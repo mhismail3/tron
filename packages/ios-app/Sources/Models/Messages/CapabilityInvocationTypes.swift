@@ -149,7 +149,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
 
     init(data: CapabilityInvocationData) {
         let argumentObject = Self.argumentObject(from: data)
-        let primitive = Self.normalizedPrimitive(from: data.identity)
+        let primitive = CapabilityPresentation.primitiveName(for: data.identity)
         let target = Self.targetId(for: primitive, identity: data.identity, arguments: argumentObject)
         let payload = argumentObject["payload"] as? [String: Any]
         let payloadSummary = Self.payloadSummary(from: payload ?? argumentObject)
@@ -179,17 +179,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
         )
         self.technicalRows = Self.technicalRows(identity: data.identity)
         self.prettyArguments = Self.prettyJSONString(data.arguments) ?? data.arguments.nilIfEmpty
-    }
-
-    private static func normalizedPrimitive(from identity: CapabilityIdentity) -> String {
-        if let modelPrimitiveName = identity.modelPrimitiveName?.lowercased(),
-           ["search", "inspect", "execute"].contains(modelPrimitiveName) {
-            return modelPrimitiveName
-        }
-        let id = identity.contractId ?? identity.functionId ?? ""
-        if id == "capability::search" { return "search" }
-        if id == "capability::inspect" { return "inspect" }
-        return "execute"
     }
 
     private static func primitiveTitle(_ primitive: String) -> String {
@@ -419,6 +408,17 @@ struct CapabilityInvocationDisplayModel: Equatable {
 }
 
 enum CapabilityPresentation {
+    static func primitiveName(for identity: CapabilityIdentity) -> String {
+        if let modelPrimitiveName = identity.modelPrimitiveName?.lowercased(),
+           ["search", "inspect", "execute"].contains(modelPrimitiveName) {
+            return modelPrimitiveName
+        }
+        let id = identity.contractId ?? identity.functionId ?? ""
+        if id == "capability::search" { return "search" }
+        if id == "capability::inspect" { return "inspect" }
+        return "execute"
+    }
+
     static func title(for identity: CapabilityIdentity) -> String {
         if let contractId = identity.contractId, identity.modelPrimitiveName != contractId {
             return humanizeCapabilityId(contractId)
@@ -448,6 +448,78 @@ enum CapabilityPresentation {
         if id.hasPrefix("capability::inspect") || identity.modelPrimitiveName == "inspect" { return "info.circle" }
         if id.hasPrefix("capability::execute") || identity.modelPrimitiveName == "execute" { return "play.circle" }
         return "puzzlepiece.extension"
+    }
+
+    static func primitiveColor(for identity: CapabilityIdentity) -> Color {
+        switch primitiveName(for: identity) {
+        case "search":
+            return .tronBlue
+        case "inspect":
+            return .tronPurple
+        default:
+            return .tronEmerald
+        }
+    }
+
+    static func statusColor(for status: CapabilityInvocationStatus, identity: CapabilityIdentity) -> Color {
+        switch status {
+        case .approvalRequired:
+            return .tronAmber
+        case .error, .unavailable:
+            return .tronError
+        case .generating, .running, .success:
+            return primitiveColor(for: identity)
+        }
+    }
+
+    static func sourceColor(for identity: CapabilityIdentity) -> Color {
+        let trustTier = identity.trustTier?.lowercased() ?? ""
+        let pluginId = identity.pluginId?.lowercased() ?? ""
+
+        if trustTier.contains("external_mcp") || pluginId.contains("mcp") {
+            return .tronTeal
+        }
+        if trustTier.contains("external_openapi") || pluginId.contains("openapi") {
+            return .tronCyan
+        }
+        if trustTier.contains("session_generated") || pluginId.contains("sandbox") {
+            return .tronPurple
+        }
+        if trustTier.contains("user_installed") {
+            return .tronAmber
+        }
+        if trustTier.contains("trusted_signed") {
+            return .tronIndigo
+        }
+        if trustTier.contains("first_party") || pluginId.hasPrefix("first_party") {
+            return .tronEmerald
+        }
+        return .tronSlate
+    }
+
+    static func sourceLabel(for identity: CapabilityIdentity) -> String {
+        let trustTier = identity.trustTier?.lowercased() ?? ""
+        let pluginId = identity.pluginId?.lowercased() ?? ""
+
+        if trustTier.contains("external_mcp") || pluginId.contains("mcp") {
+            return "MCP"
+        }
+        if trustTier.contains("external_openapi") || pluginId.contains("openapi") {
+            return "OpenAPI"
+        }
+        if trustTier.contains("session_generated") || pluginId.contains("sandbox") {
+            return "Session"
+        }
+        if trustTier.contains("user_installed") {
+            return "Installed"
+        }
+        if trustTier.contains("trusted_signed") {
+            return "Trusted"
+        }
+        if trustTier.contains("first_party") || pluginId.hasPrefix("first_party") {
+            return "First-party"
+        }
+        return "Capability"
     }
 
     static func color(for identity: CapabilityIdentity) -> Color {

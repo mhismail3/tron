@@ -75,4 +75,26 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(invocation.display.targetId, "process::run")
         XCTAssertEqual(invocation.display.commandText, "process::run · pwd")
     }
+
+    func testPresentationClassifiesCapabilitySourceLabels() {
+        let firstParty = CapabilityIdentity(
+            modelPrimitiveName: "execute",
+            contractId: "process::run",
+            implementationId: "first_party.process.v1.run",
+            functionId: "process::run",
+            pluginId: "first_party.process",
+            trustTier: "first_party_signed"
+        )
+        let mcp = CapabilityIdentity(
+            modelPrimitiveName: "execute",
+            contractId: "github::search_issues",
+            implementationId: "mcp.github.search_issues",
+            functionId: "github::search_issues",
+            pluginId: "external_mcp.github",
+            trustTier: "external_mcp"
+        )
+
+        XCTAssertEqual(CapabilityPresentation.sourceLabel(for: firstParty), "First-party")
+        XCTAssertEqual(CapabilityPresentation.sourceLabel(for: mcp), "MCP")
+    }
 }

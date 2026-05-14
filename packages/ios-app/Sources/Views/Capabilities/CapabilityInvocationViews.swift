@@ -9,45 +9,34 @@ struct CapabilityInvocationChip: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var display: CapabilityInvocationDisplayModel { data.display }
-    private var tint: Color { CapabilityPresentation.color(for: data.identity) }
 
     var body: some View {
         Button {
             onTap?()
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: CapabilityPresentation.symbol(for: data.identity))
-                    .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 30, height: 30)
+            HStack(spacing: 7) {
+                leadingAccessory
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(titleString(size: TronTypography.sizeBody2))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
+                Text(titleString(size: TronTypography.sizeBodySM))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
 
-                    Text(display.statusWithDuration)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
+                if let inlineStatusText {
+                    Text(inlineStatusText)
+                        .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(textColor.opacity(0.68))
                         .lineLimit(1)
                 }
 
-                Spacer(minLength: 8)
-
-                statusAccessory
+                trailingAccessory
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(
-                        .regular.tint(tint.opacity(colorScheme == .light ? 0.14 : 0.22)).interactive(),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    )
-            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .chipStyle(chipTint, tintOpacity: colorScheme == .light ? 0.30 : 0.38)
         .contextMenu {
             if data.status == .running || data.status == .generating {
                 Button(role: .destructive) {
@@ -58,40 +47,75 @@ struct CapabilityInvocationChip: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel(accessibilityLabel)
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: data.status)
+        .animation(.easeInOut(duration: 0.18), value: inlineStatusText)
     }
 
     private func titleString(size: CGFloat) -> AttributedString {
         var title = AttributedString(display.primitiveTitle)
         title.font = TronTypography.sans(size: size, weight: .bold)
-        title.foregroundColor = .tronTextPrimary
+        title.foregroundColor = textColor
 
         let detail = display.commandText.nilIfEmpty.map { " \($0)" } ?? ""
         var detailText = AttributedString(detail)
-        detailText.font = TronTypography.sans(size: size, weight: .medium)
-        detailText.foregroundColor = .tronTextSecondary
+        detailText.font = TronTypography.code(size: size, weight: .regular)
+        detailText.foregroundColor = textColor.opacity(0.70)
         return title + detailText
     }
 
     @ViewBuilder
-    private var statusAccessory: some View {
+    private var leadingAccessory: some View {
+        Image(systemName: CapabilityPresentation.symbol(for: data.identity))
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            .foregroundStyle(textColor)
+    }
+
+    @ViewBuilder
+    private var trailingAccessory: some View {
         if data.status == .running || data.status == .generating {
             ProgressView()
                 .controlSize(.small)
-                .tint(tint)
+                .tint(textColor.opacity(0.72))
         } else {
-            Image(systemName: data.status.iconName)
-                .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
-                .foregroundStyle(statusTint)
+            Image(systemName: "chevron.right")
+                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+                .foregroundStyle(textColor.opacity(0.56))
         }
     }
 
-    private var statusTint: Color {
-        switch data.status {
-        case .success: .tronSuccess
-        case .error, .unavailable: .tronError
-        case .approvalRequired: .tronAmber
-        case .generating, .running: tint
+    private var inlineStatusText: String? {
+        if let duration = data.formattedDuration {
+            return duration
         }
+        switch data.status {
+        case .error:
+            return "failed"
+        case .unavailable:
+            return "unavailable"
+        case .approvalRequired:
+            return "approval"
+        case .generating, .running, .success:
+            return nil
+        }
+    }
+
+    private var chipTint: Color {
+        CapabilityPresentation.statusColor(for: data.status, identity: data.identity)
+    }
+
+    private var textColor: Color {
+        CapabilityPresentation.statusColor(for: data.status, identity: data.identity)
+    }
+
+    private var accessibilityLabel: String {
+        [
+            display.primitiveTitle,
+            display.commandText.nilIfEmpty,
+            display.statusWithDuration
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
     }
 }
 
@@ -102,8 +126,10 @@ struct CapabilityInvocationDetailSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var display: CapabilityInvocationDisplayModel { data.display }
-    private var accent: Color { CapabilityPresentation.color(for: data.identity) }
+    private var accent: Color { CapabilityPresentation.statusColor(for: data.status, identity: data.identity) }
+    private var sourceAccent: Color { CapabilityPresentation.sourceColor(for: data.identity) }
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
+    private var sourceTint: TintedColors { TintedColors(accent: sourceAccent, colorScheme: colorScheme) }
 
     var body: some View {
         CapabilityDetailSheetContainer(
@@ -116,9 +142,13 @@ struct CapabilityInvocationDetailSheet: View {
                     CapabilityDetailHeader(data: data)
                         .sheetSection()
 
+                    progressSection
                     requestSection
+                    approvalSection
                     resultSection
+                    artifactsSection
                     logsSection
+                    errorSection
                     technicalSection
                 }
                 .padding(.top, 16)
@@ -128,16 +158,51 @@ struct CapabilityInvocationDetailSheet: View {
     }
 
     @ViewBuilder
-    private var requestSection: some View {
-        if !display.requestRows.isEmpty || display.prettyArguments != nil {
-            CapabilityDetailSection(title: "Request", accent: accent, tint: tint) {
+    private var progressSection: some View {
+        if shouldShowProgressSection {
+            CapabilityDetailSection(title: "Status", accent: accent, tint: tint) {
                 VStack(alignment: .leading, spacing: 12) {
-                    CapabilityReadableRows(rows: display.requestRows, tint: tint)
+                    CapabilityReadableRows(rows: statusRows, tint: tint)
 
-                    if let prettyArguments = display.prettyArguments {
-                        CapabilityRawDisclosure(title: "Raw arguments", text: prettyArguments, tint: tint)
+                    if data.status == .running || data.status == .generating || data.progressPercent != nil {
+                        if let progress = boundedProgress {
+                            ProgressView(value: progress)
+                                .tint(accent)
+                            Text("\(Int((progress * 100).rounded()))%")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                .foregroundStyle(tint.secondary)
+                        } else {
+                            ProgressView()
+                                .tint(accent)
+                        }
                     }
                 }
+            }
+            .sheetSection()
+        }
+    }
+
+    @ViewBuilder
+    private var requestSection: some View {
+        if !display.requestRows.isEmpty || display.prettyArguments != nil {
+            CapabilityDetailSection(title: "Request", accent: sourceAccent, tint: sourceTint) {
+                VStack(alignment: .leading, spacing: 12) {
+                    CapabilityReadableRows(rows: display.requestRows, tint: sourceTint)
+
+                    if let prettyArguments = display.prettyArguments {
+                        CapabilityRawDisclosure(title: "Raw arguments", text: prettyArguments, tint: sourceTint)
+                    }
+                }
+            }
+            .sheetSection()
+        }
+    }
+
+    @ViewBuilder
+    private var approvalSection: some View {
+        if let approvalState = data.approvalState, !approvalState.isEmpty {
+            CapabilityDetailSection(title: "Approval", accent: .tronAmber, tint: TintedColors(accent: .tronAmber, colorScheme: colorScheme)) {
+                CapabilityInvocationCodeBlock(text: prettyJSON(approvalState))
             }
             .sheetSection()
         }
@@ -158,6 +223,20 @@ struct CapabilityInvocationDetailSheet: View {
     }
 
     @ViewBuilder
+    private var artifactsSection: some View {
+        if !data.artifacts.isEmpty {
+            CapabilityDetailSection(title: "Artifacts", accent: .tronPurple, tint: TintedColors(accent: .tronPurple, colorScheme: colorScheme)) {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(data.artifacts, id: \.id) { artifact in
+                        CapabilityArtifactRow(artifact: artifact)
+                    }
+                }
+            }
+            .sheetSection()
+        }
+    }
+
+    @ViewBuilder
     private var logsSection: some View {
         if !data.logs.isEmpty {
             CapabilityDetailSection(title: "Logs", accent: .tronSlate, tint: tint) {
@@ -166,6 +245,16 @@ struct CapabilityInvocationDetailSheet: View {
                         CapabilityInvocationCodeBlock(text: line)
                     }
                 }
+            }
+            .sheetSection()
+        }
+    }
+
+    @ViewBuilder
+    private var errorSection: some View {
+        if let errorClassification = data.errorClassification {
+            CapabilityDetailSection(title: "Error", accent: .tronError, tint: TintedColors(accent: .tronError, colorScheme: colorScheme)) {
+                CapabilityReadableRows(rows: errorRows(errorClassification), tint: TintedColors(accent: .tronError, colorScheme: colorScheme))
             }
             .sheetSection()
         }
@@ -187,6 +276,53 @@ struct CapabilityInvocationDetailSheet: View {
 
     private var resultTint: TintedColors {
         TintedColors(accent: resultAccent, colorScheme: colorScheme)
+    }
+
+    private var shouldShowProgressSection: Bool {
+        data.status == .running
+            || data.status == .generating
+            || data.progressMessage?.nilIfEmpty != nil
+            || data.progressPercent != nil
+    }
+
+    private var boundedProgress: Double? {
+        guard let progress = data.progressPercent else { return nil }
+        return min(max(progress, 0), 1)
+    }
+
+    private var statusRows: [CapabilityDisplayRow] {
+        var rows = [CapabilityDisplayRow(label: "State", value: display.statusText)]
+        if let progressMessage = data.progressMessage?.nilIfEmpty {
+            rows.append(CapabilityDisplayRow(label: "Update", value: progressMessage))
+        }
+        if let duration = data.formattedDuration {
+            rows.append(CapabilityDisplayRow(label: "Duration", value: duration))
+        }
+        return rows
+    }
+
+    private func errorRows(_ error: CapabilityErrorClassification) -> [CapabilityDisplayRow] {
+        var rows: [CapabilityDisplayRow] = []
+        func append(_ label: String, _ value: String?, technical: Bool = false) {
+            guard let value = value?.nilIfEmpty else { return }
+            rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
+        }
+        append("Message", error.message)
+        append("Code", error.code, technical: true)
+        append("Category", error.category)
+        if let recoverable = error.recoverable {
+            rows.append(CapabilityDisplayRow(label: "Recoverable", value: recoverable ? "Yes" : "No"))
+        }
+        return rows
+    }
+
+    private func prettyJSON(_ value: [String: AnyCodable]) -> String {
+        let raw = value.mapValues(\.value)
+        guard JSONSerialization.isValidJSONObject(raw),
+              let data = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]),
+              let pretty = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return pretty
     }
 }
 
@@ -210,7 +346,8 @@ private struct CapabilityDetailHeader: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var display: CapabilityInvocationDisplayModel { data.display }
-    private var accent: Color { CapabilityPresentation.color(for: data.identity) }
+    private var accent: Color { CapabilityPresentation.statusColor(for: data.status, identity: data.identity) }
+    private var sourceAccent: Color { CapabilityPresentation.sourceColor(for: data.identity) }
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
 
     var body: some View {
@@ -236,6 +373,18 @@ private struct CapabilityDetailHeader: View {
                 CapabilityStatusBadge(status: data.status)
             }
 
+            HStack(spacing: 8) {
+                CapabilitySourceBadge(label: CapabilityPresentation.sourceLabel(for: data.identity), color: sourceAccent)
+
+                if let pluginId = data.identity.pluginId?.nilIfEmpty {
+                    Text(pluginId)
+                        .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .medium))
+                        .foregroundStyle(tint.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
             if let progressMessage = data.progressMessage?.nilIfEmpty {
                 Text(progressMessage)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
@@ -257,13 +406,78 @@ private struct CapabilityDetailHeader: View {
     private func titleString(size: CGFloat) -> AttributedString {
         var title = AttributedString(display.primitiveTitle)
         title.font = TronTypography.sans(size: size, weight: .bold)
-        title.foregroundColor = .tronTextPrimary
+        title.foregroundColor = accent
 
         let detail = display.commandText.nilIfEmpty.map { " \($0)" } ?? ""
         var detailText = AttributedString(detail)
-        detailText.font = TronTypography.sans(size: size, weight: .medium)
+        detailText.font = TronTypography.code(size: size, weight: .regular)
         detailText.foregroundColor = .tronTextSecondary
         return title + detailText
+    }
+}
+
+@available(iOS 26.0, *)
+private struct CapabilitySourceBadge: View {
+    let label: String
+    let color: Color
+
+    var body: some View {
+        Text(label)
+            .font(TronTypography.badge)
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background {
+                Capsule()
+                    .fill(color.opacity(0.14))
+            }
+    }
+}
+
+@available(iOS 26.0, *)
+private struct CapabilityArtifactRow: View {
+    let artifact: CapabilityArtifactData
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: artifactIcon)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronPurple)
+
+                Text(artifact.label?.nilIfEmpty ?? artifact.id)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let mimeType = artifact.mimeType?.nilIfEmpty {
+                Text(mimeType)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .regular))
+                    .foregroundStyle(.tronTextSecondary)
+            }
+
+            if let url = artifact.url?.nilIfEmpty {
+                Text(url)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .regular))
+                    .foregroundStyle(.tronTextMuted)
+                    .textSelection(.enabled)
+                    .lineLimit(3)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.tronSurface.opacity(0.7))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var artifactIcon: String {
+        if artifact.mimeType?.hasPrefix("image/") == true { return "photo" }
+        if artifact.mimeType?.contains("json") == true { return "curlybraces" }
+        if artifact.mimeType?.contains("text") == true { return "doc.text" }
+        return "paperclip"
     }
 }
 
@@ -328,13 +542,14 @@ struct CapabilityResultRenderer: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var tint: TintedColors {
-        TintedColors(accent: CapabilityPresentation.color(for: identity), colorScheme: colorScheme)
+        TintedColors(accent: CapabilityPresentation.primitiveColor(for: identity), colorScheme: colorScheme)
     }
 
     var body: some View {
-        if identity.modelPrimitiveName == "search", let details {
+        let primitive = CapabilityPresentation.primitiveName(for: identity)
+        if primitive == "search", let details {
             CapabilitySearchResultSummary(details: details, tint: tint)
-        } else if identity.modelPrimitiveName == "inspect", let details {
+        } else if primitive == "inspect", let details {
             CapabilityInspectionResultSummary(details: details, tint: tint)
         } else if let details, let pretty = Self.prettyJSON(details), !pretty.isEmpty {
             CapabilityInvocationCodeBlock(text: pretty)
@@ -379,6 +594,8 @@ private struct CapabilitySearchResultSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            CapabilityReadableRows(rows: summaryRows, tint: tint)
+
             if let mode = details.anyCodableDict("searchMode"),
                let state = mode.string("state") {
                 CapabilityInfoPill(
@@ -386,6 +603,10 @@ private struct CapabilitySearchResultSummary: View {
                     label: searchModeLabel(mode: mode),
                     color: state == "ready" ? .tronSuccess : .tronAmber
                 )
+            }
+
+            if let nextCursor = details.string("nextCursor")?.nilIfEmpty {
+                CapabilityInfoPill(icon: "arrow.forward.circle", label: "More results available: \(nextCursor)", color: .tronInfo)
             }
 
             if results.isEmpty {
@@ -401,6 +622,28 @@ private struct CapabilitySearchResultSummary: View {
                 }
             }
         }
+    }
+
+    private var summaryRows: [CapabilityDisplayRow] {
+        var rows: [CapabilityDisplayRow] = []
+        func append(_ label: String, _ value: String?, technical: Bool = false) {
+            guard let value = value?.nilIfEmpty else { return }
+            rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
+        }
+
+        append("Query", details.string("query"))
+        append("Results", String(results.count))
+        append("Catalog", details.uint64("catalogRevision").map(String.init), technical: true)
+
+        if let mode = details.anyCodableDict("searchMode") {
+            append("Index", mode.string("state"))
+            append("Vector", mode.bool("localVector").map { $0 ? "Ready" : "Unavailable" })
+            append("Lexical", mode.bool("lexical").map { $0 ? "Enabled" : "Disabled" })
+            append("Embedding", mode.string("embeddingModel"), technical: true)
+            append("Vector store", mode.string("vectorStore"), technical: true)
+        }
+
+        return rows
     }
 
     private var emptyMessage: String {
@@ -446,12 +689,7 @@ private struct CapabilitySearchResultRow: View {
 
             HStack(spacing: 6) {
                 ForEach(badges, id: \.self) { badge in
-                    Text(badge)
-                        .font(TronTypography.badge)
-                        .foregroundStyle(tint.heading)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(tint.accent.opacity(0.12)))
+                    CapabilitySourceBadge(label: badge, color: tint.accent)
                 }
             }
         }
@@ -499,15 +737,31 @@ private struct CapabilityInspectionResultSummary: View {
         let contract = details.anyCodableDict("contract")
         let implementation = details.anyCodableDict("implementation")
         let requirements = details.anyCodableDict("executionRequirements")
+        let binding = details.anyCodableDict("bindingDecision")
+        let provenance = details.anyCodableDict("pluginProvenance") ?? details.anyCodableDict("provenance")
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             CapabilityReadableRows(
-                rows: inspectionRows(contract: contract, implementation: implementation, requirements: requirements),
+                rows: inspectionRows(
+                    contract: contract,
+                    implementation: implementation,
+                    requirements: requirements,
+                    binding: binding,
+                    provenance: provenance
+                ),
                 tint: tint
             )
 
             if requirements?.bool("freshInspectionRequired") == true {
                 CapabilityInfoPill(icon: "lock.shield", label: "Fresh inspection required", color: .tronAmber)
+            }
+
+            if let approval = approvalRequirement(requirements: requirements, contract: contract) {
+                CapabilityInfoPill(icon: "checkmark.shield", label: approval, color: .tronAmber)
+            }
+
+            if let examples = contract?.array("examples"), !examples.isEmpty {
+                CapabilityRawDisclosure(title: "Examples", text: prettyJSONArray(examples), tint: tint)
             }
         }
     }
@@ -515,7 +769,9 @@ private struct CapabilityInspectionResultSummary: View {
     private func inspectionRows(
         contract: [String: AnyCodable]?,
         implementation: [String: AnyCodable]?,
-        requirements: [String: AnyCodable]?
+        requirements: [String: AnyCodable]?,
+        binding: [String: AnyCodable]?,
+        provenance: [String: AnyCodable]?
     ) -> [CapabilityDisplayRow] {
         var rows: [CapabilityDisplayRow] = []
         func append(_ label: String, _ value: String?, technical: Bool = false) {
@@ -523,13 +779,44 @@ private struct CapabilityInspectionResultSummary: View {
             rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
         }
         append("Contract", contract?.string("contractId"), technical: true)
+        append("Display", contract?.string("displayName"))
+        append("Description", contract?.string("description"))
+        append("Implementation", implementation?.string("implementationId"), technical: true)
         append("Function", implementation?.string("functionId"), technical: true)
+        append("Plugin", implementation?.string("pluginId") ?? provenance?.string("pluginId"), technical: true)
+        append("Worker", implementation?.string("workerId"), technical: true)
+        append("Trust", implementation?.string("trustTier"))
+        append("Health", implementation?.string("health"))
         append("Risk", contract?.string("riskLevel"))
         append("Effect", contract?.string("effectClass"))
+        append("Binding", binding?.string("bindingDecisionId") ?? binding?.string("id"), technical: true)
+        append("Selection", binding?.string("selectionPolicy") ?? binding?.string("policy"))
         append("Expected revision", requirements?.uint64("expectedRevision").map(String.init), technical: true)
         append("Schema digest", requirements?.string("expectedSchemaDigest"), technical: true)
         append("Inspection handle", requirements?.string("inspectionHandle"), technical: true)
         return rows
+    }
+
+    private func approvalRequirement(
+        requirements: [String: AnyCodable]?,
+        contract: [String: AnyCodable]?
+    ) -> String? {
+        if requirements?.bool("approvalRequired") == true {
+            return "Approval required before execution"
+        }
+        if let approval = contract?.anyCodableDict("approvalContract"),
+           approval.bool("required") == true {
+            return "Approval required by contract"
+        }
+        return nil
+    }
+
+    private func prettyJSONArray(_ value: [Any]) -> String {
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]),
+              let pretty = String(data: data, encoding: .utf8)
+        else { return "[]" }
+        return pretty
     }
 }
 

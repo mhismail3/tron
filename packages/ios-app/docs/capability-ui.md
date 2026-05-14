@@ -98,16 +98,23 @@ Chat capability invocations render from `CapabilityInvocationDisplayModel`.
 The display model keeps the provider-visible primitive (`Search`, `Inspect`, or
 `Execute`) as the prominent label and derives the follow-on detail from the
 canonical capability payload: search query, inspected target, resolved contract,
-or execute payload summary. This keeps the chat chip provider-neutral while
-still showing the concrete operation being performed, such as
-`Execute process::run · cargo test`.
+or execute payload summary. Chat chips intentionally use the compact glassy
+capsule treatment used elsewhere in Tron: one accent color per primitive,
+inline duration or live spinner, and a chevron to the detail sheet. This keeps
+the chip provider-neutral while still showing the concrete operation being
+performed, such as `Execute process::run · cargo test`.
 
 Invocation detail sheets use the same display model. The top of the sheet is a
-human-readable summary; request fields, result summaries, logs, and technical
-identity are separated into sheet-native sections. Raw argument JSON is kept
-behind a disclosure group for auditability instead of leading the sheet. Search
-results and inspect results get capability-specific structured summaries, while
-unknown results still render through a generic readable JSON/text block.
+human-readable summary; live status, request fields, approval state, result
+summaries, artifacts, logs, error classification, and technical identity are
+separated into sheet-native sections. Raw argument JSON is kept behind a
+disclosure group for auditability instead of leading the sheet. Search results
+summarize query, catalog revision, index/vector status, result count, cursor
+state, and ranked hits. Inspect results summarize contract, implementation,
+worker/plugin provenance, trust/health, binding decision, execution
+requirements, schema digest, inspection handle, approval requirements, and
+examples when available. Unknown result shapes still render through a generic
+readable JSON/text block.
 
 The current Engine Console is a sheet-native operator surface built from
 capability cards, metric grids, status banners, section chips, generated action
@@ -124,8 +131,9 @@ id, hashes, selected implementations, child invocations, approval state,
 artifact/log counts, and compensation-attempt counts while payload details
 remain redacted by default. Generated invoke/program forms and result renderers
 use contract and implementation metadata, not retired built-in-name dispatch.
-First-party capabilities may provide presentation hints, but those hints are
-advisory metadata attached to capability records.
+First-party and external capabilities may provide presentation hints, but those
+hints are advisory metadata attached to capability records; the generic sheet
+must remain useful without them.
 
 Long contract, implementation, plugin, worker, trace, and schema identifiers
 must wrap or truncate inside cards without overlapping neighboring controls.
