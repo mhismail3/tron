@@ -13,8 +13,8 @@ use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::context::local_policy;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
-use crate::domains::capability_support::implementations::capability_surface::{
-    self, CapabilitySurfacePolicy, ResolvedCapabilitySurface,
+use crate::domains::capability_support::implementations::primitive_surface::{
+    self, PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
 };
 use crate::domains::model::providers::ProviderHealthTracker;
 use crate::domains::model::providers::provider::Provider;
@@ -63,8 +63,10 @@ pub struct TurnParams<'a> {
     pub context_manager: &'a mut ContextManager,
     /// LLM provider for streaming.
     pub provider: &'a Arc<dyn Provider>,
-    /// Live catalog policy for capability lookup and execution.
-    pub capability_surface_policy: &'a CapabilitySurfacePolicy,
+    /// Provider-facing primitive surface policy.
+    pub primitive_surface_policy: &'a PrimitiveSurfacePolicy,
+    /// Worker capability execution policy.
+    pub capability_execution_policy: &'a crate::shared::profile::CapabilityExecutionPolicySpec,
     /// Optional guardrail engine for capability argument validation.
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for pre/post capability invocation hooks.
@@ -129,7 +131,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         turn,
         context_manager,
         provider,
-        capability_surface_policy,
+        primitive_surface_policy,
+        capability_execution_policy,
         guardrails,
         hooks,
         compaction,
@@ -211,13 +214,13 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         &resolved_profile.spec,
         "main",
     );
-    let capability_surface = match resolve_provider_capability_surface(
+    let primitive_surface = match resolve_provider_primitive_surface(
         engine_host,
         session_id,
         workspace_id,
         provider.provider_type(),
         &context_policy,
-        capability_surface_policy,
+        primitive_surface_policy,
     )
     .await
     {
@@ -269,7 +272,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         run_context,
         server_origin,
         &context_policy,
-        capability_surface.capabilities.clone(),
+        primitive_surface.capabilities.clone(),
         capability_primer_context,
     );
 
@@ -290,18 +293,23 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             .clone()
             .unwrap_or_else(|| resolved_profile.name.clone());
         let profile = Some(active_profile_name.as_str());
-        let (context_policy_id, capability_policy_id, cache_policy_id) =
-            resolved_turn_policy_ids(&resolved_profile, provider.provider_type());
+        let (
+            context_policy_id,
+            primitive_surface_policy_id,
+            capability_execution_policy_id,
+            cache_policy_id,
+        ) = resolved_turn_policy_ids(&resolved_profile, provider.provider_type());
         let metadata = serde_json::json!({
             "messageCount": context.messages.len(),
             "capabilityCount": context.capabilities.as_ref().map_or(0, Vec::len),
-            "catalogRevision": capability_surface.catalog_revision.0,
+            "catalogRevision": primitive_surface.catalog_revision.0,
             "streamOptions": &stream_options,
             "providerSurface": "preProjection",
                 "profileChain": resolved_profile.profile_chain.clone(),
                 "profileSpecHash": resolved_profile.spec_hash.clone(),
             "contextPolicy": context_policy_id,
-            "capabilityPolicy": capability_policy_id,
+            "primitiveSurfacePolicy": primitive_surface_policy_id,
+            "capabilityExecutionPolicy": capability_execution_policy_id,
         });
         let audit = crate::domains::session::event_store::sqlite::repositories::constitution::ContextResolutionAudit {
             session_id: Some(session_id),
@@ -496,7 +504,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         session_id,
         emitter,
         cancel,
-        &capability_surface.turn_stopping_capabilities,
+        &primitive_surface.turn_stopping_capabilities,
         sequence_counter,
         journal.as_mut(),
         run_context.engine_trace_id.as_ref(),
@@ -692,8 +700,9 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             turn,
             stream_result: &stream_result,
             context_manager,
-            capability_surface: &capability_surface,
-            capability_policy: capability_surface_policy,
+            primitive_surface: &primitive_surface,
+            primitive_surface_policy,
+            capability_execution_policy,
             guardrails,
             hooks,
             compaction,
@@ -834,7 +843,7 @@ fn build_turn_context(
     run_context: &RunContext,
     server_origin: Option<&str>,
     context_policy: &local_policy::ContextPolicy,
-    capability_surface: Vec<crate::shared::model_capabilities::ModelCapability>,
+    primitive_surface: Vec<crate::shared::model_capabilities::ModelCapability>,
     capability_primer_context: Option<String>,
 ) -> Context {
     let is_local = context_policy.is_local();
@@ -859,8 +868,8 @@ fn build_turn_context(
 
     // ModelCapability schemas are resolved from the live engine catalog at the provider
     // request boundary. The context policy has already been applied by
-    // `resolve_provider_capability_surface`.
-    context.capabilities = Some(capability_surface);
+    // `resolve_provider_primitive_surface`.
+    context.capabilities = Some(primitive_surface);
 
     context
         .skill_activation_context
@@ -934,11 +943,15 @@ async fn build_capability_primer_context(
     let Some(host) = engine_host else {
         return Ok(None);
     };
-    let capability_policy_id = context_policy.capability_policy_id().unwrap_or("default");
-    let Some(capability_policy) = execution_spec.capability_policy(capability_policy_id) else {
+    let capability_execution_policy_id = context_policy
+        .capability_execution_policy_id()
+        .unwrap_or("default");
+    let Some(capability_execution_policy) =
+        execution_spec.capability_execution_policy(capability_execution_policy_id)
+    else {
         return Ok(None);
     };
-    let primer_policy_id = capability_policy
+    let primer_policy_id = capability_execution_policy
         .context_primer_policy
         .as_deref()
         .unwrap_or("coreFirstParty");
@@ -956,22 +969,22 @@ async fn build_capability_primer_context(
         .await
 }
 
-async fn resolve_provider_capability_surface(
+async fn resolve_provider_primitive_surface(
     engine_host: Option<&crate::engine::EngineHostHandle>,
     session_id: &str,
     workspace_id: Option<&str>,
     provider_type: crate::shared::messages::Provider,
     context_policy: &local_policy::ContextPolicy,
-    capability_policy: &CapabilitySurfacePolicy,
+    primitive_surface_policy: &PrimitiveSurfacePolicy,
 ) -> Result<ResolvedCapabilitySurface, String> {
     if let Some(host) = engine_host {
-        return capability_surface::resolve_provider_capabilities(
+        return primitive_surface::resolve_provider_capabilities(
             host,
             session_id,
             workspace_id,
             provider_type,
             context_policy,
-            capability_policy,
+            primitive_surface_policy,
         )
         .await;
     }
@@ -983,7 +996,7 @@ async fn resolve_provider_capability_surface(
             workspace_id,
             provider_type,
             context_policy,
-            capability_policy,
+            primitive_surface_policy,
         );
         return Ok(ResolvedCapabilitySurface {
             catalog_revision: crate::engine::CatalogRevision(0),
@@ -1001,7 +1014,7 @@ async fn resolve_provider_capability_surface(
             workspace_id,
             provider_type,
             context_policy,
-            capability_policy,
+            primitive_surface_policy,
         );
         Err("engine host is required for provider capability schema resolution".to_owned())
     }
@@ -1010,7 +1023,7 @@ async fn resolve_provider_capability_surface(
 fn resolved_turn_policy_ids(
     resolved_profile: &crate::shared::profile::ResolvedProfile,
     provider_type: crate::shared::messages::Provider,
-) -> (String, String, String) {
+) -> (String, String, String, String) {
     let spec = &resolved_profile.spec;
     let entrypoint = spec
         .entrypoints
@@ -1023,19 +1036,28 @@ fn resolved_turn_policy_ids(
             "main",
         );
     let context_policy_id = context_policy.id().to_string();
-    let capability_policy_id = context_policy
-        .capability_policy_id()
+    let primitive_surface_policy_id = context_policy
+        .primitive_surface_policy_id()
         .map(String::from)
-        .unwrap_or_else(|| entrypoint.capability_policy.clone());
+        .unwrap_or_else(|| entrypoint.primitive_surface_policy.clone());
+    let capability_execution_policy_id = context_policy
+        .capability_execution_policy_id()
+        .map(String::from)
+        .unwrap_or_else(|| entrypoint.capability_execution_policy.clone());
     let cache_policy_id = entrypoint.cache_policy.clone();
 
-    (context_policy_id, capability_policy_id, cache_policy_id)
+    (
+        context_policy_id,
+        primitive_surface_policy_id,
+        capability_execution_policy_id,
+        cache_policy_id,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::capability_support::implementations::capability_surface::{
+    use crate::domains::capability_support::implementations::primitive_surface::{
         EngineCapabilityTarget, ResolvedCapabilitySurface,
     };
     use crate::domains::capability_support::implementations::traits::ExecutionMode;

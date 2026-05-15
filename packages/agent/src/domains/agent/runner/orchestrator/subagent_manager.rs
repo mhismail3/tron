@@ -85,11 +85,11 @@ pub struct SubsessionConfig {
     /// Whether to inherit capabilities from the parent's live catalog policy (default false).
     pub inherit_capabilities: bool,
     /// Capabilities to deny from the inherited set.
-    pub denied_capabilities: Vec<String>,
+    pub denied_contracts: Vec<String>,
     /// Optional strict allowlist — when `Some`, ONLY these capabilities are kept
-    /// (applied after `denied_capabilities`). Future-proof: newly registered capabilities
+    /// (applied after `denied_contracts`). Future-proof: newly registered capabilities
     /// will not leak into a restricted subagent.
-    pub allowed_capabilities: Option<Vec<String>>,
+    pub allowed_contracts: Option<Vec<String>>,
     /// Reasoning effort level (default Some(Medium)).
     pub reasoning_level: Option<ReasoningLevel>,
     /// Spawn type for event tagging (default `Subsession`).
@@ -110,8 +110,8 @@ impl Default for SubsessionConfig {
             max_turns: 1,
             max_depth: 0,
             inherit_capabilities: false,
-            denied_capabilities: vec![],
-            allowed_capabilities: None,
+            denied_contracts: vec![],
+            allowed_contracts: None,
             reasoning_level: Some(ReasoningLevel::Medium),
             spawn_type: SpawnType::Subsession,
         }
@@ -169,7 +169,7 @@ pub struct SubagentManager {
     /// Tracked subagents: `child_session_id` → `TrackedSubagent`.
     subagents: DashMap<String, Arc<TrackedSubagent>>,
     /// Skill registry used to resolve `SubagentConfig.skills` names to
-    /// metadata so frontmatter `deniedCapabilities` / `allowedCapabilities` can be
+    /// metadata so frontmatter `deniedContracts` / `allowedContracts` can be
     /// enforced on the spawned child. INVARIANT: if unset, `skills` on a
     /// `SubagentConfig` are silently ignored (documented as a wiring
     /// pitfall — see `main.rs::build_services` for the canonical setup).
@@ -259,7 +259,7 @@ impl SubagentManager {
     ///
     /// INVARIANT: If this setter is not called, `SubagentConfig.skills` is
     /// silently no-op'd (skills contribute no capability denials). This matches
-    /// the `Option<SkillRegistry>` contract in [`compute_denied_capabilities`] and
+    /// the `Option<SkillRegistry>` contract in [`compute_denied_contracts`] and
     /// keeps skill wiring opt-in for isolated tests and minimal runtimes.
     pub fn set_skill_registry(
         &self,
@@ -280,15 +280,15 @@ impl SubagentManager {
             })
     }
 
-    /// Compute the full `denied_capabilities` list for a spawned subagent by
-    /// unioning explicit denials (from the LLM's `deniedCapabilities` param) with
-    /// any denials implied by `skills[*]` frontmatter (`deniedCapabilities` /
-    /// inverted `allowedCapabilities`).
+    /// Compute the full `denied_contracts` list for a spawned subagent by
+    /// unioning explicit denials (from the LLM's `deniedContracts` param) with
+    /// any denials implied by `skills[*]` frontmatter (`deniedContracts` /
+    /// inverted `allowedContracts`).
     ///
     /// Unknown skill names are silently skipped — the LLM may have
     /// hallucinated one, and we should not fail the spawn for that.
     /// Duplicates are deduplicated automatically (order is not preserved).
-    pub(crate) fn compute_denied_capabilities(
+    pub(crate) fn compute_denied_contracts(
         &self,
         explicit_denied: &[String],
         skills: Option<&[String]>,
@@ -307,7 +307,7 @@ impl SubagentManager {
                     &meta.frontmatter,
                     all_model_capability_ids,
                 ) {
-                    for capability in cfg.denied_capabilities {
+                    for capability in cfg.denied_contracts {
                         let _ = denied.insert(capability);
                     }
                 }
@@ -321,7 +321,7 @@ impl SubagentManager {
         let Some(host) = self.engine_host.get() else {
             return Vec::new();
         };
-        match crate::domains::capability_support::implementations::capability_surface::list_model_capability_ids(
+        match crate::domains::capability_support::implementations::primitive_surface::list_model_capability_ids(
             host, session_id, None,
         )
         .await
@@ -398,12 +398,15 @@ impl SubagentManager {
             spawn_type: Some(spawn_type.as_str().to_owned()),
         });
 
-        let mut capability_policy = process_plan.capability_policy.clone();
+        let mut capability_execution_policy = process_plan.capability_execution_policy.clone();
         if config.inherit_capabilities {
-            capability_policy.allowed_capabilities = config.allowed_capabilities.clone();
+            capability_execution_policy.allowed_contracts = config.allowed_contracts.clone();
         } else {
-            capability_policy.allowed_capabilities = Some(Vec::new());
+            capability_execution_policy.allowed_contracts = Some(Vec::new());
         }
+        capability_execution_policy
+            .denied_contracts
+            .extend(config.denied_contracts.clone());
 
         execution::spawn_subsession_task(execution::SubsessionTaskLaunch {
             session_manager: self.session_manager.clone(),
@@ -427,8 +430,7 @@ impl SubagentManager {
             spawn_type: spawn_type.as_str().to_owned(),
             tracker: tracker.clone(),
             cancel,
-            capability_policy,
-            denied_capabilities: config.denied_capabilities.clone(),
+            capability_execution_policy,
             engine_host: self.engine_host.get().cloned(),
         });
 
@@ -487,13 +489,13 @@ impl SubagentSpawner for SubagentManager {
             .current_model_capability_ids(config.parent_session_id.as_deref().unwrap_or("subagent"))
             .await;
 
-        // INVARIANT: subagent denied_capabilities = union(explicit_deniedCapabilities,
+        // INVARIANT: subagent denied_contracts = union(explicit_deniedContracts,
         // each skill's frontmatter denials). AgentFactory applies this merged
         // policy to the live catalog capability surface for the child agent. Without
-        // this merge, skills with `deniedCapabilities: [...]` or `allowedCapabilities: [...]`
+        // this merge, skills with `deniedContracts: [...]` or `allowedContracts: [...]`
         // frontmatter would not affect the child agent's model-visible capabilities.
-        let merged_denied_capabilities = self.compute_denied_capabilities(
-            &config.denied_capabilities,
+        let merged_denied_contracts = self.compute_denied_contracts(
+            &config.denied_contracts,
             config.skills.as_deref(),
             &all_model_capability_ids,
         );
@@ -616,7 +618,7 @@ impl SubagentSpawner for SubagentManager {
             blocking_timeout_ms: config.blocking_timeout_ms,
             tracker: tracker.clone(),
             cancel,
-            denied_capabilities: merged_denied_capabilities,
+            denied_contracts: merged_denied_contracts,
             run_state_probe: self.probe_clone(),
             spawn_type: SpawnType::CapabilityAgent.as_str().to_owned(),
             engine_host: self.engine_host.get().cloned(),

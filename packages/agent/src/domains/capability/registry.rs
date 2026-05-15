@@ -19,10 +19,11 @@ use super::embeddings::EmbeddingProvider;
 #[cfg(test)]
 use super::embeddings::HashEmbeddingProvider;
 use super::types::{
-    CapabilityBindingDecision, CapabilityBindingRecord, CapabilityContractRecord,
-    CapabilityImplementationRecord, CapabilityIndexHit, CapabilityIndexStatus,
-    CapabilityInspectionHandle, CapabilityInspectionRecord, CapabilityPauseRecord,
-    CapabilityPluginManifest, CapabilityProgramRunRecord, CapabilityRunRecord,
+    AgentCapabilityRecipe, CapabilityBindingDecision, CapabilityBindingRecord,
+    CapabilityContractRecord, CapabilityImplementationRecord, CapabilityIndexHit,
+    CapabilityIndexStatus, CapabilityInspectionHandle, CapabilityInspectionRecord,
+    CapabilityPauseRecord, CapabilityPluginManifest, CapabilityProgramRunRecord,
+    CapabilityRunRecord,
 };
 use crate::engine::{
     ActorContext, EffectClass, FunctionDefinition, FunctionHealth, FunctionQuery, RiskLevel,
@@ -317,7 +318,12 @@ impl CapabilityRegistryEntry {
             effect_class: effect_name(self.function.effect_class).to_owned(),
             risk_level: risk_name(self.function.risk_level).to_owned(),
             text: self.search_text.clone(),
+            recipe: Some(self.agent_recipe()),
         }
+    }
+
+    pub(crate) fn agent_recipe(&self) -> AgentCapabilityRecipe {
+        agent_recipe_for_entry(self)
     }
 
     pub(crate) fn contract_record(&self) -> CapabilityContractRecord {
@@ -391,6 +397,7 @@ impl CapabilityRegistryEntry {
             },
             binding_decision: decision,
             inspection_handle: self.inspection_handle(),
+            recipe: self.agent_recipe(),
             execution_requirements: json!({
                 "inspectionHandle": self.inspection_handle().handle,
                 "expectedRevision": self.function.revision.0,
@@ -525,6 +532,7 @@ pub(crate) struct CapabilityIndexDocument {
     pub(crate) effect_class: String,
     pub(crate) risk_level: String,
     pub(crate) text: String,
+    pub(crate) recipe: Option<AgentCapabilityRecipe>,
 }
 
 pub(crate) type SharedCapabilityRegistryStore = Arc<Mutex<Box<dyn CapabilityRegistryStore>>>;
@@ -1128,7 +1136,11 @@ fn search_sqlite_documents(
                 lexical_hits = fuse_hits(lexical_hits, hits, &documents);
             }
             Err(error) => {
-                status.state = "unavailable".to_owned();
+                status.state = if is_vector_indexing_error(&error) {
+                    "indexing".to_owned()
+                } else {
+                    "unavailable".to_owned()
+                };
                 status.degraded_reason = Some(error.clone());
                 if policy.require_local_vector
                     && !policy.allow_lexical_only_when_degraded
@@ -2487,7 +2499,8 @@ impl SqliteCapabilityRegistryStore {
                 fused_score: score + trust_boost(&document.trust_tier),
                 matched_by: "local_vector".to_owned(),
                 snippet: snippet(&document.text, query),
-                requires_inspect: document.kind == "implementation" || document.kind == "contract",
+                requires_inspect: document_requires_inspect(&document),
+                recipe: document.recipe.clone(),
             });
         }
         hits.sort_by(|a, b| {
@@ -3116,39 +3129,46 @@ pub(crate) fn render_capability_primer(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision
     ));
-    out.push_str("The model-facing capabilities are `search`, `inspect`, and `execute`. Use capability ids below with `execute`; inspect mutating or medium/high-risk capabilities first.\n\n");
+    out.push_str("The model-facing primitives are `search`, `inspect`, and `execute`. Core first-party capabilities below are already known; call them with `execute` directly. Use `search` for dynamic plugins, MCP/OpenAPI/session workers, unfamiliar domains, or missing recipes. Use `inspect` only when a recipe says inspect is required, when execute asks for freshness fields, or when full contract detail is needed.\n\n");
     for entry in entries.drain(..) {
+        let recipe = entry.agent_recipe();
         let mut line = format!(
-            "- `{}` via `{}`: {} effect={} risk={} trust={}",
-            entry.contract_id,
-            entry.implementation_id,
-            compact_description(&entry.function.description),
-            effect_name(entry.function.effect_class),
-            risk_name(entry.function.risk_level),
-            entry.trust_tier
+            "- `{}` — {}. Use when: {}",
+            recipe.contract_id, recipe.display_name, recipe.use_when
         );
-        if entry.function.id.as_str() == "process::run" {
-            line.push_str(" safe read-only commands may execute directly; risky commands require inspect/approval");
-        } else if direct_execution_allowed(&entry.function) {
-            line.push_str(" direct with idempotency key");
-        } else if requires_fresh_revision(&entry.function) {
-            line.push_str(&format!(" inspectRevision={}", entry.function.revision.0));
-        }
-        if policy.include_compact_schemas
-            && let Some(schema) = compact_schema(entry.function.request_schema.as_ref())
-        {
-            line.push_str(&format!(" payload={schema}"));
+        if policy.include_compact_schemas {
+            if !recipe.required_payload.is_empty() {
+                line.push_str(&format!(
+                    " Required payload: {}",
+                    recipe.required_payload.join("; ")
+                ));
+            }
+            if !recipe.optional_payload.is_empty() {
+                let optional = recipe
+                    .optional_payload
+                    .iter()
+                    .take(6)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                line.push_str(&format!(" Optional: {}", optional.join("; ")));
+            }
         }
         if policy.include_examples
-            && let Some(example) = examples(&entry.function).first()
-            && let Ok(example) = serde_json::to_string(example)
+            && let Ok(example) = serde_json::to_string(&recipe.execute_template)
         {
-            line.push_str(&format!(" example={example}"));
+            line.push_str(&format!(" Execute: {example}"));
+        }
+        if recipe.inspect_required {
+            line.push_str(" Inspect before execute for freshness/elevated-risk fields.");
+        } else if recipe.approval_behavior != "none" {
+            line.push_str(&format!(" Approval: {}.", recipe.approval_behavior));
+        } else if recipe.direct_execution == "conditional_safe_direct" {
+            line.push_str(" Safe payloads run directly; risky payloads may pause for approval.");
         }
         line.push('\n');
         if estimated_tokens(out.len() + line.len()) > policy.max_tokens {
             out.push_str(
-                "- Additional capabilities are available through `search` and `inspect`.\n",
+                "- Additional capabilities are available through `search`, which returns the same execute recipes.\n",
             );
             break;
         }
@@ -3225,6 +3245,11 @@ fn document_key(document: &CapabilityIndexDocument) -> String {
 fn document_text_hash(document: &CapabilityIndexDocument) -> String {
     let mut hasher = Sha256::new();
     hasher.update(document.text.as_bytes());
+    if let Some(recipe) = &document.recipe
+        && let Ok(serialized) = serde_json::to_vec(recipe)
+    {
+        hasher.update(serialized);
+    }
     format!("{:x}", hasher.finalize())
 }
 
@@ -3335,6 +3360,11 @@ fn aggregate_documents(
                 effect_class,
                 risk_level,
                 text,
+                recipe: if kind == "contract" && entries.len() == 1 {
+                    Some(first.agent_recipe())
+                } else {
+                    None
+                },
             })
         })
         .collect()
@@ -3422,7 +3452,8 @@ fn lexical_rank(query: &str, documents: &[CapabilityIndexDocument]) -> Vec<Capab
                 fused_score: lexical_score + trust_boost(&document.trust_tier),
                 matched_by: "local_lexical".to_owned(),
                 snippet: snippet(&document.text, query),
-                requires_inspect: document.kind == "implementation" || document.kind == "contract",
+                requires_inspect: document_requires_inspect(document),
+                recipe: document.recipe.clone(),
             }
         })
         .filter(|hit| query.trim().is_empty() || hit.lexical_score > 0.0)
@@ -3434,6 +3465,14 @@ fn lexical_rank(query: &str, documents: &[CapabilityIndexDocument]) -> Vec<Capab
             .then_with(|| a.function_id.cmp(&b.function_id))
     });
     hits
+}
+
+fn document_requires_inspect(document: &CapabilityIndexDocument) -> bool {
+    document
+        .recipe
+        .as_ref()
+        .map(|recipe| recipe.inspect_required)
+        .unwrap_or_else(|| document.kind == "implementation" || document.kind == "contract")
 }
 
 fn vector_rank_with_provider(
@@ -3474,7 +3513,8 @@ fn vector_rank_with_provider(
                 fused_score: score + trust_boost(&document.trust_tier),
                 matched_by: "local_vector".to_owned(),
                 snippet: snippet(&document.text, query),
-                requires_inspect: document.kind == "implementation" || document.kind == "contract",
+                requires_inspect: document_requires_inspect(document),
+                recipe: document.recipe.clone(),
             })
         })
         .collect::<Vec<_>>();
@@ -3860,6 +3900,317 @@ fn display_name(function: &FunctionDefinition) -> String {
         .unwrap_or_else(|| function.id.as_str().to_owned())
 }
 
+fn agent_recipe_for_entry(entry: &CapabilityRegistryEntry) -> AgentCapabilityRecipe {
+    let function = &entry.function;
+    let required_payload = recipe_payload_fields(function.request_schema.as_ref(), true);
+    let optional_payload = recipe_payload_fields(function.request_schema.as_ref(), false);
+    let examples = recipe_examples(entry);
+    let execute_template = examples
+        .first()
+        .cloned()
+        .unwrap_or_else(|| recipe_execute_template(entry, recipe_payload_example(function)));
+    let inspect_required = recipe_inspect_required(function);
+    AgentCapabilityRecipe {
+        contract_id: entry.contract_id.clone(),
+        display_name: display_name(function),
+        use_when: recipe_use_when(function),
+        execute_template,
+        required_payload,
+        optional_payload,
+        examples,
+        direct_execution: recipe_direct_execution(function).to_owned(),
+        inspect_required,
+        approval_behavior: recipe_approval_behavior(function).to_owned(),
+        lifecycle_kind: recipe_lifecycle_kind(function),
+        result_summary: recipe_result_summary(function.response_schema.as_ref()),
+        aliases: recipe_aliases(function),
+    }
+}
+
+fn recipe_use_when(function: &FunctionDefinition) -> String {
+    let description = compact_description(&function.description);
+    if description.starts_with("Canonical domain capability ") {
+        format!(
+            "Use for {} work through the `{}` capability.",
+            function.id.namespace(),
+            function.id.as_str()
+        )
+    } else {
+        description
+    }
+}
+
+fn recipe_payload_fields(schema: Option<&Value>, required_only: bool) -> Vec<String> {
+    let Some(schema) = schema else {
+        return Vec::new();
+    };
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+    properties
+        .iter()
+        .filter(|(name, _)| required.contains(name.as_str()) == required_only)
+        .take(if required_only { 12 } else { 16 })
+        .map(|(name, field)| recipe_field_summary(name, field))
+        .collect()
+}
+
+fn recipe_field_summary(name: &str, field: &Value) -> String {
+    let ty = recipe_schema_type(field);
+    let mut summary = format!("{name}: {ty}");
+    if let Some(values) = field.get("enum").and_then(Value::as_array) {
+        let values = values
+            .iter()
+            .filter_map(Value::as_str)
+            .take(8)
+            .collect::<Vec<_>>();
+        if !values.is_empty() {
+            summary.push_str(&format!(" [{}]", values.join("|")));
+        }
+    }
+    if let Some(description) = field.get("description").and_then(Value::as_str)
+        && !description.trim().is_empty()
+    {
+        summary.push_str(&format!(" - {}", compact_description(description)));
+    }
+    summary
+}
+
+fn recipe_schema_type(field: &Value) -> String {
+    if let Some(ty) = field.get("type") {
+        if let Some(ty) = ty.as_str() {
+            if ty == "array" {
+                let item_ty = field
+                    .get("items")
+                    .map(recipe_schema_type)
+                    .unwrap_or_else(|| "value".to_owned());
+                return format!("array<{item_ty}>");
+            }
+            return ty.to_owned();
+        }
+        if let Some(types) = ty.as_array() {
+            let types = types.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+            if !types.is_empty() {
+                return types.join("|");
+            }
+        }
+    }
+    if field.get("oneOf").is_some() {
+        return "oneOf".to_owned();
+    }
+    if field.get("anyOf").is_some() {
+        return "anyOf".to_owned();
+    }
+    "value".to_owned()
+}
+
+fn recipe_examples(entry: &CapabilityRegistryEntry) -> Vec<Value> {
+    let existing = examples(&entry.function)
+        .into_iter()
+        .filter_map(|example| normalize_recipe_example(entry, example))
+        .take(3)
+        .collect::<Vec<_>>();
+    if existing.is_empty() {
+        vec![recipe_execute_template(
+            entry,
+            recipe_payload_example(&entry.function),
+        )]
+    } else {
+        existing
+    }
+}
+
+fn normalize_recipe_example(entry: &CapabilityRegistryEntry, example: Value) -> Option<Value> {
+    if example.get("mode").is_some() || example.get("payload").is_some() {
+        let mut object = example.as_object()?.clone();
+        object.insert("mode".to_owned(), Value::String("invoke".to_owned()));
+        object.remove("capabilityId");
+        object.insert(
+            "contractId".to_owned(),
+            Value::String(entry.contract_id.clone()),
+        );
+        object
+            .entry("reason".to_owned())
+            .or_insert_with(|| Value::String(default_recipe_reason(entry)));
+        return Some(Value::Object(object));
+    }
+    Some(recipe_execute_template(entry, example))
+}
+
+fn recipe_execute_template(entry: &CapabilityRegistryEntry, payload: Value) -> Value {
+    json!({
+        "mode": "invoke",
+        "contractId": entry.contract_id.clone(),
+        "payload": payload,
+        "reason": default_recipe_reason(entry)
+    })
+}
+
+fn default_recipe_reason(entry: &CapabilityRegistryEntry) -> String {
+    format!("Use {} for the requested work.", entry.contract_id)
+}
+
+fn recipe_payload_example(function: &FunctionDefinition) -> Value {
+    let Some(schema) = function.request_schema.as_ref() else {
+        return json!({});
+    };
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return json!({});
+    };
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    let mut payload = serde_json::Map::new();
+    for name in &required {
+        if let Some(field) = properties.get(*name) {
+            payload.insert(
+                (*name).to_owned(),
+                recipe_example_value(name, field, function),
+            );
+        }
+    }
+    Value::Object(payload)
+}
+
+fn recipe_example_value(name: &str, field: &Value, function: &FunctionDefinition) -> Value {
+    if let Some(values) = field.get("enum").and_then(Value::as_array)
+        && let Some(value) = values.first()
+    {
+        return value.clone();
+    }
+    match name {
+        "command" => Value::String("date".to_owned()),
+        "path" | "filePath" | "file_path" => Value::String("README.md".to_owned()),
+        "pattern" => Value::String("TODO".to_owned()),
+        "query" => Value::String("project documentation".to_owned()),
+        "url" => Value::String("https://example.com".to_owned()),
+        "title" => Value::String("Tron update".to_owned()),
+        "body" => Value::String("Task finished.".to_owned()),
+        "content" | "newContent" => Value::String("example content".to_owned()),
+        "oldString" => Value::String("old text".to_owned()),
+        "newString" => Value::String("new text".to_owned()),
+        "task" => Value::String("Investigate the requested topic and report findings.".to_owned()),
+        "ids" => json!(["job-<id>"]),
+        "questions" => json!([{
+            "header": "Choice",
+            "id": "choice",
+            "question": "Which option should I use?",
+            "options": [{"label": "Option A (Recommended)", "description": "Use this path."}]
+        }]),
+        "code" if function.id.as_str() == "program::run_javascript" => {
+            Value::String("return args;".to_owned())
+        }
+        other => {
+            let ty = field
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("string");
+            match ty {
+                "integer" | "number" => json!(1),
+                "boolean" => json!(true),
+                "array" => json!([]),
+                "object" => json!({}),
+                _ => Value::String(format!("<{other}>")),
+            }
+        }
+    }
+}
+
+fn recipe_inspect_required(function: &FunctionDefinition) -> bool {
+    if matches!(function.id.as_str(), "process::run" | "notifications::send") {
+        return false;
+    }
+    requires_fresh_revision(function)
+}
+
+fn recipe_direct_execution(function: &FunctionDefinition) -> &'static str {
+    if function.id.as_str() == "process::run" {
+        "conditional_safe_direct"
+    } else if function.id.as_str() == "notifications::send" || !requires_fresh_revision(function) {
+        "direct"
+    } else if direct_execution_allowed(function) {
+        "direct_with_idempotency"
+    } else {
+        "inspect_first"
+    }
+}
+
+fn recipe_approval_behavior(function: &FunctionDefinition) -> &'static str {
+    if function.required_authority.approval_required {
+        "always_pauses_for_user_approval"
+    } else if !conditional_approval_contract(function).is_null() {
+        "conditional; payloads classified as risky pause for user approval"
+    } else {
+        "none"
+    }
+}
+
+fn recipe_lifecycle_kind(function: &FunctionDefinition) -> String {
+    function
+        .metadata
+        .pointer("/lifecycle/kind")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            if function
+                .metadata
+                .get("streamTopics")
+                .and_then(Value::as_array)
+                .is_some_and(|topics| !topics.is_empty())
+            {
+                Some("stream")
+            } else {
+                None
+            }
+        })
+        .unwrap_or("immediate")
+        .to_owned()
+}
+
+fn recipe_result_summary(schema: Option<&Value>) -> String {
+    let Some(schema) = schema else {
+        return "Returns a structured capability result.".to_owned();
+    };
+    let Some(properties) = schema.get("properties").and_then(Value::as_object) else {
+        return "Returns a structured capability result.".to_owned();
+    };
+    let fields = properties.keys().take(8).cloned().collect::<Vec<_>>();
+    if fields.is_empty() {
+        "Returns a structured capability result.".to_owned()
+    } else {
+        format!("Returns fields: {}.", fields.join(", "))
+    }
+}
+
+fn recipe_aliases(function: &FunctionDefinition) -> Vec<String> {
+    let mut aliases = BTreeSet::new();
+    aliases.insert(function.id.as_str().to_owned());
+    aliases.insert(function.id.namespace().to_owned());
+    if let Some((_, name)) = function.id.as_str().rsplit_once("::") {
+        aliases.insert(name.replace('_', " "));
+    }
+    for tag in &function.tags {
+        aliases.insert(tag.to_owned());
+    }
+    aliases.into_iter().take(24).collect()
+}
+
 fn is_capability_primitive(function: &FunctionDefinition) -> bool {
     function
         .metadata
@@ -3893,32 +4244,6 @@ fn compact_description(description: &str) -> String {
         text.push_str("...");
     }
     text
-}
-
-fn compact_schema(schema: Option<&Value>) -> Option<String> {
-    let schema = schema?;
-    let properties = schema.get("properties")?.as_object()?;
-    let required = schema
-        .get("required")
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<BTreeSet<_>>()
-        })
-        .unwrap_or_default();
-    let mut fields = Vec::new();
-    for (name, field) in properties.iter().take(8) {
-        let ty = field.get("type").and_then(Value::as_str).unwrap_or("value");
-        let suffix = if required.contains(name.as_str()) {
-            ""
-        } else {
-            "?"
-        };
-        fields.push(format!("{name}{suffix}:{ty}"));
-    }
-    Some(format!("{{{}}}", fields.join(",")))
 }
 
 fn estimated_tokens(chars: usize) -> usize {
@@ -4029,6 +4354,63 @@ mod tests {
         assert_eq!(entry.trust_tier, "first_party_signed");
         assert_eq!(entry.context_primer_level, "core");
         assert!(!entry.schema_digest.is_empty());
+    }
+
+    #[test]
+    fn agent_recipe_projects_required_payload_and_execute_template() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let entry = CapabilityRegistryEntry::from_function(function, 7);
+        let recipe = entry.agent_recipe();
+
+        assert_eq!(recipe.contract_id, "process::run");
+        assert!(
+            recipe
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("command:"))
+        );
+        assert_eq!(recipe.execute_template["contractId"], json!("process::run"));
+        assert_eq!(recipe.execute_template["payload"]["command"], json!("date"));
+        assert_eq!(recipe.direct_execution, "conditional_safe_direct");
+        assert!(!recipe.inspect_required);
+        assert!(recipe.approval_behavior.contains("conditional"));
+    }
+
+    #[test]
+    fn search_hits_persist_agent_recipe_in_index_documents() {
+        let notification_spec = crate::domains::notifications::contract::capabilities()
+            .expect("notification specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "notifications::send")
+            .expect("notifications::send spec");
+        let function =
+            crate::domains::contract::function_definition_for_capability(&notification_spec);
+        let entry = CapabilityRegistryEntry::from_function(function, 12);
+        let document = entry.search_document();
+        let recipe = document.recipe.as_ref().expect("recipe");
+
+        assert_eq!(recipe.contract_id, "notifications::send");
+        assert!(
+            recipe
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("title:"))
+        );
+        assert!(
+            recipe
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("body:"))
+        );
+        assert_eq!(
+            recipe.execute_template["payload"]["title"],
+            json!("Tron test")
+        );
     }
 
     #[test]
@@ -4335,7 +4717,7 @@ mod tests {
                 .iter()
                 .any(|hit| hit.contract_id == "filesystem::read_file")
         );
-        assert_eq!(result.status.state, "unavailable");
+        assert_eq!(result.status.state, "indexing");
         assert!(
             result
                 .status
@@ -4698,8 +5080,9 @@ mod tests {
         .expect("primer");
 
         assert!(text.contains("process::run"));
-        assert!(text.contains("safe read-only commands may execute directly"));
-        assert!(text.contains("\"capabilityId\":\"process::run\""));
+        assert!(text.contains("conditional; payloads classified as risky"));
+        assert!(text.contains("\"contractId\":\"process::run\""));
+        assert!(!text.contains("\"capabilityId\""));
         assert!(!text.contains("inspectRevision=1"));
     }
 
@@ -4738,7 +5121,174 @@ mod tests {
         )
         .expect("primer");
         assert!(text.contains("notifications::send"));
-        assert!(text.contains("\"capabilityId\":\"notifications::send\""));
+        assert!(text.contains("\"contractId\":\"notifications::send\""));
+        assert!(!text.contains("\"capabilityId\""));
         assert!(!text.contains("inspectRevision=1"));
+    }
+
+    #[test]
+    fn first_party_recipe_parity_covers_common_direct_capabilities() {
+        let specs = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
+            .into_iter()
+            .chain(crate::domains::process::contract::capabilities().expect("process specs"))
+            .chain(
+                crate::domains::notifications::contract::capabilities()
+                    .expect("notification specs"),
+            )
+            .collect::<Vec<_>>();
+
+        let entries = specs
+            .into_iter()
+            .map(|spec| {
+                CapabilityRegistryEntry::from_function(
+                    crate::domains::contract::function_definition_for_capability(&spec),
+                    17,
+                )
+            })
+            .collect::<Vec<_>>();
+        let by_contract = entries
+            .iter()
+            .map(|entry| (entry.contract_id.as_str(), entry.agent_recipe()))
+            .collect::<BTreeMap<_, _>>();
+
+        let process = by_contract.get("process::run").expect("process recipe");
+        assert_eq!(
+            process.execute_template["contractId"],
+            json!("process::run")
+        );
+        assert!(
+            process
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("command:"))
+        );
+        assert!(process.direct_execution.contains("conditional_safe_direct"));
+
+        let notify = by_contract
+            .get("notifications::send")
+            .expect("notification recipe");
+        assert_eq!(
+            notify.execute_template["contractId"],
+            json!("notifications::send")
+        );
+        assert!(
+            notify
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("title:"))
+        );
+        assert!(
+            notify
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("body:"))
+        );
+
+        let read = by_contract
+            .get("filesystem::read_file")
+            .expect("read file recipe");
+        assert_eq!(
+            read.execute_template["contractId"],
+            json!("filesystem::read_file")
+        );
+        assert!(
+            read.required_payload
+                .iter()
+                .any(|field| field.starts_with("path:"))
+        );
+        assert_eq!(read.approval_behavior, "none");
+    }
+
+    #[test]
+    fn lexical_search_returns_recipes_for_common_first_party_queries() {
+        let specs = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
+            .into_iter()
+            .chain(crate::domains::process::contract::capabilities().expect("process specs"))
+            .chain(
+                crate::domains::notifications::contract::capabilities()
+                    .expect("notification specs"),
+            )
+            .collect::<Vec<_>>();
+        let documents = specs
+            .into_iter()
+            .map(|spec| {
+                CapabilityRegistryEntry::from_function(
+                    crate::domains::contract::function_definition_for_capability(&spec),
+                    18,
+                )
+                .search_document()
+            })
+            .collect::<Vec<_>>();
+        let index = HybridLocalCapabilityIndex::new(CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        });
+
+        let process = index
+            .search("process run shell command date", documents.clone(), 8)
+            .expect("process search");
+        let process_recipe = process
+            .hits
+            .iter()
+            .find(|hit| hit.contract_id == "process::run")
+            .and_then(|hit| hit.recipe.as_ref())
+            .expect("process recipe");
+        assert!(
+            process
+                .hits
+                .iter()
+                .any(|hit| hit.contract_id == "process::run" && !hit.requires_inspect)
+        );
+        assert!(
+            process_recipe
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("command:"))
+        );
+        assert_eq!(
+            process_recipe.execute_template["payload"]["command"],
+            json!("date")
+        );
+
+        let notifications = index
+            .search("notification notify app", documents.clone(), 8)
+            .expect("notification search");
+        let notification_recipe = notifications
+            .hits
+            .iter()
+            .find(|hit| hit.contract_id == "notifications::send")
+            .and_then(|hit| hit.recipe.as_ref())
+            .expect("notification recipe");
+        assert!(
+            notification_recipe
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("title:"))
+        );
+        assert!(
+            notification_recipe
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("body:"))
+        );
+
+        let read_file = index
+            .search("read file", documents, 8)
+            .expect("read file search");
+        let read_recipe = read_file
+            .hits
+            .iter()
+            .find(|hit| hit.contract_id == "filesystem::read_file")
+            .and_then(|hit| hit.recipe.as_ref())
+            .expect("read file recipe");
+        assert!(
+            read_recipe
+                .required_payload
+                .iter()
+                .any(|field| field.starts_with("path:"))
+        );
     }
 }

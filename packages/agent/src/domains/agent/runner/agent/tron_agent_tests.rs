@@ -64,8 +64,12 @@ fn test_context_manager(model: &str) -> ContextManager {
 fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
     AgentDeps {
         provider: Arc::new(provider),
-        capability_surface_policy:
-            crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy::default(),
+        primitive_surface_policy:
+            crate::domains::capability_support::implementations::primitive_surface::PrimitiveSurfacePolicy::default(),
+        capability_execution_policy:
+            crate::shared::profile::bundled_default_execution_spec().capability_execution_policies
+                ["default"]
+                .clone(),
         guardrails: None,
         hooks: None,
         context_manager: test_context_manager("mock-model"),

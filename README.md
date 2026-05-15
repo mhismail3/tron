@@ -294,7 +294,11 @@ primitives. Provider integrations do not expose their implementation names direc
 
 The default `coreFirstParty` primer is generated from registry metadata and
 includes the high-use first-party capabilities the agent should know without a
-search round trip. Important parity anchors are:
+search round trip. The same registry projection also generates
+`AgentCapabilityRecipe` records for search and inspect results, so capability
+discovery returns copyable `execute` templates, required payload fields,
+approval behavior, lifecycle notes, and result expectations instead of bare ids.
+Important parity anchors are:
 
 | Previous surface | Capability contract |
 |------------------|---------------------|
@@ -306,9 +310,10 @@ search round trip. Important parity anchors are:
 
 `process::run` and `notifications::send` both have direct, low-overhead paths
 for safe/default use: the former skips the inspect round trip for classifier-
-approved read-only checks such as `date` and `git status`, while the latter
-sends through the first-party notification delegate with an idempotency key and
-normal audit/event records.
+approved read-only checks such as `date`, `git status`, and `git log`, defaults
+to the active session worktree/workspace when `cwd` is omitted, and accepts
+bounded timeout fields in milliseconds. The latter sends through the first-party
+notification delegate with an idempotency key and normal audit/event records.
 
 Capability identity is projected from the live catalog:
 
@@ -329,11 +334,13 @@ lexical/vector fusion. The default `hybridLocal` policy prefers local vectors
 and explicitly reports degraded lexical status while the vector index is
 warming or unavailable, rather than failing the agent's catalog search. Profile
 TOML can opt into strict vector-required behavior for tests or specialized
-profiles. Profile TOML selects search/context behavior through
-`capabilityPolicies.*.searchPolicy`,
-`capabilitySearchPolicies.hybridLocal`,
-`capabilityPolicies.*.contextPrimerPolicy`, and
-`capabilityContextPrimerPolicies.*`.
+profiles. Profile TOML v3 keeps runtime-shaping policy separate: provider
+primitive exposure lives in `primitiveSurfacePolicies.*`, concrete execution
+constraints live in `capabilityExecutionPolicies.*`, search behavior lives in
+`capabilitySearchPolicies.*`, and generated first-party recipe context lives in
+`capabilityContextPrimerPolicies.*`. See
+[`packages/agent/docs/profile-control-plane.md`](packages/agent/docs/profile-control-plane.md)
+for the profile v3 control-plane schema and invariants.
 Engine Console/admin status refreshes synchronously update registry metadata,
 then warm the persistent vector index on a detached path. Agent search skips
 metadata resync when the durable registry already matches the live catalog
@@ -385,7 +392,7 @@ binding decision id, code/args hashes, limits, child invocations, selected
 implementations, approval state, artifacts, logs, compensation attempts, trace
 id, and final status.
 
-Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` without a prior inspect turn, while mutating or publishing git commands still require inspection and approval.
+Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats `cd <dir> && git status/log/diff/show` as read-only when every segment is otherwise safe. Mutating or publishing git commands still require inspection and approval.
 
 The same capability worker also registers operator/admin functions for native
 clients and the Engine Console. These are normal engine catalog functions, not
@@ -587,8 +594,8 @@ capability invocations keep the originating turn open until the approval record
 is resolved, denied, failed, or timed out, then return that outcome to the model
 as the original `execute` result. Broad first-party capabilities may declare a
 conditional approval contract: for example, `process::run` allows read-only
-checks such as `date`, `pwd`, `git status`, and test/build commands without a
-prompt, while privileged, destructive, package-installing, source-control
+checks such as `date`, `pwd`, `git status`, `git log`, and test/build commands
+without a prompt, while privileged, destructive, package-installing, source-control
 mutating, or file-redirection shell commands pause for user approval.
 
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` capability frames when iOS clients are subscribed.
@@ -816,10 +823,11 @@ System prompt    (stable, per-model)
 ```
 
 `capabilities.primer` is rendered after active rules and before skill context.
-The default `coreFirstParty` policy includes compact schemas/examples for
-trusted first-party core capabilities. `allVisibleCompact` is available as an
-opt-in profile policy for every visible worker/plugin/plugin source/OpenAPI/session
-capability under a strict budget.
+The default `coreFirstParty` policy includes compact recipe-style schemas and
+examples for trusted first-party core capabilities, using `contractId` execute
+templates. `allVisibleCompact` is available as an opt-in profile policy for
+every visible worker/plugin/plugin source/OpenAPI/session capability under a
+strict budget.
 
 ### Skills
 
@@ -1096,7 +1104,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- auth.toml                  Readable credential-profile registry
 |   +-- auth.json                  LLM provider OAuth tokens + API keys + bearerToken (mode 600)
 |   +-- default/                   Managed, restorable base AgentExecutionSpec/manual
-|   |   +-- profile.toml           Complete typed AgentExecutionSpec v2
+|   |   +-- profile.toml           Complete typed AgentExecutionSpec v3
 |   |   +-- prompts/               Main, chat, local, workflow, and process prompts
 |   |   |   +-- processes/         Summarizer, hook, automation, and subagent process prompts
 |   |   +-- context/               Context block assembly policy
@@ -1107,7 +1115,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- chat/                      Managed quick-chat profile
 |   |   +-- profile.toml           Inherits default; maps main entrypoint to chat prompt
 |   +-- local/                     Managed local-provider profile
-|   |   +-- profile.toml           Inherits default; maps main entrypoint to local prompt/context/capabilities
+|   |   +-- profile.toml           Inherits default; maps main entrypoint to local prompt/context/runtime policies
 |   +-- user/                      Sparse user profile/settings/prompt overrides
 |       +-- profile.toml           Sparse `[settings]` overrides
 +-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel

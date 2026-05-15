@@ -98,7 +98,7 @@ impl ContextManager {
         // Local models only receive the profile-selected local capability
         // policy at turn time, so the estimator should count only those.
         if context_policy.is_local()
-            && let Some(local_capabilities) = context_policy.capability_filter()
+            && let Some(local_capabilities) = context_policy.primitive_filter()
         {
             config
                 .capabilities

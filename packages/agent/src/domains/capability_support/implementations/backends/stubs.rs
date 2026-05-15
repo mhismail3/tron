@@ -99,7 +99,7 @@ mod tests {
             working_directory: "/tmp".into(),
             max_turns: 5,
             timeout_ms: 30_000,
-            denied_capabilities: vec![],
+            denied_contracts: vec![],
             skills: None,
             max_depth: 0,
             current_depth: 0,

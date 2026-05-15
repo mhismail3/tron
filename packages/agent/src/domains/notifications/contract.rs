@@ -65,7 +65,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .stream_topics(STREAM_TOPICS.to_vec())
             .examples(vec![json!({
                 "mode": "invoke",
-                "capabilityId": "notifications::send",
+                "contractId": "notifications::send",
                 "payload": {
                     "title": "Tron test",
                     "body": "This is a test notification from Tron.",

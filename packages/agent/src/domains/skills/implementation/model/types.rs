@@ -76,12 +76,12 @@ pub struct SkillFrontmatter {
     /// Categorization tags.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    /// Allow-list of capabilities (mutually exclusive with `denied_capabilities`).
+    /// Allow-list of contracts (mutually exclusive with `denied_contracts`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_capabilities: Option<Vec<String>>,
-    /// Deny-list of capabilities (mutually exclusive with `allowed_capabilities`).
+    pub allowed_contracts: Option<Vec<String>>,
+    /// Deny-list of contracts (mutually exclusive with `allowed_contracts`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub denied_capabilities: Option<Vec<String>>,
+    pub denied_contracts: Option<Vec<String>>,
     /// Subagent execution mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent: Option<SkillSubagentMode>,
@@ -226,9 +226,9 @@ pub struct AddedSkillInfo {
 
 /// ModelCapability denial configuration derived from skill frontmatter.
 #[derive(Debug, Clone)]
-pub struct CapabilityDenialConfig {
+pub struct ContractDenialConfig {
     /// Capabilities that are denied.
-    pub denied_capabilities: Vec<String>,
+    pub denied_contracts: Vec<String>,
 }
 
 #[cfg(test)]

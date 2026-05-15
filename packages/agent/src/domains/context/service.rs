@@ -210,7 +210,7 @@ pub(crate) async fn model_capability_definitions(
     deps: &Deps,
     session_id: &str,
 ) -> Vec<ModelCapability> {
-    match crate::domains::capability_support::implementations::capability_surface::list_model_capabilities(
+    match crate::domains::capability_support::implementations::primitive_surface::list_model_capabilities(
         &deps.engine_host,
         session_id,
         None,

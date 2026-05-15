@@ -40,7 +40,8 @@ They mirror the durable registry and primitive response shapes:
 - `CapabilityExecutionDTO`
 - `CapabilityProgramRunDTO`
 - `CapabilityAuditEventDTO`
-- `CapabilityPolicyDTO`
+- `PrimitiveSurfacePolicyDTO`
+- `CapabilityExecutionPolicyDTO`
 
 The DTOs preserve identifiers such as `contractId`, `implementationId`,
 `pluginId`, `workerId`, `functionId`, `schemaDigest`, and catalog/registry
@@ -131,6 +132,13 @@ execution requirements, schema digest, inspection handle, approval requirements,
 and examples when available. Unknown result shapes still render through a
 generic readable JSON/text block, with oversized structured output available in
 Technical instead of taking over the primary sheet.
+
+Capability discovery includes `AgentCapabilityRecipeDTO` on search hits and
+inspection details. The UI can show these recipes as operator help, but it must
+not maintain a parallel static capability catalog: recipe text, execute
+templates, required/optional payload fields, lifecycle notes, approval behavior,
+and result expectations all come from the live registry projection that also
+feeds the model primer.
 
 The current Engine Console is a sheet-native operator surface built from
 capability cards, metric grids, status banners, section chips, generated action

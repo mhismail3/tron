@@ -1,132 +1,16 @@
-# Tron default profile, schema v2.
-#
-# This file is both the managed base AgentExecutionSpec and the manual for
-# child profiles. User-facing sessions normally select one of the managed child
-# profiles: "normal", "chat", or "local". Those children inherit this full
-# spec and override only the entrypoint decisions that differ. This file is
-# loaded as TOML with strict schema validation:
-#
-# - Unknown keys fail startup/profile resolution.
-# - References to missing prompts, manifests, policies, or auth profiles fail.
-# - File references must be relative to a profile directory or to profiles/
-#   for shared auth files. Absolute paths and ".." are rejected.
-# - Tables deep-merge through inheritance. Scalars replace parent values.
-#   Arrays replace parent arrays; there is no append/remove operator in v2.
-# - Child profile file refs are resolved through the child profile first, then
-#   its parents, then the managed default.
-#
-# To create a child profile:
-#
-#   1. Create ~/.tron/profiles/<profile-name>/profile.toml.
-#   2. Start with:
-#
-#        version = "2"
-#        name = "<profile-name>"
-#        managed = false
-#        profileClass = "custom"
-#        inherits = ["default"]
-#        authProfile = "default"
-#
-#   3. Override only the keys that differ. For long prompts, place Markdown
-#      files in the child profile and point prompt fields at those relative
-#      files. For settings/UI/server values, keep managed defaults here and use
-#      sparse TOML overrides in ~/.tron/profiles/user/profile.toml.
-#   4. Select it globally by writing profiles/active.toml with:
-#
-#        active = "<profile-name>"
-#
-# Common child-profile override recipes:
-#
-# - Change only chat behavior:
-#
-#        [entrypoints.chat]
-#        prompt = "prompts/chat.md"
-#
-#   Then create ~/.tron/profiles/<profile-name>/prompts/chat.md. The child
-#   entrypoint inherits all omitted policies from default.
-#
-# - Make in-process subagents shorter-lived:
-#
-#        [processes."spawnSubagent.inProcess"]
-#        timeoutMs = 120000
-#        blockingTimeoutMs = 120000
-#        maxTurns = 25
-#
-# - Give local models a different primitive capability set:
-#
-#        [capabilityPolicies.localModel]
-#        allowedCapabilities = ["search", "inspect"]
-#
-#   Because arrays replace parent arrays, include the complete desired list.
-#
-# - Let local models see memory while still stripping skills/job results:
-#
-#        [contextPolicies.localDefault]
-#        stripMemory = false
-#
-# - Add a locked-down custom transform:
-#
-#        [processes.myTransform]
-#        kind = "transform"
-#        prompt = "prompts/processes/my-transform.md"
-#        modelPolicy = "settingsSubagent"
-#        contextPolicy = "minimalTransform"
-#        capabilityPolicy = "none"
-#        permissionPolicy = "lockedDown"
-#        outputContract = "plainText"
-#        auditPolicy = "default"
-#        maxTurns = 1
-#        inheritCapabilities = false
-#
-# The adjacent files below are also part of this managed default profile:
-#
-# - prompts/*.md: main/chat/local/git workflow behavior text.
-# - prompts/processes/*.md: model-backed child process behavior.
-# - [settings]: server, provider, UI, capability, hook, memory, automation, git,
-#   MCP, and iOS-facing defaults.
-# - context/context-blocks.toml: the allowed context block ids, homes,
-#   cache classes, and provider surfaces.
-# - capabilities/presentation.toml: provider capability presentation rules.
-# - providers/**: provider-specific prompt/presentation policy text.
-#
-# Value reference:
-#
-# - process kind: "main", "subagent", "summarizer", "hook", "automation",
-#   "capabilityWorker", "transform".
-# - profileClass: "base", "normal", "chat", "local", or "custom".
-# - model policy selection: "sessionDefault" uses the session/default model,
-#   "inheritParent" uses the parent process model, and "settingsSubagent" uses
-#   the configured subagent model. The schema also permits model = "..." on a
-#   policy table; use that only where the consuming runtime path supports it.
-# - model providerClass: "any", "cloud", or "local" when present.
-# - reasoning: omit to inherit model defaults, or use "none", "low", "medium",
-#   "high", "xhigh", or "max". Providers clamp unsupported values.
-# - context cache class: "foundation", "profile", "session", "turn", "none".
-# - cache behavior: "cacheIfSupported" or "noCache".
-# - provider surface: "instructions", "message", "capability", "excluded".
-# - provider systemPromptSurface: "providerDefault" or "capabilityClarification".
-# - output contract kind: "plainText", "plainTextList",
-#   "compactionSummary", "memoryRetention", or "capabilityAnswer".
-# - resultInjection ids currently used by runtime: "nextParentTurn" and
-#   "automationLedger".
-# - model-facing capability ids are search, inspect, and execute. First-party
-#   filesystem, web, shell, MCP, app, and agent actions are live worker
-#   capabilities discovered and invoked through those primitives.
+# Tron managed default profile, schema v3.
+# Profiles are runtime control-plane data. Live capabilities, plugins, recipes,
+# health, bindings, and vector state belong to the capability registry/ledger.
+# See packages/agent/docs/profile-control-plane.md for schema guidance.
 
-version = "2"
+version = "3"
 name = "default"
 managed = true
 profileClass = "base"
 inherits = []
 authProfile = "default"
 
-# Profile-owned settings.
-#
-# These values are the managed server/iOS/RPC settings baseline. They are
-# intentionally embedded in profile TOML so one profile snapshot explains both
-# model-facing behavior and harness behavior. `settings.get` still returns this
-# shape as JSON, and `settings.update` writes sparse overrides to
-# `profiles/user/profile.toml` under `[settings]`.
+# Managed server/iOS/RPC settings baseline.
 [settings]
 version = "0.1.0"
 name = "tron"
@@ -367,35 +251,19 @@ historyAutoPrune = true
 servers = []
 schemaRefreshTtlMs = 30000
 
-# Shared built-in auth registry/store for provider credentials owned by Tron.
-#
-# `registry` is readable TOML under profiles/. `rawStore` is the protected JSON
-# secret store under profiles/ and should be mode 0600. Profiles select a
-# declared registry entry through `authProfile`; raw secrets are never inlined
-# in profile TOML. Skill-owned credentials belong in workspace/vault, not here.
+# Provider credential registry/store paths. Raw secrets are never inlined here.
 [auth]
 registry = "auth.toml"
 rawStore = "auth.json"
 
-# Entrypoints are primary user-facing harness surfaces. Runtime currently uses:
-#
-# - main: default normal-session behavior for project/workspace-scoped sessions.
-# - chat: quick chat behavior for conversational sessions that do not acquire
-#   project worktrees or workspace-scoped context.
-# - local: local-provider variant automatically selected when a local provider
-#   such as Ollama is selected. It bundles the local prompt, stripped/truncated
-#   context policy, and local capability policy.
-# - gitWorkflow: merge/rebase/conflict workflow behavior.
-#
-# Each entrypoint selects one prompt and references policy ids defined later in
-# this file. For a child profile, override an entrypoint field only when that
-# surface should behave differently.
+# Entrypoints select prompt, model/context, primitive, execution, and audit policy ids.
 [entrypoints.main]
 prompt = "prompts/core.md"
 modelPolicy = "sessionDefault"
 contextPolicy = "cloudDefault"
 localContextPolicy = "localDefault"
-capabilityPolicy = "default"
+primitiveSurfacePolicy = "default"
+capabilityExecutionPolicy = "default"
 permissionPolicy = "main"
 providerPolicy = "default"
 cachePolicy = "default"
@@ -406,7 +274,8 @@ prompt = "prompts/chat.md"
 modelPolicy = "sessionDefault"
 contextPolicy = "cloudDefault"
 localContextPolicy = "localDefault"
-capabilityPolicy = "default"
+primitiveSurfacePolicy = "default"
+capabilityExecutionPolicy = "default"
 permissionPolicy = "main"
 providerPolicy = "default"
 cachePolicy = "default"
@@ -416,7 +285,8 @@ auditPolicy = "default"
 prompt = "prompts/local.md"
 modelPolicy = "sessionDefault"
 contextPolicy = "localDefault"
-capabilityPolicy = "localModel"
+primitiveSurfacePolicy = "localModel"
+capabilityExecutionPolicy = "localModel"
 permissionPolicy = "main"
 providerPolicy = "default"
 cachePolicy = "default"
@@ -426,41 +296,21 @@ auditPolicy = "default"
 prompt = "prompts/git-workflow.md"
 modelPolicy = "sessionDefault"
 contextPolicy = "cloudDefault"
-capabilityPolicy = "default"
+primitiveSurfacePolicy = "default"
+capabilityExecutionPolicy = "default"
 permissionPolicy = "main"
 providerPolicy = "default"
 cachePolicy = "default"
 auditPolicy = "default"
 
-# Processes are every harness-spawned child execution contract, model-backed or
-# otherwise. Summarizers are not separate primitives; they are processes with
-# kind = "summarizer". A process may be invoked automatically by the harness,
-# by a capability, by a hook, by automation, or by an LLM capability call.
-#
-# Process fields:
-#
-# - kind: one of the process kind values listed in the header.
-# - prompt: optional Markdown prompt ref, relative to the profile chain.
-# - modelPolicy/contextPolicy/capabilityPolicy/permissionPolicy/outputContract/
-#   auditPolicy: ids from policy tables below.
-# - timeoutMs: total wall-clock budget. Omit for runtime default; 0 means
-#   unbounded/background for the tmux-style subagent path.
-# - blockingTimeoutMs: how long the parent waits before backgrounding.
-# - blocking: true means caller waits by default; false means background.
-# - maxTurns: process turn budget.
-# - maxDepth: child nesting budget. Use 0 for no further children.
-# - inheritCapabilities: whether this process starts from the parent capability catalog.
-# - allowedCapabilities: strict allowlist after inheritance/registration.
-# - deniedCapabilities: denylist after inheritance/registration.
-# - workingDirectory: optional process cwd override.
-# - resultInjection: how results re-enter parent/workspace state.
-# - audit: per-process audit switch; auditPolicy still defines what to record.
+# Harness-spawned child process contracts.
 [processes.compaction]
 kind = "summarizer"
 prompt = "prompts/processes/compaction.md"
 modelPolicy = "inheritParent"
 contextPolicy = "minimalTransform"
-capabilityPolicy = "none"
+primitiveSurfacePolicy = "none"
+capabilityExecutionPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "compactionSummary"
 auditPolicy = "default"
@@ -478,7 +328,8 @@ kind = "summarizer"
 prompt = "prompts/processes/memory-retain.md"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-capabilityPolicy = "none"
+primitiveSurfacePolicy = "none"
+capabilityExecutionPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "memoryRetention"
 auditPolicy = "default"
@@ -496,7 +347,8 @@ kind = "capabilityWorker"
 prompt = "prompts/processes/web-fetch-summarizer.md"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-capabilityPolicy = "none"
+primitiveSurfacePolicy = "none"
+capabilityExecutionPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "capabilityAnswer"
 auditPolicy = "default"
@@ -514,7 +366,8 @@ kind = "subagent"
 prompt = "prompts/processes/conflict-resolver.md"
 modelPolicy = "settingsSubagent"
 contextPolicy = "cloudDefault"
-capabilityPolicy = "conflictResolver"
+primitiveSurfacePolicy = "conflictResolver"
+capabilityExecutionPolicy = "conflictResolver"
 permissionPolicy = "restrictedChild"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -523,7 +376,6 @@ blocking = false
 maxTurns = 40
 maxDepth = 0
 inheritCapabilities = true
-allowedCapabilities = ["search", "inspect", "execute", "filesystem::read_file", "filesystem::edit_file", "filesystem::write_file", "process::run"]
 audit = true
 
 [processes."spawnSubagent.inProcess"]
@@ -531,7 +383,8 @@ kind = "subagent"
 prompt = "prompts/core.md"
 modelPolicy = "inheritParent"
 contextPolicy = "cloudDefault"
-capabilityPolicy = "subagentInherited"
+primitiveSurfacePolicy = "subagentInherited"
+capabilityExecutionPolicy = "subagentInherited"
 permissionPolicy = "child"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -548,7 +401,8 @@ kind = "subagent"
 prompt = "prompts/core.md"
 modelPolicy = "inheritParent"
 contextPolicy = "cloudDefault"
-capabilityPolicy = "subagentInherited"
+primitiveSurfacePolicy = "subagentInherited"
+capabilityExecutionPolicy = "subagentInherited"
 permissionPolicy = "child"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -563,7 +417,8 @@ audit = true
 kind = "hook"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-capabilityPolicy = "none"
+primitiveSurfacePolicy = "none"
+capabilityExecutionPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -579,7 +434,8 @@ audit = true
 kind = "hook"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-capabilityPolicy = "none"
+primitiveSurfacePolicy = "none"
+capabilityExecutionPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -595,7 +451,8 @@ audit = true
 kind = "hook"
 modelPolicy = "settingsSubagent"
 contextPolicy = "minimalTransform"
-capabilityPolicy = "none"
+primitiveSurfacePolicy = "none"
+capabilityExecutionPolicy = "none"
 permissionPolicy = "lockedDown"
 outputContract = "plainTextList"
 auditPolicy = "default"
@@ -611,7 +468,8 @@ audit = true
 kind = "automation"
 modelPolicy = "sessionDefault"
 contextPolicy = "cloudDefault"
-capabilityPolicy = "unattended"
+primitiveSurfacePolicy = "unattended"
+capabilityExecutionPolicy = "unattended"
 permissionPolicy = "child"
 outputContract = "plainText"
 auditPolicy = "default"
@@ -620,26 +478,7 @@ inheritCapabilities = true
 resultInjection = "automationLedger"
 audit = true
 
-# Model policies determine how an entrypoint/process chooses model/provider.
-#
-# selection values used today:
-#
-# - sessionDefault: use the session's chosen model/provider, falling back to
-#   the profile-owned settings defaults.
-# - inheritParent: child process uses its parent model/provider.
-# - settingsSubagent: use settings.agent.subagentModel/default provider policy.
-#
-# The schema also has optional `model` and `reasoning` fields for explicit
-# policy wiring. Use the three default selection modes below for parity unless
-# the runtime call site you are changing consumes explicit model policies.
-#
-# Example shape for an explicit policy when the consuming call site supports it:
-#
-#   [modelPolicies.myPinnedModel]
-#   selection = "explicit"
-#   model = "provider/model-id"
-#   providerClass = "cloud"
-#   reasoning = "high"
+# Model/provider selection policies.
 [modelPolicies.sessionDefault]
 selection = "sessionDefault"
 providerClass = "any"
@@ -652,27 +491,17 @@ providerClass = "any"
 selection = "settingsSubagent"
 providerClass = "any"
 
-# Context policies decide which context blocks are eligible and how local/cloud
-# differences are applied. The block manifest must include every block emitted
-# by the runtime, so provider payload audit can prove each block appears once on
-# the intended provider surface.
-#
-# Useful fields:
-#
-# - blocks: context block manifest relative to the profile chain.
-# - localProviders: provider ids that select this as a local policy.
-# - capabilityPolicy: capability policy that should accompany this context policy.
-# - stripMemory/stripSkillIndex/stripJobResults: remove those context blocks.
-# - skipPendingJobsBootstrap: avoid DB bootstrap for background result context.
-# - rulesTruncationChars/rulesTruncationSuffix: local-model rules budget.
+# Context block and local-provider policies.
 [contextPolicies.cloudDefault]
 blocks = "context/context-blocks.toml"
-capabilityPolicy = "default"
+primitiveSurfacePolicy = "default"
+capabilityExecutionPolicy = "default"
 
 [contextPolicies.localDefault]
 blocks = "context/context-blocks.toml"
 localProviders = ["ollama"]
-capabilityPolicy = "localModel"
+primitiveSurfacePolicy = "localModel"
+capabilityExecutionPolicy = "localModel"
 stripMemory = true
 stripSkillIndex = true
 stripJobResults = true
@@ -681,65 +510,70 @@ rulesTruncationChars = 500
 rulesTruncationSuffix = "\n\n[Truncated - full rules are available through search, inspect, and execute]"
 
 [contextPolicies.minimalTransform]
-capabilityPolicy = "none"
+primitiveSurfacePolicy = "none"
+capabilityExecutionPolicy = "none"
 stripMemory = true
 stripSkillIndex = true
 stripJobResults = true
 skipPendingJobsBootstrap = true
 
-# Capability policies control capability visibility and execution eligibility.
-#
-# Semantics:
-#
-# - manifest: optional capability presentation file for descriptions/schema policy.
-# - allowedCapabilities: if present, only listed capabilities survive.
-# - deniedCapabilities: listed capabilities are removed after allowlist/inheritance.
-# - exposeInteractiveCapabilities: false hides user-blocking UI capabilities when a runtime
-#   path applies interactive filtering, such as unattended jobs.
-# - removeSpawnCapabilitiesAtMaxDepth: hides child-spawn capabilities when depth is exhausted.
-#
-# Capability policy is not a security boundary by itself. It pairs with permission
-# policy and executor checks so hidden/denied capabilities cannot be called anyway.
-[capabilityPolicies.default]
-manifest = "capabilities/presentation.toml"
+# Primitive surface policies control only the provider-facing primitives.
+[primitiveSurfacePolicies.default]
+allowedPrimitives = ["search", "inspect", "execute"]
+exposeInteractiveCapabilities = true
+removeSpawnAtMaxDepth = true
+
+[primitiveSurfacePolicies.localModel]
+allowedPrimitives = ["search", "inspect", "execute"]
+exposeInteractiveCapabilities = true
+removeSpawnAtMaxDepth = true
+
+[primitiveSurfacePolicies.none]
+allowedPrimitives = []
+exposeInteractiveCapabilities = false
+removeSpawnAtMaxDepth = true
+
+[primitiveSurfacePolicies.subagentInherited]
+allowedPrimitives = ["search", "inspect", "execute"]
+exposeInteractiveCapabilities = false
+removeSpawnAtMaxDepth = true
+
+[primitiveSurfacePolicies.unattended]
+allowedPrimitives = ["search", "inspect", "execute"]
+exposeInteractiveCapabilities = false
+removeSpawnAtMaxDepth = true
+
+[primitiveSurfacePolicies.conflictResolver]
+allowedPrimitives = ["search", "inspect", "execute"]
+exposeInteractiveCapabilities = false
+removeSpawnAtMaxDepth = true
+
+# Capability execution policies control real worker capabilities.
+[capabilityExecutionPolicies.default]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveCapabilities = true
-removeSpawnCapabilitiesAtMaxDepth = true
 
-[capabilityPolicies.localModel]
-allowedCapabilities = ["search", "inspect", "execute"]
+[capabilityExecutionPolicies.localModel]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveCapabilities = true
-removeSpawnCapabilitiesAtMaxDepth = true
 
-[capabilityPolicies.none]
-allowedCapabilities = []
+[capabilityExecutionPolicies.none]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "disabled"
-exposeInteractiveCapabilities = false
-removeSpawnCapabilitiesAtMaxDepth = true
+allowedContracts = []
 
-[capabilityPolicies.subagentInherited]
+[capabilityExecutionPolicies.subagentInherited]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveCapabilities = false
-removeSpawnCapabilitiesAtMaxDepth = true
 
-[capabilityPolicies.unattended]
-deniedCapabilities = []
+[capabilityExecutionPolicies.unattended]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveCapabilities = false
-removeSpawnCapabilitiesAtMaxDepth = true
 
-[capabilityPolicies.conflictResolver]
-allowedCapabilities = ["search", "inspect", "execute"]
+[capabilityExecutionPolicies.conflictResolver]
 searchPolicy = "hybridLocal"
 contextPrimerPolicy = "coreFirstParty"
-exposeInteractiveCapabilities = false
-removeSpawnCapabilitiesAtMaxDepth = true
+allowedContracts = ["filesystem::read_file", "filesystem::edit_file", "filesystem::write_file", "process::run"]
 
 [capabilitySearchPolicies.hybridLocal]
 lexical = true

@@ -8,9 +8,10 @@ use crate::domains::agent::runner::context::rules_index::RulesIndex;
 use crate::domains::agent::runner::context::types::ContextManagerConfig;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
-use crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy;
+use crate::domains::capability_support::implementations::primitive_surface::PrimitiveSurfacePolicy;
 use crate::domains::model::providers::provider::Provider;
 use crate::shared::messages::Message;
+use crate::shared::profile::{CapabilityExecutionPolicySpec, PrimitiveSurfacePolicySpec};
 
 use crate::domains::agent::runner::agent::tron_agent::{AgentDeps, TronAgent};
 use crate::domains::agent::runner::types::AgentConfig;
@@ -21,19 +22,21 @@ pub struct CreateAgentOpts {
     pub provider: Arc<dyn Provider>,
     /// Profile-resolved context policy for this agent.
     pub context_policy: ContextPolicy,
-    /// Profile-resolved capability policy for this agent.
-    pub capability_policy: crate::shared::profile::CapabilityPolicySpec,
+    /// Profile-resolved provider primitive surface policy for this agent.
+    pub primitive_surface_policy: PrimitiveSurfacePolicySpec,
+    /// Profile-resolved concrete capability execution policy for this agent.
+    pub capability_execution_policy: CapabilityExecutionPolicySpec,
     /// Guardrail engine (optional).
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Hook engine (optional).
     pub hooks: Option<Arc<HookEngine>>,
     /// Whether this agent runs without direct user oversight.
     /// When true, interactive capabilities are removed, spawn capabilities are gated
-    /// by `max_depth`, and all `denied_capabilities` are enforced.
+    /// by `max_depth`, and all `denied_primitives` are enforced.
     /// Set to true for: subagents, cron agents, system subsessions.
     pub is_unattended: bool,
-    /// Model capability ids denied for this agent.
-    pub denied_capabilities: Vec<String>,
+    /// Provider primitive ids denied for this agent.
+    pub denied_primitives: Vec<String>,
     /// Current subagent nesting depth (0 = top-level agent).
     pub subagent_depth: u32,
     /// Maximum nesting depth allowed for spawning children.
@@ -85,9 +88,9 @@ impl AgentFactory {
         config.subagent_depth = opts.subagent_depth;
         config.subagent_max_depth = opts.subagent_max_depth;
 
-        let capability_surface_policy = CapabilitySurfacePolicy::from_profile(
-            &opts.capability_policy,
-            &opts.denied_capabilities,
+        let primitive_surface_policy = PrimitiveSurfacePolicy::from_profile(
+            &opts.primitive_surface_policy,
+            &opts.denied_primitives,
             opts.is_unattended,
             opts.subagent_max_depth,
         );
@@ -131,7 +134,8 @@ impl AgentFactory {
             config,
             AgentDeps {
                 provider: opts.provider,
-                capability_surface_policy,
+                primitive_surface_policy,
+                capability_execution_policy: opts.capability_execution_policy,
                 guardrails: opts.guardrails,
                 hooks: opts.hooks,
                 context_manager,
@@ -201,11 +205,12 @@ mod tests {
                     ProviderKind::Anthropic,
                     spec,
                 ),
-            capability_policy: spec.capability_policies["default"].clone(),
+            primitive_surface_policy: spec.primitive_surface_policies["default"].clone(),
+            capability_execution_policy: spec.capability_execution_policies["default"].clone(),
             guardrails: None,
             hooks: None,
             is_unattended: false,
-            denied_capabilities: vec![],
+            denied_primitives: vec![],
             subagent_depth: 0,
             subagent_max_depth: 0,
             rules_content: None,
@@ -236,9 +241,9 @@ mod tests {
     }
 
     #[test]
-    fn create_agent_stores_live_catalog_capability_policy() {
+    fn create_agent_stores_live_catalog_primitive_surface_policy() {
         let mut opts = default_opts(Arc::new(MockProvider));
-        opts.denied_capabilities = vec!["process::run".into()];
+        opts.denied_primitives = vec!["execute".into()];
         let agent = AgentFactory::create_agent(default_config(), "s1".into(), opts);
         assert!(agent.context_manager().model_capability_names().is_empty());
     }

@@ -4,7 +4,7 @@ description: "Collaborative planning and research agent — produces implementat
 version: "3.0.0"
 tags: [planning, research, architecture, workflow]
 subagent: ask
-deniedCapabilities: [filesystem::edit_file]
+deniedContracts: [filesystem::edit_file]
 ---
 
 # Planning Agent

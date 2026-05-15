@@ -211,8 +211,10 @@ mod tests {
             AgentConfig::default(),
             AgentDeps {
                 provider,
-                capability_surface_policy:
-                    crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy::default(),
+                primitive_surface_policy:
+                    crate::domains::capability_support::implementations::primitive_surface::PrimitiveSurfacePolicy::default(),
+                capability_execution_policy:
+                    spec.capability_execution_policies["default"].clone(),
                 guardrails: None,
                 hooks: None,
                 context_manager: ContextManager::new(ContextManagerConfig {

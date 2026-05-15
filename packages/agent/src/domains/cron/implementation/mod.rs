@@ -38,7 +38,7 @@
 //! - **DB-before-memory**: Runtime state updates always write to SQLite first. If
 //!   the DB write fails, the in-memory update is skipped to prevent divergence.
 //! - **Allowlist-only restrictions**: `CapabilityRestrictions` uses `deny_unknown_fields` —
-//!   unknown `deniedCapabilities` JSON is rejected at parse time.
+//!   unknown `deniedContracts` JSON is rejected at parse time.
 //! - **Full-file hashing**: The config watcher hashes the entire file, not a prefix.
 //! - **Minimum timeout**: Shell (1s–3600s) and webhook (1s–300s) payloads reject 0s timeout.
 //! - **Engine-attached fires**: In production, `main.rs` attaches the engine

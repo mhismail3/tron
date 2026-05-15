@@ -4,7 +4,8 @@
 //! prompt to minimize time-to-first-token. The active profile owns every
 //! decision that differs from cloud behavior:
 //!
-//! - Which capabilities are exposed (and executable) on local models
+//! - Which provider-facing primitives are exposed on local models
+//! - Which worker capabilities are executable under the paired execution policy
 //! - How much of the rules content is included before truncation
 //! - Which provider types are considered "local"
 //!
@@ -14,10 +15,8 @@
 //! ## Invariant
 //!
 //! If a session plan selects a local provider policy, the model must only see
-//! and be able to execute capabilities in that profile's local capability
-//! policy. Schema filtering alone is insufficient — the executor must also
-//! refuse off-list calls to close the gap where a model hallucinates a
-//! capability id from training data or memory.
+//! primitives in that profile's primitive surface policy. Concrete worker
+//! execution is governed by the paired capability execution policy.
 
 use crate::shared::messages::Provider;
 
@@ -31,7 +30,8 @@ use crate::shared::messages::Provider;
 pub struct ContextPolicy {
     id: String,
     spec: crate::shared::profile::ContextPolicySpec,
-    capability_policy: Option<crate::shared::profile::CapabilityPolicySpec>,
+    primitive_surface_policy: Option<crate::shared::profile::PrimitiveSurfacePolicySpec>,
+    capability_execution_policy: Option<crate::shared::profile::CapabilityExecutionPolicySpec>,
     is_local: bool,
 }
 
@@ -86,12 +86,27 @@ impl ContextPolicy {
             .entrypoints
             .get("main")
             .expect("validated profile must define entrypoints.main");
-        let capability_policy_id = context_spec
-            .capability_policy
+        let primitive_surface_policy_id = context_spec
+            .primitive_surface_policy
             .as_deref()
-            .unwrap_or(entrypoint.capability_policy.as_str());
-        let capability_policy = spec.capability_policy(capability_policy_id).cloned();
-        Self::from_resolved_parts(context_id, context_spec, capability_policy, is_local)
+            .unwrap_or(entrypoint.primitive_surface_policy.as_str());
+        let capability_execution_policy_id = context_spec
+            .capability_execution_policy
+            .as_deref()
+            .unwrap_or(entrypoint.capability_execution_policy.as_str());
+        let primitive_surface_policy = spec
+            .primitive_surface_policy(primitive_surface_policy_id)
+            .cloned();
+        let capability_execution_policy = spec
+            .capability_execution_policy(capability_execution_policy_id)
+            .cloned();
+        Self::from_resolved_parts(
+            context_id,
+            context_spec,
+            primitive_surface_policy,
+            capability_execution_policy,
+            is_local,
+        )
     }
 
     /// Build a context policy from already-resolved profile policy tables.
@@ -99,13 +114,15 @@ impl ContextPolicy {
     pub fn from_resolved_parts(
         id: impl Into<String>,
         spec: crate::shared::profile::ContextPolicySpec,
-        capability_policy: Option<crate::shared::profile::CapabilityPolicySpec>,
+        primitive_surface_policy: Option<crate::shared::profile::PrimitiveSurfacePolicySpec>,
+        capability_execution_policy: Option<crate::shared::profile::CapabilityExecutionPolicySpec>,
         is_local: bool,
     ) -> Self {
         Self {
             id: id.into(),
             spec,
-            capability_policy,
+            primitive_surface_policy,
+            capability_execution_policy,
             is_local,
         }
     }
@@ -123,10 +140,16 @@ impl ContextPolicy {
         self.is_local
     }
 
-    /// Capability policy id for this context policy.
+    /// Primitive surface policy id for this context policy.
     #[must_use]
-    pub fn capability_policy_id(&self) -> Option<&str> {
-        self.spec.capability_policy.as_deref()
+    pub fn primitive_surface_policy_id(&self) -> Option<&str> {
+        self.spec.primitive_surface_policy.as_deref()
+    }
+
+    /// Capability execution policy id for this context policy.
+    #[must_use]
+    pub fn capability_execution_policy_id(&self) -> Option<&str> {
+        self.spec.capability_execution_policy.as_deref()
     }
 
     /// Cache-agnostic context policy spec.
@@ -135,10 +158,20 @@ impl ContextPolicy {
         &self.spec
     }
 
-    /// Capability presentation policy spec, if one is attached.
+    /// Primitive surface policy spec, if one is attached.
     #[must_use]
-    pub fn capability_policy(&self) -> Option<&crate::shared::profile::CapabilityPolicySpec> {
-        self.capability_policy.as_ref()
+    pub fn primitive_surface_policy(
+        &self,
+    ) -> Option<&crate::shared::profile::PrimitiveSurfacePolicySpec> {
+        self.primitive_surface_policy.as_ref()
+    }
+
+    /// Capability execution policy spec, if one is attached.
+    #[must_use]
+    pub fn capability_execution_policy(
+        &self,
+    ) -> Option<&crate::shared::profile::CapabilityExecutionPolicySpec> {
+        self.capability_execution_policy.as_ref()
     }
 
     /// Does this policy strip `memory_content`?
@@ -166,12 +199,12 @@ impl ContextPolicy {
         self.spec.skip_pending_jobs_bootstrap
     }
 
-    /// The allow-list of capability ids, or `None` if all registered capabilities apply.
+    /// The allow-list of provider-facing primitive ids, or `None` if all primitives apply.
     #[must_use]
-    pub fn capability_filter(&self) -> Option<Vec<String>> {
-        self.capability_policy
+    pub fn primitive_filter(&self) -> Option<Vec<String>> {
+        self.primitive_surface_policy
             .as_ref()
-            .and_then(|policy| policy.allowed_capabilities.clone())
+            .and_then(|policy| policy.allowed_primitives.clone())
     }
 
     /// The rules truncation budget (chars), or `None` for no truncation.
@@ -271,7 +304,7 @@ mod tests {
 
     #[test]
     fn local_profile_allows_capability_primitives() {
-        let allowed = local_policy().capability_filter().unwrap();
+        let allowed = local_policy().primitive_filter().unwrap();
         for name in ["search", "inspect", "execute"] {
             assert!(
                 allowed.iter().any(|capability| capability == name),
@@ -282,7 +315,7 @@ mod tests {
 
     #[test]
     fn cloud_only_capability_rejected() {
-        let allowed = local_policy().capability_filter().unwrap();
+        let allowed = local_policy().primitive_filter().unwrap();
         assert!(
             !allowed
                 .iter()
@@ -302,7 +335,7 @@ mod tests {
 
     #[test]
     fn local_capability_check_is_case_sensitive() {
-        let allowed = local_policy().capability_filter().unwrap();
+        let allowed = local_policy().primitive_filter().unwrap();
         assert!(!allowed.iter().any(|capability| capability == "Search"));
         assert!(!allowed.iter().any(|capability| capability == "EXECUTE"));
     }
@@ -384,7 +417,7 @@ mod tests {
         assert!(p.strip_skill_index());
         assert!(p.strip_job_results());
         assert!(p.skip_pending_jobs_bootstrap());
-        assert!(p.capability_filter().is_some());
+        assert!(p.primitive_filter().is_some());
         assert!(p.rules_truncation().is_some());
     }
 
@@ -395,7 +428,14 @@ mod tests {
         assert!(!p.strip_skill_index());
         assert!(!p.strip_job_results());
         assert!(!p.skip_pending_jobs_bootstrap());
-        assert_eq!(p.capability_filter(), None);
+        assert_eq!(
+            p.primitive_filter(),
+            Some(vec![
+                "search".to_string(),
+                "inspect".to_string(),
+                "execute".to_string()
+            ])
+        );
         assert_eq!(p.rules_truncation(), None);
     }
 

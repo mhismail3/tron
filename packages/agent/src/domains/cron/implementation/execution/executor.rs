@@ -87,34 +87,15 @@ pub struct ExecutorDeps {
     pub pool: ConnectionPool,
 }
 
-/// Map a payload to its capability name for restriction checks.
-fn payload_capability_name(payload: &Payload) -> &'static str {
-    match payload {
-        Payload::ShellCommand { .. } => "ShellCommand",
-        Payload::Webhook { .. } => "Webhook",
-        Payload::SystemEvent { .. } => "SystemEvent",
-        Payload::AgentTurn { .. } => "AgentTurn",
-    }
-}
-
 /// Execute a job payload and return the result.
 pub async fn execute_payload(
     job: &CronJob,
     deps: &ExecutorDeps,
     cancel: CancellationToken,
 ) -> Result<ExecutionOutput, CronError> {
-    // Check capability restrictions for non-AgentTurn payloads.
-    // AgentTurn restrictions are applied inside the agent (capability-level filtering).
-    if !matches!(&job.payload, Payload::AgentTurn { .. })
-        && let Some(ref tr) = job.capability_restrictions
-    {
-        let cap = payload_capability_name(&job.payload);
-        if !tr.is_capability_allowed(cap) {
-            return Err(CronError::Execution(format!(
-                "{cap} blocked by job capability restrictions"
-            )));
-        }
-    }
+    // Capability restrictions apply to AgentTurn execution policies only.
+    // Direct cron payload types are governed by cron payload validation and job
+    // permissions, not contract/implementation/plugin policy.
 
     match &job.payload {
         Payload::ShellCommand {
@@ -920,24 +901,7 @@ mod tests {
         assert!(enabled);
     }
 
-    // ── ModelCapability restriction enforcement ─────────────────────────────────
-
-    #[tokio::test]
-    async fn shell_command_blocked_by_allowed_capabilities_missing() {
-        let deps = make_test_deps();
-        let mut job = make_shell_job("echo hi");
-        job.capability_restrictions = Some(CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["Webhook".into()]),
-        });
-        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("ShellCommand blocked")
-        );
-    }
+    // ── Cron payload execution ───────────────────────────────────────────────
 
     #[tokio::test]
     async fn shell_command_allowed_when_no_restrictions() {
@@ -948,58 +912,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shell_command_allowed_when_in_allowed_list() {
+    async fn direct_payload_ignores_agent_contract_restrictions() {
         let deps = make_test_deps();
         let mut job = make_shell_job("echo allowed");
         job.capability_restrictions = Some(CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["ShellCommand".into()]),
+            allowed_contracts: Some(vec!["filesystem::read_file".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn webhook_blocked_by_allowed_capabilities() {
-        let deps = make_test_deps();
-        let mut job = CronJob {
-            payload: Payload::Webhook {
-                url: "https://example.com".into(),
-                method: "POST".into(),
-                headers: None,
-                body: None,
-                timeout_secs: 5,
-            },
-            ..make_shell_job("echo")
-        };
-        job.capability_restrictions = Some(CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["ShellCommand".into()]),
-        });
-        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Webhook blocked"));
-    }
-
-    #[tokio::test]
-    async fn system_event_blocked_by_allowed_capabilities() {
-        let deps = make_test_deps();
-        let mut job = CronJob {
-            payload: Payload::SystemEvent {
-                session_id: "sess_1".into(),
-                message: "hello".into(),
-            },
-            ..make_shell_job("echo")
-        };
-        job.capability_restrictions = Some(CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["ShellCommand".into()]),
-        });
-        let result = execute_payload(&job, &deps, CancellationToken::new()).await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("SystemEvent blocked")
-        );
     }
 
     #[tokio::test]
@@ -1015,9 +935,9 @@ mod tests {
             },
             ..make_shell_job("echo")
         };
-        // Even with restrictions that don't include AgentTurn, it should dispatch
+        // Contract restrictions are applied inside the spawned agent execution policy.
         job.capability_restrictions = Some(CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["ShellCommand".into()]),
+            allowed_contracts: Some(vec!["filesystem::read_file".into()]),
         });
         let result = execute_payload(&job, &deps, CancellationToken::new()).await;
         assert!(result.is_ok());

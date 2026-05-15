@@ -11,7 +11,9 @@
 //! also lets low-risk first-party read/check commands such as `date`, `pwd`,
 //! `git status`, and test/build checks skip an extra inspect turn; commands
 //! outside the low-risk set require the normal fresh-inspection and approval
-//! flow before dispatch.
+//! flow before dispatch. If a request omits `cwd`, the worker uses the active
+//! session worktree when available, then the session workspace, so common shell
+//! checks stay fast without leaving the capability architecture.
 
 pub(crate) mod approval;
 pub(crate) mod contract;
@@ -28,6 +30,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::domains::worker::{DomainRegistrationContext, DomainWorkerModule};
+use crate::engine::Invocation;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::{opt_string, opt_u64, require_string_param};
 
@@ -45,11 +48,12 @@ pub(crate) fn worker_module(
     )
 }
 
-async fn process_run_value(params: Option<&Value>, _deps: &Deps) -> Result<Value, CapabilityError> {
+async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
+    let params = Some(&invocation.payload);
     let command = require_string_param(params, "command")?;
-    let cwd = opt_string(params, "cwd").unwrap_or_else(crate::shared::paths::home_dir);
+    let cwd = opt_string(params, "cwd").unwrap_or_else(|| default_cwd(invocation, deps));
     let shell = opt_string(params, "shell").unwrap_or_else(|| "bash".to_owned());
-    let timeout_ms = opt_u64(params, "timeoutMs", DEFAULT_TIMEOUT_MS).clamp(1, 600_000);
+    let timeout_ms = command_timeout_ms(params).clamp(1, 600_000);
     let stdin = opt_string(params, "stdin");
     let env = params
         .and_then(|value| value.get("env"))
@@ -144,4 +148,96 @@ fn decode_capped(bytes: &[u8]) -> (String, bool) {
         text.push_str("\n[output truncated]");
     }
     (text, truncated)
+}
+
+fn command_timeout_ms(params: Option<&Value>) -> u64 {
+    let timeout_ms = opt_u64(params, "timeoutMs", DEFAULT_TIMEOUT_MS);
+    if timeout_ms != DEFAULT_TIMEOUT_MS || params.and_then(|value| value.get("timeout")).is_none() {
+        return timeout_ms;
+    }
+    opt_u64(params, "timeout", DEFAULT_TIMEOUT_MS)
+}
+
+fn default_cwd(invocation: &Invocation, deps: &Deps) -> String {
+    let Some(session_id) = invocation.causal_context.session_id.as_deref() else {
+        return crate::shared::paths::home_dir();
+    };
+    if let Some(worktree) = deps
+        .worktree_coordinator
+        .as_ref()
+        .and_then(|coordinator| coordinator.effective_working_dir(session_id))
+    {
+        return worktree;
+    }
+    match deps.event_store.get_session(session_id) {
+        Ok(Some(session)) => session.working_directory,
+        Ok(None) | Err(_) => crate::shared::paths::home_dir(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::domains::session::event_store::EventStore;
+    use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+    use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+    use crate::engine::{ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, TraceId};
+
+    fn event_store() -> Arc<EventStore> {
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        Arc::new(EventStore::new(pool))
+    }
+
+    fn invocation(payload: Value, session_id: Option<&str>) -> Invocation {
+        let mut causal = CausalContext::new(
+            ActorId::new("agent:test").unwrap(),
+            ActorKind::Agent,
+            AuthorityGrantId::new("grant:test").unwrap(),
+            TraceId::generate(),
+        );
+        if let Some(session_id) = session_id {
+            causal = causal.with_session_id(session_id.to_owned());
+        }
+        Invocation::new_sync(FunctionId::new("process::run").unwrap(), payload, causal)
+    }
+
+    #[test]
+    fn process_run_defaults_to_session_working_directory() {
+        let store = event_store();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                "/tmp/tron-process-default-cwd",
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(Arc::clone(&store));
+        let invocation = invocation(json!({"command": "pwd"}), Some(&created.session.id));
+
+        assert_eq!(
+            default_cwd(&invocation, &deps),
+            "/tmp/tron-process-default-cwd"
+        );
+    }
+
+    #[test]
+    fn process_timeout_accepts_timeout_ms_and_timeout() {
+        assert_eq!(
+            command_timeout_ms(Some(&json!({"timeoutMs": 42, "timeout": 1000}))),
+            42
+        );
+        assert_eq!(command_timeout_ms(Some(&json!({"timeout": 1000}))), 1000);
+        assert_eq!(command_timeout_ms(Some(&json!({}))), DEFAULT_TIMEOUT_MS);
+    }
 }

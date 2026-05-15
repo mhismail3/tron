@@ -559,10 +559,10 @@ async fn init_services(
     // run state server-side (replaces iOS-side agentPhase check).
     subagent_manager.set_run_state_probe(orchestrator.run_state_probe());
     // Wire skill registry so subagents spawned with `skills: [...]`
-    // honor each skill's frontmatter `deniedCapabilities` / `allowedCapabilities`
+    // honor each skill's frontmatter `deniedContracts` / `allowedContracts`
     // via capability-catalog filtering. Without this, subagent skill
     // restrictions would silently no-op (see
-    // `SubagentManager::compute_denied_capabilities`).
+    // `SubagentManager::compute_denied_contracts`).
     subagent_manager.set_skill_registry(skill_registry.clone());
 
     // Unified job manager (processes + subagents)

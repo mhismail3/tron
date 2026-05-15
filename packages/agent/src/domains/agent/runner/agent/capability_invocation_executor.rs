@@ -9,8 +9,9 @@ use crate::domains::agent::runner::guardrails::{EvaluationContext, GuardrailEngi
 use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::domains::agent::runner::hooks::types::{HookAction, HookContext};
 use crate::domains::capability::registry::CapabilitySearchPolicy;
-use crate::domains::capability_support::implementations::capability_surface::{
-    CapabilitySurfacePolicy, EngineCapabilityTarget, ResolvedCapabilitySurface,
+use crate::domains::capability_support::implementations::primitive_surface::{
+    EngineCapabilityTarget, PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
+    capability_execution_policy_scopes,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
@@ -215,9 +216,11 @@ fn execution_request_target(args: &Value) -> (Option<String>, Option<String>, Op
 /// Shared dependencies for capability invocation (extracted to reduce parameter count).
 pub struct CapabilityInvocationExecutionContext<'a> {
     /// Live engine-catalog capability surface resolved for this turn.
-    pub capability_surface: &'a ResolvedCapabilitySurface,
-    /// Profile/session capability policy that gates direct execute targets.
-    pub capability_policy: &'a CapabilitySurfacePolicy,
+    pub primitive_surface: &'a ResolvedCapabilitySurface,
+    /// Profile/session primitive policy that gates the provider-facing primitives.
+    pub primitive_surface_policy: &'a PrimitiveSurfacePolicy,
+    /// Profile/session capability execution policy that gates worker contracts.
+    pub capability_execution_policy: &'a crate::shared::profile::CapabilityExecutionPolicySpec,
     /// Optional guardrail engine for pre-execution validation.
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for pre/post capability-invocation hooks.
@@ -294,7 +297,7 @@ pub async fn execute_capability_invocation(
     // 1. Resolve the model capability id through the live engine catalog captured
     // at the provider request boundary.
     let engine_target = ctx
-        .capability_surface
+        .primitive_surface
         .targets_by_name
         .get(&model_primitive_name);
     if engine_target.is_none() {
@@ -317,7 +320,7 @@ pub async fn execute_capability_invocation(
     let primitive_identity = primitive_capability_identity(
         &model_primitive_name,
         engine_target.expect("checked above"),
-        ctx.capability_surface.catalog_revision.0,
+        ctx.primitive_surface.catalog_revision.0,
         ctx.trace_id,
         ctx.parent_invocation_id,
     );
@@ -331,9 +334,9 @@ pub async fn execute_capability_invocation(
         .expect("CapabilityInvocationExecutionContext.execution_spec must come from the session execution plan");
     let context_policy =
         local_policy::ContextPolicy::from_entrypoint_with_spec(ctx.provider_type, spec, "main");
-    let allowed_capabilities = context_policy.capability_filter();
+    let allowed_primitives = context_policy.primitive_filter();
     if context_policy.is_local()
-        && let Some(allowed) = allowed_capabilities.as_ref()
+        && let Some(allowed) = allowed_primitives.as_ref()
         && !allowed
             .iter()
             .any(|allowed| allowed == &model_primitive_name)
@@ -551,7 +554,10 @@ pub async fn execute_capability_invocation(
     let capability_result = if per_invocation_cancel.is_cancelled() {
         crate::shared::model_capabilities::error_result("Operation cancelled")
     } else if let (Some(engine_host), Some(target)) = (ctx.engine_host, engine_target) {
-        let execution_policy_scopes = ctx.capability_policy.execution_policy_scopes();
+        let mut execution_policy_scopes = ctx.primitive_surface_policy.primitive_policy_scopes();
+        execution_policy_scopes.extend(capability_execution_policy_scopes(
+            ctx.capability_execution_policy,
+        ));
         match primitive_runtime_metadata(ctx, &context_policy) {
             Ok(runtime_metadata) => {
                 execute_capability_primitive_via_engine(
@@ -753,20 +759,22 @@ fn primitive_runtime_metadata(
         .entrypoints
         .get("main")
         .ok_or_else(|| "capability primitive runtime requires entrypoints.main".to_owned())?;
-    let capability_policy_id = context_policy
-        .capability_policy_id()
-        .unwrap_or(entrypoint.capability_policy.as_str());
-    let capability_policy = spec
-        .capability_policy(capability_policy_id)
-        .ok_or_else(|| format!("missing capability policy '{capability_policy_id}'"))?;
-    let search_policy_id = capability_policy
+    let capability_execution_policy_id = context_policy
+        .capability_execution_policy_id()
+        .unwrap_or(entrypoint.capability_execution_policy.as_str());
+    let capability_execution_policy = spec
+        .capability_execution_policy(capability_execution_policy_id)
+        .ok_or_else(|| {
+            format!("missing capability execution policy '{capability_execution_policy_id}'")
+        })?;
+    let search_policy_id = capability_execution_policy
         .search_policy
         .as_deref()
         .unwrap_or("hybridLocal");
     let search_policy = spec
         .capability_search_policy(search_policy_id)
         .ok_or_else(|| format!("missing capability search policy '{search_policy_id}'"))?;
-    let context_primer_policy_id = capability_policy
+    let context_primer_policy_id = capability_execution_policy
         .context_primer_policy
         .as_deref()
         .unwrap_or("coreFirstParty");
@@ -775,8 +783,8 @@ fn primitive_runtime_metadata(
             .map_err(|error| format!("serialize capability search policy: {error}"))?;
     let mut metadata = vec![
         (
-            "capability.capabilityPolicyId".to_owned(),
-            capability_policy_id.to_owned(),
+            "capability.executionPolicyId".to_owned(),
+            capability_execution_policy_id.to_owned(),
         ),
         (
             "capability.searchPolicyId".to_owned(),
@@ -922,8 +930,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
-    use crate::domains::capability_support::implementations::capability_surface::{
-        CapabilitySurfacePolicy, EngineCapabilityTarget, ResolvedCapabilitySurface,
+    use crate::domains::capability_support::implementations::primitive_surface::{
+        EngineCapabilityTarget, PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
         resolve_provider_capabilities,
     };
     use crate::domains::capability_support::implementations::traits::ExecutionMode;
@@ -997,8 +1005,9 @@ mod tests {
         execution_spec: &'a crate::shared::profile::AgentExecutionSpec,
     ) -> CapabilityInvocationExecutionContext<'a> {
         CapabilityInvocationExecutionContext {
-            capability_surface: surface,
-            capability_policy: &DEFAULT_CAPABILITY_POLICY,
+            primitive_surface: surface,
+            primitive_surface_policy: &DEFAULT_PRIMITIVE_SURFACE_POLICY,
+            capability_execution_policy: &execution_spec.capability_execution_policies["default"],
             guardrails: &None,
             hooks: &None,
             emitter,
@@ -1023,8 +1032,8 @@ mod tests {
         }
     }
 
-    static DEFAULT_CAPABILITY_POLICY: std::sync::LazyLock<CapabilitySurfacePolicy> =
-        std::sync::LazyLock::new(CapabilitySurfacePolicy::default);
+    static DEFAULT_PRIMITIVE_SURFACE_POLICY: std::sync::LazyLock<PrimitiveSurfacePolicy> =
+        std::sync::LazyLock::new(PrimitiveSurfacePolicy::default);
 
     #[tokio::test]
     async fn unknown_model_primitive_fails_before_execution() {
@@ -1066,7 +1075,7 @@ mod tests {
             None,
             Provider::Anthropic,
             &context_policy,
-            &CapabilitySurfacePolicy::default(),
+            &PrimitiveSurfacePolicy::default(),
         )
         .await
         .expect("provider capability surface");

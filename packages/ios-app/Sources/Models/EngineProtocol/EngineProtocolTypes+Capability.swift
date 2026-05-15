@@ -249,6 +249,7 @@ struct CapabilityIndexHitDTO: Codable, Equatable, Sendable, Identifiable {
     var matchedBy: String?
     var snippet: String?
     var requiresInspect: Bool?
+    var recipe: AgentCapabilityRecipeDTO?
 }
 
 struct CapabilityInspectionDTO: Codable, Equatable, Sendable {
@@ -257,8 +258,25 @@ struct CapabilityInspectionDTO: Codable, Equatable, Sendable {
     var binding: CapabilityBindingDTO?
     var bindingDecision: CapabilityBindingDecisionDTO?
     var inspectionHandle: CapabilityInspectionHandleDTO?
+    var recipe: AgentCapabilityRecipeDTO?
     var executionRequirements: AnyCodable?
     var docs: AnyCodable?
+}
+
+struct AgentCapabilityRecipeDTO: Codable, Equatable, Sendable {
+    var contractId: String?
+    var displayName: String?
+    var useWhen: String?
+    var executeTemplate: AnyCodable?
+    var requiredPayload: [String]?
+    var optionalPayload: [String]?
+    var examples: [AnyCodable]?
+    var directExecution: String?
+    var inspectRequired: Bool?
+    var approvalBehavior: String?
+    var lifecycleKind: String?
+    var resultSummary: String?
+    var aliases: [String]?
 }
 
 struct CapabilityInspectionHandleDTO: Codable, Equatable, Sendable {
@@ -386,26 +404,38 @@ struct CapabilityAuditEventDTO: Codable, Equatable, Sendable, Identifiable {
     var redacted: Bool?
 }
 
-struct CapabilityPolicyDTO: Codable, Equatable, Sendable {
-    var manifest: String?
+struct PrimitiveSurfacePolicyDTO: Codable, Equatable, Sendable {
+    var allowedPrimitives: [String]?
+    var deniedPrimitives: [String]?
+    var exposeInteractiveCapabilities: Bool?
+    var removeSpawnAtMaxDepth: Bool?
+}
+
+struct CapabilityExecutionPolicyDTO: Codable, Equatable, Sendable {
     var searchPolicy: String?
     var contextPrimerPolicy: String?
-    var allowedCapabilities: [String]?
-    var deniedCapabilities: [String]?
-    var exposeInteractiveCapabilities: Bool?
-    var removeSpawnCapabilitiesAtMaxDepth: Bool?
+    var allowedContracts: [String]?
+    var deniedContracts: [String]?
+    var allowedImplementations: [String]?
+    var deniedImplementations: [String]?
+    var allowedPlugins: [String]?
+    var deniedPlugins: [String]?
+    var maxRisk: String?
+    var allowedEffects: [String]?
+    var minimumTrustTier: String?
 }
 
 struct CapabilityPolicyGetDTO: Codable, Equatable, Sendable {
     var profileName: String?
     var profileHash: String?
     var policyId: String?
-    var capabilityPolicies: [String: CapabilityPolicyDTO]?
+    var primitiveSurfacePolicies: [String: PrimitiveSurfacePolicyDTO]?
+    var capabilityExecutionPolicies: [String: CapabilityExecutionPolicyDTO]?
 }
 
 struct CapabilityPolicyValidationDTO: Codable, Equatable, Sendable {
     var valid: Bool
-    var policy: CapabilityPolicyDTO?
+    var policy: CapabilityExecutionPolicyDTO?
     var errors: [String]?
 }
 

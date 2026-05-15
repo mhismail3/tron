@@ -8,7 +8,7 @@ operation_bindings! {
     hidden = [];
     bindings = [
         "run" => |invocation, deps| {
-            process_run_value(Some(&invocation.payload), deps).await
+            process_run_value(invocation, deps).await
         },
     ];
 }

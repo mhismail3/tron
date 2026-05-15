@@ -59,7 +59,7 @@ pub struct SubagentConfig {
     pub timeout_ms: u64,
     /// Capability names to deny from the subagent registry.
     #[serde(default)]
-    pub denied_capabilities: Vec<String>,
+    pub denied_contracts: Vec<String>,
     /// Skills to enable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,

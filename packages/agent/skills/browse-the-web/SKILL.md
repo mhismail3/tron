@@ -3,7 +3,7 @@ name: "Browse the Web"
 description: "Browser automation via the agent-browser CLI — navigate, snapshot, interact, screenshot, scrape, and export"
 version: "1.0.0"
 tags: [browser, automation, web, scraping]
-allowedCapabilities:
+allowedContracts:
   - process::run
   - display::show
 ---

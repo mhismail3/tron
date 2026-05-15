@@ -240,7 +240,7 @@ pub fn build_activation_directive(skill_names: &[String]) -> Option<String> {
 fn build_capability_preferences(skill: &SkillMetadata) -> String {
     let fm = &skill.frontmatter;
 
-    if let Some(allowed) = &fm.allowed_capabilities
+    if let Some(allowed) = &fm.allowed_contracts
         && !allowed.is_empty()
     {
         let capabilities = allowed.join(", ");
@@ -249,7 +249,7 @@ fn build_capability_preferences(skill: &SkillMetadata) -> String {
         );
     }
 
-    if let Some(denied) = &fm.denied_capabilities
+    if let Some(denied) = &fm.denied_contracts
         && !denied.is_empty()
     {
         let capabilities = denied.join(", ");
@@ -311,8 +311,8 @@ mod tests {
             description: String::new(),
             content: content.to_string(),
             frontmatter: SkillFrontmatter {
-                allowed_capabilities: allowed,
-                denied_capabilities: denied,
+                allowed_contracts: allowed,
+                denied_contracts: denied,
                 ..Default::default()
             },
             source: SkillSource::Global,
@@ -453,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_context_with_allowed_capabilities() {
+    fn test_build_context_with_allowed_contracts() {
         let skill = make_skill_with_capabilities(
             "reader",
             "filesystem::read_file things.",
@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_context_with_denied_capabilities() {
+    fn test_build_context_with_denied_contracts() {
         let skill = make_skill_with_capabilities(
             "safe",
             "Safe skill.",

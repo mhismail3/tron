@@ -1,69 +1,62 @@
-//! Convert skill frontmatter to capability denial configuration.
+//! Convert skill frontmatter to contract denial configuration.
 //!
 //! Supports two mutually exclusive modes:
-//! - **Deny-list** (`deniedCapabilities`): directly specifies denied capabilities
-//! - **Allow-list** (`allowedCapabilities`): inverts to denied (all capabilities not in allow list)
+//! - **Deny-list** (`deniedContracts`): directly specifies denied contracts
+//! - **Allow-list** (`allowedContracts`): inverts to denied (all contracts not in allow list)
 //!
-//! If both are specified, `deniedCapabilities` takes precedence with a warning.
+//! If both are specified, `deniedContracts` takes precedence with a warning.
 //!
 //! For inline skills on the main agent, restrictions are soft-enforced via prompt
 //! XML hints. For subagent skills and cron jobs, restrictions are hard-enforced via
-//! live capability catalog removal in `AgentFactory`.
+//! child-agent execution policy constraints in `AgentFactory`.
 //!
 //! Callers:
-//! - `cron::impls::to_denied_list` — cron-job skill denials
-//! - `runtime::orchestrator::subagent_manager::SubagentManager::compute_denied_capabilities`
+//! - `runtime::orchestrator::subagent_manager::SubagentManager::compute_denied_contracts`
 //!   — subagents spawned via `agent::spawn_subagent` (honors `SubagentConfig.skills`)
 
 use std::collections::HashSet;
 
 use tracing::debug;
 
-use crate::domains::skills::types::{CapabilityDenialConfig, SkillFrontmatter, SkillSubagentMode};
+use crate::domains::skills::types::{ContractDenialConfig, SkillFrontmatter, SkillSubagentMode};
 
-/// Convert skill frontmatter capability restrictions to a [`CapabilityDenialConfig`].
+/// Convert skill frontmatter contract restrictions to a [`ContractDenialConfig`].
 ///
-/// Returns `None` if no capability restrictions are specified.
+/// Returns `None` if no contract restrictions are specified.
 pub fn skill_frontmatter_to_denials(
     frontmatter: &SkillFrontmatter,
-    all_available_capabilities: &[String],
-) -> Option<CapabilityDenialConfig> {
+    all_available_contracts: &[String],
+) -> Option<ContractDenialConfig> {
     let has_denied = frontmatter
-        .denied_capabilities
+        .denied_contracts
         .as_ref()
         .is_some_and(|d| !d.is_empty());
     let has_allowed = frontmatter
-        .allowed_capabilities
+        .allowed_contracts
         .as_ref()
         .is_some_and(|a| !a.is_empty());
 
     if has_denied && has_allowed {
-        debug!(
-            "Skill specifies both deniedCapabilities and allowedCapabilities; using deniedCapabilities"
-        );
+        debug!("Skill specifies both deniedContracts and allowedContracts; using deniedContracts");
     }
 
     if has_denied {
-        let denied_capabilities = frontmatter.denied_capabilities.clone().unwrap_or_default();
-        return Some(CapabilityDenialConfig {
-            denied_capabilities,
-        });
+        let denied_contracts = frontmatter.denied_contracts.clone().unwrap_or_default();
+        return Some(ContractDenialConfig { denied_contracts });
     }
 
     if let Some(allowed_list) = frontmatter
-        .allowed_capabilities
+        .allowed_contracts
         .as_ref()
         .filter(|a| !a.is_empty())
     {
         let allowed: HashSet<&str> = allowed_list.iter().map(String::as_str).collect();
-        let denied_capabilities: Vec<String> = all_available_capabilities
+        let denied_contracts: Vec<String> = all_available_contracts
             .iter()
-            .filter(|capability| !allowed.contains(capability.as_str()))
+            .filter(|contract| !allowed.contains(contract.as_str()))
             .cloned()
             .collect();
-        return Some(CapabilityDenialConfig {
-            denied_capabilities,
-        });
+        return Some(ContractDenialConfig { denied_contracts });
     }
 
     None
@@ -80,91 +73,99 @@ pub fn get_skill_subagent_mode(frontmatter: &SkillFrontmatter) -> SkillSubagentM
 mod tests {
     use super::*;
 
-    fn all_capabilities() -> Vec<String> {
+    fn all_contracts() -> Vec<String> {
         vec![
             "filesystem::read_file".to_string(),
             "filesystem::write_file".to_string(),
             "filesystem::edit_file".to_string(),
             "process::run".to_string(),
-            "Grep".to_string(),
-            "Glob".to_string(),
+            "filesystem::search_text".to_string(),
+            "filesystem::glob".to_string(),
         ]
     }
 
     #[test]
-    fn test_denied_capabilities() {
+    fn test_denied_contracts() {
         let fm = SkillFrontmatter {
-            denied_capabilities: Some(vec![
+            denied_contracts: Some(vec![
                 "process::run".to_string(),
                 "filesystem::write_file".to_string(),
             ]),
             ..Default::default()
         };
-        let config = skill_frontmatter_to_denials(&fm, &all_capabilities()).unwrap();
+        let config = skill_frontmatter_to_denials(&fm, &all_contracts()).unwrap();
         assert_eq!(
-            config.denied_capabilities,
+            config.denied_contracts,
             vec!["process::run", "filesystem::write_file"]
         );
     }
 
     #[test]
-    fn test_allowed_capabilities_inverted() {
+    fn test_allowed_contracts_inverted() {
         let fm = SkillFrontmatter {
-            allowed_capabilities: Some(vec![
+            allowed_contracts: Some(vec![
                 "filesystem::read_file".to_string(),
-                "Grep".to_string(),
+                "filesystem::search_text".to_string(),
             ]),
             ..Default::default()
         };
-        let config = skill_frontmatter_to_denials(&fm, &all_capabilities()).unwrap();
+        let config = skill_frontmatter_to_denials(&fm, &all_contracts()).unwrap();
         assert!(
             config
-                .denied_capabilities
+                .denied_contracts
                 .contains(&"process::run".to_string())
         );
         assert!(
             config
-                .denied_capabilities
+                .denied_contracts
                 .contains(&"filesystem::write_file".to_string())
         );
         assert!(
             config
-                .denied_capabilities
+                .denied_contracts
                 .contains(&"filesystem::edit_file".to_string())
         );
-        assert!(config.denied_capabilities.contains(&"Glob".to_string()));
+        assert!(
+            config
+                .denied_contracts
+                .contains(&"filesystem::glob".to_string())
+        );
         assert!(
             !config
-                .denied_capabilities
+                .denied_contracts
                 .contains(&"filesystem::read_file".to_string())
         );
-        assert!(!config.denied_capabilities.contains(&"Grep".to_string()));
+        assert!(
+            !config
+                .denied_contracts
+                .contains(&"filesystem::search_text".to_string())
+        );
     }
 
     #[test]
     fn test_both_specified_denied_wins() {
         let fm = SkillFrontmatter {
-            denied_capabilities: Some(vec!["process::run".to_string()]),
-            allowed_capabilities: Some(vec!["filesystem::read_file".to_string()]),
+            denied_contracts: Some(vec!["process::run".to_string()]),
+            allowed_contracts: Some(vec!["filesystem::read_file".to_string()]),
             ..Default::default()
         };
-        let config = skill_frontmatter_to_denials(&fm, &all_capabilities()).unwrap();
-        assert_eq!(config.denied_capabilities, vec!["process::run"]);
+        let config = skill_frontmatter_to_denials(&fm, &all_contracts()).unwrap();
+        assert_eq!(config.denied_contracts, vec!["process::run"]);
     }
 
     #[test]
     fn test_neither_specified_returns_none() {
         let fm = SkillFrontmatter::default();
-        assert!(skill_frontmatter_to_denials(&fm, &all_capabilities()).is_none());
+        assert!(skill_frontmatter_to_denials(&fm, &all_contracts()).is_none());
     }
 
     #[test]
-    fn test_empty_denied_capabilities_returns_none() {
+    fn test_empty_denied_contracts_returns_none() {
         let fm = SkillFrontmatter {
-            denied_capabilities: Some(Vec::new()),
+            denied_contracts: Some(Vec::new()),
             ..Default::default()
         };
-        assert!(skill_frontmatter_to_denials(&fm, &all_capabilities()).is_none());
+        assert!(skill_frontmatter_to_denials(&fm, &all_contracts()).is_none());
     }
 
     #[test]

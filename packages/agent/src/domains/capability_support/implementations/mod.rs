@@ -7,8 +7,8 @@
 #![allow(clippy::unnecessary_literal_bound)]
 
 pub mod backends;
-pub(crate) mod capability_surface;
 pub mod errors;
+pub(crate) mod primitive_surface;
 pub mod traits;
 pub(crate) mod utils;
 

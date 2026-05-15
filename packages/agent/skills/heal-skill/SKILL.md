@@ -43,14 +43,14 @@ The Rust parser (`skills/discovery/parser.rs`) recognizes ONLY these keys:
 | `description` | string | Yes | 1-2 sentences, under 200 chars for iOS display |
 | `version` | string | Recommended | Semver (e.g., `"1.0.0"`) |
 | `tags` | string[] | Recommended | For discovery and categorization |
-| `allowedCapabilities` | string[] | Optional | Preferred capability contracts (prompt guidance, not enforced) |
-| `deniedCapabilities` | string[] | Optional | Forbidden capability contracts (prompt guidance, not enforced) |
+| `allowedContracts` | string[] | Optional | Preferred capability contracts (prompt guidance, not enforced) |
+| `deniedContracts` | string[] | Optional | Forbidden capability contracts (prompt guidance, not enforced) |
 | `subagent` | enum | Optional | `yes` / `ask` / `no` |
 | `subagentModel` | string | Optional | Model override for subagent execution |
 
 **Common mistakes to fix:**
-- Unsupported `tools` frontmatter key → **silently ignored by parser**. Convert to `allowedCapabilities:` if intent is to declare capability preferences
-- `tool:` (singular) → ignored. Convert to `allowedCapabilities:`
+- Unsupported `tools` frontmatter key → **silently ignored by parser**. Convert to `allowedContracts:` if intent is to declare capability preferences
+- `tool:` (singular) → ignored. Convert to `allowedContracts:`
 - Missing `---` fences → frontmatter not parsed at all
 - Unclosed frontmatter (no closing `---`) → entire file treated as body, no metadata
 - `subagent: true` → should be `subagent: yes`
@@ -67,7 +67,7 @@ tags:
 
 ### 4. Validate Capability References
 
-Capabilities referenced in `allowedCapabilities`, `deniedCapabilities`, or in the skill content must be valid Tron capability contract ids.
+Capabilities referenced in `allowedContracts`, `deniedContracts`, or in the skill content must be valid Tron capability contract ids.
 
 **Available capability contracts:**
 
@@ -209,7 +209,7 @@ If the skill is missing a preflight section, add one. Model it on the vault skil
 - Infer `name` from filename or first heading
 - Infer `description` from first paragraph
 - Infer `tags` from content keywords
-- Identify tool dependencies and add to `allowedCapabilities`
+- Identify tool dependencies and add to `allowedContracts`
 - If complex, restructure into routing table + sub-files
 
 ### 13. Apply Fixes
@@ -241,7 +241,7 @@ After healing, re-read and confirm:
 Frontmatter:
   [PASS] name: "My Skill"
   [PASS] description: present (127 chars)
-  [FAIL] unsupported tools frontmatter key ignored by parser → convert to allowedCapabilities
+  [FAIL] unsupported tools frontmatter key ignored by parser → convert to allowedContracts
   [WARN] version: missing (recommended)
   [WARN] tags: missing (recommended)
 

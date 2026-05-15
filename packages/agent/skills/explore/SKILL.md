@@ -5,7 +5,7 @@ version: "1.0.0"
 tags: [explore, codebase, architecture, read-only]
 subagent: yes
 subagentModel: claude-haiku-4-5-20251001
-deniedCapabilities: [process::run, filesystem::edit_file, agent::spawn_subagent]
+deniedContracts: [process::run, filesystem::edit_file, agent::spawn_subagent]
 ---
 
 # Codebase Exploration Agent

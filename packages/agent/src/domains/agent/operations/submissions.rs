@@ -350,7 +350,7 @@ struct SubagentSpawnRequest {
     #[serde(default)]
     blocking_timeout_ms: Option<u64>,
     #[serde(default)]
-    denied_capabilities: Vec<String>,
+    denied_contracts: Vec<String>,
     #[serde(default)]
     skills: Option<Vec<String>>,
     #[serde(default)]
@@ -397,7 +397,7 @@ pub(crate) async fn spawn_subagent_value(
         working_directory,
         max_turns: request.max_turns.unwrap_or(6),
         timeout_ms: request.timeout_ms.unwrap_or(600_000),
-        denied_capabilities: request.denied_capabilities,
+        denied_contracts: request.denied_contracts,
         skills: request.skills,
         max_depth: request.max_depth.unwrap_or(0),
         current_depth: 0,

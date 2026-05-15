@@ -5,7 +5,7 @@
 # to the chat prompt and context policy so the rest of the runtime can treat it
 # as a normal session with a different execution spec.
 
-version = "2"
+version = "3"
 name = "chat"
 managed = true
 profileClass = "chat"

@@ -3,7 +3,7 @@ name: "Sandbox"
 description: Create and manage sandboxed Linux containers using Apple's container CLI. Create, execute commands, manage lifecycle, and inspect logs.
 version: "1.0.0"
 tags: [containers, sandbox, devops]
-deniedCapabilities: [agent::spawn_subagent]
+deniedContracts: [agent::spawn_subagent]
 ---
 
 # Sandbox — Container Management Skill

@@ -18,9 +18,10 @@ use walkdir::WalkDir;
 use crate::domains::settings::types::TronSettings;
 use crate::shared::messages::Provider;
 use crate::shared::profile::{
-    AgentExecutionSpec, AuditPolicySpec, CHAT_PROFILE, CachePolicySpec, CapabilityPolicySpec,
-    CompiledProfileFile, ContextPolicySpec, DEFAULT_PROFILE, LOCAL_PROFILE, NORMAL_PROFILE,
-    OutputContractSpec, PermissionPolicySpec, ProcessSpec, ProviderPolicySpec, ResolvedProfile,
+    AgentExecutionSpec, AuditPolicySpec, CHAT_PROFILE, CachePolicySpec,
+    CapabilityExecutionPolicySpec, CompiledProfileFile, ContextPolicySpec, DEFAULT_PROFILE,
+    LOCAL_PROFILE, NORMAL_PROFILE, OutputContractSpec, PermissionPolicySpec,
+    PrimitiveSurfacePolicySpec, ProcessSpec, ProviderPolicySpec, ResolvedProfile,
 };
 
 const PROFILE_WATCH_INTERVAL: Duration = Duration::from_secs(2);
@@ -98,10 +99,14 @@ pub struct SessionExecutionPlan {
     pub context_policy_id: String,
     /// Resolved context policy.
     pub context_policy: ContextPolicySpec,
-    /// Capability policy id.
-    pub capability_policy_id: String,
-    /// Resolved capability policy.
-    pub capability_policy: CapabilityPolicySpec,
+    /// Provider-facing primitive surface policy id.
+    pub primitive_surface_policy_id: String,
+    /// Resolved provider-facing primitive surface policy.
+    pub primitive_surface_policy: PrimitiveSurfacePolicySpec,
+    /// Worker capability execution policy id.
+    pub capability_execution_policy_id: String,
+    /// Resolved worker capability execution policy.
+    pub capability_execution_policy: CapabilityExecutionPolicySpec,
     /// Permission policy id.
     pub permission_policy_id: String,
     /// Resolved permission policy.
@@ -135,7 +140,8 @@ impl SessionExecutionPlan {
         crate::domains::agent::runner::context::local_policy::ContextPolicy::from_resolved_parts(
             self.context_policy_id.clone(),
             self.context_policy.clone(),
-            Some(self.capability_policy.clone()),
+            Some(self.primitive_surface_policy.clone()),
+            Some(self.capability_execution_policy.clone()),
             provider_is_local || !self.context_policy.local_providers.is_empty(),
         )
     }
@@ -156,10 +162,14 @@ pub struct ProcessExecutionPlan {
     pub context_policy_id: String,
     /// Resolved context policy.
     pub context_policy: ContextPolicySpec,
-    /// Capability policy id.
-    pub capability_policy_id: String,
-    /// Resolved capability policy.
-    pub capability_policy: CapabilityPolicySpec,
+    /// Provider-facing primitive surface policy id.
+    pub primitive_surface_policy_id: String,
+    /// Resolved provider-facing primitive surface policy.
+    pub primitive_surface_policy: PrimitiveSurfacePolicySpec,
+    /// Worker capability execution policy id.
+    pub capability_execution_policy_id: String,
+    /// Resolved worker capability execution policy.
+    pub capability_execution_policy: CapabilityExecutionPolicySpec,
     /// Permission policy id.
     pub permission_policy_id: String,
     /// Resolved permission policy.
@@ -185,7 +195,8 @@ impl ProcessExecutionPlan {
         crate::domains::agent::runner::context::local_policy::ContextPolicy::from_resolved_parts(
             self.context_policy_id.clone(),
             self.context_policy.clone(),
-            Some(self.capability_policy.clone()),
+            Some(self.primitive_surface_policy.clone()),
+            Some(self.capability_execution_policy.clone()),
             !self.context_policy.local_providers.is_empty(),
         )
     }
@@ -462,21 +473,33 @@ fn build_session_plan(
     } else {
         entrypoint.context_policy.clone()
     };
-    let capability_policy_id = spec
+    let primitive_surface_policy_id = spec
         .context_policy(&context_policy_id)
-        .and_then(|policy| policy.capability_policy.clone())
-        .unwrap_or_else(|| entrypoint.capability_policy.clone());
+        .and_then(|policy| policy.primitive_surface_policy.clone())
+        .unwrap_or_else(|| entrypoint.primitive_surface_policy.clone());
+    let capability_execution_policy_id = spec
+        .context_policy(&context_policy_id)
+        .and_then(|policy| policy.capability_execution_policy.clone())
+        .unwrap_or_else(|| entrypoint.capability_execution_policy.clone());
     let context_policy = required_spec_ref(
         &resolved_profile.name,
         "context policy",
         &context_policy_id,
         spec.context_policy(&context_policy_id).cloned(),
     )?;
-    let capability_policy = required_spec_ref(
+    let primitive_surface_policy = required_spec_ref(
         &resolved_profile.name,
-        "capability policy",
-        &capability_policy_id,
-        spec.capability_policy(&capability_policy_id).cloned(),
+        "primitive surface policy",
+        &primitive_surface_policy_id,
+        spec.primitive_surface_policy(&primitive_surface_policy_id)
+            .cloned(),
+    )?;
+    let capability_execution_policy = required_spec_ref(
+        &resolved_profile.name,
+        "capability execution policy",
+        &capability_execution_policy_id,
+        spec.capability_execution_policy(&capability_execution_policy_id)
+            .cloned(),
     )?;
     let permission_policy = required_spec_ref(
         &resolved_profile.name,
@@ -520,8 +543,10 @@ fn build_session_plan(
         prompt: spec.entrypoint_prompts.get(entrypoint_id).cloned(),
         context_policy,
         context_policy_id,
-        capability_policy,
-        capability_policy_id,
+        primitive_surface_policy,
+        primitive_surface_policy_id,
+        capability_execution_policy,
+        capability_execution_policy_id,
         permission_policy,
         permission_policy_id: entrypoint.permission_policy.clone(),
         provider_policy,
@@ -581,11 +606,19 @@ fn build_process_plan(
         &process.context_policy,
         spec.context_policy(&process.context_policy).cloned(),
     )?;
-    let capability_policy = required_spec_ref(
+    let primitive_surface_policy = required_spec_ref(
         &resolved_profile.name,
-        "capability policy",
-        &process.capability_policy,
-        spec.capability_policy(&process.capability_policy).cloned(),
+        "primitive surface policy",
+        &process.primitive_surface_policy,
+        spec.primitive_surface_policy(&process.primitive_surface_policy)
+            .cloned(),
+    )?;
+    let capability_execution_policy = required_spec_ref(
+        &resolved_profile.name,
+        "capability execution policy",
+        &process.capability_execution_policy,
+        spec.capability_execution_policy(&process.capability_execution_policy)
+            .cloned(),
     )?;
     let permission_policy = required_spec_ref(
         &resolved_profile.name,
@@ -614,8 +647,10 @@ fn build_process_plan(
         model_policy_id: process.model_policy.clone(),
         context_policy,
         context_policy_id: process.context_policy.clone(),
-        capability_policy,
-        capability_policy_id: process.capability_policy.clone(),
+        primitive_surface_policy,
+        primitive_surface_policy_id: process.primitive_surface_policy.clone(),
+        capability_execution_policy,
+        capability_execution_policy_id: process.capability_execution_policy.clone(),
         permission_policy,
         permission_policy_id: process.permission_policy.clone(),
         output_contract,
@@ -760,7 +795,8 @@ mod tests {
 
         assert_eq!(plan.profile_name, LOCAL_PROFILE);
         assert_eq!(plan.context_policy_id, "localDefault");
-        assert_eq!(plan.capability_policy_id, "localModel");
+        assert_eq!(plan.primitive_surface_policy_id, "localModel");
+        assert_eq!(plan.capability_execution_policy_id, "localModel");
     }
 
     #[test]
@@ -771,7 +807,8 @@ mod tests {
 
         assert_eq!(plan.process_id, "compaction");
         assert!(plan.prompt.is_some());
-        assert_eq!(plan.capability_policy_id, "none");
+        assert_eq!(plan.primitive_surface_policy_id, "none");
+        assert_eq!(plan.capability_execution_policy_id, "none");
         assert_eq!(plan.output_contract_id, "compactionSummary");
     }
 }

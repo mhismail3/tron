@@ -6,10 +6,9 @@
 # the normal baseline for all ordinary sessions; otherwise create your own
 # child profile that inherits from "normal".
 
-version = "2"
+version = "3"
 name = "normal"
 managed = true
 profileClass = "normal"
 inherits = ["default"]
 authProfile = "default"
-

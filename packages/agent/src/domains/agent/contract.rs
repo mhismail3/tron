@@ -357,7 +357,7 @@ fn subagent_spawn_request_schema() -> serde_json::Value {
             "maxTurns": {"type": "integer", "minimum": 1, "maximum": 20},
             "timeoutMs": {"type": "integer", "minimum": 1000, "maximum": 3600000},
             "blockingTimeoutMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 300000},
-            "deniedCapabilities": {"type": "array", "items": {"type": "string"}},
+            "deniedContracts": {"type": "array", "items": {"type": "string"}},
             "skills": {"type": "array", "items": {"type": "string"}},
             "maxDepth": {"type": "integer", "minimum": 0, "maximum": 3}
         }

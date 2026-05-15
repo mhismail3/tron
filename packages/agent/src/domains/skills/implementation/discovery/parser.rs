@@ -9,7 +9,7 @@
 //! Parser enforces defense-in-depth limits independently of the caller:
 //! - [`MAX_PARSE_BYTES`]: raw input byte count.
 //! - [`MAX_YAML_LINES`]: frontmatter line count.
-//! - [`MAX_ARRAY_ITEMS`]: size of any single YAML array (tags, allowedCapabilities, …).
+//! - [`MAX_ARRAY_ITEMS`]: size of any single YAML array (tags, allowedContracts, …).
 //!
 //! Callers like [`crate::domains::skills::discovery::loader`] already enforce an
 //! on-disk file-size cap; these parser-side bounds protect any future caller
@@ -30,8 +30,8 @@ pub const MAX_PARSE_BYTES: usize = 100 * 1024;
 /// spend CPU linearly scanning all of them.
 pub const MAX_YAML_LINES: usize = 1024;
 
-/// Maximum number of items in any single YAML array (tags, allowedCapabilities,
-/// deniedCapabilities). Well above any realistic skill manifest.
+/// Maximum number of items in any single YAML array (tags, allowedContracts,
+/// deniedContracts). Well above any realistic skill manifest.
 pub const MAX_ARRAY_ITEMS: usize = 256;
 
 /// Errors from [`parse_skill_md`]. Each variant carries enough context that
@@ -52,7 +52,7 @@ pub enum ParseSkillError {
         lines: usize,
     },
 
-    /// A YAML array (tags, allowedCapabilities, deniedCapabilities, …) exceeded [`MAX_ARRAY_ITEMS`].
+    /// A YAML array (tags, allowedContracts, deniedContracts, …) exceeded [`MAX_ARRAY_ITEMS`].
     #[error(
         "SKILL.md frontmatter key '{key}' has {count} items, exceeds limit of {MAX_ARRAY_ITEMS}"
     )]
@@ -189,21 +189,17 @@ fn parse_simple_yaml(yaml: &str) -> Result<SkillFrontmatter, ParseSkillError> {
             "tags" => {
                 fm.tags = Some(parse_array_value("tags", value, &lines, &mut i)?);
             }
-            "allowedCapabilities" | "allowed_capabilities" => {
-                fm.allowed_capabilities = Some(parse_array_value(
-                    "allowedCapabilities",
+            "allowedContracts" | "allowed_contracts" => {
+                fm.allowed_contracts = Some(parse_array_value(
+                    "allowedContracts",
                     value,
                     &lines,
                     &mut i,
                 )?);
             }
-            "deniedCapabilities" | "denied_capabilities" => {
-                fm.denied_capabilities = Some(parse_array_value(
-                    "deniedCapabilities",
-                    value,
-                    &lines,
-                    &mut i,
-                )?);
+            "deniedContracts" | "denied_contracts" => {
+                fm.denied_contracts =
+                    Some(parse_array_value("deniedContracts", value, &lines, &mut i)?);
             }
             _ => {}
         }
@@ -465,11 +461,11 @@ This is the body.";
     }
 
     #[test]
-    fn test_parse_denied_capabilities() {
-        let content = "---\ndeniedCapabilities: [process::run, filesystem::write_file]\n---\nBody";
+    fn test_parse_denied_contracts() {
+        let content = "---\ndeniedContracts: [process::run, filesystem::write_file]\n---\nBody";
         let result = parse_skill_md(content).unwrap();
         assert_eq!(
-            result.frontmatter.denied_capabilities,
+            result.frontmatter.denied_contracts,
             Some(vec![
                 "process::run".to_string(),
                 "filesystem::write_file".to_string()
@@ -478,11 +474,11 @@ This is the body.";
     }
 
     #[test]
-    fn test_parse_allowed_capabilities() {
-        let content = "---\nallowedCapabilities:\n  - filesystem::read_file\n  - filesystem::search_text\n---\nBody";
+    fn test_parse_allowed_contracts() {
+        let content = "---\nallowedContracts:\n  - filesystem::read_file\n  - filesystem::search_text\n---\nBody";
         let result = parse_skill_md(content).unwrap();
         assert_eq!(
-            result.frontmatter.allowed_capabilities,
+            result.frontmatter.allowed_contracts,
             Some(vec![
                 "filesystem::read_file".to_string(),
                 "filesystem::search_text".to_string()
@@ -586,16 +582,16 @@ This is the body.";
         let content = "---\ndeniedPatterns:\n  - removedKey: process::run\n---\nBody";
         let result = parse_skill_md(content).unwrap();
         assert_eq!(result.content, "Body");
-        assert!(result.frontmatter.denied_capabilities.is_none());
+        assert!(result.frontmatter.denied_contracts.is_none());
     }
 
     #[test]
     fn test_snake_case_keys() {
         let content =
-            "---\nallowed_capabilities: [filesystem::read_file]\nsubagent_model: haiku\n---\nBody";
+            "---\nallowed_contracts: [filesystem::read_file]\nsubagent_model: haiku\n---\nBody";
         let result = parse_skill_md(content).unwrap();
         assert_eq!(
-            result.frontmatter.allowed_capabilities,
+            result.frontmatter.allowed_contracts,
             Some(vec!["filesystem::read_file".to_string()])
         );
         assert_eq!(result.frontmatter.subagent_model.as_deref(), Some("haiku"));
@@ -668,15 +664,15 @@ This is the body.";
 
     #[test]
     fn rejects_array_items_limit_shared_across_keys() {
-        // Per-key enforcement: allowedCapabilities with many items triggers with
+        // Per-key enforcement: allowedContracts with many items triggers with
         // its own key name, not "tags".
         let items: Vec<String> = (0..=MAX_ARRAY_ITEMS).map(|i| format!("T{i}")).collect();
         let inline = format!("[{}]", items.join(","));
-        let content = format!("---\nallowedCapabilities: {inline}\n---\nBody");
+        let content = format!("---\nallowedContracts: {inline}\n---\nBody");
         let err = parse_skill_md(&content).unwrap_err();
         assert!(
-            matches!(&err, ParseSkillError::TooManyArrayItems { key, .. } if key == "allowedCapabilities"),
-            "expected allowedCapabilities key in error, got {err:?}"
+            matches!(&err, ParseSkillError::TooManyArrayItems { key, .. } if key == "allowedContracts"),
+            "expected allowedContracts key in error, got {err:?}"
         );
     }
 

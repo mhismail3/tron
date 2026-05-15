@@ -87,7 +87,7 @@ struct CapabilityClientTests {
             #expect(functionId.rawValue == "capability::execute")
             #expect(idempotencyKey.rawValue.contains("test.program"))
             #expect(options.context?.authorityScopes.contains("capability.execute") == true)
-            #expect(options.context?.authorityScopes.contains("capability.allow:program::run_javascript") == true)
+            #expect(options.context?.authorityScopes.contains("contract.allow:program::run_javascript") == true)
             let fields = Dictionary(
                 uniqueKeysWithValues: Mirror(reflecting: payload).children.compactMap { child in
                     child.label.map { ($0, child.value) }

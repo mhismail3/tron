@@ -159,7 +159,7 @@ fn make_config(task: &str) -> SubagentConfig {
         working_directory: "/tmp".into(),
         max_turns: 5,
         timeout_ms: 10_000,
-        denied_capabilities: vec![],
+        denied_contracts: vec![],
         skills: None,
         max_depth: 0,
         current_depth: 0,
@@ -371,7 +371,7 @@ fn subsession_config_defaults() {
     assert_eq!(config.max_turns, 1);
     assert_eq!(config.max_depth, 0);
     assert!(!config.inherit_capabilities);
-    assert!(config.denied_capabilities.is_empty());
+    assert!(config.denied_contracts.is_empty());
     assert_eq!(config.reasoning_level, Some(ReasoningLevel::Medium));
 }
 
@@ -1169,7 +1169,7 @@ async fn subagent_failed_includes_spawn_type() {
 //
 // REGRESSION: `skill_frontmatter_to_denials` was implemented + unit-tested
 // but never called from production code. Subagents spawned with
-// `skills: ["name"]` ignored the skill's `deniedCapabilities` / `allowedCapabilities`
+// `skills: ["name"]` ignored the skill's `deniedContracts` / `allowedContracts`
 // frontmatter. These tests pin the wiring in `SubagentManager`.
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -1202,9 +1202,9 @@ fn make_manager_with_registry(
 }
 
 #[test]
-fn compute_denied_capabilities_no_skills_passes_explicit_through() {
+fn compute_denied_contracts_no_skills_passes_explicit_through() {
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-    let merged = manager.compute_denied_capabilities(
+    let merged = manager.compute_denied_contracts(
         &["process::run".into(), "filesystem::write_file".into()],
         None,
         &[
@@ -1220,19 +1220,19 @@ fn compute_denied_capabilities_no_skills_passes_explicit_through() {
 }
 
 #[test]
-fn compute_denied_capabilities_empty_everything_yields_empty() {
+fn compute_denied_contracts_empty_everything_yields_empty() {
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-    let merged = manager.compute_denied_capabilities(&[], None, &[]);
+    let merged = manager.compute_denied_contracts(&[], None, &[]);
     assert!(merged.is_empty());
 }
 
 #[test]
-fn compute_denied_capabilities_without_skill_registry_set_ignores_skills() {
+fn compute_denied_contracts_without_skill_registry_set_ignores_skills() {
     // Safety-net: if the wiring in main.rs is omitted, skills silently no-op
     // rather than panic. This locks in that behavior (and forces a wiring
     // regression test below to catch the happy path instead).
     let (manager, _, _) = make_subagent_manager(Arc::new(MockProvider));
-    let merged = manager.compute_denied_capabilities(
+    let merged = manager.compute_denied_contracts(
         &["process::run".into()],
         Some(&["any-skill".into()]),
         &["filesystem::read_file".into(), "process::run".into()],
@@ -1241,18 +1241,18 @@ fn compute_denied_capabilities_without_skill_registry_set_ignores_skills() {
 }
 
 #[test]
-fn compute_denied_capabilities_merges_skill_denied_with_explicit() {
+fn compute_denied_contracts_merges_skill_denied_with_explicit() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "dangerous",
         SkillFrontmatter {
-            denied_capabilities: Some(vec!["process::run".to_string()]),
+            denied_contracts: Some(vec!["process::run".to_string()]),
             ..Default::default()
         },
     ));
     let (manager, _, _) = make_manager_with_registry(registry);
 
-    let merged = manager.compute_denied_capabilities(
+    let merged = manager.compute_denied_contracts(
         &["filesystem::write_file".into()],
         Some(&["dangerous".into()]),
         &[
@@ -1268,14 +1268,14 @@ fn compute_denied_capabilities_merges_skill_denied_with_explicit() {
 }
 
 #[test]
-fn compute_denied_capabilities_skill_allowed_capabilities_inverted_to_denials() {
+fn compute_denied_contracts_skill_allowed_contracts_inverted_to_denials() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "readonly",
         SkillFrontmatter {
-            allowed_capabilities: Some(vec![
+            allowed_contracts: Some(vec![
                 "filesystem::read_file".to_string(),
-                "Grep".to_string(),
+                "filesystem::search_text".to_string(),
             ]),
             ..Default::default()
         },
@@ -1286,11 +1286,11 @@ fn compute_denied_capabilities_skill_allowed_capabilities_inverted_to_denials() 
         "filesystem::read_file".to_string(),
         "filesystem::write_file".to_string(),
         "process::run".to_string(),
-        "Grep".to_string(),
+        "filesystem::search_text".to_string(),
         "filesystem::edit_file".to_string(),
     ];
     let merged =
-        manager.compute_denied_capabilities(&[], Some(&["readonly".into()]), &all_capabilities);
+        manager.compute_denied_contracts(&[], Some(&["readonly".into()]), &all_capabilities);
     let set: std::collections::HashSet<_> = merged.into_iter().collect();
     assert!(set.contains("filesystem::write_file"));
     assert!(set.contains("process::run"));
@@ -1299,17 +1299,20 @@ fn compute_denied_capabilities_skill_allowed_capabilities_inverted_to_denials() 
         !set.contains("filesystem::read_file"),
         "filesystem::read_file should be allowed"
     );
-    assert!(!set.contains("Grep"), "Grep should be allowed");
+    assert!(
+        !set.contains("filesystem::search_text"),
+        "filesystem::search_text should be allowed"
+    );
 }
 
 #[test]
-fn compute_denied_capabilities_unknown_skill_name_is_skipped() {
+fn compute_denied_contracts_unknown_skill_name_is_skipped() {
     let registry = SkillRegistry::new();
     let (manager, _, _) = make_manager_with_registry(registry);
 
     // Unknown skill in the list should silently no-op (not panic) and leave
     // explicit denials untouched.
-    let merged = manager.compute_denied_capabilities(
+    let merged = manager.compute_denied_contracts(
         &["process::run".into()],
         Some(&["does-not-exist".into()]),
         &["filesystem::read_file".into(), "process::run".into()],
@@ -1318,12 +1321,12 @@ fn compute_denied_capabilities_unknown_skill_name_is_skipped() {
 }
 
 #[test]
-fn compute_denied_capabilities_deduplicates_overlapping_denials() {
+fn compute_denied_contracts_deduplicates_overlapping_denials() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "overlap",
         SkillFrontmatter {
-            denied_capabilities: Some(vec![
+            denied_contracts: Some(vec![
                 "process::run".to_string(),
                 "filesystem::edit_file".to_string(),
             ]),
@@ -1333,7 +1336,7 @@ fn compute_denied_capabilities_deduplicates_overlapping_denials() {
     let (manager, _, _) = make_manager_with_registry(registry);
 
     // Explicit denials already include "process::run"; skill repeats it.
-    let merged = manager.compute_denied_capabilities(
+    let merged = manager.compute_denied_contracts(
         &["process::run".into(), "filesystem::write_file".into()],
         Some(&["overlap".into()]),
         &[
@@ -1351,25 +1354,25 @@ fn compute_denied_capabilities_deduplicates_overlapping_denials() {
 }
 
 #[test]
-fn compute_denied_capabilities_multiple_skills_unions() {
+fn compute_denied_contracts_multiple_skills_unions() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "no-bash",
         SkillFrontmatter {
-            denied_capabilities: Some(vec!["process::run".to_string()]),
+            denied_contracts: Some(vec!["process::run".to_string()]),
             ..Default::default()
         },
     ));
     registry.insert(make_skill(
         "no-write",
         SkillFrontmatter {
-            denied_capabilities: Some(vec!["filesystem::write_file".to_string()]),
+            denied_contracts: Some(vec!["filesystem::write_file".to_string()]),
             ..Default::default()
         },
     ));
     let (manager, _, _) = make_manager_with_registry(registry);
 
-    let merged = manager.compute_denied_capabilities(
+    let merged = manager.compute_denied_contracts(
         &[],
         Some(&["no-bash".into(), "no-write".into()]),
         &[
@@ -1385,14 +1388,14 @@ fn compute_denied_capabilities_multiple_skills_unions() {
 }
 
 #[test]
-fn compute_denied_capabilities_skill_with_empty_frontmatter_is_noop() {
+fn compute_denied_contracts_skill_with_empty_frontmatter_is_noop() {
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill("plain", SkillFrontmatter::default()));
     let (manager, _, _) = make_manager_with_registry(registry);
 
-    // Skill exists but has no deniedCapabilities / allowedCapabilities — should not
+    // Skill exists but has no deniedContracts / allowedContracts — should not
     // contribute any denials.
-    let merged = manager.compute_denied_capabilities(
+    let merged = manager.compute_denied_contracts(
         &["process::run".into()],
         Some(&["plain".into()]),
         &["filesystem::read_file".into(), "process::run".into()],
@@ -1401,22 +1404,22 @@ fn compute_denied_capabilities_skill_with_empty_frontmatter_is_noop() {
 }
 
 #[tokio::test]
-async fn spawn_with_skill_denials_forwards_merged_denied_capabilities_to_execution() {
+async fn spawn_with_skill_denials_forwards_merged_denied_contracts_to_execution() {
     // End-to-end wiring test: construct a SubagentManager with a skill
     // registry, spawn a subagent with `skills: ["restricted"]`, and observe
     // that the resulting subagent run executed with the skill's
-    // `deniedCapabilities` in force (via side-channel: the mock provider path
+    // `deniedContracts` in force (via side-channel: the mock provider path
     // doesn't block compilation, but we verify by the spawn
     // completing successfully and inspecting captured state on the
     // tracker). The load-bearing assertion is on the helper above; this
-    // test exists so that if `compute_denied_capabilities` is inadvertently
+    // test exists so that if `compute_denied_contracts` is inadvertently
     // bypassed by `spawn()`, CI fails.
 
     let mut registry = SkillRegistry::new();
     registry.insert(make_skill(
         "restricted",
         SkillFrontmatter {
-            denied_capabilities: Some(vec!["process::run".to_string()]),
+            denied_contracts: Some(vec!["process::run".to_string()]),
             ..Default::default()
         },
     ));
@@ -1428,7 +1431,7 @@ async fn spawn_with_skill_denials_forwards_merged_denied_capabilities_to_executi
     assert!(!handle.session_id.is_empty());
 
     // Cross-check: the helper would have produced process::run in the denied list.
-    let merged = manager.compute_denied_capabilities(
+    let merged = manager.compute_denied_contracts(
         &[],
         Some(&["restricted".into()]),
         &[

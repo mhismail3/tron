@@ -8,6 +8,30 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Agent-facing invocation recipe generated from one live capability.
+///
+/// This is the compact action-oriented projection used by search results,
+/// inspect summaries, and the capability primer. Operator details such as
+/// binding provenance, schema digests, and trust metadata remain in inspection
+/// and audit records.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentCapabilityRecipe {
+    pub(crate) contract_id: String,
+    pub(crate) display_name: String,
+    pub(crate) use_when: String,
+    pub(crate) execute_template: Value,
+    pub(crate) required_payload: Vec<String>,
+    pub(crate) optional_payload: Vec<String>,
+    pub(crate) examples: Vec<Value>,
+    pub(crate) direct_execution: String,
+    pub(crate) inspect_required: bool,
+    pub(crate) approval_behavior: String,
+    pub(crate) lifecycle_kind: String,
+    pub(crate) result_summary: String,
+    pub(crate) aliases: Vec<String>,
+}
+
 /// Stable abstract capability interface.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,6 +118,7 @@ pub(crate) struct CapabilityInspectionRecord {
     pub(crate) binding: CapabilityBindingRecord,
     pub(crate) binding_decision: CapabilityBindingDecision,
     pub(crate) inspection_handle: CapabilityInspectionHandle,
+    pub(crate) recipe: AgentCapabilityRecipe,
     pub(crate) execution_requirements: Value,
     pub(crate) docs: Value,
 }
@@ -168,6 +193,7 @@ pub(crate) struct CapabilityIndexHit {
     pub(crate) matched_by: String,
     pub(crate) snippet: String,
     pub(crate) requires_inspect: bool,
+    pub(crate) recipe: Option<AgentCapabilityRecipe>,
 }
 
 /// Direct execution result metadata recorded by `capability::execute`.

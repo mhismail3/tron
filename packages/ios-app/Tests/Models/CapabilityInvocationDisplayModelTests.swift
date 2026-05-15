@@ -24,7 +24,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
     func testInspectDisplaysRequestedTarget() {
         let invocation = testCapabilityInvocation(
             status: .success,
-            arguments: #"{"capabilityId":"process::run"}"#,
+            arguments: #"{"contractId":"process::run"}"#,
             identity: CapabilityIdentity(
                 modelPrimitiveName: "inspect",
                 contractId: "capability::inspect",
@@ -41,7 +41,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
     func testExecuteDisplaysTargetAndCommandInsteadOfPrimitiveImplementation() {
         let invocation = testCapabilityInvocation(
             status: .error,
-            arguments: #"{"capabilityId":"process::run","payload":{"command":"date +%s"},"expectedRevision":303}"#,
+            arguments: #"{"contractId":"process::run","payload":{"command":"date +%s"},"expectedRevision":303}"#,
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "capability::execute",
@@ -62,7 +62,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
     func testExecuteChipSuppressesSessionWorktreeIdsForPathPayloads() {
         let invocation = testCapabilityInvocation(
             status: .success,
-            arguments: #"{"capabilityId":"filesystem::list_dir","payload":{"path":"/Users/moose/Downloads/projects/testspace/.worktrees/session/sess_019e245a-408e-7331-9644-b46ade73be0d","showHidden":false},"mode":"invoke","reason":"Smoke-test list_dir."}"#,
+            arguments: #"{"contractId":"filesystem::list_dir","payload":{"path":"/Users/moose/Downloads/projects/testspace/.worktrees/session/sess_019e245a-408e-7331-9644-b46ade73be0d","showHidden":false},"mode":"invoke","reason":"Smoke-test list_dir."}"#,
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "capability::execute",
@@ -79,7 +79,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
     func testExecuteResultHighlightsFilesystemOutput() {
         let invocation = testCapabilityInvocation(
             status: .success,
-            arguments: #"{"capabilityId":"filesystem::find","payload":{"path":"/tmp/work","query":"package.json"}}"#,
+            arguments: #"{"contractId":"filesystem::find","payload":{"path":"/tmp/work","query":"package.json"}}"#,
             result: #"{"matches":[],"path":"/tmp/work","truncated":false}"#,
             details: [
                 "output": AnyCodable([

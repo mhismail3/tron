@@ -184,10 +184,11 @@ pub async fn spawn(
 
     let process = &process_plan.process;
     let working_directory = info.worktree_path.to_string_lossy().to_string();
-    let allowed: Vec<String> = process
-        .allowed_capabilities
+    let allowed: Vec<String> = process_plan
+        .capability_execution_policy
+        .allowed_contracts
         .clone()
-        .expect("conflictResolver process must define allowedCapabilities");
+        .expect("conflictResolver process must define allowedContracts");
 
     let config = SubsessionConfig {
         process_id: Some("conflictResolver".into()),
@@ -217,8 +218,11 @@ pub async fn spawn(
         inherit_capabilities: process
             .inherit_capabilities
             .expect("conflictResolver process must define inheritCapabilities"),
-        denied_capabilities: process.denied_capabilities.clone(),
-        allowed_capabilities: Some(allowed),
+        denied_contracts: process_plan
+            .capability_execution_policy
+            .denied_contracts
+            .clone(),
+        allowed_contracts: Some(allowed),
         reasoning_level: None,
         spawn_type: SpawnType::Subsession,
     };
@@ -448,19 +452,16 @@ mod tests {
     #[test]
     fn default_profile_allowlist_is_stable() {
         let spec = crate::shared::profile::bundled_default_execution_spec();
-        let process = spec
-            .process("conflictResolver")
-            .expect("default profile must define conflictResolver");
-        let allowlist = process
-            .allowed_capabilities
+        let policy = spec
+            .capability_execution_policy("conflictResolver")
+            .expect("default profile must define conflictResolver execution policy");
+        let allowlist = policy
+            .allowed_contracts
             .as_deref()
-            .expect("default conflictResolver must define allowedCapabilities");
+            .expect("default conflictResolver must define allowedContracts");
         assert_eq!(
             allowlist,
             &[
-                "search",
-                "inspect",
-                "execute",
                 "filesystem::read_file",
                 "filesystem::edit_file",
                 "filesystem::write_file",

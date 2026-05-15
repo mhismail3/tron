@@ -192,26 +192,14 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
             ..crate::domains::agent::runner::AgentConfig::default()
         };
 
-        // 4. Build denied capabilities list from user restrictions using the live capability catalog.
-        let model_capability_names =
-            match crate::domains::capability_support::implementations::capability_surface::list_model_capability_ids(
-                &self.engine_host,
-                &session_id,
-                workspace_id,
-            )
-            .await
-            {
-                Ok(names) => names,
-                Err(error) => {
-                    tracing::warn!(error = %error, "failed to read live capability catalog for cron restrictions");
-                    Vec::new()
-                }
-            };
-        let denied_capabilities = capability_restrictions
-            .map(|r| r.to_denied_list(&model_capability_names))
-            .unwrap_or_default();
-        // Interactive capabilities such as `agent::ask_user`.
-        // are removed automatically by AgentFactory when is_unattended=true.
+        let mut capability_execution_policy = session_plan.capability_execution_policy.clone();
+        if let Some(restrictions) = capability_restrictions
+            && let Some(allowed_contracts) = restrictions.allowed_contracts.clone()
+        {
+            capability_execution_policy.allowed_contracts = Some(allowed_contracts);
+        }
+        // Interactive primitives such as `agent::ask_user` are removed automatically
+        // by AgentFactory when is_unattended=true.
 
         // 6. Create agent via factory
         let mut agent = crate::domains::agent::runner::AgentFactory::create_agent(
@@ -220,11 +208,12 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
             crate::domains::agent::runner::CreateAgentOpts {
                 provider,
                 context_policy: session_plan.runtime_context_policy(),
-                capability_policy: session_plan.capability_policy.clone(),
+                primitive_surface_policy: session_plan.primitive_surface_policy.clone(),
+                capability_execution_policy,
                 guardrails: None,
                 hooks: None,
                 is_unattended: true,
-                denied_capabilities,
+                denied_primitives: Vec::new(),
                 subagent_depth: 0,
                 subagent_max_depth: 0,
                 rules_content: None,

@@ -19,6 +19,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Medium,
             Some("web.read"),
         )
+        .description("Fetch a URL and return bounded response metadata and body text.")
+        .tags(vec!["web", "fetch", "url", "http", "docs", "page", "download"])
         .request_schema(json!({
             "additionalProperties": false,
             "properties": {
@@ -43,6 +45,12 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             "required": ["url", "status", "contentType", "body", "truncated"],
             "type": "object"
         }))
+        .examples(vec![json!({
+            "mode": "invoke",
+            "contractId": "web::fetch",
+            "payload": {"url": "https://example.com"},
+            "reason": "Fetch a web page."
+        })])
         .build()?,
         CapabilityContract::new(
             "web::search",
@@ -51,6 +59,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Medium,
             Some("web.read"),
         )
+        .description("Search the web for current sources and return ranked result metadata.")
+        .tags(vec!["web", "search", "internet", "current", "sources", "research", "news"])
         .request_schema(json!({
             "additionalProperties": false,
             "properties": {
@@ -74,6 +84,12 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             "required": ["query", "results"],
             "type": "object"
         }))
+        .examples(vec![json!({
+            "mode": "invoke",
+            "contractId": "web::search",
+            "payload": {"query": "latest OpenAI API documentation", "count": 5},
+            "reason": "Find current documentation sources."
+        })])
         .build()?,
     ])
 }

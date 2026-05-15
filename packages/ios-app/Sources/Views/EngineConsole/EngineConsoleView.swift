@@ -358,13 +358,13 @@ struct EngineConsoleView: View {
     }
 
     private var policies: some View {
-        let policies = state.policies?.capabilityPolicies ?? [:]
+        let policies = state.policies?.capabilityExecutionPolicies ?? [:]
         return LazyVStack(spacing: 10) {
             if policies.isEmpty {
                 EngineConsoleEmptyState(
                     symbol: "checkmark.shield",
                     title: "No policies loaded",
-                    message: "Refresh the live console to inspect profile capability policy."
+                    message: "Refresh the live console to inspect profile execution policies."
                 )
             } else {
                 ForEach(policies.keys.sorted(), id: \.self) { id in
@@ -1374,20 +1374,23 @@ private struct BindingCard: View {
 @available(iOS 26.0, *)
 private struct PolicyCard: View {
     let id: String
-    let policy: CapabilityPolicyDTO
+    let policy: CapabilityExecutionPolicyDTO
 
     var body: some View {
         EngineConsoleCard(tint: .tronSlate) {
             EngineConsoleCardHeader(
                 symbol: "checkmark.shield",
                 title: id,
-                subtitle: policy.manifest ?? "profile capability policy"
+                subtitle: "Profile execution policy"
             )
             EngineConsoleKeyValueRow("Search", policy.searchPolicy ?? "default")
             EngineConsoleKeyValueRow("Primer", policy.contextPrimerPolicy ?? "default")
-            EngineConsoleKeyValueRow("Allowed", (policy.allowedCapabilities ?? []).joined(separator: ", "))
-            EngineConsoleKeyValueRow("Denied", (policy.deniedCapabilities ?? []).joined(separator: ", "))
-            EngineConsoleKeyValueRow("Interactive", (policy.exposeInteractiveCapabilities ?? false) ? "yes" : "no")
+            EngineConsoleKeyValueRow("Allowed actions", (policy.allowedContracts ?? []).joined(separator: ", "))
+            EngineConsoleKeyValueRow("Denied actions", (policy.deniedContracts ?? []).joined(separator: ", "))
+            EngineConsoleKeyValueRow("Allowed plugins", (policy.allowedPlugins ?? []).joined(separator: ", "))
+            EngineConsoleKeyValueRow("Denied plugins", (policy.deniedPlugins ?? []).joined(separator: ", "))
+            EngineConsoleKeyValueRow("Max risk", policy.maxRisk ?? "profile default")
+            EngineConsoleKeyValueRow("Trust level", policy.minimumTrustTier ?? "profile default")
         }
     }
 }

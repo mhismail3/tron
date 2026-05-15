@@ -4,7 +4,7 @@
 //! settings. The managed `default` profile is restorable; user profiles inherit
 //! from it and are never silently overwritten.
 //!
-//! v2 profiles resolve to a typed [`AgentExecutionSpec`]. Runtime modules should
+//! v3 profiles resolve to a typed [`AgentExecutionSpec`]. Runtime modules should
 //! consume that effective spec (or helpers backed by it), not hardcoded prompt
 //! folders or local/cloud policy constants.
 
@@ -34,7 +34,7 @@ pub const USER_PROFILE: &str = "user";
 /// Default credential profile name.
 pub const DEFAULT_AUTH_PROFILE: &str = "default";
 /// Current profile schema version.
-pub const CURRENT_PROFILE_VERSION: &str = "2";
+pub const CURRENT_PROFILE_VERSION: &str = "3";
 
 /// Parsed profile document.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -60,8 +60,10 @@ pub struct ProfileDocument {
     pub model_policies: HashMap<String, ModelPolicySpec>,
     /// Context assembly policies.
     pub context_policies: HashMap<String, ContextPolicySpec>,
-    /// Capability visibility and presentation policies.
-    pub capability_policies: HashMap<String, CapabilityPolicySpec>,
+    /// Provider-facing primitive surface policies (`search`, `inspect`, `execute`).
+    pub primitive_surface_policies: HashMap<String, PrimitiveSurfacePolicySpec>,
+    /// Real worker capability execution policies.
+    pub capability_execution_policies: HashMap<String, CapabilityExecutionPolicySpec>,
     /// Capability search policies.
     pub capability_search_policies: HashMap<String, CapabilitySearchPolicySpec>,
     /// Capability context-primer policies.
@@ -82,8 +84,7 @@ pub struct ProfileDocument {
     pub auth: AuthSpec,
 }
 
-/// Prompt, provider, context, or capability-presentation file compiled into
-/// the runtime spec.
+/// Prompt, provider, or context manifest file compiled into the runtime spec.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompiledProfileFile {
     /// Profile-relative reference from TOML.
@@ -109,8 +110,6 @@ pub struct AgentExecutionSpec {
     pub provider_prompts: HashMap<String, CompiledProfileFile>,
     /// Context block manifest files by context policy id.
     pub context_manifests: HashMap<String, CompiledProfileFile>,
-    /// Capability presentation manifest files by capability policy id.
-    pub capability_manifests: HashMap<String, CompiledProfileFile>,
     /// Readable auth registry used to resolve authProfile.
     pub auth_registry: Option<CompiledProfileFile>,
     /// All source files that affect this compiled spec.
@@ -137,8 +136,10 @@ pub struct EntryPointSpec {
     pub context_policy: String,
     /// Optional local-model context policy id.
     pub local_context_policy: Option<String>,
-    /// Capability policy id.
-    pub capability_policy: String,
+    /// Provider-facing primitive surface policy id.
+    pub primitive_surface_policy: String,
+    /// Worker capability execution policy id.
+    pub capability_execution_policy: String,
     /// Permission policy id.
     pub permission_policy: String,
     /// Provider policy id.
@@ -182,8 +183,10 @@ pub struct ProcessSpec {
     pub model_policy: String,
     /// Context policy id.
     pub context_policy: String,
-    /// Capability policy id.
-    pub capability_policy: String,
+    /// Provider-facing primitive surface policy id.
+    pub primitive_surface_policy: String,
+    /// Worker capability execution policy id.
+    pub capability_execution_policy: String,
     /// Permission policy id.
     pub permission_policy: String,
     /// Output contract id.
@@ -201,12 +204,8 @@ pub struct ProcessSpec {
     pub max_turns: Option<u32>,
     /// Maximum child nesting depth.
     pub max_depth: Option<u32>,
-    /// Whether capabilities are inherited from the parent registry.
+    /// Whether process authority is inherited from the parent registry.
     pub inherit_capabilities: Option<bool>,
-    /// Strict allowlist applied after inherited capabilities are loaded.
-    pub allowed_capabilities: Option<Vec<String>>,
-    /// Capabilities denied from the inherited registry.
-    pub denied_capabilities: Vec<String>,
     /// Reasoning level string (`none`, `low`, `medium`, `high`, `xhigh`, `max`).
     pub reasoning: Option<String>,
     /// Working directory override.
@@ -239,8 +238,10 @@ pub struct ContextPolicySpec {
     pub blocks: Option<String>,
     /// Provider ids that activate this policy as local.
     pub local_providers: Vec<String>,
-    /// Capability policy to use when this context policy is active.
-    pub capability_policy: Option<String>,
+    /// Provider-facing primitive surface policy to use when this context policy is active.
+    pub primitive_surface_policy: Option<String>,
+    /// Worker capability execution policy to use when this context policy is active.
+    pub capability_execution_policy: Option<String>,
     /// Strip memory block.
     pub strip_memory: bool,
     /// Strip skill index block.
@@ -255,24 +256,46 @@ pub struct ContextPolicySpec {
     pub rules_truncation_suffix: Option<String>,
 }
 
-/// Capability visibility/presentation policy.
+/// Provider-facing primitive surface policy.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct CapabilityPolicySpec {
-    /// Optional policy manifest file.
-    pub manifest: Option<String>,
+pub struct PrimitiveSurfacePolicySpec {
+    /// Strict allowlist of model-facing primitive ids.
+    pub allowed_primitives: Option<Vec<String>>,
+    /// Primitive ids denied by this policy.
+    pub denied_primitives: Vec<String>,
+    /// Whether interactive capabilities may be exposed.
+    pub expose_interactive_capabilities: Option<bool>,
+    /// Whether spawn/wait capabilities are removed at max depth.
+    pub remove_spawn_at_max_depth: Option<bool>,
+}
+
+/// Worker capability execution policy.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct CapabilityExecutionPolicySpec {
     /// Search policy used by capability::search.
     pub search_policy: Option<String>,
     /// Context primer policy used for generated capability context.
     pub context_primer_policy: Option<String>,
-    /// Strict allowlist of capability ids.
-    pub allowed_capabilities: Option<Vec<String>>,
-    /// Capability ids denied by this policy.
-    pub denied_capabilities: Vec<String>,
-    /// Whether interactive capabilities may be exposed.
-    pub expose_interactive_capabilities: Option<bool>,
-    /// Whether spawn/wait capabilities are removed at max depth.
-    pub remove_spawn_capabilities_at_max_depth: Option<bool>,
+    /// Strict allowlist of contract ids.
+    pub allowed_contracts: Option<Vec<String>>,
+    /// Contract ids denied by this policy.
+    pub denied_contracts: Vec<String>,
+    /// Strict allowlist of implementation ids.
+    pub allowed_implementations: Option<Vec<String>>,
+    /// Implementation ids denied by this policy.
+    pub denied_implementations: Vec<String>,
+    /// Strict allowlist of plugin ids.
+    pub allowed_plugins: Option<Vec<String>>,
+    /// Plugin ids denied by this policy.
+    pub denied_plugins: Vec<String>,
+    /// Optional maximum risk level.
+    pub max_risk: Option<String>,
+    /// Optional allowlist of effect classes.
+    pub allowed_effects: Option<Vec<String>>,
+    /// Optional minimum trust tier.
+    pub minimum_trust_tier: Option<String>,
 }
 
 /// Capability search policy.
@@ -469,7 +492,6 @@ impl AgentExecutionSpec {
             process_prompts: HashMap::new(),
             provider_prompts: HashMap::new(),
             context_manifests: HashMap::new(),
-            capability_manifests: HashMap::new(),
             auth_registry: None,
             source_files: Vec::new(),
         }
@@ -521,10 +543,19 @@ impl AgentExecutionSpec {
         self.document.context_policies.get(name)
     }
 
-    /// Capability policy by id.
+    /// Provider-facing primitive surface policy by id.
     #[must_use]
-    pub fn capability_policy(&self, name: &str) -> Option<&CapabilityPolicySpec> {
-        self.document.capability_policies.get(name)
+    pub fn primitive_surface_policy(&self, name: &str) -> Option<&PrimitiveSurfacePolicySpec> {
+        self.document.primitive_surface_policies.get(name)
+    }
+
+    /// Worker capability execution policy by id.
+    #[must_use]
+    pub fn capability_execution_policy(
+        &self,
+        name: &str,
+    ) -> Option<&CapabilityExecutionPolicySpec> {
+        self.document.capability_execution_policies.get(name)
     }
 
     /// Capability search policy by id.
@@ -839,20 +870,6 @@ fn compile_agent_execution_spec(
             spec.context_manifests.insert(policy_id.clone(), compiled);
         }
     }
-    for (policy_id, policy) in &spec.document.capability_policies {
-        if let Some(manifest) = &policy.manifest {
-            let compiled = compile_profile_file(
-                home,
-                name,
-                candidate_profiles,
-                &format!("capabilityPolicies.{policy_id}.manifest"),
-                manifest,
-            )?;
-            source_files.push(compiled.source_path.clone());
-            spec.capability_manifests
-                .insert(policy_id.clone(), compiled);
-        }
-    }
     source_files.sort();
     source_files.dedup();
     spec.source_files = source_files;
@@ -932,11 +949,6 @@ fn agent_execution_spec_hash(raw_string: &str, spec: &AgentExecutionSpec) -> Str
         spec.context_manifests
             .iter()
             .map(|(id, file)| (format!("contextPolicies.{id}.blocks"), file)),
-    );
-    files.extend(
-        spec.capability_manifests
-            .iter()
-            .map(|(id, file)| (format!("capabilityPolicies.{id}.manifest"), file)),
     );
     files.sort_by(|left, right| left.0.cmp(&right.0));
 
@@ -1031,9 +1043,15 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
         }
         validate_policy_ref(
             name,
-            "capabilityPolicies",
-            &entry.capability_policy,
-            &spec.capability_policies,
+            "primitiveSurfacePolicies",
+            &entry.primitive_surface_policy,
+            &spec.primitive_surface_policies,
+        )?;
+        validate_policy_ref(
+            name,
+            "capabilityExecutionPolicies",
+            &entry.capability_execution_policy,
+            &spec.capability_execution_policies,
         )?;
         validate_policy_ref(
             name,
@@ -1080,9 +1098,15 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
         )?;
         validate_policy_ref(
             name,
-            "capabilityPolicies",
-            &process.capability_policy,
-            &spec.capability_policies,
+            "primitiveSurfacePolicies",
+            &process.primitive_surface_policy,
+            &spec.primitive_surface_policies,
+        )?;
+        validate_policy_ref(
+            name,
+            "capabilityExecutionPolicies",
+            &process.capability_execution_policy,
+            &spec.capability_execution_policies,
         )?;
         validate_policy_ref(
             name,
@@ -1102,12 +1126,6 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
             &process.audit_policy,
             &spec.audit_policy,
         )?;
-        validate_capability_overlap(
-            name,
-            process_id,
-            process.allowed_capabilities.as_deref(),
-            &process.denied_capabilities,
-        )?;
     }
 
     for (policy_id, policy) in &spec.context_policies {
@@ -1121,26 +1139,34 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
             )?;
             validate_context_block_manifest(&path)?;
         }
-        if let Some(capability_policy) = &policy.capability_policy {
+        if let Some(primitive_surface_policy) = &policy.primitive_surface_policy {
             validate_policy_ref(
                 name,
-                "capabilityPolicies",
-                capability_policy,
-                &spec.capability_policies,
+                "primitiveSurfacePolicies",
+                primitive_surface_policy,
+                &spec.primitive_surface_policies,
+            )?;
+        }
+        if let Some(capability_execution_policy) = &policy.capability_execution_policy {
+            validate_policy_ref(
+                name,
+                "capabilityExecutionPolicies",
+                capability_execution_policy,
+                &spec.capability_execution_policies,
             )?;
         }
     }
 
-    for (policy_id, policy) in &spec.capability_policies {
-        if let Some(manifest) = &policy.manifest {
-            validate_profile_file_ref(
-                home,
-                name,
-                &candidate_profiles,
-                &format!("capabilityPolicies.{policy_id}.manifest"),
-                manifest,
-            )?;
-        }
+    for (policy_id, policy) in &spec.primitive_surface_policies {
+        validate_primitive_overlap(
+            name,
+            policy_id,
+            policy.allowed_primitives.as_deref(),
+            &policy.denied_primitives,
+        )?;
+    }
+
+    for (policy_id, policy) in &spec.capability_execution_policies {
         if let Some(search_policy) = &policy.search_policy {
             validate_policy_ref(
                 name,
@@ -1157,11 +1183,26 @@ fn validate_profile(home: &Path, name: &str, spec: &ProfileDocument) -> io::Resu
                 &spec.capability_context_primer_policies,
             )?;
         }
-        validate_capability_overlap(
+        validate_policy_overlap(
             name,
             policy_id,
-            policy.allowed_capabilities.as_deref(),
-            &policy.denied_capabilities,
+            "contract",
+            policy.allowed_contracts.as_deref(),
+            &policy.denied_contracts,
+        )?;
+        validate_policy_overlap(
+            name,
+            policy_id,
+            "implementation",
+            policy.allowed_implementations.as_deref(),
+            &policy.denied_implementations,
+        )?;
+        validate_policy_overlap(
+            name,
+            policy_id,
+            "plugin",
+            policy.allowed_plugins.as_deref(),
+            &policy.denied_plugins,
         )?;
     }
 
@@ -1267,9 +1308,10 @@ fn validate_allowed_value(
     ))
 }
 
-fn validate_capability_overlap(
+fn validate_policy_overlap(
     profile_name: &str,
     owner: &str,
+    subject: &str,
     allowed: Option<&[String]>,
     denied: &[String],
 ) -> io::Result<()> {
@@ -1283,11 +1325,31 @@ fn validate_capability_overlap(
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "profile `{profile_name}` policy `{owner}` both allows and denies capability `{conflict}`"
+                "profile `{profile_name}` policy `{owner}` both allows and denies {subject} `{conflict}`"
             ),
         ));
     }
     Ok(())
+}
+
+fn validate_primitive_overlap(
+    profile_name: &str,
+    owner: &str,
+    allowed: Option<&[String]>,
+    denied: &[String],
+) -> io::Result<()> {
+    const PRIMITIVES: &[&str] = &["search", "inspect", "execute"];
+    for primitive in allowed.into_iter().flatten().chain(denied.iter()) {
+        if !PRIMITIVES.contains(&primitive.as_str()) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "profile `{profile_name}` primitiveSurfacePolicies.{owner} references non-primitive `{primitive}`; use capabilityExecutionPolicies for contracts and implementations"
+                ),
+            ));
+        }
+    }
+    validate_policy_overlap(profile_name, owner, "primitive", allowed, denied)
 }
 
 fn profile_file_candidate_profiles(home: &Path, name: &str) -> io::Result<Vec<String>> {
@@ -1623,7 +1685,7 @@ store = "auth.json"
     }
 
     #[test]
-    fn bundled_default_profile_parses_as_v2_execution_spec() {
+    fn bundled_default_profile_parses_as_v3_execution_spec() {
         let spec = bundled_default_execution_spec();
 
         assert_eq!(spec.version, CURRENT_PROFILE_VERSION);
@@ -1637,7 +1699,11 @@ store = "auth.json"
             ProcessKind::CapabilityWorker
         );
         assert!(spec.context_policies.contains_key("cloudDefault"));
-        assert!(spec.capability_policies.contains_key("localModel"));
+        assert!(spec.primitive_surface_policies.contains_key("localModel"));
+        assert!(
+            spec.capability_execution_policies
+                .contains_key("localModel")
+        );
         assert!(spec.provider_policies.contains_key("default"));
         assert!(spec.cache_policies.contains_key("default"));
         assert_eq!(spec.settings.server.default_model, "claude-sonnet-4-6");
@@ -1681,8 +1747,113 @@ store = "auth.json"
             "localDefault"
         );
         assert_eq!(
-            local.spec.entrypoints["main"].capability_policy,
+            local.spec.entrypoints["main"].primitive_surface_policy,
             "localModel"
+        );
+        assert_eq!(
+            local.spec.entrypoints["main"].capability_execution_policy,
+            "localModel"
+        );
+    }
+
+    #[test]
+    fn profile_v3_rejects_v2_policy_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+        write(
+            &home
+                .join(dirs::PROFILES)
+                .join("child")
+                .join(files::PROFILE_TOML),
+            &format!(
+                "{}{}{}",
+                r#"
+version = "3"
+name = "child"
+inherits = ["default"]
+
+[entrypoints.main]
+"#,
+                "capability",
+                "Policy = \"default\"\n"
+            ),
+        );
+
+        let error = resolve_profile_at(&home, "child").unwrap_err();
+        assert!(
+            error.to_string().contains("unknown field")
+                || error
+                    .to_string()
+                    .contains(&format!("{}{}", "capability", "Policy")),
+            "expected v2 {}{} rejection, got {error}",
+            "capability",
+            "Policy"
+        );
+    }
+
+    #[test]
+    fn user_sparse_settings_survive_while_runtime_policy_overlay_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+        write(
+            &home
+                .join(dirs::PROFILES)
+                .join(USER_PROFILE)
+                .join(files::PROFILE_TOML),
+            r#"
+version = "2"
+name = "user"
+inherits = ["default"]
+
+[settings.server]
+defaultProvider = "openai"
+
+[primitiveSurfacePolicies.bad]
+allowedPrimitives = ["filesystem::read_file"]
+"#,
+        );
+
+        let resolved = resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
+
+        assert_eq!(resolved.spec.settings.server.default_provider, "openai");
+        assert_eq!(
+            resolved.spec.entrypoints["main"].primitive_surface_policy,
+            "default"
+        );
+        assert!(
+            !resolved.spec.primitive_surface_policies.contains_key("bad"),
+            "user profile runtime control-plane tables must not be interpreted as profile overrides"
+        );
+    }
+
+    #[test]
+    fn primitive_surface_policy_rejects_contract_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+        write(
+            &home
+                .join(dirs::PROFILES)
+                .join("child")
+                .join(files::PROFILE_TOML),
+            r#"
+version = "3"
+name = "child"
+inherits = ["default"]
+
+[primitiveSurfacePolicies.bad]
+allowedPrimitives = ["search", "filesystem::read_file"]
+"#,
+        );
+
+        let error = resolve_profile_at(&home, "child").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("primitiveSurfacePolicies.bad references non-primitive"),
+            "expected primitive-only validation, got {error}"
         );
     }
 
@@ -1737,7 +1908,7 @@ store = "auth.json"
                 .join("child")
                 .join(files::PROFILE_TOML),
             r#"
-version = "2"
+version = "3"
 name = "child"
 authProfile = "default"
 inherits = ["default"]
@@ -1765,7 +1936,11 @@ prompt = "prompts/custom-chat.md"
             Some("prompts/custom-chat.md")
         );
         assert_eq!(
-            resolved.spec.entrypoints["chat"].capability_policy, "default",
+            resolved.spec.entrypoints["chat"].primitive_surface_policy, "default",
+            "partial child entrypoint override should inherit parent policy fields"
+        );
+        assert_eq!(
+            resolved.spec.entrypoints["chat"].capability_execution_policy, "default",
             "partial child entrypoint override should inherit parent policy fields"
         );
     }
@@ -1791,7 +1966,7 @@ store = "auth.json"
                 .join("child")
                 .join(files::PROFILE_TOML),
             r#"
-version = "2"
+version = "3"
 name = "child"
 authProfile = "secondary"
 inherits = ["default"]
@@ -1816,7 +1991,7 @@ registry = "custom-auth.toml"
                 .join(dirs::PROFILES)
                 .join("a")
                 .join(files::PROFILE_TOML),
-            r#"version = "2"
+            r#"version = "3"
 name = "a"
 authProfile = "default"
 inherits = ["b"]
@@ -1827,7 +2002,7 @@ inherits = ["b"]
                 .join(dirs::PROFILES)
                 .join("b")
                 .join(files::PROFILE_TOML),
-            r#"version = "2"
+            r#"version = "3"
 name = "b"
 authProfile = "default"
 inherits = ["a"]

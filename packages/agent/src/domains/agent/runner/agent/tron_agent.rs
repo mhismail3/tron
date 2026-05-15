@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
-use crate::domains::capability_support::implementations::capability_surface::CapabilitySurfacePolicy;
+use crate::domains::capability_support::implementations::primitive_surface::PrimitiveSurfacePolicy;
 use crate::domains::model::providers::provider::Provider;
 use crate::shared::events::{BaseEvent, TronEvent};
 use crate::shared::messages::{Message, TokenUsage, UserMessageContent};
@@ -47,7 +47,9 @@ pub struct AgentDeps {
     /// LLM provider for generating completions.
     pub provider: Arc<dyn Provider>,
     /// Live catalog policy for model-facing capabilities.
-    pub capability_surface_policy: CapabilitySurfacePolicy,
+    pub primitive_surface_policy: PrimitiveSurfacePolicy,
+    /// Concrete capability execution policy for this agent.
+    pub capability_execution_policy: crate::shared::profile::CapabilityExecutionPolicySpec,
     /// Optional guardrail engine for content safety.
     pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     /// Optional hook engine for lifecycle hooks.
@@ -79,7 +81,8 @@ pub struct AgentDeps {
 pub struct TronAgent {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
-    capability_surface_policy: CapabilitySurfacePolicy,
+    primitive_surface_policy: PrimitiveSurfacePolicy,
+    capability_execution_policy: crate::shared::profile::CapabilityExecutionPolicySpec,
     guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     hooks: Option<Arc<HookEngine>>,
     context_manager: ContextManager,
@@ -127,7 +130,8 @@ impl TronAgent {
         Self {
             config,
             provider: deps.provider,
-            capability_surface_policy: deps.capability_surface_policy,
+            primitive_surface_policy: deps.primitive_surface_policy,
+            capability_execution_policy: deps.capability_execution_policy,
             guardrails: deps.guardrails,
             hooks: deps.hooks,
             context_manager: deps.context_manager,
@@ -228,7 +232,8 @@ impl TronAgent {
                 turn,
                 context_manager: &mut self.context_manager,
                 provider: &self.provider,
-                capability_surface_policy: &self.capability_surface_policy,
+                primitive_surface_policy: &self.primitive_surface_policy,
+                capability_execution_policy: &self.capability_execution_policy,
                 guardrails: &self.guardrails,
                 hooks: &self.hooks,
                 compaction: &*self.compaction,

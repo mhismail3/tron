@@ -65,9 +65,11 @@ fn has_redirection_or_mutating_pipe(command: &str) -> bool {
 }
 
 fn has_high_risk_git_operation(tokens: &[String]) -> bool {
-    tokens
-        .windows(2)
-        .any(|pair| pair[0] == "git" && HIGH_RISK_GIT_SUBCOMMANDS.contains(&pair[1].as_str()))
+    tokens.iter().enumerate().any(|(index, token)| {
+        token == "git"
+            && git_effective_subcommand(&tokens[index..])
+                .is_some_and(|subcommand| HIGH_RISK_GIT_SUBCOMMANDS.contains(&subcommand))
+    })
 }
 
 fn has_high_risk_package_operation(tokens: &[String]) -> bool {
@@ -96,9 +98,9 @@ fn segment_is_low_risk(segment: &str) -> bool {
     }
 
     match command {
+        "cd" => cd_invocation_is_low_risk(&tokens),
         "find" => find_invocation_is_read_only(&tokens),
-        "git" => tokens
-            .get(1)
+        "git" => git_effective_subcommand(&tokens)
             .is_some_and(|subcommand| git_subcommand_is_read_only(subcommand, &tokens)),
         "cargo" => tokens
             .get(1)
@@ -121,6 +123,10 @@ fn segment_is_low_risk(segment: &str) -> bool {
     }
 }
 
+fn cd_invocation_is_low_risk(tokens: &[String]) -> bool {
+    matches!(tokens.len(), 1 | 2)
+}
+
 fn find_invocation_is_read_only(tokens: &[String]) -> bool {
     !tokens.iter().any(|token| {
         matches!(
@@ -128,6 +134,37 @@ fn find_invocation_is_read_only(tokens: &[String]) -> bool {
             "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fdelete"
         )
     })
+}
+
+fn git_effective_subcommand(tokens: &[String]) -> Option<&str> {
+    if tokens.first().map(String::as_str) != Some("git") {
+        return None;
+    }
+    let mut index = 1;
+    while index < tokens.len() {
+        let token = tokens[index].as_str();
+        if token == "--version" || token == "version" {
+            return Some("version");
+        }
+        if matches!(token, "--no-pager" | "--paginate" | "--bare") {
+            index += 1;
+            continue;
+        }
+        if matches!(token, "-c" | "--git-dir" | "--work-tree") {
+            index += 2;
+            continue;
+        }
+        if token.starts_with("--git-dir=") || token.starts_with("--work-tree=") {
+            index += 1;
+            continue;
+        }
+        if token.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return Some(token);
+    }
+    None
 }
 
 fn git_subcommand_is_read_only(subcommand: &str, tokens: &[String]) -> bool {
@@ -213,6 +250,7 @@ const LOW_RISK_GIT_SUBCOMMANDS: &[&str] = &[
     "diff",
     "show",
     "branch",
+    "version",
     "rev-parse",
     "ls-files",
     "grep",
@@ -239,6 +277,8 @@ mod tests {
             "date +%Y-%m-%d",
             "pwd",
             "git status --short",
+            "git -C /tmp status --short",
+            "git --no-pager log --oneline -3",
             "git branch --show-current",
             "git remote -v",
             "rg process::run packages/agent/src",
@@ -248,6 +288,8 @@ mod tests {
             "npm list",
             "xcodebuild build-for-testing -scheme Tron",
             "echo hello",
+            "cd /tmp && git status --short && git log --oneline -3",
+            "cd ~/Downloads && pwd",
         ] {
             assert!(
                 !run_requires_approval(&json!({ "command": command })),
@@ -263,6 +305,8 @@ mod tests {
             "rm -rf target",
             "git commit -m test",
             "git reset --hard",
+            "git -C /tmp reset --hard",
+            "cd /tmp && git reset --hard",
             "git branch -D old-work",
             "git remote add origin https://example.invalid/repo.git",
             "npm install left-pad",

@@ -41,8 +41,7 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) spawn_type: String,
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
-    pub(super) capability_policy: crate::shared::profile::CapabilityPolicySpec,
-    pub(super) denied_capabilities: Vec<String>,
+    pub(super) capability_execution_policy: crate::shared::profile::CapabilityExecutionPolicySpec,
     pub(super) engine_host: Option<crate::engine::EngineHostHandle>,
 }
 
@@ -68,7 +67,7 @@ pub(super) struct CapabilityAgentTaskLaunch {
     pub(super) blocking_timeout_ms: Option<u64>,
     pub(super) tracker: Arc<TrackedSubagent>,
     pub(super) cancel: CancellationToken,
-    pub(super) denied_capabilities: Vec<String>,
+    pub(super) denied_contracts: Vec<String>,
     /// Optional weak probe to query whether the parent session has an active
     /// agent run. Used to compute the `notify` field on
     /// `SubagentResultAvailable` (notify=true when parent is idle).
@@ -79,6 +78,17 @@ pub(super) struct CapabilityAgentTaskLaunch {
     >,
     pub(super) spawn_type: String,
     pub(super) engine_host: Option<crate::engine::EngineHostHandle>,
+}
+
+fn capability_execution_policy_with_denials(
+    base: &crate::shared::profile::CapabilityExecutionPolicySpec,
+    denied_contracts: &[String],
+) -> crate::shared::profile::CapabilityExecutionPolicySpec {
+    let mut policy = base.clone();
+    policy
+        .denied_contracts
+        .extend(denied_contracts.iter().cloned());
+    policy
 }
 
 pub(super) fn spawn_subsession_task(params: SubsessionTaskLaunch) {
@@ -154,11 +164,12 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
         CreateAgentOpts {
             provider,
             context_policy: params.process_plan.runtime_context_policy(),
-            capability_policy: params.capability_policy.clone(),
+            primitive_surface_policy: params.process_plan.primitive_surface_policy.clone(),
+            capability_execution_policy: params.capability_execution_policy.clone(),
             guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
-            denied_capabilities: params.denied_capabilities.clone(),
+            denied_primitives: Vec::new(),
             subagent_depth: 0,
             subagent_max_depth: params.subagent_max_depth,
             rules_content: None,
@@ -325,11 +336,15 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
         CreateAgentOpts {
             provider,
             context_policy: params.process_plan.runtime_context_policy(),
-            capability_policy: params.process_plan.capability_policy.clone(),
+            primitive_surface_policy: params.process_plan.primitive_surface_policy.clone(),
+            capability_execution_policy: capability_execution_policy_with_denials(
+                &params.process_plan.capability_execution_policy,
+                &params.denied_contracts,
+            ),
             guardrails: params.guardrails,
             hooks: params.hooks.clone(),
             is_unattended: true,
-            denied_capabilities: params.denied_capabilities,
+            denied_primitives: Vec::new(),
             subagent_depth: params.subagent_depth,
             subagent_max_depth: params.subagent_max_depth,
             rules_content: None,

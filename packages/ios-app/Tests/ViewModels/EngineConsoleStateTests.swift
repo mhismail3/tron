@@ -32,7 +32,8 @@ struct EngineConsoleStateTests {
                     fusedScore: 1,
                     matchedBy: "lexical",
                     snippet: "Read a file",
-                    requiresInspect: true
+                    requiresInspect: true,
+                    recipe: nil
                 )
             ],
             nextCursor: nil,
@@ -199,7 +200,8 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
             profileName: "default",
             profileHash: "hash",
             policyId: policyId,
-            capabilityPolicies: [:]
+            primitiveSurfacePolicies: [:],
+            capabilityExecutionPolicies: [:]
         )
     }
 
@@ -221,6 +223,7 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
             binding: nil,
             bindingDecision: nil,
             inspectionHandle: nil,
+            recipe: nil,
             executionRequirements: nil,
             docs: nil
         )

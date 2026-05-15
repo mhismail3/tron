@@ -22,17 +22,18 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some("process.run"),
         )
-        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands.")
+        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. If cwd is omitted, Tron uses the active session worktree when available, then the session workspace.")
         .tags(vec!["shell", "bash", "zsh", "command", "terminal", "date", "git status", "test", "build", "process"])
         .request_schema(json!({
             "additionalProperties": false,
             "properties": {
-                "command": {"type": "string"},
-                "cwd": {"type": "string"},
+                "command": {"type": "string", "description": "Shell command to run, for example date, git status --short --branch, cargo test, or rg term path."},
+                "cwd": {"type": "string", "description": "Working directory. Omit this to use the active session worktree/workspace. Prefer this field over prefixing commands with cd."},
                 "env": {"additionalProperties": true, "type": "object"},
                 "shell": {"type": "string", "enum": ["bash", "zsh", "sh"]},
                 "stdin": {"type": "string"},
-                "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 600000},
+                "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 600000, "description": "Command timeout in milliseconds."},
+                "timeout": {"type": "integer", "minimum": 1, "maximum": 600000, "description": "Command timeout in milliseconds. Prefer timeoutMs when writing new requests."},
                 "sessionId": {"type": "string"},
                 "workspaceId": {"type": "string"}
             },
@@ -77,6 +78,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "approvalNotRequiredFor": [
                     "read-only inspection commands",
                     "date/time checks",
+                    "read-only git status/log/diff checks, including commands that use cd only to select a directory",
                     "build and test commands without privileged or mutating shell operators"
                 ]
             },
@@ -94,10 +96,16 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .stream_topics(STREAM_TOPICS.to_vec())
         .examples(vec![json!({
             "mode": "invoke",
-            "capabilityId": "process::run",
+            "contractId": "process::run",
             "payload": {"command": "date"},
             "idempotencyKey": "date-check-<turn>",
             "reason": "Check the current local date/time."
+        }), json!({
+            "mode": "invoke",
+            "contractId": "process::run",
+            "payload": {"command": "git status --short --branch && git log --oneline -3"},
+            "idempotencyKey": "git-status-<turn>",
+            "reason": "Check git state in the active session worktree."
         })])
         .build()?,
     ])

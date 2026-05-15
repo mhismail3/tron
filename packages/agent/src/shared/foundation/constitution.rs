@@ -2,9 +2,10 @@
 //!
 //! Normal runtime code reads the five constitutional roots only:
 //! `internal/`, `skills/`, `profiles/`, `memory/`, and `workspace/`.
-//! Managed defaults are repaired from the compiled bundle when they are
-//! missing, malformed, or stale relative to the current strict profile and
-//! context-manifest schemas.
+//! Source-owned managed defaults are refreshed from the compiled bundle when
+//! their content changes. Mutable install records such as the active profile,
+//! auth sentinels, and sparse user profile are only created or repaired when
+//! invalid.
 
 use std::fs;
 use std::io;
@@ -286,7 +287,10 @@ fn recover_managed_defaults(home: &Path, report: &mut SeedReport) -> io::Result<
         let path = home.join(default.relative_path);
         let existed_before = path.exists();
         let should_write = if existed_before {
-            default.repair_if_invalid && !managed_default_valid(&path, default.kind)
+            let invalid = default.repair_if_invalid && !managed_default_valid(&path, default.kind);
+            invalid
+                || (managed_default_is_source_owned(default.relative_path)
+                    && managed_default_content_differs(&path, default.content)?)
         } else {
             true
         };
@@ -301,6 +305,18 @@ fn recover_managed_defaults(home: &Path, report: &mut SeedReport) -> io::Result<
         }
     }
     Ok(())
+}
+
+fn managed_default_is_source_owned(relative_path: &str) -> bool {
+    relative_path.starts_with("profiles/default/")
+        || relative_path.starts_with("profiles/normal/")
+        || relative_path.starts_with("profiles/chat/")
+        || relative_path.starts_with("profiles/local/")
+}
+
+fn managed_default_content_differs(path: &Path, expected: &str) -> io::Result<bool> {
+    let actual = fs::read_to_string(path)?;
+    Ok(actual != expected)
 }
 
 fn write_managed_default(path: &Path, content: &str) -> io::Result<()> {
@@ -576,6 +592,68 @@ mod tests {
         assert!(repaired.contains("capabilities.schemas"));
         assert!(repaired.contains("providerSurface = \"capability\""));
         crate::shared::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
+    }
+
+    #[test]
+    fn seeding_refreshes_source_owned_prompt_defaults_when_content_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        ensure_tron_home_at(&home).unwrap();
+
+        let core_prompt = home
+            .join(dirs::PROFILES)
+            .join(DEFAULT_PROFILE)
+            .join(dirs::PROMPTS)
+            .join("core.md");
+        fs::write(&core_prompt, "old source-owned prompt").unwrap();
+
+        let report = ensure_tron_home_at(&home).unwrap();
+
+        assert!(
+            report.repaired.contains(&core_prompt),
+            "source-owned default prompt should refresh when bundled content changes"
+        );
+        let refreshed = fs::read_to_string(core_prompt).unwrap();
+        assert!(refreshed.contains("search` returns actionable execute recipes"));
+        assert!(refreshed.contains("\"contractId\":\"process::run\""));
+    }
+
+    #[test]
+    fn seeding_does_not_overwrite_mutable_active_auth_or_user_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(".tron");
+        ensure_tron_home_at(&home).unwrap();
+
+        let active = home.join(dirs::PROFILES).join(files::ACTIVE_TOML);
+        fs::write(&active, format!("active = \"{}\"\n", LOCAL_PROFILE)).unwrap();
+        let user_profile = home
+            .join(dirs::PROFILES)
+            .join(USER_PROFILE)
+            .join(files::PROFILE_TOML);
+        fs::write(
+            &user_profile,
+            r#"
+version = "3"
+name = "user"
+inherits = ["default"]
+"#,
+        )
+        .unwrap();
+        let auth = home.join(dirs::PROFILES).join(files::AUTH_JSON);
+        fs::write(&auth, r#"{"profiles":{"local":{"token":"redacted"}}}"#).unwrap();
+
+        let report = ensure_tron_home_at(&home).unwrap();
+
+        assert!(!report.repaired.contains(&active));
+        assert!(!report.repaired.contains(&user_profile));
+        assert!(!report.repaired.contains(&auth));
+        assert_eq!(fs::read_to_string(active).unwrap(), "active = \"local\"\n");
+        assert!(
+            fs::read_to_string(user_profile)
+                .unwrap()
+                .contains("inherits = [\"default\"]")
+        );
+        assert!(fs::read_to_string(auth).unwrap().contains("profiles"));
     }
 
     #[test]

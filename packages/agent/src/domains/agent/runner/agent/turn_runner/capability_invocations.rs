@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use crate::domains::capability_support::implementations::capability_surface::{
-    CapabilitySurfacePolicy, ResolvedCapabilitySurface,
+use crate::domains::capability_support::implementations::primitive_surface::{
+    PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
 };
 use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::shared::events::ActivatedRuleInfo;
@@ -29,8 +29,9 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub turn: u32,
     pub stream_result: &'a StreamResult,
     pub context_manager: &'a mut ContextManager,
-    pub capability_surface: &'a ResolvedCapabilitySurface,
-    pub capability_policy: &'a CapabilitySurfacePolicy,
+    pub primitive_surface: &'a ResolvedCapabilitySurface,
+    pub primitive_surface_policy: &'a PrimitiveSurfacePolicy,
+    pub capability_execution_policy: &'a crate::shared::profile::CapabilityExecutionPolicySpec,
     pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
     pub hooks: &'a Option<Arc<HookEngine>>,
     pub compaction: &'a CompactionHandler,
@@ -77,11 +78,11 @@ pub(super) struct CapabilityInvocationPhaseOutcome {
 
 fn target_identity_json(
     model_primitive_name: &str,
-    capability_surface: &ResolvedCapabilitySurface,
+    primitive_surface: &ResolvedCapabilitySurface,
     trace_id: Option<&crate::engine::TraceId>,
     parent_invocation_id: Option<&crate::engine::InvocationId>,
 ) -> Value {
-    let Some(target) = capability_surface.targets_by_name.get(model_primitive_name) else {
+    let Some(target) = primitive_surface.targets_by_name.get(model_primitive_name) else {
         return json!({ "modelPrimitiveName": model_primitive_name });
     };
     let function = &target.function;
@@ -104,7 +105,7 @@ fn target_identity_json(
         "functionId": function_id,
         "pluginId": metadata_string("pluginId"),
         "workerId": function.owner_worker.as_str(),
-        "catalogRevision": capability_surface.catalog_revision.0,
+        "catalogRevision": primitive_surface.catalog_revision.0,
         "trustTier": metadata_string("trustTier"),
         "riskLevel": format!("{:?}", function.risk_level),
         "effectClass": format!("{:?}", function.effect_class),
@@ -190,13 +191,13 @@ pub(super) async fn execute_capability_invocation_phase(
                 "runId": params.run_id,
                 "traceId": params.trace_id.map(|id| id.as_str()),
                 "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                "catalogRevision": params.capability_surface.catalog_revision.0,
+                "catalogRevision": params.primitive_surface.catalog_revision.0,
             });
             if let (Some(payload), Some(identity)) = (
                 payload.as_object_mut(),
                 target_identity_json(
                     &capability_invocation.name,
-                    params.capability_surface,
+                    params.primitive_surface,
                     params.trace_id,
                     params.parent_invocation_id,
                 )
@@ -245,7 +246,7 @@ pub(super) async fn execute_capability_invocation_phase(
 
     let waves = build_execution_waves(
         &params.stream_result.capability_invocations,
-        params.capability_surface,
+        params.primitive_surface,
     );
     let mut results: Vec<Option<CapabilityInvocationExecutionResult>> =
         vec![None; params.stream_result.capability_invocations.len()];
@@ -262,8 +263,9 @@ pub(super) async fn execute_capability_invocation_phase(
                 let working_dir = &working_dir;
                 let capability_ctx =
                     capability_invocation_executor::CapabilityInvocationExecutionContext {
-                        capability_surface: params.capability_surface,
-                        capability_policy: params.capability_policy,
+                        primitive_surface: params.primitive_surface,
+                        primitive_surface_policy: params.primitive_surface_policy,
+                        capability_execution_policy: params.capability_execution_policy,
                         guardrails: params.guardrails,
                         hooks: params.hooks,
                         emitter: params.emitter,
@@ -317,7 +319,7 @@ pub(super) async fn execute_capability_invocation_phase(
                             .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                         let base_identity = target_identity_json(
                             &capability_invocation.name,
-                            params.capability_surface,
+                            params.primitive_surface,
                             params.trace_id,
                             params.parent_invocation_id,
                         );
@@ -331,7 +333,7 @@ pub(super) async fn execute_capability_invocation_phase(
                             "runId": params.run_id,
                             "traceId": params.trace_id.map(|id| id.as_str()),
                             "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                            "catalogRevision": params.capability_surface.catalog_revision.0,
+                            "catalogRevision": params.primitive_surface.catalog_revision.0,
                         });
                         if let (Some(payload), Some(identity)) = (
                             payload.as_object_mut(),
@@ -459,12 +461,12 @@ async fn process_capability_results(
 /// - Returns `Vec<Vec<usize>>` where each inner vec is indices into `capability_invocations`
 pub(super) fn build_execution_waves(
     capability_invocations: &[crate::shared::messages::CapabilityInvocationDraft],
-    capability_surface: &ResolvedCapabilitySurface,
+    primitive_surface: &ResolvedCapabilitySurface,
 ) -> Vec<Vec<usize>> {
     let modes: Vec<_> = capability_invocations
         .iter()
         .map(|tc| {
-            capability_surface
+            primitive_surface
                 .targets_by_name
                 .get(&tc.name)
                 .map_or(ExecutionMode::Parallel, |target| {

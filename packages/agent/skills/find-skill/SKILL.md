@@ -3,7 +3,7 @@ name: "Find Skill"
 description: "Search online skill repositories, evaluate candidates, and install the best match into Tron's global skills directory"
 version: "1.0.0"
 tags: [skills, discovery, install, package-manager]
-deniedCapabilities: [agent::spawn_subagent]
+deniedContracts: [agent::spawn_subagent]
 ---
 
 # Find Skill — Skill Discovery & Installation

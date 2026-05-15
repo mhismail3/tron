@@ -277,8 +277,14 @@ fn readme_does_not_advertise_removed_or_fictional_contracts() {
 fn managed_skills_use_capability_native_references() {
     let skills_root = repo_root().join("packages").join("agent").join("skills");
     let forbidden = [
-        ("allowedTools", "use allowedCapabilities frontmatter"),
-        ("deniedTools", "use deniedCapabilities frontmatter"),
+        (
+            concat!("allowed", "Tools"),
+            "use allowedContracts frontmatter",
+        ),
+        (
+            concat!("denied", "Tools"),
+            "use deniedContracts frontmatter",
+        ),
         ("AskUserQuestion", "use agent::ask_user"),
         ("NotifyApp", "use notifications::send"),
         ("WebFetch", "use web::fetch"),

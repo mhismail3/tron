@@ -308,7 +308,7 @@ final class CapabilityClient: EngineDomainClient {
     }
 
     func validatePolicy(
-        _ policy: CapabilityPolicyDTO,
+        _ policy: CapabilityExecutionPolicyDTO,
         policyId: String? = nil
     ) async throws -> CapabilityPolicyValidationDTO {
         _ = try requireTransport().requireConnection()
@@ -321,7 +321,7 @@ final class CapabilityClient: EngineDomainClient {
 
     func updatePolicy(
         policyId: String,
-        policy: CapabilityPolicyDTO,
+        policy: CapabilityExecutionPolicyDTO,
         reason: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> AnyCodable {
@@ -376,7 +376,9 @@ final class CapabilityClient: EngineDomainClient {
             "capability.search",
             "capability.inspect",
             "capability.execute",
-            "capability.allow:program::run_javascript"
+            "contract.allow:program::run_javascript",
+            "implementation.allow:*",
+            "plugin.allow:*"
         ])
     }
 
@@ -501,11 +503,11 @@ private struct PolicyGetParams: Encodable { let policyId: String? }
 
 private struct PolicyValidateParams: Encodable {
     let policyId: String?
-    let policy: CapabilityPolicyDTO
+    let policy: CapabilityExecutionPolicyDTO
 }
 
 private struct PolicyUpdateParams: Encodable {
     let policyId: String
-    let policy: CapabilityPolicyDTO
+    let policy: CapabilityExecutionPolicyDTO
     let reason: String?
 }

@@ -470,7 +470,7 @@ authProfile = "default"
         std::fs::create_dir_all(managed_profile.parent().unwrap()).unwrap();
         std::fs::write(
             &managed_profile,
-            r#"version = "2"
+            r#"version = "3"
 name = "managed"
 managed = false
 profileClass = "custom"

@@ -222,7 +222,7 @@ known first-party capability is missing from the primer.
 | Write or edit a file | inspect if needed → `execute` → `filesystem::write_file` / `filesystem::edit_file` / `filesystem::apply_patch` | `echo >`, `cat <<EOF`, `sed -i` |
 | List/find files | `execute` → `filesystem::list_dir` / `filesystem::find` / `filesystem::glob` | guessed shell commands |
 | Search file contents | `execute` → `filesystem::search_text` | raw `grep`/`rg` unless no capability exists |
-| Shell/system command | `execute` → `process::run` with `payload.command` | rediscovering common process capability routes |
+| Shell/system command | `execute` → `process::run` with `payload.command`; use `payload.cwd` only when you need a directory other than the active session worktree | rediscovering common process capability routes |
 | Current date/time | `execute` → `process::run` with `command: "date"` | searching for a date capability |
 | Fetch a URL | `execute` → `web::fetch` | `curl` |
 | Web search | `execute` → `web::search` | — |
@@ -234,16 +234,19 @@ known first-party capability is missing from the primer.
 
 Tron is an engine of canonical worker functions. For any task about Tron engine capabilities, workers, streams, queues, sandbox workers, observability, or live discovery:
 - Use `search` to find visible contracts and implementations when the contract is not already primed. Query terms are enough: for example `sandbox spawn worker`.
+- `search` returns actionable execute recipes for top matches: when to use the capability, required payload fields, a copyable `execute` template, approval/lifecycle behavior, and result expectations. Use that recipe directly instead of guessing payload keys.
 - Use `inspect` before invoking mutating, external, medium/high-risk, plugin, MCP/OpenAPI, or unfamiliar capabilities. Its output is the current contract: required payload fields, authority, idempotency, approval, leases, compensation, streams, response schema, selected implementation, and expected revision.
-- Use `execute` to invoke a canonical function or selected implementation. Mutating/elevated-risk calls need the inspected `expectedRevision`; mutating calls also need stable idempotency.
+- Use `execute` to invoke a canonical function or selected implementation. Mutating/elevated-risk calls need the inspected `expectedRevision`; mutating calls also need stable idempotency. Low-risk first-party reads/checks such as `process::run` date, pwd, git status/log/diff/show, filesystem reads, search, and notifications are direct.
 - To create or register a new local capability, search/inspect/execute `worker::protocol_guide` first. It returns the current `/engine/workers` message flow and a worker template. Then create the worker script, execute `sandbox::spawn_worker`, search or inspect the catalog revision, invoke the new canonical function through `execute`, and stop it with `sandbox::stop_spawned_worker`.
 - Filesystem, shell, web, MCP, iOS/app, display, notification, and subagent actions are worker-owned capabilities. Treat them as live plugin implementations, not hardcoded built-ins.
 
 Common direct `execute` patterns:
-- Shell command: `{"mode":"invoke","capabilityId":"process::run","payload":{"command":"date"},"reason":"Check current date."}`
-- Read file: `{"mode":"invoke","capabilityId":"filesystem::read_file","payload":{"path":"README.md"},"reason":"Read project overview."}`
-- Search text: `{"mode":"invoke","capabilityId":"filesystem::search_text","payload":{"path":".","pattern":"term","maxResults":20},"reason":"Find matching code."}`
-- Send notification: `{"mode":"invoke","capabilityId":"notifications::send","payload":{"title":"Done","body":"Task finished."},"reason":"Notify the user."}`
+- Shell command: `{"mode":"invoke","contractId":"process::run","payload":{"command":"date"},"reason":"Check current date."}`
+- Shell in the active session worktree: `{"mode":"invoke","contractId":"process::run","payload":{"command":"git status --short --branch && git log --oneline -3"},"reason":"Check git state."}`
+- Shell in a specific directory: `{"mode":"invoke","contractId":"process::run","payload":{"command":"pwd && git status --short","cwd":"/path/to/repo","timeoutMs":60000},"reason":"Check a repo."}`. Prefer `payload.cwd` over prefixing the command with `cd`.
+- Read file: `{"mode":"invoke","contractId":"filesystem::read_file","payload":{"path":"README.md"},"reason":"Read project overview."}`
+- Search text: `{"mode":"invoke","contractId":"filesystem::search_text","payload":{"path":".","pattern":"term","maxResults":20},"reason":"Find matching code."}`
+- Send notification: `{"mode":"invoke","contractId":"notifications::send","payload":{"title":"Done","body":"Task finished."},"reason":"Notify the user."}`
 
 Search and inspect support batching. Use `queries` for several related searches
 or `targets` for several known contracts so discovery does not become serial

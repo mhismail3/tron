@@ -20,9 +20,15 @@ use crate::engine::{
 use crate::shared::messages::Provider;
 use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
-const CAPABILITY_SURFACE_GRANT: &str = "agent-capability-surface";
-pub(crate) const CAPABILITY_ALLOW_SCOPE_PREFIX: &str = "capability.allow:";
-pub(crate) const CAPABILITY_DENY_SCOPE_PREFIX: &str = "capability.deny:";
+const PRIMITIVE_SURFACE_GRANT: &str = "agent-primitive-surface";
+pub(crate) const PRIMITIVE_ALLOW_SCOPE_PREFIX: &str = "primitive.allow:";
+pub(crate) const PRIMITIVE_DENY_SCOPE_PREFIX: &str = "primitive.deny:";
+pub(crate) const CONTRACT_ALLOW_SCOPE_PREFIX: &str = "contract.allow:";
+pub(crate) const CONTRACT_DENY_SCOPE_PREFIX: &str = "contract.deny:";
+pub(crate) const IMPLEMENTATION_ALLOW_SCOPE_PREFIX: &str = "implementation.allow:";
+pub(crate) const IMPLEMENTATION_DENY_SCOPE_PREFIX: &str = "implementation.deny:";
+pub(crate) const PLUGIN_ALLOW_SCOPE_PREFIX: &str = "plugin.allow:";
+pub(crate) const PLUGIN_DENY_SCOPE_PREFIX: &str = "plugin.deny:";
 
 /// One live model-facing capability resolved from the engine catalog.
 #[derive(Clone, Debug)]
@@ -41,84 +47,126 @@ pub struct EngineCapabilityTarget {
     pub execution_mode: ExecutionMode,
 }
 
-/// Profile/session policy applied to the live capability catalog before a provider
-/// request is sent and again at the execution boundary.
+/// Profile/session policy applied to the provider-facing primitive surface before
+/// a provider request is sent and again at the primitive execution boundary.
 #[derive(Clone, Debug, Default)]
-pub struct CapabilitySurfacePolicy {
-    pub allowed_capabilities: Option<BTreeSet<String>>,
-    pub denied_capabilities: BTreeSet<String>,
+pub struct PrimitiveSurfacePolicy {
+    pub allowed_primitives: Option<BTreeSet<String>>,
+    pub denied_primitives: BTreeSet<String>,
     pub expose_interactive_capabilities: bool,
-    pub remove_spawn_capabilities_at_max_depth: bool,
+    pub remove_spawn_at_max_depth: bool,
     pub is_unattended: bool,
     pub subagent_max_depth: u32,
 }
 
-impl CapabilitySurfacePolicy {
+impl PrimitiveSurfacePolicy {
     pub(crate) fn from_profile(
-        policy: &crate::shared::profile::CapabilityPolicySpec,
+        policy: &crate::shared::profile::PrimitiveSurfacePolicySpec,
         explicit_denied: &[String],
         is_unattended: bool,
         subagent_max_depth: u32,
     ) -> Self {
-        let mut denied_capabilities = policy
-            .denied_capabilities
+        let mut denied_primitives = policy
+            .denied_primitives
             .iter()
             .cloned()
             .collect::<BTreeSet<_>>();
-        denied_capabilities.extend(explicit_denied.iter().cloned());
+        denied_primitives.extend(explicit_denied.iter().cloned());
         Self {
-            allowed_capabilities: policy
-                .allowed_capabilities
+            allowed_primitives: policy
+                .allowed_primitives
                 .as_ref()
-                .map(|capabilities| capabilities.iter().cloned().collect()),
-            denied_capabilities,
+                .map(|primitives| primitives.iter().cloned().collect()),
+            denied_primitives,
             expose_interactive_capabilities: policy
                 .expose_interactive_capabilities
                 .unwrap_or(false),
-            remove_spawn_capabilities_at_max_depth: policy
-                .remove_spawn_capabilities_at_max_depth
-                .unwrap_or(true),
+            remove_spawn_at_max_depth: policy.remove_spawn_at_max_depth.unwrap_or(true),
             is_unattended,
             subagent_max_depth,
         }
     }
 
-    pub(crate) fn execution_policy_scopes(&self) -> Vec<String> {
+    pub(crate) fn primitive_policy_scopes(&self) -> Vec<String> {
         let mut scopes = Vec::new();
-        match &self.allowed_capabilities {
+        match &self.allowed_primitives {
             Some(allowed) => {
                 scopes.extend(
                     allowed
                         .iter()
-                        .map(|capability| format!("{CAPABILITY_ALLOW_SCOPE_PREFIX}{capability}")),
+                        .map(|primitive| format!("{PRIMITIVE_ALLOW_SCOPE_PREFIX}{primitive}")),
                 );
             }
-            None => scopes.push(format!("{CAPABILITY_ALLOW_SCOPE_PREFIX}*")),
+            None => scopes.push(format!("{PRIMITIVE_ALLOW_SCOPE_PREFIX}*")),
         }
         scopes.extend(
-            self.denied_capabilities
+            self.denied_primitives
                 .iter()
-                .map(|capability| format!("{CAPABILITY_DENY_SCOPE_PREFIX}{capability}")),
+                .map(|primitive| format!("{PRIMITIVE_DENY_SCOPE_PREFIX}{primitive}")),
         );
         scopes
     }
 
     fn allows(&self, target: &EngineCapabilityTarget) -> bool {
-        if let Some(allowed) = &self.allowed_capabilities
+        if let Some(allowed) = &self.allowed_primitives
             && !allowed.contains(&target.model_capability_id)
         {
             return false;
         }
-        if self
-            .denied_capabilities
-            .contains(&target.model_capability_id)
-        {
+        if self.denied_primitives.contains(&target.model_capability_id) {
             return false;
         }
         if self.is_unattended && target.is_interactive && !self.expose_interactive_capabilities {
             return false;
         }
         true
+    }
+}
+
+pub(crate) fn capability_execution_policy_scopes(
+    policy: &crate::shared::profile::CapabilityExecutionPolicySpec,
+) -> Vec<String> {
+    let mut scopes = Vec::new();
+    push_policy_scopes(
+        &mut scopes,
+        CONTRACT_ALLOW_SCOPE_PREFIX,
+        policy.allowed_contracts.as_deref(),
+    );
+    push_policy_scopes(
+        &mut scopes,
+        IMPLEMENTATION_ALLOW_SCOPE_PREFIX,
+        policy.allowed_implementations.as_deref(),
+    );
+    push_policy_scopes(
+        &mut scopes,
+        PLUGIN_ALLOW_SCOPE_PREFIX,
+        policy.allowed_plugins.as_deref(),
+    );
+    scopes.extend(
+        policy
+            .denied_contracts
+            .iter()
+            .map(|contract| format!("{CONTRACT_DENY_SCOPE_PREFIX}{contract}")),
+    );
+    scopes.extend(
+        policy
+            .denied_implementations
+            .iter()
+            .map(|implementation| format!("{IMPLEMENTATION_DENY_SCOPE_PREFIX}{implementation}")),
+    );
+    scopes.extend(
+        policy
+            .denied_plugins
+            .iter()
+            .map(|plugin| format!("{PLUGIN_DENY_SCOPE_PREFIX}{plugin}")),
+    );
+    scopes
+}
+
+fn push_policy_scopes(scopes: &mut Vec<String>, prefix: &str, allowed: Option<&[String]>) {
+    match allowed {
+        Some(values) => scopes.extend(values.iter().map(|value| format!("{prefix}{value}"))),
+        None => scopes.push(format!("{prefix}*")),
     }
 }
 
@@ -139,18 +187,18 @@ pub(crate) async fn resolve_provider_capabilities(
     workspace_id: Option<&str>,
     provider: Provider,
     context_policy: &ContextPolicy,
-    capability_policy: &CapabilitySurfacePolicy,
+    primitive_surface_policy: &PrimitiveSurfacePolicy,
 ) -> Result<ResolvedCapabilitySurface, String> {
     let resolved =
         resolve_capability_targets_with_lifecycle(host, session_id, workspace_id).await?;
     let targets = resolved.targets;
-    let local_filter = context_policy.capability_filter();
+    let local_filter = context_policy.primitive_filter();
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
     let mut all_model_capability_ids = Vec::new();
     let mut turn_stopping_capabilities = resolved.turn_stopping_capabilities;
     for target in targets {
-        if !capability_policy.allows(&target) {
+        if !primitive_surface_policy.allows(&target) {
             continue;
         }
         if let Some(filter) = local_filter.as_ref()
@@ -241,7 +289,7 @@ async fn resolve_capability_targets_with_lifecycle(
     session_id: &str,
     workspace_id: Option<&str>,
 ) -> Result<ResolvedCapabilityTargets, String> {
-    let actor = capability_surface_actor(session_id, workspace_id)?;
+    let actor = primitive_surface_actor(session_id, workspace_id)?;
     let mut functions = host
         .discover(&FunctionQuery {
             actor: Some(actor),
@@ -302,14 +350,14 @@ async fn resolve_capability_targets_with_lifecycle(
     })
 }
 
-fn capability_surface_actor(
+fn primitive_surface_actor(
     session_id: &str,
     workspace_id: Option<&str>,
 ) -> Result<ActorContext, String> {
     let mut actor = ActorContext::new(
         ActorId::new(format!("agent:{session_id}")).map_err(|error| error.to_string())?,
         ActorKind::Agent,
-        AuthorityGrantId::new(CAPABILITY_SURFACE_GRANT).map_err(|error| error.to_string())?,
+        AuthorityGrantId::new(PRIMITIVE_SURFACE_GRANT).map_err(|error| error.to_string())?,
     )
     .with_scope("capability.search")
     .with_scope("capability.inspect")
@@ -502,6 +550,7 @@ mod tests {
             "default",
             crate::shared::profile::ContextPolicySpec::default(),
             None,
+            None,
             false,
         );
         let surface = resolve_provider_capabilities(
@@ -510,7 +559,7 @@ mod tests {
             None,
             crate::shared::messages::Provider::Anthropic,
             &context_policy,
-            &CapabilitySurfacePolicy::default(),
+            &PrimitiveSurfacePolicy::default(),
         )
         .await
         .expect("surface");

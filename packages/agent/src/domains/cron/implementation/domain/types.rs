@@ -247,33 +247,18 @@ impl MisfirePolicy {
 pub struct CapabilityRestrictions {
     /// If set, ONLY these capabilities are available (allowlist).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed_capabilities: Option<Vec<String>>,
+    pub allowed_contracts: Option<Vec<String>>,
 }
 
 impl CapabilityRestrictions {
     /// Check if a capability name is allowed under these restrictions.
     ///
     /// - `None` / empty → all allowed
-    /// - `allowed_capabilities` set → only those names are allowed
-    pub fn is_capability_allowed(&self, name: &str) -> bool {
-        match &self.allowed_capabilities {
+    /// - `allowed_contracts` set → only those names are allowed
+    pub fn is_contract_allowed(&self, name: &str) -> bool {
+        match &self.allowed_contracts {
             Some(allowed) if !allowed.is_empty() => allowed.iter().any(|t| t == name),
             _ => true,
-        }
-    }
-
-    /// Convert to a denied-capabilities list for `CreateAgentOpts`.
-    ///
-    /// Inverts the allow-list: everything in `all_model_primitive_names` NOT in `allowed_capabilities`
-    /// becomes denied. Returns empty vec if no restrictions.
-    pub fn to_denied_list(&self, all_model_primitive_names: &[String]) -> Vec<String> {
-        match &self.allowed_capabilities {
-            Some(allowed) if !allowed.is_empty() => all_model_primitive_names
-                .iter()
-                .filter(|name| !allowed.iter().any(|a| a == *name))
-                .cloned()
-                .collect(),
-            _ => Vec::new(),
         }
     }
 }
@@ -808,7 +793,10 @@ mod tests {
     #[test]
     fn capability_restrictions_serde_roundtrip_allowed() {
         let tr = CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["filesystem::read_file".into(), "Grep".into()]),
+            allowed_contracts: Some(vec![
+                "filesystem::read_file".into(),
+                "filesystem::search_text".into(),
+            ]),
         };
         let json = serde_json::to_string(&tr).unwrap();
         let back: CapabilityRestrictions = serde_json::from_str(&json).unwrap();
@@ -825,15 +813,15 @@ mod tests {
     #[test]
     fn capability_restrictions_default_is_empty() {
         let tr = CapabilityRestrictions::default();
-        assert!(tr.allowed_capabilities.is_none());
+        assert!(tr.allowed_contracts.is_none());
     }
 
     #[test]
     fn capability_restrictions_serde_rejects_unknown_fields() {
-        let json = r#"{"deniedCapabilities": ["process::run"], "allowedCapabilities": ["filesystem::read_file"]}"#;
+        let json = r#"{"deniedContracts": ["process::run"], "allowedContracts": ["filesystem::read_file"]}"#;
         assert!(serde_json::from_str::<CapabilityRestrictions>(json).is_err());
 
-        let json = r#"{"deniedCapabilities": ["process::run"]}"#;
+        let json = r#"{"deniedContracts": ["process::run"]}"#;
         assert!(serde_json::from_str::<CapabilityRestrictions>(json).is_err());
 
         let json = r#"{"unknownField": true}"#;
@@ -841,74 +829,39 @@ mod tests {
     }
 
     #[test]
-    fn capability_restrictions_is_capability_allowed_no_restrictions() {
+    fn capability_restrictions_is_contract_allowed_no_restrictions() {
         let tr = CapabilityRestrictions::default();
-        assert!(tr.is_capability_allowed("process::run"));
-        assert!(tr.is_capability_allowed("ShellCommand"));
+        assert!(tr.is_contract_allowed("process::run"));
+        assert!(tr.is_contract_allowed("ShellCommand"));
     }
 
     #[test]
-    fn capability_restrictions_is_capability_allowed_allowed() {
+    fn capability_restrictions_is_contract_allowed_allowed() {
         let tr = CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["filesystem::read_file".into(), "Grep".into()]),
+            allowed_contracts: Some(vec![
+                "filesystem::read_file".into(),
+                "filesystem::search_text".into(),
+            ]),
         };
-        assert!(tr.is_capability_allowed("filesystem::read_file"));
-        assert!(tr.is_capability_allowed("Grep"));
+        assert!(tr.is_contract_allowed("filesystem::read_file"));
+        assert!(tr.is_contract_allowed("filesystem::search_text"));
     }
 
     #[test]
-    fn capability_restrictions_is_capability_allowed_not_in_allowed() {
+    fn capability_restrictions_is_contract_allowed_not_in_allowed() {
         let tr = CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
+            allowed_contracts: Some(vec!["filesystem::read_file".into()]),
         };
-        assert!(!tr.is_capability_allowed("process::run"));
-        assert!(!tr.is_capability_allowed("filesystem::write_file"));
+        assert!(!tr.is_contract_allowed("process::run"));
+        assert!(!tr.is_contract_allowed("filesystem::write_file"));
     }
 
     #[test]
-    fn capability_restrictions_is_capability_allowed_empty_allowed() {
+    fn capability_restrictions_is_contract_allowed_empty_allowed() {
         let tr = CapabilityRestrictions {
-            allowed_capabilities: Some(vec![]),
+            allowed_contracts: Some(vec![]),
         };
-        assert!(tr.is_capability_allowed("process::run"));
-    }
-
-    #[test]
-    fn capability_restrictions_to_denied_list_from_allowed() {
-        let tr = CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
-        };
-        let all = vec![
-            "process::run".into(),
-            "filesystem::write_file".into(),
-            "filesystem::read_file".into(),
-            "Grep".into(),
-        ];
-        let denied = tr.to_denied_list(&all);
-        assert_eq!(
-            denied,
-            vec![
-                "process::run".to_string(),
-                "filesystem::write_file".to_string(),
-                "Grep".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn capability_restrictions_to_denied_list_none() {
-        let tr = CapabilityRestrictions::default();
-        let all = vec!["process::run".into(), "filesystem::read_file".into()];
-        assert!(tr.to_denied_list(&all).is_empty());
-    }
-
-    #[test]
-    fn capability_restrictions_to_denied_list_empty_allowed() {
-        let tr = CapabilityRestrictions {
-            allowed_capabilities: Some(vec![]),
-        };
-        let all = vec!["process::run".into(), "filesystem::read_file".into()];
-        assert!(tr.to_denied_list(&all).is_empty());
+        assert!(tr.is_contract_allowed("process::run"));
     }
 
     #[test]
@@ -936,7 +889,7 @@ mod tests {
             stuck_timeout_secs: 7200,
             tags: vec![],
             capability_restrictions: Some(CapabilityRestrictions {
-                allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
+                allowed_contracts: Some(vec!["filesystem::read_file".into()]),
             }),
             workspace_id: None,
             created_at: now,
@@ -948,7 +901,7 @@ mod tests {
         assert!(back.capability_restrictions.is_some());
         let tr = back.capability_restrictions.unwrap();
         assert_eq!(
-            tr.allowed_capabilities,
+            tr.allowed_contracts,
             Some(vec!["filesystem::read_file".to_string()])
         );
     }

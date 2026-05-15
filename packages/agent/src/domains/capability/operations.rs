@@ -21,8 +21,12 @@ use super::registry::{
     u64_field,
 };
 use super::types::{
-    CapabilityBindingDecision, CapabilityExecutionRecord, CapabilityIndexStatus,
-    CapabilityPluginManifest, CapabilityRejectedCandidate,
+    CapabilityBindingDecision, CapabilityExecutionRecord, CapabilityIndexHit,
+    CapabilityIndexStatus, CapabilityPluginManifest, CapabilityRejectedCandidate,
+};
+use crate::domains::capability_support::implementations::primitive_surface::{
+    CONTRACT_ALLOW_SCOPE_PREFIX, CONTRACT_DENY_SCOPE_PREFIX, IMPLEMENTATION_ALLOW_SCOPE_PREFIX,
+    IMPLEMENTATION_DENY_SCOPE_PREFIX, PLUGIN_ALLOW_SCOPE_PREFIX, PLUGIN_DENY_SCOPE_PREFIX,
 };
 use crate::engine::{
     ActorContext, ActorKind, ApprovalStatus, AuthorityGrantId, CausalContext, DeliveryMode,
@@ -32,15 +36,13 @@ use crate::engine::{
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::paths::files;
-use crate::shared::profile::CapabilityPolicySpec;
+use crate::shared::profile::CapabilityExecutionPolicySpec;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
 
 const DEFAULT_LIMIT: usize = 12;
 const MAX_LIMIT: usize = 50;
-const CAPABILITY_ALLOW_SCOPE_PREFIX: &str = "capability.allow:";
-const CAPABILITY_DENY_SCOPE_PREFIX: &str = "capability.deny:";
 static LAST_VECTOR_WARMUP_REVISION: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) async fn search_value(
@@ -211,11 +213,11 @@ fn render_search_result_value(
             .skip(cursor_offset)
             .take(limit)
             .collect::<Vec<_>>();
+        let summary = render_search_summary(&query, &page_hits);
         let results =
             serde_json::to_value(&page_hits).map_err(|error| CapabilityError::Internal {
                 message: error.to_string(),
             })?;
-        let summary = render_search_summary(&query, &results);
         return capability_result_value(CapabilityResult {
             content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(summary)]),
             details: Some(json!({
@@ -245,11 +247,14 @@ fn render_search_result_value(
             .take(limit)
             .collect::<Vec<_>>();
         let result_count = page_hits.len();
+        let query_summary = render_search_summary(&query, &page_hits);
         let results =
             serde_json::to_value(&page_hits).map_err(|error| CapabilityError::Internal {
                 message: error.to_string(),
             })?;
-        summary_lines.push(format!("'{query}': {result_count} result(s)"));
+        summary_lines.push(format!(
+            "## Query: {query}\n{query_summary}\n({result_count} result(s))"
+        ));
         batch_results.push(json!({
             "query": query,
             "results": results,
@@ -259,8 +264,8 @@ fn render_search_result_value(
     }
     capability_result_value(CapabilityResult {
         content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
-            "Capability batch search completed: {}.",
-            summary_lines.join("; ")
+            "Capability batch search completed.\n\n{}",
+            summary_lines.join("\n\n")
         ))]),
         details: Some(json!({
             "queries": batch_results,
@@ -908,17 +913,18 @@ pub(crate) async fn policy_get_value(
     let current = deps.profile_runtime.current();
     let document = current.execution_spec().document();
     let policies = if let Some(policy_id) = &policy_id {
-        let policy = document.capability_policies.get(policy_id).ok_or_else(|| {
-            CapabilityError::NotFound {
+        let policy = document
+            .capability_execution_policies
+            .get(policy_id)
+            .ok_or_else(|| CapabilityError::NotFound {
                 code: "CAPABILITY_POLICY_NOT_FOUND".to_owned(),
                 message: format!("Capability policy '{policy_id}' was not found"),
-            }
-        })?;
+            })?;
         json!({ policy_id: policy })
     } else {
-        serde_json::to_value(&document.capability_policies).map_err(|error| {
+        serde_json::to_value(&document.capability_execution_policies).map_err(|error| {
             CapabilityError::Internal {
-                message: format!("serialize capability policies: {error}"),
+                message: format!("serialize capability execution policies: {error}"),
             }
         })?
     };
@@ -926,7 +932,7 @@ pub(crate) async fn policy_get_value(
         "profileName": current.profile_name(),
         "profileHash": current.spec_hash(),
         "policyId": policy_id,
-        "capabilityPolicies": policies,
+        "capabilityExecutionPolicies": policies,
     });
     record_admin_audit(deps, invocation, "capability.policy_get", result.clone()).await?;
     Ok(result)
@@ -941,7 +947,7 @@ pub(crate) async fn policy_validate_value(
             message: "policy is required".to_owned(),
         }
     })?;
-    let validation = validate_capability_policy_payload(raw_policy);
+    let validation = validate_capability_execution_policy_payload(raw_policy);
     record_admin_audit(
         deps,
         invocation,
@@ -966,15 +972,15 @@ pub(crate) async fn policy_update_value(
             message: "policy is required".to_owned(),
         }
     })?;
-    let policy: CapabilityPolicySpec =
+    let policy: CapabilityExecutionPolicySpec =
         serde_json::from_value(raw_policy).map_err(|error| CapabilityError::InvalidParams {
-            message: format!("Invalid capability policy: {error}"),
+            message: format!("Invalid capability execution policy: {error}"),
         })?;
     let runtime = deps.profile_runtime.clone();
     let path = current_profile_toml_path(deps);
     let policy_id_for_write = policy_id.clone();
     let result = run_blocking_task("capability.policy_update", move || {
-        write_capability_policy_to_profile_and_reload(
+        write_capability_execution_policy_to_profile_and_reload(
             &path,
             &policy_id_for_write,
             &policy,
@@ -1123,12 +1129,12 @@ async fn execute_invoke_value(
         .get("payload")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    validate_target_payload(&function, &payload)?;
+    validate_target_payload(&target.entry, &payload)?;
     let idempotency_key = child_idempotency_key(
         invocation,
         &function,
         &payload,
-        function.effect_class.is_mutating(),
+        child_idempotency_required(&function, &payload),
     )?;
     let mut causal_context = CausalContext::new(
         invocation.causal_context.actor_id.clone(),
@@ -2278,8 +2284,8 @@ fn ensure_claim_covers_id(
     })
 }
 
-fn validate_capability_policy_payload(raw_policy: Value) -> Value {
-    match serde_json::from_value::<CapabilityPolicySpec>(raw_policy) {
+fn validate_capability_execution_policy_payload(raw_policy: Value) -> Value {
+    match serde_json::from_value::<CapabilityExecutionPolicySpec>(raw_policy) {
         Ok(policy) => json!({
             "valid": true,
             "policy": policy,
@@ -2313,16 +2319,16 @@ fn current_profile_toml_path(deps: &Deps) -> PathBuf {
         .join(files::PROFILE_TOML)
 }
 
-fn write_capability_policy_to_profile_and_reload(
+fn write_capability_execution_policy_to_profile_and_reload(
     path: &Path,
     policy_id: &str,
-    policy: &CapabilityPolicySpec,
+    policy: &CapabilityExecutionPolicySpec,
     runtime: &crate::domains::agent::runner::profile_runtime::ProfileRuntime,
 ) -> Result<(), CapabilityError> {
     let previous = fs::read_to_string(path).map_err(|error| CapabilityError::Internal {
         message: format!("read profile TOML {}: {error}", path.display()),
     })?;
-    write_capability_policy_to_profile_inner(path, policy_id, policy, &previous)?;
+    write_capability_execution_policy_to_profile_inner(path, policy_id, policy, &previous)?;
     if let Err(error) = runtime.reload_now("capability::policy_update") {
         atomic_write(path, previous.as_bytes())?;
         let _ = runtime.reload_now("capability::policy_update.rollback");
@@ -2335,10 +2341,10 @@ fn write_capability_policy_to_profile_and_reload(
     Ok(())
 }
 
-fn write_capability_policy_to_profile_inner(
+fn write_capability_execution_policy_to_profile_inner(
     path: &Path,
     policy_id: &str,
-    policy: &CapabilityPolicySpec,
+    policy: &CapabilityExecutionPolicySpec,
     previous: &str,
 ) -> Result<(), CapabilityError> {
     let mut value: toml::Value =
@@ -2351,16 +2357,16 @@ fn write_capability_policy_to_profile_inner(
         });
     };
     let policies = table
-        .entry("capabilityPolicies".to_owned())
+        .entry("capabilityExecutionPolicies".to_owned())
         .or_insert_with(|| toml::Value::Table(Default::default()));
     let Some(policies_table) = policies.as_table_mut() else {
         return Err(CapabilityError::InvalidParams {
-            message: "profile capabilityPolicies must be a table".to_owned(),
+            message: "profile capabilityExecutionPolicies must be a table".to_owned(),
         });
     };
     let policy_value =
         toml::Value::try_from(policy).map_err(|error| CapabilityError::Internal {
-            message: format!("serialize capability policy to TOML: {error}"),
+            message: format!("serialize capability execution policy to TOML: {error}"),
         })?;
     policies_table.insert(policy_id.to_owned(), policy_value);
     let next = toml::to_string_pretty(&value).map_err(|error| CapabilityError::Internal {
@@ -2434,16 +2440,28 @@ fn enforce_execution_policy(
         return Ok(());
     }
 
-    let candidates = [
-        decision.contract_id.as_str(),
-        decision.selected_implementation.as_str(),
-        decision.selected_function_id.as_str(),
-        function.id.as_str(),
-    ];
+    let contract_candidates = [decision.contract_id.as_str()];
+    let implementation_candidates = [decision.selected_implementation.as_str()];
+    let function_candidates = [decision.selected_function_id.as_str(), function.id.as_str()];
+    let plugin_id = string_field(&function.metadata, "pluginId")
+        .unwrap_or_else(|| function.owner_worker.as_str().to_owned());
+    let plugin_candidates = [plugin_id.as_str()];
     if policy_scope_matches(
         &invocation.causal_context.authority_scopes,
-        CAPABILITY_DENY_SCOPE_PREFIX,
-        &candidates,
+        CONTRACT_DENY_SCOPE_PREFIX,
+        &contract_candidates,
+    ) || policy_scope_matches(
+        &invocation.causal_context.authority_scopes,
+        IMPLEMENTATION_DENY_SCOPE_PREFIX,
+        &implementation_candidates,
+    ) || policy_scope_matches(
+        &invocation.causal_context.authority_scopes,
+        IMPLEMENTATION_DENY_SCOPE_PREFIX,
+        &function_candidates,
+    ) || policy_scope_matches(
+        &invocation.causal_context.authority_scopes,
+        PLUGIN_DENY_SCOPE_PREFIX,
+        &plugin_candidates,
     ) {
         return Err(CapabilityError::Custom {
             code: "CAPABILITY_DENIED".to_owned(),
@@ -2458,11 +2476,26 @@ fn enforce_execution_policy(
             })),
         });
     }
-    if policy_scope_matches(
+    let contract_allowed = policy_scope_matches(
         &invocation.causal_context.authority_scopes,
-        CAPABILITY_ALLOW_SCOPE_PREFIX,
-        &candidates,
-    ) {
+        CONTRACT_ALLOW_SCOPE_PREFIX,
+        &contract_candidates,
+    );
+    let implementation_allowed = policy_scope_matches(
+        &invocation.causal_context.authority_scopes,
+        IMPLEMENTATION_ALLOW_SCOPE_PREFIX,
+        &implementation_candidates,
+    ) || policy_scope_matches(
+        &invocation.causal_context.authority_scopes,
+        IMPLEMENTATION_ALLOW_SCOPE_PREFIX,
+        &function_candidates,
+    );
+    let plugin_allowed = policy_scope_matches(
+        &invocation.causal_context.authority_scopes,
+        PLUGIN_ALLOW_SCOPE_PREFIX,
+        &plugin_candidates,
+    );
+    if contract_allowed && implementation_allowed && plugin_allowed {
         return Ok(());
     }
     Err(CapabilityError::Custom {
@@ -2480,14 +2513,54 @@ fn enforce_execution_policy(
 }
 
 fn validate_target_payload(
-    function: &FunctionDefinition,
+    entry: &CapabilityRegistryEntry,
     payload: &Value,
 ) -> Result<(), CapabilityError> {
+    let function = &entry.function;
     if let Some(schema) = &function.request_schema {
         crate::engine::schema::validate_payload(&function.id, "request", schema, payload)
-            .map_err(engine_error_to_capability_error)?;
+            .map_err(|error| recipe_validation_error(entry, error))?;
     }
     Ok(())
+}
+
+fn recipe_validation_error(
+    entry: &CapabilityRegistryEntry,
+    error: crate::engine::EngineError,
+) -> CapabilityError {
+    let mapped = engine_error_to_capability_error(error);
+    let recipe = entry.agent_recipe();
+    let example = serde_json::to_string(&recipe.execute_template).unwrap_or_else(|_| {
+        format!(
+            "{{\"mode\":\"invoke\",\"contractId\":\"{}\",\"payload\":{{}}}}",
+            recipe.contract_id
+        )
+    });
+    let guidance = format!(
+        "Invalid payload for {}. Put target arguments inside execute.payload. Required payload: {}. Example: {}",
+        entry.contract_id,
+        if recipe.required_payload.is_empty() {
+            "none".to_owned()
+        } else {
+            recipe.required_payload.join("; ")
+        },
+        example
+    );
+    match mapped {
+        CapabilityError::InvalidParams { message } => CapabilityError::InvalidParams {
+            message: format!("{message}. {guidance}"),
+        },
+        CapabilityError::Custom {
+            code,
+            message,
+            details,
+        } => CapabilityError::Custom {
+            code,
+            message: format!("{message}. {guidance}"),
+            details,
+        },
+        other => other,
+    }
 }
 
 fn requires_fresh_revision_for_payload(
@@ -2557,9 +2630,17 @@ fn child_idempotency_key(
     Ok(None)
 }
 
-fn render_search_summary(query: &str, results: &Value) -> String {
-    let result_values = results.as_array().cloned().unwrap_or_default();
-    if result_values.is_empty() {
+fn child_idempotency_required(function: &FunctionDefinition, payload: &Value) -> bool {
+    if function.id.as_str() == "process::run"
+        && !crate::domains::process::approval::run_requires_approval(payload)
+    {
+        return false;
+    }
+    function.effect_class.is_mutating()
+}
+
+fn render_search_summary(query: &str, results: &[CapabilityIndexHit]) -> String {
+    if results.is_empty() {
         return if query.trim().is_empty() {
             "No visible capabilities found.".to_owned()
         } else {
@@ -2567,26 +2648,73 @@ fn render_search_summary(query: &str, results: &Value) -> String {
         };
     }
     let mut lines = vec![format!(
-        "Found {} visible capabilities. Inspect one before executing mutating or elevated-risk work.",
-        result_values.len()
+        "Found {} visible capabilities. Use the execute recipes below; inspect only when a recipe says it is required or you need full contract detail.",
+        results.len()
     )];
-    for result in result_values.iter().take(8) {
-        let function_id = result
-            .get("functionId")
-            .and_then(Value::as_str)
-            .unwrap_or("<unknown>");
-        let contract_id = result
-            .get("contractId")
-            .and_then(Value::as_str)
-            .unwrap_or("<unknown>");
-        lines.push(format!("- {contract_id} -> {function_id}"));
+    let full_recipe_count = results.len().min(5);
+    for result in results.iter().take(full_recipe_count) {
+        lines.push(render_search_hit_recipe(result));
     }
+    if results.len() > full_recipe_count {
+        lines.push("Additional compact matches:".to_owned());
+        for result in results.iter().skip(full_recipe_count).take(10) {
+            lines.push(format!(
+                "- `{}` via `{}` ({})",
+                result.contract_id, result.function_id, result.matched_by
+            ));
+        }
+    }
+    lines.join("\n")
+}
+
+fn render_search_hit_recipe(hit: &CapabilityIndexHit) -> String {
+    let Some(recipe) = hit.recipe.as_ref() else {
+        return format!(
+            "- `{}` via `{}`. Inspect this {} result for invocation details.",
+            hit.contract_id, hit.function_id, hit.kind
+        );
+    };
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "\n### `{}` — {}",
+        recipe.contract_id, recipe.display_name
+    ));
+    lines.push(format!("Use when: {}", recipe.use_when));
+    if let Ok(template) = serde_json::to_string(&recipe.execute_template) {
+        lines.push(format!("Execute:\n```json\n{template}\n```"));
+    }
+    if !recipe.required_payload.is_empty() {
+        lines.push(format!(
+            "Required payload: {}.",
+            recipe.required_payload.join("; ")
+        ));
+    }
+    if !recipe.optional_payload.is_empty() {
+        let optional = recipe
+            .optional_payload
+            .iter()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>();
+        lines.push(format!("Optional payload: {}.", optional.join("; ")));
+    }
+    if recipe.inspect_required {
+        lines
+            .push("Inspect required before execute for freshness/elevated-risk fields.".to_owned());
+    } else {
+        lines.push(format!("Direct execution: {}.", recipe.direct_execution));
+    }
+    if recipe.approval_behavior != "none" {
+        lines.push(format!("Approval: {}.", recipe.approval_behavior));
+    }
+    lines.push(format!("Result: {}", recipe.result_summary));
     lines.join("\n")
 }
 
 fn render_inspection_summary(details: &Value) -> String {
     let implementation = &details["implementation"];
     let contract = &details["contract"];
+    let recipe = &details["recipe"];
     let requirements = &details["executionRequirements"];
     let function_id = implementation["functionId"].as_str().unwrap_or("<unknown>");
     let contract_id = contract["contractId"].as_str().unwrap_or("<unknown>");
@@ -2598,6 +2726,15 @@ fn render_inspection_summary(details: &Value) -> String {
     let mut summary = format!(
         "{contract_id} is implemented by {function_id}. effect={effect}, risk={risk}, expectedRevision={expected_revision}."
     );
+
+    if let Some(use_when) = recipe["useWhen"].as_str() {
+        summary.push_str(&format!("\nUse when: {use_when}"));
+    }
+    if let Ok(template) = serde_json::to_string(&recipe["executeTemplate"])
+        && template != "null"
+    {
+        summary.push_str(&format!("\nExecute:\n```json\n{template}\n```"));
+    }
 
     if requirements["freshInspectionRequired"]
         .as_bool()
@@ -2617,7 +2754,17 @@ fn render_inspection_summary(details: &Value) -> String {
         ));
     }
 
-    let required_payload_fields = required_payload_fields(contract);
+    let required_payload_fields = recipe["requiredPayload"]
+        .as_array()
+        .map(|fields| {
+            fields
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .filter(|fields| !fields.is_empty())
+        .unwrap_or_else(|| required_payload_fields(contract));
     if !required_payload_fields.is_empty() {
         summary.push_str(&format!(
             "\nExecute payload must include: {}.",
@@ -2881,6 +3028,7 @@ mod tests {
             matched_by: "hybrid".to_owned(),
             snippet: "Run a process".to_owned(),
             requires_inspect: false,
+            recipe: None,
         };
 
         let value = render_search_result_value(
@@ -2919,6 +3067,79 @@ mod tests {
     }
 
     #[test]
+    fn search_visible_content_contains_actionable_recipe() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let entry = CapabilityRegistryEntry::from_function(function, 9);
+        let recipe = entry.agent_recipe();
+        let hit = CapabilityIndexHit {
+            kind: "implementation".to_owned(),
+            capability_id: entry.capability_id(),
+            contract_id: entry.contract_id.clone(),
+            implementation_id: entry.implementation_id.clone(),
+            plugin_id: entry.plugin_id.clone(),
+            worker_id: entry.worker_id.clone(),
+            function_id: entry.function_id.clone(),
+            catalog_revision: entry.catalog_revision,
+            schema_digest: entry.schema_digest.clone(),
+            trust_tier: entry.trust_tier.clone(),
+            health: "Healthy".to_owned(),
+            visibility: "system".to_owned(),
+            effect_class: "external_side_effect".to_owned(),
+            risk_level: "high".to_owned(),
+            lexical_score: 1.0,
+            vector_score: None,
+            fused_score: 1.0,
+            matched_by: "local_lexical".to_owned(),
+            snippet: "Run a bounded shell command".to_owned(),
+            requires_inspect: false,
+            recipe: Some(recipe),
+        };
+        let status = CapabilityIndexStatus {
+            lexical: true,
+            local_vector: false,
+            cloud_embeddings: false,
+            vector_store: "none".to_owned(),
+            embedding_model: "none".to_owned(),
+            state: "ready".to_owned(),
+            degraded_reason: None,
+        };
+
+        let value = render_search_result_value(
+            vec![(
+                "process run shell command date".to_owned(),
+                super::super::registry::CapabilityIndexSearchResult {
+                    hits: vec![hit],
+                    status,
+                },
+            )],
+            9,
+            0,
+            10,
+        )
+        .expect("search result");
+        let content = value["content"][0]["text"].as_str().expect("text content");
+
+        assert!(content.contains("process::run"));
+        assert!(content.contains("\"payload\":{\"command\":\"date\"}"));
+        assert!(content.contains("Required payload: command"));
+        assert!(!content.contains("process::run -> process::run"));
+        assert_eq!(
+            value["details"]["results"][0]["recipe"]["contractId"],
+            json!("process::run")
+        );
+        let required_command = value["details"]["results"][0]["recipe"]["requiredPayload"][0]
+            .as_str()
+            .expect("required command summary");
+        assert!(required_command.starts_with("command: string"));
+        assert!(required_command.contains("Shell command to run"));
+    }
+
+    #[test]
     fn stale_revision_needed_for_mutating_or_risky_functions() {
         let mut read = test_function("alpha::read");
         assert!(!requires_fresh_revision(&read));
@@ -2952,12 +3173,25 @@ mod tests {
 
     #[test]
     fn process_run_date_does_not_require_approval_but_destructive_command_does() {
-        let function = test_function("process::run");
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
         assert!(!execution_requires_approval(
             &function,
             &json!({ "command": "date +%Y-%m-%d" })
         ));
+        assert!(!child_idempotency_required(
+            &function,
+            &json!({ "command": "date +%Y-%m-%d" })
+        ));
         assert!(execution_requires_approval(
+            &function,
+            &json!({ "command": "rm -rf target" })
+        ));
+        assert!(child_idempotency_required(
             &function,
             &json!({ "command": "rm -rf target" })
         ));
@@ -2975,14 +3209,19 @@ mod tests {
             }
         }));
 
-        let error = validate_target_payload(&function, &json!({})).expect_err("schema error");
+        let entry = CapabilityRegistryEntry::from_function(function, 1);
+        let error = validate_target_payload(&entry, &json!({})).expect_err("schema error");
 
         match error {
             CapabilityError::InvalidParams { message } => {
                 assert!(message.contains("required field is missing"));
+                assert!(message.contains("Required payload"));
+                assert!(message.contains("command"));
             }
             CapabilityError::Custom { message, .. } => {
                 assert!(message.contains("required field is missing"));
+                assert!(message.contains("Required payload"));
+                assert!(message.contains("command"));
             }
             other => panic!("unexpected error: {other:?}"),
         }
@@ -3129,6 +3368,10 @@ mod tests {
             &function,
             &json!({"payload": {"command": "git status --short"}})
         ));
+        assert!(!requires_fresh_revision_for_payload(
+            &function,
+            &json!({"payload": {"command": "cd /tmp && git status --short && git log --oneline -3"}})
+        ));
     }
 
     #[test]
@@ -3156,7 +3399,7 @@ mod tests {
         assert!(!requires_fresh_revision_for_payload(
             &function,
             &json!({
-                "capabilityId": "notifications::send",
+                "contractId": "notifications::send",
                 "idempotencyKey": "notify-test",
                 "payload": {"title": "Tron test", "body": "hello"}
             })
@@ -3313,8 +3556,8 @@ mod tests {
 
     #[test]
     fn policy_validation_reports_structured_errors_without_updating() {
-        let validation = validate_capability_policy_payload(json!({
-            "allowedCapabilities": "filesystem::read_file"
+        let validation = validate_capability_execution_policy_payload(json!({
+            "allowedContracts": "filesystem::read_file"
         }));
         assert_eq!(validation["valid"], json!(false));
         assert!(

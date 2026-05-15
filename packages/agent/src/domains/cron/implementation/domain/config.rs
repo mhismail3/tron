@@ -472,7 +472,7 @@ mod tests {
     fn validate_job_capability_restrictions_allowed_only() {
         let mut job = make_valid_job();
         job.capability_restrictions = Some(CapabilityRestrictions {
-            allowed_capabilities: Some(vec!["filesystem::read_file".into()]),
+            allowed_contracts: Some(vec!["filesystem::read_file".into()]),
         });
         validate_job(&job).unwrap();
     }
@@ -488,7 +488,7 @@ mod tests {
     fn validate_job_capability_restrictions_empty_list() {
         let mut job = make_valid_job();
         job.capability_restrictions = Some(CapabilityRestrictions {
-            allowed_capabilities: Some(vec![]),
+            allowed_contracts: Some(vec![]),
         });
         validate_job(&job).unwrap();
     }
