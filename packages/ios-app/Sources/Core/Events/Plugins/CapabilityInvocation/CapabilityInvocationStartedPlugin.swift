@@ -30,6 +30,7 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
             let traceId: String?
             let rootInvocationId: String?
             let bindingDecisionId: String?
+            let themeColor: String?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -46,7 +47,8 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
                     effectClass: effectClass,
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
-                    bindingDecisionId: bindingDecisionId
+                    bindingDecisionId: bindingDecisionId,
+                    themeColor: themeColor
                 )
             }
         }
@@ -59,17 +61,20 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
         let invocationId: String
         let arguments: [String: AnyCodable]?
         let identity: CapabilityIdentity
+        let timestamp: Date?
 
         init(
             modelPrimitiveName: String,
             invocationId: String,
             arguments: [String: AnyCodable]?,
-            identity: CapabilityIdentity? = nil
+            identity: CapabilityIdentity? = nil,
+            timestamp: Date? = nil
         ) {
             self.modelPrimitiveName = modelPrimitiveName
             self.invocationId = invocationId
             self.arguments = arguments
             self.identity = identity ?? CapabilityIdentity()
+            self.timestamp = timestamp
         }
 
         var formattedArguments: String {
@@ -93,7 +98,8 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
             modelPrimitiveName: event.data.modelPrimitiveName,
             invocationId: event.data.invocationId,
             arguments: event.data.arguments,
-            identity: event.data.identity
+            identity: event.data.identity,
+            timestamp: event.timestamp.flatMap(DateParser.parse)
         )
     }
 

@@ -213,6 +213,7 @@ pub(crate) struct CapabilityExecutionRecord {
     pub(crate) plugin_versions: Vec<String>,
     pub(crate) binding_decision: CapabilityBindingDecision,
     pub(crate) schema_digest: String,
+    pub(crate) presentation_hints: Option<Value>,
 }
 
 /// Durable record for one sandboxed program execution.

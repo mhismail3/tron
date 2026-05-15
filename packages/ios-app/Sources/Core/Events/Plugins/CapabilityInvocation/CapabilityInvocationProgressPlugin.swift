@@ -32,6 +32,7 @@ enum CapabilityInvocationProgressPlugin: DispatchableEventPlugin {
             let traceId: String?
             let rootInvocationId: String?
             let bindingDecisionId: String?
+            let themeColor: String?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -48,7 +49,8 @@ enum CapabilityInvocationProgressPlugin: DispatchableEventPlugin {
                     effectClass: effectClass,
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
-                    bindingDecisionId: bindingDecisionId
+                    bindingDecisionId: bindingDecisionId,
+                    themeColor: themeColor
                 )
             }
         }

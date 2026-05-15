@@ -73,6 +73,9 @@ pub struct CapabilityEventIdentity {
     /// Durable binding decision id selected by the registry resolver.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding_decision_id: Option<String>,
+    /// Optional presentation theme color declared by capability metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme_color: Option<String>,
 }
 
 impl CapabilityEventIdentity {
@@ -1867,6 +1870,7 @@ mod tests {
                 trace_id: Some("trace-test".into()),
                 root_invocation_id: Some("root-test".into()),
                 binding_decision_id: Some("binding-test".into()),
+                theme_color: Some("#10B981".into()),
             },
         };
         assert!(e.is_capability_invocation());
@@ -1880,6 +1884,7 @@ mod tests {
         assert_eq!(json["schemaDigest"], "sha256:test");
         assert_eq!(json["catalogRevision"], 7);
         assert_eq!(json["bindingDecisionId"], "binding-test");
+        assert_eq!(json["themeColor"], "#10B981");
     }
 
     #[test]

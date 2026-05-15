@@ -17,6 +17,7 @@ struct CapabilityIdentity: Codable, Equatable, Hashable, Sendable {
     var traceId: String?
     var rootInvocationId: String?
     var bindingDecisionId: String?
+    var themeColor: String?
 
     init(
         modelPrimitiveName: String? = nil,
@@ -32,7 +33,8 @@ struct CapabilityIdentity: Codable, Equatable, Hashable, Sendable {
         effectClass: String? = nil,
         traceId: String? = nil,
         rootInvocationId: String? = nil,
-        bindingDecisionId: String? = nil
+        bindingDecisionId: String? = nil,
+        themeColor: String? = nil
     ) {
         self.modelPrimitiveName = modelPrimitiveName
         self.contractId = contractId
@@ -48,6 +50,7 @@ struct CapabilityIdentity: Codable, Equatable, Hashable, Sendable {
         self.traceId = traceId
         self.rootInvocationId = rootInvocationId
         self.bindingDecisionId = bindingDecisionId
+        self.themeColor = themeColor
     }
 }
 

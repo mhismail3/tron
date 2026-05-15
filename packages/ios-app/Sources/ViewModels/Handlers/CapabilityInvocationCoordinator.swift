@@ -26,6 +26,7 @@ final class CapabilityInvocationCoordinator {
         _ pluginResult: CapabilityInvocationGeneratingPlugin.Result,
         context: CapabilityInvocationContext
     ) {
+        let eventTimestamp = pluginResult.timestamp ?? Date()
         // Finalize any active thinking message before capability chip appears
         context.finalizeThinkingMessageIfNeeded()
 
@@ -51,7 +52,7 @@ final class CapabilityInvocationCoordinator {
                 id: pluginResult.invocationId,
                 status: .generating,
                 arguments: "",
-                generatedAt: Date(),
+                generatedAt: eventTimestamp,
                 identity: pluginResult.identity
             )
             content = .capabilityInvocation(invocation)
@@ -71,7 +72,7 @@ final class CapabilityInvocationCoordinator {
                 invocationId: pluginResult.invocationId,
                 modelPrimitiveName: pluginResult.modelPrimitiveName,
                 arguments: "",
-                timestamp: Date()
+                timestamp: eventTimestamp
             )
             context.enqueueCapabilityInvocationStart(invocationStartedData)
         }
@@ -89,6 +90,7 @@ final class CapabilityInvocationCoordinator {
         _ pluginResult: CapabilityInvocationStartedPlugin.Result,
         context: CapabilityInvocationContext
     ) {
+        let eventTimestamp = pluginResult.timestamp ?? Date()
         let isUserInteraction = pluginResult.identity.isUserInteractionCapability
 
         // Parse UserInteraction params if applicable
@@ -103,7 +105,7 @@ final class CapabilityInvocationCoordinator {
             status: .running,
             arguments: pluginResult.formattedArguments,
             payloadJSON: pluginResult.arguments,
-            startedAt: Date(),
+            startedAt: eventTimestamp,
             identity: pluginResult.identity
         )
 
@@ -134,7 +136,7 @@ final class CapabilityInvocationCoordinator {
                     existing.arguments = pluginResult.formattedArguments
                     existing.payloadJSON = pluginResult.arguments
                     existing.status = .running
-                    existing.startedAt = existing.startedAt ?? Date()
+                    existing.startedAt = existing.startedAt ?? eventTimestamp
                     existing.identity = pluginResult.identity
                     context.messages[existingIndex].content = .capabilityInvocation(existing)
                     context.currentCapabilityInvocationMessages[context.messages[existingIndex].id] = context.messages[existingIndex]
@@ -184,7 +186,7 @@ final class CapabilityInvocationCoordinator {
             invocationId: pluginResult.invocationId,
             modelPrimitiveName: pluginResult.modelPrimitiveName,
             arguments: pluginResult.formattedArguments,
-            timestamp: Date()
+            timestamp: eventTimestamp
         )
         context.enqueueCapabilityInvocationStart(invocationStartedData)
     }
@@ -235,6 +237,7 @@ final class CapabilityInvocationCoordinator {
             success: pluginResult.success,
             result: pluginResult.displayResult,
             durationMs: pluginResult.duration,
+            timestamp: pluginResult.timestamp ?? Date(),
             details: pluginResult.rawDetails,
             identity: pluginResult.identity
         )

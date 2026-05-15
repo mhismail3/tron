@@ -111,6 +111,11 @@ fn target_identity_json(
         "effectClass": format!("{:?}", function.effect_class),
         "traceId": trace_id.map(|id| id.as_str()),
         "rootInvocationId": parent_invocation_id.map(|id| id.as_str()),
+        "themeColor": function
+            .metadata
+            .get("presentationHints")
+            .and_then(|value| value.get("themeColor"))
+            .and_then(Value::as_str),
     })
 }
 
@@ -152,6 +157,12 @@ fn result_identity_json(
     }
     if let Some(value) = details.get("functionId") {
         identity.insert("functionId".to_owned(), value.clone());
+    }
+    if let Some(value) = details
+        .get("presentationHints")
+        .and_then(|hints| hints.get("themeColor"))
+    {
+        identity.insert("themeColor".to_owned(), value.clone());
     }
     if let Some(plugin) = details
         .get("pluginVersions")

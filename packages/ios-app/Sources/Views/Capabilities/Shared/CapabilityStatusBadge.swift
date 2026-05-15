@@ -35,20 +35,23 @@ struct CapabilityStatusBadge: View {
                     .tint(statusColor)
             } else {
                 Image(systemName: status.iconName)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody2))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(statusColor)
             }
             Text(statusLabel)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                 .foregroundStyle(statusColor)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
         .background {
             Capsule()
                 .fill(.clear)
                 .glassEffect(.regular.tint(statusColor.opacity(0.25)), in: Capsule())
         }
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .combine)
     }
 }

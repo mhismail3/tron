@@ -10,7 +10,7 @@
 //! module contains only method-agnostic construction helpers used to turn those
 //! local records into engine definitions.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::engine::{
@@ -68,7 +68,8 @@ pub(crate) struct CapabilityContract {
     /// hardcoded interactive-tool lists.
     pub(crate) lifecycle: Option<Value>,
     /// Optional presentation metadata for chip/sheet summaries. Renderers may
-    /// use these hints, but capability identity always comes from the contract.
+    /// use hints such as `themeColor`, but capability identity always comes
+    /// from the contract.
     pub(crate) presentation_hints: Option<Value>,
 }
 
@@ -341,6 +342,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
             Some("approval" | "user_input" | "async_run" | "stream" | "external_interaction")
         )
     });
+    let presentation_hints = presentation_hints_for_capability(spec);
     definition.metadata = json!({
         "operationKey": spec.operation_key.as_str(),
         "domainWorker": spec.domain_worker.as_str(),
@@ -363,7 +365,42 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         "lifecycle": spec.lifecycle,
         "stopsTurn": stops_turn,
         "isInteractive": is_interactive,
-        "presentationHints": spec.presentation_hints,
+        "presentationHints": presentation_hints,
     });
     definition
+}
+
+fn presentation_hints_for_capability(spec: &CapabilitySpec) -> Value {
+    let mut hints = spec
+        .presentation_hints
+        .as_ref()
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_else(Map::new);
+    if !hints.contains_key("themeColor") {
+        if let Some(color) = default_theme_color(spec.function_id.as_str()) {
+            hints.insert("themeColor".to_owned(), Value::String(color.to_owned()));
+        }
+    }
+    Value::Object(hints)
+}
+
+fn default_theme_color(function_id: &str) -> Option<&'static str> {
+    let namespace = function_id
+        .split_once("::")
+        .map(|(namespace, _)| namespace)?;
+    match namespace {
+        "capability" => Some("#10B981"),
+        "filesystem" => Some("#10B981"),
+        "process" => Some("#38BDF8"),
+        "web" => Some("#3B82F6"),
+        "notifications" => Some("#EC4899"),
+        "agent" => Some("#8B5CF6"),
+        "job" => Some("#F59E0B"),
+        "sandbox" => Some("#A97BFF"),
+        "display" => Some("#818CF8"),
+        "browser" => Some("#06B6D4"),
+        "mcp" => Some("#2DD4BF"),
+        _ => None,
+    }
 }

@@ -52,6 +52,7 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
 
         XCTAssertEqual(capabilityResult.modelPrimitiveName, "execute")
         XCTAssertEqual(capabilityResult.invocationId, "tc2")
+        XCTAssertEqual(capabilityResult.timestamp, DateParser.parse("2025-01-26T10:00:00Z"))
     }
 
     func testTransformMinimalPayload() throws {

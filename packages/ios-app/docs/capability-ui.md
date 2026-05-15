@@ -1,6 +1,6 @@
 # Capability UI And Engine Console
 
-> Last verified: 2026-05-14
+> Last verified: 2026-05-15
 
 The iOS capability UI is a thin client over server-owned capability records. It
 does not maintain a local tool catalog and does not choose capability bindings
@@ -100,38 +100,56 @@ store raw secret values.
 ## Rendering Rules
 
 Chat capability invocations render from `CapabilityInvocationDisplayModel`.
-The display model keeps the provider-visible primitive (`Search`, `Inspect`, or
-`Execute`) as the prominent label and derives the follow-on detail from the
-canonical capability payload: search query, inspected target, resolved contract,
-or execute payload summary. Chat chips intentionally use the compact glassy
-capsule treatment used elsewhere in Tron: one accent color per primitive,
-inline duration or live spinner, and a chevron to the detail sheet. This keeps
-the chip provider-neutral while still showing the concrete operation being
-performed, such as `Execute process::run · cargo test`.
+The display model keeps provider-visible primitive identity in metadata, but the
+chip's prominent label is the user-facing resolved capability name: `Search`,
+`Inspect`, `Run Command`, `List Directory`, `Search Text`, `Send Notification`,
+or a generic humanized id for plugin capabilities that do not declare a display
+name. The code-styled detail that follows the bold label is only the
+high-signal request input, such as a shell command, query, URL, compact path, or
+program first line.
+
+Chat chips intentionally use the compact glassy capsule treatment used
+elsewhere in Tron: fixed-width icons so labels align across capabilities, a
+smaller code-styled detail string, an elapsed/duration label that stays visible
+at the trailing edge while the detail truncates, and a chevron to the detail
+sheet. Chips take only the width they need until the request detail is too long,
+then the detail truncates inside the available row width. Capability metadata
+may include `presentationHints.themeColor`; iOS carries that color through
+generating, started, progress, pause/run, and completed events for chips and
+sheets. When an early `execute` event has not resolved the binding yet, the chip
+derives a stable color from the requested contract id in the submitted arguments
+so running process, filesystem, notification, and other first-party capability
+chips do not all collapse to the generic execute color.
 `capability.invocation.generating` creates the chip immediately, before worker
 dispatch completes; `started`, `progress`, and `completed` update that same
 invocation id. While running, chips show live elapsed time from `generatedAt` or
-`startedAt`; after completion they show the server-reported execution duration.
+`startedAt`; after completion they show the observed invocation span when it is
+longer than the server-reported inner execution duration. The raw server
+duration remains available in collapsed metadata for audit.
 Parallel calls are ordered by event enqueue order, not completion order, so a
 fast child cannot jump ahead of an earlier running invocation.
 
 Invocation detail sheets use the same display model. The toolbar carries the
-primitive icon and title, while the first card is only capability identity:
-resolved capability, display name, category/source, plugin, status badge, and
-duration. Request, result, approval, artifacts, logs, and error classification
-are separated into sheet-native sections. Request cards show high-signal fields
-such as command, query, URL, compact path, reason, and mode; result cards show
-status plus domain-specific summaries such as stdout/stderr, file content, diff
-text, entry counts, match counts, and child invocation counts. Raw request JSON,
-raw result JSON/text, schema digest, trace id, binding decision, and other
-debug identifiers live in a collapsed Technical section by default. Search
+primitive icon and title, while the first card focuses on operator-readable
+capability identity: friendly capability name, status and observed duration
+pills, and a user-facing plugin/source label such as `File System
+(First-party)` or `GitHub (MCP)`. Request, result, approval, artifacts, logs,
+and error classification are separated into sheet-native sections. Request
+cards show only high-signal submitted fields such as command, query, URL,
+compact path, reason, and notable booleans/counts; duplicated target/mode data
+stays in metadata. Result cards show only the operator-relevant output itself:
+stdout/stderr, file content, diff text, entry names, match previews, or another
+domain output preview. Exit code, timeout state, truncation flags, counts,
+paths, raw request JSON, raw result JSON/text, schema digest, trace id, binding
+decision, child invocation count, server duration, observed duration, and other
+debug identifiers live in a collapsed Metadata section by default. Search
 results summarize query, catalog revision, index/vector status, result count,
 cursor state, and ranked hits. Inspect results summarize contract,
 implementation, worker/plugin provenance, trust/health, binding decision,
 execution requirements, schema digest, inspection handle, approval requirements,
 and examples when available. Unknown result shapes still render through a
 generic readable JSON/text block, with oversized structured output available in
-Technical instead of taking over the primary sheet.
+Metadata instead of taking over the primary sheet.
 
 Capability discovery includes `AgentCapabilityRecipeDTO` on search hits and
 inspection details. The UI can show these recipes as operator help, but it must

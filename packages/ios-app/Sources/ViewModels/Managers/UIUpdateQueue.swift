@@ -57,6 +57,7 @@ final class UIUpdateQueue {
         let success: Bool
         let result: String
         let durationMs: Int?
+        let timestamp: Date
         /// Structured result details from server (capability-specific shape)
         let details: [String: AnyCodable]?
         let identity: CapabilityIdentity
@@ -66,6 +67,7 @@ final class UIUpdateQueue {
             success: Bool,
             result: String,
             durationMs: Int?,
+            timestamp: Date = Date(),
             details: [String: AnyCodable]?,
             identity: CapabilityIdentity? = nil
         ) {
@@ -73,6 +75,7 @@ final class UIUpdateQueue {
             self.success = success
             self.result = result
             self.durationMs = durationMs
+            self.timestamp = timestamp
             self.details = details
             self.identity = identity ?? CapabilityIdentity()
         }

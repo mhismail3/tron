@@ -34,6 +34,7 @@ enum CapabilityPauseRequestedPlugin: DispatchableEventPlugin {
             let traceId: String?
             let rootInvocationId: String?
             let bindingDecisionId: String?
+            let themeColor: String?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -50,7 +51,8 @@ enum CapabilityPauseRequestedPlugin: DispatchableEventPlugin {
                     effectClass: effectClass,
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
-                    bindingDecisionId: bindingDecisionId
+                    bindingDecisionId: bindingDecisionId,
+                    themeColor: themeColor
                 )
             }
         }
@@ -118,6 +120,7 @@ enum CapabilityPauseResolvedPlugin: DispatchableEventPlugin {
             let traceId: String?
             let rootInvocationId: String?
             let bindingDecisionId: String?
+            let themeColor: String?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -134,7 +137,8 @@ enum CapabilityPauseResolvedPlugin: DispatchableEventPlugin {
                     effectClass: effectClass,
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
-                    bindingDecisionId: bindingDecisionId
+                    bindingDecisionId: bindingDecisionId,
+                    themeColor: themeColor
                 )
             }
         }
@@ -196,6 +200,7 @@ enum CapabilityRunStatusPlugin: DispatchableEventPlugin {
             let traceId: String?
             let rootInvocationId: String?
             let bindingDecisionId: String?
+            let themeColor: String?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -212,7 +217,8 @@ enum CapabilityRunStatusPlugin: DispatchableEventPlugin {
                     effectClass: effectClass,
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
-                    bindingDecisionId: bindingDecisionId
+                    bindingDecisionId: bindingDecisionId,
+                    themeColor: themeColor
                 )
             }
         }

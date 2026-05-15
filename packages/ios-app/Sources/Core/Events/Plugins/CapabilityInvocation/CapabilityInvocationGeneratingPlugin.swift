@@ -31,6 +31,7 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
             let traceId: String?
             let rootInvocationId: String?
             let bindingDecisionId: String?
+            let themeColor: String?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -47,7 +48,8 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
                     effectClass: effectClass,
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
-                    bindingDecisionId: bindingDecisionId
+                    bindingDecisionId: bindingDecisionId,
+                    themeColor: themeColor
                 )
             }
         }
@@ -59,11 +61,18 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
         let modelPrimitiveName: String
         let invocationId: String
         let identity: CapabilityIdentity
+        let timestamp: Date?
 
-        init(modelPrimitiveName: String, invocationId: String, identity: CapabilityIdentity? = nil) {
+        init(
+            modelPrimitiveName: String,
+            invocationId: String,
+            identity: CapabilityIdentity? = nil,
+            timestamp: Date? = nil
+        ) {
             self.modelPrimitiveName = modelPrimitiveName
             self.invocationId = invocationId
             self.identity = identity ?? CapabilityIdentity()
+            self.timestamp = timestamp
         }
     }
 
@@ -73,7 +82,8 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
         Result(
             modelPrimitiveName: event.data.modelPrimitiveName,
             invocationId: event.data.invocationId,
-            identity: event.data.identity
+            identity: event.data.identity,
+            timestamp: event.timestamp.flatMap(DateParser.parse)
         )
     }
 

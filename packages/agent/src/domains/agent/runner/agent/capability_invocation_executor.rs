@@ -68,6 +68,23 @@ fn string_metadata(function: &crate::engine::FunctionDefinition, key: &str) -> O
         .map(ToOwned::to_owned)
 }
 
+fn presentation_theme_color(function: &crate::engine::FunctionDefinition) -> Option<String> {
+    function
+        .metadata
+        .get("presentationHints")
+        .and_then(|value| value.get("themeColor"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn details_theme_color(details: &Value) -> Option<String> {
+    details
+        .get("presentationHints")
+        .and_then(|value| value.get("themeColor"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
 fn primitive_capability_identity(
     model_primitive_name: &str,
     target: &EngineCapabilityTarget,
@@ -96,6 +113,7 @@ fn primitive_capability_identity(
         trace_id: trace_id.map(|id| id.as_str().to_owned()),
         root_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
         binding_decision_id: None,
+        theme_color: presentation_theme_color(function),
     }
 }
 
@@ -183,6 +201,7 @@ fn capability_identity_from_result(
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
             .or_else(|| base_identity.binding_decision_id.clone()),
+        theme_color: details_theme_color(details).or_else(|| base_identity.theme_color.clone()),
     }
 }
 

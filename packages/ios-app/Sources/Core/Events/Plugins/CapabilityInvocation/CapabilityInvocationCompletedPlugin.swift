@@ -30,7 +30,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
                 case invocationId, modelPrimitiveName, content, isError, duration, details
                 case contractId, implementationId, functionId, pluginId, workerId
                 case schemaDigest, catalogRevision, trustTier, riskLevel, effectClass, traceId
-                case rootInvocationId, bindingDecisionId
+                case rootInvocationId, bindingDecisionId, themeColor
             }
 
             init(from decoder: Decoder) throws {
@@ -56,7 +56,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
                     effectClass: try container.decodeIfPresent(String.self, forKey: .effectClass),
                     traceId: try container.decodeIfPresent(String.self, forKey: .traceId),
                     rootInvocationId: try container.decodeIfPresent(String.self, forKey: .rootInvocationId),
-                    bindingDecisionId: try container.decodeIfPresent(String.self, forKey: .bindingDecisionId)
+                    bindingDecisionId: try container.decodeIfPresent(String.self, forKey: .bindingDecisionId),
+                    themeColor: try container.decodeIfPresent(String.self, forKey: .themeColor)
                 )
             }
         }
@@ -80,6 +81,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
         /// Raw details dictionary for capability-specific structured results
         let rawDetails: [String: AnyCodable]?
         let identity: CapabilityIdentity
+        let timestamp: Date?
 
         init(
             invocationId: String,
@@ -89,7 +91,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
             duration: Int?,
             details: EventData.CapabilityResultDetails?,
             rawDetails: [String: AnyCodable]?,
-            identity: CapabilityIdentity? = nil
+            identity: CapabilityIdentity? = nil,
+            timestamp: Date? = nil
         ) {
             self.invocationId = invocationId
             self.modelPrimitiveName = modelPrimitiveName
@@ -99,6 +102,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
             self.details = details
             self.rawDetails = rawDetails
             self.identity = identity ?? CapabilityIdentity()
+            self.timestamp = timestamp
         }
 
         /// Display-friendly result text.
@@ -118,7 +122,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
             duration: event.data.duration,
             details: event.data.details,
             rawDetails: event.data.rawDetails,
-            identity: event.data.identity
+            identity: event.data.identity,
+            timestamp: event.timestamp.flatMap(DateParser.parse)
         )
     }
 

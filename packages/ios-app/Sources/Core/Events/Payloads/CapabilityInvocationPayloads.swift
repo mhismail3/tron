@@ -47,7 +47,8 @@ struct CapabilityInvocationStartedPayload {
             effectClass: payload.string("effectClass"),
             traceId: payload.string("traceId"),
             rootInvocationId: payload.string("rootInvocationId"),
-            bindingDecisionId: payload.string("bindingDecisionId")
+            bindingDecisionId: payload.string("bindingDecisionId"),
+            themeColor: payload.string("themeColor")
         )
 
         // Arguments can be dict or string
@@ -123,7 +124,8 @@ struct CapabilityInvocationCompletedPayload {
             effectClass: payload.string("effectClass"),
             traceId: payload.string("traceId"),
             rootInvocationId: payload.string("rootInvocationId"),
-            bindingDecisionId: payload.string("bindingDecisionId")
+            bindingDecisionId: payload.string("bindingDecisionId"),
+            themeColor: payload.string("themeColor")
         )
 
         // Optional enrichment fields

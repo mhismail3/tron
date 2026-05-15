@@ -148,6 +148,27 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
         XCTAssertEqual(capabilityResult.duration, 200)
     }
 
+    func testTransformCarriesCanonicalEventTimestamp() throws {
+        let json = """
+        {
+            "type": "capability.invocation.completed",
+            "timestamp": "2026-05-15T04:47:31.798Z",
+            "data": {
+                "invocationId": "capability-timestamp",
+                "modelPrimitiveName": "execute",
+                "isError": false,
+                "content": "ok",
+                "duration": 445
+            }
+        }
+        """.data(using: .utf8)!
+
+        let event = try CapabilityInvocationCompletedPlugin.parse(from: json)
+        let result = try XCTUnwrap(CapabilityInvocationCompletedPlugin.transform(event) as? CapabilityInvocationCompletedPlugin.Result)
+
+        XCTAssertEqual(result.timestamp, DateParser.parse("2026-05-15T04:47:31.798Z"))
+    }
+
     func testTransformDisplayResult() throws {
         let json = """
         {
@@ -210,6 +231,7 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
                 "traceId": "019e25cb-0ebe-79d1-b20c-3070e3256a15",
                 "rootInvocationId": "019e25cb-6ab0-7782-8110-684e36bc6218",
                 "bindingDecisionId": "binding_decision_019e25cb",
+                "themeColor": "#10B981",
                 "content": "Listed session worktree.",
                 "isError": false,
                 "duration": 69,
@@ -232,6 +254,7 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
         XCTAssertEqual(result?.displayResult, "Listed session worktree.")
         XCTAssertEqual(result?.duration, 69)
         XCTAssertEqual(result?.identity.contractId, "filesystem::list_dir")
+        XCTAssertEqual(result?.identity.themeColor, "#10B981")
         XCTAssertEqual(result?.rawDetails?["status"]?.stringValue, "ok")
     }
 }

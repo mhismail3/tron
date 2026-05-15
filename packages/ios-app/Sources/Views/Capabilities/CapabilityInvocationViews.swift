@@ -9,6 +9,13 @@ struct CapabilityInvocationChip: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var display: CapabilityInvocationDisplayModel { data.display }
+    private var accent: Color {
+        CapabilityPresentation.statusColor(
+            for: data.status,
+            identity: data.identity,
+            targetId: display.targetId
+        )
+    }
 
     var body: some View {
         Button {
@@ -17,10 +24,21 @@ struct CapabilityInvocationChip: View {
             HStack(spacing: 7) {
                 leadingAccessory
 
-                Text(titleString(size: TronTypography.sizeBodySM))
+                Text(display.capabilityName)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                    .foregroundStyle(textColor)
                     .lineLimit(1)
-                    .truncationMode(.middle)
-                    .layoutPriority(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(2)
+
+                if !display.commandText.isEmpty {
+                    Text(display.commandText)
+                        .font(TronTypography.code(size: TronTypography.sizeCaption - 1, weight: .regular))
+                        .foregroundStyle(textColor.opacity(0.68))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(0)
+                }
 
                 inlineStatusView
 
@@ -41,29 +59,18 @@ struct CapabilityInvocationChip: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityLabel(accessibilityLabel)
         .animation(.spring(response: 0.28, dampingFraction: 0.86), value: data.status)
         .animation(.easeInOut(duration: 0.18), value: data.formattedDuration)
     }
 
-    private func titleString(size: CGFloat) -> AttributedString {
-        var title = AttributedString(display.primitiveTitle)
-        title.font = TronTypography.sans(size: size, weight: .bold)
-        title.foregroundColor = textColor
-
-        let detail = display.commandText.nilIfEmpty.map { " \($0)" } ?? ""
-        var detailText = AttributedString(detail)
-        detailText.font = TronTypography.code(size: size, weight: .regular)
-        detailText.foregroundColor = textColor.opacity(0.70)
-        return title + detailText
-    }
-
     @ViewBuilder
     private var leadingAccessory: some View {
         Image(systemName: CapabilityPresentation.symbol(for: data.identity))
-            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
             .foregroundStyle(textColor)
+            .frame(width: 18, height: 18)
     }
 
     @ViewBuilder
@@ -96,9 +103,12 @@ struct CapabilityInvocationChip: View {
 
     private func inlineStatusText(_ text: String) -> some View {
         Text(text)
-            .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))
+            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
             .foregroundStyle(textColor.opacity(0.68))
             .lineLimit(1)
+            .monospacedDigit()
+            .frame(minWidth: 38, alignment: .trailing)
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private var terminalStatusText: String? {
@@ -117,16 +127,17 @@ struct CapabilityInvocationChip: View {
     }
 
     private var chipTint: Color {
-        CapabilityPresentation.statusColor(for: data.status, identity: data.identity)
+        accent
     }
 
     private var textColor: Color {
-        CapabilityPresentation.statusColor(for: data.status, identity: data.identity)
+        accent
     }
 
     private var accessibilityLabel: String {
         [
             display.primitiveTitle,
+            display.capabilityName,
             display.commandText.nilIfEmpty,
             display.statusWithDuration
         ]
@@ -142,7 +153,13 @@ struct CapabilityInvocationDetailSheet: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var display: CapabilityInvocationDisplayModel { data.display }
-    private var accent: Color { CapabilityPresentation.statusColor(for: data.status, identity: data.identity) }
+    private var accent: Color {
+        CapabilityPresentation.statusColor(
+            for: data.status,
+            identity: data.identity,
+            targetId: display.targetId
+        )
+    }
     private var sourceAccent: Color { CapabilityPresentation.sourceColor(for: data.identity) }
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
     private var sourceTint: TintedColors { TintedColors(accent: sourceAccent, colorScheme: colorScheme) }
@@ -223,7 +240,7 @@ struct CapabilityInvocationDetailSheet: View {
 
     @ViewBuilder
     private var resultSection: some View {
-        if data.result?.nilIfEmpty != nil || !display.resultRows.isEmpty {
+        if display.resultPreview?.nilIfEmpty != nil || data.result?.nilIfEmpty != nil || !display.resultRows.isEmpty {
             CapabilityDetailSection(title: data.status == .error ? "Failure" : "Result", accent: resultAccent, tint: resultTint) {
                 VStack(alignment: .leading, spacing: 12) {
                     if primitive == "execute" {
@@ -234,7 +251,7 @@ struct CapabilityInvocationDetailSheet: View {
                             CapabilityInvocationCodeBlock(text: preview)
                         } else if data.result?.nilIfEmpty != nil {
                             CapabilityResultNote(
-                                text: "Structured output is available in Technical.",
+                                text: "Structured output is available in Metadata.",
                                 tint: resultTint
                             )
                         }
@@ -292,7 +309,7 @@ struct CapabilityInvocationDetailSheet: View {
     @ViewBuilder
     private var technicalSection: some View {
         if !display.technicalRows.isEmpty || display.prettyArguments != nil || display.prettyResult != nil {
-            CapabilityDetailSection(title: "Technical", accent: .tronSlate, tint: tint) {
+            CapabilityDetailSection(title: "Metadata", accent: .tronSlate, tint: tint) {
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 14) {
                         if !display.technicalRows.isEmpty {
@@ -307,7 +324,7 @@ struct CapabilityInvocationDetailSheet: View {
                     }
                     .padding(.top, 8)
                 } label: {
-                    Text("Metadata and raw payloads")
+                    Text("Audit metadata and raw payloads")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(tint.heading)
                 }
@@ -392,19 +409,47 @@ private struct CapabilityDetailHeader: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var display: CapabilityInvocationDisplayModel { data.display }
-    private var accent: Color { CapabilityPresentation.statusColor(for: data.status, identity: data.identity) }
-    private var sourceAccent: Color { CapabilityPresentation.sourceColor(for: data.identity) }
+    private var accent: Color {
+        CapabilityPresentation.statusColor(
+            for: data.status,
+            identity: data.identity,
+            targetId: display.targetId
+        )
+    }
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 10) {
-                CapabilitySourceBadge(label: CapabilityPresentation.sourceLabel(for: data.identity), color: sourceAccent)
+            HStack(alignment: .top, spacing: 12) {
+                Text(display.capabilityName)
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .bold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
                 Spacer(minLength: 8)
-                CapabilityStatusBadge(status: data.status)
+
+                HStack(spacing: 8) {
+                    CapabilityStatusBadge(status: data.status)
+                    if let duration = data.formattedDuration {
+                        CapabilityHeaderDurationBadge(duration: duration, color: accent)
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
 
-            CapabilityReadableRows(rows: display.capabilityRows, tint: tint)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(summaryLine)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(tint.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let plugin = CapabilityPresentation.pluginLabel(for: data.identity) {
+                CapabilityHeaderMetric(label: "Plugin", value: plugin, tint: tint)
+            }
         }
         .padding(16)
         .background {
@@ -415,6 +460,57 @@ private struct CapabilityDetailHeader: View {
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
         }
+    }
+
+    private var summaryLine: String {
+        var parts = [display.primitiveTitle]
+        if let target = display.targetId?.nilIfEmpty {
+            parts.append(target)
+        }
+        return parts.joined(separator: " via ")
+    }
+}
+
+@available(iOS 26.0, *)
+private struct CapabilityHeaderDurationBadge: View {
+    let duration: String
+    let color: Color
+
+    var body: some View {
+        Text(duration)
+            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
+            .foregroundStyle(color)
+            .monospacedDigit()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background {
+                Capsule()
+                    .fill(.clear)
+                    .glassEffect(.regular.tint(color.opacity(0.20)), in: Capsule())
+            }
+            .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+@available(iOS 26.0, *)
+private struct CapabilityHeaderMetric: View {
+    let label: String
+    let value: String
+    let tint: TintedColors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(tint.subtle)
+            Text(value)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

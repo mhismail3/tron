@@ -181,6 +181,7 @@ mod tests {
             trace_id: Some("trace-test".into()),
             root_invocation_id: Some("root-test".into()),
             binding_decision_id: Some("binding-test".into()),
+            theme_color: Some("#10B981".into()),
         }
     }
 

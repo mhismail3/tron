@@ -1198,6 +1198,12 @@ async fn execute_invoke_value(
         output: output.clone(),
         approval_state: None,
         plugin_versions: vec![target.entry.plugin_id.clone()],
+        presentation_hints: target
+            .entry
+            .function
+            .metadata
+            .get("presentationHints")
+            .cloned(),
         binding_decision: target.binding_decision,
         schema_digest: target.entry.schema_digest,
     };
@@ -1344,6 +1350,12 @@ fn approved_execution_result(
             "traceId": approval.trace_id.as_str()
         })),
         plugin_versions: vec![target.entry.plugin_id.clone()],
+        presentation_hints: target
+            .entry
+            .function
+            .metadata
+            .get("presentationHints")
+            .cloned(),
         binding_decision: target.binding_decision.clone(),
         schema_digest: target.entry.schema_digest.clone(),
     };
