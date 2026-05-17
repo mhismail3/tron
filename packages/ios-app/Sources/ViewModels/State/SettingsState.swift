@@ -87,18 +87,6 @@ final class SettingsState {
     /// Whether the Mac server loads the local MLX transcription sidecar.
     var transcriptionEnabled: Bool = false
 
-    // MARK: - Codex App Server
-
-    /// Whether Tron Server starts and supervises `codex app-server`.
-    var codexAppServerEnabled: Bool = true
-    /// Managed Codex App Server WebSocket port.
-    var codexAppServerPort: Int = 4500
-    /// Server-owned defaults for new Codex threads.
-    var codexAppServerPreferredCwd: String = ""
-    var codexAppServerPreferredModel: String = ""
-    var codexAppServerApprovalPolicy: String = "onRequest"
-    var codexAppServerSandboxMode: String = "workspaceWrite"
-
     // MARK: - Update Checks
 
     /// Master switch for user-mode update checks. Default `false` (opt-in).
@@ -254,12 +242,6 @@ final class SettingsState {
         storageRetentionEnabled = settings.storageRetentionEnabled
         storageMaxDatabaseMb = settings.storageMaxDatabaseMb
         transcriptionEnabled = settings.transcriptionEnabled
-        codexAppServerEnabled = settings.codexAppServerEnabled
-        codexAppServerPort = settings.codexAppServerPort
-        codexAppServerPreferredCwd = settings.codexAppServerPreferredCwd ?? ""
-        codexAppServerPreferredModel = settings.codexAppServerPreferredModel ?? ""
-        codexAppServerApprovalPolicy = settings.codexAppServerApprovalPolicy
-        codexAppServerSandboxMode = settings.codexAppServerSandboxMode
 
         updateEnabled = settings.updateEnabled
         updateChannel = settings.updateChannel

@@ -249,7 +249,6 @@ mod tests {
         let server = json.get("server").unwrap();
         assert!(server.get("heartbeatIntervalMs").is_some());
         assert!(server.get("defaultModel").is_some());
-        assert!(server.get("codexAppServer").is_some());
 
         // Removed fields no longer present
         assert!(server.get("wsPort").is_none());
@@ -261,17 +260,6 @@ mod tests {
 
         // Optional sections omitted when None
         assert!(json.get("guardrails").is_none());
-    }
-
-    #[test]
-    fn codex_app_server_defaults_are_server_owned() {
-        let settings = TronSettings::default();
-        let codex = settings.server.codex_app_server;
-        assert!(codex.enabled);
-        assert_eq!(codex.port, 4500);
-        assert_eq!(codex.listen_url(), "ws://0.0.0.0:4500");
-        assert_eq!(codex.approval_policy, CodexAppApprovalPolicy::OnRequest);
-        assert_eq!(codex.sandbox_mode, CodexAppSandboxMode::WorkspaceWrite);
     }
 
     #[test]

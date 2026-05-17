@@ -18,7 +18,6 @@ use crate::domains::catalog;
 use crate::domains::session::event_store::EventStore;
 use crate::domains::skills::registry::SkillRegistry;
 use crate::engine::{FunctionDefinition, InProcessFunctionHandler, WorkerDefinition, WorkerKind};
-use crate::platform::codex_app::CodexAppServerManager;
 use crate::shared::server::context::{AgentDeps, CapabilitySupportConfig, ServerRuntimeContext};
 
 #[derive(Clone)]
@@ -47,7 +46,6 @@ pub(crate) struct DomainRegistrationContext {
         >,
     >,
     pub(crate) mcp_router: Option<Arc<tokio::sync::RwLock<crate::domains::mcp::router::McpRouter>>>,
-    pub(crate) codex_app_server: Option<Arc<CodexAppServerManager>>,
     pub(crate) device_request_broker:
         Option<Arc<crate::platform::device_broker::DeviceRequestBroker>>,
     pub(crate) transcription_engine:
@@ -92,7 +90,6 @@ impl DomainRegistrationContext {
             auth_path: ctx.auth_path.clone(),
             oauth_flows: Arc::clone(&ctx.oauth_flows),
             mcp_router: ctx.mcp_router.clone(),
-            codex_app_server: ctx.codex_app_server.clone(),
             device_request_broker: ctx.device_request_broker.clone(),
             transcription_engine: Arc::clone(&ctx.transcription_engine),
             cron_scheduler: ctx.cron_scheduler.clone(),

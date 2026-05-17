@@ -2,13 +2,11 @@
 
 use crate::domains::agent::runner::profile_runtime::ProfileRuntime;
 use crate::domains::worker::DomainRegistrationContext;
-use crate::platform::codex_app::CodexAppServerManager;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
-    pub(super) codex_app_server: Option<Arc<CodexAppServerManager>>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) mcp_router: Option<Arc<tokio::sync::RwLock<crate::domains::mcp::router::McpRouter>>>,
     pub(super) profile_runtime: Arc<ProfileRuntime>,
@@ -18,7 +16,6 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
-            codex_app_server: deps.codex_app_server.clone(),
             engine_host: deps.engine_host.clone(),
             mcp_router: deps.mcp_router.clone(),
             profile_runtime: deps.profile_runtime.clone(),

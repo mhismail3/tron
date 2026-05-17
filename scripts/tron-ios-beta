@@ -1,0 +1,368 @@
+#!/usr/bin/env bash
+# Build, install, launch, and stop the local Tron Beta iOS app on a physical device.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IOS_DIR="$ROOT_DIR/packages/ios-app"
+DERIVED_DATA="build/DerivedData"
+SCHEME="Tron Beta"
+CONFIG="Beta"
+DEVICE_ID="${TRON_IOS_DEVICE_ID:-}"
+DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
+DESTINATION="${TRON_IOS_DESTINATION:-}"
+LAUNCH_AFTER_INSTALL=1
+
+usage() {
+    cat <<'USAGE'
+Usage:
+  scripts/tron-ios-beta install [--device-id ID] [--device-name NAME] [--no-launch]
+  scripts/tron-ios-beta launch [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-beta stop [--device-id ID] [--device-name NAME]
+  scripts/tron-ios-beta status [--device-id ID] [--device-name NAME]
+
+Aliases:
+  start    Same as install
+
+Environment overrides:
+  TRON_IOS_DEVICE_ID       Physical iOS device identifier
+  TRON_IOS_DEVICE_NAME     Physical iOS device name
+  TRON_IOS_DESTINATION     Full xcodebuild destination, e.g. platform=iOS,id=<id>
+
+Without a device override, the script selects the only available physical iOS
+device. If multiple physical devices are available, set TRON_IOS_DEVICE_ID or
+TRON_IOS_DEVICE_NAME locally.
+USAGE
+}
+
+die() {
+    echo "error: $*" >&2
+    exit 1
+}
+
+require_full_xcode() {
+    local selected_xcode
+    selected_xcode="$(xcode-select -p)"
+    if [[ "$selected_xcode" == "/Library/Developer/CommandLineTools"* ]]; then
+        die "xcode-select points to Command Line Tools, not full Xcode: $selected_xcode"
+    fi
+}
+
+parse_common_args() {
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --device-id)
+                DEVICE_ID="${2:-}"
+                [ -n "$DEVICE_ID" ] || die "--device-id requires a value"
+                shift 2
+                ;;
+            --device-name)
+                DEVICE_NAME="${2:-}"
+                [ -n "$DEVICE_NAME" ] || die "--device-name requires a value"
+                shift 2
+                ;;
+            --no-launch)
+                LAUNCH_AFTER_INSTALL=0
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                die "unknown option: $1"
+                ;;
+        esac
+    done
+}
+
+device_uuid_from_line() {
+    sed -nE 's/.*([0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}).*/\1/p' | head -1
+}
+
+available_physical_devices() {
+    local output
+    for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+        output="$(
+            xcrun devicectl list devices 2>&1 \
+                | awk 'NR > 2 && $0 !~ /unavailable/ && $0 ~ /available/ && $0 ~ /(iPhone|iPad|iPod)/ { print }'
+        )"
+        if [ -n "$output" ]; then
+            printf '%s\n' "$output"
+            return 0
+        fi
+        sleep 1
+    done
+}
+
+resolve_device_id() {
+    if [ -n "$DEVICE_ID" ]; then
+        printf '%s\n' "$DEVICE_ID"
+        return 0
+    fi
+
+    local devices
+    devices="$(available_physical_devices || true)"
+
+    if [ -n "$DEVICE_NAME" ]; then
+        local matched
+        matched="$(
+            printf '%s\n' "$devices" \
+                | awk -v name="$DEVICE_NAME" 'index(tolower($0), tolower(name)) { print; exit }'
+        )"
+        if [ -z "$matched" ]; then
+            echo "Available physical devices:" >&2
+            printf '%s\n' "$devices" >&2
+            die "no available physical iOS device matched TRON_IOS_DEVICE_NAME=$DEVICE_NAME"
+        fi
+        printf '%s\n' "$matched" | device_uuid_from_line
+        return 0
+    fi
+
+    local count
+    count="$(printf '%s\n' "$devices" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+    if [ "$count" = "1" ]; then
+        printf '%s\n' "$devices" | device_uuid_from_line
+        return 0
+    fi
+
+    echo "Available physical devices:" >&2
+    printf '%s\n' "$devices" >&2
+    die "set TRON_IOS_DEVICE_ID or TRON_IOS_DEVICE_NAME when zero or multiple physical devices are available"
+}
+
+project_selector() {
+    cd "$IOS_DIR"
+    local workspace
+    workspace="$(find . -maxdepth 2 -name "*.xcworkspace" -not -path "*/.build/*" -not -path "*/build/*" -not -path "*.xcodeproj/*" | head -1)"
+    if [ -n "$workspace" ]; then
+        printf '%s\n%s\n' "-workspace" "$workspace"
+    else
+        printf '%s\n%s\n' "-project" "TronMobile.xcodeproj"
+    fi
+}
+
+bundle_id_for_project() {
+    local selector_flag="$1"
+    local selector_path="$2"
+    cd "$IOS_DIR"
+    xcodebuild -showBuildSettings "$selector_flag" "$selector_path" \
+        -scheme "$SCHEME" \
+        -configuration "$CONFIG" 2>/dev/null \
+        | awk -F' = ' '/^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER/ {print $2; exit}'
+}
+
+pretty_xcode_output() {
+    if command -v xcbeautify >/dev/null 2>&1; then
+        xcbeautify --quiet
+    elif command -v xcpretty >/dev/null 2>&1; then
+        xcpretty --color
+    else
+        awk '
+            /[^ ].*:[0-9]+:[0-9]+: (error|warning|note):/ { print; next }
+            /^\*\* (BUILD|CLEAN|TEST) (SUCCEEDED|FAILED|CANCELED) \*\*/ { print; next }
+            /^The following build commands failed:/ { print; in_fail=1; next }
+            in_fail && /^\([0-9]+ failures?\)$/ { print; in_fail=0; next }
+            in_fail { print; next }
+            /^(Undefined symbols|ld: error|duplicate symbol|fatal error)/ { print; next }
+            /Code Sign(ing)? (error|failed)/ { print; next }
+            /provisioning profile/ && /error|not found|does not/ { print; next }
+        '
+    fi
+}
+
+build_install_launch() {
+    require_full_xcode
+
+    local device_id
+    device_id="$(resolve_device_id)"
+    [ -n "$device_id" ] || die "could not resolve a physical iOS device"
+
+    xcodebuild -version
+    cd "$IOS_DIR"
+    xcodegen generate
+
+    local selector
+    selector="$(project_selector)"
+    local project_flag project_path
+    project_flag="$(printf '%s\n' "$selector" | sed -n '1p')"
+    project_path="$(printf '%s\n' "$selector" | sed -n '2p')"
+
+    local bundle_id
+    bundle_id="$(bundle_id_for_project "$project_flag" "$project_path")"
+
+    local destination
+    if [ -n "$DESTINATION" ]; then
+        destination="$DESTINATION"
+    else
+        destination="platform=iOS,id=${device_id}"
+    fi
+
+    local ts log xcresult
+    ts="$(date +%s)-$$"
+    log="/tmp/xcode-${ts}.log"
+    xcresult="/tmp/xcode-${ts}.xcresult"
+
+    set +e
+    xcodebuild \
+        build \
+        "$project_flag" "$project_path" \
+        -scheme "$SCHEME" \
+        -configuration "$CONFIG" \
+        -destination "$destination" \
+        -destination-timeout 30 \
+        -derivedDataPath "$DERIVED_DATA" \
+        -resultBundlePath "$xcresult" \
+        -allowProvisioningUpdates \
+        -allowProvisioningDeviceRegistration \
+        2>&1 \
+        | tee "$log" \
+        | pretty_xcode_output
+    local build_status=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$build_status" -ne 0 ]; then
+        echo
+        echo "Build failed."
+        echo
+        echo "-- Errors --"
+        grep -E ':[0-9]+:[0-9]+: (error|warning):' "$log" | awk '!seen[$0]++' | head -20 || true
+        echo
+        echo "-- Failed commands --"
+        sed -n '/^The following build commands failed:/,/^([0-9]\+ failures\?)$/p' "$log" | head -30 || true
+        echo
+        echo "-- Signing / linker hints --"
+        grep -E 'Undefined symbols|ld: error|Code Sign|provisioning profile|signing identity' "$log" \
+            | grep -iE 'error|failed|not found|does not' | head -10 || true
+        echo
+        echo "Full log: $log"
+        echo "xcresult: $xcresult"
+        exit "$build_status"
+    fi
+
+    local app
+    app="$(find "$DERIVED_DATA/Build/Products" -name "TronMobile.app" -path "*iphoneos*" -type d | head -1)"
+    [ -d "$app" ] || die "expected app bundle not found under $DERIVED_DATA/Build/Products"
+
+    xcrun devicectl device install app --device "$device_id" "$app"
+
+    if [ "$LAUNCH_AFTER_INSTALL" = "1" ] && [ -n "$bundle_id" ]; then
+        launch_beta_for_device "$device_id" "$bundle_id"
+    fi
+
+    echo
+    echo "Installed $app on $device_id"
+    echo "Bundle ID: ${bundle_id:-unknown}"
+    echo "Full log: $log"
+    echo "xcresult: $xcresult"
+}
+
+launch_beta_for_device() {
+    local device_id="$1"
+    local bundle_id="$2"
+    if ! xcrun devicectl device process launch --device "$device_id" "$bundle_id"; then
+        die "launch failed. Unlock the device, then run scripts/tron-ios-beta launch"
+    fi
+}
+
+launch_beta() {
+    local device_id
+    device_id="$(resolve_device_id)"
+    [ -n "$device_id" ] || die "could not resolve a physical iOS device"
+
+    cd "$IOS_DIR"
+    xcodegen generate >/dev/null
+    local selector
+    selector="$(project_selector)"
+    local project_flag project_path
+    project_flag="$(printf '%s\n' "$selector" | sed -n '1p')"
+    project_path="$(printf '%s\n' "$selector" | sed -n '2p')"
+
+    local bundle_id
+    bundle_id="$(bundle_id_for_project "$project_flag" "$project_path")"
+    [ -n "$bundle_id" ] || die "could not resolve bundle ID"
+    launch_beta_for_device "$device_id" "$bundle_id"
+}
+
+tronmobile_pids() {
+    local device_id="$1"
+    xcrun devicectl device info processes --device "$device_id" \
+        | awk '$0 ~ /TronMobile\.app\/TronMobile$/ { print $1 }'
+}
+
+stop_beta() {
+    local device_id
+    device_id="$(resolve_device_id)"
+    [ -n "$device_id" ] || die "could not resolve a physical iOS device"
+
+    local pids
+    pids="$(tronmobile_pids "$device_id" || true)"
+    if [ -z "$pids" ]; then
+        echo "No running TronMobile processes found on $device_id."
+        return 0
+    fi
+
+    local pid
+    while IFS= read -r pid; do
+        [ -n "$pid" ] || continue
+        xcrun devicectl device process terminate --device "$device_id" --pid "$pid" || true
+    done <<< "$pids"
+
+    local remaining
+    remaining="$(tronmobile_pids "$device_id" || true)"
+    if [ -n "$remaining" ]; then
+        echo "Some TronMobile processes are still running:" >&2
+        printf '%s\n' "$remaining" >&2
+        exit 1
+    fi
+
+    echo "Stopped TronMobile on $device_id."
+}
+
+status_beta() {
+    local device_id
+    device_id="$(resolve_device_id)"
+    [ -n "$device_id" ] || die "could not resolve a physical iOS device"
+
+    echo "Device: $device_id"
+    local pids
+    pids="$(tronmobile_pids "$device_id" || true)"
+    if [ -z "$pids" ]; then
+        echo "TronMobile: not running"
+    else
+        echo "TronMobile PIDs:"
+        printf '%s\n' "$pids"
+    fi
+}
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+    case "$cmd" in
+        install|start)
+            parse_common_args "$@"
+            build_install_launch
+            ;;
+        launch)
+            parse_common_args "$@"
+            launch_beta
+            ;;
+        stop)
+            parse_common_args "$@"
+            stop_beta
+            ;;
+        status)
+            parse_common_args "$@"
+            status_beta
+            ;;
+        help|-h|--help)
+            usage
+            ;;
+        *)
+            usage >&2
+            exit 64
+            ;;
+    esac
+}
+
+main "$@"

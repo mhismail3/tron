@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-13 (capability-native chat/dashboard/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs sections, server-owned storage/observability settings, live session and approval stream subscription before prompt send, Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-05-16 (capability-native chat/dashboard/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs sections, server-owned storage/observability settings, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, and retired direct integration removal)
 
 ## Overview
 
@@ -13,7 +13,6 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Capability-native invocation/result rendering for the live `search` / `inspect` / `execute` harness
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
-- A separate Codex mode that connects directly to a Tron-managed `codex app-server` on the active paired machine without using Tron agent sessions
 - A top-level Engine Console mode for live capability registry search, program runs, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
 
 The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
@@ -32,13 +31,11 @@ Sources/
 │       └── Payloads/       # Shared Decodable structs
 ├── Database/               # SQLite event database, queries
 ├── Models/                 # Data models, event transformers
-│   ├── CodexApp/           # Direct Codex App Server protocol models
 │   ├── Events/             # Event types and registry
 │   ├── Features/           # Feature-specific models
 │   ├── Messages/           # Message models
 │   └── EngineProtocol/     # /engine frame, invocation, and stream codables
 ├── Services/               # Network, state management
-│   ├── CodexApp/           # Codex endpoint store, token store, JSON-RPC transport/client
 │   ├── Network/            # engine protocol, WebSocket (with Bearer auth), deep links
 │   ├── Events/             # Event store, sync
 │   ├── Audio/              # Recording, transcription
@@ -51,13 +48,11 @@ Sources/
 │   ├── Settings/           # PairedServerStore (local server list + active id)
 │   └── Storage/            # KeychainItem, PairedServerTokenStore, EngineConsoleCache
 ├── ViewModels/             # View state management
-│   ├── CodexApp/           # Codex mode state reducer and view model
 │   ├── Chat/               # ChatViewModel and extensions
 │   ├── Handlers/           # Event handling coordinators
 │   ├── Managers/           # Specialized state managers
 │   └── State/              # @Observable state objects, including EngineConsoleState
 └── Views/                  # SwiftUI views
-    ├── CodexApp/           # Codex dashboard, full-screen thread detail, setup/status, approvals
     ├── Chat/               # Core chat interface
     ├── EngineConsole/      # Capability registry/plugin/binding/audit console
     ├── Capabilities/       # Generic capability invocation chips, detail sheets, and result rendering
@@ -155,8 +150,6 @@ final class SubagentState {
 | `Services/Storage/EngineConsoleCache.swift` | Read-only disconnected Engine Console summary cache |
 | `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
-| `Services/CodexApp/CodexJSONRPCTransport.swift` | Direct Codex App Server JSON-RPC transport |
-| `ViewModels/CodexApp/CodexAppViewModel.swift` | Codex mode setup, connection, thread, turn, and approval state |
 | `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state |
 | `Views/EngineConsole/EngineConsoleView.swift` | Top-level capability operator console |
 
@@ -231,43 +224,6 @@ payload reveal is a future server-authorized flow and must not be reconstructed
 locally.
 
 ## Data Flow
-
-### Codex App Server Mode
-
-```
-Codex mode UI
-    ↓
-CodexAppViewModel + CodexAppReducer
-    ↓
-CodexAppClient
-    ↓
-CodexJSONRPCTransport
-    ↓
-Tron-managed codex app-server on the active paired machine
-```
-
-Codex mode does not use Tron sessions, the Tron agent turn pipeline, or
-`EventRegistry`/`EventStoreManager`. It does use authenticated Tron engine protocol for
-discovery: `CodexAppModeView` asks `engineClient.codexAppServer.status()` for the
-server-owned endpoint, bearer token, lifecycle state, and thread defaults. The
-iOS view model keeps that data in memory only; Codex endpoint configuration and
-the WebSocket bearer token are owned by Tron Server.
-
-The UI mirrors the core session flow: a dashboard lists Codex threads, `+` opens
-a draft full-screen thread view, tapping an existing thread routes to a full
-detail view on iPhone, and iPad uses the same dashboard/detail split. The
-dashboard auto-connects, auto-loads `thread/list`, and keeps polling managed
-server status while disconnected so a restarted Codex child recovers without
-manual refresh. Foreground transitions in Codex mode also recover the dedicated
-Codex WebSocket: the view model disconnects the stale direct socket, refreshes
-managed status through Tron engine protocol, reconnects, reloads `thread/list`, and resumes
-the selected thread without replaying any turn. Detail views render text
-messages and Codex tool items as one chronological transcript, show the newest
-resumed history window first, keep older decoded entries outside the SwiftUI
-list until Load Earlier Entries is tapped, and re-anchor after prepending older
-batches. Failed/disabled server lifecycle states stay inside the dashboard as
-retryable connection states; manual server configuration lives in the main
-Settings sheet instead of an in-dashboard settings subpage.
 
 ### Live Events
 
@@ -354,7 +310,6 @@ dependencies.eventStoreManager
 |------|--------------|
 | Persistent | Never (eventDatabase, pushNotificationService) |
 | Connection-based | Server change (engineClient, skillStore) |
-| Codex mode | Active paired server change; foreground recovery resets the direct Codex WebSocket only |
 
 Foreground/background handling for the primary Tron engine connection is owned by
 `TronMobileApp` and the network services rather than by session views. SwiftUI
@@ -364,10 +319,7 @@ to `.disconnected` so the next foreground transition can kick a fresh retry. On
 foreground return, the app verifies any apparently connected socket with a
 bounded URLSession WebSocket ping before issuing notification or session-list
 engine refreshes, and manually retries through the same path as the status pill when
-the connection state machine says retrying is appropriate. Codex mode owns a
-small mode-scoped foreground hook because its Codex WebSocket bypasses
-`EngineConnection`; that hook refreshes only the direct Codex transport and does
-not mutate Tron session state. Normal automatic recovery uses one short
+the connection state machine says retrying is appropriate. Normal automatic recovery uses one short
 two-second WebSocket-open probe; if that probe cannot connect, the transport
 parks in the user-retryable failed/not-connected state instead of cycling
 through repeated reconnect windows. Deploy-aware reconnect remains more patient

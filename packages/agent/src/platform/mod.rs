@@ -9,7 +9,6 @@
 //! | Module   | Feature flag | Content |
 //! |----------|--------------|---------|
 //! | [`apns`] | `apns`       | Apple Push Notification service — JWT auth, HTTP/2 send, 410 Gone handling |
-//! | [`codex_app`] | always | Managed Codex App Server child lifecycle |
 //! | [`device_broker`] | always | Engine-stream request/response broker for paired devices |
 //!
 //! ## Invariants
@@ -24,6 +23,5 @@
 
 #[cfg(feature = "apns")]
 pub mod apns;
-pub mod codex_app;
 pub mod device_broker;
 pub mod updater;

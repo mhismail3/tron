@@ -476,7 +476,6 @@ async fn server_boots_and_responds() {
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         cron_scheduler: None,
-        codex_app_server: None,
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(
@@ -693,7 +692,6 @@ async fn server_graceful_shutdown() {
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         cron_scheduler: None,
-        codex_app_server: None,
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(

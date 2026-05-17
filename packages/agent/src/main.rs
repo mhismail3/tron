@@ -31,7 +31,7 @@
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
 //! 7. Production DB target is strictly `~/.tron/internal/database/tron.sqlite`
 //! 8. Server shutdown is signal-owned (`SIGINT`/`SIGTERM` on Unix) so managed
-//!    children such as `codex app-server` are stopped before Tron exits.
+//!    children are stopped before Tron exits.
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -463,7 +463,6 @@ struct ServiceState {
     output_buffer_registry:
         Arc<tron::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
     transcription_engine: Arc<std::sync::OnceLock<Arc<tron::domains::transcription::MlxEngine>>>,
-    codex_app_server: Arc<tron::platform::codex_app::CodexAppServerManager>,
 }
 
 /// Build core services: orchestrator, session manager, providers, capabilities, subagent manager.
@@ -589,12 +588,6 @@ async fn init_services(
         Arc::new(tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker::new());
 
     let transcription_engine = Arc::new(std::sync::OnceLock::new());
-    let codex_app_server = Arc::new(
-        tron::platform::codex_app::CodexAppServerManager::new(
-            settings.server.codex_app_server.clone(),
-        )
-        .context("Failed to initialize Codex App Server lifecycle manager")?,
-    );
 
     Ok(ServiceState {
         event_store,
@@ -612,7 +605,6 @@ async fn init_services(
         job_manager,
         output_buffer_registry,
         transcription_engine,
-        codex_app_server,
     })
 }
 
@@ -808,7 +800,6 @@ fn build_server_runtime_context(
         shutdown_coordinator: None,
         origin,
         cron_scheduler: Some(cron.scheduler.clone()),
-        codex_app_server: Some(services.codex_app_server.clone()),
         worktree_coordinator,
         device_request_broker: None,
         context_artifacts: Arc::new(
@@ -1029,21 +1020,6 @@ async fn main() -> Result<()> {
     cron.scheduler
         .set_engine_host(server.runtime_context().engine_host.clone());
     register_blocking_supervisor_shutdown(server.shutdown());
-    if let Some(codex_app_server) = server.runtime_context().codex_app_server.clone() {
-        if let Err(error) = codex_app_server.start().await {
-            tracing::warn!(
-                error = %error,
-                "managed Codex App Server did not start; Tron will continue and surface status via codexApp.status"
-            );
-        }
-        server.shutdown().register_phase_hook(
-            tron::app::shutdown::ShutdownPhase::Capabilities,
-            "codex-app-server",
-            move || async move {
-                codex_app_server.stop().await;
-            },
-        );
-    }
     register_transcription_sidecar(
         settings.server.transcription.enabled,
         server.shutdown(),

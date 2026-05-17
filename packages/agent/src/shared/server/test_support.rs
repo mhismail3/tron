@@ -189,7 +189,6 @@ pub fn make_test_context() -> ServerRuntimeContext {
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         cron_scheduler: None,
-        codex_app_server: None,
         worktree_coordinator: None,
         device_request_broker: None,
         context_artifacts: Arc::new(ContextArtifactsService::new()),

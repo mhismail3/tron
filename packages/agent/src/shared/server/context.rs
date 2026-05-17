@@ -21,7 +21,6 @@ use parking_lot::{Mutex, RwLock};
 
 use crate::app::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::domains::session::context::ContextArtifactsService;
-use crate::platform::codex_app::CodexAppServerManager;
 use crate::platform::device_broker::DeviceRequestBroker;
 use crate::shared::server::errors::CapabilityError;
 
@@ -252,11 +251,6 @@ pub struct ServerRuntimeContext {
     pub origin: String,
     /// Cron scheduler (None = cron not available).
     pub cron_scheduler: Option<std::sync::Arc<crate::domains::cron::CronScheduler>>,
-    /// Server-owned Codex App Server lifecycle manager.
-    ///
-    /// `None` in isolated tests and embedded contexts; production installs one
-    /// during daemon startup and exposes it through `codexApp.status`.
-    pub codex_app_server: Option<Arc<CodexAppServerManager>>,
     /// Worktree coordinator for session isolation (None = isolation disabled).
     pub worktree_coordinator: Option<std::sync::Arc<crate::domains::worktree::WorktreeCoordinator>>,
     /// Device request broker for iOS request/response round-trips.

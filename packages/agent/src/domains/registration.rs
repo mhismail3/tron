@@ -33,9 +33,9 @@ use crate::domains::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, auth, blob, browser, capability, codex_app, context, cron, device, display, events,
-    filesystem, git, import, job, logs, mcp, memory, message, model, notifications, plan, process,
-    program, prompt_library, repo, sandbox, session, settings, skills, system, transcription, tree,
+    agent, auth, blob, browser, capability, context, cron, device, display, events, filesystem,
+    git, import, job, logs, mcp, memory, message, model, notifications, plan, process, program,
+    prompt_library, repo, sandbox, session, settings, skills, system, transcription, tree,
     voice_notes, web, worktree,
 };
 
@@ -69,7 +69,6 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
     let mut modules = vec![
         system::worker_module(&deps)?,
         capability::worker_module(&deps)?,
-        codex_app::worker_module(&deps)?,
         blob::worker_module(&deps)?,
         message::worker_module(&deps)?,
         cron::worker_module(&deps)?,

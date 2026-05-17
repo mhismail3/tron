@@ -7,7 +7,6 @@
 - Xcode 26+ with iOS 26 SDK
 - XcodeGen (`brew install xcodegen`)
 - Tron server running locally
-- Optional for Codex mode: current Codex CLI with WebSocket `app-server` support installed on the paired Tron server machine
 
 ### Project Generation
 
@@ -41,32 +40,33 @@ queries are not logged. When physical-device pairing fails, copy the
 is local-network permission, Tailscale reachability, HTTP auth, or engine
 protocol response handling.
 
-### Codex App Server Mode
+### Codex App Local Actions
 
-Codex mode is separate from Tron agent sessions, but its server lifecycle is
-owned by the paired Tron server. Start or restart the Tron server after
-installing a current Codex CLI; when `server.codexAppServer.enabled` is true,
-the server launches `codex app-server`, writes the capability token under
-`~/.tron/internal/run/codex-app-server-token`, and reports the live endpoint via
-`codexApp.status`.
+The repository includes `.codex/environments/environment.toml` for Codex app
+toolbar actions. `Dev Server` starts `scripts/tron dev -bdt` from the project
+root, and `Stop Dev Server` runs `scripts/tron dev --stop`. `Install iOS Beta`
+runs `scripts/tron-ios-beta install`; it regenerates the Xcode project,
+preflights the active Xcode toolchain, builds the `Tron Beta` scheme for a
+physical iOS destination, writes a full log plus `.xcresult` bundle, installs
+the resulting app bundle with `xcrun devicectl`, and launches the resolved
+bundle ID on the device. `Launch iOS Beta` runs `scripts/tron-ios-beta launch`
+for the already-installed app, which is useful after unlocking a device whose
+launch was denied during install. `Stop iOS Beta` runs `scripts/tron-ios-beta stop`,
+finds running `TronMobile.app/TronMobile` PIDs on the selected device, and
+terminates them with `xcrun devicectl device process terminate`.
 
-For local verification:
+Keep device-specific values out of the repo. The helper auto-selects the only
+available physical iOS device. If multiple devices are available, set one of
+these in your local terminal environment before running it:
 
 ```bash
-# from the repository root
-scripts/tron dev
-# Then open Codex mode in the paired iOS app. The dashboard should connect,
-# load threads automatically, and open selected threads as full-screen detail
-# views on iPhone.
+export TRON_IOS_DEVICE_ID=<device-identifier>
+# or
+export TRON_IOS_DEVICE_NAME=<device-name>
 ```
 
-Use a Tailscale/private address for device testing. If the status page shows a
-failed Codex server, verify `codex` is on the LaunchAgent shell `PATH`, the CLI
-supports `app-server --listen ... --ws-auth capability-token --ws-token-file`,
-and the configured port is free. The Codex dashboard now stays on the thread
-list flow when the managed server is failed or restarting; it shows a retryable
-connection state and polls `codexApp.status` until the server reports a running
-endpoint.
+If Xcode needs a custom destination string, set `TRON_IOS_DESTINATION`
+directly, for example `platform=iOS,id=<device-identifier>`.
 
 ## Build Configurations
 
@@ -95,7 +95,6 @@ xcodebuild test \
 
 ```
 Tests/
-├── CodexApp/          # Codex JSON-RPC, reducer, managed-status, view-model tests
 ├── ViewModels/        # ViewModel tests
 ├── Services/          # Service tests
 ├── Core/              # Event plugin tests

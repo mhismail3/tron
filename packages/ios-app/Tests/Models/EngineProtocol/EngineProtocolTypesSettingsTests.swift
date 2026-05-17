@@ -13,15 +13,7 @@ struct ServerSettingsTests {
         {
             "server": {
                 "defaultModel": "claude-opus-4-6",
-                "defaultWorkspace": "/projects",
-                "codexAppServer": {
-                    "enabled": true,
-                    "port": 4511,
-                    "preferredCwd": "/projects/tron",
-                    "preferredModel": "gpt-5.4",
-                    "approvalPolicy": "unlessTrusted",
-                    "sandboxMode": "readOnly"
-                }
+                "defaultWorkspace": "/projects"
             },
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 },
@@ -49,12 +41,6 @@ struct ServerSettingsTests {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.defaultWorkspace == "/projects")
-        #expect(settings.codexAppServerEnabled == true)
-        #expect(settings.codexAppServerPort == 4511)
-        #expect(settings.codexAppServerPreferredCwd == "/projects/tron")
-        #expect(settings.codexAppServerPreferredModel == "gpt-5.4")
-        #expect(settings.codexAppServerApprovalPolicy == "unlessTrusted")
-        #expect(settings.codexAppServerSandboxMode == "readOnly")
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
         #expect(settings.rules.discoverStandaloneFiles == false)
@@ -82,12 +68,6 @@ struct ServerSettingsTests {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
         #expect(settings.defaultModel == "claude-sonnet-4-6")
         #expect(settings.defaultWorkspace == nil)
-        #expect(settings.codexAppServerEnabled == true)
-        #expect(settings.codexAppServerPort == 4500)
-        #expect(settings.codexAppServerPreferredCwd == nil)
-        #expect(settings.codexAppServerPreferredModel == nil)
-        #expect(settings.codexAppServerApprovalPolicy == "onRequest")
-        #expect(settings.codexAppServerSandboxMode == "workspaceWrite")
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
         #expect(settings.rules.discoverStandaloneFiles == true)
@@ -319,43 +299,6 @@ struct ServerSettingsTests {
         #expect(settings.updateChannel == "stable")
     }
 
-    @Test("Codex App Server settings default when server block omits them")
-    func codexAppServerDefaultsWhenServerOnly() throws {
-        let json = #"{"server":{"defaultWorkspace":"/tmp"}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
-        #expect(settings.codexAppServerEnabled == true)
-        #expect(settings.codexAppServerPort == 4500)
-        #expect(settings.codexAppServerPreferredCwd == nil)
-        #expect(settings.codexAppServerPreferredModel == nil)
-        #expect(settings.codexAppServerApprovalPolicy == "onRequest")
-        #expect(settings.codexAppServerSandboxMode == "workspaceWrite")
-    }
-
-    @Test("decode Codex App Server settings from JSON")
-    func codexAppServerSettingsDecode() throws {
-        let json = """
-        {
-            "server": {
-                "codexAppServer": {
-                    "enabled": false,
-                    "port": 4512,
-                    "preferredCwd": "/work",
-                    "preferredModel": "gpt-5.4",
-                    "approvalPolicy": "never",
-                    "sandboxMode": "dangerFullAccess"
-                }
-            }
-        }
-        """
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
-        #expect(settings.codexAppServerEnabled == false)
-        #expect(settings.codexAppServerPort == 4512)
-        #expect(settings.codexAppServerPreferredCwd == "/work")
-        #expect(settings.codexAppServerPreferredModel == "gpt-5.4")
-        #expect(settings.codexAppServerApprovalPolicy == "never")
-        #expect(settings.codexAppServerSandboxMode == "dangerFullAccess")
-    }
-
     @Test("decode transcription setting from JSON")
     func transcriptionSettingDecode() throws {
         let json = #"{"server":{"transcription":{"enabled":true}}}"#
@@ -415,29 +358,6 @@ struct ServerSettingsTests {
         let server = json["server"] as! [String: Any]
         let transcription = server["transcription"] as! [String: Any]
         #expect(transcription["enabled"] as? Bool == true)
-    }
-
-    @Test("ServerSettingsUpdate encodes Codex App Server block under server.codexAppServer")
-    func codexAppServerSettingsUpdateEncode() throws {
-        var update = ServerSettingsUpdate()
-        update.server = .init(codexAppServer: .init(
-            enabled: true,
-            port: 4513,
-            preferredCwd: "/work",
-            preferredModel: "gpt-5.4",
-            approvalPolicy: "unlessTrusted",
-            sandboxMode: "workspaceWrite"
-        ))
-        let data = try JSONEncoder().encode(update)
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        let server = json["server"] as! [String: Any]
-        let codex = server["codexAppServer"] as! [String: Any]
-        #expect(codex["enabled"] as? Bool == true)
-        #expect(codex["port"] as? Int == 4513)
-        #expect(codex["preferredCwd"] as? String == "/work")
-        #expect(codex["preferredModel"] as? String == "gpt-5.4")
-        #expect(codex["approvalPolicy"] as? String == "unlessTrusted")
-        #expect(codex["sandboxMode"] as? String == "workspaceWrite")
     }
 
     @Test("ServerSettingsUpdate omits update block when nil (partial update)")

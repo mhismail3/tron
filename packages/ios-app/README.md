@@ -111,8 +111,7 @@ packages/ios-app/
 │   │   ├── Events.swift            # Server event types
 │   │   └── Message.swift           # Chat message models
 │   ├── Services/
-│   │   ├── Network/                # Engine client, connection, and domain clients
-│   │   └── CodexApp/               # Direct Codex App Server product protocol
+│   │   └── Network/                # Engine client, connection, and domain clients
 │   ├── ViewModels/
 │   │   └── ChatViewModel.swift     # Chat state management
 │   ├── Views/

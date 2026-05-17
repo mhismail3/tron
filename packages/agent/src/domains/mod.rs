@@ -49,7 +49,6 @@ pub mod browser;
 pub mod capability;
 pub mod capability_support;
 pub mod catalog;
-pub mod codex_app;
 pub mod context;
 pub mod contract;
 /// Cron domain: scheduled triggers, automation state, and cron event projection.

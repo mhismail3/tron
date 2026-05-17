@@ -73,7 +73,6 @@ fn make_context_with_worktree(
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         cron_scheduler: None,
-        codex_app_server: None,
         worktree_coordinator: Some(coord.clone()),
         device_request_broker: None,
         context_artifacts: Arc::new(

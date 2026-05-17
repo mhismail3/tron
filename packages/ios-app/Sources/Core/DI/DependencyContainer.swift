@@ -92,11 +92,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Notification inbox store - refreshed from server
     private(set) var notificationStore: NotificationStore
 
-    /// Dedicated direct-to-Codex mode state. It uses `EngineClient` only to
-    /// discover the server-owned endpoint, then keeps Codex threads separate
-    /// from Tron sessions and event streams.
-    private(set) var codexAppViewModel: CodexAppViewModel
-
     // MARK: - Repositories
 
     /// Model repository for model operations with caching
@@ -203,9 +198,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // Initialize notification store
         notificationStore = NotificationStore(engineClient: client)
 
-        // Initialize server-owned Codex App Server mode.
-        codexAppViewModel = CodexAppViewModel()
-
         // Initialize repositories
         modelRepository = DefaultModelRepository(modelClient: client.model)
         sessionRepository = DefaultSessionRepository(sessionClient: client.session)
@@ -221,11 +213,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         // retries on reconnect. Must happen after all stored properties are initialized
         // (`self` is fully available here).
         eventStoreManager.attachConnectionManager(manager)
-        codexAppViewModel.configure(
-            activeServer: pairedServerStore.activeServer,
-            serverStatusProvider: { [client] in try await client.codexAppServer.status() }
-        )
-
         // Listen for auth updates from WebSocket events
         NotificationCenter.default.addObserver(
             forName: .authDidUpdate,
@@ -407,11 +394,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
         agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
         eventStoreManager.loadSessions()
-        codexAppViewModel.configure(
-            activeServer: pairedServerStore.activeServer,
-            serverStatusProvider: { [newClient] in try await newClient.codexAppServer.status() }
-        )
-
         activeServerSelectionVersion += 1
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)
 

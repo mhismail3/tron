@@ -16,12 +16,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertTrue(state.availableModels.isEmpty)
         XCTAssertFalse(state.isLoadingModels)
         XCTAssertNil(state.loadError)
-        XCTAssertTrue(state.codexAppServerEnabled)
-        XCTAssertEqual(state.codexAppServerPort, 4500)
-        XCTAssertEqual(state.codexAppServerPreferredCwd, "")
-        XCTAssertEqual(state.codexAppServerPreferredModel, "")
-        XCTAssertEqual(state.codexAppServerApprovalPolicy, "onRequest")
-        XCTAssertEqual(state.codexAppServerSandboxMode, "workspaceWrite")
         XCTAssertEqual(state.observabilityLogLevel, "info")
         XCTAssertEqual(state.observabilityPayloadCapture, "normal")
         XCTAssertEqual(state.observabilityVerboseRetentionDays, 7)
@@ -57,33 +51,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.updateFrequency, "daily")
         XCTAssertEqual(state.updateAction, "notify")
         XCTAssertFalse(state.transcriptionEnabled)
-    }
-
-    func testApplyServerSettingsLoadsCodexAppServerFields() throws {
-        let state = SettingsState()
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data("""
-        {
-          "server": {
-            "codexAppServer": {
-              "enabled": false,
-              "port": 4512,
-              "preferredCwd": "/work",
-              "preferredModel": "gpt-5.4",
-              "approvalPolicy": "never",
-              "sandboxMode": "dangerFullAccess"
-            }
-          }
-        }
-        """.utf8))
-
-        state.applyServerSettings(settings)
-
-        XCTAssertFalse(state.codexAppServerEnabled)
-        XCTAssertEqual(state.codexAppServerPort, 4512)
-        XCTAssertEqual(state.codexAppServerPreferredCwd, "/work")
-        XCTAssertEqual(state.codexAppServerPreferredModel, "gpt-5.4")
-        XCTAssertEqual(state.codexAppServerApprovalPolicy, "never")
-        XCTAssertEqual(state.codexAppServerSandboxMode, "dangerFullAccess")
     }
 
     func testApplyServerSettingsLoadsDiagnosticsFields() throws {

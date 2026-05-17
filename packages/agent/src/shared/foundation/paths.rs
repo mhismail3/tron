@@ -127,11 +127,6 @@ pub mod files {
     /// loop and the user-mode auto-updater. Presence of the file blocks
     /// any further install actions without touching settings.
     pub const AUTO_UPDATE_PAUSE: &str = "auto-update.pause";
-    /// Runtime bearer token consumed by the managed Codex App Server child.
-    ///
-    /// Stored under `internal/run/` because it is regenerated and consumed only
-    /// by the local Tron daemon + iOS clients authenticated to that daemon.
-    pub const CODEX_APP_SERVER_TOKEN: &str = "codex-app-server-token";
     /// Canonical cron job definitions.
     pub const AUTOMATIONS_JSON: &str = "automations.json";
     /// Profile prompt file name used by project-local prompt overrides.
@@ -487,12 +482,6 @@ pub fn onboarded_marker_path() -> PathBuf {
 /// `server::updater`. Mode `0o644` (no secrets); atomic writes.
 pub fn updater_state_path() -> PathBuf {
     run_dir().join(files::UPDATER_STATE_JSON)
-}
-
-/// `~/.tron/internal/run/codex-app-server-token` — bearer token for the
-/// server-managed `codex app-server` child process.
-pub fn codex_app_server_token_path() -> PathBuf {
-    run_dir().join(files::CODEX_APP_SERVER_TOKEN)
 }
 
 /// `~/.tron/internal/run/auto-update.pause` — pause sentinel for the auto-updater.

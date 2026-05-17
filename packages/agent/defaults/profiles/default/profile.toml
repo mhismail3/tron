@@ -143,12 +143,6 @@ channel = "stable"
 frequency = "daily"
 action = "notify"
 
-[settings.server.codexAppServer]
-enabled = true
-port = 4500
-approvalPolicy = "onRequest"
-sandboxMode = "workspaceWrite"
-
 [settings.tmux]
 commandTimeoutMs = 30000
 pollingIntervalMs = 500

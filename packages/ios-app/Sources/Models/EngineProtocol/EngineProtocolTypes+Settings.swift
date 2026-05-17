@@ -18,15 +18,6 @@ struct ServerSettings: Decodable {
     /// Cached Tailscale IP (e.g. `100.x.y.z`) the server reported. Populated by
     /// the Mac wrapper / install scripts. Optional — older servers don't set it.
     let tailscaleIp: String?
-    /// Whether the Tron server owns and supervises `codex app-server`.
-    let codexAppServerEnabled: Bool
-    /// Managed Codex App Server WebSocket port.
-    let codexAppServerPort: Int
-    /// Server-owned defaults for new Codex threads.
-    let codexAppServerPreferredCwd: String?
-    let codexAppServerPreferredModel: String?
-    let codexAppServerApprovalPolicy: String
-    let codexAppServerSandboxMode: String
 
     // MARK: - Update Checks
     //
@@ -145,11 +136,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case defaultModel, defaultWorkspace, transcription, tailscaleIp, update, codexAppServer
-    }
-
-    private enum CodexAppServerKeys: String, CodingKey {
-        case enabled, port, preferredCwd, preferredModel, approvalPolicy, sandboxMode
+        case defaultModel, defaultWorkspace, transcription, tailscaleIp, update
     }
 
     private enum TranscriptionKeys: String, CodingKey {
@@ -174,21 +161,6 @@ struct ServerSettings: Decodable {
             decodedDefaultModel = (try? serverContainer.decodeIfPresent(String.self, forKey: .defaultModel)) ?? decodedDefaultModel
             defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
             tailscaleIp = try? serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
-            if let codexContainer = try? serverContainer.nestedContainer(keyedBy: CodexAppServerKeys.self, forKey: .codexAppServer) {
-                codexAppServerEnabled = (try? codexContainer.decodeIfPresent(Bool.self, forKey: .enabled)) ?? true
-                codexAppServerPort = (try? codexContainer.decodeIfPresent(Int.self, forKey: .port)) ?? 4500
-                codexAppServerPreferredCwd = try? codexContainer.decodeIfPresent(String.self, forKey: .preferredCwd)
-                codexAppServerPreferredModel = try? codexContainer.decodeIfPresent(String.self, forKey: .preferredModel)
-                codexAppServerApprovalPolicy = (try? codexContainer.decodeIfPresent(String.self, forKey: .approvalPolicy)) ?? "onRequest"
-                codexAppServerSandboxMode = (try? codexContainer.decodeIfPresent(String.self, forKey: .sandboxMode)) ?? "workspaceWrite"
-            } else {
-                codexAppServerEnabled = true
-                codexAppServerPort = 4500
-                codexAppServerPreferredCwd = nil
-                codexAppServerPreferredModel = nil
-                codexAppServerApprovalPolicy = "onRequest"
-                codexAppServerSandboxMode = "workspaceWrite"
-            }
             if let transcriptionContainer = try? serverContainer.nestedContainer(keyedBy: TranscriptionKeys.self, forKey: .transcription) {
                 transcriptionEnabled = (try? transcriptionContainer.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
             } else {
@@ -212,12 +184,6 @@ struct ServerSettings: Decodable {
             defaultWorkspace = nil
             transcriptionEnabled = false
             tailscaleIp = nil
-            codexAppServerEnabled = true
-            codexAppServerPort = 4500
-            codexAppServerPreferredCwd = nil
-            codexAppServerPreferredModel = nil
-            codexAppServerApprovalPolicy = "onRequest"
-            codexAppServerSandboxMode = "workspaceWrite"
             updateEnabled = false
             updateChannel = "stable"
             updateFrequency = "daily"
@@ -515,9 +481,6 @@ struct ServerSettingsUpdate: Encodable {
         /// Only the fields the user actually changed are set; the encoder
         /// drops `nil` so the server's deep-merge preserves everything else.
         var update: UpdateUpdate?
-        /// Partial update for server-owned Codex App Server lifecycle/defaults.
-        var codexAppServer: CodexAppServerUpdate?
-
         struct TranscriptionUpdate: Encodable {
             var enabled: Bool?
         }
@@ -529,14 +492,6 @@ struct ServerSettingsUpdate: Encodable {
             var action: UpdateAction?
         }
 
-        struct CodexAppServerUpdate: Encodable {
-            var enabled: Bool?
-            var port: Int?
-            var preferredCwd: String?
-            var preferredModel: String?
-            var approvalPolicy: String?
-            var sandboxMode: String?
-        }
     }
 
     struct ContextUpdate: Encodable {

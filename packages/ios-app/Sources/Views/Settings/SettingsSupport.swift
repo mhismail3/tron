@@ -11,7 +11,6 @@ enum SettingsLabels {
     static let connectedServerUnavailableDescription = ConnectionStatusCopy.connectedServerUnavailableDescription
     static let loadingServerSettingsDescription = "Loading server settings from the active server."
     static let transcriptionSidecar = "Transcription Sidecar"
-    static let codexAppServer = "Codex App Server"
     static let updates = "Updates"
 }
 
@@ -633,13 +632,11 @@ enum ServerOnboardingLauncher {
 }
 
 enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
-    case codexAppServer
     case transcriptionSidecar
     case updates
     case diagnostics
 
     static let loadedOrder: [Self] = [
-        .codexAppServer,
         .transcriptionSidecar,
         .updates,
         .diagnostics,
@@ -647,8 +644,6 @@ enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
 
     var title: String {
         switch self {
-        case .codexAppServer:
-            return SettingsLabels.codexAppServer
         case .transcriptionSidecar:
             return SettingsLabels.transcriptionSidecar
         case .updates:
@@ -714,7 +709,6 @@ enum ServerSettingsSummary {
         let activeServerUnavailable: Bool
         let isLoaded: Bool
         let loadError: String?
-        let codexAppServerEnabled: Bool
         let transcriptionEnabled: Bool
         let updateEnabled: Bool
         let updateChannel: String
@@ -733,7 +727,7 @@ enum ServerSettingsSummary {
 
     static func description(for context: Context) -> String {
         guard context.pairedServerCount > 0 else {
-            return "Pair a Mac to manage server-backed Codex, transcription, and update settings from this iPhone."
+            return "Pair a Mac to manage server-backed transcription, update, and diagnostics settings from this iPhone."
         }
 
         guard let label = cleaned(context.activeServerLabel), !label.isEmpty else {
@@ -750,17 +744,16 @@ enum ServerSettingsSummary {
             if let error = cleaned(context.loadError), !error.isEmpty {
                 return "\(label) is paired, but settings are unavailable: \(error)"
             }
-            return "\(label) is connected. Loading Codex, transcription, and update settings."
+            return "\(label) is connected. Loading transcription, update, and diagnostics settings."
         }
 
-        let codex = "Codex App Server is \(context.codexAppServerEnabled ? "on" : "off")"
         let transcription = "Local transcription is \(context.transcriptionEnabled ? "on" : "off")"
         let updates = updateDescription(
             enabled: context.updateEnabled,
             channel: context.updateChannel,
             frequency: context.updateFrequency
         )
-        return "\(label) is connected. \(codex). \(transcription). \(updates)."
+        return "\(label) is connected. \(transcription). \(updates)."
     }
 
     private static func updateDescription(enabled: Bool, channel: String, frequency: String) -> String {

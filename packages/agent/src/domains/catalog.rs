@@ -129,7 +129,6 @@ fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     specs.extend(super::blob::contract::capabilities()?);
     specs.extend(super::browser::contract::capabilities()?);
     specs.extend(super::capability::contract::capabilities()?);
-    specs.extend(super::codex_app::contract::capabilities()?);
     specs.extend(super::context::contract::capabilities()?);
     specs.extend(super::cron::contract::capabilities()?);
     specs.extend(super::device::contract::capabilities()?);

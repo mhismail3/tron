@@ -142,10 +142,6 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var pluginSources: PluginSourceClient = PluginSourceClient(transport: self)
 
-    /// Server-owned Codex App Server lifecycle discovery.
-    @ObservationIgnored
-    lazy var codexAppServer: CodexAppServerClient = CodexAppServerClient(transport: self)
-
     /// Blob storage client (for Display capability image loading).
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)

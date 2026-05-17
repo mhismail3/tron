@@ -34,7 +34,7 @@ primitives over that same catalog.
 | `skills` | System/session | Reads, idempotent session writes | Session scoped writes | Activation state is reconstructed from events. |
 | `state` / `stream` | Scoped primitive workers | Projection writes, stream append/poll | Scoped writes | Primitives support catalog watch, subscriptions, approvals, jobs, and runtime delivery. |
 | `transcription` / `voice_notes` | System | Reads, high-risk media writes | File/model scoped writes | Audio/model-cache/file leases guard side effects. |
-| `system` / `codex_app` | System | Reads, critical lifecycle writes | Explicit writes | Shutdown/update/check/status are canonical functions with strict authority. |
+| `system` | System | Reads, critical lifecycle writes | Explicit writes | Shutdown/update/check/status are canonical functions with strict authority. |
 
 ## Required Contract Columns
 

@@ -50,7 +50,7 @@ pub trait SnapshotDeps: Send + Sync {
     fn get_volatile_skill_removal_tokens(&self) -> u64;
     /// Volatile: background job results tokens.
     fn get_volatile_job_results_tokens(&self) -> u64;
-    /// ModelCapability clarification text (Codex mode).
+    /// ModelCapability clarification text for provider-specific payloads.
     fn get_capability_clarification(&self) -> Option<String>;
     /// ModelCapability summaries for the detailed snapshot.
     fn get_capability_summaries(&self) -> Vec<CapabilitySummary>;

@@ -666,14 +666,6 @@ const CURRENT_BOUNDARY_ALLOWLIST: &[CurrentBoundaryAllow] = &[
         expires: "none",
     },
     CurrentBoundaryAllow {
-        relative_path_prefix: "README.md",
-        marker: "CodexJSONRPCTransport",
-        kind: CurrentBoundaryKind::Isolate,
-        owner: "domains::codex_app",
-        reason: "Codex App Server is an isolated current product protocol behind codex_app::* capabilities.",
-        expires: "none",
-    },
-    CurrentBoundaryAllow {
         relative_path_prefix: "packages/agent/src/domains/model/providers/",
         marker: "isLegacy",
         kind: CurrentBoundaryKind::Isolate,
@@ -726,11 +718,7 @@ fn current_architecture_terms_are_deleted_or_owned() {
         ["bri", "dge"].concat(),
         ["adap", "ter"].concat(),
     ];
-    let isolated_protocol_terms = [
-        "JsonRpc".to_string(),
-        "jsonrpc".to_string(),
-        "CodexJSONRPCTransport".to_string(),
-    ];
+    let isolated_protocol_terms = ["JsonRpc".to_string(), "jsonrpc".to_string()];
     let old_import_markers = [
         "crate::runtime::".to_string(),
         "crate::events::".to_string(),
@@ -929,7 +917,7 @@ fn current_architecture_ownership_report_is_current() {
          transport: /engine client protocol, /engine/workers socket transport, auth gate\n\
          engine primitives: {}\n\
          domains: {}\n\
-         platform: APNs, Codex App Server, updater/device sidecars\n\
+         platform: APNs, updater/device sidecars\n\
          shared: foundation types, protocol DTOs, neutral helpers\n",
         primitive_workers.join(", "),
         domain_names.join(", "),

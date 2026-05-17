@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, capability execution, and event-sourced session persistence. A native iOS app provides a real-time chat interface with streaming, session management, push notifications, and a separate direct Codex App Server mode.
+Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, capability execution, and event-sourced session persistence. A native iOS app provides a real-time chat interface with streaming, session management, and push notifications.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -62,17 +62,6 @@ This README is the single, canonical reference for the project and is expected t
 |   - SQLite-backed sessions, events, branches, cron, prompts, and devices    |
 +-----------------------------------------------------------------------------+
 
-+-----------------------------------------------------------------------------+
-| Optional Codex mode                                                         |
-| /engine invoke(codex_app::status) -> Codex App Server WS -> managed child   |
-+-----------------------------------------------------------------------------+
-
-Optional Codex mode connects the iOS app directly to a `codex app-server`
-process on the active paired machine, but Tron Server owns that child process,
-its bearer token file, and its lifecycle. Clients discover the live endpoint via
-authenticated `/engine` `invoke` for `codex_app::status`, then use the
-dedicated Codex App Server transport that does not route turns through the Tron
-agent.
 ```
 
 ### Data Path
@@ -101,6 +90,7 @@ tron/
 |   +-- tron-release-notes  Deterministic tagged-release changelog generator
 |   +-- tron-lib.sh         Shared bash helpers used by scripts/tron
 |   +-- tron-cli            Contributor CLI helper for local service management
+|   +-- tron-ios-beta       Local physical-device build/install/stop helper for the iOS beta
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
 +-- docs/
 |   +-- manual-testing-readiness.md Clean manual-QA checklist for the capability runtime
@@ -125,7 +115,7 @@ app/        Binary/server bootstrap, health, metrics, onboarding, shutdown
 transport/  /engine client protocol, /engine/workers socket transport, auth gate
 engine/     Live capability fabric: catalog, workers, triggers, ledger, streams, queues
 domains/    Every Tron worker: contracts, deps, handlers, operations, local services, tests
-platform/   OS/vendor integrations: APNS, Codex App Server, device broker, updater
+platform/   OS/vendor integrations: APNS, device broker, updater
 shared/     Foundation IDs/errors/paths, protocol DTOs, unified storage helpers
 main.rs     Thin CLI/startup entry point
 ```
@@ -136,7 +126,7 @@ main.rs     Thin CLI/startup entry point
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
 | `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness and registry/index projection | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `capability::registry::CapabilityRegistrySnapshot`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
-| `platform` | OS/vendor/product-protocol integrations | `CodexAppServerManager`, APNS senders, updater scheduler |
+| `platform` | OS/vendor/product-protocol integrations | APNS senders, updater scheduler |
 | `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
 The domain package is intentionally vertical. A domain root is only docs,
@@ -219,6 +209,18 @@ open TronMac.xcodeproj
 ```
 
 Build with the `Tron` scheme (or `Tron Beta` for the beta variant). The app starts without a server until the user pairs a Mac through onboarding.
+
+Codex app local actions are checked in under
+`.codex/environments/environment.toml`. Open this project root in the Codex app
+to get toolbar actions for starting `scripts/tron dev -bdt`, stopping the dev
+server with `scripts/tron dev --stop`, installing/launching the local iOS beta
+with `scripts/tron-ios-beta install`, and stopping the launched app with
+`scripts/tron-ios-beta stop`. If the device was locked during install,
+`scripts/tron-ios-beta launch` relaunches the already-installed app without
+rebuilding. The iOS helper deliberately does not store personal device details;
+it auto-selects the only available physical iOS device, or you can set
+`TRON_IOS_DEVICE_ID` or `TRON_IOS_DEVICE_NAME` in your local terminal
+environment before running it.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions, TDD expectations, and release workflows.
 
@@ -632,14 +634,6 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
     "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
     "transcription": { "enabled": false },
     "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
-    "codexAppServer": {             // Tron-owned codex app-server child process
-      "enabled": true,              // Starts with Tron Server and stops during Tron shutdown
-      "port": 4500,                 // ws://0.0.0.0:<port>, authenticated with a token file
-      "preferredCwd": null,         // Optional default cwd for new Codex threads
-      "preferredModel": null,       // Optional default model for new Codex threads
-      "approvalPolicy": "onRequest",// "onRequest" | "unlessTrusted" | "never"
-      "sandboxMode": "workspaceWrite" // "readOnly" | "workspaceWrite" | "dangerFullAccess"
-    },
     "update": {                     // User-mode update checks. All fields off / safest by default.
       "enabled": false,             // Master switch — false means the scheduler never runs + no GitHub API traffic
       "channel": "stable",          // "stable" ignores pre-release tags; "beta" includes them
@@ -909,11 +903,11 @@ packages/ios-app/Sources/
 +-- Models/               Data models, engine protocol codables, event types
 +-- Protocols/            Coordinator and view model protocols
 +-- Services/             Network (engine client, WebSocket, deep links), paired servers, audio,
-+                         Codex App Server client, push notifications, local diagnostics,
++                         push notifications, local diagnostics,
 +                         feedback composer, Engine Console cache, Keychain tokens
-+-- ViewModels/           Chat and Codex view models, handlers, managers, @Observable state,
++-- ViewModels/           Chat view models, handlers, managers, @Observable state,
 +                         OnboardingState, EngineConsoleState
-+-- Views/                SwiftUI views (chat, Codex, Engine Console, capability views, voice notes, settings, Onboarding/, ...)
++-- Views/                SwiftUI views (chat, Engine Console, capability views, voice notes, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
 +-- Extensions/           Type extensions
@@ -932,7 +926,6 @@ packages/ios-app/Sources/
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Capability-native chat UI**: active work is rendered as `capabilityInvocation` / `capabilityResult` content from capability identity and schema/result metadata. Retired capability descriptors, old built-in names, and plugin source-specific capability sheets are not active UI routes.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Codex mode**: A separate top-level iOS mode connects directly to the Tron-managed `codex app-server` on the active paired machine. Tron Server owns process startup/shutdown, settings, and the token file; engine-native clients discover the live endpoint by invoking `codex_app::status` and do not use the Tron agent session/event pipeline. The Codex dashboard mirrors the regular session flow: it auto-connects, auto-loads `thread/list`, opens existing threads as full chat pages, recovers the direct Codex WebSocket on foreground, and uses the main Server settings sheet for Codex lifecycle/configuration controls.
 - **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, vector index state, and program runs through a simplified Overview/Capabilities/Program Runs flow. Advanced sections expose plugin manifests, workers, bindings, policies, redacted audit rows, trace summaries, and primer inputs behind an explicit toggle. It invokes capability admin functions rather than hardcoded capability descriptors. `EngineConsoleCache` stores read-only summaries for disconnected browsing; mutations stay server-authoritative and are disabled by the console state while offline.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
@@ -946,7 +939,6 @@ packages/ios-app/Sources/
 ```
 Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
-Codex:   /engine invoke(codex_app::status) -> Codex App Server WS -> CodexJSONRPCTransport -> CodexAppClient -> CodexAppViewModel -> Codex mode UI
 Console: /engine invoke(capability::*) -> CapabilityClient -> EngineConsoleState -> EngineConsoleView
 ```
 
@@ -967,7 +959,6 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `capability-ui.md` — Engine Console, capability DTOs, schema forms, offline cache, and admin client boundaries
 - `apns.md` — Push notification setup
 - `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
-- `codex-app-server.md` — Server-owned Codex App Server lifecycle, security, transport, and tests
 
 ---
 
@@ -1148,7 +1139,6 @@ Base directories in the tree below are resolved through helpers in `packages/age
     |   +-- auto-deploy.lock       Contributor deploy concurrency lock
     |   +-- auto-deploy.pause      Contributor deploy pause sentinel
     |   +-- auto-update.pause      User-mode updater pause sentinel
-    |   +-- codex-app-server-token Managed Codex App Server capability token (mode 600)
     |   +-- deploy.lock            Manual deploy concurrency lock
     |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
     |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`

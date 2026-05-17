@@ -14,7 +14,6 @@ struct ContentView: View {
     private var defaultModel: String { dependencies.defaultModel }
     private var quickSessionWorkspace: String { dependencies.quickSessionWorkspace }
     private var notificationStore: NotificationStore { dependencies.notificationStore }
-    private var codexAppViewModel: CodexAppViewModel { dependencies.codexAppViewModel }
 
     // Deep link navigation from TronMobileApp
     @Binding var deepLinkSessionId: String?
@@ -169,8 +168,6 @@ struct ContentView: View {
     private var mainContent: some View {
         if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
             compactVoiceNotesList
-        } else if navigationMode == .codex {
-            codexMode
         } else if navigationMode == .engine {
             engineConsoleMode
         } else if horizontalSizeClass == .compact && navigationMode == .sandboxes {
@@ -220,16 +217,6 @@ struct ContentView: View {
                 actions: dashboardActions
             )
         }
-    }
-
-    @ViewBuilder
-    private var codexMode: some View {
-        CodexAppModeView(
-            viewModel: codexAppViewModel,
-            activeServer: dependencies.pairedServerStore.activeServer,
-            activeServerSelectionVersion: dependencies.activeServerSelectionVersion,
-            actions: dashboardActions
-        )
     }
 
     @ViewBuilder
@@ -296,13 +283,6 @@ struct ContentView: View {
                         deleteSession(sessionId)
                     },
                     onVoiceNote: { showVoiceNotesRecording = true },
-                    actions: dashboardActions
-                )
-            } else if navigationMode == .codex {
-                CodexAppModeView(
-                    viewModel: codexAppViewModel,
-                    activeServer: dependencies.pairedServerStore.activeServer,
-                    activeServerSelectionVersion: dependencies.activeServerSelectionVersion,
                     actions: dashboardActions
                 )
             } else if navigationMode == .sandboxes {

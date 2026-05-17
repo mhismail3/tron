@@ -147,7 +147,6 @@ struct SourceGuardTests {
                 guard let url = any as? URL else { continue }
                 guard url.pathExtension == "swift" || url.pathExtension == "md" else { continue }
                 if url.path == #filePath { continue }
-                if url.path.contains("/CodexApp/") { continue }
 
                 let content = try String(contentsOf: url, encoding: .utf8)
                 for (needle, reason) in forbidden {
