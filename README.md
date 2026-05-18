@@ -11,6 +11,8 @@ This README is the single, canonical reference for the project and is expected t
 ## Table of Contents
 
 - [Architecture](#architecture)
+- [Modular Engine Audit](#modular-engine-audit)
+- [Collapsed Modular Engine](#collapsed-modular-engine)
 - [Repository Structure](#repository-structure)
 - [Rust Modules](#rust-modules)
 - [Quick Start](#quick-start)
@@ -75,6 +77,30 @@ This README is the single, canonical reference for the project and is expected t
 
 ---
 
+## Modular Engine Audit
+
+The durable audit for the post-mobile-first direction lives in
+[`docs/modular-engine-audit.md`](docs/modular-engine-audit.md). It inventories
+the Rust server and iOS app, classifies engine-kernel, core-runtime,
+capability-module, and product-shell surfaces, and defines the target direction:
+Tron as a modular local capability engine with a thin chat and generated-native
+UI harness.
+
+## Collapsed Modular Engine
+
+The implementation target for the modular-engine rebuild lives in
+[`docs/collapsed-modular-engine-architecture.md`](docs/collapsed-modular-engine-architecture.md).
+The core rule is one substrate: workers invoke capabilities against typed
+resources under scoped grants. Artifacts, goals, claims, evidence, decisions,
+generated UI surfaces, module config, worker packages, secret refs, and
+materialized files are modeled as resource kinds rather than separate
+persistence planes. The first engine slice is the generic `resource::*`
+primitive worker over `engine_resource_type_definitions`, `engine_resources`,
+`engine_resource_versions`, `engine_resource_links`, and
+`engine_resource_events`.
+
+---
+
 ## Repository Structure
 
 ```
@@ -93,7 +119,9 @@ tron/
 |   +-- tron-ios-beta       Local physical-device build/install/stop helper for the iOS beta
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
 +-- docs/
+|   +-- collapsed-modular-engine-architecture.md Collapsed worker/capability/resource target
 |   +-- manual-testing-readiness.md Clean manual-QA checklist for the capability runtime
+|   +-- modular-engine-audit.md     Audit and target direction for the modular engine pivot
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
@@ -124,7 +152,7 @@ main.rs     Thin CLI/startup entry point
 |--------|---------|-----------|
 | `app` | Startup/bootstrap + HTTP shell | `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
-| `engine` | Live capability fabric, primitive workers, local worker protocol | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord` |
+| `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
 | `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness and registry/index projection | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `capability::registry::CapabilityRegistrySnapshot`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor/product-protocol integrations | APNS senders, updater scheduler |
 | `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
@@ -486,18 +514,20 @@ search or inspect the new catalog entry, execute the new `namespace::function`,
 then stop it with `sandbox::stop_spawned_worker`.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
-`queue::*`, and `approval::*` preserve the runtime semantics for delivery,
-state, queued handoff, and human approval. `catalog::*`, `worker::*`, and
-`observability::*` expose live catalog snapshots, worker health/lifecycle, trace
-summaries, spans, structured log projections, and metrics through the same
-canonical invocation path. `storage::*` owns stats, retention, checkpoints, and
-portable snapshot export for the unified engine database. A practical debugging trace includes invocation
-records, stream publications, approvals, resource leases, and compensation
-records, all tied together by `traceId` plus `parentInvocationId`. Query
+`queue::*`, `resource::*`, and `approval::*` preserve the runtime semantics for
+delivery, projection state, queued handoff, typed durable objects, and human
+approval. `catalog::*`, `worker::*`, and `observability::*` expose live catalog
+snapshots, worker health/lifecycle, trace summaries, spans, structured log
+projections, and metrics through the same canonical invocation path.
+`storage::*` owns stats, retention, checkpoints, and portable snapshot export
+for the unified engine database. A practical debugging trace includes
+invocation records, resource versions/links/events, stream publications,
+approvals, resource leases, and compensation records, all tied together by
+`traceId` plus `parentInvocationId`. Query
 response shaping for these privileged primitive workers lives under
 `packages/agent/src/engine/primitives/runtime.rs`; `EngineHost` coordinates
-catalog, ledger, stream, lease, approval, and compensation access without owning
-primitive response contracts.
+catalog, ledger, stream, resource, lease, approval, and compensation access
+without owning primitive response contracts.
 
 Sandbox-created capabilities enter through the high-risk
 `sandbox::spawn_worker` capability. It requires explicit idempotency,
@@ -850,7 +880,7 @@ All active server storage lives in `~/.tron/internal/database/tron.sqlite`. WAL 
 
 The unified database has one migration surface for session/log/blob tables and engine-owned stores for primitive state. Fresh databases start from consolidated `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`; additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql` are registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
-Engine ledger rows, streams, state, queues, approvals, resource leases, compensation records, worker lifecycle records, bounded server/iOS logs, and compressed content-addressed blobs share that same file. Large correctness and audit payloads flow through `StoredPayloadRef`: primary rows keep compact inline JSON only below the configured threshold, otherwise they store an internal payload-ref envelope while the full bytes live once in `blobs` and are owned by `storage_payload_refs`. Retention operates from `storage_payload_refs`, so blobs are deleted only when no live owner remains. Startup enforces `storage.max_database_mb` as a soft budget: when the active DB plus WAL/SHM sidecars exceed it, the server records a warning, runs only safe verbose-log/blob retention, and checkpoints the WAL; audit-critical rows and owner refs are not automatically deleted. `storage::stats`, `storage::retention_run`, `storage::checkpoint`, and `storage::export_snapshot` are canonical system capabilities; the observability worker reads the same local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`. Trace and log queries return previews/refs by default; callers must explicitly request full payload expansion through blob refs.
+Engine ledger rows, streams, state, queues, typed resources, approvals, resource leases, compensation records, worker lifecycle records, bounded server/iOS logs, and compressed content-addressed blobs share that same file. Large correctness and audit payloads flow through `StoredPayloadRef`: primary rows keep compact inline JSON only below the configured threshold, otherwise they store an internal payload-ref envelope while the full bytes live once in `blobs` and are owned by `storage_payload_refs`. Retention operates from `storage_payload_refs`, so blobs are deleted only when no live owner remains. Startup enforces `storage.max_database_mb` as a soft budget: when the active DB plus WAL/SHM sidecars exceed it, the server records a warning, runs only safe verbose-log/blob retention, and checkpoints the WAL; audit-critical rows and owner refs are not automatically deleted. `storage::stats`, `storage::retention_run`, `storage::checkpoint`, and `storage::export_snapshot` are canonical system capabilities; the observability worker reads the same local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`. Trace and log queries return previews/refs by default; callers must explicitly request full payload expansion through blob refs.
 
 ### Tables
 
@@ -868,6 +898,7 @@ Engine ledger rows, streams, state, queues, approvals, resource leases, compensa
 | `engine_catalog_changes` | Live catalog audit trail for worker/function/trigger registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_approvals`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for artifacts, goals, claims, evidence, decisions, generated UI surfaces, module config, worker packages, secret refs, and materialized files |
 | `capability_plugins`, `capability_implementations`, `capability_bindings` | Durable capability registry layer over the live catalog: plugin manifests, concrete implementations, conformance state, signature status, and policy-selected bindings |
 | `capability_index_documents`, `capability_vector_metadata` | Search documents and persistent local vector-index metadata for hybrid capability search |
 | `capability_inspection_handles`, `capability_binding_decisions`, `capability_audit_events`, `capability_pause_records`, `capability_run_records`, `capability_program_runs` | Fresh inspect handles plus auditable records for binding resolution, pauses, async runs, program runs, and search/inspect/execute lifecycle decisions |
@@ -1130,7 +1161,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- vault/                     Skill-owned local fast secret storage
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
-    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, approvals, leases, compensation, workers, capability registry/index/audit
+    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, approvals, leases, compensation, workers, capability registry/index/audit
     |   +-- tron.sqlite.lock       OS-level flock sidecar; one Tron process owns it while running
     |   +-- archive/               One-way archive of retired or incompatible storage generations
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output

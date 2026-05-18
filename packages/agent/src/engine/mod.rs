@@ -31,8 +31,9 @@
 //!   `filesystem::create_dir`, and `skills::activate` are the only executable
 //!   domain surface;
 //! - stream, state, queue, approval, catalog, worker, and observability workers
-//!   are registered as first-class primitive workers with in-memory and
-//!   SQLite-backed stores scoped outside the production event-store migration;
+//!   plus the generic `resource` kernel are registered as first-class primitive
+//!   workers with in-memory and SQLite-backed stores scoped outside the
+//!   production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution,
 //!   while `approval::resolve` remains a user/client-owned primitive routed
@@ -42,6 +43,10 @@
 //!   domain resource from payload fields plus causal context such as `sessionId`,
 //!   record auditable rollback/compensation state, and avoid blocking the whole
 //!   host or inventing per-handler locks;
+//! - typed resources are the durable object substrate: artifacts, goals, claims,
+//!   evidence, decisions, generated UI surfaces, worker packages, and
+//!   materialized files should be modeled as versioned resources with links and
+//!   events instead of separate persistence planes;
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
 //!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;
@@ -85,6 +90,7 @@ pub mod primitives;
 pub mod protocol;
 pub mod queue;
 pub mod registry;
+pub mod resources;
 pub mod schema;
 pub mod state;
 pub mod streams;
@@ -131,6 +137,12 @@ pub use queue::{
     InMemoryEngineQueueStore, QueueItemStatus, SqliteEngineQueueStore,
 };
 pub use registry::LiveCatalog;
+pub use resources::{
+    CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
+    EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
+    EngineResourceVersion, EngineResourceVersioningMode, InMemoryEngineResourceStore,
+    LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+};
 pub use state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
 };

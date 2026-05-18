@@ -29,6 +29,11 @@ use super::leases::{
 use super::queue::{
     EngineQueueItem, EnqueueInvocation, InMemoryEngineQueueStore, SqliteEngineQueueStore,
 };
+use super::resources::{
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
+    EngineResourceVersion, InMemoryEngineResourceStore, LinkResources, ListResources,
+    RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+};
 use super::state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
 };
@@ -45,6 +50,7 @@ pub(crate) mod approval;
 pub(crate) mod catalog;
 pub(crate) mod observability;
 pub(crate) mod queue;
+pub(crate) mod resource;
 pub(in crate::engine) mod runtime;
 pub(crate) mod state;
 pub(crate) mod storage;
@@ -54,6 +60,7 @@ pub(crate) mod worker;
 pub(crate) const STREAM_WORKER_ID: &str = "stream";
 pub(crate) const STATE_WORKER_ID: &str = "state";
 pub(crate) const QUEUE_WORKER_ID: &str = "queue";
+pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
 pub(crate) const APPROVAL_WORKER_ID: &str = "approval";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
 pub(crate) const WORKER_WORKER_ID: &str = "worker";
@@ -465,6 +472,67 @@ impl CompensationStoreBackend {
     }
 }
 
+pub(in crate::engine) enum ResourceStoreBackend {
+    InMemory(InMemoryEngineResourceStore),
+    Sqlite(SqliteEngineResourceStore),
+}
+
+impl ResourceStoreBackend {
+    pub(in crate::engine) fn register_type(
+        &mut self,
+        request: RegisterResourceType,
+    ) -> Result<EngineResourceTypeDefinition> {
+        match self {
+            Self::InMemory(store) => store.register_type(request),
+            Self::Sqlite(store) => store.register_type(request),
+        }
+    }
+
+    pub(in crate::engine) fn create(&mut self, request: CreateResource) -> Result<EngineResource> {
+        match self {
+            Self::InMemory(store) => store.create(request),
+            Self::Sqlite(store) => store.create(request),
+        }
+    }
+
+    pub(in crate::engine) fn update(
+        &mut self,
+        request: UpdateResource,
+    ) -> Result<EngineResourceVersion> {
+        match self {
+            Self::InMemory(store) => store.update(request),
+            Self::Sqlite(store) => store.update(request),
+        }
+    }
+
+    pub(in crate::engine) fn link(
+        &mut self,
+        request: LinkResources,
+    ) -> Result<super::resources::EngineResourceLink> {
+        match self {
+            Self::InMemory(store) => store.link(request),
+            Self::Sqlite(store) => store.link(request),
+        }
+    }
+
+    pub(in crate::engine) fn inspect(
+        &self,
+        resource_id: &str,
+    ) -> Result<Option<EngineResourceInspection>> {
+        match self {
+            Self::InMemory(store) => store.inspect(resource_id),
+            Self::Sqlite(store) => store.inspect(resource_id),
+        }
+    }
+
+    pub(in crate::engine) fn list(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
+        match self {
+            Self::InMemory(store) => store.list(filter),
+            Self::Sqlite(store) => store.list(filter),
+        }
+    }
+}
+
 /// Engine primitive store bundle.
 #[derive(Clone)]
 pub(in crate::engine) struct PrimitiveStores {
@@ -473,6 +541,7 @@ pub(in crate::engine) struct PrimitiveStores {
     pub(in crate::engine) queue: Arc<StdMutex<QueueStoreBackend>>,
     pub(in crate::engine) approvals: Arc<StdMutex<ApprovalStoreBackend>>,
     pub(in crate::engine) leases: Arc<StdMutex<ResourceLeaseStoreBackend>>,
+    pub(in crate::engine) resources: Arc<StdMutex<ResourceStoreBackend>>,
     pub(in crate::engine) compensation: Arc<StdMutex<CompensationStoreBackend>>,
 }
 
@@ -493,6 +562,9 @@ impl PrimitiveStores {
             ))),
             leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::InMemory(
                 InMemoryEngineResourceLeaseStore::new(),
+            ))),
+            resources: Arc::new(StdMutex::new(ResourceStoreBackend::InMemory(
+                InMemoryEngineResourceStore::new(),
             ))),
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
                 InMemoryEngineCompensationStore::new(),
@@ -517,6 +589,9 @@ impl PrimitiveStores {
             leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::Sqlite(
                 SqliteEngineResourceLeaseStore::open(path)?,
             ))),
+            resources: Arc::new(StdMutex::new(ResourceStoreBackend::Sqlite(
+                SqliteEngineResourceStore::open(path)?,
+            ))),
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
                 SqliteEngineCompensationStore::open(path)?,
             ))),
@@ -529,6 +604,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(STREAM_WORKER_ID, WorkerKind::Stream)?,
         primitive_worker(STATE_WORKER_ID, WorkerKind::State)?,
         primitive_worker(QUEUE_WORKER_ID, WorkerKind::Queue)?,
+        primitive_worker(RESOURCE_WORKER_ID, WorkerKind::System)?,
         primitive_worker(APPROVAL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
@@ -544,6 +620,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(stream::registrations(stores)?);
     registrations.extend(state::registrations(stores)?);
     registrations.extend(queue::registrations(stores)?);
+    registrations.extend(resource::registrations(stores)?);
     registrations.extend(approval::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
     registrations.extend(worker::registrations()?);
