@@ -114,10 +114,6 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var skill: SkillClient = SkillClient(transport: self)
 
-    /// Sandbox container management client (list, start, stop, kill, remove)
-    @ObservationIgnored
-    lazy var sandbox: SandboxClient = SandboxClient(transport: self)
-
     /// Cron scheduling operations client (automations)
     @ObservationIgnored
     lazy var cron: CronClient = CronClient(transport: self)

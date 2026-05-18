@@ -131,8 +131,6 @@ pub mod files {
     pub const AUTOMATIONS_JSON: &str = "automations.json";
     /// Profile prompt file name used by project-local prompt overrides.
     pub const SYSTEM_MD: &str = "SYSTEM.md";
-    /// Container runtime configuration override.
-    pub const CONTAINERS_JSON: &str = "containers.json";
     /// Canonical user-memory root file.
     ///
     /// Auto-injected into every session's context. Lightweight by design:
@@ -516,13 +514,6 @@ pub fn user_profile_path() -> PathBuf {
     profiles_dir()
         .join(crate::shared::profile::USER_PROFILE)
         .join(files::PROFILE_TOML)
-}
-
-/// `~/.tron/profiles/user/containers.json`
-pub fn containers_path() -> PathBuf {
-    profiles_dir()
-        .join(crate::shared::profile::USER_PROFILE)
-        .join(files::CONTAINERS_JSON)
 }
 
 /// `~/.tron/profiles/default/`
@@ -949,16 +940,6 @@ mod tests {
             dirs::INTERNAL,
             dirs::DB,
             dirs::JOURNALS
-        )));
-    }
-
-    #[test]
-    fn containers_path_correct() {
-        let p = containers_path();
-        assert!(p.ends_with(format!(
-            "{}/user/{}",
-            dirs::PROFILES,
-            files::CONTAINERS_JSON
         )));
     }
 

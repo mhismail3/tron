@@ -213,11 +213,11 @@ Build with the `Tron` scheme (or `Tron Beta` for the beta variant). The app star
 Codex app local actions are checked in under
 `.codex/environments/environment.toml`. Open this project root in the Codex app
 to get toolbar actions for starting `scripts/tron dev -bdt`, stopping the dev
-server with `scripts/tron dev --stop`, installing/launching the local iOS beta
-with `scripts/tron-ios-beta install`, and stopping the launched app with
-`scripts/tron-ios-beta stop`. If the device was locked during install,
-`scripts/tron-ios-beta launch` relaunches the already-installed app without
-rebuilding. The iOS helper deliberately does not store personal device details;
+server with `scripts/tron dev --stop`, rebuilding/installing/launching the local
+iOS beta with `scripts/tron-ios-beta install`, and launching the already-installed
+beta with `scripts/tron-ios-beta launch`. If the device was locked during install,
+the launch action relaunches the already-installed app without rebuilding. The
+iOS helper deliberately does not store personal device details;
 it auto-selects the only available physical iOS device, or you can set
 `TRON_IOS_DEVICE_ID` or `TRON_IOS_DEVICE_NAME` in your local terminal
 environment before running it.

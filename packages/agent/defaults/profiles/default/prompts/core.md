@@ -133,9 +133,8 @@ Canonical paths for the `~/.tron/` layout. Skills and workflows should reference
 | DATABASE | `~/.tron/internal/database/` | `log.db` for events/sessions/automation state/audit; `engine-ledger.sqlite` for engine invocation/idempotency/catalog-change records |
 | ACTIVE_PROFILE | `~/.tron/profiles/active.toml` | Selects the active execution profile |
 | DEFAULT_PROFILE | `~/.tron/profiles/default/` | Managed default execution spec and prompt files |
-| USER_PROFILE | `~/.tron/profiles/user/` | Sparse user profile, settings, prompt, and container overrides |
+| USER_PROFILE | `~/.tron/profiles/user/` | Sparse user profile, settings, and prompt overrides |
 | USER_PROFILE | `~/.tron/profiles/user/profile.toml` | Sparse server configuration overrides under `[settings]` |
-| CONTAINERS_JSON | `~/.tron/profiles/user/containers.json` | Container configuration |
 | AUTH_REGISTRY | `~/.tron/profiles/auth.toml` | Credential profile registry and secret handles |
 | AUTH | `~/.tron/profiles/auth.json` | Tron-owned provider auth and bearerToken |
 | RUN | `~/.tron/internal/run/` | Runtime state and local contributor artifacts: `auth.lock`, `.mac-wrapper.<bundle-id>.lock`, `.onboarded`, `updater-state.json`, pause/lock sentinels, optional `Tron-Dev.app` |
@@ -343,7 +342,7 @@ Use the `self-deploy` skill for deployment. **THIS RESTARTS THE SERVER** — nev
 
 ### Containers
 
-Use the `sandbox` skill for container management. Containers are single-use — one per task, never reuse. Default to containers for anything that installs software, runs unfamiliar code, or needs capabilities beyond the host. See the skill for full CLI reference, web app serving pattern, and registry management.
+Use the `sandbox` skill for container management. Containers are single-use — one per task, never reuse. Default to containers for anything that installs software, runs unfamiliar code, or needs capabilities beyond the host. See the skill for full CLI reference, web app serving pattern, and cleanup guidance.
 
 ### Self-investigation
 

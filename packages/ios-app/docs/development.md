@@ -44,16 +44,14 @@ protocol response handling.
 
 The repository includes `.codex/environments/environment.toml` for Codex app
 toolbar actions. `Dev Server` starts `scripts/tron dev -bdt` from the project
-root, and `Stop Dev Server` runs `scripts/tron dev --stop`. `Install iOS Beta`
-runs `scripts/tron-ios-beta install`; it regenerates the Xcode project,
+root, and `Stop Dev Server` runs `scripts/tron dev --stop`. `Rebuild + Install
+iOS Beta` runs `scripts/tron-ios-beta install`; it regenerates the Xcode project,
 preflights the active Xcode toolchain, builds the `Tron Beta` scheme for a
 physical iOS destination, writes a full log plus `.xcresult` bundle, installs
 the resulting app bundle with `xcrun devicectl`, and launches the resolved
-bundle ID on the device. `Launch iOS Beta` runs `scripts/tron-ios-beta launch`
-for the already-installed app, which is useful after unlocking a device whose
-launch was denied during install. `Stop iOS Beta` runs `scripts/tron-ios-beta stop`,
-finds running `TronMobile.app/TronMobile` PIDs on the selected device, and
-terminates them with `xcrun devicectl device process terminate`.
+bundle ID on the device. `Launch Installed iOS Beta` runs
+`scripts/tron-ios-beta launch` for the already-installed app, which is useful
+after unlocking a device whose launch was denied during install.
 
 Keep device-specific values out of the repo. The helper auto-selects the only
 available physical iOS device. If multiple devices are available, set one of

@@ -15,10 +15,6 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["sandbox.lifecycle"];
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
-        CapabilityContract::new("sandbox::list_containers", "sandbox", EffectClass::PureRead, RiskLevel::Low, Some("sandbox.read"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .build()?,
         CapabilityContract::new("sandbox::spawn_worker", "sandbox", EffectClass::ExternalSideEffect, RiskLevel::High, Some("sandbox.write"))
             .request_schema(json!({
                 "additionalProperties": false,
@@ -71,42 +67,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox-worker", "worker:{workerId}", 300000))
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "stop kills the sandbox-created process and unregisters volatile catalog entries through worker::disconnect; manual cleanup may be required if the process cannot be signaled"))
             .high_risk_contract(json!({"sandboxAutonomy":{"withoutUserApproval":true,"requiresIdempotency":true,"requiresLease":true,"requiresCompensation":true,"visibilityDefault":"session","reason":"sandbox-created worker stop is scoped to one worker id and audited by engine ledger, stream, lease, and cleanup records"},"resourceLock":{"idTemplate":"worker:{workerId}","kind":"sandbox-worker","reason":"serializes lifecycle operations for one sandbox-created worker","required":true,"ttlMs":300000},"rollbackOrCompensation":"manual process cleanup may be required if the worker process cannot be signaled","streamTopics": STREAM_TOPICS,"version":1}))
-            .stream_topics(STREAM_TOPICS.to_vec())
-            .build()?,
-        CapabilityContract::new("sandbox::start_container", "sandbox", EffectClass::ExternalSideEffect, RiskLevel::High, Some("sandbox.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"name":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["name"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}))
-            .idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox", "container:{name}", 300000))
-            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "inverse container lifecycle command can be run manually if the runtime is still available"))
-            .high_risk_contract(json!({"sandboxAutonomy":{"withoutUserApproval":true,"requiresIdempotency":true,"requiresLease":true,"requiresCompensation":true,"visibilityDefault":"session","reason":"sandbox container lifecycle is scoped to one container name and audited by engine ledger, stream, lease, and cleanup records"},"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"inverse container lifecycle command can be run manually if the runtime is still available","streamTopics": STREAM_TOPICS,"version":1}))
-            .stream_topics(STREAM_TOPICS.to_vec())
-            .build()?,
-        CapabilityContract::new("sandbox::stop_container", "sandbox", EffectClass::ExternalSideEffect, RiskLevel::High, Some("sandbox.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"name":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["name"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}))
-            .idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox", "container:{name}", 300000))
-            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "inverse container lifecycle command can be run manually if the runtime is still available"))
-            .high_risk_contract(json!({"sandboxAutonomy":{"withoutUserApproval":true,"requiresIdempotency":true,"requiresLease":true,"requiresCompensation":true,"visibilityDefault":"session","reason":"sandbox container lifecycle is scoped to one container name and audited by engine ledger, stream, lease, and cleanup records"},"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"inverse container lifecycle command can be run manually if the runtime is still available","streamTopics": STREAM_TOPICS,"version":1}))
-            .stream_topics(STREAM_TOPICS.to_vec())
-            .build()?,
-        CapabilityContract::new("sandbox::kill_container", "sandbox", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("sandbox.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"name":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["name"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}))
-            .idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox", "container:{name}", 300000))
-            .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "sandbox kill/remove is external and may require manual container recreation"))
-            .high_risk_contract(json!({"sandboxAutonomy":{"withoutUserApproval":true,"requiresIdempotency":true,"requiresLease":true,"requiresCompensation":true,"visibilityDefault":"session","reason":"sandbox container lifecycle is scoped to one container name and audited by engine ledger, stream, lease, and cleanup records"},"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"sandbox kill/remove is external and may require manual container recreation","streamTopics": STREAM_TOPICS,"version":1}))
-            .stream_topics(STREAM_TOPICS.to_vec())
-            .build()?,
-        CapabilityContract::new("sandbox::remove_container", "sandbox", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("sandbox.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"name":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["name"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}))
-            .idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox", "container:{name}", 300000))
-            .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "sandbox kill/remove is external and may require manual container recreation"))
-            .high_risk_contract(json!({"sandboxAutonomy":{"withoutUserApproval":true,"requiresIdempotency":true,"requiresLease":true,"requiresCompensation":true,"visibilityDefault":"session","reason":"sandbox container lifecycle is scoped to one container name and audited by engine ledger, stream, lease, and cleanup records"},"resourceLock":{"idTemplate":"container:{name}","kind":"sandbox","reason":"serializes lifecycle operations for one local sandbox container","required":true,"ttlMs":300000},"rollbackOrCompensation":"sandbox kill/remove is external and may require manual container recreation","streamTopics": STREAM_TOPICS,"version":1}))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])

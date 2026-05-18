@@ -70,6 +70,16 @@ struct SourceGuardTests {
             "github" + "Issue" + "Page",
             "open" + "Feedback" + "Issue",
             "Create" + " Issue",
+            "Sandbox" + "Client",
+            "Sand" + "boxes" + "Dashboard" + "View",
+            "Container" + "DTO",
+            "Container" + "Action" + "Params",
+            "Container" + "Action" + "Result",
+            "sandbox" + "::" + "list_" + "containers",
+            "sandbox" + "::" + "start_" + "container",
+            "sandbox" + "::" + "stop_" + "container",
+            "sandbox" + "::" + "kill_" + "container",
+            "sandbox" + "::" + "remove_" + "container",
         ]
 
         let fileURL = URL(fileURLWithPath: #filePath)

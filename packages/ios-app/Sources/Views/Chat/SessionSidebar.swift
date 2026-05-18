@@ -8,7 +8,6 @@ enum NavigationMode: String, CaseIterable {
     case engine = "Engine"
     case voiceNotes = "Voice Notes"
     case automations = "Automations"
-    case sandboxes = "Sandboxes"
 
     var icon: String {
         switch self {
@@ -16,7 +15,6 @@ enum NavigationMode: String, CaseIterable {
         case .engine: "server.rack"
         case .voiceNotes: "waveform"
         case .automations: "clock.badge.checkmark"
-        case .sandboxes: "shippingbox"
         }
     }
 }

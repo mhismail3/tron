@@ -18,19 +18,13 @@ command = "scripts/tron dev --stop"
 platform = "darwin"
 
 [[actions]]
-name = "Install iOS Beta"
+name = "Rebuild + Install iOS Beta"
 icon = "debug"
 command = "scripts/tron-ios-beta install"
 platform = "darwin"
 
 [[actions]]
-name = "Launch iOS Beta"
+name = "Launch Installed iOS Beta"
 icon = "run"
 command = "scripts/tron-ios-beta launch"
-platform = "darwin"
-
-[[actions]]
-name = "Stop iOS Beta"
-icon = "tool"
-command = "scripts/tron-ios-beta stop"
 platform = "darwin"

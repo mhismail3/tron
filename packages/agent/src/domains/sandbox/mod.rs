@@ -49,39 +49,6 @@ pub(crate) mod service;
 use crate::domains::sandbox::service as sandbox_service;
 use crate::shared::server::params::require_string_param;
 
-async fn list_containers(_deps: &Deps) -> Result<Value, CapabilityError> {
-    let path = sandbox_service::containers_json_path();
-    let mut containers = run_blocking_task("sandbox.list_containers.load_metadata", move || {
-        sandbox_service::load_containers(&path)
-    })
-    .await?;
-    let statuses = sandbox_service::query_container_statuses().await;
-    for container in &mut containers {
-        let name = container
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let status = statuses.get(name).cloned().unwrap_or_else(|| "gone".into());
-        let _ = container
-            .as_object_mut()
-            .expect("container entry must be an object")
-            .insert("status".into(), Value::String(status));
-    }
-    let host_ip = crate::domains::settings::get_settings()
-        .server
-        .tailscale_ip
-        .clone();
-    Ok(json!({
-        "containers": containers,
-        "hostIp": host_ip,
-    }))
-}
-
-async fn run_container_command(action: &str, payload: &Value) -> Result<Value, CapabilityError> {
-    let name = require_string_param(Some(payload), "name")?;
-    sandbox_service::run_container_command(action, &name).await
-}
-
 async fn list_spawned_workers(deps: &Deps) -> Result<Value, CapabilityError> {
     Ok(json!({ "workers": deps.worker_processes.list().await }))
 }
@@ -271,20 +238,6 @@ fn read_worker_bearer_token(path: &Path) -> Result<String, CapabilityError> {
             message: "sandbox worker auth token file does not contain bearerToken".to_owned(),
         })?;
     Ok(token.to_owned())
-}
-
-async fn remove_container(payload: &Value, _deps: &Deps) -> Result<Value, CapabilityError> {
-    let name = require_string_param(Some(payload), "name")?;
-    sandbox_service::remove_container_runtime_best_effort(&name).await;
-
-    let metadata_path = sandbox_service::containers_json_path();
-    let name_for_metadata = name.clone();
-    run_blocking_task("sandbox.remove_container_metadata", move || {
-        sandbox_service::remove_container_metadata_at(&metadata_path, &name_for_metadata)
-    })
-    .await?;
-
-    Ok(json!({ "success": true }))
 }
 
 async fn wait_for_worker_registration(

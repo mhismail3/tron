@@ -1055,6 +1055,18 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
             "sandbox::spawn_worker must stay a high-risk domain-owned capability with complete engine metadata; missing `{required}`"
         );
     }
+    for removed in [
+        concat!("sandbox::", "list_", "containers"),
+        concat!("sandbox::", "start_", "container"),
+        concat!("sandbox::", "stop_", "container"),
+        concat!("sandbox::", "kill_", "container"),
+        concat!("sandbox::", "remove_", "container"),
+    ] {
+        assert!(
+            !sandbox_contract.contains(removed),
+            "retired container dashboard capability `{removed}` must stay deleted"
+        );
+    }
     assert!(
         !sandbox_contract.contains(".approval_required(true)"),
         "sandbox lifecycle capabilities are sandbox-autonomous and must not create user approvals"

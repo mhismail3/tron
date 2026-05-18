@@ -70,7 +70,7 @@ agent autonomy.
 |------|--------------|---------------------|
 | Discovery | Every worker can read the live registry and receive topology notifications. | The live catalog is the agent's primary substrate. Agents get stable model-facing primitives for search, inspection, and execution, and the underlying catalog changes while the agent runs. |
 | Visibility | Registry availability is mostly a worker/RBAC concern. | Visibility is scoped: session, workspace, system, client, worker, admin. Agent-created capabilities default to session visibility. |
-| Self-modification | Sandboxes and workers can be added live. | Agents can create session-scoped workers/functions, test them immediately, then request explicit promotion to wider visibility. |
+| Self-modification | Sandbox workers can be added live. | Agents can create session-scoped workers/functions, test them immediately, then request explicit promotion to wider visibility. |
 | Idempotency | Queue retries make delivery concerns visible. | Every mutating agent-visible function must declare an idempotency contract before invocation is allowed. |
 | Causality | Trace context propagates through invocations. | Every catalog mutation, trigger fire, invocation, retry, approval, state write, and worker spawn belongs to a durable causal graph. |
 | Guardrails | RBAC and middleware can filter access. | Guardrails are native invocation policy: schema validation, authority checks, approval triggers, budgets, causal-depth limits, loop detection, namespace ownership, provenance, and health checks. |

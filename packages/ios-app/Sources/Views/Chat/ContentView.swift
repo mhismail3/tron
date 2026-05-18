@@ -170,8 +170,6 @@ struct ContentView: View {
             compactVoiceNotesList
         } else if navigationMode == .engine {
             engineConsoleMode
-        } else if horizontalSizeClass == .compact && navigationMode == .sandboxes {
-            compactSandboxesDashboard
         } else if horizontalSizeClass == .compact && navigationMode == .automations {
             compactAutomationsDashboard
         } else {
@@ -194,16 +192,6 @@ struct ContentView: View {
             VoiceNotesListView(
                 engineClient: engineClient,
                 onVoiceNote: { showVoiceNotesRecording = true },
-                actions: dashboardActions
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var compactSandboxesDashboard: some View {
-        NavigationStack {
-            SandboxesDashboardView(
-                engineClient: engineClient,
                 actions: dashboardActions
             )
         }
@@ -283,11 +271,6 @@ struct ContentView: View {
                         deleteSession(sessionId)
                     },
                     onVoiceNote: { showVoiceNotesRecording = true },
-                    actions: dashboardActions
-                )
-            } else if navigationMode == .sandboxes {
-                SandboxesDashboardView(
-                    engineClient: engineClient,
                     actions: dashboardActions
                 )
             } else if navigationMode == .automations {

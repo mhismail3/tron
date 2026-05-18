@@ -12,7 +12,7 @@ Manage sandboxed Linux containers via Apple's `container` CLI on macOS 26+ Apple
 
 **Containers are your workshop.** Use them aggressively — not just for "safety" but as your primary way of doing real work that goes beyond reading and writing files. Need a tool that isn't installed? Container. Need to run something you're not 100% sure about? Container. Need to stand up a service, process data, build something interactive? Container. The host machine stays clean; the containers are yours to use, break, rebuild, and throw away. Default to containment: if you're reaching for `apt-get install` or `pip install` on the host, stop and spin up a container instead.
 
-**Containers are single-use.** Each container serves exactly one purpose. Never repurpose or reuse a container for a different task. Need something new? Create a new container. This keeps the sandbox dashboard accurate and prevents stale state from polluting new work. Containers are cheap — always create a fresh one.
+**Containers are single-use.** Each container serves exactly one purpose. Never repurpose or reuse a container for a different task. Need something new? Create a new container. Containers are cheap — always create a fresh one.
 
 ## When to Use Containers
 
@@ -200,40 +200,7 @@ container logs <name>
 container logs --tail 50 <name>
 ```
 
-## 6. Registry
-
-The iOS dashboard reads container state from `~/.tron/profiles/user/containers.json`. After creating or removing a container, update this file so the dashboard stays in sync.
-
-**Structure:**
-```json
-{
-  "containers": [
-    {
-      "name": "my-sandbox",
-      "image": "ubuntu:latest",
-      "createdAt": "2026-02-09T12:00:00.000Z",
-      "createdBySession": "<session-id>",
-      "workingDirectory": "~/my-project",
-      "ports": ["3000:3000"],
-      "purpose": "Python dev environment"
-    }
-  ]
-}
-```
-
-After `container run`:
-```bash
-# Read current registry, add entry, write back
-```
-
-After `container delete`:
-```bash
-# Read current registry, remove entry by name, write back
-```
-
-Use `filesystem::read_file` to read the file and `process::run` with a small script for the atomic write.
-
-## 7. Networking
+## 6. Networking
 
 Services inside the container must bind to `0.0.0.0`, not `localhost` or `127.0.0.1`.
 
@@ -248,20 +215,19 @@ container exec my-sandbox sh -c "node server.js --host 0.0.0.0"
 container exec my-sandbox sh -c "flask run --host 0.0.0.0 --port 3000"
 ```
 
-## 8. Key Mechanics
+## 7. Key Mechanics
 
 - **Workspace mount**: `/workspace` inside the container maps to the host path you specify with `--volume`. Files flow both ways — write a script on the host, exec it in the container; generate output in the container, read it from the host.
 - **Each exec is a separate command.** No persistent shell session. Set environment variables per-call via `--env`.
 - **Long-running processes**: Use `--detach` for servers and daemons — the process persists in the container after exec returns. Interact via subsequent exec calls.
-- **Containers survive sessions.** The registry at `~/.tron/profiles/user/containers.json` tracks everything. Use `container list --all` to see what's running. Clean up with `container delete` when done.
+- **Containers survive sessions.** Use `container list --all` to see what's running. Clean up with `container delete` when done.
 
-## 9. Safety Rules
+## 8. Safety Rules
 
 - Always use descriptive container names (project/purpose based)
 - Clean up containers when done: stop first (`container stop <name>`), then delete (`container delete <name>`)
 - **Never delete a running container** — always stop it first or the command will fail
 - Don't expose privileged ports (< 1024) without the user asking
-- Remove the registry entry when deleting a container
 - Use `--volume` to share files rather than copying
 
 ## Gotchas
