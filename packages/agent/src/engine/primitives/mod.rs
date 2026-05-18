@@ -10,8 +10,10 @@
 //! substrate. `ui::*` stores fixed-catalog generated UI as `ui_surface`
 //! resources, authors deterministic target surfaces from substrate projections,
 //! validates/refreshes/expires generated versions, and routes submitted actions
-//! back through canonical capability invocations. `storage::*` is the system
-//! primitive surface for the unified
+//! back through canonical capability invocations. `module::*` registers,
+//! configures, activates, disables, upgrades, rolls back, and quarantines
+//! worker packages as typed resources under derived grants. `storage::*` is the
+//! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
 //! export.
 
@@ -59,6 +61,7 @@ pub(crate) mod approval;
 pub(crate) mod catalog;
 pub(crate) mod control;
 pub(crate) mod grant;
+pub(crate) mod module;
 pub(crate) mod observability;
 pub(crate) mod queue;
 pub(crate) mod resource;
@@ -81,6 +84,7 @@ pub(crate) const WORKER_WORKER_ID: &str = "worker";
 pub(crate) const OBSERVABILITY_WORKER_ID: &str = "observability";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
 pub(crate) const UI_WORKER_ID: &str = "ui";
+pub(crate) const MODULE_WORKER_ID: &str = "module";
 const ENGINE_OWNER_ACTOR: &str = "system";
 const ENGINE_AUTHORITY_GRANT: &str = "engine-system";
 
@@ -652,6 +656,9 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         .with_namespace_claim("claim")
         .with_namespace_claim("evidence")
         .with_namespace_claim("decision")
+        .with_namespace_claim("worker_package")
+        .with_namespace_claim("module_config")
+        .with_namespace_claim("activation_record")
         .with_namespace_claim("materialized_file")
         .with_namespace_claim("patch");
     Ok(vec![
@@ -664,6 +671,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CONTROL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(UI_WORKER_ID, WorkerKind::System)?,
+        primitive_worker(MODULE_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(OBSERVABILITY_WORKER_ID, WorkerKind::System)?,
         primitive_worker(STORAGE_WORKER_ID, WorkerKind::System)?,
@@ -683,6 +691,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(catalog::registrations()?);
     registrations.extend(control::registrations()?);
     registrations.extend(ui::registrations()?);
+    registrations.extend(module::registrations()?);
     registrations.extend(worker::registrations()?);
     registrations.extend(observability::registrations()?);
     registrations.extend(storage::registrations()?);

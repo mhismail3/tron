@@ -224,8 +224,54 @@ struct EngineConsoleView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(goals.prefix(8).enumerated()), id: \.offset) { _, goal in
                             EngineConsoleKeyValueRow(
-                                substrateField(goal, keys: ["resourceId", "id"], fallback: "goal"),
-                                substrateField(goal, keys: ["lifecycle", "kind"], fallback: "open")
+                                substrateField(
+                                    goal,
+                                    keys: ["resourceId", "id"],
+                                    defaultValue: "goal"
+                                ),
+                                substrateField(
+                                    goal,
+                                    keys: ["lifecycle", "kind"],
+                                    defaultValue: "open"
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            EngineConsoleCard {
+                EngineConsoleCardHeader(
+                    symbol: "shippingbox",
+                    title: "Modules",
+                    subtitle: "Worker packages, configs, and activations projected from resource truth."
+                )
+                let packages = substrateSnapshot?.modulePackages ?? []
+                let configs = substrateSnapshot?.moduleConfigs ?? []
+                let activations = substrateSnapshot?.activationRecords ?? []
+                if packages.isEmpty && configs.isEmpty && activations.isEmpty {
+                    EngineConsoleEmptyState(
+                        symbol: "shippingbox",
+                        title: "No modules",
+                        message: "Registered packages and activation records will appear here after module capabilities run."
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        EngineConsoleKeyValueRow("Packages", "\(packages.count)")
+                        EngineConsoleKeyValueRow("Configs", "\(configs.count)")
+                        EngineConsoleKeyValueRow("Activations", "\(activations.count)")
+                        ForEach(Array(packages.prefix(4).enumerated()), id: \.offset) { _, package in
+                            EngineConsoleKeyValueRow(
+                                substrateField(
+                                    package,
+                                    keys: ["resourceId", "id"],
+                                    defaultValue: "worker_package"
+                                ),
+                                substrateField(
+                                    package,
+                                    keys: ["lifecycle", "kind"],
+                                    defaultValue: "available"
+                                )
                             )
                         }
                     }
@@ -293,8 +339,16 @@ struct EngineConsoleView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(actions.prefix(10).enumerated()), id: \.offset) { _, action in
                             EngineConsoleKeyValueRow(
-                                substrateField(action, keys: ["functionId"], fallback: "capability"),
-                                substrateField(action, keys: ["targetType", "requiredRisk"], fallback: "action")
+                                substrateField(
+                                    action,
+                                    keys: ["functionId"],
+                                    defaultValue: "capability"
+                                ),
+                                substrateField(
+                                    action,
+                                    keys: ["targetType", "requiredRisk"],
+                                    defaultValue: "action"
+                                )
                             )
                         }
                     }
@@ -706,6 +760,8 @@ struct EngineConsoleView: View {
             EngineConsoleMetric("Capabilities", countText(snapshot?.capabilities?.count, cached: nil), .tronTeal),
             EngineConsoleMetric("Resource Kinds", countText(snapshot?.resourceTypes?.count, cached: nil), .tronCyan),
             EngineConsoleMetric("Active Goals", countText(snapshot?.activeGoals?.count, cached: nil), .tronAmber),
+            EngineConsoleMetric("Packages", countText(snapshot?.modulePackages?.count, cached: nil), .tronPurple),
+            EngineConsoleMetric("Activations", countText(snapshot?.activationRecords?.count, cached: nil), .tronRose),
             EngineConsoleMetric("UI Surfaces", countText(snapshot?.uiSurfaceRefs?.count, cached: nil), .tronEmerald),
             EngineConsoleMetric("Invocations", countText(snapshot?.invocations?.count, cached: nil), .tronPurple),
             EngineConsoleMetric("Grants", countText(snapshot?.grants?.count, cached: nil), .tronSlate),
@@ -773,8 +829,8 @@ struct EngineConsoleView: View {
         }
     }
 
-    private func substrateField(_ value: AnyCodable, keys: [String], fallback: String) -> String {
-        substrateFieldOptional(value, keys: keys) ?? fallback
+    private func substrateField(_ value: AnyCodable, keys: [String], defaultValue: String) -> String {
+        substrateFieldOptional(value, keys: keys) ?? defaultValue
     }
 
     private func substrateFieldOptional(_ value: AnyCodable, keys: [String]) -> String? {

@@ -16,7 +16,8 @@ use super::{
 use crate::engine::discovery::FunctionQuery;
 use crate::engine::grants::{EngineGrantLifecycle, ListGrants};
 use crate::engine::resources::{
-    EngineResource, EngineResourceInspection, ListResources, UI_SURFACE_KIND,
+    ACTIVATION_RECORD_KIND, EngineResource, EngineResourceInspection, ListResources,
+    MODULE_CONFIG_KIND, UI_SURFACE_KIND, WORKER_PACKAGE_KIND,
 };
 use crate::engine::{EffectClass, EngineError, Invocation, Result, VisibilityScope, WorkerId};
 
@@ -31,7 +32,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             snapshot_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
+                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "modulePackages", "moduleConfigs", "activationRecords", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
                 "additionalProperties": false,
                 "properties": {
                     "catalogRevision": {"type": "integer"},
@@ -39,6 +40,9 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                     "capabilities": {"type": "array"},
                     "resourceTypes": {"type": "array"},
                     "activeGoals": {"type": "array"},
+                    "modulePackages": {"type": "array"},
+                    "moduleConfigs": {"type": "array"},
+                    "activationRecords": {"type": "array"},
                     "invocations": {"type": "array"},
                     "grants": {"type": "array"},
                     "queues": {"type": "array"},
@@ -110,7 +114,7 @@ fn inspect_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "grant", "goal", "resource", "invocation", "trace", "approval", "queue", "lease", "storage", "integrity"]
+                "enum": ["worker", "capability", "grant", "goal", "package", "module_config", "activation", "resource", "invocation", "trace", "approval", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "includeFullPayloads": {"type": "boolean"}
@@ -151,6 +155,24 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         .into_iter()
         .filter(|resource| !matches!(resource.lifecycle.as_str(), "completed" | "archived"))
         .collect::<Vec<_>>();
+    let module_packages = host.list_resources(ListResources {
+        kind: Some(WORKER_PACKAGE_KIND.to_owned()),
+        scope: None,
+        lifecycle: None,
+        limit,
+    })?;
+    let module_configs = host.list_resources(ListResources {
+        kind: Some(MODULE_CONFIG_KIND.to_owned()),
+        scope: None,
+        lifecycle: None,
+        limit,
+    })?;
+    let activation_records = host.list_resources(ListResources {
+        kind: Some(ACTIVATION_RECORD_KIND.to_owned()),
+        scope: None,
+        lifecycle: None,
+        limit,
+    })?;
     let invocations = latest_invocations(host.invocations(), limit)
         .iter()
         .map(|record| invocation_record_value(record, false))
@@ -170,6 +192,9 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "capabilities": capabilities,
         "resourceTypes": host.resource_type_definitions()?,
         "activeGoals": active_goals,
+        "modulePackages": module_packages,
+        "moduleConfigs": module_configs,
+        "activationRecords": activation_records,
         "invocations": invocations,
         "grants": grants,
         "queues": queues,
@@ -222,6 +247,25 @@ fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> 
         }
         "goal" | "resource" => {
             json!({ "resource": host.inspect_resource(target_id)? })
+        }
+        "package" => {
+            let resource_id = if target_id.starts_with("worker-package:") {
+                target_id.to_owned()
+            } else {
+                format!("worker-package:{target_id}")
+            };
+            json!({ "package": host.inspect_resource(&resource_id)? })
+        }
+        "module_config" => {
+            json!({ "moduleConfig": host.inspect_resource(target_id)? })
+        }
+        "activation" => {
+            let resource_id = if target_id.starts_with("activation:") {
+                target_id.to_owned()
+            } else {
+                format!("activation:{target_id}")
+            };
+            json!({ "activation": host.inspect_resource(&resource_id)? })
         }
         "invocation" => {
             let invocation = host
@@ -468,6 +512,55 @@ fn substrate_actions() -> Vec<Value> {
             false,
         ),
         action_summary("agent::abort", "goal", "sessionId", "high", true),
+        action_summary(
+            "module::inspect_package",
+            "package",
+            "packageId",
+            "low",
+            false,
+        ),
+        action_summary(
+            "module::configure",
+            "package",
+            "packageResourceId",
+            "medium",
+            false,
+        ),
+        action_summary(
+            "module::activate",
+            "package",
+            "packageResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::disable",
+            "activation",
+            "activationResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::upgrade",
+            "activation",
+            "activationResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::rollback",
+            "activation",
+            "activationResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::quarantine",
+            "activation",
+            "resourceId",
+            "high",
+            true,
+        ),
     ]
 }
 
@@ -488,6 +581,8 @@ fn actions_for_target(target_type: &str, target_id: &str) -> Vec<Value> {
             let key = match target_type {
                 "worker" => "workerId",
                 "grant" => "grantId",
+                "package" => "packageId",
+                "activation" => "activationResourceId",
                 "goal" | "resource" => "resourceId",
                 _ => "targetId",
             };

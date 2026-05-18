@@ -28,6 +28,18 @@ pub const UI_SURFACE_SCHEMA_ID: &str = "tron.resource.ui_surface.v1";
 pub const UI_CATALOG_ID: &str = "tron.ui.catalog.core.v1";
 /// Fixed first-party generated UI component catalog revision.
 pub const UI_CATALOG_REVISION: u64 = 1;
+/// Built-in module package resource kind.
+pub const WORKER_PACKAGE_KIND: &str = "worker_package";
+/// Built-in module package schema id.
+pub const WORKER_PACKAGE_SCHEMA_ID: &str = "tron.resource.worker_package.v1";
+/// Built-in module configuration resource kind.
+pub const MODULE_CONFIG_KIND: &str = "module_config";
+/// Built-in module configuration schema id.
+pub const MODULE_CONFIG_SCHEMA_ID: &str = "tron.resource.module_config.v1";
+/// Built-in module activation record resource kind.
+pub const ACTIVATION_RECORD_KIND: &str = "activation_record";
+/// Built-in module activation record schema id.
+pub const ACTIVATION_RECORD_SCHEMA_ID: &str = "tron.resource.activation_record.v1";
 
 const UI_MAX_DEPTH: usize = 8;
 const UI_MAX_COMPONENTS: usize = 200;
@@ -598,6 +610,197 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "read": ["ui.read", "resource.read"],
                 "write": ["ui.write", "resource.write"],
                 "delete": ["ui.write", "resource.write"]
+            }),
+        ),
+        builtin_type(
+            WORKER_PACKAGE_KIND,
+            WORKER_PACKAGE_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "packageId",
+                    "version",
+                    "manifestSchemaId",
+                    "sourceProvenance",
+                    "packageDigest",
+                    "trustTier",
+                    "signatureStatus",
+                    "declaredWorkerKind",
+                    "namespace",
+                    "declaredCapabilities",
+                    "requiredGrants",
+                    "configSchema",
+                    "runtimeEntryPoint",
+                    "healthPolicy",
+                    "sandboxProcessPolicy",
+                    "redactionPolicy"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "packageId": {"type": "string"},
+                    "version": {"type": "string"},
+                    "manifestSchemaId": {"type": "string"},
+                    "sourceProvenance": {"type": "object"},
+                    "packageDigest": {"type": "string"},
+                    "trustTier": {"type": "string"},
+                    "signatureStatus": {"type": "string"},
+                    "declaredWorkerKind": {"type": "string"},
+                    "namespace": {"type": "string"},
+                    "declaredCapabilities": {"type": "array"},
+                    "requiredGrants": {"type": "object"},
+                    "configSchema": {"type": "object"},
+                    "runtimeEntryPoint": {"type": "object"},
+                    "healthPolicy": {"type": "object"},
+                    "sandboxProcessPolicy": {"type": "object"},
+                    "redactionPolicy": {"type": "object"}
+                }
+            }),
+            vec![
+                "draft",
+                "available",
+                "active",
+                "disabled",
+                "superseded",
+                "quarantined",
+                "discarded",
+                "damaged",
+            ],
+            vec![
+                "configured_by",
+                "activates",
+                "declares_capability",
+                "registered_capability",
+                "supersedes",
+                "rollback_target",
+                "quarantined_by",
+                "evidence_for",
+                "derived_from",
+            ],
+            json!({
+                "read": ["module.read", "resource.read"],
+                "write": ["module.write", "resource.write"],
+                "activate": ["module.write"],
+                "delete": ["module.write", "resource.write"]
+            }),
+        ),
+        builtin_type(
+            MODULE_CONFIG_KIND,
+            MODULE_CONFIG_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "packageResourceId",
+                    "packageVersionId",
+                    "packageId",
+                    "scope",
+                    "configRevision",
+                    "config",
+                    "redactionPolicy",
+                    "secretRefs",
+                    "validationHash"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "packageResourceId": {"type": "string"},
+                    "packageVersionId": {"type": "string"},
+                    "packageId": {"type": "string"},
+                    "scope": {"type": "string"},
+                    "configRevision": {"type": "integer"},
+                    "config": {"type": "object"},
+                    "redactionPolicy": {"type": "object"},
+                    "secretRefs": {"type": "array"},
+                    "validationHash": {"type": "string"}
+                }
+            }),
+            vec![
+                "draft",
+                "active",
+                "superseded",
+                "disabled",
+                "discarded",
+                "damaged",
+            ],
+            vec![
+                "configured_by",
+                "activates",
+                "supersedes",
+                "rollback_target",
+                "evidence_for",
+                "derived_from",
+            ],
+            json!({
+                "read": ["module.read", "resource.read"],
+                "write": ["module.write", "resource.write"],
+                "delete": ["module.write", "resource.write"]
+            }),
+        ),
+        builtin_type(
+            ACTIVATION_RECORD_KIND,
+            ACTIVATION_RECORD_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "packageResourceId",
+                    "packageVersionId",
+                    "moduleConfigResourceId",
+                    "configVersionId",
+                    "derivedGrantId",
+                    "derivedGrantRevision",
+                    "derivedGrantHash",
+                    "workerId",
+                    "declaredCapabilities",
+                    "registeredCapabilities",
+                    "healthResult",
+                    "activationStatus",
+                    "rollbackTarget",
+                    "compensationState"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "packageResourceId": {"type": "string"},
+                    "packageVersionId": {"type": "string"},
+                    "moduleConfigResourceId": {"type": "string"},
+                    "configVersionId": {"type": "string"},
+                    "derivedGrantId": {"type": "string"},
+                    "derivedGrantRevision": {"type": "integer"},
+                    "derivedGrantHash": {"type": "string"},
+                    "workerId": {"type": "string"},
+                    "declaredCapabilities": {"type": "array"},
+                    "registeredCapabilities": {"type": "array"},
+                    "healthResult": {"type": "object"},
+                    "activationStatus": {"type": "string"},
+                    "rollbackTarget": {},
+                    "compensationState": {"type": "object"}
+                }
+            }),
+            vec![
+                "pending",
+                "active",
+                "failed",
+                "disabled",
+                "rolled_back",
+                "superseded",
+                "quarantined",
+                "damaged",
+            ],
+            vec![
+                "activates",
+                "owns_worker",
+                "uses_grant",
+                "declares_capability",
+                "registered_capability",
+                "configured_by",
+                "supersedes",
+                "rollback_target",
+                "quarantined_by",
+                "evidence_for",
+                "derived_from",
+            ],
+            json!({
+                "read": ["module.read", "resource.read"],
+                "write": ["module.write", "resource.write"],
+                "disable": ["module.write"],
+                "quarantine": ["module.write"]
             }),
         ),
         builtin_type(
@@ -2155,6 +2358,9 @@ fn validate_ui_bindings(value: Option<&Value>) -> Result<()> {
                     | "capability"
                     | "grant"
                     | "goal"
+                    | "package"
+                    | "module_config"
+                    | "activation"
                     | "resource"
                     | "invocation"
                     | "trace"

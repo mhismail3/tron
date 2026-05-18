@@ -32,7 +32,7 @@ recent substrate additions lives in `docs/modular-engine-cleanup-audit.md`.
   capabilities through the audited `ui::submit_action` gateway; clients never
   submit arbitrary target function ids or payload templates.
 - Old mobile-session-manager routes, compatibility readers, aliases, and
-  product-shell fallback renderers are not part of the target runtime.
+  product-shell compatibility renderers are not part of the target runtime.
 
 ## Primitive Model
 
@@ -64,6 +64,7 @@ A resource is the durable object model. Resource kinds include:
 - `ui_surface`
 - `module_config`
 - `worker_package`
+- `activation_record`
 - `secret_ref`
 - `materialized_file`
 - `patch_proposal`
@@ -130,8 +131,9 @@ The resource kernel provides:
 - `resource::list`
 
 The engine registers first-party resource type definitions for `artifact`,
-`goal`, `claim`, `evidence`, and `decision` at primitive-store startup. Thin
-wrappers compose the generic resource store:
+`goal`, `claim`, `evidence`, `decision`, `worker_package`, `module_config`,
+and `activation_record` at primitive-store startup. Thin wrappers compose the
+generic resource store:
 
 - `artifact::create`, `artifact::update`, `artifact::promote`,
   `artifact::discard`, `artifact::inspect`, `artifact::split`,
@@ -143,6 +145,35 @@ wrappers compose the generic resource store:
 
 These wrappers are convenience capabilities only. They do not create separate
 stores.
+
+## Module Package Lifecycle
+
+Plug-and-play modules are not a separate persistence plane. A module is a
+validated package resource, a config resource, an activation record, derived
+grants, and worker/capability catalog records.
+
+The first-party `module` primitive exposes:
+
+- `module::register_package` for digest/provenance/namespace/capability/config
+  validation before `worker_package` persistence;
+- `module::inspect_package` as the read projection over package/config/
+  activation resources;
+- `module::configure` for config-schema validation and `secret_ref`-only
+  secret handling before `module_config` persistence;
+- `module::activate` for deriving a narrower worker grant, validating the
+  already registered worker capabilities against the package manifest and grant
+  ceiling, and creating an `activation_record`;
+- `module::disable`, `module::upgrade`, `module::rollback`, and
+  `module::quarantine` as explicit idempotent lifecycle capabilities. Upgrade
+  is a replacement operation: it names the current activation, persists the new
+  activation version, then revokes the superseded grant. Disable and quarantine
+  disconnect volatile workers through the canonical worker lifecycle and revoke
+  grants; non-volatile workers remain catalog-visible but lose activation
+  authority.
+
+No package table, module action multiplexer, client-side policy, or `control`
+mutation path exists. Control and generated UI surfaces expose module resources
+as projections and submit only stored canonical capability actions.
 
 Type registration is an admin-visible capability. Resource payloads are
 validated against the registered type schema before create or update persists

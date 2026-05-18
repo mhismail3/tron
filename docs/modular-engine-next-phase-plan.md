@@ -1,5 +1,29 @@
 # Module Package Activation And Operator Action Phase
 
+## Implementation Checkpoint
+
+Implemented in the current substrate as a resource-native package lifecycle:
+
+- built-in `worker_package`, `module_config`, and `activation_record` resource
+  type definitions;
+- first-party `module` primitive with `module::register_package`,
+  `module::inspect_package`, `module::configure`, `module::activate`,
+  `module::disable`, `module::upgrade`, `module::rollback`, and
+  `module::quarantine`;
+- manifest validation for digest/provenance, namespace ownership, mutating
+  idempotency, resource-backed durable outputs, config schema, risk/effect, and
+  grant ceiling;
+- activation grant derivation through the engine grant store and registered
+  worker capability validation against the manifest;
+- read-only control projections for module packages/configs/activations and
+  server-authored generated UI support for package/config/activation targets;
+- iOS Engine Console decoding and rendering of module package/config/activation
+  refs as read-only substrate projections.
+
+This checkpoint intentionally does not add remote marketplace installation,
+dynamic UI catalogs, a package table, `control::act`, client-side policy, or a
+storage generation bump.
+
 ## Summary
 
 The generated UI authoring phase established deterministic `ui_surface`
@@ -50,7 +74,7 @@ The target state for this phase:
   ratings, or third-party catalog distribution.
 - Do not add dynamic UI component catalogs.
 - Do not add `control::act`, client-side policy decisions, route aliases,
-  compatibility readers, or fallback renderers.
+  compatibility readers, or renderer aliases.
 - Do not let a package self-enable, self-expand grants, or register capabilities
   beyond its activation grant.
 - Do not make iOS a module manager with local truth. It can render server
@@ -132,24 +156,27 @@ Add package lifecycle capabilities under a first-party `module` worker:
 
 - `module::activate`
   - Resource-backed and idempotent.
-  - Requires `workerPackageResourceId`, `packageVersionId`,
+  - Requires `packageResourceId`, `packageVersionId`,
     `moduleConfigResourceId`, `configVersionId`, child grant request, lifecycle
     policy, health policy, and rollback policy.
-  - Derives a grant, starts/registers the worker through canonical worker spawn
-    or in-process registration, verifies declared capabilities against the grant,
-    runs health checks, and creates an `activation_record` resource.
+  - Derives a grant, binds an already registered built-in or `worker::spawn`
+    worker, verifies declared capabilities against the grant, runs health
+    checks, and creates an `activation_record` resource.
 
 - `module::disable`
   - Resource-backed and idempotent.
-  - Disconnects volatile workers or disables in-process registrations through
-    canonical worker lifecycle paths, revokes or pauses derived grants according
-    to policy, and updates the activation record.
+  - Disconnects volatile workers through canonical worker lifecycle paths,
+    revokes the derived grant, records the worker lifecycle outcome, and updates
+    the activation record. Non-volatile built-in workers remain catalog-visible
+    but lose activation authority.
 
 - `module::upgrade`
   - Resource-backed and idempotent.
-  - Validates the new package version, performs grant narrowing/derivation,
-    activates a replacement worker, preserves or migrates config only through a
-    declared config transform, and links old/new activation records.
+  - Requires the activation being replaced, validates the new package/config
+    versions, performs grant narrowing/derivation, persists the replacement
+    activation version, then revokes the superseded grant. If the old worker was
+    volatile and is replaced by a different worker, it is disconnected through
+    the canonical worker lifecycle.
 
 - `module::rollback`
   - Resource-backed and idempotent.
@@ -176,9 +203,10 @@ grant requirements.
 4. `module::activate` prepares an invocation with package refs, config refs,
    constraints, grant request, idempotency key, and output contract.
 5. The engine derives a child grant from the caller grant.
-6. The worker registers capabilities. Registration fails if runtime declarations
-   exceed the package manifest, config, grant, resource selectors, file roots,
-   network policy, risk ceiling, visibility ceiling, or trust tier.
+6. The worker must already be registered through the built-in catalog or
+   canonical `worker::spawn`. Activation fails if runtime declarations exceed
+   the package manifest, config, grant, resource selectors, file roots, network
+   policy, risk ceiling, visibility ceiling, or trust tier.
 7. A health check runs under the derived grant.
 8. The activation record links package, config, worker, grant, health result,
    invocation, and rollback target.
@@ -292,7 +320,7 @@ Do not add fixed package dashboards or local package policy.
    server-advertised action gating, action result rendering, stale/approval
    states, and offline read-only cache behavior.
 9. Run absence scans for compatibility routes, local iOS policy, dynamic
-   catalogs, fallback renderers, and package action multiplexers.
+   catalogs, renderer aliases, and package action multiplexers.
 
 ## Verification
 

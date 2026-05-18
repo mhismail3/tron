@@ -929,6 +929,82 @@ fn target_projection(
                 graph: bounded_json(json!({"resource": inspection}), request.max_preview_bytes),
             })
         }
+        "package" => {
+            let resource_id = if request.target_id.starts_with("worker-package:") {
+                request.target_id.clone()
+            } else {
+                format!("worker-package:{}", request.target_id)
+            };
+            let inspection =
+                host.inspect_resource(&resource_id)?
+                    .ok_or_else(|| EngineError::NotFound {
+                        kind: "resource",
+                        id: resource_id.clone(),
+                    })?;
+            if inspection.resource.kind != "worker_package" {
+                return Err(EngineError::PolicyViolation(format!(
+                    "resource {resource_id} is {}, expected worker_package",
+                    inspection.resource.kind
+                )));
+            }
+            Ok(TargetProjection {
+                title: format!("Package {}", request.target_id),
+                summary: format!(
+                    "{} / {}",
+                    inspection.resource.kind, inspection.resource.lifecycle
+                ),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(json!({"package": inspection}), request.max_preview_bytes),
+            })
+        }
+        "module_config" => {
+            let inspection = host.inspect_resource(&request.target_id)?.ok_or_else(|| {
+                EngineError::NotFound {
+                    kind: "resource",
+                    id: request.target_id.clone(),
+                }
+            })?;
+            if inspection.resource.kind != "module_config" {
+                return Err(EngineError::PolicyViolation(format!(
+                    "resource {} is {}, expected module_config",
+                    request.target_id, inspection.resource.kind
+                )));
+            }
+            Ok(TargetProjection {
+                title: format!("Module Config {}", request.target_id),
+                summary: inspection.resource.lifecycle.clone(),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(
+                    json!({"moduleConfig": inspection}),
+                    request.max_preview_bytes,
+                ),
+            })
+        }
+        "activation" => {
+            let resource_id = if request.target_id.starts_with("activation:") {
+                request.target_id.clone()
+            } else {
+                format!("activation:{}", request.target_id)
+            };
+            let inspection =
+                host.inspect_resource(&resource_id)?
+                    .ok_or_else(|| EngineError::NotFound {
+                        kind: "resource",
+                        id: resource_id.clone(),
+                    })?;
+            if inspection.resource.kind != "activation_record" {
+                return Err(EngineError::PolicyViolation(format!(
+                    "resource {resource_id} is {}, expected activation_record",
+                    inspection.resource.kind
+                )));
+            }
+            Ok(TargetProjection {
+                title: format!("Activation {}", request.target_id),
+                summary: inspection.resource.lifecycle.clone(),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(json!({"activation": inspection}), request.max_preview_bytes),
+            })
+        }
         "invocation" => {
             let record = host
                 .invocations()
@@ -1073,21 +1149,21 @@ fn layout_for_projection(projection: &TargetProjection) -> Value {
 fn generated_actions(
     host: &dyn PrimitiveRuntimeHost,
     invocation: &crate::engine::Invocation,
-    _request: &SurfaceAuthoringRequest,
+    request: &SurfaceAuthoringRequest,
 ) -> Result<Vec<Value>> {
-    let refresh = host
-        .discover_functions(&FunctionQuery {
-            actor: Some(actor_context(invocation)),
-            include_internal: true,
-            ..FunctionQuery::default()
-        })
-        .into_iter()
+    let functions = host.discover_functions(&FunctionQuery {
+        actor: Some(actor_context(invocation)),
+        include_internal: true,
+        ..FunctionQuery::default()
+    });
+    let refresh = functions
+        .iter()
         .find(|function| function.id.as_str() == REFRESH_SURFACE_FUNCTION)
         .ok_or_else(|| EngineError::NotFound {
             kind: "function",
             id: REFRESH_SURFACE_FUNCTION.to_owned(),
         })?;
-    Ok(vec![json!({
+    let mut actions = vec![json!({
         "actionId": "refresh-surface",
         "label": "Refresh",
         "targetFunctionId": REFRESH_SURFACE_FUNCTION,
@@ -1102,7 +1178,30 @@ fn generated_actions(
         "approvalPolicy": {"required": refresh.required_authority.approval_required},
         "targetRevision": refresh.revision.0,
         "expiresAt": default_expires_at()
-    })])
+    })];
+    if request.target_type == "package" {
+        if let Some(inspect_package) = functions
+            .iter()
+            .find(|function| function.id.as_str() == "module::inspect_package")
+        {
+            actions.push(json!({
+                "actionId": "inspect-package",
+                "label": "Inspect Package",
+                "targetFunctionId": "module::inspect_package",
+                "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                "payloadTemplate": {
+                    "packageId": request.target_id.strip_prefix("worker-package:").unwrap_or(&request.target_id)
+                },
+                "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                "requiredRisk": risk_label(&inspect_package.risk_level),
+                "approvalPolicy": {"required": inspect_package.required_authority.approval_required},
+                "targetRevision": inspect_package.revision.0,
+                "expiresAt": default_expires_at()
+            }));
+        }
+    }
+    Ok(actions)
 }
 
 fn validate_action_target(
@@ -1759,6 +1858,9 @@ fn ensure_supported_target_type(target_type: &str) -> Result<()> {
         "worker"
             | "capability"
             | "goal"
+            | "package"
+            | "module_config"
+            | "activation"
             | "resource"
             | "invocation"
             | "grant"
@@ -1904,7 +2006,7 @@ fn surface_for_target_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "goal", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
+                "enum": ["worker", "capability", "goal", "package", "module_config", "activation", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "purpose": {"type": "string"},

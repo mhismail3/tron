@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-18 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, server-authored generated `ui_surface` inspection/refresh/action flow, strict generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-18 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -13,7 +13,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Capability-native invocation/result rendering for the live `search` / `inspect` / `execute` harness
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
-- A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
+- A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, module package/config/activation refs, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
 - No fixed Automations or Voice Notes dashboards; reusable cron and voice-note protocol pieces remain capability modules until generated/control surfaces replace them
 
 The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
@@ -204,7 +204,8 @@ workers, bindings, policies, audit, traces, and primer internals only after the
 user opts in. `EngineConsoleState` owns refresh, search, inspect, local mutation
 state, mutation gating, and disconnected read-only cache snapshots. The server
 remains the source of truth for policy, authority, approval, audit redaction,
-plugin lifecycle, and binding selection.
+plugin lifecycle, module package/config/activation resources, and binding
+selection.
 
 The Engine Console uses sheet-native Tron components: section chips, compact
 metric grids, capability cards, status banners, generated action rows, and
@@ -218,11 +219,11 @@ are unavailable; that policy is visible in the search result status and is not
 applied to model turns.
 
 The console cache is intentionally read-only. On disconnect, the UI shows stale
-catalog/registry/index summaries and disables mutations. Reconnect refreshes the
-live snapshot and replaces cached summaries when the server reports a newer
-catalog or registry revision. The cache stores redacted audit rows only; full
-payload reveal is a future server-authorized flow and must not be reconstructed
-locally.
+catalog/registry/index/module summaries and disables mutations. Reconnect
+refreshes the live snapshot and replaces cached summaries when the server
+reports a newer catalog or registry revision. The cache stores redacted audit
+rows and generated UI refs only; full payload reveal and module lifecycle
+actions are server-authorized flows and must not be reconstructed locally.
 
 ## Data Flow
 

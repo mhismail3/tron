@@ -36,6 +36,7 @@ use super::{
 };
 
 mod generated_ui;
+mod module_activation;
 
 fn wid(value: &str) -> WorkerId {
     WorkerId::new(value).unwrap()

@@ -974,6 +974,115 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
 }
 
 #[test]
+fn module_package_activation_gates_stay_on() {
+    let crate_root = crate_root();
+    let repo_root = repo_root();
+
+    let resources = std::fs::read_to_string(crate_root.join("src/engine/resources.rs"))
+        .expect("failed to read engine resources");
+    for required in [
+        "worker_package",
+        "module_config",
+        "activation_record",
+        "configured_by",
+        "activates",
+        "owns_worker",
+        "uses_grant",
+        "registered_capability",
+    ] {
+        assert!(
+            resources.contains(required),
+            "module activation resource model must keep `{required}`"
+        );
+    }
+
+    let primitives = std::fs::read_to_string(crate_root.join("src/engine/primitives/mod.rs"))
+        .expect("failed to read primitive module registry");
+    assert!(
+        primitives.contains("MODULE_WORKER_ID")
+            && primitives.contains("module::registrations")
+            && primitives.contains("primitive_worker(MODULE_WORKER_ID"),
+        "module package lifecycle must be a first-party primitive worker"
+    );
+
+    let module_path = crate_root.join("src/engine/primitives/module.rs");
+    let module = std::fs::read_to_string(&module_path)
+        .unwrap_or_else(|e| panic!("failed to read {module_path:?}: {e}"));
+    for required in [
+        "module::register_package",
+        "module::inspect_package",
+        "module::configure",
+        "module::activate",
+        "module::disable",
+        "module::upgrade",
+        "module::rollback",
+        "module::quarantine",
+        "DurableOutputContract::resource_backed",
+        "derive_grant",
+        "revoke_grant",
+        "packageDigest",
+        "secret_ref",
+    ] {
+        assert!(
+            module.contains(required),
+            "module primitive must keep `{required}`"
+        );
+    }
+    for forbidden in [
+        "module::act\"",
+        "module::run_action",
+        "control::act",
+        "sandbox::spawn_worker",
+        "authorityCeiling",
+        "legacy",
+        "fallback",
+    ] {
+        assert!(
+            !module.contains(forbidden),
+            "module primitive must not reintroduce `{forbidden}`"
+        );
+    }
+
+    let control = std::fs::read_to_string(crate_root.join("src/engine/primitives/control.rs"))
+        .expect("failed to read control primitive");
+    assert!(
+        control.contains("modulePackages")
+            && control.contains("moduleConfigs")
+            && control.contains("activationRecords")
+            && control.contains("module::inspect_package")
+            && !control.contains("module::act\""),
+        "control projections must expose module resources/actions without a mutation multiplexer"
+    );
+
+    let ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
+        .expect("failed to read generated UI primitive");
+    assert!(
+        ui.contains("\"package\"")
+            && ui.contains("\"module_config\"")
+            && ui.contains("\"activation\"")
+            && ui.contains("module::inspect_package"),
+        "generated UI authoring must support module package targets through canonical actions"
+    );
+
+    let capability_client_path = repo_root
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("Services")
+        .join("Network")
+        .join("Clients")
+        .join("CapabilityClient.swift");
+    let capability_client = std::fs::read_to_string(&capability_client_path)
+        .unwrap_or_else(|e| panic!("failed to read {capability_client_path:?}: {e}"));
+    assert!(
+        !capability_client.contains("module::act")
+            && !capability_client.contains("control::act")
+            && !capability_client.contains("targetFunctionId ="),
+        "iOS must not construct module/control action targets locally"
+    );
+}
+
+#[test]
 fn retired_capability_event_surface_stays_deleted() {
     let repo_root = repo_root();
     let crate_root = crate_root();

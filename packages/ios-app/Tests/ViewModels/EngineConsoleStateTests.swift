@@ -164,6 +164,9 @@ struct EngineConsoleStateTests {
             capabilities: [AnyCodable(["id": "resource::create"])],
             resourceTypes: [AnyCodable(["kind": "goal"])],
             activeGoals: [],
+            modulePackages: [AnyCodable(["resourceId": "worker-package:demo"])],
+            moduleConfigs: [AnyCodable(["resourceId": "module-config:workspace:demo"])],
+            activationRecords: [AnyCodable(["resourceId": "activation:workspace:demo"])],
             invocations: [],
             grants: [],
             queues: [],
@@ -178,6 +181,9 @@ struct EngineConsoleStateTests {
         await state.refresh()
 
         #expect(state.controlSnapshot?.catalogRevision == 7)
+        #expect(state.controlSnapshot?.modulePackages?.count == 1)
+        #expect(state.controlSnapshot?.moduleConfigs?.count == 1)
+        #expect(state.controlSnapshot?.activationRecords?.count == 1)
         #expect(state.cachedSnapshot?.controlSnapshot?.catalogRevision == 7)
     }
 

@@ -6,6 +6,9 @@ struct ControlSnapshotDTO: Codable, Equatable, Sendable {
     var capabilities: [AnyCodable]?
     var resourceTypes: [AnyCodable]?
     var activeGoals: [AnyCodable]?
+    var modulePackages: [AnyCodable]? = nil
+    var moduleConfigs: [AnyCodable]? = nil
+    var activationRecords: [AnyCodable]? = nil
     var invocations: [AnyCodable]?
     var grants: [AnyCodable]?
     var queues: [AnyCodable]?

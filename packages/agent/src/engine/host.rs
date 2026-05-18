@@ -23,7 +23,8 @@ use super::compensation::{EngineCompensationRecord, compensation_record};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TriggerId, TriggerTypeId, WorkerId,
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
+    WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation, InvocationResult};
 use super::leases::{AcquireResourceLease, EngineResourceLease};
@@ -2240,6 +2241,40 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .update(request)
     }
 
+    fn link_resources(
+        &mut self,
+        request: super::resources::LinkResources,
+    ) -> Result<super::resources::EngineResourceLink> {
+        self.primitives
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .link(request)
+    }
+
+    fn derive_grant(
+        &mut self,
+        request: super::grants::DeriveGrant,
+    ) -> Result<super::grants::EngineGrant> {
+        self.primitives
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .derive(request)
+    }
+
+    fn revoke_grant(
+        &mut self,
+        grant_id: &AuthorityGrantId,
+        trace_id: TraceId,
+    ) -> Result<super::grants::EngineGrant> {
+        self.primitives
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .revoke(grant_id, trace_id)
+    }
+
     fn list_grants(
         &self,
         filter: super::grants::ListGrants,
@@ -2981,6 +3016,6 @@ fn grant_id(value: &str) -> Result<AuthorityGrantId> {
 fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
     matches!(
         namespace,
-        "catalog" | "worker" | "control" | "observability" | "storage" | "ui"
+        "catalog" | "worker" | "control" | "observability" | "storage" | "ui" | "module"
     )
 }

@@ -6,17 +6,18 @@
 
 use serde_json::{Value, json};
 
-use super::{catalog, control, observability, storage, ui, worker};
+use super::{catalog, control, module, observability, storage, ui, worker};
 use crate::engine::approval::EngineApprovalRecord;
 use crate::engine::discovery::{ActorContext, FunctionQuery};
 use crate::engine::errors::{EngineError, Result};
-use crate::engine::grants::{EngineGrant, ListGrants};
-use crate::engine::ids::{InvocationId, TriggerId, WorkerId};
+use crate::engine::grants::{DeriveGrant, EngineGrant, ListGrants};
+use crate::engine::ids::{AuthorityGrantId, InvocationId, TriggerId, WorkerId};
 use crate::engine::invocation::{CausalContext, Invocation, InvocationRecord};
 use crate::engine::leases::EngineResourceLease;
 use crate::engine::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
-    EngineResourceVersion, ListResources, UpdateResource,
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLink,
+    EngineResourceTypeDefinition, EngineResourceVersion, LinkResources, ListResources,
+    UpdateResource,
 };
 use crate::engine::streams::EngineStreamEvent;
 use crate::engine::types::{
@@ -69,6 +70,13 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>>;
     fn create_resource(&mut self, request: CreateResource) -> Result<EngineResource>;
     fn update_resource(&mut self, request: UpdateResource) -> Result<EngineResourceVersion>;
+    fn link_resources(&mut self, request: LinkResources) -> Result<EngineResourceLink>;
+    fn derive_grant(&mut self, request: DeriveGrant) -> Result<EngineGrant>;
+    fn revoke_grant(
+        &mut self,
+        grant_id: &AuthorityGrantId,
+        trace_id: crate::engine::ids::TraceId,
+    ) -> Result<EngineGrant>;
     fn list_grants(&self, filter: ListGrants) -> Result<Vec<EngineGrant>>;
     fn inspect_grant(
         &self,
@@ -134,6 +142,14 @@ pub(in crate::engine) fn dispatch(
         | ui::EXPIRE_SURFACE_FUNCTION
         | ui::DISCARD_SURFACE_FUNCTION
         | ui::SUBMIT_ACTION_FUNCTION => ui::dispatch(host, invocation),
+        module::REGISTER_PACKAGE_FUNCTION
+        | module::INSPECT_PACKAGE_FUNCTION
+        | module::CONFIGURE_FUNCTION
+        | module::ACTIVATE_FUNCTION
+        | module::DISABLE_FUNCTION
+        | module::UPGRADE_FUNCTION
+        | module::ROLLBACK_FUNCTION
+        | module::QUARANTINE_FUNCTION => module::dispatch(host, invocation),
         observability::TRACE_GET_FUNCTION => trace_get(host, invocation),
         observability::TRACE_LIST_FUNCTION => trace_list(host, invocation),
         observability::SPAN_LIST_FUNCTION => span_list(host, invocation),
