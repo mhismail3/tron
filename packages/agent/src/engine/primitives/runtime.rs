@@ -13,6 +13,7 @@ use crate::engine::errors::{EngineError, Result};
 use crate::engine::ids::{InvocationId, TriggerId, WorkerId};
 use crate::engine::invocation::{CausalContext, Invocation, InvocationRecord};
 use crate::engine::leases::EngineResourceLease;
+use crate::engine::output_audit::EngineOutputAuditObservation;
 use crate::engine::streams::EngineStreamEvent;
 use crate::engine::types::{
     CatalogChange, CatalogRevision, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition,
@@ -27,6 +28,7 @@ struct TraceComponents {
     streams: Vec<EngineStreamEvent>,
     leases: Vec<EngineResourceLease>,
     compensation: Vec<Value>,
+    output_audit: Vec<EngineOutputAuditObservation>,
 }
 
 #[derive(Default)]
@@ -58,6 +60,7 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineStreamEvent>>;
     fn resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>>;
     fn compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>>;
+    fn output_audit_for_trace(&self, trace_id: &str) -> Result<Vec<EngineOutputAuditObservation>>;
     fn worker_count(&self) -> usize;
     fn function_count(&self) -> usize;
     fn trigger_count(&self) -> usize;
@@ -280,7 +283,7 @@ fn worker_protocol_guide(invocation: &Invocation) -> Result<Value> {
         "TRON_ENGINE_WORKER_ID": "Stable worker id injected by sandbox::spawn_worker",
         "TRON_ENGINE_WORKER_VISIBILITY": "session, workspace, or system",
         "TRON_ENGINE_WORKER_PROTOCOL_VERSION": protocol_version.to_string(),
-        "TRON_ENGINE_WORKER_TOKEN": "Scoped worker-token JSON injected by sandbox::spawn_worker; bounds pluginId, namespaceClaims, authorityCeiling, visibilityCeiling, trustTier, scope binding, expiry, and signatureStatus",
+        "TRON_ENGINE_WORKER_TOKEN": "Scoped worker-token JSON injected by sandbox::spawn_worker; bounds pluginId, namespaceClaims, authorityGrantId, authorityGrantRevision, authorityGrantHash, resourceSelectors, visibilityCeiling, trustTier, scope binding, expiry, and signatureStatus",
         "TRON_ENGINE_SESSION_ID": "Present for session-visible sandbox workers",
         "TRON_ENGINE_WORKSPACE_ID": "Present for workspace-visible sandbox workers"
     });
@@ -384,6 +387,7 @@ fn trace_get(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
         "approvals": trace.approvals.iter().map(|record| json!(record)).collect::<Vec<_>>(),
         "leases": trace.leases,
         "compensation": trace.compensation,
+        "outputAudit": trace.output_audit,
     }))
 }
 
@@ -502,7 +506,10 @@ PROTOCOL_VERSION = int(os.environ.get("TRON_ENGINE_WORKER_PROTOCOL_VERSION", "1"
 WORKER_TOKEN = json.loads(os.environ.get("TRON_ENGINE_WORKER_TOKEN", json.dumps({
     "pluginId": "session_generated." + WORKER_ID,
     "namespaceClaims": [NAMESPACE],
-    "authorityCeiling": [],
+    "authorityGrantId": "worker-runtime",
+    "authorityGrantRevision": 1,
+    "authorityGrantHash": "loopback-bootstrap",
+    "resourceSelectors": ["*"],
     "visibilityCeiling": VISIBILITY,
     "trustTier": "session_generated",
     "sessionId": SESSION_ID,
@@ -623,7 +630,7 @@ def worker_definition():
         "kind": "Sandbox",
         "lifecycle": "Ready",
         "owner_actor": "system",
-        "authority_grant": "sandbox-worker-grant",
+        "authority_grant": WORKER_TOKEN["authorityGrantId"],
         "namespace_claims": [NAMESPACE],
         "visibility": ENGINE_VISIBILITY,
         "provenance": scoped_provenance(),
@@ -839,6 +846,7 @@ fn log_query(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
             logs.extend(trace.approvals.iter().map(approval_log_value));
             logs.extend(trace.leases.iter().map(lease_log_value));
             logs.extend(trace.compensation.iter().map(compensation_log_value));
+            logs.extend(trace.output_audit.iter().map(output_audit_log_value));
         }
         None => {
             logs.extend(host.invocations().iter().map(invocation_log_value));
@@ -896,6 +904,7 @@ fn trace_components(host: &dyn PrimitiveRuntimeHost, trace_id: &str) -> Result<T
         streams: host.stream_records_for_trace(trace_id)?,
         leases: host.resource_leases_for_trace(trace_id)?,
         compensation: host.compensation_records_for_trace(trace_id)?,
+        output_audit: host.output_audit_for_trace(trace_id)?,
     })
 }
 
@@ -941,6 +950,7 @@ fn trace_summary(trace_id: &str, trace: &TraceComponents) -> Value {
         "pendingApprovalCount": pending_approvals,
         "leaseCount": trace.leases.len(),
         "compensationCount": trace.compensation.len(),
+        "outputAuditCount": trace.output_audit.len(),
         "firstTimestamp": timestamps.first(),
         "lastTimestamp": timestamps.last(),
     })
@@ -977,6 +987,12 @@ fn trace_timestamps(trace: &TraceComponents) -> Vec<String> {
             .leases
             .iter()
             .map(|record| record.acquired_at.to_rfc3339()),
+    );
+    timestamps.extend(
+        trace
+            .output_audit
+            .iter()
+            .map(|record| record.created_at.to_rfc3339()),
     );
     timestamps.extend(trace.compensation.iter().filter_map(|record| {
         record
@@ -1062,6 +1078,20 @@ fn compensation_log_value(record: &Value) -> Value {
         "functionId": record.get("functionId").and_then(Value::as_str),
         "message": "engine compensation record written",
         "error": record.get("error"),
+    })
+}
+
+fn output_audit_log_value(record: &EngineOutputAuditObservation) -> Value {
+    json!({
+        "timestamp": record.created_at.to_rfc3339(),
+        "traceId": record.trace_id.as_str(),
+        "kind": "output_audit",
+        "level": record.severity,
+        "observationId": record.observation_id,
+        "functionId": record.function_id.as_str(),
+        "outputKind": record.output_kind,
+        "outputRef": record.output_ref,
+        "message": record.message,
     })
 }
 

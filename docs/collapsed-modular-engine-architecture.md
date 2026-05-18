@@ -37,8 +37,9 @@ for artifacts, goals, work items, UI surfaces, and control-plane state.
 A worker is any runnable actor: first-party Rust module, local model agent,
 coordinator agent, spawned subagent, sandbox process, MCP adapter, iOS client,
 or system service. Workers own namespace claims and register capabilities.
-Worker tokens bound visibility, authority, trust tier, session/workspace scope,
-expiry, and namespace claims.
+Worker tokens bind visibility, trust tier, session/workspace scope, expiry,
+namespace claims, authority grant id/revision/hash, and resource selectors.
+The engine resolves the stored grant before registration or invocation.
 
 ### Capability
 
@@ -84,10 +85,13 @@ invocation tree plus worker lifecycle records.
 ### Grant
 
 A grant is scoped authority delegated to a worker or invocation. The target
-grant model includes allowed capabilities, resource kinds/selectors, max risk,
-file roots, network policy, output policy, budget, expiry, delegation rules, and
-approval requirements. Until the full grant model lands, existing authority
-scopes and worker-token ceilings remain the enforcement surface.
+grant model is now implemented by `engine_grants` and `engine_grant_events`.
+Grants include parent id, subject actor/worker/invocation, lifecycle, allowed
+capabilities/namespaces/authority labels, resource kinds/selectors, file roots,
+network policy, max risk, budget, expiry, delegation rules, approval
+requirements, provenance, trace, and revision. Invocation prepare resolves
+`authority_grant_id` to this stored record before handler execution. Raw
+caller-supplied scope arrays are audit context only.
 
 ### Event
 
@@ -95,9 +99,21 @@ Events are append-only facts. Streams, state tables, local indexes, iOS caches,
 and control-plane summaries are projections that must be rebuildable from the
 catalog ledger, invocation ledger, resource store, and stream history.
 
-## Resource Kernel
+## Secure Substrate Slice
 
-The first implementation slice adds `resource::*` primitive capabilities:
+The secure substrate slice adds:
+
+- `grant::derive`
+- `grant::inspect`
+- `grant::list`
+- `grant::revoke`
+
+Child grants must be narrower than the parent across capability, namespace,
+authority label, resource kind, resource selector, file root, network, risk,
+expiry, delegation, and approval policy. Worker registration rejects namespace
+claims and functions that exceed the worker's grant.
+
+The resource kernel provides:
 
 - `resource::register_type`
 - `resource::create`
@@ -106,9 +122,19 @@ The first implementation slice adds `resource::*` primitive capabilities:
 - `resource::inspect`
 - `resource::list`
 
-This is intentionally generic. Artifact, goal, claim, evidence, decision, and
-UI-specific modules should register resource type definitions and then compose
-the resource capabilities rather than creating separate stores.
+The engine registers first-party resource type definitions for `artifact`,
+`goal`, `claim`, `evidence`, and `decision` at primitive-store startup. Thin
+wrappers compose the generic resource store:
+
+- `artifact::create`, `artifact::update`, `artifact::promote`,
+  `artifact::discard`, `artifact::inspect`
+- `goal::create`, `goal::complete`
+- `claim::attach`
+- `evidence::attach`
+- `decision::create`
+
+These wrappers are convenience capabilities only. They do not create separate
+stores.
 
 Type registration is an admin-visible capability. Resource payloads are
 validated against the registered type schema before create or update persists
@@ -117,6 +143,13 @@ any resource/version rows.
 Resource writes are compare-and-set protected through `expectedCurrentVersionId`.
 If the current version differs, the update fails before writing a new version.
 This is the base concurrency invariant for multi-agent artifact work.
+
+The current phase audits existing durable-output paths instead of globally
+blocking them. Filesystem writes, write-like process invocations, program
+artifacts without resource refs, and agent outputs without promoted resource
+refs record `engine_output_audit_observations`, exposed through
+`observability::trace_get` and `observability::log_query`. New substrate
+wrappers must return resource refs when they produce durable output.
 
 ## Artifact And Goal Mapping
 
@@ -150,6 +183,11 @@ archive, and promote must be normal capabilities.
   definition.
 - Unknown lifecycle states and link relations are rejected.
 - Resource updates require current-version compare-and-set.
+- Invocation authority is grant-based. Missing, expired, revoked,
+  subject-mismatched, insufficient-risk, insufficient-authority, or
+  selector-mismatched grants fail before handler execution.
+- Spawned sandbox workers receive derived grants and tokens carrying grant
+  identity/resource selectors. Child grants cannot broaden the parent.
 - Large resource payloads use blob-backed storage refs through the unified
   storage layer.
 - Secret values must not be stored as normal artifact/resource payloads. Store
@@ -160,10 +198,7 @@ archive, and promote must be normal capabilities.
 ## Clean-Break Cutover
 
 The target architecture does not include runtime compatibility with old
-mobile-first session-manager state. A future cutover should bump the storage
-generation, archive/export old data before startup, remove legacy routes and
-DTOs, and fail CI on references to retired capability names or product-shell
-event reconstruction.
-
-This initial resource-kernel slice is additive so it can be verified safely
-before the destructive cutover is performed.
+mobile-first session-manager state. The current storage generation is
+`modular-engine-v1`: startup archives old active `tron.sqlite`, WAL, and SHM
+sidecars before opening the current schema. The runtime does not read or migrate
+old product/session schemas for the new grant/resource APIs.

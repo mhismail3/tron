@@ -5,8 +5,11 @@
 //! locking and ledger completion; this module owns primitive worker definitions,
 //! schemas, handler bindings, and privileged query response shaping through the
 //! local `runtime` module.
-//! `storage::*` is the system primitive surface for the unified `tron.sqlite`
-//! runtime: stats, retention, checkpoints, and portable snapshot export.
+//! `grant::*` is the engine-owned authority surface; `resource::*` plus the
+//! artifact/goal/claim/evidence/decision wrappers form the durable output
+//! substrate. `storage::*` is the system primitive surface for the unified
+//! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
+//! export.
 
 use std::sync::{Arc, Mutex as StdMutex};
 
@@ -20,11 +23,15 @@ use super::compensation::{
     EngineCompensationRecord, InMemoryEngineCompensationStore, SqliteEngineCompensationStore,
 };
 use super::errors::{EngineError, Result};
+use super::grants::{EngineGrantStoreBackend, InMemoryEngineGrantStore, SqliteEngineGrantStore};
 use super::ids::{ActorId, AuthorityGrantId, FunctionId, WorkerId};
 use super::invocation::{InProcessFunctionHandler, Invocation};
 use super::leases::{
     AcquireResourceLease, EngineResourceLease, InMemoryEngineResourceLeaseStore,
     SqliteEngineResourceLeaseStore,
+};
+use super::output_audit::{
+    EngineOutputAuditStoreBackend, InMemoryEngineOutputAuditStore, SqliteEngineOutputAuditStore,
 };
 use super::queue::{
     EngineQueueItem, EnqueueInvocation, InMemoryEngineQueueStore, SqliteEngineQueueStore,
@@ -33,6 +40,7 @@ use super::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
     EngineResourceVersion, InMemoryEngineResourceStore, LinkResources, ListResources,
     RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+    builtin_resource_type_definitions,
 };
 use super::state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
@@ -48,6 +56,7 @@ use super::types::{
 
 pub(crate) mod approval;
 pub(crate) mod catalog;
+pub(crate) mod grant;
 pub(crate) mod observability;
 pub(crate) mod queue;
 pub(crate) mod resource;
@@ -61,6 +70,7 @@ pub(crate) const STREAM_WORKER_ID: &str = "stream";
 pub(crate) const STATE_WORKER_ID: &str = "state";
 pub(crate) const QUEUE_WORKER_ID: &str = "queue";
 pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
+pub(crate) const GRANT_WORKER_ID: &str = "grant";
 pub(crate) const APPROVAL_WORKER_ID: &str = "approval";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
 pub(crate) const WORKER_WORKER_ID: &str = "worker";
@@ -542,12 +552,14 @@ pub(in crate::engine) struct PrimitiveStores {
     pub(in crate::engine) approvals: Arc<StdMutex<ApprovalStoreBackend>>,
     pub(in crate::engine) leases: Arc<StdMutex<ResourceLeaseStoreBackend>>,
     pub(in crate::engine) resources: Arc<StdMutex<ResourceStoreBackend>>,
+    pub(in crate::engine) grants: Arc<StdMutex<EngineGrantStoreBackend>>,
+    pub(in crate::engine) output_audit: Arc<StdMutex<EngineOutputAuditStoreBackend>>,
     pub(in crate::engine) compensation: Arc<StdMutex<CompensationStoreBackend>>,
 }
 
 impl PrimitiveStores {
     pub(in crate::engine) fn in_memory() -> Self {
-        Self {
+        let stores = Self {
             streams: Arc::new(StdMutex::new(StreamStoreBackend::InMemory(
                 InMemoryEngineStreamStore::new(),
             ))),
@@ -566,14 +578,24 @@ impl PrimitiveStores {
             resources: Arc::new(StdMutex::new(ResourceStoreBackend::InMemory(
                 InMemoryEngineResourceStore::new(),
             ))),
+            grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
+                InMemoryEngineGrantStore::new(),
+            ))),
+            output_audit: Arc::new(StdMutex::new(EngineOutputAuditStoreBackend::InMemory(
+                InMemoryEngineOutputAuditStore::new(),
+            ))),
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
                 InMemoryEngineCompensationStore::new(),
             ))),
-        }
+        };
+        stores
+            .install_builtin_resource_types()
+            .expect("built-in resource type definitions are valid");
+        stores
     }
 
     pub(in crate::engine) fn sqlite(path: &std::path::Path) -> Result<Self> {
-        Ok(Self {
+        let stores = Self {
             streams: Arc::new(StdMutex::new(StreamStoreBackend::Sqlite(
                 SqliteEngineStreamStore::open(path)?,
             ))),
@@ -592,19 +614,45 @@ impl PrimitiveStores {
             resources: Arc::new(StdMutex::new(ResourceStoreBackend::Sqlite(
                 SqliteEngineResourceStore::open(path)?,
             ))),
+            grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::Sqlite(
+                SqliteEngineGrantStore::open(path)?,
+            ))),
+            output_audit: Arc::new(StdMutex::new(EngineOutputAuditStoreBackend::Sqlite(
+                SqliteEngineOutputAuditStore::open(path)?,
+            ))),
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
                 SqliteEngineCompensationStore::open(path)?,
             ))),
-        })
+        };
+        stores.install_builtin_resource_types()?;
+        Ok(stores)
+    }
+
+    fn install_builtin_resource_types(&self) -> Result<()> {
+        let mut resources = self
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?;
+        for definition in builtin_resource_type_definitions() {
+            resources.register_type(definition)?;
+        }
+        Ok(())
     }
 }
 
 pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
+    let resource_worker = primitive_worker(RESOURCE_WORKER_ID, WorkerKind::System)?
+        .with_namespace_claim("artifact")
+        .with_namespace_claim("goal")
+        .with_namespace_claim("claim")
+        .with_namespace_claim("evidence")
+        .with_namespace_claim("decision");
     Ok(vec![
         primitive_worker(STREAM_WORKER_ID, WorkerKind::Stream)?,
         primitive_worker(STATE_WORKER_ID, WorkerKind::State)?,
         primitive_worker(QUEUE_WORKER_ID, WorkerKind::Queue)?,
-        primitive_worker(RESOURCE_WORKER_ID, WorkerKind::System)?,
+        resource_worker,
+        primitive_worker(GRANT_WORKER_ID, WorkerKind::System)?,
         primitive_worker(APPROVAL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
@@ -621,6 +669,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(state::registrations(stores)?);
     registrations.extend(queue::registrations(stores)?);
     registrations.extend(resource::registrations(stores)?);
+    registrations.extend(grant::registrations(stores)?);
     registrations.extend(approval::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
     registrations.extend(worker::registrations()?);

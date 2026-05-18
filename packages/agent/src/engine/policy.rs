@@ -222,15 +222,6 @@ pub fn validate_invocation(function: &FunctionDefinition, invocation: &Invocatio
         });
     }
 
-    for scope in &function.required_authority.scopes {
-        if !invocation.causal_context.has_scope(scope) {
-            return Err(EngineError::PolicyViolation(format!(
-                "missing required authority scope {scope} for {}",
-                function.id
-            )));
-        }
-    }
-
     if function.effect_class.is_mutating() && invocation.causal_context.idempotency_key.is_none() {
         return Err(EngineError::PolicyViolation(format!(
             "mutating invocation of {} requires an idempotency key",

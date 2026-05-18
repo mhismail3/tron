@@ -98,16 +98,19 @@ Keep as the durable foundation:
 - Primitive workers:
   - `approval::*`: request, resolve, get, list.
   - `catalog::*`: list, inspect, watch snapshot.
+  - `grant::*`: derive, inspect, list, revoke engine-owned authority grants.
   - `observability::*`: trace, span, log, metric reads.
   - `queue::*`: enqueue, claim, complete, fail, cancel, get, list.
   - `resource::*`: register type, create, update, link, inspect, list.
+  - `artifact::*`, `goal::*`, `claim::*`, `evidence::*`, `decision::*`:
+    thin wrappers over the generic resource kernel.
   - `state::*`: get, set, delete, compare-and-set, list.
   - `storage::*`: stats, checkpoint, export snapshot, retention run.
   - `stream::*`: subscribe, poll, unsubscribe, publish.
   - `worker::*`: list, get, disconnect, health, protocol guide.
-- `/engine/workers`: local worker connection, scoped worker identity,
-  registration mode, heartbeat, durable/volatile health, stream publication
-  through the engine.
+- `/engine/workers`: local worker connection, scoped worker identity with
+  grant id/revision/hash and resource selectors, registration mode, heartbeat,
+  durable/volatile health, stream publication through the engine.
 
 Kernel risks to preserve during simplification:
 
@@ -267,7 +270,7 @@ Target properties:
 Dynamic/native UI should become a first-class engine capability area.
 
 The minimum useful primitive is not "A2UI support"; it is a Tron-native UI
-contract with adapter compatibility:
+contract with optional reference adapters:
 
 | Primitive | Responsibility |
 | --- | --- |
@@ -385,7 +388,7 @@ Tests/docs:
 
 - Server schema validation tests for accepted/rejected UI messages.
 - iOS renderer tests for unsupported components, invalid bindings, action
-  callback encoding, and safe fallback rendering.
+  callback encoding, and explicit rejection of unsupported rendering paths.
 - End-to-end harness test: model emits UI, iOS renders it, user taps action,
   server records audited action.
 

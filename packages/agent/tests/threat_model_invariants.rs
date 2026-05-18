@@ -477,6 +477,46 @@ fn capability_registry_authority_stays_deleted() {
 }
 
 #[test]
+fn modular_substrate_has_no_raw_scope_or_worker_token_authority_fallbacks() {
+    let crate_root = crate_root();
+    let policy = std::fs::read_to_string(crate_root.join("src/engine/policy.rs"))
+        .expect("failed to read engine policy");
+    assert!(
+        !policy.contains("required_authority.scopes") && !policy.contains("has_scope(scope)"),
+        "engine invocation policy must not authorize from caller-supplied raw scope strings"
+    );
+
+    for root in [
+        crate_root.join("src/engine"),
+        crate_root.join("src/domains/sandbox"),
+    ] {
+        for path in rust_files_under(&root) {
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+            assert!(
+                !content.contains("authorityCeiling") && !content.contains("authority_ceiling"),
+                "{} must use grant identity/resource selectors, not token-owned authority lists",
+                path.strip_prefix(&crate_root).unwrap_or(&path).display()
+            );
+        }
+    }
+}
+
+#[test]
+fn modular_engine_storage_generation_is_clean_break() {
+    let storage = std::fs::read_to_string(crate_root().join("src/shared/storage.rs"))
+        .expect("failed to read shared storage");
+    assert!(
+        storage.contains("CURRENT_STORAGE_GENERATION: &str = \"modular-engine-v1\""),
+        "storage generation must stay on the modular-engine clean-break generation"
+    );
+    assert!(
+        storage.contains("archive_incompatible_active_database(active_db_path)?"),
+        "startup must archive incompatible active DB files before opening current schema"
+    );
+}
+
+#[test]
 fn retired_capability_event_surface_stays_deleted() {
     let repo_root = repo_root();
     let crate_root = crate_root();

@@ -362,6 +362,115 @@ pub struct EngineResourceInspection {
     pub events: Vec<EngineResourceEvent>,
 }
 
+/// Built-in resource kinds for the collapsed modular substrate.
+#[must_use]
+pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
+    vec![
+        builtin_type(
+            "artifact",
+            "tron.resource.artifact.v1",
+            json!({
+                "type": "object",
+                "required": ["title", "body"],
+                "additionalProperties": true,
+                "properties": {
+                    "title": {"type": "string"},
+                    "body": {},
+                    "format": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["draft", "promoted", "discarded", "archived"],
+            vec![
+                "supports",
+                "supersedes",
+                "evidence_for",
+                "derived_from",
+                "part_of",
+            ],
+            json!({"read": ["resource.read"], "write": ["resource.write"], "promote": ["resource.write"], "delete": ["resource.write"]}),
+        ),
+        builtin_type(
+            "goal",
+            "tron.resource.goal.v1",
+            json!({
+                "type": "object",
+                "required": ["intent"],
+                "additionalProperties": true,
+                "properties": {
+                    "intent": {"type": "string"},
+                    "successCriteria": {"type": "array", "items": {"type": "string"}},
+                    "inputResources": {"type": "array", "items": {"type": "string"}},
+                    "expectedOutputKinds": {"type": "array", "items": {"type": "string"}},
+                    "constraints": {"type": "object"},
+                    "riskBudget": {"type": "object"},
+                    "approvalPolicy": {"type": "object"},
+                    "retentionPolicy": {"type": "object"},
+                    "completionCondition": {"type": "string"}
+                }
+            }),
+            vec!["open", "in_progress", "completed", "failed", "archived"],
+            vec!["subgoal", "produces", "supported_by", "decided_by"],
+            json!({"read": ["resource.read"], "write": ["resource.write"], "complete": ["resource.write"]}),
+        ),
+        builtin_type(
+            "decision",
+            "tron.resource.decision.v1",
+            json!({
+                "type": "object",
+                "required": ["status", "summary"],
+                "additionalProperties": true,
+                "properties": {
+                    "status": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "promotedResources": {"type": "array", "items": {"type": "string"}},
+                    "discardedResources": {"type": "array", "items": {"type": "string"}},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["draft", "final", "archived"],
+            vec!["decides", "promotes", "discards", "supports"],
+            json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
+        builtin_type(
+            "claim",
+            "tron.resource.claim.v1",
+            json!({
+                "type": "object",
+                "required": ["statement"],
+                "additionalProperties": true,
+                "properties": {
+                    "statement": {"type": "string"},
+                    "confidence": {"type": "number"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["draft", "accepted", "rejected", "archived"],
+            vec!["claims_about", "supported_by", "contradicts"],
+            json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
+        builtin_type(
+            "evidence",
+            "tron.resource.evidence.v1",
+            json!({
+                "type": "object",
+                "required": ["summary"],
+                "additionalProperties": true,
+                "properties": {
+                    "summary": {"type": "string"},
+                    "source": {"type": "string"},
+                    "resourceRef": {"type": "string"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["draft", "accepted", "rejected", "archived"],
+            vec!["evidence_for", "derived_from", "supports"],
+            json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
+    ]
+}
+
 /// In-memory resource store.
 #[derive(Default)]
 pub struct InMemoryEngineResourceStore {
@@ -1334,6 +1443,32 @@ fn type_definition_from_request(
         revision,
         created_at,
         updated_at,
+    }
+}
+
+fn builtin_type(
+    kind: &str,
+    schema_id: &str,
+    schema: Value,
+    lifecycle_states: Vec<&str>,
+    allowed_link_relations: Vec<&str>,
+    required_capabilities: Value,
+) -> RegisterResourceType {
+    RegisterResourceType {
+        kind: kind.to_owned(),
+        schema_id: schema_id.to_owned(),
+        schema,
+        lifecycle_states: lifecycle_states.into_iter().map(str::to_owned).collect(),
+        versioning_mode: EngineResourceVersioningMode::AppendOnly,
+        allowed_link_relations: allowed_link_relations
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        default_retention: json!({"class": "project"}),
+        redaction_rules: json!({"preview": "metadata_only"}),
+        materialization_rules: json!({"durableOutputsRequireResourceVersion": true}),
+        required_capabilities,
+        owner_worker_id: WorkerId::new("resource").expect("valid static worker id"),
     }
 }
 

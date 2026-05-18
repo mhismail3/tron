@@ -1,7 +1,7 @@
 //! In-memory live catalog registry.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use chrono::Utc;
 use serde_json::Value;
@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 
 use super::discovery::{ActorContext, FunctionQuery};
 use super::errors::{EngineError, Result};
+use super::grants::{EngineGrantLifecycle, EngineGrantStoreBackend, InMemoryEngineGrantStore};
 use super::ids::{FunctionId, TriggerId, TriggerTypeId, WorkerId};
 use super::invocation::{InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult};
 use super::ledger::{
@@ -106,6 +107,7 @@ pub struct LiveCatalog {
     changes: Vec<CatalogChange>,
     invocations: Vec<InvocationRecord>,
     ledger: Box<dyn EngineLedgerStore>,
+    grants: Arc<StdMutex<EngineGrantStoreBackend>>,
 }
 
 impl LiveCatalog {
@@ -127,7 +129,18 @@ impl LiveCatalog {
             changes: Vec::new(),
             invocations: Vec::new(),
             ledger,
+            grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
+                InMemoryEngineGrantStore::new(),
+            ))),
         }
+    }
+
+    /// Use a caller-supplied grant store for invocation authorization.
+    pub(in crate::engine) fn set_grant_store(
+        &mut self,
+        grants: Arc<StdMutex<EngineGrantStoreBackend>>,
+    ) {
+        self.grants = grants;
     }
 
     /// Current catalog revision.
@@ -169,6 +182,7 @@ impl LiveCatalog {
         volatile: bool,
     ) -> Result<WorkerRevision> {
         validate_worker_namespace_claims(&definition)?;
+        self.validate_worker_grant(&definition)?;
         let kind = if let Some(existing) = self.workers.get(&definition.id) {
             if existing.definition.owner_actor != definition.owner_actor {
                 return Err(EngineError::OwnerMismatch {
@@ -276,6 +290,7 @@ impl LiveCatalog {
                 function_id: definition.id.to_string(),
             });
         }
+        self.validate_function_worker_grant(&definition, owner)?;
         policy::validate_function_registration(&definition)?;
 
         let kind = if let Some(existing) = self.functions.get(&definition.id) {
@@ -691,7 +706,9 @@ impl LiveCatalog {
             }
         }
 
-        if let Err(err) = policy::validate_invocation(&function, &invocation) {
+        if let Err(err) = policy::validate_invocation(&function, &invocation)
+            .and_then(|_| self.validate_invocation_grant(&function, &invocation))
+        {
             let result = InvocationResult::error(
                 &invocation,
                 function.owner_worker.clone(),
@@ -825,6 +842,102 @@ impl LiveCatalog {
             handler,
             idempotency,
         }))
+    }
+
+    fn validate_invocation_grant(
+        &self,
+        function: &FunctionDefinition,
+        invocation: &Invocation,
+    ) -> Result<()> {
+        self.grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .authorize_invocation(function, invocation)
+            .map(|_| ())
+    }
+
+    fn validate_worker_grant(&self, definition: &WorkerDefinition) -> Result<()> {
+        let grants = self
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?;
+        let grant = grants
+            .inspect(&definition.authority_grant)?
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(format!(
+                    "worker {} authority grant {} not found",
+                    definition.id, definition.authority_grant
+                ))
+            })?;
+        if grant.lifecycle != EngineGrantLifecycle::Active {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker {} authority grant {} is not active",
+                definition.id, definition.authority_grant
+            )));
+        }
+        if let Some(expires_at) = grant.expires_at
+            && expires_at <= Utc::now()
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker {} authority grant {} is expired",
+                definition.id, definition.authority_grant
+            )));
+        }
+        for namespace in &definition.namespace_claims {
+            if !allows_item(&grant.allowed_namespaces, namespace) {
+                return Err(EngineError::PolicyViolation(format!(
+                    "worker {} namespace {namespace} exceeds authority grant {}",
+                    definition.id, definition.authority_grant
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_function_worker_grant(
+        &self,
+        definition: &FunctionDefinition,
+        owner: &WorkerDefinition,
+    ) -> Result<()> {
+        let grants = self
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?;
+        let grant = grants.inspect(&owner.authority_grant)?.ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "function {} worker grant {} not found",
+                definition.id, owner.authority_grant
+            ))
+        })?;
+        if grant.lifecycle != EngineGrantLifecycle::Active {
+            return Err(EngineError::PolicyViolation(format!(
+                "function {} worker grant {} is not active",
+                definition.id, owner.authority_grant
+            )));
+        }
+        if definition.risk_level > grant.max_risk {
+            return Err(EngineError::PolicyViolation(format!(
+                "function {} risk {:?} exceeds worker grant {} max risk {:?}",
+                definition.id, definition.risk_level, owner.authority_grant, grant.max_risk
+            )));
+        }
+        if !allows_item(&grant.allowed_capabilities, definition.id.as_str())
+            && !allows_item(&grant.allowed_namespaces, definition.id.namespace())
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "function {} exceeds worker grant {} capabilities",
+                definition.id, owner.authority_grant
+            )));
+        }
+        for scope in &definition.required_authority.scopes {
+            if !allows_item(&grant.allowed_authority_scopes, scope) {
+                return Err(EngineError::PolicyViolation(format!(
+                    "function {} required authority {scope} exceeds worker grant {}",
+                    definition.id, owner.authority_grant
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Finish an invocation whose handler already executed outside the catalog
@@ -1514,6 +1627,10 @@ fn payload_fingerprint(payload: &Value) -> String {
     write_canonical_json(payload, &mut canonical);
     let digest = Sha256::digest(canonical.as_bytes());
     hex::encode(digest)
+}
+
+fn allows_item(allowed: &[String], value: &str) -> bool {
+    allowed.iter().any(|item| item == "*" || item == value)
 }
 
 fn write_canonical_json(value: &Value, out: &mut String) {

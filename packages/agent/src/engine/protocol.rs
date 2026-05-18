@@ -6,8 +6,8 @@
 //! stream events through `stream::publish`, and cleanly disconnect.
 //! Visible external/session workers also present a scoped worker token in
 //! `hello`; the token is the protocol-level plugin lifecycle boundary for
-//! namespace claims, authority ceilings, visibility, trust, scope binding, and
-//! signature state.
+//! namespace claims, grant identity, resource selectors, visibility, trust,
+//! scope binding, and signature state.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -144,8 +144,14 @@ pub struct ScopedWorkerToken {
     pub plugin_id: String,
     /// Namespaces the worker may claim for functions, contracts, and implementations.
     pub namespace_claims: Vec<String>,
-    /// Maximum authority scopes the worker may request. Empty means no extra scopes.
-    pub authority_ceiling: Vec<String>,
+    /// Engine-owned authority grant assigned to this worker.
+    pub authority_grant_id: AuthorityGrantId,
+    /// Grant revision captured when the token was issued.
+    pub authority_grant_revision: u64,
+    /// Policy hash captured when the token was issued.
+    pub authority_grant_hash: String,
+    /// Resource selectors the worker may reference.
+    pub resource_selectors: Vec<String>,
     /// Maximum visibility the worker may request.
     pub visibility_ceiling: WorkerVisibility,
     /// Trust tier assigned by the issuing policy.
@@ -172,7 +178,10 @@ impl ScopedWorkerToken {
         Self {
             plugin_id: format!("session_generated.{}", worker.id.as_str()),
             namespace_claims,
-            authority_ceiling: Vec::new(),
+            authority_grant_id: worker.authority_grant.clone(),
+            authority_grant_revision: 1,
+            authority_grant_hash: "loopback-bootstrap".to_owned(),
+            resource_selectors: vec!["*".to_owned()],
             visibility_ceiling: WorkerVisibility::Session,
             trust_tier: "session_generated".to_owned(),
             session_id: None,

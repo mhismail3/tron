@@ -3,9 +3,9 @@
 //! This module owns canonical function execution for the sandbox namespace and
 //! keeps domain contracts, services, sandbox-created worker launch/stop
 //! lifecycle, and tests beside the worker that uses them. Spawned workers are
-//! local `/engine/workers` participants with a scoped endpoint/token
-//! environment; cleanup routes through `worker::disconnect` and lifecycle
-//! events publish to `sandbox.lifecycle`.
+//! local `/engine/workers` participants with a derived child grant and scoped
+//! endpoint/token environment; cleanup routes through `worker::disconnect` and
+//! lifecycle events publish to `sandbox.lifecycle`.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -95,6 +95,12 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
     let command = require_string_param(Some(payload), "command")?;
     let args = string_array(payload, "args")?;
     let expected_function_ids = string_array(payload, "expectedFunctionIds")?;
+    if expected_function_ids.is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "sandbox::spawn_worker requires expectedFunctionIds to derive a worker grant"
+                .to_owned(),
+        });
+    }
     let timeout_ms = opt_u64(Some(payload), "timeoutMs", 10_000).clamp(100, 60_000);
     let visibility = opt_string(Some(payload), "visibility").unwrap_or_else(|| "session".into());
     let session_id = opt_string(Some(payload), "sessionId")
@@ -128,6 +134,15 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
             });
         }
     }
+    let derived_grant = derive_sandbox_worker_grant(
+        deps,
+        invocation,
+        &worker_id,
+        &expected_function_ids,
+        working_directory.as_deref(),
+        payload,
+    )
+    .await?;
 
     let endpoint = sandbox_service::worker_endpoint_from_origin(&deps.origin);
     let auth_path = deps.auth_path.clone();
@@ -144,6 +159,17 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
         .env("TRON_ENGINE_WORKER_ID", &worker_id)
         .env("TRON_ENGINE_WORKER_VISIBILITY", &visibility)
         .env("TRON_ENGINE_WORKER_AUTH_POLICY", "loopback_bearer")
+        .env(
+            "TRON_ENGINE_WORKER_TOKEN",
+            sandbox_worker_token_json(
+                &worker_id,
+                &expected_function_ids,
+                &derived_grant,
+                visibility.as_str(),
+                session_id.as_deref(),
+                workspace_id.as_deref(),
+            )?,
+        )
         .env(
             "TRON_ENGINE_WORKER_PROTOCOL_VERSION",
             crate::engine::protocol::WORKER_PROTOCOL_VERSION.to_string(),
@@ -211,6 +237,8 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
     publish_sandbox_lifecycle_event(deps, invocation, "sandbox.worker_spawned", &record).await?;
     Ok(json!({
         "workerId": worker_id,
+        "authorityGrantId": derived_grant["grantId"],
+        "authorityGrantRevision": derived_grant["revision"],
         "processId": process_id,
         "registeredFunctionIds": registered_function_ids,
         "catalogRevision": catalog_revision,
@@ -218,6 +246,107 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
         "workerEndpoint": endpoint,
         "streamTopic": contract::STREAM_TOPICS[0],
     }))
+}
+
+async fn derive_sandbox_worker_grant(
+    deps: &Deps,
+    invocation: &Invocation,
+    worker_id: &str,
+    expected_function_ids: &[String],
+    working_directory: Option<&str>,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    let allowed_namespaces = expected_function_namespaces(expected_function_ids)?;
+    let grant_id = format!("sandbox-worker:{worker_id}");
+    let mut context = CausalContext::new(
+        ActorId::new("sandbox-spawn-worker").map_err(engine_invalid_params)?,
+        ActorKind::System,
+        AuthorityGrantId::new("sandbox-spawn-worker").map_err(engine_invalid_params)?,
+        invocation.causal_context.trace_id.clone(),
+    )
+    .with_scope("grant.write")
+    .with_idempotency_key(format!(
+        "sandbox-worker-grant:{worker_id}:{}",
+        invocation.id
+    ));
+    if let Some(session_id) = invocation.causal_context.session_id.clone() {
+        context = context.with_session_id(session_id);
+    }
+    if let Some(workspace_id) = invocation.causal_context.workspace_id.clone() {
+        context = context.with_workspace_id(workspace_id);
+    }
+    let grant_payload = json!({
+        "grantId": grant_id,
+        "parentGrantId": invocation.causal_context.authority_grant_id.as_str(),
+        "subjectWorkerId": worker_id,
+        "allowedCapabilities": expected_function_ids,
+        "allowedNamespaces": allowed_namespaces,
+        "allowedAuthorityScopes": optional_string_array_or(payload, "allowedAuthorityScopes", vec!["*".to_owned()])?,
+        "allowedResourceKinds": optional_string_array_or(payload, "allowedResourceKinds", vec!["*".to_owned()])?,
+        "resourceSelectors": optional_string_array_or(payload, "resourceSelectors", vec!["*".to_owned()])?,
+        "fileRoots": optional_string_array_or(
+            payload,
+            "fileRoots",
+            vec![working_directory.unwrap_or("*").to_owned()],
+        )?,
+        "networkPolicy": opt_string(Some(payload), "networkPolicy").unwrap_or_else(|| "loopback".to_owned()),
+        "maxRisk": opt_string(Some(payload), "maxRisk").unwrap_or_else(|| "medium".to_owned()),
+        "budget": payload.get("budget").cloned().unwrap_or_else(|| json!({})),
+        "canDelegate": false,
+        "approvalRequired": payload.get("approvalRequired").and_then(Value::as_bool).unwrap_or(false),
+        "provenance": {
+            "source": "sandbox::spawn_worker",
+            "workerId": worker_id,
+            "parentInvocationId": invocation.id.as_str(),
+        },
+    });
+    let result = deps
+        .engine_host
+        .invoke(
+            Invocation::new_sync(
+                FunctionId::new("grant::derive").map_err(engine_invalid_params)?,
+                grant_payload,
+                context,
+            )
+            .with_delivery_mode(DeliveryMode::Sync),
+        )
+        .await;
+    if let Some(error) = result.error {
+        return Err(engine_internal(error));
+    }
+    result
+        .value
+        .and_then(|value| value.get("grant").cloned())
+        .ok_or_else(|| CapabilityError::Internal {
+            message: "grant::derive did not return a grant".to_owned(),
+        })
+}
+
+fn sandbox_worker_token_json(
+    worker_id: &str,
+    expected_function_ids: &[String],
+    grant: &Value,
+    visibility: &str,
+    session_id: Option<&str>,
+    workspace_id: Option<&str>,
+) -> Result<String, CapabilityError> {
+    let token = json!({
+        "pluginId": format!("session_generated.{worker_id}"),
+        "namespaceClaims": expected_function_namespaces(expected_function_ids)?,
+        "authorityGrantId": grant["grantId"],
+        "authorityGrantRevision": grant["revision"],
+        "authorityGrantHash": format!("grant:{}:{}", grant["grantId"].as_str().unwrap_or_default(), grant["revision"].as_u64().unwrap_or_default()),
+        "resourceSelectors": grant["resourceSelectors"],
+        "visibilityCeiling": visibility,
+        "trustTier": "session_generated",
+        "sessionId": session_id,
+        "workspaceId": workspace_id,
+        "expiresAt": grant["expiresAt"],
+        "signatureStatus": "engine_issued",
+    });
+    serde_json::to_string(&token).map_err(|error| CapabilityError::Internal {
+        message: format!("failed to serialize sandbox worker token: {error}"),
+    })
 }
 
 fn read_worker_bearer_token(path: &Path) -> Result<String, CapabilityError> {
@@ -483,6 +612,42 @@ fn string_array(payload: &Value, key: &str) -> Result<Vec<String>, CapabilityErr
                 .collect()
         })
         .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+fn optional_string_array_or(
+    payload: &Value,
+    key: &str,
+    default: Vec<String>,
+) -> Result<Vec<String>, CapabilityError> {
+    let values = string_array(payload, key)?;
+    if values.is_empty() {
+        Ok(default)
+    } else {
+        Ok(values)
+    }
+}
+
+fn expected_function_namespaces(
+    expected_function_ids: &[String],
+) -> Result<Vec<String>, CapabilityError> {
+    let mut namespaces = expected_function_ids
+        .iter()
+        .map(|function_id| {
+            function_id
+                .split_once("::")
+                .map(|(namespace, _)| namespace)
+                .filter(|namespace| !namespace.is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| CapabilityError::InvalidParams {
+                    message: format!(
+                        "expectedFunctionIds entry must be namespace::operation: {function_id}"
+                    ),
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    namespaces.sort();
+    namespaces.dedup();
+    Ok(namespaces)
 }
 
 #[cfg(test)]

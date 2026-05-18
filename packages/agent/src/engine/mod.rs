@@ -12,9 +12,10 @@
 //! - the catalog is live, revisioned, and discoverable;
 //! - workers own the functions and triggers they register;
 //! - mutating capabilities require idempotency metadata;
-//! - invocations carry actor, authority, catalog revision, trace, session,
-//!   workspace, idempotency, and optional parent/trigger context into a
-//!   pluggable engine ledger;
+//! - invocations carry actor, authority grant id, catalog revision, trace,
+//!   session, workspace, idempotency, and optional parent/trigger context into a
+//!   pluggable engine ledger; invocation prepare resolves that grant from the
+//!   engine-owned grant store before any handler runs;
 //! - declared request/response schemas are enforced before/after handlers;
 //! - session capabilities can be explicitly promoted to workspace/system scope;
 //! - `EngineHost` exposes privileged `engine::*` transport functions for live
@@ -30,10 +31,10 @@
 //! - canonical domain functions such as `events::append`,
 //!   `filesystem::create_dir`, and `skills::activate` are the only executable
 //!   domain surface;
-//! - stream, state, queue, approval, catalog, worker, and observability workers
-//!   plus the generic `resource` kernel are registered as first-class primitive
-//!   workers with in-memory and SQLite-backed stores scoped outside the
-//!   production event-store migration;
+//! - stream, state, queue, approval, catalog, grant, worker, and observability
+//!   workers plus the generic `resource` kernel are registered as first-class
+//!   primitive workers with in-memory and SQLite-backed stores scoped outside
+//!   the production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution,
 //!   while `approval::resolve` remains a user/client-owned primitive routed
@@ -47,6 +48,9 @@
 //!   evidence, decisions, generated UI surfaces, worker packages, and
 //!   materialized files should be modeled as versioned resources with links and
 //!   events instead of separate persistence planes;
+//! - output-resource audit observations measure current durable-output paths
+//!   that do not yet return resource refs, allowing later enforcement without
+//!   guessing;
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
 //!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;
@@ -80,11 +84,13 @@ pub mod compensation;
 pub mod discovery;
 pub mod errors;
 pub mod external;
+pub mod grants;
 pub mod host;
 pub mod ids;
 pub mod invocation;
 pub mod leases;
 pub mod ledger;
+pub mod output_audit;
 pub mod policy;
 pub mod primitives;
 pub mod protocol;
@@ -109,6 +115,10 @@ pub use compensation::{
 pub use discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use errors::{EngineError, Result};
 pub use external::{EngineExternalWorkerRuntime, ExternalWorkerConnection};
+pub use grants::{
+    DeriveGrant, EngineGrant, EngineGrantEvent, EngineGrantLifecycle, EngineGrantStoreBackend,
+    InMemoryEngineGrantStore, ListGrants, SqliteEngineGrantStore,
+};
 pub use host::{CatalogWatchRequest, CatalogWatchResponse, EngineHost, EngineHostHandle};
 pub use ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
@@ -125,6 +135,10 @@ pub use ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
     IdempotencyReservationOutcome, IdempotencyStatus, InMemoryEngineLedgerStore,
     SqliteEngineLedgerStore, StoredEngineError, StoredInvocationOutcome,
+};
+pub use output_audit::{
+    EngineOutputAuditObservation, EngineOutputAuditStoreBackend, InMemoryEngineOutputAuditStore,
+    SqliteEngineOutputAuditStore, output_audit_observation,
 };
 pub use protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,

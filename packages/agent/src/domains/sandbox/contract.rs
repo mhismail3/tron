@@ -23,19 +23,29 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "command": {"type": "string"},
                     "args": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
                     "workingDirectory": {"type": "string"},
-                    "expectedFunctionIds": {"type": "array", "items": {"type": "string"}, "maxItems": 128},
+                    "expectedFunctionIds": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 128},
+                    "allowedAuthorityScopes": {"type": "array", "items": {"type": "string"}},
+                    "allowedResourceKinds": {"type": "array", "items": {"type": "string"}},
+                    "resourceSelectors": {"type": "array", "items": {"type": "string"}},
+                    "fileRoots": {"type": "array", "items": {"type": "string"}},
+                    "networkPolicy": {"type": "string", "enum": ["none", "loopback", "declared", "unrestricted"]},
+                    "maxRisk": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                    "budget": {"type": "object"},
+                    "approvalRequired": {"type": "boolean"},
                     "timeoutMs": {"type": "integer", "minimum": 100, "maximum": 60000},
                     "visibility": {"type": "string", "enum": ["session", "workspace", "system"]},
                     "sessionId": {"type": "string"},
                     "workspaceId": {"type": "string"}
                 },
-                "required": ["workerId", "command"],
+                "required": ["workerId", "command", "expectedFunctionIds"],
                 "type": "object"
             }))
             .response_schema(json!({
                 "additionalProperties": false,
                 "properties": {
                     "workerId": {"type": "string"},
+                    "authorityGrantId": {"type": "string"},
+                    "authorityGrantRevision": {"type": "integer"},
                     "processId": {"type": ["integer", "null"]},
                     "registeredFunctionIds": {"type": "array", "items": {"type": "string"}},
                     "catalogRevision": {"type": "integer"},
@@ -43,7 +53,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "workerEndpoint": {"type": "string"},
                     "streamTopic": {"type": "string"}
                 },
-                "required": ["workerId", "registeredFunctionIds", "catalogRevision", "visibility", "workerEndpoint", "streamTopic"],
+                "required": ["workerId", "authorityGrantId", "authorityGrantRevision", "registeredFunctionIds", "catalogRevision", "visibility", "workerEndpoint", "streamTopic"],
                 "type": "object"
             }))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())

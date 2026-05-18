@@ -327,7 +327,7 @@ impl EngineExternalWorkerRuntime {
         let mut context = CausalContext::new(
             ActorId::new(format!("worker:{}", message.worker_id))?,
             ActorKind::Worker,
-            super::ids::AuthorityGrantId::new(format!("worker-grant:{}", message.worker_id))?,
+            connection.worker_token.authority_grant_id.clone(),
             message
                 .trace_id
                 .clone()
@@ -578,11 +578,15 @@ impl EngineExternalWorkerRuntime {
     }
 
     async fn catalog_snapshot_for(&self, worker_id: &WorkerId) -> CatalogSnapshot {
+        let authority_grant = self
+            .connections
+            .get(worker_id)
+            .map(|connection| connection.worker_token.authority_grant_id.clone())
+            .unwrap_or_else(|| AuthorityGrantId::new("worker-runtime").expect("valid grant id"));
         let actor = ActorContext::new(
             ActorId::new(format!("worker:{worker_id}")).expect("valid worker actor id"),
             ActorKind::Worker,
-            super::ids::AuthorityGrantId::new(format!("worker-grant:{worker_id}"))
-                .expect("valid worker grant id"),
+            authority_grant,
         );
         let functions = self
             .host
@@ -647,6 +651,22 @@ fn validate_worker_token(hello: &WorkerHello) -> Result<()> {
                 token.namespace_claims
             )));
         }
+    }
+    if hello.worker.authority_grant != token.authority_grant_id {
+        return Err(EngineError::PolicyViolation(format!(
+            "worker authority grant {} does not match scoped token grant {}",
+            hello.worker.authority_grant, token.authority_grant_id
+        )));
+    }
+    if token.authority_grant_revision == 0 || token.authority_grant_hash.trim().is_empty() {
+        return Err(EngineError::PolicyViolation(
+            "workerToken authority grant revision and hash are required".to_owned(),
+        ));
+    }
+    if token.resource_selectors.is_empty() {
+        return Err(EngineError::PolicyViolation(
+            "workerToken.resourceSelectors must not be empty".to_owned(),
+        ));
     }
     if visibility_rank(&hello.default_visibility) > visibility_rank(&token.visibility_ceiling) {
         return Err(EngineError::PolicyViolation(format!(
@@ -744,18 +764,6 @@ fn validate_external_capability_metadata(
             "external visible function {} trustTier {trust_tier} exceeds scoped token trust {}",
             definition.id, token.trust_tier
         )));
-    }
-    for scope in &definition.required_authority.scopes {
-        if !token
-            .authority_ceiling
-            .iter()
-            .any(|allowed| allowed == scope)
-        {
-            return Err(EngineError::PolicyViolation(format!(
-                "external visible function {} authority scope {scope} exceeds scoped token ceiling",
-                definition.id
-            )));
-        }
     }
     let contract_namespace = contract_id
         .split_once("::")

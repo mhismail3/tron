@@ -90,14 +90,17 @@ UI harness.
 
 The implementation target for the modular-engine rebuild lives in
 [`docs/collapsed-modular-engine-architecture.md`](docs/collapsed-modular-engine-architecture.md).
+The next checkpoint plan is
+[`docs/modular-engine-next-phase-plan.md`](docs/modular-engine-next-phase-plan.md).
 The core rule is one substrate: workers invoke capabilities against typed
 resources under scoped grants. Artifacts, goals, claims, evidence, decisions,
 generated UI surfaces, module config, worker packages, secret refs, and
 materialized files are modeled as resource kinds rather than separate
-persistence planes. The first engine slice is the generic `resource::*`
-primitive worker over `engine_resource_type_definitions`, `engine_resources`,
-`engine_resource_versions`, `engine_resource_links`, and
-`engine_resource_events`.
+persistence planes. The current substrate slice adds engine-owned `grant::*`
+authority, built-in `artifact`, `goal`, `claim`, `evidence`, and `decision`
+resource type definitions, thin wrapper capabilities over the generic
+`resource::*` kernel, and output-resource audit observations for existing
+durable-output paths that are not yet resource-backed.
 
 ---
 
@@ -402,9 +405,9 @@ required payload fields from the selected contract schema, so agents do not have
 to infer the nested `execute.payload` shape from raw JSON alone. Mutating calls also require stable idempotency; model
 capability invocations derive a child key from the parent call when one is not passed
 explicitly. External/session workers connect with a scoped `workerToken` that
-bounds plugin id, namespace claims, authority ceiling, visibility ceiling,
-trust tier, scope binding, expiry, and signature status before their functions
-can enter the capability registry.
+bounds plugin id, namespace claims, authority grant id/revision/hash, resource
+selectors, visibility ceiling, trust tier, scope binding, expiry, and signature
+status before their functions can enter the capability registry.
 
 `execute` program mode is implemented by the first-party
 `program::run_javascript` worker. The parent engine spawns the
@@ -514,16 +517,20 @@ search or inspect the new catalog entry, execute the new `namespace::function`,
 then stop it with `sandbox::stop_spawned_worker`.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
-`queue::*`, `resource::*`, and `approval::*` preserve the runtime semantics for
-delivery, projection state, queued handoff, typed durable objects, and human
-approval. `catalog::*`, `worker::*`, and `observability::*` expose live catalog
-snapshots, worker health/lifecycle, trace summaries, spans, structured log
-projections, and metrics through the same canonical invocation path.
+`queue::*`, `resource::*`, `grant::*`, and `approval::*` preserve the runtime
+semantics for delivery, projection state, queued handoff, typed durable objects,
+engine-owned authority, and human approval. `artifact::*`, `goal::*`,
+`claim::*`, `evidence::*`, and `decision::*` are wrapper capabilities that
+compose the generic resource kernel; they do not create separate stores.
+`catalog::*`, `worker::*`, and `observability::*` expose live catalog snapshots,
+worker health/lifecycle, trace summaries, spans, output-resource audit
+observations, structured log projections, and metrics through the same canonical
+invocation path.
 `storage::*` owns stats, retention, checkpoints, and portable snapshot export
 for the unified engine database. A practical debugging trace includes
 invocation records, resource versions/links/events, stream publications,
-approvals, resource leases, and compensation records, all tied together by
-`traceId` plus `parentInvocationId`. Query
+approvals, resource leases, compensation records, and output-resource audit
+observations, all tied together by `traceId` plus `parentInvocationId`. Query
 response shaping for these privileged primitive workers lives under
 `packages/agent/src/engine/primitives/runtime.rs`; `EngineHost` coordinates
 catalog, ledger, stream, resource, lease, approval, and compensation access
@@ -532,12 +539,16 @@ without owning primitive response contracts.
 Sandbox-created capabilities enter through the high-risk
 `sandbox::spawn_worker` capability. It requires explicit idempotency,
 `sandbox.write` authority, a worker resource lease, compensation notes, and the
-sandbox autonomy contract recorded on the capability. It starts a local worker
-process with scoped `/engine/workers` environment, waits for the expected
-registration, and returns the worker id, registered functions, catalog revision,
-visibility, and process metadata without a separate approval prompt. Session
-visibility is the default; workspace/system promotion is still only
-`engine::promote`. `sandbox::list_spawned_workers`,
+sandbox autonomy contract recorded on the capability. Before launch it derives
+a child worker grant from the caller's parent grant; the child grant is limited
+by expected function ids, namespaces, resource selectors, file roots, network
+policy, risk, budget, and delegation=false. It starts a local worker process
+with scoped `/engine/workers` environment plus a worker token carrying
+`authorityGrantId`, grant revision/hash, and resource selectors, waits for the
+expected registration, and returns the worker id, derived grant id, registered
+functions, catalog revision, visibility, and process metadata without a
+separate approval prompt. Session visibility is the default; workspace/system
+promotion is still only `engine::promote`. `sandbox::list_spawned_workers`,
 `sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the
 local process lifecycle; stop kills the process, unregisters volatile catalog
 entries through `worker::disconnect`, and publishes `sandbox.lifecycle`.
@@ -876,11 +887,11 @@ Async lifecycle hooks execute before/after capability invocations and around pro
 
 ## Database Schema
 
-All active server storage lives in `~/.tron/internal/database/tron.sqlite`. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "payload-ref-v2"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/payload-ref-v2-*` and starts fresh. Retired pre-unified database artifacts are archived the same way and are never read as active storage.
+All active server storage lives in `~/.tron/internal/database/tron.sqlite`. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v1"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v1-*` and starts fresh. Old product/session data is archived, not migrated or read by the new runtime. Retired pre-unified database artifacts are archived the same way and are never read as active storage.
 
 The unified database has one migration surface for session/log/blob tables and engine-owned stores for primitive state. Fresh databases start from consolidated `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`; additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql` are registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
-Engine ledger rows, streams, state, queues, typed resources, approvals, resource leases, compensation records, worker lifecycle records, bounded server/iOS logs, and compressed content-addressed blobs share that same file. Large correctness and audit payloads flow through `StoredPayloadRef`: primary rows keep compact inline JSON only below the configured threshold, otherwise they store an internal payload-ref envelope while the full bytes live once in `blobs` and are owned by `storage_payload_refs`. Retention operates from `storage_payload_refs`, so blobs are deleted only when no live owner remains. Startup enforces `storage.max_database_mb` as a soft budget: when the active DB plus WAL/SHM sidecars exceed it, the server records a warning, runs only safe verbose-log/blob retention, and checkpoints the WAL; audit-critical rows and owner refs are not automatically deleted. `storage::stats`, `storage::retention_run`, `storage::checkpoint`, and `storage::export_snapshot` are canonical system capabilities; the observability worker reads the same local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`. Trace and log queries return previews/refs by default; callers must explicitly request full payload expansion through blob refs.
+Engine ledger rows, grants, streams, state, queues, typed resources, approvals, resource leases, compensation records, output-resource audit observations, worker lifecycle records, bounded server/iOS logs, and compressed content-addressed blobs share that same file. Large correctness and audit payloads flow through `StoredPayloadRef`: primary rows keep compact inline JSON only below the configured threshold, otherwise they store an internal payload-ref envelope while the full bytes live once in `blobs` and are owned by `storage_payload_refs`. Retention operates from `storage_payload_refs`, so blobs are deleted only when no live owner remains. Startup enforces `storage.max_database_mb` as a soft budget: when the active DB plus WAL/SHM sidecars exceed it, the server records a warning, runs only safe verbose-log/blob retention, and checkpoints the WAL; audit-critical rows and owner refs are not automatically deleted. `storage::stats`, `storage::retention_run`, `storage::checkpoint`, and `storage::export_snapshot` are canonical system capabilities; the observability worker reads the same local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`. Trace and log queries return previews/refs by default; callers must explicitly request full payload expansion through blob refs.
 
 ### Tables
 
@@ -894,11 +905,13 @@ Engine ledger rows, streams, state, queues, typed resources, approvals, resource
 | `branches` | Named positions in the event tree (root + head pointer per branch) |
 | `logs` | Application logs (level, component, message, error fields, trace IDs, origin) |
 | `engine_invocations` | Engine invocation ledger: function, worker, trace, parent, idempotency, status, result/error summaries |
+| `engine_grants`, `engine_grant_events` | Engine-owned authority model: parent/child grants, subject binding, allowed capabilities/namespaces/resource selectors/file roots/network/risk/budget/expiry/delegation, plus lifecycle events |
 | `engine_stream_events` | Engine stream publication history with cursor, topic, visibility, trace, and compact payload |
 | `engine_catalog_changes` | Live catalog audit trail for worker/function/trigger registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_approvals`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
 | `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for artifacts, goals, claims, evidence, decisions, generated UI surfaces, module config, worker packages, secret refs, and materialized files |
+| `engine_output_audit_observations` | Temporary audit observations for known durable-output paths that do not yet return resource refs |
 | `capability_plugins`, `capability_implementations`, `capability_bindings` | Durable capability registry layer over the live catalog: plugin manifests, concrete implementations, conformance state, signature status, and policy-selected bindings |
 | `capability_index_documents`, `capability_vector_metadata` | Search documents and persistent local vector-index metadata for hybrid capability search |
 | `capability_inspection_handles`, `capability_binding_decisions`, `capability_audit_events`, `capability_pause_records`, `capability_run_records`, `capability_program_runs` | Fresh inspect handles plus auditable records for binding resolution, pauses, async runs, program runs, and search/inspect/execute lifecycle decisions |

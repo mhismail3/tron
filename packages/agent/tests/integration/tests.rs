@@ -157,7 +157,7 @@ async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
         tron::engine::WorkerId::new("integration-worker").unwrap(),
         WorkerKind::External,
         ActorId::new("integration-worker-owner").unwrap(),
-        AuthorityGrantId::new("integration-worker-grant").unwrap(),
+        AuthorityGrantId::new("worker-runtime").unwrap(),
     )
     .with_namespace_claim("demo");
     let mut worker_hello = tron::engine::WorkerHello::loopback(worker);
@@ -282,7 +282,7 @@ async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
             CausalContext::new(
                 ActorId::new("integration-observer").unwrap(),
                 ActorKind::System,
-                AuthorityGrantId::new("integration-observer").unwrap(),
+                AuthorityGrantId::new("engine-system").unwrap(),
                 TraceId::new("integration-observability-trace").unwrap(),
             )
             .with_scope("observability.read"),

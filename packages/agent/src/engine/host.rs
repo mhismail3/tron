@@ -30,6 +30,7 @@ use super::leases::{AcquireResourceLease, EngineResourceLease};
 use super::ledger::{
     EngineLedgerStore, IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
+use super::output_audit::{EngineOutputAuditObservation, output_audit_observation};
 use super::primitives;
 use super::primitives::{
     APPROVAL_REQUEST_FUNCTION, APPROVAL_RESOLVE_FUNCTION, PrimitiveStores,
@@ -45,11 +46,11 @@ use super::streams::{
     StreamActorScope, StreamCursor,
 };
 use super::types::{
-    CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision, CompensationContract,
-    DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
-    IdempotencyContract, Provenance, ResourceLeaseFailureBehavior, ResourceLeaseRequirement,
-    RiskLevel, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
-    WorkerKind, WorkerRevision,
+    AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
+    CompensationContract, DeliveryMode, EffectClass, FunctionDefinition, FunctionHealth,
+    FunctionRevision, IdempotencyContract, Provenance, ResourceLeaseFailureBehavior,
+    ResourceLeaseRequirement, RiskLevel, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
+    WorkerDefinition, WorkerKind, WorkerRevision,
 };
 use super::{policy, schema};
 
@@ -428,6 +429,8 @@ impl EngineHostHandle {
     async fn execute_prepared_regular(&self, prepared: PreparedSyncInvocation) -> InvocationResult {
         let compensation_contract = prepared.function.compensation.clone();
         let compensation_invocation = prepared.invocation.clone();
+        let audit_invocation = prepared.invocation.clone();
+        let audit_function = prepared.function.clone();
         let lease_result = self.acquire_prepared_resource_lease(&prepared).await;
         let mut lease_ids = Vec::new();
         let handler_result = match lease_result {
@@ -462,6 +465,8 @@ impl EngineHostHandle {
             lease_ids,
         )
         .await;
+        self.record_output_audit_for_result(&audit_invocation, &audit_function, &result)
+            .await;
         result
     }
 
@@ -525,6 +530,31 @@ impl EngineHostHandle {
             Err(error) => {
                 tracing::error!(?error, "failed to record engine compensation contract");
             }
+        }
+    }
+
+    async fn record_output_audit_for_result(
+        &self,
+        invocation: &Invocation,
+        function: &FunctionDefinition,
+        result: &InvocationResult,
+    ) {
+        if result.error.is_some() {
+            return;
+        }
+        let Some(observation) = output_audit_for_result(invocation, function, result) else {
+            return;
+        };
+        let store = self.inner.lock().await.primitives.output_audit.clone();
+        let stored = store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("output audit store lock poisoned".to_owned()))
+            .and_then(|mut store| store.record(observation));
+        if let Err(error) = stored {
+            tracing::error!(
+                ?error,
+                "failed to record engine output-resource audit observation"
+            );
         }
     }
 
@@ -1066,6 +1096,177 @@ impl EngineHostHandle {
     }
 }
 
+fn output_audit_for_result(
+    invocation: &Invocation,
+    function: &FunctionDefinition,
+    result: &InvocationResult,
+) -> Option<EngineOutputAuditObservation> {
+    let value = result.value.as_ref();
+    match invocation.function_id.namespace() {
+        "filesystem" if function.effect_class.is_mutating() => Some(output_audit_observation(
+            result.trace_id.clone(),
+            result.invocation_id.clone(),
+            result.function_id.clone(),
+            "filesystem_write_without_resource",
+            output_ref_from_payload(&invocation.payload),
+            "filesystem mutation completed without a produced resource reference",
+            json!({"payload": audit_payload_summary(&invocation.payload)}),
+        )),
+        "process" if process_payload_is_write_like(&invocation.payload) => {
+            Some(output_audit_observation(
+                result.trace_id.clone(),
+                result.invocation_id.clone(),
+                result.function_id.clone(),
+                "process_write_like_output_without_resource",
+                output_ref_from_payload(&invocation.payload),
+                "write-like process command completed without a produced resource reference",
+                json!({"payload": audit_payload_summary(&invocation.payload)}),
+            ))
+        }
+        "program" if value.is_some_and(has_unregistered_program_artifacts) => {
+            let value = result.value.as_ref()?;
+            Some(output_audit_observation(
+                result.trace_id.clone(),
+                result.invocation_id.clone(),
+                result.function_id.clone(),
+                "program_artifact_without_resource",
+                None,
+                "program result included artifacts without resource references",
+                json!({"resultShape": audit_payload_summary(value)}),
+            ))
+        }
+        "agent" if value.is_some_and(agent_result_lacks_promoted_resource_refs) => {
+            let value = result.value.as_ref()?;
+            Some(output_audit_observation(
+                result.trace_id.clone(),
+                result.invocation_id.clone(),
+                result.function_id.clone(),
+                "agent_output_without_promoted_resource",
+                None,
+                "agent result completed without promoted resource references",
+                json!({"resultShape": audit_payload_summary(value)}),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn output_ref_from_payload(payload: &Value) -> Option<String> {
+    [
+        "path",
+        "filePath",
+        "targetPath",
+        "directory",
+        "workingDirectory",
+    ]
+    .into_iter()
+    .find_map(|field| {
+        payload
+            .get(field)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    })
+}
+
+fn process_payload_is_write_like(payload: &Value) -> bool {
+    let command = payload
+        .get("command")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("program").and_then(Value::as_str))
+        .unwrap_or_default();
+    let args = payload
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_default();
+    let command_line = format!("{command} {args}").to_lowercase();
+    [
+        ">",
+        ">>",
+        "tee ",
+        "sed -i",
+        "perl -i",
+        "mv ",
+        "cp ",
+        "rm ",
+        "touch ",
+        "mkdir ",
+        "install ",
+        "apply_patch",
+        "git checkout",
+        "git reset",
+    ]
+    .into_iter()
+    .any(|needle| command_line.contains(needle))
+}
+
+fn has_unregistered_program_artifacts(value: &Value) -> bool {
+    value
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .is_some_and(|items| items.iter().any(|item| !value_has_resource_reference(item)))
+}
+
+fn agent_result_lacks_promoted_resource_refs(value: &Value) -> bool {
+    !value_has_resource_reference(value)
+}
+
+fn value_has_resource_reference(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(key, value)| {
+            matches!(
+                key.as_str(),
+                "resource"
+                    | "resourceId"
+                    | "resourceRef"
+                    | "resourceRefs"
+                    | "producedResources"
+                    | "promotedResources"
+            ) || value_has_resource_reference(value)
+        }),
+        Value::Array(values) => values.iter().any(value_has_resource_reference),
+        _ => false,
+    }
+}
+
+fn audit_payload_summary(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, value)| {
+                    let summary = match value {
+                        Value::String(text) => json!({"type": "string", "len": text.len()}),
+                        Value::Array(items) => json!({"type": "array", "len": items.len()}),
+                        Value::Object(items) => json!({"type": "object", "keys": items.len()}),
+                        Value::Bool(_) => json!({"type": "boolean"}),
+                        Value::Number(_) => json!({"type": "number"}),
+                        Value::Null => json!({"type": "null"}),
+                    };
+                    (key.clone(), summary)
+                })
+                .collect(),
+        ),
+        other => json!({"type": value_type_name(other)}),
+    }
+}
+
+fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
 fn release_after_primary(
     release: Result<Option<EngineResourceLease>>,
     primary: Result<Value>,
@@ -1358,9 +1559,10 @@ impl EngineHost {
     }
 
     fn from_catalog_and_primitives(
-        catalog: LiveCatalog,
+        mut catalog: LiveCatalog,
         primitives: PrimitiveStores,
     ) -> Result<Self> {
+        catalog.set_grant_store(primitives.grants.clone());
         let mut host = Self {
             catalog,
             primitives,
@@ -1693,6 +1895,11 @@ impl EngineHost {
             }
         }
         policy::validate_invocation(&function, invocation)?;
+        self.primitives
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .authorize_invocation(&function, invocation)?;
         if let Some(schema) = &function.request_schema {
             schema::validate_payload(&function.id, "request", schema, &invocation.payload)?;
         }
@@ -1929,25 +2136,7 @@ impl EngineHost {
             ));
         }
         match target {
-            VisibilityScope::Workspace => {
-                if !invocation
-                    .causal_context
-                    .has_scope("engine.promote.workspace")
-                {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "missing required authority scope {} for {}",
-                        "engine.promote.workspace", PROMOTE_FUNCTION
-                    )));
-                }
-            }
-            VisibilityScope::System => {
-                if !invocation.causal_context.has_scope("engine.promote.system") {
-                    return Err(EngineError::PolicyViolation(format!(
-                        "missing required authority scope {} for {}",
-                        "engine.promote.system", PROMOTE_FUNCTION
-                    )));
-                }
-            }
+            VisibilityScope::Workspace | VisibilityScope::System => {}
             _ => {
                 return Err(EngineError::InvalidVisibilityPromotion {
                     function_id: function_id.to_string(),
@@ -2111,6 +2300,14 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             })
     }
 
+    fn output_audit_for_trace(&self, trace_id: &str) -> Result<Vec<EngineOutputAuditObservation>> {
+        self.primitives
+            .output_audit
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("output audit store lock poisoned".to_owned()))?
+            .list_by_trace(trace_id, 500)
+    }
+
     fn worker_count(&self) -> usize {
         self.catalog.workers().len()
     }
@@ -2255,6 +2452,7 @@ fn meta_function_definitions() -> Result<Vec<FunctionDefinition>> {
             EffectClass::IdempotentWrite,
         )
         .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_required_authority(AuthorityRequirement::scope("engine.promote"))
         .with_risk(RiskLevel::Medium)
         .with_request_schema(promote_schema()),
     ];

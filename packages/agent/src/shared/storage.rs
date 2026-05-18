@@ -3,10 +3,11 @@
 //! Tron stores active server data in one engine-owned SQLite database:
 //! `~/.tron/internal/database/tron.sqlite`. Runtime connections use WAL for
 //! safe concurrent reads/writes; checkpoints and exports create compact
-//! single-file artifacts when the operator needs one. The `payload-ref-v2`
-//! generation makes `storage_payload_refs` the only ownership ledger for large
-//! payload blobs, so retention can compact diagnostics without deleting
-//! correctness/audit payloads still referenced by engine, session, or log rows.
+//! single-file artifacts when the operator needs one. The `modular-engine-v1`
+//! generation is a clean break for the collapsed substrate: startup archives
+//! older active DB, WAL, and SHM files before creating the grant, resource,
+//! ledger, stream, state, queue, approval, lease, compensation, storage, and
+//! session-harness tables from the current schema only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,7 +27,7 @@ pub const UNIFIED_LOCK_FILENAME: &str = "tron.sqlite.lock";
 
 /// Current storage generation. A live DB without this marker is archived and
 /// reset before startup continues.
-pub const CURRENT_STORAGE_GENERATION: &str = "payload-ref-v2";
+pub const CURRENT_STORAGE_GENERATION: &str = "modular-engine-v1";
 
 /// Metadata key storing the active storage generation.
 pub const STORAGE_GENERATION_KEY: &str = "storage_generation";
@@ -516,7 +517,7 @@ pub fn prepare_active_database(active_db_path: &Path) -> Result<ArchiveReport> {
 }
 
 /// Archive the active DB when its generation marker does not match the current
-/// payload-ref storage generation.
+/// Current modular-engine storage generation.
 pub fn archive_incompatible_active_database(active_db_path: &Path) -> Result<ArchiveReport> {
     if !active_db_path.exists() {
         return Ok(ArchiveReport {
@@ -1490,7 +1491,7 @@ mod tests {
     }
 
     #[test]
-    fn incompatible_active_database_is_archived_for_payload_ref_generation() {
+    fn incompatible_active_database_is_archived_for_modular_engine_generation() {
         let dir = tempfile::tempdir().unwrap();
         let active = dir.path().join(UNIFIED_DB_FILENAME);
         {

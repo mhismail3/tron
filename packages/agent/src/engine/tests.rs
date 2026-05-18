@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use async_trait::async_trait;
+use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::{Value, json};
 use tokio::sync::{Barrier, Notify};
 
@@ -1813,7 +1814,7 @@ async fn invocation_enforces_authority_health_and_idempotency_key() {
         .await;
     assert!(matches!(
         no_scope.error,
-        Some(EngineError::PolicyViolation(message)) if message.contains("missing required authority")
+        Some(EngineError::PolicyViolation(message)) if message.contains("idempotency key")
     ));
 
     let no_key = catalog
@@ -2992,6 +2993,33 @@ async fn engine_promote_requires_authority_revision_and_session_ownership() {
         )
         .unwrap();
 
+    let no_promote_grant = host
+        .invoke(host_invocation(
+            "grant::derive",
+            json!({
+                "grantId": "no-promote-grant",
+                "parentGrantId": "grant",
+                "allowedCapabilities": ["engine::discover"],
+                "allowedNamespaces": ["engine"],
+                "allowedAuthorityScopes": ["engine.discover"],
+                "allowedResourceKinds": ["*"],
+                "resourceSelectors": ["*"],
+                "fileRoots": ["*"],
+                "networkPolicy": "none",
+                "maxRisk": "critical"
+            }),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("promote-grant-derive"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("derive-no-promote"),
+        ))
+        .await;
+    assert_eq!(no_promote_grant.error, None);
+
     let no_scope = host
         .invoke(host_invocation(
             "engine::promote",
@@ -3002,12 +3030,23 @@ async fn engine_promote_requires_authority_revision_and_session_ownership() {
                 "workspaceId": "workspace-a",
                 "expectedFunctionRevision": 1
             }),
-            mutating_causal("promote-no-scope"),
+            CausalContext::new(
+                actor("agent"),
+                ActorKind::Agent,
+                grant("no-promote-grant"),
+                trace("promote-no-grant"),
+            )
+            .with_session_id("session-a")
+            .with_workspace_id("workspace-a")
+            .with_scope("engine.promote")
+            .with_idempotency_key("promote-no-scope"),
         ))
         .await;
     assert!(matches!(
         no_scope.error,
-        Some(EngineError::PolicyViolation(message)) if message.contains("missing required authority")
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("does not allow function")
+                || message.contains("does not allow required authority")
     ));
 
     let stale = host
@@ -4044,6 +4083,486 @@ async fn resource_primitive_manages_typed_resources_through_capabilities() {
             .len(),
         1
     );
+}
+
+#[tokio::test]
+async fn grant_derivation_rejects_broader_child_grants() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+
+    let broader = handle
+        .invoke(host_invocation(
+            "grant::derive",
+            json!({
+                "grantId": "narrow-parent-grant",
+                "parentGrantId": "grant",
+                "allowedCapabilities": ["artifact::inspect"],
+                "allowedNamespaces": ["artifact"],
+                "allowedAuthorityScopes": ["resource.read"],
+                "allowedResourceKinds": ["artifact"],
+                "resourceSelectors": ["*"],
+                "fileRoots": ["*"],
+                "networkPolicy": "none",
+                "maxRisk": "low",
+                "canDelegate": true
+            }),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("grant-derive-parent"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("derive-parent"),
+        ))
+        .await;
+    assert_eq!(broader.error, None);
+
+    let rejected = handle
+        .invoke(host_invocation(
+            "grant::derive",
+            json!({
+                "grantId": "broader-grandchild",
+                "parentGrantId": "narrow-parent-grant",
+                "allowedCapabilities": ["artifact::inspect", "artifact::create"],
+                "allowedNamespaces": ["artifact"],
+                "allowedAuthorityScopes": ["resource.read"],
+                "allowedResourceKinds": ["artifact"],
+                "resourceSelectors": ["*"],
+                "fileRoots": ["*"],
+                "networkPolicy": "none",
+                "maxRisk": "low"
+            }),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("grant-derive-child"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("derive-child"),
+        ))
+        .await;
+
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("capabilities exceeds parent")
+    ));
+}
+
+#[tokio::test]
+async fn invocation_authorization_uses_grant_not_raw_scope_strings() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let derived = handle
+        .invoke(host_invocation(
+            "grant::derive",
+            json!({
+                "grantId": "artifact-read-only",
+                "parentGrantId": "grant",
+                "allowedCapabilities": ["artifact::inspect"],
+                "allowedNamespaces": ["artifact"],
+                "allowedAuthorityScopes": ["resource.read"],
+                "allowedResourceKinds": ["artifact"],
+                "resourceSelectors": ["kind:artifact"],
+                "fileRoots": ["*"],
+                "networkPolicy": "none",
+                "maxRisk": "low"
+            }),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("grant-raw-scope"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("derive-read-only"),
+        ))
+        .await;
+    assert_eq!(derived.error, None);
+
+    let result = handle
+        .invoke(host_invocation(
+            "artifact::create",
+            json!({
+                "payload": {"title": "draft", "body": "body"}
+            }),
+            CausalContext::new(
+                actor("agent"),
+                ActorKind::Agent,
+                grant("artifact-read-only"),
+                trace("raw-scope-ignored"),
+            )
+            .with_scope("resource.write")
+            .with_idempotency_key("artifact-create-denied"),
+        ))
+        .await;
+
+    assert!(matches!(
+        result.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("does not allow function")
+                || message.contains("does not allow required authority")
+                || message.contains("exceeds grant")
+    ));
+}
+
+#[tokio::test]
+async fn revoked_grants_fail_before_handler_execution() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let derived = handle
+        .invoke(host_invocation(
+            "grant::derive",
+            json!({
+                "grantId": "revoked-artifact-read",
+                "parentGrantId": "grant",
+                "allowedCapabilities": ["artifact::inspect"],
+                "allowedNamespaces": ["artifact"],
+                "allowedAuthorityScopes": ["resource.read"],
+                "allowedResourceKinds": ["artifact"],
+                "resourceSelectors": ["*"],
+                "fileRoots": ["*"],
+                "networkPolicy": "none",
+                "maxRisk": "low"
+            }),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("grant-revoked-derive"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("derive-revoked"),
+        ))
+        .await;
+    assert_eq!(derived.error, None);
+
+    let revoked = handle
+        .invoke(host_invocation(
+            "grant::revoke",
+            json!({"grantId": "revoked-artifact-read"}),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("grant-revoked"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("revoke-artifact-read"),
+        ))
+        .await;
+    assert_eq!(revoked.error, None);
+
+    let denied = handle
+        .invoke(host_invocation(
+            "artifact::inspect",
+            json!({"resourceId": "missing-artifact"}),
+            CausalContext::new(
+                actor("agent"),
+                ActorKind::Agent,
+                grant("revoked-artifact-read"),
+                trace("grant-revoked-invoke"),
+            )
+            .with_scope("resource.read"),
+        ))
+        .await;
+
+    assert!(matches!(
+        denied.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("not active")
+    ));
+}
+
+#[tokio::test]
+async fn expired_grants_fail_before_handler_execution() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let expires_at = (Utc::now() + ChronoDuration::milliseconds(100)).to_rfc3339();
+    let derived = handle
+        .invoke(host_invocation(
+            "grant::derive",
+            json!({
+                "grantId": "expiring-artifact-read",
+                "parentGrantId": "grant",
+                "allowedCapabilities": ["artifact::inspect"],
+                "allowedNamespaces": ["artifact"],
+                "allowedAuthorityScopes": ["resource.read"],
+                "allowedResourceKinds": ["artifact"],
+                "resourceSelectors": ["*"],
+                "fileRoots": ["*"],
+                "networkPolicy": "none",
+                "maxRisk": "low",
+                "expiresAt": expires_at,
+            }),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("grant-expired-derive"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("derive-expiring"),
+        ))
+        .await;
+    assert_eq!(derived.error, None);
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let denied = handle
+        .invoke(host_invocation(
+            "artifact::inspect",
+            json!({"resourceId": "missing-artifact"}),
+            CausalContext::new(
+                actor("agent"),
+                ActorKind::Agent,
+                grant("expiring-artifact-read"),
+                trace("grant-expired-invoke"),
+            )
+            .with_scope("resource.read"),
+        ))
+        .await;
+    assert!(matches!(
+        denied.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("is expired")
+    ));
+}
+
+#[tokio::test]
+async fn grant_resource_selectors_block_unauthorized_resource_mutations() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let derived = handle
+        .invoke(host_invocation(
+            "grant::derive",
+            json!({
+                "grantId": "one-artifact-writer",
+                "parentGrantId": "grant",
+                "allowedCapabilities": ["artifact::create"],
+                "allowedNamespaces": ["artifact"],
+                "allowedAuthorityScopes": ["resource.write"],
+                "allowedResourceKinds": ["artifact"],
+                "resourceSelectors": ["resource:allowed-artifact"],
+                "fileRoots": ["*"],
+                "networkPolicy": "none",
+                "maxRisk": "medium"
+            }),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("grant-selector-derive"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("derive-selector"),
+        ))
+        .await;
+    assert_eq!(derived.error, None);
+
+    let denied = handle
+        .invoke(host_invocation(
+            "artifact::create",
+            json!({
+                "resourceId": "denied-artifact",
+                "payload": {"title": "draft", "body": "body"}
+            }),
+            CausalContext::new(
+                actor("agent"),
+                ActorKind::Agent,
+                grant("one-artifact-writer"),
+                trace("grant-selector-denied"),
+            )
+            .with_scope("resource.write")
+            .with_idempotency_key("denied-artifact-create"),
+        ))
+        .await;
+
+    assert!(matches!(
+        denied.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("does not allow resource")
+    ));
+}
+
+#[tokio::test]
+async fn worker_registration_and_functions_cannot_exceed_worker_grant() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let derived = handle
+        .invoke(host_invocation(
+            "grant::derive",
+            json!({
+                "grantId": "demo-worker-grant",
+                "parentGrantId": "grant",
+                "allowedCapabilities": ["demo::echo"],
+                "allowedNamespaces": ["demo"],
+                "allowedAuthorityScopes": ["demo.read"],
+                "allowedResourceKinds": ["artifact"],
+                "resourceSelectors": ["*"],
+                "fileRoots": ["*"],
+                "networkPolicy": "none",
+                "maxRisk": "low"
+            }),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("worker-grant-derive"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("derive-demo-worker"),
+        ))
+        .await;
+    assert_eq!(derived.error, None);
+
+    let rejected_worker = handle.register_worker_for_setup(
+        WorkerDefinition::new(
+            wid("bad-demo-worker"),
+            WorkerKind::InProcess,
+            actor("owner"),
+            grant("demo-worker-grant"),
+        )
+        .with_namespace_claim("other"),
+        false,
+    );
+    assert!(matches!(
+        rejected_worker,
+        Err(EngineError::PolicyViolation(message)) if message.contains("namespace other exceeds")
+    ));
+
+    handle
+        .register_worker_for_setup(
+            WorkerDefinition::new(
+                wid("demo-worker"),
+                WorkerKind::InProcess,
+                actor("owner"),
+                grant("demo-worker-grant"),
+            )
+            .with_namespace_claim("demo"),
+            false,
+        )
+        .unwrap();
+
+    let rejected_function = handle.register_function_for_setup(
+        FunctionDefinition::new(
+            fid("demo::write"),
+            wid("demo-worker"),
+            "write",
+            VisibilityScope::Agent,
+            EffectClass::IdempotentWrite,
+        )
+        .with_required_authority(AuthorityRequirement::scope("demo.write"))
+        .with_idempotency(IdempotencyContract::caller_session_engine_ledger()),
+        Some(handler()),
+        false,
+    );
+    assert!(matches!(
+        rejected_function,
+        Err(EngineError::PolicyViolation(message)) if message.contains("exceeds worker grant")
+    ));
+}
+
+#[tokio::test]
+async fn artifact_goal_decision_wrappers_produce_resource_refs() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+
+    let artifact = handle
+        .invoke(host_invocation(
+            "artifact::create",
+            json!({
+                "resourceId": "artifact-wrapper-test",
+                "payload": {"title": "Audit", "body": "draft"}
+            }),
+            mutating_causal("artifact-wrapper-create").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(artifact.error, None);
+    assert_eq!(
+        artifact.value.as_ref().unwrap()["resource"]["resourceId"],
+        "artifact-wrapper-test"
+    );
+
+    let promoted = handle
+        .invoke(host_invocation(
+            "artifact::promote",
+            json!({"resourceId": "artifact-wrapper-test"}),
+            mutating_causal("artifact-wrapper-promote").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(promoted.error, None);
+    assert_eq!(
+        promoted.value.as_ref().unwrap()["version"]["resourceId"],
+        "artifact-wrapper-test"
+    );
+
+    let goal = handle
+        .invoke(host_invocation(
+            "goal::create",
+            json!({
+                "resourceId": "goal-wrapper-test",
+                "payload": {"intent": "Finish substrate", "successCriteria": ["decision recorded"]}
+            }),
+            mutating_causal("goal-wrapper-create").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(goal.error, None);
+
+    let completed = handle
+        .invoke(host_invocation(
+            "goal::complete",
+            json!({
+                "goalResourceId": "goal-wrapper-test",
+                "decision": {"status": "done", "summary": "Substrate checkpoint complete"}
+            }),
+            mutating_causal("goal-wrapper-complete").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(completed.error, None);
+    let value = completed.value.as_ref().unwrap();
+    assert_eq!(value["goalVersion"]["resourceId"], "goal-wrapper-test");
+    assert_eq!(value["decision"]["kind"], "decision");
+    assert_eq!(value["link"]["relation"], "decided_by");
+}
+
+#[tokio::test]
+async fn write_like_outputs_are_reported_in_trace_output_audit() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("filesystem", "filesystem"), false)
+        .unwrap();
+    let function = FunctionDefinition::new(
+        fid("filesystem::write_file"),
+        wid("filesystem"),
+        "write file",
+        VisibilityScope::Agent,
+        EffectClass::IdempotentWrite,
+    )
+    .with_required_authority(AuthorityRequirement::scope("filesystem.write"))
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger());
+    handle
+        .register_function_for_setup(function, Some(handler()), false)
+        .unwrap();
+
+    let result = handle
+        .invoke(host_invocation(
+            "filesystem::write_file",
+            json!({"path": "/tmp/tron-output-audit.txt", "content": "draft"}),
+            mutating_causal("filesystem-output-audit").with_scope("filesystem.write"),
+        ))
+        .await;
+    assert_eq!(result.error, None);
+
+    let trace = handle
+        .invoke(host_invocation(
+            "observability::trace_get",
+            json!({"traceId": result.trace_id.as_str()}),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("output-audit-trace"),
+            )
+            .with_scope("observability.read"),
+        ))
+        .await;
+    assert_eq!(trace.error, None);
+    let audit = trace.value.as_ref().unwrap()["outputAudit"]
+        .as_array()
+        .unwrap();
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0]["outputKind"], "filesystem_write_without_resource");
 }
 
 #[tokio::test]
