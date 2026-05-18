@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, capability execution, and event-sourced session persistence. A native iOS app provides a real-time chat interface with streaming, session management, and push notifications.
+Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, capability execution, grants, typed resources, and event-sourced session persistence. A native iOS app provides a thin chat and Engine Console harness over the server-owned substrate.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -86,6 +86,10 @@ capability-module, and product-shell surfaces, and defines the target direction:
 Tron as a modular local capability engine with a thin chat and generated-native
 UI harness.
 
+The cleanup proof map for removing product-shell surfaces and consolidating the
+recent modular-engine additions lives in
+[`docs/modular-engine-cleanup-audit.md`](docs/modular-engine-cleanup-audit.md).
+
 ## Collapsed Modular Engine
 
 The implementation target for the modular-engine rebuild lives in
@@ -128,6 +132,7 @@ tron/
 |   +-- collapsed-modular-engine-architecture.md Collapsed worker/capability/resource target
 |   +-- manual-testing-readiness.md Clean manual-QA checklist for the capability runtime
 |   +-- modular-engine-audit.md     Audit and target direction for the modular engine pivot
+|   +-- modular-engine-cleanup-audit.md Proof map for cleanup/removal decisions
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
@@ -970,7 +975,7 @@ packages/ios-app/Sources/
 +                         feedback composer, Engine Console cache, Keychain tokens
 +-- ViewModels/           Chat view models, handlers, managers, @Observable state,
 +                         OnboardingState, EngineConsoleState
-+-- Views/                SwiftUI views (chat, Engine Console, capability views, voice notes, settings, Onboarding/, ...)
++-- Views/                SwiftUI views (chat, Engine Console, capability views, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
 +-- Extensions/           Type extensions

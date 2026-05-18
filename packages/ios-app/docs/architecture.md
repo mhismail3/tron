@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-18 (capability-native chat/dashboard/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, strict generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, and retired direct integration removal)
+> Last verified: 2026-05-18 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, strict generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -14,6 +14,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 - A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, generated `ui_surface` refs, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
+- No fixed Automations or Voice Notes dashboards; reusable cron and voice-note protocol pieces remain capability modules until generated/control surfaces replace them
 
 The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
 
@@ -56,7 +57,6 @@ Sources/
     ├── Chat/               # Core chat interface
     ├── EngineConsole/      # Capability registry/plugin/binding/audit console
     ├── Capabilities/       # Generic capability invocation chips, detail sheets, and result rendering
-    ├── Tools/              # Shared support views still used by capability/source-control surfaces
     ├── Components/         # Reusable UI components
     └── ...                 # Feature-specific views
 ```

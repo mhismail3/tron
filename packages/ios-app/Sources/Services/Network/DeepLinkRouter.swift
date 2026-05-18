@@ -20,8 +20,6 @@ enum NavigationIntent: Equatable {
     case session(id: String, scrollTo: ScrollTarget?)
     /// Navigate to settings
     case settings
-    /// Navigate to voice notes
-    case voiceNotes
     /// Open the notification inbox, optionally auto-opening a specific notification
     case notification(invocationId: String)
     /// Process pending shared content from Share Extension
@@ -99,11 +97,6 @@ final class DeepLinkRouter {
         case "settings":
             pendingIntent = .settings
             TronLogger.shared.info("Deep link intent set: settings", category: .notification)
-            return true
-
-        case "voice-notes":
-            pendingIntent = .voiceNotes
-            TronLogger.shared.info("Deep link intent set: voiceNotes", category: .notification)
             return true
 
         case "share":

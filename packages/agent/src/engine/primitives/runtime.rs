@@ -10,13 +10,13 @@ use super::{catalog, control, observability, storage, ui, worker};
 use crate::engine::approval::EngineApprovalRecord;
 use crate::engine::discovery::{ActorContext, FunctionQuery};
 use crate::engine::errors::{EngineError, Result};
-use crate::engine::grants::{EngineGrant, EngineGrantLifecycle, ListGrants};
+use crate::engine::grants::{EngineGrant, ListGrants};
 use crate::engine::ids::{InvocationId, TriggerId, WorkerId};
 use crate::engine::invocation::{CausalContext, Invocation, InvocationRecord};
 use crate::engine::leases::EngineResourceLease;
 use crate::engine::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
-    EngineResourceVersion, ListResources, UI_SURFACE_KIND, UpdateResource,
+    EngineResourceVersion, ListResources, UpdateResource,
 };
 use crate::engine::streams::EngineStreamEvent;
 use crate::engine::types::{
@@ -25,13 +25,13 @@ use crate::engine::types::{
 };
 use crate::shared::logging::{LogLevel, LogQueryOptions, SortOrder};
 
-struct TraceComponents {
-    invocations: Vec<InvocationRecord>,
-    catalog_changes: Vec<CatalogChange>,
-    approvals: Vec<EngineApprovalRecord>,
-    streams: Vec<EngineStreamEvent>,
-    leases: Vec<EngineResourceLease>,
-    compensation: Vec<Value>,
+pub(in crate::engine::primitives) struct TraceComponents {
+    pub invocations: Vec<InvocationRecord>,
+    pub catalog_changes: Vec<CatalogChange>,
+    pub approvals: Vec<EngineApprovalRecord>,
+    pub streams: Vec<EngineStreamEvent>,
+    pub leases: Vec<EngineResourceLease>,
+    pub compensation: Vec<Value>,
 }
 
 #[derive(Default)]
@@ -120,8 +120,9 @@ pub(in crate::engine) fn dispatch(
         worker::HEALTH_FUNCTION => worker_health(host, invocation),
         worker::DISCONNECT_FUNCTION => worker_disconnect(host, invocation),
         worker::PROTOCOL_GUIDE_FUNCTION => worker_protocol_guide(invocation),
-        control::SNAPSHOT_FUNCTION => control_snapshot(host, invocation),
-        control::INSPECT_FUNCTION => control_inspect(host, invocation),
+        control::SNAPSHOT_FUNCTION | control::INSPECT_FUNCTION => {
+            control::dispatch(host, invocation)
+        }
         ui::CATALOG_FUNCTION
         | ui::CREATE_SURFACE_FUNCTION
         | ui::UPDATE_SURFACE_FUNCTION
@@ -197,362 +198,6 @@ fn catalog_watch_snapshot(
         "nextRevision": response.get("nextRevision").cloned().unwrap_or(Value::Null),
         "hasMore": response.get("hasMore").cloned().unwrap_or(Value::Bool(false)),
     }))
-}
-
-fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let actor = actor_context(&invocation.causal_context);
-    let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
-    let limit = limit.clamp(1, 500);
-    let capabilities = host.discover_functions(&FunctionQuery {
-        actor: Some(actor.clone()),
-        include_internal: false,
-        ..FunctionQuery::default()
-    });
-    let active_goals = host
-        .list_resources(ListResources {
-            kind: Some("goal".to_owned()),
-            scope: None,
-            lifecycle: None,
-            limit,
-        })?
-        .into_iter()
-        .filter(|resource| !matches!(resource.lifecycle.as_str(), "completed" | "archived"))
-        .collect::<Vec<_>>();
-    let invocations = latest_invocations(host.invocations(), limit)
-        .iter()
-        .map(|record| invocation_record_value(record, false))
-        .collect::<Vec<_>>();
-    let grants = host.list_grants(ListGrants {
-        parent_grant_id: None,
-        lifecycle: Some(EngineGrantLifecycle::Active),
-        limit,
-    })?;
-    let approvals =
-        host.approval_records(None, invocation.causal_context.session_id.as_deref(), limit)?;
-    let queues = host.queue_items("engine", limit).unwrap_or_default();
-    let storage = host.storage_stats().ok().map(|stats| json!(stats));
-    Ok(json!({
-        "catalogRevision": host.catalog_revision().0,
-        "workers": host.visible_workers(&actor),
-        "capabilities": capabilities,
-        "resourceTypes": host.resource_type_definitions()?,
-        "activeGoals": active_goals,
-        "invocations": invocations,
-        "grants": grants,
-        "queues": queues,
-        "leases": [],
-        "approvals": approvals,
-        "storage": storage,
-        "integrityWarnings": substrate_integrity_warnings(host)?,
-        "availableActions": substrate_actions(),
-        "uiSurfaceRefs": ui_surface_refs(host, limit)?,
-    }))
-}
-
-fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let target_type = required_str(&invocation.payload, "targetType")?;
-    let target_id = required_str(&invocation.payload, "targetId")?;
-    let include_full_payloads = invocation
-        .payload
-        .get("includeFullPayloads")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let graph = match target_type {
-        "worker" => {
-            let id = WorkerId::new(target_id.to_owned())?;
-            let functions = host
-                .discover_functions(&FunctionQuery {
-                    include_internal: true,
-                    ..FunctionQuery::default()
-                })
-                .into_iter()
-                .filter(|function| function.owner_worker == id)
-                .collect::<Vec<_>>();
-            json!({
-                "worker": host.inspect_worker(&id)?,
-                "capabilities": functions,
-            })
-        }
-        "capability" => {
-            let function = host
-                .discover_functions(&FunctionQuery {
-                    include_internal: true,
-                    ..FunctionQuery::default()
-                })
-                .into_iter()
-                .find(|function| function.id.as_str() == target_id);
-            json!({ "capability": function })
-        }
-        "grant" => {
-            let grant_id = crate::engine::ids::AuthorityGrantId::new(target_id.to_owned())?;
-            json!({ "grant": host.inspect_grant(&grant_id)? })
-        }
-        "goal" | "resource" => {
-            json!({ "resource": host.inspect_resource(target_id)? })
-        }
-        "invocation" => {
-            let invocation = host
-                .invocations()
-                .into_iter()
-                .find(|record| record.invocation_id.as_str() == target_id);
-            json!({ "invocation": invocation.as_ref().map(|record| invocation_record_value(record, include_full_payloads)) })
-        }
-        "trace" => {
-            let trace = trace_components(host, target_id)?;
-            json!({
-                "summary": trace_summary(target_id, &trace),
-                "invocations": trace.invocations.iter().map(|record| invocation_record_value(record, include_full_payloads)).collect::<Vec<_>>(),
-                "streams": trace.streams,
-                "approvals": trace.approvals,
-                "leases": trace.leases,
-                "compensation": trace.compensation,
-            })
-        }
-        _ => {
-            return Err(EngineError::PolicyViolation(format!(
-                "unsupported control target type {target_type}"
-            )));
-        }
-    };
-    Ok(json!({
-        "targetType": target_type,
-        "targetId": target_id,
-        "graph": graph,
-        "availableActions": actions_for_target(target_type, target_id),
-        "uiSurfaceRefs": ui_surface_refs_for_target(host, target_type, target_id)?,
-    }))
-}
-
-fn ui_surface_refs(host: &dyn PrimitiveRuntimeHost, limit: usize) -> Result<Vec<Value>> {
-    host.list_resources(ListResources {
-        kind: Some(UI_SURFACE_KIND.to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit,
-    })?
-    .into_iter()
-    .filter_map(|resource| ui_surface_ref_for_resource(host, resource).transpose())
-    .collect()
-}
-
-fn ui_surface_refs_for_target(
-    host: &dyn PrimitiveRuntimeHost,
-    target_type: &str,
-    target_id: &str,
-) -> Result<Vec<Value>> {
-    let functions = host.discover_functions(&FunctionQuery {
-        include_internal: true,
-        ..FunctionQuery::default()
-    });
-    Ok(ui_surface_refs(host, 100)?
-        .into_iter()
-        .filter(|surface| {
-            let bound_to_target = surface_targets(surface).iter().any(|target| {
-                target.get("targetType").and_then(Value::as_str) == Some(target_type)
-                    && target.get("targetId").and_then(Value::as_str) == Some(target_id)
-            });
-            let action_targets_capability = target_type == "capability"
-                && surface_actions(surface).iter().any(|action| {
-                    action.get("targetFunctionId").and_then(Value::as_str) == Some(target_id)
-                });
-            let action_targets_worker = target_type == "worker"
-                && surface_actions(surface).iter().any(|action| {
-                    let Some(function_id) = action.get("targetFunctionId").and_then(Value::as_str)
-                    else {
-                        return false;
-                    };
-                    functions.iter().any(|function| {
-                        function.id.as_str() == function_id
-                            && function.owner_worker.as_str() == target_id
-                    })
-                });
-            bound_to_target || action_targets_capability || action_targets_worker
-        })
-        .collect())
-}
-
-fn ui_surface_ref_for_resource(
-    host: &dyn PrimitiveRuntimeHost,
-    resource: EngineResource,
-) -> Result<Option<Value>> {
-    if matches!(
-        resource.lifecycle.as_str(),
-        "discarded" | "damaged" | "expired"
-    ) {
-        return Ok(None);
-    }
-    let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-        return Ok(None);
-    };
-    let payload = current_resource_payload(&inspection).unwrap_or(Value::Null);
-    Ok(Some(json!({
-        "resourceId": resource.resource_id,
-        "versionId": resource.current_version_id,
-        "kind": resource.kind,
-        "lifecycle": resource.lifecycle,
-        "surfaceId": payload.get("surfaceId").cloned().unwrap_or(Value::Null),
-        "title": payload.get("title").cloned().unwrap_or(Value::Null),
-        "purpose": payload.get("purpose").cloned().unwrap_or(Value::Null),
-        "catalog": payload.get("catalog").cloned().unwrap_or(Value::Null),
-        "expiresAt": payload.get("expiresAt").cloned().unwrap_or(Value::Null),
-        "targets": payload.get("bindings").cloned().unwrap_or_else(|| json!([])),
-        "actions": ui_surface_action_summaries(&payload),
-    })))
-}
-
-fn current_resource_payload(inspection: &EngineResourceInspection) -> Option<Value> {
-    let current = inspection.resource.current_version_id.as_ref()?;
-    inspection
-        .versions
-        .iter()
-        .find(|version| &version.version_id == current)
-        .map(|version| version.payload.clone())
-}
-
-fn surface_targets(surface: &Value) -> Vec<Value> {
-    surface
-        .get("targets")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn surface_actions(surface: &Value) -> Vec<Value> {
-    surface
-        .get("actions")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn ui_surface_action_summaries(payload: &Value) -> Value {
-    let Some(actions) = payload.get("actions").and_then(Value::as_array) else {
-        return json!([]);
-    };
-    Value::Array(
-        actions
-            .iter()
-            .map(|action| {
-                json!({
-                    "actionId": action.get("actionId").cloned().unwrap_or(Value::Null),
-                    "label": action.get("label").cloned().unwrap_or(Value::Null),
-                    "targetFunctionId": action.get("targetFunctionId").cloned().unwrap_or(Value::Null),
-                    "requiredGrant": action.get("requiredGrant").cloned().unwrap_or(Value::Null),
-                    "requiredRisk": action.get("requiredRisk").cloned().unwrap_or(Value::Null),
-                    "targetRevision": action.get("targetRevision").cloned().unwrap_or(Value::Null),
-                    "expiresAt": action.get("expiresAt").cloned().unwrap_or(Value::Null),
-                })
-            })
-            .collect(),
-    )
-}
-
-fn latest_invocations(
-    mut invocations: Vec<InvocationRecord>,
-    limit: usize,
-) -> Vec<InvocationRecord> {
-    invocations.sort_by_key(|record| record.timestamp);
-    invocations.reverse();
-    invocations.truncate(limit);
-    invocations
-}
-
-fn substrate_integrity_warnings(host: &dyn PrimitiveRuntimeHost) -> Result<Vec<Value>> {
-    let damaged = host
-        .list_resources(ListResources {
-            kind: None,
-            scope: None,
-            lifecycle: Some("damaged".to_owned()),
-            limit: 50,
-        })?
-        .into_iter()
-        .map(|resource| {
-            json!({
-                "kind": "damaged_resource",
-                "resourceId": resource.resource_id,
-                "resourceKind": resource.kind,
-            })
-        })
-        .collect();
-    Ok(damaged)
-}
-
-fn substrate_actions() -> Vec<Value> {
-    vec![
-        action_template("grant::revoke", "grant", "grantId", "high", true),
-        action_template("worker::disconnect", "worker", "workerId", "high", true),
-        action_template(
-            "resource::link",
-            "resource",
-            "sourceResourceId",
-            "medium",
-            false,
-        ),
-        action_template(
-            "artifact::promote",
-            "resource",
-            "resourceId",
-            "medium",
-            false,
-        ),
-        action_template(
-            "approval::resolve",
-            "approval",
-            "approvalId",
-            "medium",
-            false,
-        ),
-        action_template("agent::abort", "goal", "sessionId", "high", true),
-    ]
-}
-
-fn actions_for_target(target_type: &str, target_id: &str) -> Vec<Value> {
-    substrate_actions()
-        .into_iter()
-        .filter(|action| {
-            action
-                .get("targetType")
-                .and_then(Value::as_str)
-                .is_none_or(|kind| {
-                    kind == target_type || target_type == "goal" && kind == "resource"
-                })
-        })
-        .map(|mut action| {
-            if let Some(template) = action
-                .get_mut("payloadTemplate")
-                .and_then(Value::as_object_mut)
-            {
-                let key = match target_type {
-                    "worker" => "workerId",
-                    "grant" => "grantId",
-                    "goal" | "resource" => "resourceId",
-                    _ => "targetId",
-                };
-                template.insert(key.to_owned(), json!(target_id));
-            }
-            action
-        })
-        .collect()
-}
-
-fn action_template(
-    function_id: &str,
-    target_type: &str,
-    target_field: &str,
-    risk: &str,
-    approval_required: bool,
-) -> Value {
-    let mut payload_template = serde_json::Map::new();
-    payload_template.insert(target_field.to_owned(), json!("<target-id>"));
-    payload_template.insert("reason".to_owned(), json!("operator-requested"));
-    json!({
-        "functionId": function_id,
-        "targetType": target_type,
-        "requiredRisk": risk,
-        "approvalRequired": approval_required,
-        "targetRevision": Value::Null,
-        "payloadTemplate": payload_template
-    })
 }
 
 fn worker_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
@@ -1273,7 +918,10 @@ fn metrics_snapshot(host: &dyn PrimitiveRuntimeHost) -> Result<Value> {
     }))
 }
 
-fn trace_components(host: &dyn PrimitiveRuntimeHost, trace_id: &str) -> Result<TraceComponents> {
+pub(in crate::engine::primitives) fn trace_components(
+    host: &dyn PrimitiveRuntimeHost,
+    trace_id: &str,
+) -> Result<TraceComponents> {
     Ok(TraceComponents {
         invocations: host
             .invocations()
@@ -1292,7 +940,10 @@ fn trace_components(host: &dyn PrimitiveRuntimeHost, trace_id: &str) -> Result<T
     })
 }
 
-fn trace_summary(trace_id: &str, trace: &TraceComponents) -> Value {
+pub(in crate::engine::primitives) fn trace_summary(
+    trace_id: &str,
+    trace: &TraceComponents,
+) -> Value {
     let failed_invocations = trace
         .invocations
         .iter()
@@ -1470,7 +1121,7 @@ fn log_matches(log: &Value, needle: &str) -> bool {
     contains(log, needle)
 }
 
-fn actor_context(context: &CausalContext) -> ActorContext {
+pub(in crate::engine::primitives) fn actor_context(context: &CausalContext) -> ActorContext {
     ActorContext {
         actor_id: context.actor_id.clone(),
         actor_kind: context.actor_kind.clone(),
@@ -1535,7 +1186,10 @@ fn catalog_change_value(change: &CatalogChange) -> Value {
     })
 }
 
-fn invocation_record_value(record: &InvocationRecord, include_full_payloads: bool) -> Value {
+pub(in crate::engine::primitives) fn invocation_record_value(
+    record: &InvocationRecord,
+    include_full_payloads: bool,
+) -> Value {
     let mut value = json!({
         "invocationId": record.invocation_id.as_str(),
         "functionId": record.function_id.as_str(),
@@ -1611,7 +1265,10 @@ fn change_kind_str(kind: &crate::engine::types::CatalogChangeKind) -> &'static s
     }
 }
 
-fn required_str<'a>(payload: &'a Value, field: &str) -> Result<&'a str> {
+pub(in crate::engine::primitives) fn required_str<'a>(
+    payload: &'a Value,
+    field: &str,
+) -> Result<&'a str> {
     payload.get(field).and_then(Value::as_str).ok_or_else(|| {
         EngineError::PolicyViolation(format!("required field {field} must be a string"))
     })
@@ -1627,7 +1284,7 @@ fn optional_string(value: Option<&Value>) -> Result<Option<String>> {
     }
 }
 
-fn optional_u64(value: Option<&Value>) -> Result<Option<u64>> {
+pub(in crate::engine::primitives) fn optional_u64(value: Option<&Value>) -> Result<Option<u64>> {
     match value {
         None | Some(Value::Null) => Ok(None),
         Some(Value::Number(number)) => number

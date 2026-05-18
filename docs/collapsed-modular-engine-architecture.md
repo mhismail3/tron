@@ -14,6 +14,9 @@ and module control into one substrate:
 The goal is to keep Tron modular without creating separate persistence planes
 for artifacts, goals, work items, UI surfaces, and control-plane state.
 
+The cleanup proof map for removing fixed product-shell code and consolidating
+recent substrate additions lives in `docs/modular-engine-cleanup-audit.md`.
+
 ## Invariants
 
 - Every executable path is a canonical `namespace::function` capability owned

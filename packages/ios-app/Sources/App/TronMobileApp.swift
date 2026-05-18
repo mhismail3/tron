@@ -90,9 +90,6 @@ struct TronMobileApp: App {
                 case .settings:
                     NotificationCenter.default.post(name: .showSettingsAction, object: nil)
                     TronLogger.shared.info("Deep link to settings", category: .notification)
-                case .voiceNotes:
-                    NotificationCenter.default.post(name: .navigationModeAction, object: NavigationMode.voiceNotes)
-                    TronLogger.shared.info("Deep link to voice notes", category: .notification)
                 case .notification(let invocationId):
                     deepLinkNotificationInvocationId = invocationId
                     TronLogger.shared.info("Deep link to notification inbox: invocationId=\(invocationId)", category: .notification)

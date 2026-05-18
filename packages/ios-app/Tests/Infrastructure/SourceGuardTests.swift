@@ -80,6 +80,15 @@ struct SourceGuardTests {
             "sandbox" + "::" + "stop_" + "container",
             "sandbox" + "::" + "kill_" + "container",
             "sandbox" + "::" + "remove_" + "container",
+            "Automations" + "Dashboard" + "View",
+            "Automation" + "Detail" + "Sheet",
+            "Automation" + "Form" + "Sheet",
+            "Automation" + "Run" + "Detail" + "Sheet",
+            "Voice" + "Notes" + "List" + "View",
+            "Safari" + "View",
+            "NavigationMode" + "." + "automations",
+            "NavigationMode" + "." + "voiceNotes",
+            "can" + "Manage" + "Automations",
         ]
 
         let fileURL = URL(fileURLWithPath: #filePath)

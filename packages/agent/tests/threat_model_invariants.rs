@@ -71,6 +71,101 @@ fn repo_root() -> PathBuf {
     );
 }
 
+#[test]
+fn cleanup_audit_and_fixed_ios_dashboard_removals_stay_in_force() {
+    let repo_root = repo_root();
+    let cleanup_audit = repo_root
+        .join("docs")
+        .join("modular-engine-cleanup-audit.md");
+    let cleanup_audit_text = std::fs::read_to_string(&cleanup_audit)
+        .unwrap_or_else(|e| panic!("failed to read {cleanup_audit:?}: {e}"));
+    assert!(
+        cleanup_audit_text.contains("remove with proof")
+            && cleanup_audit_text.contains("Cleanup Decisions Applied"),
+        "cleanup audit must remain the proof map for whole-repo removals"
+    );
+
+    for removed_path in [
+        [
+            "packages",
+            "ios-app",
+            "Sources",
+            "Views",
+            "Automations",
+            "AutomationsDashboardView.swift",
+        ],
+        [
+            "packages",
+            "ios-app",
+            "Sources",
+            "Views",
+            "VoiceNotes",
+            "VoiceNotesListView.swift",
+        ],
+        [
+            "packages",
+            "ios-app",
+            "Sources",
+            "Views",
+            "Browser",
+            "SafariView.swift",
+        ],
+    ] {
+        let path = removed_path
+            .iter()
+            .fold(repo_root.clone(), |path, segment| path.join(segment));
+        assert!(
+            !path.exists(),
+            "fixed product-shell view must stay removed: {}",
+            path.display()
+        );
+    }
+
+    let ios_roots = [
+        repo_root.join("packages").join("ios-app").join("Sources"),
+        repo_root.join("packages").join("ios-app").join("Tests"),
+    ];
+    let forbidden = [
+        "Automations".to_owned() + "Dashboard" + "View",
+        "Voice".to_owned() + "Notes" + "List" + "View",
+        "Safari".to_owned() + "View",
+        "NavigationMode".to_owned() + "." + "automations",
+        "NavigationMode".to_owned() + "." + "voiceNotes",
+        "can".to_owned() + "Manage" + "Automations",
+    ];
+    for root in ios_roots {
+        let mut stack = vec![root];
+        while let Some(path) = stack.pop() {
+            for entry in std::fs::read_dir(&path)
+                .unwrap_or_else(|e| panic!("failed to enumerate {path:?}: {e}"))
+            {
+                let entry = entry.unwrap_or_else(|e| panic!("failed to read dir entry: {e}"));
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|ext| ext.to_str()) != Some("swift") {
+                    continue;
+                }
+                if path.file_name().and_then(|name| name.to_str()) == Some("SourceGuardTests.swift")
+                {
+                    continue;
+                }
+                let content = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+                for needle in &forbidden {
+                    assert!(
+                        !content.contains(needle),
+                        "{} must not reintroduce fixed iOS dashboard shell marker `{needle}`",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn assert_site(root: &Path, relative: &str, keyword: &str) {
     let path = root.join(relative);
     let content =

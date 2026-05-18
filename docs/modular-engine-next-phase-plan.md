@@ -9,6 +9,12 @@ templates. The next phase makes that substrate operationally useful by adding
 server-authored surfaces for real workers, capabilities, goals, resources,
 invocations, grants, approvals, queues, leases, and storage integrity.
 
+This plan starts after the cleanup checkpoint documented in
+`docs/modular-engine-cleanup-audit.md`: the fixed iOS Automations and Voice
+Notes dashboards are no longer product-shell targets, control projection shaping
+lives with `control::*`, and generated UI remains the path for future bespoke
+operator surfaces.
+
 This phase is not a new dashboard framework and not a dynamic third-party UI
 marketplace. It is deterministic surface authoring, refresh, integrity, and
 end-to-end action handling on top of the existing resource, invocation, grant,

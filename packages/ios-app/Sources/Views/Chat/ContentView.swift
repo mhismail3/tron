@@ -29,7 +29,7 @@ struct ContentView: View {
     // Voice notes recording
     @State private var showVoiceNotesRecording = false
 
-    // Navigation mode (Agents vs Voice Notes)
+    // Navigation mode (chat harness vs engine console)
     @State private var navigationMode: NavigationMode = .agents
 
     // Scroll target for deep link navigation (passed to ChatView)
@@ -166,12 +166,8 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if horizontalSizeClass == .compact && navigationMode == .voiceNotes {
-            compactVoiceNotesList
-        } else if navigationMode == .engine {
+        if navigationMode == .engine {
             engineConsoleMode
-        } else if horizontalSizeClass == .compact && navigationMode == .automations {
-            compactAutomationsDashboard
         } else {
             splitViewContent
         }
@@ -184,27 +180,6 @@ struct ContentView: View {
             notificationUnreadCount: notificationStore.unreadCount,
             onNotificationBell: { showNotificationSheet = true }
         )
-    }
-
-    @ViewBuilder
-    private var compactVoiceNotesList: some View {
-        NavigationStack {
-            VoiceNotesListView(
-                engineClient: engineClient,
-                onVoiceNote: { showVoiceNotesRecording = true },
-                actions: dashboardActions
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var compactAutomationsDashboard: some View {
-        NavigationStack {
-            AutomationsDashboardView(
-                engineClient: engineClient,
-                actions: dashboardActions
-            )
-        }
     }
 
     @ViewBuilder
@@ -261,31 +236,16 @@ struct ContentView: View {
 
     @ViewBuilder
     private var sidebarContent: some View {
-        Group {
-            if navigationMode == .agents {
-                SessionSidebar(
-                    selectedSessionId: $selectedSessionId,
-                    onNewSession: { showNewSessionSheet = true },
-                    onNewSessionLongPress: { createQuickSession() },
-                    onDeleteSession: { sessionId in
-                        deleteSession(sessionId)
-                    },
-                    onVoiceNote: { showVoiceNotesRecording = true },
-                    actions: dashboardActions
-                )
-            } else if navigationMode == .automations {
-                AutomationsDashboardView(
-                    engineClient: engineClient,
-                    actions: dashboardActions
-                )
-            } else {
-                VoiceNotesListView(
-                    engineClient: engineClient,
-                    onVoiceNote: { showVoiceNotesRecording = true },
-                    actions: dashboardActions
-                )
-            }
-        }
+        SessionSidebar(
+            selectedSessionId: $selectedSessionId,
+            onNewSession: { showNewSessionSheet = true },
+            onNewSessionLongPress: { createQuickSession() },
+            onDeleteSession: { sessionId in
+                deleteSession(sessionId)
+            },
+            onVoiceNote: { showVoiceNotesRecording = true },
+            actions: dashboardActions
+        )
         // Remove default gray sidebar toggle - we'll add a custom emerald one to detail views
         .toolbar(removing: .sidebarToggle)
     }

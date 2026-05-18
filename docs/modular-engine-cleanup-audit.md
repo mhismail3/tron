@@ -1,0 +1,90 @@
+# Modular Engine Cleanup Audit
+
+Last verified: 2026-05-18 on `next/modular-capability-engine`.
+
+This document is the proof map for the cleanup pass that follows the generated
+UI substrate checkpoint. The rule for this pass is remove with proof: code is
+kept only when it has a current substrate role, reusable capability contract,
+runtime caller, thin-client purpose, or test/support role.
+
+## Current Substrate Map
+
+| Area | Classification | Evidence | Decision |
+|------|----------------|----------|----------|
+| `app`, `transport`, `shared`, `platform` | distribution/support | `src/lib.rs`, README module map, startup and protocol entrypoints | Keep; only remove stale product routes when exact callers are gone |
+| `engine` fabric | substrate | 38 Rust files under `packages/agent/src/engine`; primitive workers register catalog, control, grant, resource, storage, UI, worker, queue, stream, state, approval, observability | Keep; consolidate projection logic into owning primitives |
+| `engine/primitives/control.rs` | substrate thin projection | public `control::snapshot` and `control::inspect`; static gate forbids `control::act` | Keep; owns control projection shaping and action summaries |
+| `engine/primitives/runtime.rs` | runtime dispatch | host-dispatched primitive boundary and host trait | Keep; should dispatch to primitive owners, not accumulate projection code |
+| `engine/resources.rs` | substrate resource kernel | built-in resource definitions, validation, resource/version/link stores, UI-surface validation | Keep for now; candidate for later file split after behavior is stable |
+| Domain registration | capability modules | 36 domain contract files and 32 startup worker-module registrations in `domains/registration.rs` | Keep as current capability surface until each domain is individually proven unused or duplicated |
+| `cron` server domain and iOS DTO/client | capability module | `cron::` contracts, `CronClient`, DTO tests | Keep as reusable capability module; remove fixed iOS dashboard shell |
+| `voice_notes` server domain and recording components | capability module / chat affordance | `voice_notes::` contracts and chat recording sheet/button still have callers | Keep; remove fixed iOS list shell |
+| iOS chat/session surfaces | thin shell | `ContentView`, `SessionSidebar`, `ChatView`, onboarding/settings pairing paths | Keep as thin chat harness until replaced by generated surfaces |
+| iOS Engine Console | thin control client | `NavigationMode.engine`, `EngineConsoleState`, `control::*` DTOs, generated UI renderer | Keep; no local policy truth |
+| Fixed iOS Automations dashboard | remove candidate | only reached through `NavigationMode.automations`; duplicates future control/generated UI surface for cron | Remove from top-level navigation and delete fixed views |
+| Fixed iOS Voice Notes list | remove candidate | only reached through `NavigationMode.voiceNotes`; voice recording remains callable from chat | Remove from top-level navigation and delete fixed list |
+| `SafariView` browser wrapper | remove candidate | no production caller; only self-preview reference | Remove |
+
+## Cleanup Decisions Applied
+
+- Moved control snapshot/inspect projection construction out of the generic
+  primitive runtime and into `engine/primitives/control.rs`. Runtime now dispatches
+  to the control primitive; the control primitive owns substrate action summaries,
+  UI-surface refs, and target graph shaping.
+- Removed control `payloadTemplate` summaries. Control projections now expose
+  action identity, target type/field, risk, approval, revision, and target value
+  hints only. Executable generated-UI payload templates remain stored and
+  validated only on `ui_surface` resources.
+- Removed the fixed iOS Automations dashboard files. Cron DTOs/client/tests remain
+  because cron is a reusable capability module; the bespoke dashboard was product
+  shell state.
+- Removed the fixed iOS Voice Notes list and `voice-notes` deep-link route. Chat
+  voice recording remains as an explicit chat affordance.
+- Removed the unused `SafariView` wrapper. Browser capability/event DTOs remain
+  until the browser/display capability family is audited end-to-end.
+- Split the generated-UI engine tests into `engine/tests/generated_ui.rs` as the
+  first test-module boundary around the previously monolithic engine test file.
+
+## Deferred High-Scrutiny Areas
+
+These areas are not proven removable in this checkpoint and need separate
+call-graph/test-backed passes:
+
+- `notifications`: still drives APNs, notification inbox, and engine-delivered
+  operator notices. Remove only after notification delivery is replaced by
+  resource/control projections or a generated surface.
+- `prompt_library`: still has settings, input-bar, history, and snippet callers.
+  It should become artifact/resource-backed before any deeper deletion.
+- `AgentControl`, `SourceChanges`, and subagent sheets: still have chat-sheet
+  callers and event-state dependencies. Replace with resource lineage/control
+  projections before deletion.
+- `browser`, `display`, `device`, `transcription`, and `voice_notes` server
+  domains: still register capability workers and may support chat or local device
+  flows. Demote or remove only with route, DTO, and event-plugin proof.
+- `engine/resources.rs` and the remaining `engine/tests.rs` body: large files
+  that need further mechanical splitting, but no behavior should move until the
+  current cleanup tests pass.
+
+## Static Gates
+
+The cleanup is protected by static tests that require:
+
+- no `control::act`;
+- no output-audit acceptance path;
+- no public `sandbox::spawn_worker` path;
+- no notification markdown blob as durable subagent result path;
+- no iOS-generated UI action submission fields that let the client choose target
+  function, payload template, or grant;
+- no fixed iOS Automations/Voice Notes dashboard names or retired navigation
+  cases;
+- no local iOS generated-UI fallback renderer.
+
+## Verification Targets
+
+- Rust targeted static gates: `cargo test --test threat_model_invariants`.
+- Rust broad check for engine refactors: `scripts/tron ci fmt check clippy test`.
+- iOS project refresh after deleting source files:
+  `cd packages/ios-app && xcodegen generate`.
+- iOS targeted tests: navigation, source guards, generated UI DTO/cache, and
+  Engine Console state tests.
+- Final hygiene: `git diff --check` and README/doc scans for removed names.

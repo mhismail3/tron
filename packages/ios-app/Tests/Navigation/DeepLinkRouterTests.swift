@@ -117,12 +117,12 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .settings)
     }
 
-    func testHandleURLVoiceNotes() {
+    func testHandleURLVoiceNotesIsRetired() {
         let router = DeepLinkRouter()
         let url = URL(string: "tron://voice-notes")!
 
-        XCTAssertTrue(router.handle(url: url))
-        XCTAssertEqual(router.pendingIntent, .voiceNotes)
+        XCTAssertFalse(router.handle(url: url))
+        XCTAssertNil(router.pendingIntent)
     }
 
     func testHandleURLWithMissingSessionId() {
@@ -191,7 +191,7 @@ final class DeepLinkRouterTests: XCTestCase {
             NavigationIntent.session(id: "sess_2", scrollTo: nil)
         )
         XCTAssertEqual(NavigationIntent.settings, NavigationIntent.settings)
-        XCTAssertEqual(NavigationIntent.voiceNotes, NavigationIntent.voiceNotes)
-        XCTAssertNotEqual(NavigationIntent.settings, NavigationIntent.voiceNotes)
+        XCTAssertEqual(NavigationIntent.share, NavigationIntent.share)
+        XCTAssertNotEqual(NavigationIntent.settings, NavigationIntent.share)
     }
 }

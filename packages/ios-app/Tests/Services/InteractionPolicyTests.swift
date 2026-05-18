@@ -47,7 +47,6 @@ struct InteractionPolicyTests {
         #expect(f.policy.canCommitWorktree == false)
         #expect(f.policy.canManagePluginSources == false)
         #expect(f.policy.canManageSkills == false)
-        #expect(f.policy.canManageAutomations == false)
         #expect(f.policy.canLoadServerData == false)
     }
 
@@ -64,7 +63,6 @@ struct InteractionPolicyTests {
         #expect(f.policy.canCommitWorktree)
         #expect(f.policy.canManagePluginSources)
         #expect(f.policy.canManageSkills)
-        #expect(f.policy.canManageAutomations)
         #expect(f.policy.canLoadServerData)
     }
 
