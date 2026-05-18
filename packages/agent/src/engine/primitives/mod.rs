@@ -8,8 +8,10 @@
 //! `grant::*` is the engine-owned authority surface; `resource::*` plus the
 //! artifact/goal/claim/evidence/decision wrappers form the durable output
 //! substrate. `ui::*` stores fixed-catalog generated UI as `ui_surface`
-//! resources and routes submitted actions back through canonical capability
-//! invocations. `storage::*` is the system primitive surface for the unified
+//! resources, authors deterministic target surfaces from substrate projections,
+//! validates/refreshes/expires generated versions, and routes submitted actions
+//! back through canonical capability invocations. `storage::*` is the system
+//! primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
 //! export.
 

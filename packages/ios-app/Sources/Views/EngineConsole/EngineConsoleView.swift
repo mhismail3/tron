@@ -245,17 +245,36 @@ struct EngineConsoleView: View {
                         title: "No surfaces",
                         message: "Generated UI resources will appear here after workers create them."
                     )
+                    if state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: "worker"),
+                       let worker = substrateSnapshot?.workers?.first,
+                       let workerId = substrateFieldOptional(worker, keys: ["id", "workerId"]) {
+                        Button {
+                            Task { await state.authorSurface(targetType: "worker", targetId: workerId) }
+                        } label: {
+                            Label("Create Worker Surface", systemImage: "rectangle.badge.plus")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(state.isMutatingDisabled)
+                    }
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(surfaces.prefix(8).enumerated()), id: \.element.resourceId) { _, surface in
-                            EngineConsoleKeyValueRow(
-                                surface.title ?? surface.surfaceId ?? surface.resourceId,
-                                surface.lifecycle ?? surface.catalog?.id ?? "ui_surface"
-                            )
+                            Button {
+                                Task { await state.inspectSurface(surface) }
+                            } label: {
+                                EngineConsoleKeyValueRow(
+                                    surface.title ?? surface.surfaceId ?? surface.resourceId,
+                                    surface.lifecycle ?? surface.catalog?.id ?? "ui_surface"
+                                )
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
+
+            generatedSurfaceDetail
 
             EngineConsoleCard {
                 EngineConsoleCardHeader(
@@ -695,8 +714,71 @@ struct EngineConsoleView: View {
         ]
     }
 
+    @ViewBuilder
+    private var generatedSurfaceDetail: some View {
+        if let inspected = state.selectedSurface,
+           let surface = inspected.surface {
+            EngineConsoleCard {
+                EngineConsoleCardHeader(
+                    symbol: "rectangle.3.group.bubble.left",
+                    title: surface.title,
+                    subtitle: "Validation: \(inspected.validationState)"
+                )
+
+                GeneratedUISurfaceView(
+                    surface: surface,
+                    resourceRef: inspected.resourceRef,
+                    observedVersionId: inspected.resourceRef?.versionId,
+                    isOfflineCached: state.isMutatingDisabled,
+                    onSubmit: { submission in
+                        Task { await state.submitSurfaceAction(submission) }
+                    }
+                )
+
+                HStack(spacing: 10) {
+                    Button {
+                        Task { await state.refreshSelectedSurface() }
+                    } label: {
+                        Label("Refresh Surface", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(state.isMutatingDisabled || inspected.resourceRef?.versionId == nil)
+
+                    if let ref = inspected.resourceRef {
+                        Button {
+                            Task { await state.validateSurface(ref) }
+                        } label: {
+                            Label("Validate", systemImage: "checkmark.shield")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                if let result = state.surfaceActionResult {
+                    EngineConsoleKeyValueRow(
+                        result.targetFunctionId ?? "surface action",
+                        result.childInvocationId ?? result.actionId ?? "submitted"
+                    )
+                }
+
+                if let error = state.surfaceError {
+                    EngineConsoleBanner(
+                        symbol: "exclamationmark.triangle",
+                        title: "Surface state",
+                        message: error,
+                        tint: .tronAmber
+                    )
+                }
+            }
+        }
+    }
+
     private func substrateField(_ value: AnyCodable, keys: [String], fallback: String) -> String {
-        guard let dictionary = value.dictionaryValue else { return fallback }
+        substrateFieldOptional(value, keys: keys) ?? fallback
+    }
+
+    private func substrateFieldOptional(_ value: AnyCodable, keys: [String]) -> String? {
+        guard let dictionary = value.dictionaryValue else { return nil }
         for key in keys {
             if let string = dictionary[key] as? String, !string.isEmpty {
                 return string
@@ -708,7 +790,7 @@ struct EngineConsoleView: View {
                 return bool ? "true" : "false"
             }
         }
-        return fallback
+        return nil
     }
 
     private var readinessTint: Color {

@@ -62,6 +62,7 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn approval_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineApprovalRecord>>;
     fn stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineStreamEvent>>;
     fn resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>>;
+    fn resource_lease(&self, lease_id: &str) -> Result<Option<EngineResourceLease>>;
     fn compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>>;
     fn resource_type_definitions(&self) -> Result<Vec<EngineResourceTypeDefinition>>;
     fn list_resources(&self, filter: ListResources) -> Result<Vec<EngineResource>>;
@@ -125,8 +126,12 @@ pub(in crate::engine) fn dispatch(
         }
         ui::CATALOG_FUNCTION
         | ui::CREATE_SURFACE_FUNCTION
+        | ui::SURFACE_FOR_TARGET_FUNCTION
         | ui::UPDATE_SURFACE_FUNCTION
         | ui::INSPECT_SURFACE_FUNCTION
+        | ui::VALIDATE_SURFACE_FUNCTION
+        | ui::REFRESH_SURFACE_FUNCTION
+        | ui::EXPIRE_SURFACE_FUNCTION
         | ui::DISCARD_SURFACE_FUNCTION
         | ui::SUBMIT_ACTION_FUNCTION => ui::dispatch(host, invocation),
         observability::TRACE_GET_FUNCTION => trace_get(host, invocation),

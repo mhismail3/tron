@@ -2163,6 +2163,14 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .list_by_trace(trace_id, 500)
     }
 
+    fn resource_lease(&self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
+        self.primitives
+            .leases
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
+            .get(lease_id)
+    }
+
     fn compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>> {
         self.primitives
             .compensation

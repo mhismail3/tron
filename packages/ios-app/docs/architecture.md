@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-18 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, strict generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-18 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, server-authored generated `ui_surface` inspection/refresh/action flow, strict generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -13,7 +13,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Capability-native invocation/result rendering for the live `search` / `inspect` / `execute` harness
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
-- A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, generated `ui_surface` refs, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
+- A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
 - No fixed Automations or Voice Notes dashboards; reusable cron and voice-note protocol pieces remain capability modules until generated/control surfaces replace them
 
 The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
@@ -146,13 +146,13 @@ final class SubagentState {
 | `Models/UnifiedEventTransformer.swift` | History reconstruction |
 | `ViewModels/Chat/ChatViewModel.swift` | Main chat state |
 | `Services/Network/EngineClient.swift` | /engine client protocol, canonical invoke, and stream subscriptions |
-| `Services/Network/Clients/CapabilityClient.swift` | Capability admin and primitive client for Engine Console |
+| `Services/Network/Clients/CapabilityClient.swift` | Capability admin, control, and generated UI primitive client for Engine Console |
 | `Services/Storage/EngineConsoleCache.swift` | Read-only disconnected Engine Console summary cache, including redacted generated UI refs |
 | `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state |
 | `Views/EngineConsole/EngineConsoleView.swift` | Top-level capability operator console |
-| `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog generated UI resources |
+| `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources |
 
 ## Engine Client Boundary
 

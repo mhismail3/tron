@@ -48,10 +48,12 @@
 //!   evidence, decisions, generated UI surfaces, worker packages, and
 //!   materialized files are modeled as versioned resources with links and
 //!   events instead of separate persistence planes;
-//! - generated UI surfaces are fixed-catalog `ui_surface` resources; clients
-//!   render the declared component tree and submit stored action ids through
-//!   `ui::submit_action`, while the engine reconstructs and authorizes the
-//!   target capability invocation;
+//! - generated UI surfaces are fixed-catalog `ui_surface` resources; the engine
+//!   can author deterministic target surfaces from substrate projections,
+//!   validate/refresh/expire generated versions, and clients render the
+//!   declared component tree while submitting stored action ids through
+//!   `ui::submit_action` so the engine reconstructs and authorizes the target
+//!   capability invocation;
 //! - durable-output capabilities declare output contracts and finish validation
 //!   requires canonical resource refs for every resource-backed path;
 //! - the trigger runtime records trigger metadata, transport/domain authority

@@ -110,7 +110,7 @@ fn inspect_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "grant", "goal", "resource", "invocation", "trace"]
+                "enum": ["worker", "capability", "grant", "goal", "resource", "invocation", "trace", "approval", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "includeFullPayloads": {"type": "boolean"}
@@ -240,6 +240,30 @@ fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> 
                 "leases": trace.leases,
                 "compensation": trace.compensation,
             })
+        }
+        "approval" => {
+            let approval = host
+                .approval_records(None, invocation.causal_context.session_id.as_deref(), 500)?
+                .into_iter()
+                .find(|record| record.approval_id == target_id);
+            json!({ "approval": approval })
+        }
+        "queue" => {
+            let item = host
+                .queue_items("engine", 500)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|item| item.receipt_id == target_id || item.queue == target_id);
+            json!({ "queue": item })
+        }
+        "lease" => {
+            json!({ "lease": host.resource_lease(target_id)? })
+        }
+        "storage" => {
+            json!({ "storage": host.storage_stats().ok().map(|stats| json!(stats)) })
+        }
+        "integrity" => {
+            json!({ "warnings": substrate_integrity_warnings(host)? })
         }
         _ => {
             return Err(EngineError::PolicyViolation(format!(
@@ -412,6 +436,14 @@ fn substrate_integrity_warnings(host: &dyn PrimitiveRuntimeHost) -> Result<Vec<V
 
 fn substrate_actions() -> Vec<Value> {
     vec![
+        action_summary("ui::surface_for_target", "*", "targetId", "medium", false),
+        action_summary(
+            "ui::refresh_surface",
+            "*",
+            "surfaceResourceId",
+            "medium",
+            false,
+        ),
         action_summary("grant::revoke", "grant", "grantId", "high", true),
         action_summary("worker::disconnect", "worker", "workerId", "high", true),
         action_summary(
@@ -447,7 +479,9 @@ fn actions_for_target(target_type: &str, target_id: &str) -> Vec<Value> {
                 .get("targetType")
                 .and_then(Value::as_str)
                 .is_none_or(|kind| {
-                    kind == target_type || target_type == "goal" && kind == "resource"
+                    kind == "*"
+                        || kind == target_type
+                        || target_type == "goal" && kind == "resource"
                 })
         })
         .map(|mut action| {

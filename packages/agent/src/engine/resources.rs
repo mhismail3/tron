@@ -1952,7 +1952,8 @@ fn ui_surface_schema() -> Value {
             "actions": {"type": "array", "items": {"type": "object"}, "maxItems": UI_MAX_ACTIONS},
             "redactionPolicy": {"type": "object"},
             "expiresAt": {"type": "string"},
-            "refreshPolicy": {"type": "object"}
+            "refreshPolicy": {"type": "object"},
+            "authoring": {"type": "object"}
         }
     })
 }
@@ -2150,7 +2151,18 @@ fn validate_ui_bindings(value: Option<&Value>) -> Result<()> {
         if let Some(target_type) = object.get("targetType").and_then(Value::as_str)
             && !matches!(
                 target_type,
-                "worker" | "capability" | "grant" | "goal" | "resource" | "invocation" | "trace"
+                "worker"
+                    | "capability"
+                    | "grant"
+                    | "goal"
+                    | "resource"
+                    | "invocation"
+                    | "trace"
+                    | "approval"
+                    | "queue"
+                    | "lease"
+                    | "storage"
+                    | "integrity"
             )
         {
             return Err(EngineError::PolicyViolation(format!(
@@ -2418,6 +2430,9 @@ fn scan_ui_value_for_forbidden_content(value: &Value, path: &str) -> Result<()> 
                         "ui_surface stores secret-like value at {path}.{key}; use secret_ref"
                     )));
                 }
+                if ui_structural_identifier_key(key) && child.is_string() {
+                    continue;
+                }
                 scan_ui_value_for_forbidden_content(child, &format!("{path}.{key}"))?;
             }
         }
@@ -2452,6 +2467,27 @@ fn secret_like_key(key: &str) -> bool {
     ["secret", "apikey", "password", "credential", "accesstoken"]
         .iter()
         .any(|needle| key.contains(needle))
+}
+
+fn ui_structural_identifier_key(key: &str) -> bool {
+    matches!(
+        key,
+        "surfaceId"
+            | "resourceId"
+            | "versionId"
+            | "targetId"
+            | "targetFunctionId"
+            | "targetVersionId"
+            | "functionId"
+            | "workerId"
+            | "grantId"
+            | "invocationId"
+            | "createdByInvocationId"
+            | "refreshedFromVersionId"
+            | "projectionHash"
+            | "actionId"
+            | "confirmActionId"
+    )
 }
 
 fn raw_secret_like_value(value: &str) -> bool {

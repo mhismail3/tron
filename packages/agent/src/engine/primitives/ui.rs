@@ -4,8 +4,9 @@
 //! wrappers around the generic resource store plus the fixed component catalog.
 //! They do not own durable state.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use super::{
     PrimitiveFunctionRegistration, UI_WORKER_ID, host_dispatched_registration, optional_string,
@@ -13,11 +14,11 @@ use super::{
 };
 use crate::engine::discovery::{ActorContext, FunctionQuery};
 use crate::engine::ids::FunctionId;
-use crate::engine::primitives::runtime::PrimitiveRuntimeHost;
+use crate::engine::primitives::runtime::{PrimitiveRuntimeHost, invocation_record_value};
 use crate::engine::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion,
-    EngineResourceVersionState, UI_SURFACE_KIND, UpdateResource, ui_component_catalog,
-    validate_ui_surface_payload,
+    EngineResourceVersionState, UI_CATALOG_REVISION, UI_SURFACE_KIND, UpdateResource,
+    ui_component_catalog, validate_ui_surface_payload,
 };
 use crate::engine::types::{
     DurableOutputContract, EffectClass, FunctionDefinition, IdempotencyContract, RiskLevel,
@@ -31,6 +32,12 @@ pub(crate) const UPDATE_SURFACE_FUNCTION: &str = "ui::update_surface";
 pub(crate) const INSPECT_SURFACE_FUNCTION: &str = "ui::inspect_surface";
 pub(crate) const DISCARD_SURFACE_FUNCTION: &str = "ui::discard_surface";
 pub(crate) const SUBMIT_ACTION_FUNCTION: &str = "ui::submit_action";
+pub(crate) const SURFACE_FOR_TARGET_FUNCTION: &str = "ui::surface_for_target";
+pub(crate) const VALIDATE_SURFACE_FUNCTION: &str = "ui::validate_surface";
+pub(crate) const REFRESH_SURFACE_FUNCTION: &str = "ui::refresh_surface";
+pub(crate) const EXPIRE_SURFACE_FUNCTION: &str = "ui::expire_surface";
+
+const GENERATED_AUTHORING_MODE: &str = "generated";
 
 pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
     Ok(vec![
@@ -57,6 +64,13 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
         )
         .with_output_contract(DurableOutputContract::resource_backed([UI_SURFACE_KIND])),
         ui_write(
+            SURFACE_FOR_TARGET_FUNCTION,
+            "author or refresh a deterministic generated ui_surface for a substrate target",
+            surface_for_target_schema(),
+            surface_resource_response_schema(),
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([UI_SURFACE_KIND])),
+        ui_write(
             UPDATE_SURFACE_FUNCTION,
             "compare-and-set update a generated ui_surface resource",
             update_surface_schema(),
@@ -78,6 +92,8 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 "additionalProperties": false,
                 "properties": {
                     "inspection": {"type": ["object", "null"]},
+                    "surface": {"type": ["object", "null"]},
+                    "resourceRef": {"type": ["object", "null"]},
                     "validationState": {"type": "string"},
                     "bindings": {"type": "array"},
                     "actions": {"type": "array"},
@@ -85,6 +101,40 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 }
             }),
         ),
+        ui_read(
+            VALIDATE_SURFACE_FUNCTION,
+            "validate a stored ui_surface against current substrate truth",
+            json!({
+                "type": "object",
+                "required": ["surfaceResourceId"],
+                "additionalProperties": false,
+                "properties": {"surfaceResourceId": {"type": "string"}}
+            }),
+            json!({
+                "type": "object",
+                "required": ["surfaceResourceId", "validationState", "diagnostics"],
+                "additionalProperties": false,
+                "properties": {
+                    "surfaceResourceId": {"type": "string"},
+                    "validationState": {"type": "string"},
+                    "diagnostics": {"type": "array"}
+                }
+            }),
+        ),
+        ui_write(
+            REFRESH_SURFACE_FUNCTION,
+            "refresh a generated ui_surface from stored authoring metadata",
+            refresh_surface_schema(),
+            surface_version_response_schema(),
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([UI_SURFACE_KIND])),
+        ui_write(
+            EXPIRE_SURFACE_FUNCTION,
+            "expire a ui_surface lifecycle without deleting its payload",
+            expire_surface_schema(),
+            surface_version_response_schema(),
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([UI_SURFACE_KIND])),
         ui_write(
             DISCARD_SURFACE_FUNCTION,
             "discard a generated ui_surface resource",
@@ -162,8 +212,12 @@ pub(in crate::engine) fn dispatch(
     match invocation.function_id.as_str() {
         CATALOG_FUNCTION => catalog(),
         CREATE_SURFACE_FUNCTION => create_surface(host, invocation),
+        SURFACE_FOR_TARGET_FUNCTION => surface_for_target(host, invocation),
         UPDATE_SURFACE_FUNCTION => update_surface(host, invocation),
         INSPECT_SURFACE_FUNCTION => inspect_surface(host, invocation),
+        VALIDATE_SURFACE_FUNCTION => validate_surface(host, invocation),
+        REFRESH_SURFACE_FUNCTION => refresh_surface(host, invocation),
+        EXPIRE_SURFACE_FUNCTION => expire_surface(host, invocation),
         DISCARD_SURFACE_FUNCTION => discard_surface(host, invocation),
         SUBMIT_ACTION_FUNCTION => Err(EngineError::PolicyViolation(
             "ui::submit_action must execute through the async host action gateway".to_owned(),
@@ -209,6 +263,67 @@ fn create_surface(
     }))
 }
 
+fn surface_for_target(
+    host: &mut dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+) -> Result<Value> {
+    let request = SurfaceAuthoringRequest::from_invocation(invocation)?;
+    let AuthoredSurface { surface, .. } =
+        author_surface_for_target(host, invocation, &request, None)?;
+    let resource_id = request
+        .existing_surface_resource_id
+        .clone()
+        .or_else(|| request.resource_id.clone())
+        .unwrap_or_else(|| deterministic_surface_resource_id(&request));
+
+    if let Some(existing) = host.inspect_resource(&resource_id)? {
+        ensure_ui_surface(&existing)?;
+        let expected_current_version_id = request
+            .expected_current_version_id
+            .clone()
+            .or(existing.resource.current_version_id.clone());
+        let version = host.update_resource(UpdateResource {
+            resource_id,
+            expected_current_version_id,
+            lifecycle: Some(surface_lifecycle(invocation, "active")?),
+            payload: surface.clone(),
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        Ok(json!({
+            "surface": surface,
+            "version": version,
+            "resourceRefs": [resource_ref_from_version(&version, UI_SURFACE_KIND, "updated")],
+        }))
+    } else {
+        let resource = host.create_resource(CreateResource {
+            resource_id: Some(resource_id),
+            kind: UI_SURFACE_KIND.to_owned(),
+            schema_id: None,
+            scope: resource_scope_from_payload(invocation)?,
+            owner_worker_id: WorkerId::new(UI_WORKER_ID).unwrap(),
+            owner_actor_id: invocation.causal_context.actor_id.clone(),
+            lifecycle: Some(surface_lifecycle(invocation, "active")?),
+            policy: invocation
+                .payload
+                .get("policy")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+            initial_payload: Some(surface.clone()),
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        Ok(json!({
+            "surface": surface,
+            "resource": resource,
+            "resourceRefs": [resource_ref_from_resource(&resource, "created")],
+        }))
+    }
+}
+
 fn update_surface(
     host: &mut dyn PrimitiveRuntimeHost,
     invocation: &crate::engine::Invocation,
@@ -243,12 +358,144 @@ fn inspect_surface(
         ensure_ui_surface(inspection)?;
     }
     let payload = inspection.as_ref().and_then(current_payload);
+    let resource_ref = inspection
+        .as_ref()
+        .and_then(|inspection| {
+            inspection
+                .resource
+                .current_version_id
+                .as_ref()
+                .map(|_| inspection)
+        })
+        .map(|inspection| {
+            json!({
+                "resourceId": inspection.resource.resource_id,
+                "kind": inspection.resource.kind,
+                "versionId": inspection.resource.current_version_id,
+                "role": "current",
+                "contentHash": current_version_hash(inspection).unwrap_or_default(),
+            })
+        });
+    let validation_state = surface_validation_state(host, invocation, &inspection).state;
     Ok(json!({
         "inspection": inspection,
-        "validationState": if payload.is_some() { "valid" } else { "missing" },
+        "surface": payload,
+        "resourceRef": resource_ref,
+        "validationState": validation_state,
         "bindings": payload.as_ref().and_then(|payload| payload.get("bindings")).cloned().unwrap_or_else(|| json!([])),
         "actions": action_summaries(payload.as_ref()),
         "lineage": surface_lineage(inspection.as_ref()),
+    }))
+}
+
+fn validate_surface(
+    host: &mut dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+) -> Result<Value> {
+    let surface_resource_id = required_str(&invocation.payload, "surfaceResourceId")?;
+    let inspection = host.inspect_resource(surface_resource_id)?;
+    let validation = surface_validation_state(host, invocation, &inspection);
+    Ok(json!({
+        "surfaceResourceId": surface_resource_id,
+        "validationState": validation.state,
+        "diagnostics": validation.diagnostics,
+    }))
+}
+
+fn refresh_surface(
+    host: &mut dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+) -> Result<Value> {
+    let resource_id = required_string_owned(&invocation.payload, "surfaceResourceId")?;
+    let expected_current_version_id =
+        optional_string(invocation.payload.get("expectedCurrentVersionId"))?.ok_or_else(|| {
+            EngineError::PolicyViolation(
+                "ui::refresh_surface requires expectedCurrentVersionId".to_owned(),
+            )
+        })?;
+    let inspection = host
+        .inspect_resource(&resource_id)?
+        .ok_or_else(|| EngineError::NotFound {
+            kind: "resource",
+            id: resource_id.clone(),
+        })?;
+    ensure_ui_surface(&inspection)?;
+    let payload = current_payload(&inspection).ok_or_else(|| {
+        EngineError::PolicyViolation(format!("ui_surface {resource_id} has no current payload"))
+    })?;
+    let mut request = SurfaceAuthoringRequest::from_authoring_payload(&payload)?;
+    request.existing_surface_resource_id = Some(resource_id.clone());
+    request.expected_current_version_id = Some(expected_current_version_id.clone());
+    request.expected_target_revision = None;
+    if DateTime::parse_from_rfc3339(&request.expires_at)
+        .map(|expires_at| expires_at.with_timezone(&Utc) <= Utc::now())
+        .unwrap_or(true)
+    {
+        request.expires_at = default_expires_at();
+    }
+    let AuthoredSurface { mut surface, .. } = author_surface_for_target(
+        host,
+        invocation,
+        &request,
+        inspection.resource.current_version_id.as_deref(),
+    )?;
+    surface["authoring"]["refreshedFromVersionId"] = json!(
+        inspection
+            .resource
+            .current_version_id
+            .clone()
+            .unwrap_or_default()
+    );
+    validate_surface_targets(host, invocation, &surface)?;
+    validate_ui_surface_payload(&surface)?;
+    let version = host.update_resource(UpdateResource {
+        resource_id,
+        expected_current_version_id: Some(expected_current_version_id),
+        lifecycle: Some("active".to_owned()),
+        payload: surface.clone(),
+        state: None,
+        locations: Vec::new(),
+        trace_id: invocation.causal_context.trace_id.clone(),
+        invocation_id: Some(invocation.id.clone()),
+    })?;
+    Ok(json!({
+        "surface": surface,
+        "version": version,
+        "resourceRefs": [resource_ref_from_version(&version, UI_SURFACE_KIND, "updated")],
+    }))
+}
+
+fn expire_surface(
+    host: &mut dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+) -> Result<Value> {
+    let resource_id = required_string_owned(&invocation.payload, "surfaceResourceId")?;
+    let inspection = host
+        .inspect_resource(&resource_id)?
+        .ok_or_else(|| EngineError::NotFound {
+            kind: "resource",
+            id: resource_id.clone(),
+        })?;
+    ensure_ui_surface(&inspection)?;
+    let payload = current_payload(&inspection).ok_or_else(|| {
+        EngineError::PolicyViolation(format!("ui_surface {resource_id} has no current payload"))
+    })?;
+    let expected_current_version_id =
+        optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+            .or(inspection.resource.current_version_id);
+    let version = host.update_resource(UpdateResource {
+        resource_id,
+        expected_current_version_id,
+        lifecycle: Some("expired".to_owned()),
+        payload,
+        state: None,
+        locations: Vec::new(),
+        trace_id: invocation.causal_context.trace_id.clone(),
+        invocation_id: Some(invocation.id.clone()),
+    })?;
+    Ok(json!({
+        "version": version,
+        "resourceRefs": [resource_ref_from_version(&version, UI_SURFACE_KIND, "expired")],
     }))
 }
 
@@ -408,6 +655,454 @@ fn validate_surface_targets(
         let _ = validate_action_target(host, invocation, action)?;
     }
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct SurfaceAuthoringRequest {
+    target_type: String,
+    target_id: String,
+    purpose: String,
+    layout_profile: String,
+    expected_target_revision: Option<u64>,
+    existing_surface_resource_id: Option<String>,
+    expected_current_version_id: Option<String>,
+    resource_id: Option<String>,
+    max_preview_bytes: usize,
+    expires_at: String,
+    refresh_policy: Value,
+    links: Vec<Value>,
+}
+
+struct AuthoredSurface {
+    surface: Value,
+}
+
+impl SurfaceAuthoringRequest {
+    fn from_invocation(invocation: &crate::engine::Invocation) -> Result<Self> {
+        let target_type = required_string_owned(&invocation.payload, "targetType")?;
+        ensure_supported_target_type(&target_type)?;
+        let target_id = required_string_owned(&invocation.payload, "targetId")?;
+        let purpose = optional_string(invocation.payload.get("purpose"))?
+            .unwrap_or_else(|| format!("Inspect {target_type} {target_id}"));
+        let layout_profile = optional_string(invocation.payload.get("layoutProfile"))?
+            .unwrap_or_else(|| "compact".to_owned());
+        let max_preview_bytes = optional_u64(invocation.payload.get("maxPreviewBytes"))?
+            .unwrap_or(1024)
+            .min(16 * 1024) as usize;
+        let expires_at = optional_string(invocation.payload.get("expiresAt"))?
+            .unwrap_or_else(default_expires_at);
+        ensure_not_expired(Some(&expires_at), "ui_surface")?;
+        Ok(Self {
+            target_type,
+            target_id,
+            purpose,
+            layout_profile,
+            expected_target_revision: optional_u64(
+                invocation.payload.get("expectedTargetRevision"),
+            )?,
+            existing_surface_resource_id: optional_string(
+                invocation.payload.get("existingSurfaceResourceId"),
+            )?,
+            expected_current_version_id: optional_string(
+                invocation.payload.get("expectedCurrentVersionId"),
+            )?,
+            resource_id: optional_string(invocation.payload.get("resourceId"))?,
+            max_preview_bytes,
+            expires_at,
+            refresh_policy: invocation
+                .payload
+                .get("refreshPolicy")
+                .cloned()
+                .unwrap_or_else(|| json!({"mode": "manual"})),
+            links: invocation
+                .payload
+                .get("links")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        })
+    }
+
+    fn from_authoring_payload(payload: &Value) -> Result<Self> {
+        let authoring = payload
+            .get("authoring")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "ui::refresh_surface requires generated authoring metadata".to_owned(),
+                )
+            })?;
+        if authoring.get("mode").and_then(Value::as_str) != Some(GENERATED_AUTHORING_MODE) {
+            return Err(EngineError::PolicyViolation(
+                "ui::refresh_surface requires generated authoring metadata".to_owned(),
+            ));
+        }
+        let target_type = authoring
+            .get("targetType")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation("generated authoring requires targetType".to_owned())
+            })?
+            .to_owned();
+        ensure_supported_target_type(&target_type)?;
+        let target_id = authoring
+            .get("targetId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation("generated authoring requires targetId".to_owned())
+            })?
+            .to_owned();
+        Ok(Self {
+            target_type,
+            target_id,
+            purpose: authoring
+                .get("purpose")
+                .and_then(Value::as_str)
+                .unwrap_or("Refresh generated surface")
+                .to_owned(),
+            layout_profile: authoring
+                .get("layoutProfile")
+                .and_then(Value::as_str)
+                .unwrap_or("compact")
+                .to_owned(),
+            expected_target_revision: authoring.get("targetRevision").and_then(Value::as_u64),
+            existing_surface_resource_id: None,
+            expected_current_version_id: None,
+            resource_id: None,
+            max_preview_bytes: authoring
+                .get("maxPreviewBytes")
+                .and_then(Value::as_u64)
+                .unwrap_or(1024)
+                .min(16 * 1024) as usize,
+            expires_at: payload
+                .get("expiresAt")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(default_expires_at),
+            refresh_policy: payload
+                .get("refreshPolicy")
+                .cloned()
+                .unwrap_or_else(|| json!({"mode": "manual"})),
+            links: payload
+                .get("bindings")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        })
+    }
+}
+
+fn author_surface_for_target(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    request: &SurfaceAuthoringRequest,
+    refreshed_from_version_id: Option<&str>,
+) -> Result<AuthoredSurface> {
+    let projection = target_projection(host, invocation, request)?;
+    if let Some(expected) = request.expected_target_revision
+        && projection.revision != expected
+    {
+        return Err(EngineError::StaleFunctionRevision {
+            function_id: format!("{}:{}", request.target_type, request.target_id),
+            expected,
+            actual: projection.revision,
+        });
+    }
+    let projection_hash = hash_json(&projection.graph)?;
+    let mut bindings = vec![json!({
+        "targetType": request.target_type,
+        "targetId": request.target_id,
+        "role": "target",
+        "label": projection.title,
+    })];
+    for link in &request.links {
+        if !bindings.iter().any(|binding| binding == link) {
+            bindings.push(link.clone());
+        }
+    }
+    let surface_id = format!(
+        "generated.{}.{}",
+        request.target_type,
+        slug(&request.target_id)
+    );
+    let mut surface = json!({
+        "surfaceId": surface_id,
+        "title": projection.title,
+        "purpose": request.purpose,
+        "catalog": {"id": "tron.ui.catalog.core.v1", "revision": UI_CATALOG_REVISION},
+        "layout": layout_for_projection(&projection),
+        "bindings": bindings,
+        "actions": generated_actions(host, invocation, request)?,
+        "redactionPolicy": {"mode": "redacted"},
+        "expiresAt": request.expires_at,
+        "refreshPolicy": request.refresh_policy,
+        "authoring": {
+            "mode": GENERATED_AUTHORING_MODE,
+            "targetType": request.target_type,
+            "targetId": request.target_id,
+            "purpose": request.purpose,
+            "layoutProfile": request.layout_profile,
+            "targetRevision": projection.revision,
+            "catalogRevision": host.catalog_revision().0,
+            "projectionHash": projection_hash,
+            "maxPreviewBytes": request.max_preview_bytes,
+            "createdByInvocationId": invocation.id.as_str(),
+        }
+    });
+    if let Some(version_id) = refreshed_from_version_id {
+        surface["authoring"]["refreshedFromVersionId"] = json!(version_id);
+    }
+    validate_surface_targets(host, invocation, &surface)?;
+    validate_ui_surface_payload(&surface)?;
+    Ok(AuthoredSurface { surface })
+}
+
+struct TargetProjection {
+    title: String,
+    summary: String,
+    revision: u64,
+    graph: Value,
+}
+
+fn target_projection(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    request: &SurfaceAuthoringRequest,
+) -> Result<TargetProjection> {
+    match request.target_type.as_str() {
+        "worker" => {
+            let worker_id = WorkerId::new(request.target_id.clone())?;
+            let worker = host.inspect_worker(&worker_id)?;
+            let functions = host
+                .discover_functions(&FunctionQuery {
+                    include_internal: true,
+                    ..FunctionQuery::default()
+                })
+                .into_iter()
+                .filter(|function| function.owner_worker == worker_id)
+                .collect::<Vec<_>>();
+            Ok(TargetProjection {
+                title: format!("Worker {}", worker.id.as_str()),
+                summary: format!("{} capabilities", functions.len()),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(
+                    json!({"worker": worker, "capabilities": functions}),
+                    request.max_preview_bytes,
+                ),
+            })
+        }
+        "capability" => {
+            let function = host
+                .discover_functions(&FunctionQuery {
+                    actor: Some(actor_context(invocation)),
+                    include_internal: true,
+                    ..FunctionQuery::default()
+                })
+                .into_iter()
+                .find(|function| function.id.as_str() == request.target_id)
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "function",
+                    id: request.target_id.clone(),
+                })?;
+            Ok(TargetProjection {
+                title: format!("Capability {}", function.id.as_str()),
+                summary: function.description.clone(),
+                revision: function.revision.0,
+                graph: bounded_json(json!({"capability": function}), request.max_preview_bytes),
+            })
+        }
+        "goal" | "resource" => {
+            let inspection = host.inspect_resource(&request.target_id)?.ok_or_else(|| {
+                EngineError::NotFound {
+                    kind: "resource",
+                    id: request.target_id.clone(),
+                }
+            })?;
+            let summary = format!(
+                "{} / {}",
+                inspection.resource.kind, inspection.resource.lifecycle
+            );
+            Ok(TargetProjection {
+                title: format!("Resource {}", inspection.resource.resource_id),
+                summary,
+                revision: host.catalog_revision().0,
+                graph: bounded_json(json!({"resource": inspection}), request.max_preview_bytes),
+            })
+        }
+        "invocation" => {
+            let record = host
+                .invocations()
+                .into_iter()
+                .find(|record| record.invocation_id.as_str() == request.target_id)
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "invocation",
+                    id: request.target_id.clone(),
+                })?;
+            Ok(TargetProjection {
+                title: format!("Invocation {}", record.function_id.as_str()),
+                summary: record
+                    .error
+                    .as_ref()
+                    .map_or_else(|| "completed".to_owned(), |_| "failed".to_owned()),
+                revision: record.function_revision.0,
+                graph: bounded_json(
+                    json!({"invocation": invocation_record_value(&record, false)}),
+                    request.max_preview_bytes,
+                ),
+            })
+        }
+        "grant" => {
+            let grant_id = crate::engine::ids::AuthorityGrantId::new(request.target_id.clone())?;
+            let grant = host
+                .inspect_grant(&grant_id)?
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "grant",
+                    id: request.target_id.clone(),
+                })?;
+            Ok(TargetProjection {
+                title: format!("Grant {}", grant.grant_id.as_str()),
+                summary: format!("{:?} / max {:?}", grant.lifecycle, grant.max_risk),
+                revision: grant.revision,
+                graph: bounded_json(json!({"grant": grant}), request.max_preview_bytes),
+            })
+        }
+        "approval" => {
+            let record = host
+                .approval_records(None, invocation.causal_context.session_id.as_deref(), 500)?
+                .into_iter()
+                .find(|record| record.approval_id == request.target_id)
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "approval",
+                    id: request.target_id.clone(),
+                })?;
+            Ok(TargetProjection {
+                title: format!("Approval {}", record.approval_id),
+                summary: format!("{:?} {}", record.status, record.function_id.as_str()),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(json!({"approval": record}), request.max_preview_bytes),
+            })
+        }
+        "queue" => {
+            let item = host
+                .queue_items("engine", 500)?
+                .into_iter()
+                .find(|item| {
+                    item.receipt_id == request.target_id || item.queue == request.target_id
+                })
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "queue_item",
+                    id: request.target_id.clone(),
+                })?;
+            Ok(TargetProjection {
+                title: format!("Queue {}", item.receipt_id),
+                summary: format!("{:?} {}", item.status, item.function_id.as_str()),
+                revision: item
+                    .target_revision
+                    .map_or(host.catalog_revision().0, |revision| revision.0),
+                graph: bounded_json(json!({"queue": item}), request.max_preview_bytes),
+            })
+        }
+        "lease" => {
+            let lease =
+                host.resource_lease(&request.target_id)?
+                    .ok_or_else(|| EngineError::NotFound {
+                        kind: "lease",
+                        id: request.target_id.clone(),
+                    })?;
+            Ok(TargetProjection {
+                title: format!("Lease {}", lease.lease_id),
+                summary: format!(
+                    "{:?} {}:{}",
+                    lease.status, lease.resource_kind, lease.resource_id
+                ),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(json!({"lease": lease}), request.max_preview_bytes),
+            })
+        }
+        "storage" => {
+            let storage = host.storage_stats().ok().map(|stats| json!(stats));
+            Ok(TargetProjection {
+                title: "Storage".to_owned(),
+                summary: storage
+                    .as_ref()
+                    .and_then(|value| value.get("databaseBytes").and_then(Value::as_u64))
+                    .map_or_else(
+                        || "storage stats unavailable".to_owned(),
+                        |bytes| format!("{bytes} database bytes"),
+                    ),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(json!({"storage": storage}), request.max_preview_bytes),
+            })
+        }
+        "integrity" => {
+            let damaged = host.list_resources(crate::engine::resources::ListResources {
+                kind: None,
+                scope: None,
+                lifecycle: Some("damaged".to_owned()),
+                limit: 50,
+            })?;
+            Ok(TargetProjection {
+                title: "Integrity".to_owned(),
+                summary: format!("{} damaged resources", damaged.len()),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(
+                    json!({"damagedResources": damaged}),
+                    request.max_preview_bytes,
+                ),
+            })
+        }
+        other => Err(EngineError::PolicyViolation(format!(
+            "unsupported ui target type {other}"
+        ))),
+    }
+}
+
+fn layout_for_projection(projection: &TargetProjection) -> Value {
+    json!({
+        "type": "Section",
+        "props": {"title": projection.title},
+        "children": [
+            {"type": "Heading", "props": {"text": projection.title}},
+            {"type": "Text", "props": {"text": projection.summary}},
+            {"type": "Monospace", "props": {"text": projection.graph.to_string()}},
+            {"type": "Button", "props": {"label": "Refresh", "actionId": "refresh-surface"}}
+        ]
+    })
+}
+
+fn generated_actions(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    _request: &SurfaceAuthoringRequest,
+) -> Result<Vec<Value>> {
+    let refresh = host
+        .discover_functions(&FunctionQuery {
+            actor: Some(actor_context(invocation)),
+            include_internal: true,
+            ..FunctionQuery::default()
+        })
+        .into_iter()
+        .find(|function| function.id.as_str() == REFRESH_SURFACE_FUNCTION)
+        .ok_or_else(|| EngineError::NotFound {
+            kind: "function",
+            id: REFRESH_SURFACE_FUNCTION.to_owned(),
+        })?;
+    Ok(vec![json!({
+        "actionId": "refresh-surface",
+        "label": "Refresh",
+        "targetFunctionId": REFRESH_SURFACE_FUNCTION,
+        "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+        "payloadTemplate": {
+            "surfaceResourceId": "${surface.resourceId}",
+            "expectedCurrentVersionId": "${surface.versionId}"
+        },
+        "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+        "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+        "requiredRisk": risk_label(&refresh.risk_level),
+        "approvalPolicy": {"required": refresh.required_authority.approval_required},
+        "targetRevision": refresh.revision.0,
+        "expiresAt": default_expires_at()
+    })])
 }
 
 fn validate_action_target(
@@ -815,6 +1510,317 @@ fn parse_risk(value: &str) -> Result<RiskLevel> {
     }
 }
 
+fn risk_label(risk: &RiskLevel) -> &'static str {
+    match risk {
+        RiskLevel::Low => "low",
+        RiskLevel::Medium => "medium",
+        RiskLevel::High => "high",
+        RiskLevel::Critical => "critical",
+    }
+}
+
+struct SurfaceValidation {
+    state: &'static str,
+    diagnostics: Vec<Value>,
+}
+
+fn surface_validation_state(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    inspection: &Option<EngineResourceInspection>,
+) -> SurfaceValidation {
+    let Some(inspection) = inspection else {
+        return SurfaceValidation {
+            state: "invalid",
+            diagnostics: vec![
+                json!({"code": "missing_surface", "message": "ui_surface resource does not exist"}),
+            ],
+        };
+    };
+    if let Err(error) = ensure_ui_surface(inspection) {
+        return validation_error("invalid", "wrong_kind", error);
+    }
+    match inspection.resource.lifecycle.as_str() {
+        "expired" => {
+            return SurfaceValidation {
+                state: "expired",
+                diagnostics: vec![
+                    json!({"code": "expired_lifecycle", "message": "ui_surface lifecycle is expired"}),
+                ],
+            };
+        }
+        "damaged" | "discarded" => {
+            return SurfaceValidation {
+                state: "damaged",
+                diagnostics: vec![
+                    json!({"code": "unavailable_lifecycle", "message": format!("ui_surface lifecycle is {}", inspection.resource.lifecycle)}),
+                ],
+            };
+        }
+        _ => {}
+    }
+    let Some(current_version_id) = inspection.resource.current_version_id.as_deref() else {
+        return SurfaceValidation {
+            state: "invalid",
+            diagnostics: vec![
+                json!({"code": "missing_current_version", "message": "ui_surface has no current version"}),
+            ],
+        };
+    };
+    let Some(version) = inspection
+        .versions
+        .iter()
+        .find(|version| version.version_id == current_version_id)
+    else {
+        return SurfaceValidation {
+            state: "damaged",
+            diagnostics: vec![
+                json!({"code": "missing_current_version_record", "message": "current ui_surface version is missing"}),
+            ],
+        };
+    };
+    if version.state != EngineResourceVersionState::Available {
+        return SurfaceValidation {
+            state: "damaged",
+            diagnostics: vec![
+                json!({"code": "unavailable_version", "message": format!("current ui_surface version is {:?}", version.state)}),
+            ],
+        };
+    }
+    let payload = &version.payload;
+    if let Err(error) = validate_ui_surface_payload(payload) {
+        return validation_error("invalid", "invalid_payload", error);
+    }
+    if DateTime::parse_from_rfc3339(
+        payload
+            .get("expiresAt")
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+    )
+    .map(|expires_at| expires_at.with_timezone(&Utc) <= Utc::now())
+    .unwrap_or(true)
+    {
+        return SurfaceValidation {
+            state: "expired",
+            diagnostics: vec![
+                json!({"code": "expired_surface", "message": "ui_surface expiresAt is expired or invalid"}),
+            ],
+        };
+    }
+    if let Some(actions) = payload.get("actions").and_then(Value::as_array) {
+        for action in actions {
+            if DateTime::parse_from_rfc3339(
+                action
+                    .get("expiresAt")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            )
+            .map(|expires_at| expires_at.with_timezone(&Utc) <= Utc::now())
+            .unwrap_or(true)
+            {
+                return SurfaceValidation {
+                    state: "expired",
+                    diagnostics: vec![
+                        json!({"code": "expired_action", "message": "ui_surface action is expired or invalid"}),
+                    ],
+                };
+            }
+            if action
+                .get("requiredGrant")
+                .and_then(Value::as_str)
+                .is_some_and(|required| {
+                    required != invocation.causal_context.authority_grant_id.as_str()
+                })
+            {
+                return SurfaceValidation {
+                    state: "unauthorized",
+                    diagnostics: vec![
+                        json!({"code": "grant_mismatch", "message": "ui_surface action requires a different grant"}),
+                    ],
+                };
+            }
+            if let Err(error) = validate_action_target(host, invocation, action) {
+                return match error {
+                    EngineError::StaleFunctionRevision { .. } => {
+                        validation_error("stale", "stale_action_target", error)
+                    }
+                    EngineError::NotFound { .. } => {
+                        validation_error("invalid", "missing_action_target", error)
+                    }
+                    other => validation_error("invalid", "invalid_action_target", other),
+                };
+            }
+        }
+    }
+    if let Some(authoring) = payload.get("authoring").and_then(Value::as_object)
+        && authoring.get("mode").and_then(Value::as_str) == Some(GENERATED_AUTHORING_MODE)
+    {
+        match SurfaceAuthoringRequest::from_authoring_payload(payload).and_then(|request| {
+            target_projection(host, invocation, &request).map(|target| (request, target))
+        }) {
+            Ok((_, target)) => {
+                if authoring
+                    .get("targetRevision")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|revision| revision != target.revision)
+                {
+                    return SurfaceValidation {
+                        state: "stale",
+                        diagnostics: vec![
+                            json!({"code": "stale_target_revision", "message": "generated ui_surface target revision drifted"}),
+                        ],
+                    };
+                }
+            }
+            Err(error) => return validation_error("invalid", "invalid_authoring_target", error),
+        }
+    }
+    if let Some(bindings) = payload.get("bindings").and_then(Value::as_array) {
+        for binding in bindings {
+            if let Err(error) = validate_binding_target(host, invocation, binding) {
+                return validation_error("invalid", "dangling_binding", error);
+            }
+        }
+    }
+    SurfaceValidation {
+        state: "valid",
+        diagnostics: Vec::new(),
+    }
+}
+
+fn validation_error(
+    state: &'static str,
+    code: &'static str,
+    error: EngineError,
+) -> SurfaceValidation {
+    SurfaceValidation {
+        state,
+        diagnostics: vec![json!({"code": code, "message": error.to_string()})],
+    }
+}
+
+fn validate_binding_target(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    binding: &Value,
+) -> Result<()> {
+    let Some(target_type) = binding.get("targetType").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(target_id) = binding.get("targetId").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let request = SurfaceAuthoringRequest {
+        target_type: target_type.to_owned(),
+        target_id: target_id.to_owned(),
+        purpose: "validate binding".to_owned(),
+        layout_profile: "compact".to_owned(),
+        expected_target_revision: None,
+        existing_surface_resource_id: None,
+        expected_current_version_id: None,
+        resource_id: None,
+        max_preview_bytes: 256,
+        expires_at: default_expires_at(),
+        refresh_policy: json!({"mode": "manual"}),
+        links: Vec::new(),
+    };
+    target_projection(host, invocation, &request).map(|_| ())
+}
+
+fn current_version_hash(inspection: &EngineResourceInspection) -> Option<String> {
+    let current = inspection.resource.current_version_id.as_ref()?;
+    inspection
+        .versions
+        .iter()
+        .find(|version| &version.version_id == current)
+        .map(|version| version.content_hash.clone())
+}
+
+fn optional_u64(value: Option<&Value>) -> Result<Option<u64>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(number)) => number
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| EngineError::PolicyViolation("expected unsigned integer".to_owned())),
+        Some(other) => Err(EngineError::PolicyViolation(format!(
+            "expected unsigned integer, got {other}"
+        ))),
+    }
+}
+
+fn default_expires_at() -> String {
+    (Utc::now() + ChronoDuration::hours(1)).to_rfc3339()
+}
+
+fn ensure_supported_target_type(target_type: &str) -> Result<()> {
+    if matches!(
+        target_type,
+        "worker"
+            | "capability"
+            | "goal"
+            | "resource"
+            | "invocation"
+            | "grant"
+            | "approval"
+            | "queue"
+            | "lease"
+            | "storage"
+            | "integrity"
+    ) {
+        Ok(())
+    } else {
+        Err(EngineError::PolicyViolation(format!(
+            "unsupported ui target type {target_type}"
+        )))
+    }
+}
+
+fn deterministic_surface_resource_id(request: &SurfaceAuthoringRequest) -> String {
+    format!(
+        "ui-surface-{}-{}",
+        request.target_type,
+        slug(&request.target_id)
+    )
+}
+
+fn slug(value: &str) -> String {
+    let mut slug = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    slug.trim_matches('-').chars().take(48).collect::<String>()
+}
+
+fn hash_json(value: &Value) -> Result<String> {
+    let bytes = serde_json::to_vec(value).map_err(|error| EngineError::LedgerFailure {
+        operation: "ui_surface.projection_hash",
+        message: error.to_string(),
+    })?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn bounded_json(value: Value, max_preview_bytes: usize) -> Value {
+    let text = value.to_string();
+    if text.len() <= max_preview_bytes {
+        value
+    } else {
+        json!({
+            "truncated": true,
+            "preview": text.chars().take(max_preview_bytes).collect::<String>(),
+        })
+    }
+}
+
 fn action_summaries(payload: Option<&Value>) -> Value {
     let Some(actions) = payload
         .and_then(|payload| payload.get("actions"))
@@ -890,6 +1896,36 @@ fn create_surface_schema() -> Value {
     })
 }
 
+fn surface_for_target_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["targetType", "targetId"],
+        "additionalProperties": false,
+        "properties": {
+            "targetType": {
+                "type": "string",
+                "enum": ["worker", "capability", "goal", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
+            },
+            "targetId": {"type": "string"},
+            "purpose": {"type": "string"},
+            "layoutProfile": {"type": "string"},
+            "expectedTargetRevision": {"type": "integer"},
+            "existingSurfaceResourceId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "resourceId": {"type": "string"},
+            "maxPreviewBytes": {"type": "integer"},
+            "expiresAt": {"type": "string"},
+            "refreshPolicy": {"type": "object"},
+            "links": {"type": "array", "items": {"type": "object"}},
+            "scope": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "lifecycle": {"type": "string"},
+            "policy": {"type": "object"}
+        }
+    })
+}
+
 fn update_surface_schema() -> Value {
     json!({
         "type": "object",
@@ -901,6 +1937,30 @@ fn update_surface_schema() -> Value {
             "surface": {"type": "object"},
             "links": {"type": "array", "items": {"type": "object"}},
             "lifecycle": {"type": "string"}
+        }
+    })
+}
+
+fn refresh_surface_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["surfaceResourceId", "expectedCurrentVersionId"],
+        "additionalProperties": false,
+        "properties": {
+            "surfaceResourceId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"}
+        }
+    })
+}
+
+fn expire_surface_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["surfaceResourceId"],
+        "additionalProperties": false,
+        "properties": {
+            "surfaceResourceId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"}
         }
     })
 }
@@ -935,10 +1995,12 @@ fn submit_action_schema() -> Value {
 fn surface_resource_response_schema() -> Value {
     json!({
         "type": "object",
-        "required": ["resource", "resourceRefs"],
+        "required": ["resourceRefs"],
         "additionalProperties": false,
         "properties": {
+            "surface": {"type": "object"},
             "resource": {"type": "object"},
+            "version": {"type": "object"},
             "resourceRefs": {"type": "array"}
         }
     })
@@ -950,6 +2012,7 @@ fn surface_version_response_schema() -> Value {
         "required": ["version", "resourceRefs"],
         "additionalProperties": false,
         "properties": {
+            "surface": {"type": "object"},
             "version": {"type": "object"},
             "resourceRefs": {"type": "array"}
         }

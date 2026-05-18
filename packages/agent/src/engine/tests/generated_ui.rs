@@ -1,5 +1,16 @@
 use super::*;
 
+fn generated_surface_request(target_type: &str, target_id: &str) -> Value {
+    json!({
+        "targetType": target_type,
+        "targetId": target_id,
+        "purpose": "Inspect substrate target",
+        "layoutProfile": "compact",
+        "maxPreviewBytes": 512,
+        "expiresAt": "2100-01-01T00:00:00Z"
+    })
+}
+
 #[tokio::test]
 async fn ui_surface_resource_type_is_registered_and_validated() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
@@ -92,6 +103,409 @@ async fn ui_surface_resource_type_is_registered_and_validated() {
     assert_eq!(value["resourceRefs"][0]["kind"], "ui_surface");
     assert_eq!(value["resource"]["kind"], "ui_surface");
     assert_eq!(value["resource"]["lifecycle"], "active");
+}
+
+#[tokio::test]
+async fn ui_surface_for_target_creates_deterministic_worker_surface() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("demo::inspect", "demo"),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+
+    let created = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_surface_request("worker", "demo"),
+            mutating_causal("ui-surface-for-worker").with_scope("ui.write"),
+        ))
+        .await;
+
+    assert_eq!(created.error, None);
+    let value = created.value.as_ref().unwrap();
+    assert_eq!(value["resourceRefs"][0]["kind"], "ui_surface");
+    assert_eq!(value["surface"]["authoring"]["mode"], "generated");
+    assert_eq!(value["surface"]["authoring"]["targetType"], "worker");
+    assert_eq!(value["surface"]["authoring"]["targetId"], "demo");
+    assert_eq!(value["surface"]["bindings"][0]["targetType"], "worker");
+    assert_eq!(
+        value["surface"]["actions"][0]["targetFunctionId"],
+        "ui::refresh_surface"
+    );
+    assert_eq!(
+        value["surface"]["actions"][0]["payloadTemplate"]["surfaceResourceId"],
+        "${surface.resourceId}"
+    );
+
+    let replayed = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_surface_request("worker", "demo"),
+            mutating_causal("ui-surface-for-worker").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(replayed.error, None);
+    assert_eq!(
+        replayed.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"],
+        value["resourceRefs"][0]["resourceId"]
+    );
+}
+
+#[tokio::test]
+async fn ui_surface_for_target_supports_core_substrate_targets() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("demo::inspect", "demo"),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+
+    let resource = handle
+        .invoke(host_invocation(
+            "resource::create",
+            json!({
+                "kind": "goal",
+                "resourceId": "goal-surface-target",
+                "payload": {
+                    "intent": "inspect generated UI target coverage",
+                    "successCriteria": ["surface exists"],
+                    "inputResources": [],
+                    "expectedOutputKinds": ["ui_surface"],
+                    "constraints": {},
+                    "riskBudget": {"maxRisk": "low"},
+                    "approvalPolicy": {"required": false},
+                    "retentionPolicy": {"mode": "keep"},
+                    "completionCondition": "manual"
+                }
+            }),
+            mutating_causal("ui-target-goal").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(resource.error, None);
+
+    let invocation = handle
+        .invoke(host_invocation(
+            "demo::inspect",
+            json!({"message": "surface target"}),
+            causal().with_scope("demo.read"),
+        ))
+        .await;
+    assert_eq!(invocation.error, None);
+
+    for (target_type, target_id) in [
+        ("worker", "demo".to_owned()),
+        ("capability", "demo::inspect".to_owned()),
+        ("grant", "grant".to_owned()),
+        ("resource", "goal-surface-target".to_owned()),
+        ("goal", "goal-surface-target".to_owned()),
+        ("invocation", invocation.invocation_id.to_string()),
+        ("storage", "default".to_owned()),
+        ("integrity", "default".to_owned()),
+    ] {
+        let created = handle
+            .invoke(host_invocation(
+                "ui::surface_for_target",
+                generated_surface_request(target_type, &target_id),
+                mutating_causal(&format!("surface-{target_type}")).with_scope("ui.write"),
+            ))
+            .await;
+        assert_eq!(
+            created.error, None,
+            "surface target {target_type}:{target_id} should be authored"
+        );
+        assert_eq!(
+            created.value.as_ref().unwrap()["surface"]["authoring"]["targetType"],
+            target_type
+        );
+    }
+}
+
+#[tokio::test]
+async fn ui_validate_surface_detects_stale_expired_and_invalid_surfaces() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("demo::inspect", "demo"),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+
+    let created = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_surface_request("capability", "demo::inspect"),
+            mutating_causal("validate-generated-surface").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let resource_id = created.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let original_version_id = created.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let valid = handle
+        .invoke(host_invocation(
+            "ui::validate_surface",
+            json!({"surfaceResourceId": resource_id}),
+            causal().with_scope("ui.read"),
+        ))
+        .await;
+    assert_eq!(valid.error, None);
+    assert_eq!(valid.value.as_ref().unwrap()["validationState"], "valid");
+
+    let mut changed_function = read_function("demo::inspect", "demo");
+    changed_function.description = "changed description".to_owned();
+    handle
+        .register_function_for_setup(changed_function, Some(handler()), false)
+        .unwrap();
+    let stale = handle
+        .invoke(host_invocation(
+            "ui::validate_surface",
+            json!({"surfaceResourceId": resource_id}),
+            causal().with_scope("ui.read"),
+        ))
+        .await;
+    assert_eq!(stale.error, None);
+    assert_eq!(stale.value.as_ref().unwrap()["validationState"], "stale");
+
+    let refreshed = handle
+        .invoke(host_invocation(
+            "ui::refresh_surface",
+            json!({
+                "surfaceResourceId": resource_id,
+                "expectedCurrentVersionId": original_version_id.clone()
+            }),
+            mutating_causal("refresh-stale-generated-surface").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(refreshed.error, None);
+    assert_eq!(
+        refreshed.value.as_ref().unwrap()["surface"]["authoring"]["refreshedFromVersionId"],
+        original_version_id
+    );
+
+    let refreshed_validation = handle
+        .invoke(host_invocation(
+            "ui::validate_surface",
+            json!({"surfaceResourceId": resource_id}),
+            causal().with_scope("ui.read"),
+        ))
+        .await;
+    assert_eq!(refreshed_validation.error, None);
+    assert_eq!(
+        refreshed_validation.value.as_ref().unwrap()["validationState"],
+        "valid"
+    );
+
+    let expired = handle
+        .invoke(host_invocation(
+            "ui::expire_surface",
+            json!({"surfaceResourceId": resource_id}),
+            mutating_causal("expire-generated-surface").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(expired.error, None);
+    let expired_validation = handle
+        .invoke(host_invocation(
+            "ui::validate_surface",
+            json!({"surfaceResourceId": resource_id}),
+            causal().with_scope("ui.read"),
+        ))
+        .await;
+    assert_eq!(expired_validation.error, None);
+    assert_eq!(
+        expired_validation.value.as_ref().unwrap()["validationState"],
+        "expired"
+    );
+
+    let expired_refresh = handle
+        .invoke(host_invocation(
+            "ui::refresh_surface",
+            json!({
+                "surfaceResourceId": resource_id,
+                "expectedCurrentVersionId": expired.value.as_ref().unwrap()["resourceRefs"][0]["versionId"].as_str().unwrap()
+            }),
+            mutating_causal("refresh-expired-generated-surface").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(expired_refresh.error, None);
+    let live_after_expired_refresh = handle
+        .invoke(host_invocation(
+            "ui::validate_surface",
+            json!({"surfaceResourceId": resource_id}),
+            causal().with_scope("ui.read"),
+        ))
+        .await;
+    assert_eq!(live_after_expired_refresh.error, None);
+    assert_eq!(
+        live_after_expired_refresh.value.as_ref().unwrap()["validationState"],
+        "valid"
+    );
+
+    let missing = handle
+        .invoke(host_invocation(
+            "ui::validate_surface",
+            json!({"surfaceResourceId": "missing-surface"}),
+            causal().with_scope("ui.read"),
+        ))
+        .await;
+    assert_eq!(missing.error, None);
+    assert_eq!(
+        missing.value.as_ref().unwrap()["validationState"],
+        "invalid"
+    );
+}
+
+#[tokio::test]
+async fn ui_refresh_surface_requires_generated_authoring_and_cas() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("demo::inspect", "demo"),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+
+    let manual = handle
+        .invoke(host_invocation(
+            "ui::create_surface",
+            json!({
+                "resourceId": "manual-refresh-rejected",
+                "surface": valid_ui_surface("demo::inspect", 1)
+            }),
+            mutating_causal("manual-refresh-create").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(manual.error, None);
+    let manual_version = manual.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let manual_refresh = handle
+        .invoke(host_invocation(
+            "ui::refresh_surface",
+            json!({
+                "surfaceResourceId": "manual-refresh-rejected",
+                "expectedCurrentVersionId": manual_version
+            }),
+            mutating_causal("manual-refresh-rejected").with_scope("ui.write"),
+        ))
+        .await;
+    assert!(matches!(
+        manual_refresh.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("generated authoring")
+    ));
+
+    let generated = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_surface_request("worker", "demo"),
+            mutating_causal("generated-refresh-create").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(generated.error, None);
+    let resource_id = generated.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let version_id = generated.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let rejected = handle
+        .invoke(host_invocation(
+            "ui::refresh_surface",
+            json!({
+                "surfaceResourceId": resource_id,
+                "expectedCurrentVersionId": "wrong-version"
+            }),
+            mutating_causal("generated-refresh-stale").with_scope("ui.write"),
+        ))
+        .await;
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("version conflict")
+    ));
+
+    let refreshed = handle
+        .invoke(host_invocation(
+            "ui::refresh_surface",
+            json!({
+                "surfaceResourceId": resource_id,
+                "expectedCurrentVersionId": version_id
+            }),
+            mutating_causal("generated-refresh-ok").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(refreshed.error, None);
+    assert_eq!(
+        refreshed.value.as_ref().unwrap()["surface"]["authoring"]["refreshedFromVersionId"],
+        version_id
+    );
+    assert_eq!(
+        refreshed.value.as_ref().unwrap()["resourceRefs"][0]["kind"],
+        "ui_surface"
+    );
+}
+
+#[tokio::test]
+async fn control_advertises_generated_surface_authoring_without_layout_templates() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("demo::inspect", "demo"),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+
+    let inspect = handle
+        .invoke(host_invocation(
+            "control::inspect",
+            json!({"targetType": "worker", "targetId": "demo"}),
+            causal().with_scope("control.read"),
+        ))
+        .await;
+    assert_eq!(inspect.error, None);
+    let value = inspect.value.as_ref().unwrap();
+    assert!(
+        value["availableActions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action["functionId"] == "ui::surface_for_target")
+    );
+    let text = serde_json::to_string(value).unwrap();
+    assert!(!text.contains("payloadTemplate"));
+    assert!(!text.contains("inputSchema"));
+    assert!(!text.contains("\"layout\""));
 }
 
 #[tokio::test]

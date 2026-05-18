@@ -810,10 +810,15 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
         "ui::create_surface",
         "ui::update_surface",
         "ui::inspect_surface",
+        "ui::surface_for_target",
+        "ui::validate_surface",
+        "ui::refresh_surface",
+        "ui::expire_surface",
         "ui::discard_surface",
         "ui::submit_action",
         "DurableOutputContract::resource_backed([UI_SURFACE_KIND])",
         "action_child_invocation",
+        "generated authoring",
         "targetFunctionId",
         "idempotencyKey",
     ] {
@@ -932,10 +937,39 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
     let capability_client = std::fs::read_to_string(&capability_client_path)
         .unwrap_or_else(|e| panic!("failed to read {capability_client_path:?}: {e}"));
     assert!(
-        capability_client.contains("\"ui::submit_action\"")
+        capability_client.contains("\"ui::surface_for_target\"")
+            && capability_client.contains("\"ui::inspect_surface\"")
+            && capability_client.contains("\"ui::validate_surface\"")
+            && capability_client.contains("\"ui::refresh_surface\"")
+            && capability_client.contains("\"ui::submit_action\"")
             && capability_client
                 .contains("canonicalSubmission.idempotencyKey = idempotencyKey.rawValue"),
         "iOS must submit generated UI actions through the audited server gateway with one canonical idempotency key"
+    );
+
+    let engine_console_state_path = repo_root
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("ViewModels")
+        .join("State")
+        .join("EngineConsoleState.swift");
+    let engine_console_state = std::fs::read_to_string(&engine_console_state_path)
+        .unwrap_or_else(|e| panic!("failed to read {engine_console_state_path:?}: {e}"));
+    let engine_console_view_path = repo_root
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("Views")
+        .join("EngineConsole")
+        .join("EngineConsoleView.swift");
+    let engine_console_view = std::fs::read_to_string(&engine_console_view_path)
+        .unwrap_or_else(|e| panic!("failed to read {engine_console_view_path:?}: {e}"));
+    assert!(
+        engine_console_state.contains("controlAdvertisesAction")
+            && engine_console_view
+                .contains("state.controlAdvertisesAction(functionId: \"ui::surface_for_target\""),
+        "iOS generated surface authoring affordances must be gated by server-advertised control actions"
     );
 }
 

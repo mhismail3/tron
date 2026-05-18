@@ -181,6 +181,84 @@ struct EngineConsoleStateTests {
         #expect(state.cachedSnapshot?.controlSnapshot?.catalogRevision == 7)
     }
 
+    @Test("server advertised actions gate generated surface authoring")
+    func serverAdvertisedActionsGateGeneratedSurfaceAuthoring() async throws {
+        let client = FakeEngineConsoleCapabilityClient()
+        client.controlSnapshot = ControlSnapshotDTO(
+            catalogRevision: 7,
+            workers: [AnyCodable(["id": "resource"])],
+            capabilities: [],
+            resourceTypes: [],
+            activeGoals: [],
+            invocations: [],
+            grants: [],
+            queues: [],
+            leases: [],
+            approvals: [],
+            storage: nil,
+            integrityWarnings: [],
+            availableActions: []
+        )
+        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+
+        await state.refresh()
+        #expect(!state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: "worker"))
+
+        client.controlSnapshot.availableActions = [
+            AnyCodable(["functionId": "ui::surface_for_target", "targetType": "worker"])
+        ]
+        await state.refresh()
+        #expect(state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: "worker"))
+        #expect(!state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: "grant"))
+
+        client.controlSnapshot.availableActions = [
+            AnyCodable(["functionId": "ui::surface_for_target", "targetType": "*"])
+        ]
+        await state.refresh()
+        #expect(state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: "grant"))
+    }
+
+    @Test("engine console loads validates and refreshes generated surfaces through ui primitives")
+    func generatedSurfaceFlowUsesServerPrimitives() async throws {
+        let client = FakeEngineConsoleCapabilityClient()
+        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let ref = UiSurfaceRefDTO(
+            resourceId: "res-ui",
+            versionId: "ver-ui",
+            kind: "ui_surface",
+            lifecycle: "active",
+            surfaceId: "surface",
+            title: "Surface",
+            purpose: "Inspect",
+            catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+            expiresAt: "2100-01-01T00:00:00Z",
+            targets: [],
+            actions: []
+        )
+
+        await state.inspectSurface(ref)
+        #expect(state.selectedSurface?.resourceRef?.resourceId == "res-ui")
+
+        await state.validateSurface(ref)
+        #expect(state.surfaceError == nil)
+
+        await state.refreshSelectedSurface()
+        #expect(client.lastRefreshRequest?.surfaceResourceId == "res-ui")
+        #expect(state.mutationState == .succeeded("Surface refreshed"))
+
+        await state.submitSurfaceAction(
+            UiActionSubmissionDTO(
+                surfaceResourceId: "res-ui",
+                surfaceVersionId: "ver-ui",
+                actionId: "refresh-surface",
+                userInput: [:],
+                idempotencyKey: "client-generated"
+            )
+        )
+        #expect(client.lastSubmission?.actionId == "refresh-surface")
+        #expect(state.surfaceActionResult?.childInvocationId == "child")
+    }
+
     private func ephemeralCache() -> EngineConsoleCache {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -201,6 +279,8 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
     var searchError: Error?
     var statusError: Error?
     var lastSearchQuery: String?
+    var lastRefreshRequest: UiSurfaceRefreshRequestDTO?
+    var lastSubmission: UiActionSubmissionDTO?
     var controlSnapshot = ControlSnapshotDTO(
         catalogRevision: 1,
         workers: [],
@@ -239,6 +319,97 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         includeFullPayloads: Bool
     ) async throws -> ControlInspectDTO {
         ControlInspectDTO(targetType: targetType, targetId: targetId, graph: nil, availableActions: [])
+    }
+
+    func inspectUiSurface(surfaceResourceId: String) async throws -> UiSurfaceInspectResultDTO {
+        UiSurfaceInspectResultDTO(
+            inspection: AnyCodable(["resource": ["resourceId": surfaceResourceId]]),
+            surface: UiSurfaceDTO(
+                surfaceId: "surface",
+                title: "Surface",
+                purpose: "Inspect",
+                catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+                layout: UiComponentDTO(id: "root", type: "Text", props: ["text": AnyCodable("hello")], children: nil),
+                bindings: [],
+                actions: [],
+                redactionPolicy: ["mode": AnyCodable("redacted")],
+                expiresAt: "2100-01-01T00:00:00Z",
+                refreshPolicy: ["mode": AnyCodable("manual")]
+            ),
+            resourceRef: UiSurfaceRefDTO(
+                resourceId: surfaceResourceId,
+                versionId: "ver-ui",
+                kind: "ui_surface",
+                lifecycle: "active",
+                surfaceId: "surface",
+                title: "Surface",
+                purpose: "Inspect",
+                catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+                expiresAt: "2100-01-01T00:00:00Z",
+                targets: [],
+                actions: []
+            ),
+            validationState: "valid",
+            bindings: [],
+            actions: [],
+            lineage: AnyCodable(["versionCount": 1])
+        )
+    }
+
+    func validateUiSurface(surfaceResourceId: String) async throws -> UiSurfaceValidationDTO {
+        UiSurfaceValidationDTO(surfaceResourceId: surfaceResourceId, validationState: "valid", diagnostics: [])
+    }
+
+    func surfaceForTarget(
+        _ request: UiSurfaceForTargetRequestDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiSurfaceMutationResultDTO {
+        UiSurfaceMutationResultDTO(
+            surface: nil,
+            resource: nil,
+            version: nil,
+            resourceRefs: [
+                UiSurfaceRefDTO(
+                    resourceId: "res-ui",
+                    versionId: "ver-ui",
+                    kind: "ui_surface",
+                    lifecycle: "active",
+                    surfaceId: "surface",
+                    title: "Surface",
+                    purpose: "Inspect",
+                    catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+                    expiresAt: "2100-01-01T00:00:00Z",
+                    targets: [],
+                    actions: []
+                )
+            ]
+        )
+    }
+
+    func refreshUiSurface(
+        _ request: UiSurfaceRefreshRequestDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiSurfaceMutationResultDTO {
+        lastRefreshRequest = request
+        return try await surfaceForTarget(
+            UiSurfaceForTargetRequestDTO(targetType: "worker", targetId: "demo"),
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func submitUiAction(
+        _ submission: UiActionSubmissionDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiActionResultDTO {
+        lastSubmission = submission
+        return UiActionResultDTO(
+            surfaceResourceId: submission.surfaceResourceId,
+            surfaceVersionId: submission.surfaceVersionId,
+            actionId: submission.actionId,
+            targetFunctionId: "ui::refresh_surface",
+            childInvocationId: "child",
+            result: AnyCodable(["ok": true])
+        )
     }
 
     func auditQuery(_ query: CapabilityAuditQueryDTO) async throws -> CapabilityAuditQueryResultDTO {

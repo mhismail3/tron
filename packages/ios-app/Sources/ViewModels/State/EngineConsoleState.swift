@@ -6,6 +6,20 @@ protocol EngineConsoleCapabilityClient: AnyObject {
     func registrySnapshot(includeDocuments: Bool, includeBindings: Bool) async throws -> CapabilityRegistrySnapshotDTO
     func controlSnapshot(limit: Int) async throws -> ControlSnapshotDTO
     func controlInspect(targetType: String, targetId: String, includeFullPayloads: Bool) async throws -> ControlInspectDTO
+    func inspectUiSurface(surfaceResourceId: String) async throws -> UiSurfaceInspectResultDTO
+    func validateUiSurface(surfaceResourceId: String) async throws -> UiSurfaceValidationDTO
+    func surfaceForTarget(
+        _ request: UiSurfaceForTargetRequestDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiSurfaceMutationResultDTO
+    func refreshUiSurface(
+        _ request: UiSurfaceRefreshRequestDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiSurfaceMutationResultDTO
+    func submitUiAction(
+        _ submission: UiActionSubmissionDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiActionResultDTO
     func auditQuery(_ query: CapabilityAuditQueryDTO) async throws -> CapabilityAuditQueryResultDTO
     func programRunList(_ query: CapabilityProgramRunQueryDTO) async throws -> CapabilityProgramRunQueryResultDTO
     func getPolicy(policyId: String?) async throws -> CapabilityPolicyGetDTO
@@ -111,6 +125,9 @@ final class EngineConsoleState {
     private(set) var programInspection: CapabilityInspectionDTO?
     private(set) var programResult: CapabilityProgramExecutionDTO?
     private(set) var programError: String?
+    private(set) var selectedSurface: UiSurfaceInspectResultDTO?
+    private(set) var surfaceActionResult: UiActionResultDTO?
+    private(set) var surfaceError: String?
     private(set) var searchResults: [CapabilityIndexHitDTO] = []
     private(set) var capabilitySearchState: CapabilitySearchState = .idle
     private(set) var capabilitySearchMode: CapabilityIndexStatusDTO?
@@ -127,6 +144,16 @@ final class EngineConsoleState {
         case .offlineCached: true
         default: !connectionState().isConnected
         }
+    }
+
+    func controlAdvertisesAction(functionId: String, targetType: String? = nil) -> Bool {
+        controlSnapshot?.availableActions?.contains { action in
+            guard let object = action.dictionaryValue else { return false }
+            guard object["functionId"] as? String == functionId else { return false }
+            guard let targetType else { return true }
+            let advertisedTarget = object["targetType"] as? String
+            return advertisedTarget == targetType || advertisedTarget == "*"
+        } ?? false
     }
 
     init(
@@ -239,6 +266,100 @@ final class EngineConsoleState {
             )
         } catch {
             loadState = .failed(error.localizedDescription)
+        }
+    }
+
+    func inspectSurface(_ ref: UiSurfaceRefDTO) async {
+        do {
+            selectedSurface = try await capabilityClient.inspectUiSurface(surfaceResourceId: ref.resourceId)
+            surfaceError = nil
+        } catch {
+            surfaceError = error.localizedDescription
+        }
+    }
+
+    func validateSurface(_ ref: UiSurfaceRefDTO) async {
+        do {
+            let validation = try await capabilityClient.validateUiSurface(surfaceResourceId: ref.resourceId)
+            surfaceError = validation.validationState == "valid"
+                ? nil
+                : "Surface \(validation.validationState)"
+        } catch {
+            surfaceError = error.localizedDescription
+        }
+    }
+
+    func authorSurface(targetType: String, targetId: String) async {
+        guard !isMutatingDisabled else { return }
+        mutationState = .running("Creating generated surface")
+        do {
+            let request = UiSurfaceForTargetRequestDTO(
+                targetType: targetType,
+                targetId: targetId,
+                purpose: "Inspect \(targetType) \(targetId)",
+                layoutProfile: "compact",
+                expectedTargetRevision: nil,
+                existingSurfaceResourceId: nil,
+                expectedCurrentVersionId: nil,
+                resourceId: nil,
+                maxPreviewBytes: 1024,
+                expiresAt: nil,
+                refreshPolicy: ["mode": AnyCodable("manual")],
+                links: nil
+            )
+            let result = try await capabilityClient.surfaceForTarget(
+                request,
+                idempotencyKey: .userAction("ui.surface_for_target")
+            )
+            mutationState = .succeeded("Surface created")
+            if let ref = result.resourceRefs.first {
+                await inspectSurface(ref)
+            }
+            await refresh()
+        } catch {
+            mutationState = .failed(error.localizedDescription)
+        }
+    }
+
+    func refreshSelectedSurface() async {
+        guard !isMutatingDisabled else { return }
+        guard let ref = selectedSurface?.resourceRef,
+              let versionId = ref.versionId
+        else {
+            surfaceError = "Select a live surface before refreshing."
+            return
+        }
+        mutationState = .running("Refreshing generated surface")
+        do {
+            let result = try await capabilityClient.refreshUiSurface(
+                UiSurfaceRefreshRequestDTO(
+                    surfaceResourceId: ref.resourceId,
+                    expectedCurrentVersionId: versionId
+                ),
+                idempotencyKey: .userAction("ui.refresh_surface")
+            )
+            mutationState = .succeeded("Surface refreshed")
+            if let refreshed = result.resourceRefs.first {
+                await inspectSurface(refreshed)
+            }
+            await refresh()
+        } catch {
+            mutationState = .failed(error.localizedDescription)
+        }
+    }
+
+    func submitSurfaceAction(_ submission: UiActionSubmissionDTO) async {
+        guard !isMutatingDisabled else { return }
+        mutationState = .running("Submitting surface action")
+        do {
+            surfaceActionResult = try await capabilityClient.submitUiAction(
+                submission,
+                idempotencyKey: .userAction("ui.submit_action")
+            )
+            mutationState = .succeeded("Surface action submitted")
+            await refresh()
+        } catch {
+            mutationState = .failed(error.localizedDescription)
         }
     }
 

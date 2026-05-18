@@ -161,13 +161,17 @@ There is no audit-mode acceptance path for converted durable outputs.
 Generated UI is also resource-native. The engine registers `ui_surface` with
 schema id `tron.resource.ui_surface.v1`, validates payloads against the fixed
 `tron.ui.catalog.core.v1` component catalog, and exposes `ui::catalog`,
-`ui::create_surface`, `ui::update_surface`, `ui::inspect_surface`,
-`ui::discard_surface`, and `ui::submit_action`. Surface updates are append-only
-resource versions guarded by compare-and-set. Control projections expose only
-bounded `uiSurfaceRefs`; full layouts are inspected through the surface
-capability. `ui::submit_action` validates the stored surface version, expiry,
-target revision, required grant, idempotency key, and user input before
-creating the child target invocation.
+`ui::create_surface`, `ui::surface_for_target`, `ui::validate_surface`,
+`ui::refresh_surface`, `ui::expire_surface`, `ui::update_surface`,
+`ui::inspect_surface`, `ui::discard_surface`, and `ui::submit_action`.
+Generated surfaces carry deterministic authoring metadata for their target
+graph, projection hash, preview bounds, and target revision. Surface updates
+are append-only resource versions guarded by compare-and-set. Control
+projections expose only bounded `uiSurfaceRefs` and authoring/refresh action
+summaries; full layouts are inspected through the surface capability.
+`ui::submit_action` validates the stored surface version, expiry, target
+revision, required grant, idempotency key, and user input before creating the
+child target invocation.
 
 ## Artifact And Goal Mapping
 

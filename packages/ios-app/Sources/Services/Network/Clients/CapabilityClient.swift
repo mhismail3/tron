@@ -54,6 +54,50 @@ final class CapabilityClient: EngineDomainClient {
         )
     }
 
+    func inspectUiSurface(surfaceResourceId: String) async throws -> UiSurfaceInspectResultDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeRead(
+            "ui::inspect_surface",
+            SurfaceIdParams(surfaceResourceId: surfaceResourceId),
+            context: readContext
+        )
+    }
+
+    func validateUiSurface(surfaceResourceId: String) async throws -> UiSurfaceValidationDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeRead(
+            "ui::validate_surface",
+            SurfaceIdParams(surfaceResourceId: surfaceResourceId),
+            context: readContext
+        )
+    }
+
+    func surfaceForTarget(
+        _ request: UiSurfaceForTargetRequestDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiSurfaceMutationResultDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeWrite(
+            "ui::surface_for_target",
+            request,
+            idempotencyKey: idempotencyKey,
+            context: uiActionContext
+        )
+    }
+
+    func refreshUiSurface(
+        _ request: UiSurfaceRefreshRequestDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiSurfaceMutationResultDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeWrite(
+            "ui::refresh_surface",
+            request,
+            idempotencyKey: idempotencyKey,
+            context: uiActionContext
+        )
+    }
+
     func submitUiAction(
         _ submission: UiActionSubmissionDTO,
         idempotencyKey: EngineIdempotencyKey
@@ -468,6 +512,7 @@ final class CapabilityClient: EngineDomainClient {
 private struct StatusParams: Encodable { let includeSnapshot: Bool }
 private struct SnapshotParams: Encodable { let includeDocuments: Bool; let includeBindings: Bool }
 private struct ControlSnapshotParams: Encodable { let limit: Int }
+private struct SurfaceIdParams: Encodable { let surfaceResourceId: String }
 
 private struct InspectParams: Encodable {
     let capabilityId: String?
