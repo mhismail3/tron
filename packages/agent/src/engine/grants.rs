@@ -976,6 +976,7 @@ fn wrapper_resource_kind(function_id: &str) -> Option<&'static str> {
         id if id.starts_with("decision::") => Some("decision"),
         id if id.starts_with("materialized_file::") => Some("materialized_file"),
         id if id.starts_with("patch::") => Some("patch_proposal"),
+        id if id.starts_with("ui::") => Some("ui_surface"),
         _ => None,
     }
 }

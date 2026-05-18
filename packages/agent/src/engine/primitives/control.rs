@@ -22,7 +22,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             snapshot_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions"],
+                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
                 "additionalProperties": false,
                 "properties": {
                     "catalogRevision": {"type": "integer"},
@@ -37,7 +37,8 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                     "approvals": {"type": "array"},
                     "storage": {"type": ["object", "null"]},
                     "integrityWarnings": {"type": "array"},
-                    "availableActions": {"type": "array"}
+                    "availableActions": {"type": "array"},
+                    "uiSurfaceRefs": {"type": "array"}
                 }
             }),
         ),
@@ -47,13 +48,14 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             inspect_schema(),
             json!({
                 "type": "object",
-                "required": ["targetType", "targetId", "graph", "availableActions"],
+                "required": ["targetType", "targetId", "graph", "availableActions", "uiSurfaceRefs"],
                 "additionalProperties": false,
                 "properties": {
                     "targetType": {"type": "string"},
                     "targetId": {"type": "string"},
                     "graph": {"type": "object"},
-                    "availableActions": {"type": "array"}
+                    "availableActions": {"type": "array"},
+                    "uiSurfaceRefs": {"type": "array"}
                 }
             }),
         ),

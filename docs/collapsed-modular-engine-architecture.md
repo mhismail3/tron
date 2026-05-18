@@ -26,7 +26,8 @@ for artifacts, goals, work items, UI surfaces, and control-plane state.
 - Control-plane screens are projections over catalog, invocation, grant,
   resource, queue, approval, lease, storage, and stream records.
 - Generated UI is declarative resource data. UI actions resolve to canonical
-  capabilities or audited user-response invocations.
+  capabilities through the audited `ui::submit_action` gateway; clients never
+  submit arbitrary target function ids or payload templates.
 - Old mobile-session-manager routes, compatibility readers, aliases, and
   product-shell fallback renderers are not part of the target runtime.
 
@@ -62,6 +63,9 @@ A resource is the durable object model. Resource kinds include:
 - `worker_package`
 - `secret_ref`
 - `materialized_file`
+- `patch_proposal`
+- `execution_output`
+- `agent_result`
 
 The generic resource kernel is implemented by the engine tables:
 
@@ -151,6 +155,17 @@ and `patch_proposal` refs, retained process/program output produces
 `execution_output` refs, and completed agent runs produce `agent_result` refs.
 There is no audit-mode acceptance path for converted durable outputs.
 
+Generated UI is also resource-native. The engine registers `ui_surface` with
+schema id `tron.resource.ui_surface.v1`, validates payloads against the fixed
+`tron.ui.catalog.core.v1` component catalog, and exposes `ui::catalog`,
+`ui::create_surface`, `ui::update_surface`, `ui::inspect_surface`,
+`ui::discard_surface`, and `ui::submit_action`. Surface updates are append-only
+resource versions guarded by compare-and-set. Control projections expose only
+bounded `uiSurfaceRefs`; full layouts are inspected through the surface
+capability. `ui::submit_action` validates the stored surface version, expiry,
+target revision, required grant, idempotency key, and user input before
+creating the child target invocation.
+
 ## Artifact And Goal Mapping
 
 Artifacts are `Resource(kind = "artifact")`. Artifact operations such as
@@ -195,7 +210,9 @@ mutation multiplexer.
 - Secret values must not be stored as normal artifact/resource payloads. Store
   vault handles or redacted `secret_ref` resources instead.
 - Generated UI cannot execute code or call arbitrary endpoints. Actions route
-  back through canonical capabilities.
+  back through stored canonical capability templates and fail closed on
+  unsupported components, stale versions, expired actions, damaged resources, or
+  unauthorized grants.
 
 ## Clean-Break Cutover
 

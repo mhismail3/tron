@@ -687,6 +687,164 @@ fn resource_native_orchestration_and_control_plane_gates_stay_on() {
 }
 
 #[test]
+fn generated_ui_resource_and_renderer_gates_stay_on() {
+    let crate_root = crate_root();
+    let repo_root = repo_root();
+
+    let resources = std::fs::read_to_string(crate_root.join("src/engine/resources.rs"))
+        .expect("failed to read engine resources");
+    for required in [
+        "UI_SURFACE_SCHEMA_ID",
+        "tron.resource.ui_surface.v1",
+        "tron.ui.catalog.core.v1",
+        "validate_ui_surface_payload",
+        "scan_ui_value_for_forbidden_content",
+        "secret_ref",
+        "file://",
+    ] {
+        assert!(
+            resources.contains(required),
+            "resource kernel must keep generated UI validation marker `{required}`"
+        );
+    }
+
+    let ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
+        .expect("failed to read generated UI primitive");
+    for required in [
+        "ui::catalog",
+        "ui::create_surface",
+        "ui::update_surface",
+        "ui::inspect_surface",
+        "ui::discard_surface",
+        "ui::submit_action",
+        "DurableOutputContract::resource_backed([UI_SURFACE_KIND])",
+        "action_child_invocation",
+        "targetFunctionId",
+        "idempotencyKey",
+    ] {
+        assert!(
+            ui.contains(required),
+            "generated UI primitive must keep `{required}`"
+        );
+    }
+    assert!(
+        !ui.contains("ui::render_contract"),
+        "generated UI must expose ui::catalog, not a parallel render-contract API"
+    );
+
+    let control = std::fs::read_to_string(crate_root.join("src/engine/primitives/control.rs"))
+        .expect("failed to read control primitive");
+    assert!(
+        control.contains("uiSurfaceRefs")
+            && !control.contains("payloadTemplate")
+            && !control.contains("inputSchema"),
+        "control projections must expose UI surface refs without inlining action templates or schemas"
+    );
+
+    let renderer_path = repo_root
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("Views")
+        .join("EngineConsole")
+        .join("GeneratedUISurfaceView.swift");
+    let renderer = std::fs::read_to_string(&renderer_path)
+        .unwrap_or_else(|e| panic!("failed to read {renderer_path:?}: {e}"));
+    for component in [
+        "Text",
+        "Heading",
+        "Monospace",
+        "Badge",
+        "Section",
+        "List",
+        "Table",
+        "Tabs",
+        "Disclosure",
+        "ResourceRef",
+        "InvocationRef",
+        "GrantRef",
+        "WorkerRef",
+        "Metric",
+        "TextField",
+        "TextArea",
+        "Select",
+        "Toggle",
+        "Stepper",
+        "DateTime",
+        "Button",
+        "ButtonGroup",
+        "Confirmation",
+        "Progress",
+        "Health",
+        "Warning",
+        "Error",
+        "EmptyState",
+    ] {
+        assert!(
+            renderer.contains(component),
+            "iOS generated UI renderer must declare and render `{component}`"
+        );
+    }
+    assert!(
+        renderer.contains("Unsupported UI component")
+            && renderer.contains("Unsupported Surface")
+            && !renderer.contains("WKWebView")
+            && !renderer.contains("WebView"),
+        "iOS generated UI renderer must fail closed and must not render executable markup"
+    );
+
+    let generated_ui_dtos_path = repo_root
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("Models")
+        .join("EngineProtocol")
+        .join("EngineProtocolTypes+GeneratedUI.swift");
+    let generated_ui_dtos = std::fs::read_to_string(&generated_ui_dtos_path)
+        .unwrap_or_else(|e| panic!("failed to read {generated_ui_dtos_path:?}: {e}"));
+    let submission_dto = generated_ui_dtos
+        .split("struct UiActionSubmissionDTO")
+        .nth(1)
+        .and_then(|tail| tail.split("struct UiActionResultDTO").next())
+        .expect("UiActionSubmissionDTO must precede UiActionResultDTO");
+    for allowed in [
+        "surfaceResourceId",
+        "surfaceVersionId",
+        "actionId",
+        "userInput",
+        "idempotencyKey",
+    ] {
+        assert!(
+            submission_dto.contains(allowed),
+            "UI action submission DTO must include `{allowed}`"
+        );
+    }
+    for forbidden in ["targetFunctionId", "payloadTemplate", "requiredGrant"] {
+        assert!(
+            !submission_dto.contains(forbidden),
+            "iOS UI action submissions must not let the client choose `{forbidden}`"
+        );
+    }
+
+    let capability_client_path = repo_root
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("Services")
+        .join("Network")
+        .join("Clients")
+        .join("CapabilityClient.swift");
+    let capability_client = std::fs::read_to_string(&capability_client_path)
+        .unwrap_or_else(|e| panic!("failed to read {capability_client_path:?}: {e}"));
+    assert!(
+        capability_client.contains("\"ui::submit_action\"")
+            && capability_client
+                .contains("canonicalSubmission.idempotencyKey = idempotencyKey.rawValue"),
+        "iOS must submit generated UI actions through the audited server gateway with one canonical idempotency key"
+    );
+}
+
+#[test]
 fn retired_capability_event_surface_stays_deleted() {
     let repo_root = repo_root();
     let crate_root = crate_root();

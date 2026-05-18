@@ -1,261 +1,258 @@
-# Generated UI Resource And Renderer Phase
+# Generated UI Surface Authoring And Integrity Phase
 
 ## Summary
 
-The next phase builds the first user-facing surface that is native to the
-collapsed modular engine: declarative UI resources rendered by iOS and backed by
-canonical capability actions. The goal is not a custom dashboard framework and
-not a second control-plane state store. The goal is a strict resource type that
-lets workers describe operator interfaces, inspectable control surfaces, and
-goal-specific working views without bypassing grants, output contracts, resource
-lineage, or invocation audit.
+The generated UI primitive now exists: `ui_surface` is a typed resource,
+`tron.ui.catalog.core.v1` is the fixed component contract, iOS renders that
+catalog strictly, and `ui::submit_action` executes only stored canonical action
+templates. The next phase makes that substrate operationally useful by adding
+server-authored surfaces for real workers, capabilities, goals, resources,
+invocations, grants, approvals, queues, leases, and storage integrity.
 
-This phase starts only after the resource-native orchestration checkpoint:
-
-- storage generation is `modular-engine-v2`;
-- covered durable-output paths enforce top-level `resourceRefs`;
-- public child creation is `worker::spawn`;
-- `agent::run_goal` owns goal execution;
-- subagent output is child invocation/resource lineage, not durable markdown
-  delivery;
-- `control::snapshot` and `control::inspect` are rebuildable projections.
+This phase is not a new dashboard framework and not a dynamic third-party UI
+marketplace. It is deterministic surface authoring, refresh, integrity, and
+end-to-end action handling on top of the existing resource, invocation, grant,
+and control substrate.
 
 ## First-Principles Objective
 
-Agents and modules need to present structured choices, inspections, forms, and
-progress views to an operator. The UI itself is output from a worker, so it must
-be subject to the same substrate rules as every other output:
+An operator needs to inspect the live modular engine and take bounded actions
+without reading raw JSON or trusting client-local policy. A worker or control
+projection can know what object is being inspected, what actions are possible,
+what revisions and grants those actions require, and what redacted previews are
+safe to display. That knowledge should be persisted as `ui_surface` resources,
+not as bespoke iOS screens or another server state plane.
 
-- it is a typed resource, not client-local state;
-- it has schema, version, provenance, lifecycle, retention, links, and policy;
-- it is rendered from a bounded component catalog;
-- every action invokes a canonical capability with a grant and idempotency key;
-- every submitted action is checked against target resource versions and policy
-  at invocation prepare time;
-- unsupported, stale, oversized, or unsafe UI fails closed.
+The target state for this phase:
 
-The result should make Tron useful as a modular capability engine without
-recreating the old mobile-first product shell.
+- every generated operator surface is a `ui_surface` resource version;
+- every generated surface is reproducible from substrate truth plus deterministic
+  authoring rules;
+- every action is a stored canonical target invocation template;
+- every stale, expired, damaged, unauthorized, oversized, or dangling surface
+  fails closed;
+- iOS can inspect, render, submit, refresh, and display action outcomes without
+  owning policy or constructing arbitrary capability payloads.
 
 ## Non-Goals
 
-- Do not add a new persisted UI plane, dashboard table, action queue, local iOS
-  truth store, or client authority cache.
-- Do not add `control::act` or any mutation multiplexer. Mutations remain normal
-  capabilities such as `grant::revoke`, `resource::link`, `artifact::promote`,
-  `approval::resolve`, `worker::disconnect`, and `agent::abort`.
-- Do not build a broad coordinator-agent rewrite in this phase.
-- Do not support legacy UI payloads, fallback renderers, component aliases,
-  deprecated route readers, or best-effort approximations.
-- Do not store raw secret bytes in UI resources, previews, action templates,
-  iOS caches, logs, or control snapshots.
+- Do not add a storage generation bump or new durable UI/control tables.
+- Do not add dynamic third-party component catalogs.
+- Do not add `control::act`, route aliases, fallback renderers, or local iOS
+  policy decisions.
+- Do not rebuild the coordinator agent, chat UX, or main app information
+  architecture in this phase.
+- Do not let generated surfaces read unbounded resource bodies, raw logs, or
+  secrets.
+- Do not treat a surface as authority. Authority remains grant plus capability
+  policy at invocation prepare time.
 
-## Core Primitives
+## Server Surface Authoring
 
-### `ui_surface` Resource
+Add deterministic authoring capabilities under the `ui` worker:
 
-Register `Resource(kind = "ui_surface")` as first-party substrate data.
+- `ui::surface_for_target`
+  - Mutating, resource-backed, idempotent.
+  - Request: `targetType`, `targetId`, `purpose`, `layoutProfile`,
+    `expectedTargetRevision`, optional `existingSurfaceResourceId`,
+    optional `expectedCurrentVersionId`, `refreshPolicy`, `maxPreviewBytes`,
+    `expiresAt`, and `links`.
+  - Behavior: builds or refreshes a `ui_surface` resource from current substrate
+    projections and returns top-level `resourceRefs`.
 
-Required payload fields:
+- `ui::validate_surface`
+  - Pure read.
+  - Revalidates a stored surface against current catalog, component bounds,
+    bindings, action targets, target revisions, grants, resource selectors,
+    expiry, redaction policy, and dangling refs.
+  - Returns `valid`, `stale`, `expired`, `damaged`, or `unauthorized`, plus
+    bounded diagnostics.
 
-- `surfaceId`: stable logical surface id scoped to the owner resource or worker.
-- `title`: short operator-facing title.
-- `purpose`: `inspect`, `configure`, `approve`, `curate`, `goal_working_set`,
-  `module_status`, or `custom`.
-- `componentCatalog`: catalog id and revision.
-- `layout`: declarative component tree with bounded depth, count, labels, and
-  data references.
-- `dataBindings`: resource refs, invocation refs, grant refs, and projection refs
-  used by the layout.
-- `actions`: capability action bindings with target revisions, idempotency
-  policy, required grant/risk/approval metadata, and payload templates.
-- `redactionPolicy`: preview and cache redaction rules.
-- `expiry`: latest valid action time.
-- `refreshPolicy`: whether the surface is static, stream-updated, or rebuilt
-  from a projection.
+- `ui::refresh_surface`
+  - Mutating, resource-backed, idempotent.
+  - CAS update for an existing generated surface using the same deterministic
+    authoring rule that created it.
+  - Rejects if the surface was manually authored or its authoring metadata is
+    missing.
 
-The resource type definition must define allowed lifecycle states:
+- `ui::expire_surface`
+  - Mutating, resource-backed, idempotent.
+  - Lifecycle transition to `expired` when `expiresAt` or target revision drift
+    makes actions invalid. It must not delete bytes.
 
-- `draft`: created but not renderable.
-- `active`: renderable and actions may be submitted.
-- `superseded`: replaced by a newer version.
-- `expired`: renderable as read-only history; actions rejected.
-- `discarded`: hidden from default projections.
-- `damaged`: payload or referenced data failed integrity checks.
+These capabilities compose the existing resource store. They do not create a
+surface registry table, local cache, or control-plane persistence layer.
 
-### Component Catalog
+## First-Party Surface Set
 
-The catalog is a versioned contract, not a Swift implementation detail.
+Author fixed first-party surfaces for these targets:
 
-Initial component set:
+- `worker`
+  - Health, lifecycle, trust tier, visibility, namespace claims, registered
+    capabilities, recent invocations, child workers, disconnect/refresh actions.
 
-- text: `Text`, `Heading`, `Monospace`, `Badge`;
-- structure: `Section`, `List`, `Table`, `Tabs`, `Disclosure`;
-- data: `ResourceRef`, `InvocationRef`, `GrantRef`, `WorkerRef`, `Metric`;
-- inputs: `TextField`, `TextArea`, `Select`, `Toggle`, `Stepper`, `DateTime`;
-- commands: `Button`, `ButtonGroup`, `Confirmation`;
-- status: `Progress`, `Health`, `Warning`, `Error`, `EmptyState`.
+- `capability`
+  - Request/response schema summary, effect, risk, idempotency, output contract,
+    required grant, target revision, examples, inspect/execute readiness.
+
+- `goal`
+  - Intent, success criteria, working set, candidate outputs, promoted refs,
+    claims, evidence, decisions, child invocation tree, pause/abort/promote
+    actions.
+
+- `resource`
+  - Current version, lifecycle, policy, versions, links, lineage, redacted
+    preview, available lifecycle/curation actions.
+
+- `invocation`
+  - Function, actor, worker, grant snapshot, parent/children, inputs, result,
+    produced resource refs, trace linkage, retry/inspect actions.
+
+- `grant`
+  - Subject, parent, lifecycle, allowed capabilities/resource selectors/file
+    roots/network/risk/budgets/expiry/delegation, revoke/inspect actions.
+
+- `approval`
+  - Request context, risk, target function, redacted payload preview, expiry,
+    approve/reject actions through canonical `approval::resolve`.
+
+- `queue` and `lease`
+  - Queue item status, lease owner, expiry, blocked work, retry/cancel/release
+    actions only where canonical capabilities already exist.
+
+- `storage` and `integrity`
+  - DB size, blob refs, resource damage warnings, orphan candidates, retention
+    readiness, checkpoint/export/retention actions through canonical storage
+    capabilities.
+
+Each surface must be narrow, inspectable, and bounded. Large payloads stay as
+refs with previews. Layouts should prefer `Section`, `Metric`, `Table`,
+`ResourceRef`, `InvocationRef`, `GrantRef`, `WorkerRef`, `Disclosure`,
+`Warning`, `Error`, and explicit action buttons.
+
+## Control Projection Integration
+
+`control::snapshot` and `control::inspect` remain read-only projections. Extend
+their `availableActions` to include `ui::surface_for_target` templates when a
+target has no current active surface or when the current surface is stale.
 
 Rules:
 
-- Each component has a JSON schema and Swift renderer test fixture.
-- Component props must be bounded by byte size, item count, and nesting depth.
-- Text is display data only. It cannot contain executable markup, local file
-  URLs, raw secrets, or unbounded logs.
-- Components unsupported by the active iOS catalog make the surface invalid.
-  The client must not approximate them.
+- Control projections may list `uiSurfaceRefs`.
+- Control projections must not inline full layouts, payload templates, or input
+  schemas.
+- Control projections must not create surfaces implicitly.
+- Surface creation and refresh happen only through `ui::*` capabilities with
+  idempotency and grants.
+- Stale action submissions fail at `ui::submit_action` or the target capability,
+  even if control projected the action earlier.
 
-### Action Binding
+## Integrity And Lifecycle
 
-An action is a prepared capability invocation template.
+Add a surface integrity path that is rebuildable from existing substrate truth:
 
-Required action fields:
+- Detect dangling resource/invocation/grant/worker/capability bindings.
+- Detect target revision drift for stored actions.
+- Detect expired surfaces and expired actions.
+- Detect secret-like values in layout props, bindings, previews, action labels,
+  and cached iOS surface summaries.
+- Detect unsupported catalog/component ids.
+- Detect excessive component count, depth, table rows, text bytes, and total
+  payload bytes.
+- Detect stale output contracts for resource-backed action targets.
+- Mark damaged or expired surfaces through resource lifecycle updates; do not
+  silently rewrite payload truth.
 
-- `actionId`;
-- `label` and optional icon;
-- `targetFunctionId`;
-- `targetResourceId` and `targetVersionId` when acting on a resource;
-- `requiredGrantId` or grant selector;
-- `requiredRisk`;
-- `approvalPolicy`;
-- `idempotencyKeyTemplate`;
-- `payloadTemplate`;
-- `inputSchema`;
-- `confirmationPolicy`;
-- `expiresAt`;
-- `surfaceVersionId`;
-- `targetRevision`.
+Integrity output should be visible through `ui::validate_surface`,
+`control::snapshot` integrity warnings, and `observability::trace_get` when the
+surface was involved in an action.
 
-Submission rules:
+## iOS End-To-End Consumption
 
-- iOS submits only user input plus the action id and observed surface version.
-- The server reconstructs the invocation from the stored action template.
-- Invocation prepare checks grant, resource selector, target revision, expiry,
-  approval, idempotency, budget, and output contract before handler execution.
-- Stale target revisions fail at the target capability; the renderer may then
-  ask for a refreshed surface.
+The iOS Engine Console should move from showing only `uiSurfaceRefs` to rendering
+server-authored surfaces in detail views:
 
-## Server Implementation Plan
+- Selecting a worker/capability/goal/resource/invocation/grant/approval can call
+  `control::inspect`.
+- If an active `uiSurfaceRef` exists, iOS calls `ui::inspect_surface` and renders
+  the returned current version.
+- If no surface exists, iOS shows the server-provided `ui::surface_for_target`
+  action template as a normal server-authoritative action, not a local shortcut.
+- Action submission sends only `surfaceResourceId`, `surfaceVersionId`,
+  `actionId`, `userInput`, and one idempotency key.
+- Action results render child invocation id, target function id, output refs,
+  approval-required state, stale/rejected state, and refresh affordance from the
+  server response.
+- Offline cached surfaces are read-only and actions stay disabled.
 
-1. Add failing tests for `ui_surface` type registration, schema validation,
-   lifecycle transitions, versioning, redaction, unsupported components, stale
-   actions, and action permission checks.
-2. Register `ui_surface` and `ui_component_catalog` resource definitions in the
-   resource kernel.
-3. Add `ui::create_surface`, `ui::update_surface`, `ui::inspect_surface`,
-   `ui::discard_surface`, and `ui::render_contract` wrappers over
-   `resource::*`.
-4. Add strict validation:
-   - catalog id/revision exists;
-   - component tree validates against catalog schemas;
-   - referenced resources/invocations/grants are visible to the active grant;
-   - action targets are canonical capabilities;
-   - action payload templates validate against target request schemas;
-   - mutating actions include idempotency and output contracts;
-   - redaction policy covers every secret-like binding.
-5. Extend `control::snapshot` and `control::inspect` to return optional
-   `ui_surface` refs for worker, goal, resource, grant, invocation, and trace
-   targets. The control APIs still return projections only.
-6. Add event/projection output that announces surface resource versions without
-   embedding mutable UI state in streams.
-7. Add integrity tooling:
-   - scan surfaces for dangling refs;
-   - mark damaged surfaces inspectable;
-   - detect orphaned surface blobs;
-   - verify expired actions are rejected.
-8. Remove any server code that emits bespoke dashboard payloads once a
-   corresponding `ui_surface` exists.
+Renderer work in this phase:
 
-## iOS Implementation Plan
+- Add compact and regular width layout tests for every first-party surface type.
+- Add accessibility labels for reference rows, metrics, status components, and
+  action controls.
+- Add form-state tests for `TextField`, `TextArea`, `Select`, `Toggle`,
+  `Stepper`, and `DateTime`.
+- Keep unsupported components as closed error states.
 
-1. Add DTOs for `ui_surface` refs, component catalog revision, component tree,
-   data bindings, action bindings, and action submission.
-2. Build a strict SwiftUI renderer for the initial catalog.
-3. Keep the renderer stateless with respect to truth:
-   - it may cache read-only surface versions;
-   - it must not decide policy;
-   - it must not synthesize unsupported components;
-   - it must not mutate local lineage, grant, or resource state.
-4. Wire Engine Console detail views to display server-provided `ui_surface`
-   refs for selected workers, goals, resources, grants, invocations, and traces.
-5. Submit actions through the capability client using the action id plus
-   observed surface/resource revisions. The server reconstructs the real
-   invocation.
-6. Render stale, expired, approval-required, and rejected action states from
-   server responses, not local guesses.
-7. Add accessibility and layout tests for compact and regular width:
-   - no clipped labels;
-   - no overlapping controls;
-   - dynamic type remains usable;
-   - unsupported components produce a closed error state.
+## Security Rules
 
-## Security And Failure Rules
+- Surface authoring requires a grant that can read the target projection and
+  create/update `ui_surface` resources.
+- Surface actions cannot exceed the authoring invocation's grant ceiling.
+- `ui::surface_for_target` cannot include an action whose target function,
+  revision, risk, output contract, or required grant is not visible and valid.
+- `ui::submit_action` remains the only UI action gateway.
+- A client cannot submit target function ids, payload templates, required grants,
+  or target revisions.
+- Secret-like output is represented as `secret_ref` or redacted preview only.
+- Resource bodies, logs, stdout/stderr, and trace payloads are bounded previews
+  unless explicitly materialized as refs.
+- Duplicate surface refresh and action submissions use idempotency; they must not
+  create duplicate versions or child invocations.
+- Damaged or expired surfaces are inspectable but not actionable.
 
-- A surface cannot grant authority. It can only reference action templates that
-  resolve to canonical capabilities.
-- A worker cannot render an action above its grant ceiling.
-- A client cannot submit a payload field outside the action template schema.
-- A generated surface cannot read resources not visible to the active grant.
-- A stale surface version cannot perform mutation.
-- An expired surface is read-only.
-- A damaged surface is inspectable but not actionable.
-- Secret-like data is represented as `secret_ref` or redacted preview only.
-- Oversized payloads, deep trees, excessive table rows, and unbounded log views
-  fail validation before persistence.
-- Offline iOS actions are rejected unless explicitly modeled as durable
-  approval responses with idempotency and expiry. Do not add this by default.
+## TDD Sequence
 
-## Test-Driven Sequence
-
-1. `ui_surface` resource type registration fails invalid schemas.
-2. Component catalog rejects unsupported components and excessive tree bounds.
-3. `ui::create_surface` returns top-level `resourceRefs`.
-4. Surface creation fails when bindings reference invisible resources.
-5. Surface creation fails when action targets unknown or noncanonical
-   capabilities.
-6. Mutating action templates fail without idempotency/output contract.
-7. Action submission fails when surface version is stale.
-8. Action submission fails when target resource revision changed.
-9. Revoked/expired grants fail before handler execution.
-10. Secret-like bindings are redacted or rejected.
-11. Control projections expose only surface refs and rebuild without control
-    state tables.
-12. iOS renderer snapshot tests cover every catalog component.
-13. iOS renderer rejects unsupported component ids.
-14. iOS action submission sends only action id, observed revisions, and validated
-    user input.
-15. Static gates fail on fallback renderers, legacy dashboard routes, local
-    policy decisions, or UI mutation multiplexers.
-
-## Static Gates
-
-- No public mutation API named `control::act`.
-- No generated UI action without a canonical `targetFunctionId`.
-- No mutable action without idempotency.
-- No unsupported-component fallback renderer.
-- No iOS local grant/policy truth.
-- No raw secret bytes in UI resources, previews, logs, or caches.
-- No UI table/cache that cannot be rebuilt from catalog, invocation, grant, and
-  resource truth.
-- No legacy route, alias, or retired DTO reader.
+1. Add failing tests for `ui::surface_for_target` creating a worker surface with
+   top-level `resourceRefs`.
+2. Add tests that generated action templates reject unknown targets, stale target
+   revisions, excessive risk, missing idempotency, missing output contracts, and
+   grants broader than the authoring grant.
+3. Add tests that control projections advertise `ui::surface_for_target` without
+   creating surfaces or inlining layouts/templates.
+4. Add tests for deterministic surfaces for worker, capability, goal, resource,
+   invocation, grant, approval, queue/lease, and storage/integrity targets.
+5. Add tests that `ui::validate_surface` detects dangling refs, expired actions,
+   stale target revisions, unsupported components, raw secrets, and oversized
+   payloads.
+6. Add CAS/idempotency tests for `ui::refresh_surface` and lifecycle tests for
+   `ui::expire_surface`.
+7. Add iOS DTO/client tests for inspecting a surface, submitting an action,
+   rendering action results, and keeping offline surfaces read-only.
+8. Add iOS renderer layout/accessibility tests for compact and regular widths.
+9. Add static gates for no control mutation multiplexer, no local iOS policy,
+   no dynamic catalog acceptance, no fallback renderer, and no generated UI
+   payload/template in control caches.
 
 ## Verification
 
-- Rust targeted tests for resource type registration, UI wrappers, validation,
-  action submission, grants, stale revisions, redaction, and control projection.
-- `scripts/tron ci fmt check clippy test` before checkpoint.
-- iOS `xcodegen generate`.
-- Targeted iOS tests for Engine Console DTOs, renderer fixtures, unsupported
-  components, action submission, and cache redaction.
+- Targeted Rust tests for `ui::*` authoring, validation, refresh, expiry,
+  control projection integration, and action submission.
+- Static gate tests in `packages/agent/tests/threat_model_invariants.rs`.
+- `scripts/tron ci fmt check clippy test`.
+- `cd packages/ios-app && xcodegen generate`.
+- Targeted `xcodebuild test` for Engine Console generated UI DTOs, renderer,
+  surface loading, action submission, cache redaction, and layout/accessibility.
 - `git diff --check`.
-- Update `~/LEDGER.jsonl` with the phase plan and implementation checkpoint.
+- Update `~/LEDGER.jsonl` with the checkpoint.
 
-## Phase Exit Criteria
+## Exit Criteria
 
-- A worker can create an inspectable `ui_surface` resource.
-- The control plane can expose surface refs without durable control state.
-- iOS can render the accepted catalog strictly and submit actions safely.
-- Stale, unauthorized, unsupported, damaged, expired, and secret-bearing surfaces
-  fail closed in tests.
-- No legacy dashboard or mobile-first session-manager UI path remains necessary
-  for substrate inspection.
+- Engine Console can render real server-authored surfaces for the core substrate
+  target types.
+- Surface authoring is deterministic, idempotent, resource-backed, and
+  grant-scoped.
+- Surface integrity failures are visible, bounded, and fail closed.
+- iOS remains a thin renderer/action submitter with no local policy truth.
+- No new durable plane exists beyond catalog/worker records, invocation ledger,
+  grant ledger, and resource store.

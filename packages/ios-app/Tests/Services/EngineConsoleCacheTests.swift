@@ -34,7 +34,46 @@ struct EngineConsoleCacheTests {
                 )
             ],
             workerSummaries: [],
-            controlSnapshot: nil,
+            controlSnapshot: ControlSnapshotDTO(
+                catalogRevision: 7,
+                workers: [],
+                capabilities: [],
+                resourceTypes: [],
+                activeGoals: [],
+                invocations: [],
+                grants: [],
+                queues: [],
+                leases: [],
+                approvals: [],
+                storage: nil,
+                integrityWarnings: [],
+                availableActions: [],
+                uiSurfaceRefs: [
+                    UiSurfaceRefDTO(
+                        resourceId: "res-ui",
+                        versionId: "ver-ui",
+                        kind: "ui_surface",
+                        lifecycle: "active",
+                        surfaceId: "surface",
+                        title: "Surface",
+                        purpose: "Control",
+                        catalog: UiCatalogRefDTO(id: "tron.ui.catalog.core.v1", revision: 1),
+                        expiresAt: "2100-01-01T00:00:00Z",
+                        targets: [],
+                        actions: [
+                            UiActionSummaryDTO(
+                                actionId: "act",
+                                label: "Act",
+                                targetFunctionId: "artifact::promote",
+                                requiredGrant: "grant",
+                                requiredRisk: "medium",
+                                targetRevision: 1,
+                                expiresAt: "2100-01-01T00:00:00Z"
+                            )
+                        ]
+                    )
+                ]
+            ),
             recentAuditRows: [
                 CapabilityAuditEventDTO(
                     id: "audit-1",
@@ -94,5 +133,10 @@ struct EngineConsoleCacheTests {
         #expect(loaded.pluginSummaries.first?.id == "first_party.filesystem")
         #expect(loaded.recentAuditRows.first?.redacted == true)
         #expect(loaded.recentProgramRuns.first?.bindingDecisionId == "binding_decision_1")
+        #expect(loaded.controlSnapshot?.uiSurfaceRefs?.first?.resourceId == "res-ui")
+
+        let rawCache = try String(contentsOf: url, encoding: .utf8)
+        #expect(!rawCache.contains("payloadTemplate"))
+        #expect(!rawCache.contains("inputSchema"))
     }
 }

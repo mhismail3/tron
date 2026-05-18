@@ -90,7 +90,7 @@ UI harness.
 
 The implementation target for the modular-engine rebuild lives in
 [`docs/collapsed-modular-engine-architecture.md`](docs/collapsed-modular-engine-architecture.md).
-The current enforcement checkpoint is
+The next substrate checkpoint is planned in
 [`docs/modular-engine-next-phase-plan.md`](docs/modular-engine-next-phase-plan.md).
 The core rule is one substrate: workers invoke capabilities against typed
 resources under scoped grants. Artifacts, goals, claims, evidence, decisions,
@@ -98,9 +98,12 @@ generated UI surfaces, module config, worker packages, secret refs, and
 materialized files are modeled as resource kinds rather than separate
 persistence planes. The current substrate slice has engine-owned `grant::*`
 authority, built-in resource type definitions for artifacts, goals, claims,
-evidence, decisions, materialized files, patch proposals, execution outputs, and
-agent results, thin wrapper capabilities over the generic `resource::*` kernel,
-and resource-backed output enforcement for converted durable-output paths.
+evidence, decisions, generated UI surfaces, materialized files, patch proposals,
+execution outputs, and agent results, thin wrapper capabilities over the
+generic `resource::*` kernel, resource-backed output enforcement for converted
+durable-output paths, a fixed `tron.ui.catalog.core.v1` generated UI catalog,
+`ui::*` surface/action capabilities, and control projections that expose
+`uiSurfaceRefs` without adding durable control-plane state.
 
 ---
 
@@ -446,6 +449,17 @@ provider-facing primitives:
 Admin mutations carry high-risk capability metadata, approval requirements,
 idempotency, policy evaluation, tracing, and audit records. Read paths return
 redacted audit data by default; reveal behavior remains server-authoritative.
+
+Engine-owned primitive workers additionally expose the substrate control and
+generated UI surfaces. `control::snapshot` and `control::inspect` are read-only
+projections over catalog, invocation, grant, resource, queue, lease, approval,
+storage, and worker truth; they may include `uiSurfaceRefs` but do not inline
+large layouts or stored action templates. Generated UI is persisted as
+`Resource(kind = "ui_surface")` and managed by `ui::catalog`,
+`ui::create_surface`, `ui::update_surface`, `ui::inspect_surface`,
+`ui::discard_surface`, and `ui::submit_action`. iOS submits only the stored
+surface/version/action coordinates, user input, and idempotency key; the server
+reconstructs and authorizes the canonical target invocation.
 
 ---
 
@@ -975,7 +989,7 @@ packages/ios-app/Sources/
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Capability-native chat UI**: active work is rendered as `capabilityInvocation` / `capabilityResult` content from capability identity and schema/result metadata. Retired capability descriptors, old built-in names, and plugin source-specific capability sheets are not active UI routes.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, vector index state, and program runs through a simplified Overview/Capabilities/Program Runs flow. Advanced sections expose plugin manifests, workers, bindings, policies, redacted audit rows, trace summaries, and primer inputs behind an explicit toggle. It invokes capability admin functions rather than hardcoded capability descriptors. `EngineConsoleCache` stores read-only summaries for disconnected browsing; mutations stay server-authoritative and are disabled by the console state while offline.
+- **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, vector index state, program runs, substrate workers/resources/grants, and generated `ui_surface` refs through a simplified Overview/Capabilities/Program Runs/Substrate flow. Advanced sections expose plugin manifests, workers, bindings, policies, redacted audit rows, trace summaries, and primer inputs behind an explicit toggle. It invokes capability admin functions rather than hardcoded capability descriptors. `EngineConsoleCache` stores read-only summaries and redacted generated-UI refs for disconnected browsing; mutations and generated-UI actions stay server-authoritative and are disabled while offline.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.

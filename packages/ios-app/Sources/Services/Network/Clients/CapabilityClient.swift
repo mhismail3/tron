@@ -54,6 +54,21 @@ final class CapabilityClient: EngineDomainClient {
         )
     }
 
+    func submitUiAction(
+        _ submission: UiActionSubmissionDTO,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> UiActionResultDTO {
+        _ = try requireTransport().requireConnection()
+        var canonicalSubmission = submission
+        canonicalSubmission.idempotencyKey = idempotencyKey.rawValue
+        return try await invokeWrite(
+            "ui::submit_action",
+            canonicalSubmission,
+            idempotencyKey: idempotencyKey,
+            context: uiActionContext
+        )
+    }
+
     func search(_ request: CapabilitySearchRequestDTO) async throws -> CapabilitySearchResponseDTO {
         _ = try requireTransport().requireConnection()
         let result: CapabilityPrimitiveResultDTO = try await invokeRead(
@@ -413,6 +428,15 @@ final class CapabilityClient: EngineDomainClient {
             "capability.admin.read",
             "capability.audit.read",
             "capability.policy.read"
+        ])
+    }
+
+    private var uiActionContext: EngineInvocationContext {
+        EngineInvocationContext(authorityScopes: [
+            "ui.write",
+            "capability.admin.read",
+            "resource.read",
+            "resource.write"
         ])
     }
 

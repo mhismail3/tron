@@ -357,6 +357,9 @@ impl EngineHostHandle {
         if invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
             return self.invoke_approval_resolve_unlocked(invocation).await;
         }
+        if invocation.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION {
+            return self.invoke_ui_submit_action_unlocked(invocation).await;
+        }
         if invocation.function_id.namespace() == ENGINE_WORKER_ID {
             return self.inner.lock().await.invoke(invocation).await;
         }
@@ -918,6 +921,82 @@ impl EngineHostHandle {
             prepared.meta_function,
             Ok(value),
             None,
+        )
+    }
+
+    async fn invoke_ui_submit_action_unlocked(
+        &self,
+        mut invocation: Invocation,
+    ) -> InvocationResult {
+        let prepared = {
+            let mut host = self.inner.lock().await;
+            let function = match host.prepare_meta_invocation(&mut invocation) {
+                Ok(function) => function,
+                Err(err) => return host.meta_error(&invocation, err),
+            };
+            let idempotency = match host
+                .catalog
+                .begin_invocation_idempotency(&function, &invocation)
+            {
+                InvocationIdempotencyDecision::None => None,
+                InvocationIdempotencyDecision::Reserved(reservation) => Some(reservation),
+                InvocationIdempotencyDecision::Finished { result, scope } => {
+                    return host
+                        .catalog
+                        .record_invocation_result(&invocation, result, scope);
+                }
+            };
+            match primitives::ui::action_child_invocation(&*host, &invocation) {
+                Ok(child) => Ok((invocation.clone(), function, idempotency, child)),
+                Err(err) => Err(host.finish_meta_invocation(
+                    invocation.clone(),
+                    function,
+                    Err(err),
+                    idempotency,
+                )),
+            }
+        };
+        let (meta_invocation, meta_function, idempotency, child) = match prepared {
+            Ok(prepared) => prepared,
+            Err(result) => return result,
+        };
+        let child = if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
+            let mut host = self.inner.lock().await;
+            host.catalog.prepare_sync_invocation(child)
+        } else if is_host_dispatched_primitive_namespace(child.function_id.namespace()) {
+            PreparedSyncInvocationDecision::Finished(Box::new(
+                self.inner
+                    .lock()
+                    .await
+                    .invoke_sync_host_dispatched_primitive(child),
+            ))
+        } else {
+            let mut host = self.inner.lock().await;
+            host.catalog.prepare_sync_invocation(child)
+        };
+        let child_result = match child {
+            PreparedSyncInvocationDecision::Execute(child) => {
+                if child.invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
+                    self.execute_prepared_approval_resolve(*child).await
+                } else {
+                    self.execute_prepared_regular(*child).await
+                }
+            }
+            PreparedSyncInvocationDecision::Finished(result) => *result,
+        };
+        let submit_value = if let Some(error) = child_result.error.clone() {
+            Err(error)
+        } else {
+            Ok(primitives::ui::submit_action_result_value(
+                &meta_invocation,
+                &child_result,
+            ))
+        };
+        self.inner.lock().await.finish_meta_invocation(
+            meta_invocation,
+            meta_function,
+            submit_value,
+            idempotency,
         )
     }
 
@@ -2131,6 +2210,28 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .inspect(resource_id)
     }
 
+    fn create_resource(
+        &mut self,
+        request: super::resources::CreateResource,
+    ) -> Result<super::resources::EngineResource> {
+        self.primitives
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .create(request)
+    }
+
+    fn update_resource(
+        &mut self,
+        request: super::resources::UpdateResource,
+    ) -> Result<super::resources::EngineResourceVersion> {
+        self.primitives
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .update(request)
+    }
+
     fn list_grants(
         &self,
         filter: super::grants::ListGrants,
@@ -2872,6 +2973,6 @@ fn grant_id(value: &str) -> Result<AuthorityGrantId> {
 fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
     matches!(
         namespace,
-        "catalog" | "worker" | "control" | "observability" | "storage"
+        "catalog" | "worker" | "control" | "observability" | "storage" | "ui"
     )
 }

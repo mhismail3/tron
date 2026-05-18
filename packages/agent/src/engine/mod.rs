@@ -31,10 +31,10 @@
 //! - canonical domain functions such as `events::append`,
 //!   `filesystem::create_dir`, and `skills::activate` are the only executable
 //!   domain surface;
-//! - stream, state, queue, approval, catalog, grant, worker, and observability
-//!   workers plus the generic `resource` kernel are registered as first-class
-//!   primitive workers with in-memory and SQLite-backed stores scoped outside
-//!   the production event-store migration;
+//! - stream, state, queue, approval, catalog, grant, worker, observability, and
+//!   generated-UI workers plus the generic `resource` kernel are registered as
+//!   first-class primitive workers with in-memory and SQLite-backed stores
+//!   scoped outside the production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution,
 //!   while `approval::resolve` remains a user/client-owned primitive routed
@@ -46,8 +46,12 @@
 //!   host or inventing per-handler locks;
 //! - typed resources are the durable object substrate: artifacts, goals, claims,
 //!   evidence, decisions, generated UI surfaces, worker packages, and
-//!   materialized files should be modeled as versioned resources with links and
+//!   materialized files are modeled as versioned resources with links and
 //!   events instead of separate persistence planes;
+//! - generated UI surfaces are fixed-catalog `ui_surface` resources; clients
+//!   render the declared component tree and submit stored action ids through
+//!   `ui::submit_action`, while the engine reconstructs and authorizes the
+//!   target capability invocation;
 //! - durable-output capabilities declare output contracts and finish validation
 //!   requires canonical resource refs for every resource-backed path;
 //! - the trigger runtime records trigger metadata, transport/domain authority

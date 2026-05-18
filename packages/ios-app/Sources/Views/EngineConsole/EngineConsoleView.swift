@@ -234,6 +234,31 @@ struct EngineConsoleView: View {
 
             EngineConsoleCard {
                 EngineConsoleCardHeader(
+                    symbol: "rectangle.3.group",
+                    title: "Generated Surfaces",
+                    subtitle: "Validated ui_surface resources linked from the substrate projection."
+                )
+                let surfaces = substrateSnapshot?.uiSurfaceRefs ?? []
+                if surfaces.isEmpty {
+                    EngineConsoleEmptyState(
+                        symbol: "rectangle.dashed",
+                        title: "No surfaces",
+                        message: "Generated UI resources will appear here after workers create them."
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(surfaces.prefix(8).enumerated()), id: \.element.resourceId) { _, surface in
+                            EngineConsoleKeyValueRow(
+                                surface.title ?? surface.surfaceId ?? surface.resourceId,
+                                surface.lifecycle ?? surface.catalog?.id ?? "ui_surface"
+                            )
+                        }
+                    }
+                }
+            }
+
+            EngineConsoleCard {
+                EngineConsoleCardHeader(
                     symbol: "arrow.triangle.branch",
                     title: "Available Actions",
                     subtitle: "Actions are templates for canonical capabilities; stale submissions fail at the target."
@@ -662,6 +687,7 @@ struct EngineConsoleView: View {
             EngineConsoleMetric("Capabilities", countText(snapshot?.capabilities?.count, cached: nil), .tronTeal),
             EngineConsoleMetric("Resource Kinds", countText(snapshot?.resourceTypes?.count, cached: nil), .tronCyan),
             EngineConsoleMetric("Active Goals", countText(snapshot?.activeGoals?.count, cached: nil), .tronAmber),
+            EngineConsoleMetric("UI Surfaces", countText(snapshot?.uiSurfaceRefs?.count, cached: nil), .tronEmerald),
             EngineConsoleMetric("Invocations", countText(snapshot?.invocations?.count, cached: nil), .tronPurple),
             EngineConsoleMetric("Grants", countText(snapshot?.grants?.count, cached: nil), .tronSlate),
             EngineConsoleMetric("Queues", countText(snapshot?.queues?.count, cached: nil), .tronRose),

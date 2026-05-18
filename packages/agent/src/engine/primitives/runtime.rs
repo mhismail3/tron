@@ -6,7 +6,7 @@
 
 use serde_json::{Value, json};
 
-use super::{catalog, control, observability, storage, worker};
+use super::{catalog, control, observability, storage, ui, worker};
 use crate::engine::approval::EngineApprovalRecord;
 use crate::engine::discovery::{ActorContext, FunctionQuery};
 use crate::engine::errors::{EngineError, Result};
@@ -15,7 +15,8 @@ use crate::engine::ids::{InvocationId, TriggerId, WorkerId};
 use crate::engine::invocation::{CausalContext, Invocation, InvocationRecord};
 use crate::engine::leases::EngineResourceLease;
 use crate::engine::resources::{
-    EngineResource, EngineResourceInspection, EngineResourceTypeDefinition, ListResources,
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
+    EngineResourceVersion, ListResources, UI_SURFACE_KIND, UpdateResource,
 };
 use crate::engine::streams::EngineStreamEvent;
 use crate::engine::types::{
@@ -65,6 +66,8 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn resource_type_definitions(&self) -> Result<Vec<EngineResourceTypeDefinition>>;
     fn list_resources(&self, filter: ListResources) -> Result<Vec<EngineResource>>;
     fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>>;
+    fn create_resource(&mut self, request: CreateResource) -> Result<EngineResource>;
+    fn update_resource(&mut self, request: UpdateResource) -> Result<EngineResourceVersion>;
     fn list_grants(&self, filter: ListGrants) -> Result<Vec<EngineGrant>>;
     fn inspect_grant(
         &self,
@@ -119,6 +122,12 @@ pub(in crate::engine) fn dispatch(
         worker::PROTOCOL_GUIDE_FUNCTION => worker_protocol_guide(invocation),
         control::SNAPSHOT_FUNCTION => control_snapshot(host, invocation),
         control::INSPECT_FUNCTION => control_inspect(host, invocation),
+        ui::CATALOG_FUNCTION
+        | ui::CREATE_SURFACE_FUNCTION
+        | ui::UPDATE_SURFACE_FUNCTION
+        | ui::INSPECT_SURFACE_FUNCTION
+        | ui::DISCARD_SURFACE_FUNCTION
+        | ui::SUBMIT_ACTION_FUNCTION => ui::dispatch(host, invocation),
         observability::TRACE_GET_FUNCTION => trace_get(host, invocation),
         observability::TRACE_LIST_FUNCTION => trace_list(host, invocation),
         observability::SPAN_LIST_FUNCTION => span_list(host, invocation),
@@ -236,6 +245,7 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "storage": storage,
         "integrityWarnings": substrate_integrity_warnings(host)?,
         "availableActions": substrate_actions(),
+        "uiSurfaceRefs": ui_surface_refs(host, limit)?,
     }))
 }
 
@@ -309,7 +319,132 @@ fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> 
         "targetId": target_id,
         "graph": graph,
         "availableActions": actions_for_target(target_type, target_id),
+        "uiSurfaceRefs": ui_surface_refs_for_target(host, target_type, target_id)?,
     }))
+}
+
+fn ui_surface_refs(host: &dyn PrimitiveRuntimeHost, limit: usize) -> Result<Vec<Value>> {
+    host.list_resources(ListResources {
+        kind: Some(UI_SURFACE_KIND.to_owned()),
+        scope: None,
+        lifecycle: None,
+        limit,
+    })?
+    .into_iter()
+    .filter_map(|resource| ui_surface_ref_for_resource(host, resource).transpose())
+    .collect()
+}
+
+fn ui_surface_refs_for_target(
+    host: &dyn PrimitiveRuntimeHost,
+    target_type: &str,
+    target_id: &str,
+) -> Result<Vec<Value>> {
+    let functions = host.discover_functions(&FunctionQuery {
+        include_internal: true,
+        ..FunctionQuery::default()
+    });
+    Ok(ui_surface_refs(host, 100)?
+        .into_iter()
+        .filter(|surface| {
+            let bound_to_target = surface_targets(surface).iter().any(|target| {
+                target.get("targetType").and_then(Value::as_str) == Some(target_type)
+                    && target.get("targetId").and_then(Value::as_str) == Some(target_id)
+            });
+            let action_targets_capability = target_type == "capability"
+                && surface_actions(surface).iter().any(|action| {
+                    action.get("targetFunctionId").and_then(Value::as_str) == Some(target_id)
+                });
+            let action_targets_worker = target_type == "worker"
+                && surface_actions(surface).iter().any(|action| {
+                    let Some(function_id) = action.get("targetFunctionId").and_then(Value::as_str)
+                    else {
+                        return false;
+                    };
+                    functions.iter().any(|function| {
+                        function.id.as_str() == function_id
+                            && function.owner_worker.as_str() == target_id
+                    })
+                });
+            bound_to_target || action_targets_capability || action_targets_worker
+        })
+        .collect())
+}
+
+fn ui_surface_ref_for_resource(
+    host: &dyn PrimitiveRuntimeHost,
+    resource: EngineResource,
+) -> Result<Option<Value>> {
+    if matches!(
+        resource.lifecycle.as_str(),
+        "discarded" | "damaged" | "expired"
+    ) {
+        return Ok(None);
+    }
+    let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
+        return Ok(None);
+    };
+    let payload = current_resource_payload(&inspection).unwrap_or(Value::Null);
+    Ok(Some(json!({
+        "resourceId": resource.resource_id,
+        "versionId": resource.current_version_id,
+        "kind": resource.kind,
+        "lifecycle": resource.lifecycle,
+        "surfaceId": payload.get("surfaceId").cloned().unwrap_or(Value::Null),
+        "title": payload.get("title").cloned().unwrap_or(Value::Null),
+        "purpose": payload.get("purpose").cloned().unwrap_or(Value::Null),
+        "catalog": payload.get("catalog").cloned().unwrap_or(Value::Null),
+        "expiresAt": payload.get("expiresAt").cloned().unwrap_or(Value::Null),
+        "targets": payload.get("bindings").cloned().unwrap_or_else(|| json!([])),
+        "actions": ui_surface_action_summaries(&payload),
+    })))
+}
+
+fn current_resource_payload(inspection: &EngineResourceInspection) -> Option<Value> {
+    let current = inspection.resource.current_version_id.as_ref()?;
+    inspection
+        .versions
+        .iter()
+        .find(|version| &version.version_id == current)
+        .map(|version| version.payload.clone())
+}
+
+fn surface_targets(surface: &Value) -> Vec<Value> {
+    surface
+        .get("targets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn surface_actions(surface: &Value) -> Vec<Value> {
+    surface
+        .get("actions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn ui_surface_action_summaries(payload: &Value) -> Value {
+    let Some(actions) = payload.get("actions").and_then(Value::as_array) else {
+        return json!([]);
+    };
+    Value::Array(
+        actions
+            .iter()
+            .map(|action| {
+                json!({
+                    "actionId": action.get("actionId").cloned().unwrap_or(Value::Null),
+                    "label": action.get("label").cloned().unwrap_or(Value::Null),
+                    "targetFunctionId": action.get("targetFunctionId").cloned().unwrap_or(Value::Null),
+                    "requiredGrant": action.get("requiredGrant").cloned().unwrap_or(Value::Null),
+                    "requiredRisk": action.get("requiredRisk").cloned().unwrap_or(Value::Null),
+                    "targetRevision": action.get("targetRevision").cloned().unwrap_or(Value::Null),
+                    "expiresAt": action.get("expiresAt").cloned().unwrap_or(Value::Null),
+                })
+            })
+            .collect(),
+    )
 }
 
 fn latest_invocations(

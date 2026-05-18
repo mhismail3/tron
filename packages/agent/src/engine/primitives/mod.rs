@@ -7,7 +7,9 @@
 //! local `runtime` module.
 //! `grant::*` is the engine-owned authority surface; `resource::*` plus the
 //! artifact/goal/claim/evidence/decision wrappers form the durable output
-//! substrate. `storage::*` is the system primitive surface for the unified
+//! substrate. `ui::*` stores fixed-catalog generated UI as `ui_surface`
+//! resources and routes submitted actions back through canonical capability
+//! invocations. `storage::*` is the system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
 //! export.
 
@@ -62,6 +64,7 @@ pub(in crate::engine) mod runtime;
 pub(crate) mod state;
 pub(crate) mod storage;
 pub(crate) mod stream;
+pub(crate) mod ui;
 pub(crate) mod worker;
 
 pub(crate) const STREAM_WORKER_ID: &str = "stream";
@@ -75,6 +78,7 @@ pub(crate) const CONTROL_WORKER_ID: &str = "control";
 pub(crate) const WORKER_WORKER_ID: &str = "worker";
 pub(crate) const OBSERVABILITY_WORKER_ID: &str = "observability";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
+pub(crate) const UI_WORKER_ID: &str = "ui";
 const ENGINE_OWNER_ACTOR: &str = "system";
 const ENGINE_AUTHORITY_GRANT: &str = "engine-system";
 
@@ -657,6 +661,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(APPROVAL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CONTROL_WORKER_ID, WorkerKind::System)?,
+        primitive_worker(UI_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(OBSERVABILITY_WORKER_ID, WorkerKind::System)?,
         primitive_worker(STORAGE_WORKER_ID, WorkerKind::System)?,
@@ -675,6 +680,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(approval::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
     registrations.extend(control::registrations()?);
+    registrations.extend(ui::registrations()?);
     registrations.extend(worker::registrations()?);
     registrations.extend(observability::registrations()?);
     registrations.extend(storage::registrations()?);

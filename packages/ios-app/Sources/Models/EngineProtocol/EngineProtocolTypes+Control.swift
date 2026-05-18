@@ -14,6 +14,7 @@ struct ControlSnapshotDTO: Codable, Equatable, Sendable {
     var storage: AnyCodable?
     var integrityWarnings: [AnyCodable]?
     var availableActions: [AnyCodable]?
+    var uiSurfaceRefs: [UiSurfaceRefDTO]? = nil
 }
 
 struct ControlInspectRequestDTO: Codable, Equatable, Sendable {
@@ -27,4 +28,5 @@ struct ControlInspectDTO: Codable, Equatable, Sendable {
     var targetId: String?
     var graph: AnyCodable?
     var availableActions: [AnyCodable]?
+    var uiSurfaceRefs: [UiSurfaceRefDTO]? = nil
 }
