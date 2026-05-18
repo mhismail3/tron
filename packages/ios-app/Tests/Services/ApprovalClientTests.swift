@@ -25,7 +25,7 @@ struct ApprovalClientTests {
             return EngineApprovalResolveResult(
                 approval: EngineApprovalRecordDTO(
                     approvalId: "approval-1",
-                    functionId: "sandbox::spawn_worker",
+                    functionId: "worker::spawn",
                     payload: nil,
                     actorId: nil,
                     actorKind: nil,

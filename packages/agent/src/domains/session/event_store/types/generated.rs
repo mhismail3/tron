@@ -57,8 +57,6 @@ define_events! {
         ConfigReasoningLevel => "config.reasoning_level" => payloads::config::ConfigReasoningLevelPayload,
         /// Agent interrupted by user.
         NotificationInterrupted => "notification.interrupted" => payloads::notification::NotificationInterruptedPayload,
-        /// Subagent result notification.
-        NotificationSubagentResult => "notification.subagent_result" => payloads::notification::NotificationSubagentResultPayload,
         /// Compaction boundary marker.
         CompactBoundary => "compact.boundary" => payloads::compact::CompactBoundaryPayload,
         /// Phase 1 of the H13 compaction two-phase commit: summary produced,
@@ -117,8 +115,6 @@ define_events! {
         SubagentCompleted => "subagent.completed" => payloads::subagent::SubagentCompletedPayload,
         /// Subagent failed.
         SubagentFailed => "subagent.failed" => payloads::subagent::SubagentFailedPayload,
-        /// Subagent results consumed by parent agent.
-        SubagentResultsConsumed => "subagent.results_consumed" => payloads::notification::SubagentResultsConsumedPayload,
         /// Background process result notification.
         NotificationProcessResult => "notification.process_result" => payloads::notification::NotificationProcessResultPayload,
         /// Process results consumed by agent.
@@ -210,7 +206,7 @@ define_events! {
         /// Whether this is a repo-wide event (`repo.*`).
         is_repo_type => [RepoLockAcquired, RepoLockReleased, RepoMainAdvanced],
         /// Whether this is a subagent event (`subagent.*`).
-        is_subagent_type => [SubagentSpawned, SubagentStatusUpdate, SubagentCompleted, SubagentFailed, SubagentResultsConsumed],
+        is_subagent_type => [SubagentSpawned, SubagentStatusUpdate, SubagentCompleted, SubagentFailed],
         /// Whether this is a hook event (`hook.*`).
         is_hook_type => [HookTriggered, HookCompleted, HookBackgroundStarted, HookBackgroundCompleted, LlmHookResult],
         /// Whether this is a skill event (`skill.*`).
@@ -232,7 +228,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 83] = [
+    const EXPECTED: [(EventType, &str); 81] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -274,10 +270,6 @@ mod tests {
             EventType::NotificationInterrupted,
             "notification.interrupted",
         ),
-        (
-            EventType::NotificationSubagentResult,
-            "notification.subagent_result",
-        ),
         (EventType::CompactBoundary, "compact.boundary"),
         (EventType::CompactSummary, "compact.summary"),
         (EventType::CompactSummaryStaging, "compact.summary_staging"),
@@ -305,10 +297,6 @@ mod tests {
         (EventType::SubagentStatusUpdate, "subagent.status_update"),
         (EventType::SubagentCompleted, "subagent.completed"),
         (EventType::SubagentFailed, "subagent.failed"),
-        (
-            EventType::SubagentResultsConsumed,
-            "subagent.results_consumed",
-        ),
         (
             EventType::NotificationProcessResult,
             "notification.process_result",
@@ -389,7 +377,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 83);
+        assert_eq!(ALL_EVENT_TYPES.len(), 81);
     }
 
     #[test]

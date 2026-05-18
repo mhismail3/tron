@@ -66,16 +66,16 @@ struct SubagentDetailSheet: View {
                     SheetTitle(title: titleText, color: titleColor)
                 }
 
-                // Send to Agent button (top right) - when results are pending (completed or failed)
+                // Done button (top right) - when resource-native results have been reviewed.
                 if (data.status == .completed || data.status == .failed) && data.resultDeliveryStatus == .pending {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             onSendResults?(data)
                         } label: {
                             HStack(spacing: 4) {
-                                Text("Send")
+                                Text("Done")
                                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                                Image(systemName: "paperplane.fill")
+                                Image(systemName: "checkmark")
                                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                             }
                             .foregroundStyle(.tronEmerald)

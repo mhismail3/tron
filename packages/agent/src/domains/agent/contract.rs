@@ -6,8 +6,8 @@ use serde_json::json;
 use crate::domains::catalog::CapabilitySpec;
 use crate::domains::contract::CapabilityContract;
 use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    Result as EngineResult, RiskLevel, VisibilityScope,
+    CompensationContract, CompensationKind, DurableOutputContract, EffectClass,
+    IdempotencyContract, Result as EngineResult, RiskLevel, VisibilityScope,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["agent.runtime", "agent.queue"];
@@ -23,6 +23,29 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"not-required","kind":"documented-by-domain","reason":"existing domain guardrails own serialization; this metadata prevents high-risk generic triggers from omitting an explicit safety contract","required":false,"ttlMs":0},"rollbackOrCompensation":"domain-specific tests preserve current rollback, no-op, or replay behavior","streamTopics": STREAM_TOPICS,"version":1}))
             .stream_topics(STREAM_TOPICS.to_vec())
+            .build()?,
+        CapabilityContract::new("agent::run_goal", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
+            .description("Run a goal from typed resource inputs and complete it with resource-backed outputs.")
+            .approval_required(true)
+            .request_schema(agent_run_goal_request_schema())
+            .response_schema(json!({
+                "type": "object",
+                "required": ["goalResourceId", "agentResult", "decision", "resourceRefs"],
+                "additionalProperties": false,
+                "properties": {
+                    "goalResourceId": {"type": "string"},
+                    "agentResult": {"type": "object"},
+                    "decision": {"type": "object"},
+                    "workingSet": {"type": "object"},
+                    "resourceRefs": {"type": "array"}
+                }
+            }))
+            .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .output_contract(DurableOutputContract::resource_backed(["agent_result", "decision", "goal"]))
+            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "goal runs are resource-backed; failed or interrupted runs leave linked resources inspectable and do not fabricate completion"))
+            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceBackedGoalRun":true,"streamTopics": STREAM_TOPICS,"version":1}))
+            .stream_topics(STREAM_TOPICS.to_vec())
+            .tags(vec!["goal", "coordinator", "agent result", "decision", "resources"])
             .build()?,
         CapabilityContract::new("agent::abort", "agent", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("agent.write"))
             .approval_required(true)
@@ -56,12 +79,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
         CapabilityContract::new("agent::clear_queue", "agent", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("agent.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
-            .build()?,
-        CapabilityContract::new("agent::deliver_subagent_results", "agent", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("agent.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
@@ -298,6 +315,28 @@ fn capability_result_schema() -> serde_json::Value {
     })
 }
 
+fn agent_run_goal_request_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "required": ["goalResourceId", "promotedResourceIds", "decision"],
+        "additionalProperties": false,
+        "properties": {
+            "goalResourceId": {"type": "string"},
+            "promotedResourceIds": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            "decision": {"type": "object"},
+            "finalMessage": {"type": "string"},
+            "coordinatorWorker": {"type": "string"},
+            "runMode": {"type": "string"},
+            "workingSetSelectors": {"type": "array", "items": {"type": "string"}},
+            "constraints": {"type": "object"},
+            "outputContract": {"type": "object"},
+            "budget": {"type": "object"},
+            "sessionId": {"type": "string"},
+            "workspaceId": {"type": "string"}
+        }
+    })
+}
+
 fn user_interaction_request_schema() -> serde_json::Value {
     json!({
         "type": "object",
@@ -451,5 +490,39 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("agent::subagent_status")
         );
+    }
+
+    #[test]
+    fn run_goal_contract_is_resource_backed_goal_orchestration() {
+        let specs = capabilities().expect("agent contracts");
+        let run_goal = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "agent::run_goal")
+            .expect("run goal contract");
+        assert_eq!(
+            run_goal
+                .request_schema
+                .as_ref()
+                .and_then(|schema| schema.pointer("/required"))
+                .and_then(serde_json::Value::as_array)
+                .map(|required| {
+                    required.contains(&json!("goalResourceId"))
+                        && required.contains(&json!("promotedResourceIds"))
+                        && required.contains(&json!("decision"))
+                }),
+            Some(true)
+        );
+        let allowed = match &run_goal.output_contract {
+            DurableOutputContract::ResourceBacked {
+                produced_resource_kinds,
+                required_resource_refs,
+            } => Some((produced_resource_kinds, required_resource_refs)),
+            _ => None,
+        }
+        .expect("resource-backed output contract");
+        assert_eq!(*allowed.1, true);
+        assert!(allowed.0.contains(&"agent_result".to_owned()));
+        assert!(allowed.0.contains(&"decision".to_owned()));
+        assert!(allowed.0.contains(&"goal".to_owned()));
     }
 }

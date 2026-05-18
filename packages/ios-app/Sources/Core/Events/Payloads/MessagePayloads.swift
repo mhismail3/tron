@@ -23,13 +23,11 @@ struct UserMessagePayload {
     /// Skills referenced in this message (rendered as cyan chips above the message)
     let skills: [Skill]?
     /// Server-provided structured message kind for interactive-capability responses.
-    /// Values: `"answered_questions"`, `"subagent_results_delivered"`. When present,
-    /// iOS renders a chip instead of the plain text content.
+    /// Values: `"answered_questions"`. When present, iOS renders a chip instead
+    /// of the plain text content.
     let messageKind: String?
     /// Number of questions answered for `messageKind == "answered_questions"`.
     let answerCount: Int?
-    /// Number of subagent results delivered for `messageKind == "subagent_results_delivered"`.
-    let subagentCount: Int?
 
     init?(from payload: [String: AnyCodable]) {
         var extractedAttachments: [Attachment] = []
@@ -133,7 +131,6 @@ struct UserMessagePayload {
         // Structured interactive-capability response metadata (server-provided).
         self.messageKind = payload.string("messageKind")
         self.answerCount = payload.int("answerCount")
-        self.subagentCount = payload.int("subagentCount")
     }
 }
 

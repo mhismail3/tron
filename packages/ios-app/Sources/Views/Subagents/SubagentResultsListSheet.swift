@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Sheet listing multiple pending subagent results for batch review.
 /// Shown when tapping a consolidated notification with 2+ results.
-/// Each row opens the SubagentDetailSheet; "Send All" sends everything at once.
+/// Each row opens the SubagentDetailSheet; child output remains in resources.
 @available(iOS 26.0, *)
 struct SubagentResultsListSheet: View {
     let pendingSubagents: [SubagentInvocationData]
@@ -43,9 +43,9 @@ struct SubagentResultsListSheet: View {
                         dismiss()
                     } label: {
                         HStack(spacing: 4) {
-                            Text("Send All")
+                            Text("Done")
                                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                            Image(systemName: "paperplane.fill")
+                            Image(systemName: "checkmark")
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         }
                         .foregroundStyle(.tronEmerald)

@@ -20,7 +20,6 @@ enum MessageContent: Equatable {
     case userInteraction(UserInteractionInvocationData)
     case engineApproval(EngineApprovalData)
     case answeredQuestions(questionCount: Int)
-    case subagentResultsDelivered(subagentCount: Int)
     case subagent(SubagentInvocationData)
 
     // MARK: - Convenience Factories (forward to systemEvent)
@@ -142,10 +141,6 @@ enum MessageContent: Equatable {
             return data.params.action
         case .answeredQuestions(let count):
             return "Answered \(count) \(count == 1 ? "question" : "questions")"
-        case .subagentResultsDelivered(let count):
-            return count == 1
-                ? "Sent sub-agent result"
-                : "Sent \(count) sub-agent results"
         case .subagent(let data):
             switch data.status {
             case .running:

@@ -4,6 +4,7 @@ import SwiftUI
 struct EngineConsoleView: View {
     enum ConsoleSection: String, CaseIterable {
         case overview = "Overview"
+        case substrate = "Substrate"
         case capabilities = "Capabilities"
         case plugins = "Plugins"
         case workers = "Workers"
@@ -17,6 +18,7 @@ struct EngineConsoleView: View {
         var symbol: String {
             switch self {
             case .overview: "gauge.with.dots.needle.bottom.50percent"
+            case .substrate: "square.stack.3d.up"
             case .capabilities: "sparkle.magnifyingglass"
             case .plugins: "puzzlepiece.extension"
             case .workers: "server.rack"
@@ -31,7 +33,7 @@ struct EngineConsoleView: View {
 
         var isAdvanced: Bool {
             switch self {
-            case .overview, .capabilities, .programRuns:
+            case .overview, .substrate, .capabilities, .programRuns:
                 false
             case .plugins, .workers, .bindings, .policies, .audit, .traces, .primer:
                 true
@@ -99,6 +101,8 @@ struct EngineConsoleView: View {
         switch section {
         case .overview:
             overview
+        case .substrate:
+            substrate
         case .capabilities:
             capabilities
         case .plugins:
@@ -133,6 +137,8 @@ struct EngineConsoleView: View {
         switch section {
         case .overview:
             "Live capability fabric, registry health, search index state, and operator readiness."
+        case .substrate:
+            "Read-only substrate projection over workers, capabilities, goals, resources, invocations, grants, queues, approvals, and actions."
         case .capabilities:
             "Search, inspect, and execute live contracts and implementations through capability primitives."
         case .plugins:
@@ -184,6 +190,71 @@ struct EngineConsoleView: View {
                     message: message,
                     tint: .tronError
                 )
+            }
+        }
+    }
+
+    private var substrate: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            EngineConsoleMetricGrid(metrics: substrateMetrics)
+
+            if let warnings = substrateSnapshot?.integrityWarnings, !warnings.isEmpty {
+                EngineConsoleBanner(
+                    symbol: "exclamationmark.triangle",
+                    title: "Integrity warnings",
+                    message: "\(warnings.count) substrate warning\(warnings.count == 1 ? "" : "s") need inspection.",
+                    tint: .tronAmber
+                )
+            }
+
+            EngineConsoleCard {
+                EngineConsoleCardHeader(
+                    symbol: "target",
+                    title: "Active Goals",
+                    subtitle: "Goal resources projected from the resource store."
+                )
+                let goals = substrateSnapshot?.activeGoals ?? []
+                if goals.isEmpty {
+                    EngineConsoleEmptyState(
+                        symbol: "checkmark.circle",
+                        title: "No active goals",
+                        message: "Open goal resources will appear here as the coordinator creates them."
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(goals.prefix(8).enumerated()), id: \.offset) { _, goal in
+                            EngineConsoleKeyValueRow(
+                                substrateField(goal, keys: ["resourceId", "id"], fallback: "goal"),
+                                substrateField(goal, keys: ["lifecycle", "kind"], fallback: "open")
+                            )
+                        }
+                    }
+                }
+            }
+
+            EngineConsoleCard {
+                EngineConsoleCardHeader(
+                    symbol: "arrow.triangle.branch",
+                    title: "Available Actions",
+                    subtitle: "Actions are templates for canonical capabilities; stale submissions fail at the target."
+                )
+                let actions = substrateSnapshot?.availableActions ?? []
+                if actions.isEmpty {
+                    EngineConsoleEmptyState(
+                        symbol: "lock.shield",
+                        title: "No actions",
+                        message: "The control projection did not advertise substrate actions."
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(actions.prefix(10).enumerated()), id: \.offset) { _, action in
+                            EngineConsoleKeyValueRow(
+                                substrateField(action, keys: ["functionId"], fallback: "capability"),
+                                substrateField(action, keys: ["targetType", "requiredRisk"], fallback: "action")
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -580,6 +651,40 @@ struct EngineConsoleView: View {
         ]
     }
 
+    private var substrateSnapshot: ControlSnapshotDTO? {
+        state.controlSnapshot ?? state.cachedSnapshot?.controlSnapshot
+    }
+
+    private var substrateMetrics: [EngineConsoleMetric] {
+        let snapshot = substrateSnapshot
+        return [
+            EngineConsoleMetric("Workers", countText(snapshot?.workers?.count, cached: nil), .tronEmerald),
+            EngineConsoleMetric("Capabilities", countText(snapshot?.capabilities?.count, cached: nil), .tronTeal),
+            EngineConsoleMetric("Resource Kinds", countText(snapshot?.resourceTypes?.count, cached: nil), .tronCyan),
+            EngineConsoleMetric("Active Goals", countText(snapshot?.activeGoals?.count, cached: nil), .tronAmber),
+            EngineConsoleMetric("Invocations", countText(snapshot?.invocations?.count, cached: nil), .tronPurple),
+            EngineConsoleMetric("Grants", countText(snapshot?.grants?.count, cached: nil), .tronSlate),
+            EngineConsoleMetric("Queues", countText(snapshot?.queues?.count, cached: nil), .tronRose),
+            EngineConsoleMetric("Approvals", countText(snapshot?.approvals?.count, cached: nil), .tronAmber)
+        ]
+    }
+
+    private func substrateField(_ value: AnyCodable, keys: [String], fallback: String) -> String {
+        guard let dictionary = value.dictionaryValue else { return fallback }
+        for key in keys {
+            if let string = dictionary[key] as? String, !string.isEmpty {
+                return string
+            }
+            if let int = dictionary[key] as? Int {
+                return String(int)
+            }
+            if let bool = dictionary[key] as? Bool {
+                return bool ? "true" : "false"
+            }
+        }
+        return fallback
+    }
+
     private var readinessTint: Color {
         readinessIssues.isEmpty ? .tronSuccess : .tronAmber
     }
@@ -809,7 +914,7 @@ private struct EngineConsoleSuggestionChips: View {
         EngineConsoleSearchSuggestion(title: "Run command", query: "run a shell command", symbol: "terminal"),
         EngineConsoleSearchSuggestion(title: "Search web", query: "search the web", symbol: "globe"),
         EngineConsoleSearchSuggestion(title: "Ask user", query: "ask the user a question", symbol: "person.crop.circle.badge.questionmark"),
-        EngineConsoleSearchSuggestion(title: "Sandbox worker", query: "spawn sandbox worker", symbol: "shippingbox")
+        EngineConsoleSearchSuggestion(title: "Spawn worker", query: "worker::spawn", symbol: "shippingbox")
     ]
     let select: (EngineConsoleSearchSuggestion) -> Void
 

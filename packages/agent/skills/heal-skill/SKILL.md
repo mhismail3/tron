@@ -78,7 +78,7 @@ Capabilities referenced in `allowedContracts`, `deniedContracts`, or in the skil
 | Search | `filesystem::search_text`, `capability::search` |
 | Web | `web::fetch`, `web::search` |
 | Interactive | `agent::ask_user`, `agent::request_approval`, `display::show`, `browser::computer_action`, `notifications::send` |
-| Agent | `agent::spawn_subagent`, `sandbox::spawn_worker`, `sandbox::stop_spawned_worker` |
+| Agent | `agent::spawn_subagent`, `agent::run_goal`, `worker::spawn`, `worker::disconnect` |
 | Plugin sources | MCP/OpenAPI capabilities appear as normal plugin-provided implementations discovered through `capability::search` and invoked through `capability::execute`. |
 
 **Import translation table:**

@@ -30,7 +30,6 @@ pub use bootstrap::{
     PromptBootstrapData, PromptContextArtifacts, load_prompt_bootstrap,
     load_prompt_bootstrap_minimal,
 };
-pub use pending::{format_subagent_results, get_pending_subagent_results};
 pub use session_update::{load_session_update_data, resume_prompt_session};
 pub use skills::{
     SkillContextResult, collect_pending_skill_payloads, prepare_skill_context_from_session,

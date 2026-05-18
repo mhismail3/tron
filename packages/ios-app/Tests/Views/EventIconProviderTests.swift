@@ -15,7 +15,7 @@ final class EventIconProviderTests: XCTestCase {
             "stream.turn_start", "stream.turn_end",
             "config.model_switch", "config.prompt_update", "config.reasoning_level",
             "message.deleted",
-            "notification.interrupted", "notification.subagent_result",
+            "notification.interrupted",
             "skills::activated", "skills::deactivated",
             "rules.loaded", "rules.activated",
             "compact.boundary", "compact.summary",
@@ -26,7 +26,6 @@ final class EventIconProviderTests: XCTestCase {
             "worktree.acquired", "worktree.commit", "worktree.released",
             "worktree.merged", "worktree.renamed",
             "subagent.spawned", "subagent.completed", "subagent.failed",
-            "subagent.results_consumed",
             "notification.process_result", "process.results_consumed",
             "turn.failed",
             "memory.retained",
@@ -99,22 +98,6 @@ final class EventIconProviderTests: XCTestCase {
 
     func testSubagentFailed_hasErrorColor() {
         XCTAssertEqual(EventIconProvider.color(for: .subagentFailed), .tronError)
-    }
-
-    func testSubagentResultsConsumed_hasTrayIcon() {
-        XCTAssertEqual(EventIconProvider.iconName(for: .subagentResultsConsumed), "tray.and.arrow.down.fill")
-    }
-
-    func testSubagentResultsConsumed_hasSuccessColor() {
-        XCTAssertEqual(EventIconProvider.color(for: .subagentResultsConsumed), .tronSuccess)
-    }
-
-    func testNotificationSubagentResult_hasBellIcon() {
-        XCTAssertEqual(EventIconProvider.iconName(for: .notificationSubagentResult), "bell.badge.fill")
-    }
-
-    func testNotificationSubagentResult_hasWarningColor() {
-        XCTAssertEqual(EventIconProvider.color(for: .notificationSubagentResult), .tronWarning)
     }
 
     // MARK: - Turn Events

@@ -100,6 +100,7 @@ struct EngineConsoleStateTests {
                 registryRevision: 1,
                 pluginSummaries: [],
                 workerSummaries: [],
+                controlSnapshot: nil,
                 recentAuditRows: [],
                 recentTraceSummaries: [],
                 recentProgramRuns: [],
@@ -154,6 +155,32 @@ struct EngineConsoleStateTests {
         #expect(state.loadState == .live)
     }
 
+    @Test("refresh loads read-only control snapshot")
+    func refreshLoadsControlSnapshot() async throws {
+        let client = FakeEngineConsoleCapabilityClient()
+        client.controlSnapshot = ControlSnapshotDTO(
+            catalogRevision: 7,
+            workers: [AnyCodable(["id": "resource"])],
+            capabilities: [AnyCodable(["id": "resource::create"])],
+            resourceTypes: [AnyCodable(["kind": "goal"])],
+            activeGoals: [],
+            invocations: [],
+            grants: [],
+            queues: [],
+            leases: [],
+            approvals: [],
+            storage: nil,
+            integrityWarnings: [],
+            availableActions: [AnyCodable(["functionId": "worker::disconnect"])]
+        )
+        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+
+        await state.refresh()
+
+        #expect(state.controlSnapshot?.catalogRevision == 7)
+        #expect(state.cachedSnapshot?.controlSnapshot?.catalogRevision == 7)
+    }
+
     private func ephemeralCache() -> EngineConsoleCache {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -174,6 +201,21 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
     var searchError: Error?
     var statusError: Error?
     var lastSearchQuery: String?
+    var controlSnapshot = ControlSnapshotDTO(
+        catalogRevision: 1,
+        workers: [],
+        capabilities: [],
+        resourceTypes: [],
+        activeGoals: [],
+        invocations: [],
+        grants: [],
+        queues: [],
+        leases: [],
+        approvals: [],
+        storage: nil,
+        integrityWarnings: [],
+        availableActions: []
+    )
 
     func status(includeSnapshot: Bool) async throws -> CapabilityStatusDTO {
         if let statusError { throw statusError }
@@ -185,6 +227,18 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         includeBindings: Bool
     ) async throws -> CapabilityRegistrySnapshotDTO {
         CapabilityRegistrySnapshotDTO(plugins: [], implementations: [], bindings: [], documents: [], programRuns: [])
+    }
+
+    func controlSnapshot(limit: Int) async throws -> ControlSnapshotDTO {
+        controlSnapshot
+    }
+
+    func controlInspect(
+        targetType: String,
+        targetId: String,
+        includeFullPayloads: Bool
+    ) async throws -> ControlInspectDTO {
+        ControlInspectDTO(targetType: targetType, targetId: targetId, graph: nil, availableActions: [])
     }
 
     func auditQuery(_ query: CapabilityAuditQueryDTO) async throws -> CapabilityAuditQueryResultDTO {

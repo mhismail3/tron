@@ -11,6 +11,9 @@ operation_bindings! {
         "prompt" => |invocation, deps| {
             prompt_value(invocation, deps).await
         },
+        "run_goal" => |invocation, deps| {
+            run_goal_value(invocation, deps).await
+        },
         "prompt_apply" => |invocation, deps| {
             prompt_apply_value(Some(&invocation.payload), invocation, deps).await
         },
@@ -37,9 +40,6 @@ operation_bindings! {
         },
         "clear_queue" => |invocation, deps| {
             clear_queue_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "deliver_subagent_results" => |invocation, deps| {
-            deliver_subagent_results_value(Some(&invocation.payload), deps).await
         },
         "ask_user" => |invocation, deps| {
             ask_user_value(Some(&invocation.payload), invocation, deps).await

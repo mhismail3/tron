@@ -36,11 +36,13 @@ pub(crate) fn worker_module(
 ) -> crate::engine::Result<DomainWorkerModule> {
     {
         let domain_deps = Deps::from_engine(deps);
-        crate::domains::worker::domain_worker_module(
+        let mut module = crate::domains::worker::domain_worker_module(
             "sandbox",
             contract::STREAM_TOPICS,
             handlers::function_registrations(contract::capabilities()?, domain_deps)?,
-        )
+        )?;
+        module.worker = module.worker.with_namespace_claim("worker");
+        Ok(module)
     }
 }
 
@@ -97,7 +99,7 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
     let expected_function_ids = string_array(payload, "expectedFunctionIds")?;
     if expected_function_ids.is_empty() {
         return Err(CapabilityError::InvalidParams {
-            message: "sandbox::spawn_worker requires expectedFunctionIds to derive a worker grant"
+            message: "worker::spawn requires expectedFunctionIds to derive a worker grant"
                 .to_owned(),
         });
     }
@@ -109,13 +111,12 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
         .or_else(|| invocation.causal_context.workspace_id.clone());
     if visibility == "session" && session_id.is_none() {
         return Err(CapabilityError::InvalidParams {
-            message: "sandbox::spawn_worker requires sessionId for session-visible workers".into(),
+            message: "worker::spawn requires sessionId for session-visible workers".into(),
         });
     }
     if visibility == "workspace" && workspace_id.is_none() {
         return Err(CapabilityError::InvalidParams {
-            message: "sandbox::spawn_worker requires workspaceId for workspace-visible workers"
-                .into(),
+            message: "worker::spawn requires workspaceId for workspace-visible workers".into(),
         });
     }
     if !matches!(visibility.as_str(), "session" | "workspace" | "system") {
@@ -295,7 +296,7 @@ async fn derive_sandbox_worker_grant(
         "canDelegate": false,
         "approvalRequired": payload.get("approvalRequired").and_then(Value::as_bool).unwrap_or(false),
         "provenance": {
-            "source": "sandbox::spawn_worker",
+            "source": "worker::spawn",
             "workerId": worker_id,
             "parentInvocationId": invocation.id.as_str(),
         },

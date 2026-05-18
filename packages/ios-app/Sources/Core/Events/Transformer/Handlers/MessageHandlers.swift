@@ -11,9 +11,8 @@ enum MessageHandlers {
     /// Transform message.user event into a ChatMessage.
     ///
     /// User messages contain the user's input to the agent.
-    /// Interactive-capability responses (answered questions and subagent results) are
-    /// identified by the server-provided `messageKind` field and rendered
-    /// as chips — iOS does not parse the message text content for these.
+    /// Interactive-capability responses such as answered questions are identified
+    /// by the server-provided `messageKind` field and rendered as chips.
     static func transformUserMessage(
         _ payload: [String: AnyCodable],
         timestamp: Date
@@ -35,12 +34,6 @@ enum MessageHandlers {
             return ChatMessage(
                 role: .user,
                 content: .answeredQuestions(questionCount: max(1, parsed.answerCount ?? 1)),
-                timestamp: timestamp
-            )
-        case "subagent_results_delivered":
-            return ChatMessage(
-                role: .user,
-                content: .subagentResultsDelivered(subagentCount: max(1, parsed.subagentCount ?? 1)),
                 timestamp: timestamp
             )
         default:

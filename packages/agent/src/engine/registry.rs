@@ -1124,6 +1124,14 @@ impl LiveCatalog {
                 )));
             }
         }
+        for kind in output_contract_resource_kinds(&definition.output_contract) {
+            if kind != "*" && !allows_item(&grant.allowed_resource_kinds, &kind) {
+                return Err(EngineError::PolicyViolation(format!(
+                    "function {} output resource kind {kind} exceeds worker grant {}",
+                    definition.id, owner.authority_grant
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -1826,6 +1834,20 @@ fn payload_fingerprint(payload: &Value) -> String {
 
 fn allows_item(allowed: &[String], value: &str) -> bool {
     allowed.iter().any(|item| item == "*" || item == value)
+}
+
+fn output_contract_resource_kinds(contract: &DurableOutputContract) -> Vec<String> {
+    match contract {
+        DurableOutputContract::None => Vec::new(),
+        DurableOutputContract::ResourceBacked {
+            produced_resource_kinds,
+            ..
+        } => produced_resource_kinds.clone(),
+        DurableOutputContract::Conditional {
+            resource_backed_contract,
+            ..
+        } => output_contract_resource_kinds(resource_backed_contract),
+    }
 }
 
 fn write_canonical_json(value: &Value, out: &mut String) {

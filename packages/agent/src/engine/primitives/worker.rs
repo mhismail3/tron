@@ -140,11 +140,11 @@ fn worker_protocol_guide_function() -> crate::engine::FunctionDefinition {
     definition.metadata = json!({
         "agentGuidance": [
             "Use worker::protocol_guide before authoring a sandbox-created worker.",
-            "Write a local worker script from the returned template, then invoke sandbox::spawn_worker with command, args, workerId, expectedFunctionIds, visibility, and idempotencyKey.",
+            "Write a local worker script from the returned template, then invoke worker::spawn with command, args, workerId, expectedFunctionIds, visibility, and idempotencyKey.",
             "Do not search Tron source or probe HTTP paths to learn the worker protocol."
         ],
         "relatedCapabilities": [
-            "sandbox::spawn_worker",
+            "worker::spawn",
             "sandbox::list_spawned_workers",
             "sandbox::stop_spawned_worker",
             "catalog::list",

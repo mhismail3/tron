@@ -48,9 +48,8 @@
 //!   evidence, decisions, generated UI surfaces, worker packages, and
 //!   materialized files should be modeled as versioned resources with links and
 //!   events instead of separate persistence planes;
-//! - durable-output capabilities declare output contracts, finish validation
-//!   requires canonical resource refs, and output-audit observations remain a
-//!   read-only measurement surface for paths that are still being converted;
+//! - durable-output capabilities declare output contracts and finish validation
+//!   requires canonical resource refs for every resource-backed path;
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
 //!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;
@@ -58,7 +57,7 @@
 //!   protocol, registers scoped functions/triggers, publishes streams only
 //!   through `stream::publish`, cleans volatile workers on disconnect, marks
 //!   durable disconnected workers unhealthy, and supplies the sandbox-created
-//!   worker path used by `sandbox::spawn_worker`.
+//!   worker path used by `worker::spawn`.
 //!
 //! # INVARIANT: one production execution shape
 //!
@@ -90,7 +89,6 @@ pub mod ids;
 pub mod invocation;
 pub mod leases;
 pub mod ledger;
-pub mod output_audit;
 pub mod policy;
 pub mod primitives;
 pub mod protocol;
@@ -135,10 +133,6 @@ pub use ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
     IdempotencyReservationOutcome, IdempotencyStatus, InMemoryEngineLedgerStore,
     SqliteEngineLedgerStore, StoredEngineError, StoredInvocationOutcome,
-};
-pub use output_audit::{
-    EngineOutputAuditObservation, EngineOutputAuditStoreBackend, InMemoryEngineOutputAuditStore,
-    SqliteEngineOutputAuditStore, output_audit_observation,
 };
 pub use protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,

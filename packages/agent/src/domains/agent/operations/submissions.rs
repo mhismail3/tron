@@ -1,13 +1,9 @@
 //! Agent workflow operations.
+use super::{BaseEvent, EventType, PromptQueueService, TronEvent};
 use super::{
-    BaseEvent, EventType, PromptQueueService, TronEvent, format_subagent_results,
-    get_pending_subagent_results,
-};
-use super::{
-    agent_capability_identity, emit_run_status, load_prompt_session, persist_lifecycle_event,
-    persist_pause_record, persist_run_record, persist_run_status, publish_agent_queue_stream,
-    resolve_pause_record, start_or_queue_prompt, start_or_queue_prompt_with_loaded_session,
-    string_param_or_context,
+    agent_capability_identity, emit_run_status, persist_lifecycle_event, persist_pause_record,
+    persist_run_record, persist_run_status, publish_agent_queue_stream, resolve_pause_record,
+    start_or_queue_prompt, string_param_or_context,
 };
 use crate::domains::agent::Deps;
 use crate::domains::capability::types::{CapabilityPauseRecord, CapabilityRunRecord};
@@ -549,57 +545,4 @@ pub(crate) async fn cancel_subagent_value(
         "subagentSessionId": subagent_session_id,
         "cancelled": true
     }))
-}
-
-pub(crate) async fn deliver_subagent_results_value(
-    params: Option<&Value>,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let session_id = require_string_param(params, "sessionId")?;
-    let session =
-        load_prompt_session(deps, &session_id, "agent.deliverSubagentResults.verify").await?;
-    let event_store = deps.event_store.clone();
-    let sid = session_id.clone();
-    let (prompt, count) = run_blocking_task("agent.deliverSubagentResults.format", move || {
-        let pending = get_pending_subagent_results(&event_store, &sid);
-        if pending.is_empty() {
-            return Err(CapabilityError::NotFound {
-                code: "NO_PENDING_RESULTS".into(),
-                message: "No unconsumed subagent results found".into(),
-            });
-        }
-        let count = pending.len();
-        let event_ids: Vec<String> = pending.iter().map(|(id, _)| id.clone()).collect();
-        let formatted =
-            format_subagent_results(&pending).ok_or_else(|| CapabilityError::Internal {
-                message: "Failed to format subagent results".into(),
-            })?;
-        let _ = event_store.append(&crate::domains::session::event_store::AppendOptions {
-            session_id: &sid,
-            event_type: EventType::SubagentResultsConsumed,
-            payload: json!({
-                "consumedEventIds": event_ids,
-                "count": count,
-            }),
-            parent_id: None,
-            sequence: None,
-        });
-        Ok((formatted, count))
-    })
-    .await?;
-    let metadata = json!({
-        "messageKind": "subagent_results_delivered",
-        "subagentCount": count,
-    });
-    start_or_queue_prompt_with_loaded_session(
-        deps,
-        session,
-        session_id,
-        prompt,
-        Some(metadata),
-        "agent.deliverSubagentResults.queue",
-        false,
-        Some(json!({"subagentCount": count})),
-    )
-    .await
 }

@@ -111,21 +111,6 @@ final class AgentClient: EngineDomainClient {
         )
     }
 
-    // MARK: - Subagent Result Delivery
-
-    /// Deliver pending subagent results as a server-constructed prompt.
-    /// The server formats the results and either spawns a prompt run or queues if busy.
-    func deliverSubagentResults(idempotencyKey: EngineIdempotencyKey) async throws -> DeliverSubagentResultsResponse {
-        let sessionId = try await requireLiveSessionEvents()
-        let params = DeliverSubagentResultsParams(sessionId: sessionId)
-        return try await invokeWrite(
-            "agent::deliver_subagent_results",
-            params,
-            idempotencyKey: idempotencyKey,
-            context: sessionInvocationContext(sessionId)
-        )
-    }
-
     // MARK: - Confirmation/Answer Submission
 
     /// Submit answers for an UserInteraction capability invocation.

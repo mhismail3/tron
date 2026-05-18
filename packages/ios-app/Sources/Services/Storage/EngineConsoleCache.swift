@@ -5,6 +5,7 @@ struct EngineConsoleCacheSnapshot: Codable, Equatable, Sendable {
     var registryRevision: UInt64?
     var pluginSummaries: [CapabilityPluginManifestDTO]
     var workerSummaries: [CapabilityIndexDocumentDTO]
+    var controlSnapshot: ControlSnapshotDTO?
     var recentAuditRows: [CapabilityAuditEventDTO]
     var recentTraceSummaries: [CapabilityAuditEventDTO]
     var recentProgramRuns: [CapabilityProgramRunDTO]
@@ -50,6 +51,7 @@ final class EngineConsoleCache {
     static func makeSnapshot(
         status: CapabilityStatusDTO?,
         registry: CapabilityRegistrySnapshotDTO?,
+        controlSnapshot: ControlSnapshotDTO?,
         audit: CapabilityAuditQueryResultDTO?,
         programRuns: CapabilityProgramRunQueryResultDTO? = nil
     ) -> EngineConsoleCacheSnapshot {
@@ -62,6 +64,7 @@ final class EngineConsoleCache {
             registryRevision: status?.registryRevision,
             pluginSummaries: registry?.plugins ?? [],
             workerSummaries: workers,
+            controlSnapshot: controlSnapshot,
             recentAuditRows: audit?.events ?? [],
             recentTraceSummaries: traces,
             recentProgramRuns: programRuns?.programRuns ?? registry?.programRuns ?? [],

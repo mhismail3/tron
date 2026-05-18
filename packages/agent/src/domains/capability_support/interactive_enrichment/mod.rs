@@ -40,18 +40,15 @@
 use serde_json::Value;
 
 const ANSWERS_MARKER: &str = "[Answers to your questions]";
-const SUBAGENT_RESULTS_MARKER: &str = "# Completed Sub-Agent Results";
 
 mod payload;
 mod questions;
-mod subagent;
 
 #[cfg(test)]
 mod tests;
 
 use payload::{build_user_message_metadata, find_first_user_message_after, inject_into_payload};
 use questions::{extract_questions, parse_answers};
-use subagent::enrich_subagent_result_messages;
 
 const ASK_USER_CONTRACT_ID: &str = "agent::ask_user";
 
@@ -118,12 +115,6 @@ pub fn enrich_interactive_capability_statuses(events: &mut [Value]) {
 
         inject_into_payload(&mut events[call_idx], fields);
     }
-
-    // Second pass: back-fill `message.user` events that contain delivered
-    // subagent results. The live path tags these with `messageKind` via
-    // `PromptRequest.message_metadata`, but historical events from before
-    // that change need back-filling so iOS renders a chip.
-    enrich_subagent_result_messages(events);
 }
 
 fn capability_target_id(event: &Value) -> Option<String> {

@@ -736,7 +736,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
             spawnType: nil
         )
         viewModel.handleSubagentSpawnedResult(result)
-        // Mark as completed so deliverSubagentResults() will accept it
+        // Mark as completed so local resource-result review can surface it.
         viewModel.subagentState.complete(
             subagentSessionId: sessionId,
             resultSummary: "Done",

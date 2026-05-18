@@ -1,246 +1,261 @@
-# Resource Materialization And Enforcement Checkpoint
+# Generated UI Resource And Renderer Phase
 
-## Phase Boundary
+## Summary
 
-This checkpoint implements **Resource Materialization and Enforcement**.
+The next phase builds the first user-facing surface that is native to the
+collapsed modular engine: declarative UI resources rendered by iOS and backed by
+canonical capability actions. The goal is not a custom dashboard framework and
+not a second control-plane state store. The goal is a strict resource type that
+lets workers describe operator interfaces, inspectable control surfaces, and
+goal-specific working views without bypassing grants, output contracts, resource
+lineage, or invocation audit.
 
-The secure substrate has engine-owned grants, typed resources, resource wrappers,
-clean storage generation reset, and historical audit observations. This phase
-closes the output gap: covered durable output paths must produce resource refs
-through canonical capabilities or be rejected before execution.
+This phase starts only after the resource-native orchestration checkpoint:
 
-This is still not the iOS control plane or generated UI phase. Those surfaces
-depend on trustworthy resource lineage, materialization, and enforcement first.
+- storage generation is `modular-engine-v2`;
+- covered durable-output paths enforce top-level `resourceRefs`;
+- public child creation is `worker::spawn`;
+- `agent::run_goal` owns goal execution;
+- subagent output is child invocation/resource lineage, not durable markdown
+  delivery;
+- `control::snapshot` and `control::inspect` are rebuildable projections.
 
-## First Principles
+## First-Principles Objective
 
-- Durable output is a resource version, not an incidental file, transcript,
-  process side effect, or in-memory return blob.
-- Filesystem writes are scratch until a capability materializes them into a
-  `materialized_file` resource or updates a typed artifact resource.
-- Agents and workers do not decide whether output is worth keeping by writing
-  directly into durable storage. They propose, update, link, promote, discard,
-  or materialize resources under grants.
-- The engine enforces output contracts at invocation prepare/finish boundaries.
-  Handlers should not be trusted to self-report correctness after the fact.
-- Enforcement must be deny-by-default for new paths. Existing audited paths get
-  converted module by module until the audit count reaches zero, then the audit
-  mode is removed.
-- There is no compatibility reader, fallback route, alias, or silent coercion
-  for retired output shapes.
+Agents and modules need to present structured choices, inspections, forms, and
+progress views to an operator. The UI itself is output from a worker, so it must
+be subject to the same substrate rules as every other output:
 
-## Target Outcome
+- it is a typed resource, not client-local state;
+- it has schema, version, provenance, lifecycle, retention, links, and policy;
+- it is rendered from a bounded component catalog;
+- every action invokes a canonical capability with a grant and idempotency key;
+- every submitted action is checked against target resource versions and policy
+  at invocation prepare time;
+- unsupported, stale, oversized, or unsafe UI fails closed.
 
-This phase establishes:
+The result should make Tron useful as a modular capability engine without
+recreating the old mobile-first product shell.
 
-- `filesystem::*`, `process::*`, `program::*`, and `agent::*` durable-output
-  paths either return resource refs or fail with a policy error.
-- `materialized_file` is a registered first-party resource kind with explicit
-  read/write/promote/delete/materialize capabilities.
-- Program output and agent final outputs are stored as typed resources with
-  lineage to the invocation, goal, worker, and grant that produced them.
-- Output contracts are declared in capability metadata and enforced by the
-  engine, not by convention in handlers.
-- The output audit path is retained only as read-only conversion telemetry; it is
-  not an acceptance path for converted filesystem/process/program/agent outputs.
+## Non-Goals
 
-## Workstream 1: Resource Type And Contract Hardening
+- Do not add a new persisted UI plane, dashboard table, action queue, local iOS
+  truth store, or client authority cache.
+- Do not add `control::act` or any mutation multiplexer. Mutations remain normal
+  capabilities such as `grant::revoke`, `resource::link`, `artifact::promote`,
+  `approval::resolve`, `worker::disconnect`, and `agent::abort`.
+- Do not build a broad coordinator-agent rewrite in this phase.
+- Do not support legacy UI payloads, fallback renderers, component aliases,
+  deprecated route readers, or best-effort approximations.
+- Do not store raw secret bytes in UI resources, previews, action templates,
+  iOS caches, logs, or control snapshots.
 
-Completed first-party resource definitions:
+## Core Primitives
 
-- `materialized_file`: durable file bytes or path-backed file record with hash,
-  size, MIME/type hint, workspace root, relative path, owner invocation, and
-  retention policy.
-- `patch_proposal`: structured patch/diff intent with base resource/version,
-  target materialization, validation status, and merge result.
-- `execution_output`: normalized process/program stdout/stderr/log preview,
-  exit status, resource refs, and redaction policy.
-- `agent_result`: final answer, decision refs, promoted resources, open claims,
-  and follow-up subgoal refs.
+### `ui_surface` Resource
 
-Contract rules now enforced:
+Register `Resource(kind = "ui_surface")` as first-party substrate data.
 
-- Every mutating capability declares produced resource kinds or explicitly
-  declares `producesDurableOutput = false`.
-- Every durable-output capability declares materialization rules, retention, and
-  redaction.
-- Resource create/update validates payload schema before persistence.
-- Resource version bytes are content-addressed and hash-verified.
-- Delete/discard is lifecycle-first; byte deletion only happens after retention
-  proves no live references.
+Required payload fields:
 
-Tests/gates:
+- `surfaceId`: stable logical surface id scoped to the owner resource or worker.
+- `title`: short operator-facing title.
+- `purpose`: `inspect`, `configure`, `approve`, `curate`, `goal_working_set`,
+  `module_status`, or `custom`.
+- `componentCatalog`: catalog id and revision.
+- `layout`: declarative component tree with bounded depth, count, labels, and
+  data references.
+- `dataBindings`: resource refs, invocation refs, grant refs, and projection refs
+  used by the layout.
+- `actions`: capability action bindings with target revisions, idempotency
+  policy, required grant/risk/approval metadata, and payload templates.
+- `redactionPolicy`: preview and cache redaction rules.
+- `expiry`: latest valid action time.
+- `refreshPolicy`: whether the surface is static, stream-updated, or rebuilt
+  from a projection.
 
-- Invalid resource payloads fail before persistence.
-- A resource version cannot point to missing bytes without being marked damaged.
-- Resource kind definitions cannot omit lifecycle/versioning/link rules.
-- Mutating capability registration fails without an output contract.
+The resource type definition must define allowed lifecycle states:
 
-## Workstream 2: Materialization Capabilities
+- `draft`: created but not renderable.
+- `active`: renderable and actions may be submitted.
+- `superseded`: replaced by a newer version.
+- `expired`: renderable as read-only history; actions rejected.
+- `discarded`: hidden from default projections.
+- `damaged`: payload or referenced data failed integrity checks.
 
-Canonical capabilities:
+### Component Catalog
 
-- `artifact::materialize`
-- `materialized_file::create`
-- `materialized_file::read`
-- `materialized_file::update`
-- `materialized_file::promote`
-- `materialized_file::discard`
-- `materialized_file::inspect`
-- `materialized_file::hash_verify`
-- `patch::propose`
-- `patch::apply`
-- `patch::merge`
+The catalog is a versioned contract, not a Swift implementation detail.
+
+Initial component set:
+
+- text: `Text`, `Heading`, `Monospace`, `Badge`;
+- structure: `Section`, `List`, `Table`, `Tabs`, `Disclosure`;
+- data: `ResourceRef`, `InvocationRef`, `GrantRef`, `WorkerRef`, `Metric`;
+- inputs: `TextField`, `TextArea`, `Select`, `Toggle`, `Stepper`, `DateTime`;
+- commands: `Button`, `ButtonGroup`, `Confirmation`;
+- status: `Progress`, `Health`, `Warning`, `Error`, `EmptyState`.
 
 Rules:
 
-- Materialization must require a grant selector for the target resource and file
-  root.
-- Writes outside allowed file roots are rejected before execution.
-- Materialized paths are workspace-relative where possible; absolute paths are
-  allowed only when the grant explicitly permits that root.
-- Hash, size, and content owner are recorded before a version becomes current.
-- Partial writes are quarantined and inspectable; prior current versions remain
-  current.
+- Each component has a JSON schema and Swift renderer test fixture.
+- Component props must be bounded by byte size, item count, and nesting depth.
+- Text is display data only. It cannot contain executable markup, local file
+  URLs, raw secrets, or unbounded logs.
+- Components unsupported by the active iOS catalog make the surface invalid.
+  The client must not approximate them.
 
-Tests/gates:
+### Action Binding
 
-- File materialization outside grant roots fails.
-- Concurrent materialization uses CAS or a lease.
-- Hash mismatch marks the version damaged and does not promote it.
-- Discard does not delete shared bytes still referenced by another resource.
+An action is a prepared capability invocation template.
 
-## Workstream 3: Convert Filesystem And Process Paths
+Required action fields:
 
-Filesystem:
+- `actionId`;
+- `label` and optional icon;
+- `targetFunctionId`;
+- `targetResourceId` and `targetVersionId` when acting on a resource;
+- `requiredGrantId` or grant selector;
+- `requiredRisk`;
+- `approvalPolicy`;
+- `idempotencyKeyTemplate`;
+- `payloadTemplate`;
+- `inputSchema`;
+- `confirmationPolicy`;
+- `expiresAt`;
+- `surfaceVersionId`;
+- `targetRevision`.
 
-- Convert write/patch/create operations to produce `materialized_file` refs;
-  patch operations also produce `patch_proposal` refs.
-- Keep direct file reads as read-only capabilities, with optional resource
-  hydration when the caller needs a durable reference.
-- Remove any durable write path that bypasses resource version registration.
+Submission rules:
 
-Process:
+- iOS submits only user input plus the action id and observed surface version.
+- The server reconstructs the invocation from the stored action template.
+- Invocation prepare checks grant, resource selector, target revision, expiry,
+  approval, idempotency, budget, and output contract before handler execution.
+- Stale target revisions fail at the target capability; the renderer may then
+  ask for a refreshed surface.
 
-- Require write-like process commands to use `executionMode =
-  "sandbox_materialized"` and declare expected output resources.
-- Capture stdout/stderr/log previews as `execution_output` resources when they
-  are retained beyond the invocation result.
-- Commands that mutate the workspace without declared materialization fail
-  before execution.
-- Read-only command classifier remains strict and test-covered.
+## Server Implementation Plan
 
-Tests first:
+1. Add failing tests for `ui_surface` type registration, schema validation,
+   lifecycle transitions, versioning, redaction, unsupported components, stale
+   actions, and action permission checks.
+2. Register `ui_surface` and `ui_component_catalog` resource definitions in the
+   resource kernel.
+3. Add `ui::create_surface`, `ui::update_surface`, `ui::inspect_surface`,
+   `ui::discard_surface`, and `ui::render_contract` wrappers over
+   `resource::*`.
+4. Add strict validation:
+   - catalog id/revision exists;
+   - component tree validates against catalog schemas;
+   - referenced resources/invocations/grants are visible to the active grant;
+   - action targets are canonical capabilities;
+   - action payload templates validate against target request schemas;
+   - mutating actions include idempotency and output contracts;
+   - redaction policy covers every secret-like binding.
+5. Extend `control::snapshot` and `control::inspect` to return optional
+   `ui_surface` refs for worker, goal, resource, grant, invocation, and trace
+   targets. The control APIs still return projections only.
+6. Add event/projection output that announces surface resource versions without
+   embedding mutable UI state in streams.
+7. Add integrity tooling:
+   - scan surfaces for dangling refs;
+   - mark damaged surfaces inspectable;
+   - detect orphaned surface blobs;
+   - verify expired actions are rejected.
+8. Remove any server code that emits bespoke dashboard payloads once a
+   corresponding `ui_surface` exists.
 
-- `filesystem::write_file` returns resource refs and creates a version.
-- `filesystem::patch` creates a patch proposal or materialized version.
-- Write-like `process::run` without output contract fails.
-- Read-only `git status/log/diff/show` remains allowed under read grants.
+## iOS Implementation Plan
 
-## Workstream 4: Convert Program And Agent Outputs
+1. Add DTOs for `ui_surface` refs, component catalog revision, component tree,
+   data bindings, action bindings, and action submission.
+2. Build a strict SwiftUI renderer for the initial catalog.
+3. Keep the renderer stateless with respect to truth:
+   - it may cache read-only surface versions;
+   - it must not decide policy;
+   - it must not synthesize unsupported components;
+   - it must not mutate local lineage, grant, or resource state.
+4. Wire Engine Console detail views to display server-provided `ui_surface`
+   refs for selected workers, goals, resources, grants, invocations, and traces.
+5. Submit actions through the capability client using the action id plus
+   observed surface/resource revisions. The server reconstructs the real
+   invocation.
+6. Render stale, expired, approval-required, and rejected action states from
+   server responses, not local guesses.
+7. Add accessibility and layout tests for compact and regular width:
+   - no clipped labels;
+   - no overlapping controls;
+   - dynamic type remains usable;
+   - unsupported components produce a closed error state.
 
-Program worker:
+## Security And Failure Rules
 
-- Reject loose `artifacts` output and require resource refs.
-- Store retained stdout/stderr/log previews as `execution_output` resources.
-- Enforce output byte limits before resource version creation.
-- Link child capability outputs to the parent program invocation.
+- A surface cannot grant authority. It can only reference action templates that
+  resolve to canonical capabilities.
+- A worker cannot render an action above its grant ceiling.
+- A client cannot submit a payload field outside the action template schema.
+- A generated surface cannot read resources not visible to the active grant.
+- A stale surface version cannot perform mutation.
+- An expired surface is read-only.
+- A damaged surface is inspectable but not actionable.
+- Secret-like data is represented as `secret_ref` or redacted preview only.
+- Oversized payloads, deep trees, excessive table rows, and unbounded log views
+  fail validation before persistence.
+- Offline iOS actions are rejected unless explicitly modeled as durable
+  approval responses with idempotency and expiry. Do not add this by default.
 
-Agent runtime:
+## Test-Driven Sequence
 
-- Completed prompt runs emit `agent_result` resources.
-- Goal-bound decision linking remains the next coordinator concern because this
-  phase intentionally does not introduce a new `agent::run_goal` coordinator.
-- Subagent outputs should attach to the goal as `claim`, `evidence`,
-  `artifact`, or `decision` resources in the coordinator phase.
-- Final chat text is a projection over resources and invocation state, not the
-  durable source of truth.
+1. `ui_surface` resource type registration fails invalid schemas.
+2. Component catalog rejects unsupported components and excessive tree bounds.
+3. `ui::create_surface` returns top-level `resourceRefs`.
+4. Surface creation fails when bindings reference invisible resources.
+5. Surface creation fails when action targets unknown or noncanonical
+   capabilities.
+6. Mutating action templates fail without idempotency/output contract.
+7. Action submission fails when surface version is stale.
+8. Action submission fails when target resource revision changed.
+9. Revoked/expired grants fail before handler execution.
+10. Secret-like bindings are redacted or rejected.
+11. Control projections expose only surface refs and rebuild without control
+    state tables.
+12. iOS renderer snapshot tests cover every catalog component.
+13. iOS renderer rejects unsupported component ids.
+14. iOS action submission sends only action id, observed revisions, and validated
+    user input.
+15. Static gates fail on fallback renderers, legacy dashboard routes, local
+    policy decisions, or UI mutation multiplexers.
 
-Tests first:
+## Static Gates
 
-- Program artifact without resource refs fails after conversion.
-- Agent final output without promoted resource refs fails after conversion.
-- Context overflow uses resource summaries/refs, not full bodies.
-- Child outputs remain trace-linked after worker crash or disconnect.
-
-## Workstream 5: Enforcement Switch And Audit Removal
-
-Conversion sequence:
-
-1. Keep audit observations readable while adding resource-backed paths.
-2. Add per-namespace enforcement through contracts and static gates.
-3. Convert one namespace at a time and update tests to expect policy failures.
-4. Remove audit-only acceptance branches after covered paths enforce resources.
-5. Keep any audit schema read-only if historical records still matter.
-
-Static gates:
-
-- No mutating capability without `producedResourceKinds` or explicit
-  non-durable contract.
-- No filesystem write helper reachable without resource registration.
-- No process write-like command without output resource contract.
-- No program result `artifacts` array.
-- No completed agent run without an `agent_result` resource ref.
-- No output-audit-only acceptance path for converted durable-output paths.
-
-## Workstream 6: Security And Abuse Cases
-
-Threats to test explicitly:
-
-- Prompt-injected worker asks for broader resource selectors.
-- Child worker attempts to materialize outside its file roots.
-- Process command writes through shell redirection or tool-specific flags.
-- Resource payload contains secrets that should be `secret_ref`.
-- Symlink or path traversal escapes the allowed root.
-- Concurrent workers race to update the same artifact.
-- Worker crashes after writing bytes but before registering a version.
-- Blob exists without live resource owner.
-- Resource exists with missing blob bytes.
-- Malicious generated patch edits grant/policy files without approval.
-
-Required behavior:
-
-- Reject broader grants before handler execution.
-- Canonicalize paths before policy checks.
-- Treat symlinks as resolved target paths for grant enforcement.
-- Quarantine partial outputs.
-- Record damaged resources rather than silently repairing truth.
-- Require approval for high-risk materialization or policy/config file writes.
+- No public mutation API named `control::act`.
+- No generated UI action without a canonical `targetFunctionId`.
+- No mutable action without idempotency.
+- No unsupported-component fallback renderer.
+- No iOS local grant/policy truth.
+- No raw secret bytes in UI resources, previews, logs, or caches.
+- No UI table/cache that cannot be rebuilt from catalog, invocation, grant, and
+  resource truth.
+- No legacy route, alias, or retired DTO reader.
 
 ## Verification
 
-Targeted tests first:
+- Rust targeted tests for resource type registration, UI wrappers, validation,
+  action submission, grants, stale revisions, redaction, and control projection.
+- `scripts/tron ci fmt check clippy test` before checkpoint.
+- iOS `xcodegen generate`.
+- Targeted iOS tests for Engine Console DTOs, renderer fixtures, unsupported
+  components, action submission, and cache redaction.
+- `git diff --check`.
+- Update `~/LEDGER.jsonl` with the phase plan and implementation checkpoint.
 
-- Grant-rooted materialization tests.
-- Filesystem write/patch resource tests.
-- Process write-like enforcement tests.
-- Program artifact resource tests.
-- Agent decision/promoted-resource tests.
-- Crash/quarantine/damaged-resource tests.
-- Symlink/path traversal tests.
-- Static gates for output contracts.
+## Phase Exit Criteria
 
-Full verification:
-
-```bash
-scripts/tron ci fmt check clippy test
-git diff --check
-```
-
-iOS verification is required only if protocol DTOs or client-visible resource
-schemas change:
-
-```bash
-cd packages/ios-app && xcodegen generate
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:<targeted-test>
-```
-
-## Exit Criteria
-
-- All new durable outputs flow through resource refs.
-- Audit observations for converted paths are zero in targeted tests.
-- Static gates prevent reintroducing non-resource durable outputs.
-- README and architecture docs describe the enforced model, not the temporary
-  audit model.
-- No runtime compatibility, fallback renderers, old output aliases, or retired
-  DTO readers remain.
+- A worker can create an inspectable `ui_surface` resource.
+- The control plane can expose surface refs without durable control state.
+- iOS can render the accepted catalog strictly and submit actions safely.
+- Stale, unauthorized, unsupported, damaged, expired, and secret-bearing surfaces
+  fail closed in tests.
+- No legacy dashboard or mobile-first session-manager UI path remains necessary
+  for substrate inspection.

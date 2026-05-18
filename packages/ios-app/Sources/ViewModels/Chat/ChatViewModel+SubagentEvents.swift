@@ -160,15 +160,14 @@ extension ChatViewModel {
         }
     }
 
-    // MARK: - Subagent Result Delivery
+    // MARK: - Subagent Result Review
 
-    /// Deliver all pending subagent results through the engine.
-    /// The server retrieves unconsumed results, formats them, and spawns a prompt run (or queues).
-    /// Called from both "Send" (individual) and "Send All" buttons in subagent sheets.
-    func deliverSubagentResults(idempotencyKey: EngineIdempotencyKey) {
+    /// Dismiss local subagent-result notifications after the user reviews them.
+    /// Durable child output lives in agent_result resources and invocation lineage.
+    func markSubagentResultsReviewed() {
         let pending = subagentState.pendingSubagents
         guard !pending.isEmpty else { return }
-        logger.info("Delivering \(pending.count) pending subagent results via server", category: .chat)
+        logger.info("Marking \(pending.count) subagent results reviewed", category: .chat)
 
         for subagent in pending {
             subagentState.markResultsSent(subagentSessionId: subagent.subagentSessionId)
@@ -179,25 +178,6 @@ extension ChatViewModel {
         removeFromMessages { msg in
             if case .systemEvent(.subagentResultsReady) = msg.content { return true }
             return false
-        }
-
-        // Add chip to chat immediately (matches UserInteractionCoordinator pattern).
-        // On reconstruction the server-tagged message.user event produces the same chip.
-        let chip = ChatMessage(
-            role: .user,
-            content: .subagentResultsDelivered(subagentCount: pending.count)
-        )
-        appendToMessages(chip)
-        currentTurn += 1
-
-        Task {
-            do {
-                let response = try await engineClient.agent.deliverSubagentResults(idempotencyKey: idempotencyKey)
-                logInfo("Subagent results delivered: count=\(response.subagentCount), queued=\(response.queued)")
-            } catch {
-                logError("Failed to deliver subagent results: \(error.localizedDescription)")
-                showError("Could not deliver subagent results: \(error.localizedDescription)")
-            }
         }
     }
 }

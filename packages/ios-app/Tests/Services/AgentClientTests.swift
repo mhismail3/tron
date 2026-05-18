@@ -180,9 +180,6 @@ struct AgentClientTests {
             case "agent::clear_queue":
                 #expect((payload as? ClearQueueParams)?.sessionId == sessionId)
                 return ClearQueueResult(cleared: 1)
-            case "agent::deliver_subagent_results":
-                #expect((payload as? DeliverSubagentResultsParams)?.sessionId == sessionId)
-                return DeliverSubagentResultsResponse(acknowledged: true, queued: false, subagentCount: 0, runId: nil)
             case "agent::submit_answers":
                 #expect((payload as? SubmitAnswersParams)?.sessionId == sessionId)
                 #expect((payload as? SubmitAnswersParams)?.pauseId == "pause-1")
@@ -205,7 +202,6 @@ struct AgentClientTests {
         _ = try await client.queuePrompt("queued", idempotencyKey: .userAction("agent.queuePrompt.test"))
         try await client.dequeuePrompt("queue-1", idempotencyKey: .userAction("agent.dequeuePrompt.test"))
         try await client.clearQueue(idempotencyKey: .userAction("agent.clearQueue.test"))
-        _ = try await client.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults.test"))
         _ = try await client.submitAnswers(
             pauseId: "pause-1",
             invocationId: "inv-1",
@@ -214,7 +210,7 @@ struct AgentClientTests {
         )
         try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
         _ = try await client.abortCapabilityInvocation(invocationId: "capability-1", idempotencyKey: .userAction("agent.abortCapabilityInvocation.test"))
-        #expect(transport.ensureSessionEventSubscriptionCallCount == 6)
+        #expect(transport.ensureSessionEventSubscriptionCallCount == 5)
         #expect(transport.operationOrder.prefix(2) == [
             "subscribe:\(sessionId)",
             "write:agent::prompt"
@@ -226,7 +222,6 @@ struct AgentClientTests {
             "agent::queue_prompt",
             "agent::dequeue_prompt",
             "agent::clear_queue",
-            "agent::deliver_subagent_results",
             "agent::submit_answers",
             "agent::abort",
             "agent::abort_invocation"

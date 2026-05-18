@@ -79,10 +79,6 @@ enum EventIconProvider {
             return "checkmark.circle.fill"
         case .subagentFailed:
             return "xmark.circle.fill"
-        case .subagentResultsConsumed:
-            return "tray.and.arrow.down.fill"
-        case .notificationSubagentResult:
-            return "bell.badge.fill"
         case .turnFailed:
             return "exclamationmark.triangle.fill"
         case .memoryRetained:
@@ -162,10 +158,6 @@ enum EventIconProvider {
             return .tronSuccess
         case .subagentFailed:
             return .tronError
-        case .subagentResultsConsumed:
-            return .tronSuccess
-        case .notificationSubagentResult:
-            return .tronWarning
         case .turnFailed:
             return .tronError
         case .memoryRetained:

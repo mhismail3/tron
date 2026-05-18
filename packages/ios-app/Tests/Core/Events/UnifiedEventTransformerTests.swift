@@ -134,11 +134,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "newLevel": AnyCodable("high")
             ],
             .notificationInterrupted: [:],
-            .notificationSubagentResult: [
-                "subagentSessionId": AnyCodable("sub-session"),
-                "task": AnyCodable("Check a detail"),
-                "success": AnyCodable(true)
-            ],
             .skillDeactivated: [
                 "skillName": AnyCodable("browser")
             ],
@@ -639,8 +634,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             .messageDeleted,
             .streamTurnEnd,
             .configModelSwitch, .configReasoningLevel,
-            .notificationSubagentResult,
-            .subagentSpawned, .subagentCompleted, .subagentFailed, .subagentResultsConsumed,
+            .subagentSpawned, .subagentCompleted, .subagentFailed,
             .fileRead, .fileWrite, .fileEdit,
             .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged, .worktreeRenamed,
             .compactBoundary, .compactSummary,
@@ -663,6 +657,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
             .sessionFork,
             // Prompt/skill/process/memory trigger events do not currently restore
             // user-visible chat or persisted ReconstructedState fields.
+            .capabilityPauseRequested,
+            .capabilityPauseResolved,
+            .capabilityRunStatus,
             .configPromptUpdate,
             .skillActivated,
             .memoryAutoRetainTriggered,
@@ -2541,42 +2538,11 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(maps.completedInvocations["tc1"]?.durationMs, 42)
     }
 
-    func testBuildCapabilityMapsCollectsConsumedSubagentIds() {
-        let events = [
-            rawEvent(
-                id: "e1",
-                type: "subagent.results_consumed",
-                payload: [
-                    "consumedEventIds": AnyCodable(["notif-1", "notif-2"])
-                ],
-                sequence: 1
-            )
-        ]
-
-        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
-
-        XCTAssertEqual(maps.consumedSubagentEventIds, Set(["notif-1", "notif-2"]))
-    }
-
-    func testBuildCapabilityMapsTracksLastTurnEndSequence() {
-        let events = [
-            rawEvent(id: "e1", type: "stream.turn_end", payload: ["turn": AnyCodable(1)], sequence: 5),
-            rawEvent(id: "e2", type: "stream.turn_end", payload: ["turn": AnyCodable(2)], sequence: 10),
-            rawEvent(id: "e3", type: "stream.turn_end", payload: ["turn": AnyCodable(3)], sequence: 8)
-        ]
-
-        let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: events)
-
-        XCTAssertEqual(maps.lastTurnEndSequence, 10)
-    }
-
     func testBuildCapabilityMapsEmptyEvents() {
         let maps = UnifiedEventTransformer.buildCapabilityInvocationMaps(from: [RawEvent]())
 
         XCTAssertTrue(maps.startedInvocations.isEmpty)
         XCTAssertTrue(maps.completedInvocations.isEmpty)
-        XCTAssertTrue(maps.consumedSubagentEventIds.isEmpty)
-        XCTAssertEqual(maps.lastTurnEndSequence, -1)
     }
 
     func testBuildCapabilityMapsDuplicateInvocationIdLastWins() {

@@ -1,5 +1,5 @@
 //! Agent workflow operations.
-use super::{AgentCommandService, PromptQueueService, PromptRequest, errors, spawn_prompt_run};
+use super::{AgentCommandService, PromptQueueService, PromptRequest, spawn_prompt_run};
 use crate::domains::agent::Deps;
 use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
@@ -99,27 +99,6 @@ pub(crate) fn merge_success_fields(target: &mut Value, extra: Option<Value>) {
             let _ = target.insert(key, value);
         }
     }
-}
-
-pub(crate) async fn load_prompt_session(
-    deps: &Deps,
-    session_id: &str,
-    task: &'static str,
-) -> Result<crate::domains::session::event_store::sqlite::row_types::SessionRow, CapabilityError> {
-    let session_manager = deps.session_manager.clone();
-    let sid_check = session_id.to_owned();
-    run_blocking_task(task, move || {
-        session_manager
-            .get_session(&sid_check)
-            .map_err(|e| CapabilityError::Internal {
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| CapabilityError::NotFound {
-                code: errors::SESSION_NOT_FOUND.into(),
-                message: format!("Session '{sid_check}' not found"),
-            })
-    })
-    .await
 }
 
 pub(crate) async fn publish_agent_queue_stream(

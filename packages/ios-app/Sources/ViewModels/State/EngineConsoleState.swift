@@ -4,6 +4,8 @@ import Foundation
 protocol EngineConsoleCapabilityClient: AnyObject {
     func status(includeSnapshot: Bool) async throws -> CapabilityStatusDTO
     func registrySnapshot(includeDocuments: Bool, includeBindings: Bool) async throws -> CapabilityRegistrySnapshotDTO
+    func controlSnapshot(limit: Int) async throws -> ControlSnapshotDTO
+    func controlInspect(targetType: String, targetId: String, includeFullPayloads: Bool) async throws -> ControlInspectDTO
     func auditQuery(_ query: CapabilityAuditQueryDTO) async throws -> CapabilityAuditQueryResultDTO
     func programRunList(_ query: CapabilityProgramRunQueryDTO) async throws -> CapabilityProgramRunQueryResultDTO
     func getPolicy(policyId: String?) async throws -> CapabilityPolicyGetDTO
@@ -100,6 +102,7 @@ final class EngineConsoleState {
     private(set) var loadState: LoadState = .idle
     private(set) var status: CapabilityStatusDTO?
     private(set) var registry: CapabilityRegistrySnapshotDTO?
+    private(set) var controlSnapshot: ControlSnapshotDTO?
     private(set) var audit: CapabilityAuditQueryResultDTO?
     private(set) var programRuns: CapabilityProgramRunQueryResultDTO?
     private(set) var policies: CapabilityPolicyGetDTO?
@@ -155,6 +158,7 @@ final class EngineConsoleState {
                 includeDocuments: true,
                 includeBindings: true
             )
+            let controlSnapshot = try await capabilityClient.controlSnapshot(limit: 100)
             let audit = try await capabilityClient.auditQuery(
                 CapabilityAuditQueryDTO(eventType: nil, traceId: nil, limit: 50, revealPayloads: false)
             )
@@ -164,6 +168,7 @@ final class EngineConsoleState {
             let policies = try await capabilityClient.getPolicy(policyId: nil)
             self.status = status
             self.registry = registry
+            self.controlSnapshot = controlSnapshot
             self.audit = audit
             self.programRuns = programRuns
             self.policies = policies
@@ -178,6 +183,7 @@ final class EngineConsoleState {
             let snapshot = EngineConsoleCache.makeSnapshot(
                 status: status,
                 registry: registry,
+                controlSnapshot: controlSnapshot,
                 audit: audit,
                 programRuns: programRuns
             )

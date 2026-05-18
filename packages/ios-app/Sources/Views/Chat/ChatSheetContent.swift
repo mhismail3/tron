@@ -176,7 +176,7 @@ struct ChatSheetContent: View {
                 eventStoreManager: eventStoreManager,
                 engineClient: engineClient,
                 onSendResults: { _ in
-                    viewModel.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults"))
+                    viewModel.markSubagentResultsReviewed()
                     sheetCoordinator?.dismiss()
                 }
             )
@@ -195,11 +195,11 @@ struct ChatSheetContent: View {
             eventStoreManager: eventStoreManager,
             engineClient: engineClient,
             onSendAll: {
-                viewModel.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults"))
+                viewModel.markSubagentResultsReviewed()
                 sheetCoordinator?.dismiss()
             },
             onSendIndividual: { _ in
-                viewModel.deliverSubagentResults(idempotencyKey: .userAction("agent.deliverSubagentResults"))
+                viewModel.markSubagentResultsReviewed()
                 sheetCoordinator?.dismiss()
             }
         )

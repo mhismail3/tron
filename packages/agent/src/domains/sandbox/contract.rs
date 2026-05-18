@@ -15,7 +15,8 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["sandbox.lifecycle"];
 /// Canonical capability contracts exposed by this domain worker.
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
-        CapabilityContract::new("sandbox::spawn_worker", "sandbox", EffectClass::ExternalSideEffect, RiskLevel::High, Some("sandbox.write"))
+        CapabilityContract::new("spawn_worker", "sandbox", EffectClass::ExternalSideEffect, RiskLevel::High, Some("worker.write"))
+            .function_id("worker::spawn")
             .request_schema(json!({
                 "additionalProperties": false,
                 "properties": {

@@ -41,28 +41,9 @@ extension ChatViewModel {
     // MARK: - Subagent State Restoration
 
     /// Restore subagent state from reconstructed session data.
-    /// Populates SubagentState from result events and converts subagent capability messages
-    /// to subagent chips using lifecycle events (spawned/completed/failed).
+    /// Converts subagent capability messages to subagent chips using lifecycle events
+    /// (spawned/completed/failed).
     func restoreSubagentState(from state: ReconstructedState) {
-        // Populate SubagentState from reconstructed subagent results
-        for result in state.subagentResults {
-            var data = SubagentInvocationData(
-                invocationId: result.subagentSessionId,
-                subagentSessionId: result.subagentSessionId,
-                task: result.task,
-                model: nil,
-                status: result.success ? .completed : .failed,
-                currentTurn: result.totalTurns,
-                resultSummary: result.resultSummary,
-                fullOutput: nil,
-                duration: result.duration,
-                error: result.success ? nil : "Failed",
-                tokenUsage: result.tokenUsage
-            )
-            data.resultDeliveryStatus = .pending
-            subagentState.populateFromReconstruction(data)
-        }
-
         // Convert subagent capability invocations to subagent chips using lifecycle events.
         guard !state.subagentSpawns.isEmpty else { return }
 
@@ -119,33 +100,6 @@ extension ChatViewModel {
             subagentState.populateFromReconstruction(subagentData)
         }
 
-        // Remove notification messages for blocking subagents
-        let blockingSessionIds = Set(state.subagentSpawns.filter { $0.blocking }.map { $0.subagentSessionId })
-        if !blockingSessionIds.isEmpty {
-            allReconstructedMessages.removeAll { msg in
-                if case .systemEvent(.subagentResultAvailable(let sid, _, _)) = msg.content {
-                    return blockingSessionIds.contains(sid)
-                }
-                return false
-            }
-        }
-
-        // Consolidate individual subagentResultAvailable notifications into a single grouped notification
-        var resultEntries: [SubagentResultEntry] = []
-        var indicesToRemove = IndexSet()
-        for (i, msg) in allReconstructedMessages.enumerated() {
-            if case .systemEvent(.subagentResultAvailable(let sid, let task, let success)) = msg.content {
-                resultEntries.append(SubagentResultEntry(subagentSessionId: sid, taskPreview: task, success: success))
-                indicesToRemove.insert(i)
-            }
-        }
-        if !resultEntries.isEmpty {
-            allReconstructedMessages.remove(atOffsets: indicesToRemove)
-            allReconstructedMessages.append(ChatMessage(
-                role: .system,
-                content: .systemEvent(.subagentResultsReady(results: resultEntries))
-            ))
-        }
     }
 
     /// Load more older messages when user scrolls to top.

@@ -286,12 +286,6 @@ extension SessionEvent {
             }
             return "Subagent failed"
 
-        case .subagentResultsConsumed:
-            return "Results consumed"
-
-        case .notificationSubagentResult:
-            return "Subagent result"
-
         case .turnFailed:
             let error = payload.string("error") ?? ""
             if !error.isEmpty {

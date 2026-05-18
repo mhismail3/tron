@@ -45,7 +45,6 @@ enum PersistedEventType: String, CaseIterable {
 
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
-    case notificationSubagentResult = "notification.subagent_result"
 
     // Skills
     case skillActivated = "skills::activated"
@@ -88,7 +87,6 @@ enum PersistedEventType: String, CaseIterable {
     case subagentSpawned = "subagent.spawned"
     case subagentCompleted = "subagent.completed"
     case subagentFailed = "subagent.failed"
-    case subagentResultsConsumed = "subagent.results_consumed"
 
     // Turn events
     case turnFailed = "turn.failed"
@@ -144,7 +142,6 @@ enum PersistedEventType: String, CaseIterable {
         case .messageDeleted:          return .init(false,   true,    false,   true,   "Message deleted")
         // Notifications
         case .notificationInterrupted: return .init(true,    false,   false,   false,  "Session interrupted")
-        case .notificationSubagentResult: return .init(true, false,   false,   false,  "Subagent result available")
         // Skills
         case .skillActivated:          return .init(false,   false,   false,   false,  "Skill activated")
         case .skillDeactivated:        return .init(true,    false,   false,   false,  "Skill deactivated")
@@ -178,7 +175,6 @@ enum PersistedEventType: String, CaseIterable {
         case .subagentSpawned:         return .init(false,   true,    false,   false,  "Subagent spawned")
         case .subagentCompleted:       return .init(false,   true,    false,   false,  "Subagent completed")
         case .subagentFailed:          return .init(false,   true,    false,   false,  "Subagent failed")
-        case .subagentResultsConsumed: return .init(false,   false,   false,   false,  "Subagent results consumed")
         // Turn events
         case .turnFailed:              return .init(true,    false,   false,   false,  "Turn failed")
         // Memory

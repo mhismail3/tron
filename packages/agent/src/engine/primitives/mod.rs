@@ -30,9 +30,6 @@ use super::leases::{
     AcquireResourceLease, EngineResourceLease, InMemoryEngineResourceLeaseStore,
     SqliteEngineResourceLeaseStore,
 };
-use super::output_audit::{
-    EngineOutputAuditStoreBackend, InMemoryEngineOutputAuditStore, SqliteEngineOutputAuditStore,
-};
 use super::queue::{
     EngineQueueItem, EnqueueInvocation, InMemoryEngineQueueStore, SqliteEngineQueueStore,
 };
@@ -56,6 +53,7 @@ use super::types::{
 
 pub(crate) mod approval;
 pub(crate) mod catalog;
+pub(crate) mod control;
 pub(crate) mod grant;
 pub(crate) mod observability;
 pub(crate) mod queue;
@@ -73,6 +71,7 @@ pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
 pub(crate) const GRANT_WORKER_ID: &str = "grant";
 pub(crate) const APPROVAL_WORKER_ID: &str = "approval";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
+pub(crate) const CONTROL_WORKER_ID: &str = "control";
 pub(crate) const WORKER_WORKER_ID: &str = "worker";
 pub(crate) const OBSERVABILITY_WORKER_ID: &str = "observability";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
@@ -498,6 +497,13 @@ impl ResourceStoreBackend {
         }
     }
 
+    pub(in crate::engine) fn list_types(&self) -> Result<Vec<EngineResourceTypeDefinition>> {
+        match self {
+            Self::InMemory(store) => store.list_types(),
+            Self::Sqlite(store) => store.list_types(),
+        }
+    }
+
     pub(in crate::engine) fn create(&mut self, request: CreateResource) -> Result<EngineResource> {
         match self {
             Self::InMemory(store) => store.create(request),
@@ -553,7 +559,6 @@ pub(in crate::engine) struct PrimitiveStores {
     pub(in crate::engine) leases: Arc<StdMutex<ResourceLeaseStoreBackend>>,
     pub(in crate::engine) resources: Arc<StdMutex<ResourceStoreBackend>>,
     pub(in crate::engine) grants: Arc<StdMutex<EngineGrantStoreBackend>>,
-    pub(in crate::engine) output_audit: Arc<StdMutex<EngineOutputAuditStoreBackend>>,
     pub(in crate::engine) compensation: Arc<StdMutex<CompensationStoreBackend>>,
 }
 
@@ -580,9 +585,6 @@ impl PrimitiveStores {
             ))),
             grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::InMemory(
                 InMemoryEngineGrantStore::new(),
-            ))),
-            output_audit: Arc::new(StdMutex::new(EngineOutputAuditStoreBackend::InMemory(
-                InMemoryEngineOutputAuditStore::new(),
             ))),
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
                 InMemoryEngineCompensationStore::new(),
@@ -616,9 +618,6 @@ impl PrimitiveStores {
             ))),
             grants: Arc::new(StdMutex::new(EngineGrantStoreBackend::Sqlite(
                 SqliteEngineGrantStore::open(path)?,
-            ))),
-            output_audit: Arc::new(StdMutex::new(EngineOutputAuditStoreBackend::Sqlite(
-                SqliteEngineOutputAuditStore::open(path)?,
             ))),
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
                 SqliteEngineCompensationStore::open(path)?,
@@ -657,6 +656,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(GRANT_WORKER_ID, WorkerKind::System)?,
         primitive_worker(APPROVAL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
+        primitive_worker(CONTROL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(OBSERVABILITY_WORKER_ID, WorkerKind::System)?,
         primitive_worker(STORAGE_WORKER_ID, WorkerKind::System)?,
@@ -674,6 +674,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(grant::registrations(stores)?);
     registrations.extend(approval::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
+    registrations.extend(control::registrations()?);
     registrations.extend(worker::registrations()?);
     registrations.extend(observability::registrations()?);
     registrations.extend(storage::registrations()?);

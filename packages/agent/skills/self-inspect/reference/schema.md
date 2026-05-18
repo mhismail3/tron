@@ -206,7 +206,7 @@ Stored in `events.type`. Each has a typed JSON payload.
 | Capabilities | `capability.invocation.started`, `capability.invocation.completed`, `capability.invocation.progress` |
 | Streaming | `stream.text_delta`, `stream.thinking_delta`, `stream.turn_start`, `stream.turn_end` |
 | Config | `config.model_switch`, `config.prompt_update`, `config.reasoning_level` |
-| Notifications | `notification.interrupted`, `notification.subagent_result`, `subagent.results_consumed` |
+| Notifications | `notification.interrupted`, `notification.process_result`, `notification.user_job_action` |
 | Compaction | `compact.boundary`, `compact.summary` |
 | Context | `context.cleared` |
 | Skills | `skill.activated`, `skill.deactivated`, `skills.cleared` |

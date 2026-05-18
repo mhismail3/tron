@@ -390,10 +390,6 @@ mod session_event_tests {
                 json!({"timestamp": "t", "turn": 1}),
             ),
             (
-                EventType::NotificationSubagentResult,
-                json!({"parentSessionId": "p", "subagentSessionId": "s", "task": "t", "resultSummary": "r", "success": true, "totalTurns": 1, "duration": 100, "tokenUsage": {"inputTokens": 0, "outputTokens": 0}, "completedAt": "t"}),
-            ),
-            (
                 EventType::CompactBoundary,
                 json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10, "reason": "manual"}),
             ),
@@ -489,10 +485,6 @@ mod session_event_tests {
                 json!({"subagentSessionId": "s", "error": "e", "recoverable": false}),
             ),
             (
-                EventType::SubagentResultsConsumed,
-                json!({"consumedEventIds": ["evt-1"], "count": 1}),
-            ),
-            (
                 EventType::TodoWrite,
                 json!({"todos": [], "trigger": "capability"}),
             ),
@@ -526,7 +518,7 @@ mod session_event_tests {
             ),
         ];
 
-        assert_eq!(cases.len(), 53, "must cover all 53 event types");
+        assert_eq!(cases.len(), 51, "must cover all 51 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());

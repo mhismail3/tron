@@ -593,10 +593,10 @@ async fn spawn_subsession_provider_creation_failure_ends_child_session() {
     );
 }
 
-// ── notification.subagent_result persistence tests ──
+// ── resource-native subagent result persistence tests ──
 
 #[tokio::test]
-async fn spawn_nonblocking_persists_notification_to_parent_session() {
+async fn spawn_nonblocking_records_lifecycle_without_parent_result_message() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 
     let parent_sid = session_mgr
@@ -614,40 +614,36 @@ async fn spawn_nonblocking_persists_notification_to_parent_session() {
         .await
         .unwrap();
 
-    // Check the parent session for notification.subagent_result events
-    let events = store
-        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+    let completed = store
+        .get_events_by_type(&parent_sid, &["subagent.completed"], None)
         .unwrap();
-    assert_eq!(
-        events.len(),
-        1,
-        "expected one notification event in parent session"
-    );
+    assert_eq!(completed.len(), 1, "expected subagent.completed lifecycle");
 
-    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
-    assert_eq!(payload["parentSessionId"], parent_sid);
-    assert_eq!(payload["task"], "research task");
-    assert_eq!(payload["success"], true);
-    assert!(payload["output"].is_string());
+    let messages = store
+        .get_events_by_type(&parent_sid, &["message.system"], None)
+        .unwrap();
+    assert!(
+        messages.is_empty(),
+        "subagent output must not persist parent-session markdown blobs"
+    );
 }
 
 #[tokio::test]
-async fn spawn_no_parent_session_id_skips_notification() {
+async fn spawn_no_parent_session_id_skips_parent_result_message() {
     let (manager, _, store) = make_subagent_manager(Arc::new(MockProvider));
 
     // No parent_session_id set (None → empty string)
     let config = make_config("test task");
     let handle = manager.spawn(config).await.unwrap();
 
-    // No notification events anywhere (parent_session_id was empty)
-    let events = store
-        .get_events_by_type(&handle.session_id, &["notification.subagent_result"], None)
+    let messages = store
+        .get_events_by_type(&handle.session_id, &["message.system"], None)
         .unwrap();
-    assert!(events.is_empty());
+    assert!(messages.is_empty());
 }
 
 #[tokio::test]
-async fn spawn_nonblocking_failed_persists_notification_with_success_false() {
+async fn spawn_nonblocking_failed_records_lifecycle_without_parent_result_message() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(ErrorProvider));
 
     let parent_sid = session_mgr
@@ -665,17 +661,19 @@ async fn spawn_nonblocking_failed_persists_notification_with_success_false() {
         .await
         .unwrap();
 
-    let events = store
-        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+    let failed = store
+        .get_events_by_type(&parent_sid, &["subagent.failed"], None)
         .unwrap();
-    assert_eq!(events.len(), 1);
+    assert_eq!(failed.len(), 1, "expected subagent.failed lifecycle");
 
-    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
-    assert_eq!(payload["success"], false);
+    let messages = store
+        .get_events_by_type(&parent_sid, &["message.system"], None)
+        .unwrap();
+    assert!(messages.is_empty());
 }
 
 #[tokio::test]
-async fn spawn_blocking_skips_notification() {
+async fn spawn_blocking_skips_parent_result_message() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 
     let parent_sid = session_mgr
@@ -687,13 +685,12 @@ async fn spawn_blocking_skips_notification() {
     config.blocking_timeout_ms = Some(300_000);
     let _handle = manager.spawn(config).await.unwrap();
 
-    // Blocking subagents should NOT persist notification.subagent_result
-    let events = store
-        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+    let messages = store
+        .get_events_by_type(&parent_sid, &["message.system"], None)
         .unwrap();
     assert!(
-        events.is_empty(),
-        "blocking subagents should not persist notification events"
+        messages.is_empty(),
+        "blocking subagents should not persist parent-session result messages"
     );
 }
 
@@ -763,7 +760,7 @@ async fn spawn_failed_persists_lifecycle_events_to_parent() {
 }
 
 #[tokio::test]
-async fn subsession_does_not_persist_notification() {
+async fn subsession_does_not_persist_parent_result_message() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 
     let parent_sid = session_mgr
@@ -773,13 +770,12 @@ async fn subsession_does_not_persist_notification() {
     let config = make_subsession_config("summarize", &parent_sid);
     let _result = manager.spawn_subsession(config).await.unwrap();
 
-    // Subsessions should NOT persist notification.subagent_result
-    let events = store
-        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+    let messages = store
+        .get_events_by_type(&parent_sid, &["message.system"], None)
         .unwrap();
     assert!(
-        events.is_empty(),
-        "subsessions should not persist notification events"
+        messages.is_empty(),
+        "subsessions should not persist parent-session result messages"
     );
 }
 
@@ -837,11 +833,11 @@ async fn spawn_end_session_flushes_persisted_events() {
     );
 }
 
-// ── D4: notify field on SubagentResultAvailable ──
+// ── resource-native subagent completion with parent run-state probes ──
 //
-// These tests verify that the server-side `notify` field is computed from the
-// parent session's run state: notify=true when idle, notify=false when active.
-// When no probe is set, the safe default is notify=true.
+// Probe state must not reintroduce durable parent-session result messages.
+// Subagent output is represented by lifecycle events and resource-backed
+// agent_result records when an engine host is available.
 
 /// Stub probe that reports a fixed "has_active_run" value for any session.
 struct StubProbe {
@@ -855,7 +851,7 @@ impl crate::domains::agent::runner::orchestrator::orchestrator::RunStateProbe fo
 }
 
 #[tokio::test]
-async fn notify_true_when_probe_reports_parent_idle() {
+async fn no_parent_result_message_when_probe_reports_parent_idle() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
         .create_session("mock-model", "/tmp", None, None)
@@ -876,19 +872,14 @@ async fn notify_true_when_probe_reports_parent_idle() {
         .await
         .unwrap();
 
-    let events = store
-        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+    let messages = store
+        .get_events_by_type(&parent_sid, &["message.system"], None)
         .unwrap();
-    assert_eq!(events.len(), 1);
-    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
-    assert_eq!(
-        payload["notify"], true,
-        "notify should be true when parent is idle"
-    );
+    assert!(messages.is_empty());
 }
 
 #[tokio::test]
-async fn notify_false_when_probe_reports_parent_active() {
+async fn no_parent_result_message_when_probe_reports_parent_active() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
         .create_session("mock-model", "/tmp", None, None)
@@ -909,20 +900,14 @@ async fn notify_false_when_probe_reports_parent_active() {
         .await
         .unwrap();
 
-    let events = store
-        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+    let messages = store
+        .get_events_by_type(&parent_sid, &["message.system"], None)
         .unwrap();
-    assert_eq!(events.len(), 1);
-    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
-    assert_eq!(
-        payload["notify"], false,
-        "notify should be false when parent is active"
-    );
+    assert!(messages.is_empty());
 }
 
 #[tokio::test]
-async fn notify_defaults_true_when_probe_not_set() {
-    // No probe installed → safe default (notify=true, user sees completion).
+async fn no_parent_result_message_when_probe_not_set() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
         .create_session("mock-model", "/tmp", None, None)
@@ -938,19 +923,14 @@ async fn notify_defaults_true_when_probe_not_set() {
         .await
         .unwrap();
 
-    let events = store
-        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+    let messages = store
+        .get_events_by_type(&parent_sid, &["message.system"], None)
         .unwrap();
-    assert_eq!(events.len(), 1);
-    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
-    assert_eq!(
-        payload["notify"], true,
-        "notify should default to true without a probe"
-    );
+    assert!(messages.is_empty());
 }
 
 #[tokio::test]
-async fn notify_defaults_true_when_probe_weak_expired() {
+async fn no_parent_result_message_when_probe_weak_expired() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
     let parent_sid = session_mgr
         .create_session("mock-model", "/tmp", None, None)
@@ -975,15 +955,10 @@ async fn notify_defaults_true_when_probe_weak_expired() {
         .await
         .unwrap();
 
-    let events = store
-        .get_events_by_type(&parent_sid, &["notification.subagent_result"], None)
+    let messages = store
+        .get_events_by_type(&parent_sid, &["message.system"], None)
         .unwrap();
-    assert_eq!(events.len(), 1);
-    let payload: serde_json::Value = serde_json::from_str(&events[0].payload).unwrap();
-    assert_eq!(
-        payload["notify"], true,
-        "notify should default to true when Weak probe is expired"
-    );
+    assert!(messages.is_empty());
 }
 
 // ── SpawnType::Hook and spawn_type event field tests ──

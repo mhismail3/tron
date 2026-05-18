@@ -430,6 +430,12 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             }),
             vec!["draft", "promoted", "discarded", "archived"],
             vec![
+                "input",
+                "produced",
+                "candidate_output",
+                "promoted_output",
+                "supported_by",
+                "contradicted_by",
                 "supports",
                 "supersedes",
                 "evidence_for",
@@ -458,7 +464,19 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 }
             }),
             vec!["open", "in_progress", "completed", "failed", "archived"],
-            vec!["subgoal", "produces", "supported_by", "decided_by"],
+            vec![
+                "input",
+                "subgoal",
+                "produced",
+                "produces",
+                "candidate_output",
+                "promoted_output",
+                "decided_by",
+                "supported_by",
+                "contradicted_by",
+                "supersedes",
+                "derived_from",
+            ],
             json!({"read": ["resource.read"], "write": ["resource.write"], "complete": ["resource.write"]}),
         ),
         builtin_type(
@@ -477,7 +495,15 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 }
             }),
             vec!["draft", "final", "archived"],
-            vec!["decides", "promotes", "discards", "supports"],
+            vec![
+                "decides",
+                "promotes",
+                "discards",
+                "supports",
+                "supported_by",
+                "contradicted_by",
+                "derived_from",
+            ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
         builtin_type(
@@ -494,7 +520,13 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 }
             }),
             vec!["draft", "accepted", "rejected", "archived"],
-            vec!["claims_about", "supported_by", "contradicts"],
+            vec![
+                "claims_about",
+                "supported_by",
+                "contradicted_by",
+                "contradicts",
+                "derived_from",
+            ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
         builtin_type(
@@ -512,7 +544,13 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 }
             }),
             vec!["draft", "accepted", "rejected", "archived"],
-            vec!["evidence_for", "derived_from", "supports"],
+            vec![
+                "evidence_for",
+                "supported_by",
+                "contradicted_by",
+                "derived_from",
+                "supports",
+            ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
         builtin_type(
@@ -542,7 +580,13 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "quarantined",
                 "archived",
             ],
-            vec!["applies_patch", "derived_from", "materializes"],
+            vec![
+                "applies_patch",
+                "derived_from",
+                "materializes",
+                "produced",
+                "promoted_output",
+            ],
             json!({"read": ["resource.read"], "write": ["resource.write"], "promote": ["resource.write"], "delete": ["resource.write"]}),
         ),
         builtin_type(
@@ -570,7 +614,13 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "discarded",
                 "archived",
             ],
-            vec!["applies_to", "produces", "derived_from"],
+            vec![
+                "applies_to",
+                "produces",
+                "produced",
+                "derived_from",
+                "promoted_output",
+            ],
             json!({"read": ["resource.read"], "write": ["resource.write"], "apply": ["resource.write"]}),
         ),
         builtin_type(
@@ -593,7 +643,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 }
             }),
             vec!["retained", "discarded", "archived"],
-            vec!["produced_by", "derived_from"],
+            vec!["produced_by", "produced", "derived_from"],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
         builtin_type(
@@ -614,7 +664,14 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 }
             }),
             vec!["final", "interrupted", "discarded", "archived"],
-            vec!["answers", "decides", "promotes", "supports"],
+            vec![
+                "answers",
+                "decides",
+                "promotes",
+                "supports",
+                "produced",
+                "derived_from",
+            ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
     ]
@@ -663,6 +720,11 @@ impl InMemoryEngineResourceStore {
     pub fn get_type(&self, kind: &str) -> Result<Option<EngineResourceTypeDefinition>> {
         validate_token("resource kind", kind)?;
         Ok(self.type_definitions.get(kind).cloned())
+    }
+
+    /// List registered resource type definitions.
+    pub fn list_types(&self) -> Result<Vec<EngineResourceTypeDefinition>> {
+        Ok(self.type_definitions.values().cloned().collect())
     }
 
     /// Create a resource.
@@ -1118,6 +1180,25 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
             )
             .optional()
             .map_err(|err| sqlite_err("resource.get_type", err.to_string()))
+    }
+
+    /// List registered resource type definitions.
+    pub fn list_types(&self) -> Result<Vec<EngineResourceTypeDefinition>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT kind, schema_id, schema_json, lifecycle_states_json, versioning_mode,
+                        allowed_link_relations_json, default_retention_json, redaction_rules_json,
+                        materialization_rules_json, required_capabilities_json, owner_worker_id,
+                        revision, created_at, updated_at
+                 FROM engine_resource_type_definitions ORDER BY kind",
+            )
+            .map_err(|err| sqlite_err("resource.list_types.prepare", err.to_string()))?;
+        let rows = stmt
+            .query_map([], row_to_type_definition)
+            .map_err(|err| sqlite_err("resource.list_types", err.to_string()))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|err| sqlite_err("resource.list_types.row", err.to_string()))
     }
 
     /// Create a resource.

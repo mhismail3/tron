@@ -105,9 +105,6 @@ struct MessageBubble: View {
         case .answeredQuestions(let count):
             AnsweredQuestionsChipView(questionCount: count)
 
-        case .subagentResultsDelivered(let count):
-            SubagentResultsDeliveredChipView(subagentCount: count)
-
         case .subagent(let data):
             SubagentChip(data: data) {
                 onTap?(.subagent(data))
@@ -155,32 +152,6 @@ struct ConfirmedActionChipView: View {
                 .foregroundStyle(approved ? .tronSuccess : .tronError)
 
             Text(approved ? "Approved action" : "Denied action")
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.tronSurface.opacity(colorScheme == .light ? 0.85 : 0.6))
-        .clipShape(Capsule())
-        .frame(maxWidth: .infinity, alignment: .trailing)
-    }
-}
-
-// MARK: - Subagent Results Delivered Chip View
-
-struct SubagentResultsDeliveredChipView: View {
-    let subagentCount: Int
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "arrow.up.circle.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                .foregroundStyle(.tronSuccess)
-
-            Text(subagentCount == 1
-                 ? "Sent sub-agent result"
-                 : "Sent \(subagentCount) sub-agent results")
                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                 .foregroundStyle(.tronTextSecondary)
         }

@@ -3,6 +3,10 @@ use std::sync::Arc;
 
 use crate::domains::model::providers::provider::ProviderFactory;
 use crate::domains::session::event_store::{AppendOptions, EventType};
+use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+use crate::engine::{
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
+};
 use crate::shared::events::{BaseEvent, TronEvent};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -554,26 +558,19 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
             .is_some_and(|p| p.has_active_run(&params.tracker.parent_session_id));
         let notify = !parent_active;
 
-        let payload = json!({
-            "parentSessionId": params.tracker.parent_session_id,
-            "subagentSessionId": params.child_session_id,
-            "task": params.tracker.task,
-            "resultSummary": truncate(&result_output, 200),
-            "success": success,
-            "totalTurns": i64::from(result.turns_executed),
-            "duration": duration_ms,
-            "tokenUsage": token_usage.clone().unwrap_or(json!({})),
-            "completedAt": chrono::Utc::now().to_rfc3339(),
-            "output": truncate(&result_output, 4000),
-            "notify": notify,
-        });
-        let _ = params.event_store.append(&AppendOptions {
-            session_id: &params.tracker.parent_session_id,
-            event_type: EventType::NotificationSubagentResult,
-            payload,
-            parent_id: None,
-            sequence: None,
-        });
+        create_subagent_agent_result_resource(
+            params.engine_host.as_ref(),
+            &params.tracker.parent_session_id,
+            &params.child_session_id,
+            &params.tracker.task,
+            &result_output,
+            success,
+            result.turns_executed,
+            duration_ms,
+            token_usage.clone(),
+            &params.spawn_type,
+        )
+        .await;
 
         let _ = params.broadcast.emit(TronEvent::SubagentResultAvailable {
             base: BaseEvent::now(&params.tracker.parent_session_id),
@@ -609,6 +606,75 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
         duration_ms,
         "subagent execution finished"
     );
+}
+
+async fn create_subagent_agent_result_resource(
+    engine_host: Option<&crate::engine::EngineHostHandle>,
+    parent_session_id: &str,
+    child_session_id: &str,
+    task: &str,
+    output: &str,
+    success: bool,
+    turns_executed: u32,
+    duration_ms: u64,
+    token_usage: Option<Value>,
+    spawn_type: &str,
+) {
+    let Some(engine_host) = engine_host else {
+        return;
+    };
+    let session_id = if parent_session_id.is_empty() {
+        child_session_id
+    } else {
+        parent_session_id
+    };
+    let context = CausalContext::new(
+        ActorId::new("system:subagent").expect("valid actor id"),
+        ActorKind::System,
+        AuthorityGrantId::new("engine-system").expect("valid grant"),
+        TraceId::generate(),
+    )
+    .with_session_id(session_id.to_owned())
+    .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
+    .with_scope("resource.write")
+    .with_idempotency_key(format!("subagent-agent-result:{child_session_id}"));
+    let payload = json!({
+        "kind": "agent_result",
+        "scope": "session",
+        "sessionId": session_id,
+        "payload": {
+            "message": truncate(output, 4000),
+            "promotedRefs": [],
+            "decisionRefs": [],
+            "subgoalRefs": [],
+            "stopReason": if success { "completed" } else { "failed" },
+            "tokenUsage": token_usage.unwrap_or_else(|| json!({})),
+            "metadata": {
+                "parentSessionId": parent_session_id,
+                "subagentSessionId": child_session_id,
+                "task": task,
+                "success": success,
+                "turnsExecuted": turns_executed,
+                "durationMs": duration_ms,
+                "spawnType": spawn_type
+            }
+        }
+    });
+    let result = engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("resource::create").expect("valid function id"),
+            payload,
+            context,
+        ))
+        .await;
+    if let Some(error) = result.error {
+        tracing::warn!(
+            parent_session_id,
+            child_session_id,
+            error = %error,
+            "failed to create resource-native subagent agent_result"
+        );
+    }
 }
 
 async fn acquire_worktree_directory(

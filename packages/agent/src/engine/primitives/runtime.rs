@@ -6,14 +6,17 @@
 
 use serde_json::{Value, json};
 
-use super::{catalog, observability, storage, worker};
+use super::{catalog, control, observability, storage, worker};
 use crate::engine::approval::EngineApprovalRecord;
 use crate::engine::discovery::{ActorContext, FunctionQuery};
 use crate::engine::errors::{EngineError, Result};
+use crate::engine::grants::{EngineGrant, EngineGrantLifecycle, ListGrants};
 use crate::engine::ids::{InvocationId, TriggerId, WorkerId};
 use crate::engine::invocation::{CausalContext, Invocation, InvocationRecord};
 use crate::engine::leases::EngineResourceLease;
-use crate::engine::output_audit::EngineOutputAuditObservation;
+use crate::engine::resources::{
+    EngineResource, EngineResourceInspection, EngineResourceTypeDefinition, ListResources,
+};
 use crate::engine::streams::EngineStreamEvent;
 use crate::engine::types::{
     CatalogChange, CatalogRevision, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition,
@@ -28,7 +31,6 @@ struct TraceComponents {
     streams: Vec<EngineStreamEvent>,
     leases: Vec<EngineResourceLease>,
     compensation: Vec<Value>,
-    output_audit: Vec<EngineOutputAuditObservation>,
 }
 
 #[derive(Default)]
@@ -60,7 +62,25 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineStreamEvent>>;
     fn resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>>;
     fn compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>>;
-    fn output_audit_for_trace(&self, trace_id: &str) -> Result<Vec<EngineOutputAuditObservation>>;
+    fn resource_type_definitions(&self) -> Result<Vec<EngineResourceTypeDefinition>>;
+    fn list_resources(&self, filter: ListResources) -> Result<Vec<EngineResource>>;
+    fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>>;
+    fn list_grants(&self, filter: ListGrants) -> Result<Vec<EngineGrant>>;
+    fn inspect_grant(
+        &self,
+        grant_id: &crate::engine::ids::AuthorityGrantId,
+    ) -> Result<Option<EngineGrant>>;
+    fn queue_items(
+        &self,
+        queue: &str,
+        limit: usize,
+    ) -> Result<Vec<crate::engine::queue::EngineQueueItem>>;
+    fn approval_records(
+        &self,
+        status: Option<crate::engine::approval::ApprovalStatus>,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<EngineApprovalRecord>>;
     fn worker_count(&self) -> usize;
     fn function_count(&self) -> usize;
     fn trigger_count(&self) -> usize;
@@ -97,6 +117,8 @@ pub(in crate::engine) fn dispatch(
         worker::HEALTH_FUNCTION => worker_health(host, invocation),
         worker::DISCONNECT_FUNCTION => worker_disconnect(host, invocation),
         worker::PROTOCOL_GUIDE_FUNCTION => worker_protocol_guide(invocation),
+        control::SNAPSHOT_FUNCTION => control_snapshot(host, invocation),
+        control::INSPECT_FUNCTION => control_inspect(host, invocation),
         observability::TRACE_GET_FUNCTION => trace_get(host, invocation),
         observability::TRACE_LIST_FUNCTION => trace_list(host, invocation),
         observability::SPAN_LIST_FUNCTION => span_list(host, invocation),
@@ -166,6 +188,236 @@ fn catalog_watch_snapshot(
         "nextRevision": response.get("nextRevision").cloned().unwrap_or(Value::Null),
         "hasMore": response.get("hasMore").cloned().unwrap_or(Value::Bool(false)),
     }))
+}
+
+fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
+    let actor = actor_context(&invocation.causal_context);
+    let limit = optional_u64(invocation.payload.get("limit"))?.unwrap_or(100) as usize;
+    let limit = limit.clamp(1, 500);
+    let capabilities = host.discover_functions(&FunctionQuery {
+        actor: Some(actor.clone()),
+        include_internal: false,
+        ..FunctionQuery::default()
+    });
+    let active_goals = host
+        .list_resources(ListResources {
+            kind: Some("goal".to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit,
+        })?
+        .into_iter()
+        .filter(|resource| !matches!(resource.lifecycle.as_str(), "completed" | "archived"))
+        .collect::<Vec<_>>();
+    let invocations = latest_invocations(host.invocations(), limit)
+        .iter()
+        .map(|record| invocation_record_value(record, false))
+        .collect::<Vec<_>>();
+    let grants = host.list_grants(ListGrants {
+        parent_grant_id: None,
+        lifecycle: Some(EngineGrantLifecycle::Active),
+        limit,
+    })?;
+    let approvals =
+        host.approval_records(None, invocation.causal_context.session_id.as_deref(), limit)?;
+    let queues = host.queue_items("engine", limit).unwrap_or_default();
+    let storage = host.storage_stats().ok().map(|stats| json!(stats));
+    Ok(json!({
+        "catalogRevision": host.catalog_revision().0,
+        "workers": host.visible_workers(&actor),
+        "capabilities": capabilities,
+        "resourceTypes": host.resource_type_definitions()?,
+        "activeGoals": active_goals,
+        "invocations": invocations,
+        "grants": grants,
+        "queues": queues,
+        "leases": [],
+        "approvals": approvals,
+        "storage": storage,
+        "integrityWarnings": substrate_integrity_warnings(host)?,
+        "availableActions": substrate_actions(),
+    }))
+}
+
+fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
+    let target_type = required_str(&invocation.payload, "targetType")?;
+    let target_id = required_str(&invocation.payload, "targetId")?;
+    let include_full_payloads = invocation
+        .payload
+        .get("includeFullPayloads")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let graph = match target_type {
+        "worker" => {
+            let id = WorkerId::new(target_id.to_owned())?;
+            let functions = host
+                .discover_functions(&FunctionQuery {
+                    include_internal: true,
+                    ..FunctionQuery::default()
+                })
+                .into_iter()
+                .filter(|function| function.owner_worker == id)
+                .collect::<Vec<_>>();
+            json!({
+                "worker": host.inspect_worker(&id)?,
+                "capabilities": functions,
+            })
+        }
+        "capability" => {
+            let function = host
+                .discover_functions(&FunctionQuery {
+                    include_internal: true,
+                    ..FunctionQuery::default()
+                })
+                .into_iter()
+                .find(|function| function.id.as_str() == target_id);
+            json!({ "capability": function })
+        }
+        "grant" => {
+            let grant_id = crate::engine::ids::AuthorityGrantId::new(target_id.to_owned())?;
+            json!({ "grant": host.inspect_grant(&grant_id)? })
+        }
+        "goal" | "resource" => {
+            json!({ "resource": host.inspect_resource(target_id)? })
+        }
+        "invocation" => {
+            let invocation = host
+                .invocations()
+                .into_iter()
+                .find(|record| record.invocation_id.as_str() == target_id);
+            json!({ "invocation": invocation.as_ref().map(|record| invocation_record_value(record, include_full_payloads)) })
+        }
+        "trace" => {
+            let trace = trace_components(host, target_id)?;
+            json!({
+                "summary": trace_summary(target_id, &trace),
+                "invocations": trace.invocations.iter().map(|record| invocation_record_value(record, include_full_payloads)).collect::<Vec<_>>(),
+                "streams": trace.streams,
+                "approvals": trace.approvals,
+                "leases": trace.leases,
+                "compensation": trace.compensation,
+            })
+        }
+        _ => {
+            return Err(EngineError::PolicyViolation(format!(
+                "unsupported control target type {target_type}"
+            )));
+        }
+    };
+    Ok(json!({
+        "targetType": target_type,
+        "targetId": target_id,
+        "graph": graph,
+        "availableActions": actions_for_target(target_type, target_id),
+    }))
+}
+
+fn latest_invocations(
+    mut invocations: Vec<InvocationRecord>,
+    limit: usize,
+) -> Vec<InvocationRecord> {
+    invocations.sort_by_key(|record| record.timestamp);
+    invocations.reverse();
+    invocations.truncate(limit);
+    invocations
+}
+
+fn substrate_integrity_warnings(host: &dyn PrimitiveRuntimeHost) -> Result<Vec<Value>> {
+    let damaged = host
+        .list_resources(ListResources {
+            kind: None,
+            scope: None,
+            lifecycle: Some("damaged".to_owned()),
+            limit: 50,
+        })?
+        .into_iter()
+        .map(|resource| {
+            json!({
+                "kind": "damaged_resource",
+                "resourceId": resource.resource_id,
+                "resourceKind": resource.kind,
+            })
+        })
+        .collect();
+    Ok(damaged)
+}
+
+fn substrate_actions() -> Vec<Value> {
+    vec![
+        action_template("grant::revoke", "grant", "grantId", "high", true),
+        action_template("worker::disconnect", "worker", "workerId", "high", true),
+        action_template(
+            "resource::link",
+            "resource",
+            "sourceResourceId",
+            "medium",
+            false,
+        ),
+        action_template(
+            "artifact::promote",
+            "resource",
+            "resourceId",
+            "medium",
+            false,
+        ),
+        action_template(
+            "approval::resolve",
+            "approval",
+            "approvalId",
+            "medium",
+            false,
+        ),
+        action_template("agent::abort", "goal", "sessionId", "high", true),
+    ]
+}
+
+fn actions_for_target(target_type: &str, target_id: &str) -> Vec<Value> {
+    substrate_actions()
+        .into_iter()
+        .filter(|action| {
+            action
+                .get("targetType")
+                .and_then(Value::as_str)
+                .is_none_or(|kind| {
+                    kind == target_type || target_type == "goal" && kind == "resource"
+                })
+        })
+        .map(|mut action| {
+            if let Some(template) = action
+                .get_mut("payloadTemplate")
+                .and_then(Value::as_object_mut)
+            {
+                let key = match target_type {
+                    "worker" => "workerId",
+                    "grant" => "grantId",
+                    "goal" | "resource" => "resourceId",
+                    _ => "targetId",
+                };
+                template.insert(key.to_owned(), json!(target_id));
+            }
+            action
+        })
+        .collect()
+}
+
+fn action_template(
+    function_id: &str,
+    target_type: &str,
+    target_field: &str,
+    risk: &str,
+    approval_required: bool,
+) -> Value {
+    let mut payload_template = serde_json::Map::new();
+    payload_template.insert(target_field.to_owned(), json!("<target-id>"));
+    payload_template.insert("reason".to_owned(), json!("operator-requested"));
+    json!({
+        "functionId": function_id,
+        "targetType": target_type,
+        "requiredRisk": risk,
+        "approvalRequired": approval_required,
+        "targetRevision": Value::Null,
+        "payloadTemplate": payload_template
+    })
 }
 
 fn worker_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
@@ -278,12 +530,12 @@ fn worker_protocol_guide(invocation: &Invocation) -> Result<Value> {
         .unwrap_or("demo");
     let protocol_version = crate::engine::protocol::WORKER_PROTOCOL_VERSION;
     let environment = json!({
-        "TRON_ENGINE_WORKER_ENDPOINT": "Absolute WebSocket endpoint injected by sandbox::spawn_worker, for example ws://127.0.0.1:9847/engine/workers",
-        "TRON_ENGINE_BEARER_TOKEN": "Bearer token injected by sandbox::spawn_worker; send it as Authorization: Bearer <token>",
-        "TRON_ENGINE_WORKER_ID": "Stable worker id injected by sandbox::spawn_worker",
+        "TRON_ENGINE_WORKER_ENDPOINT": "Absolute WebSocket endpoint injected by worker::spawn, for example ws://127.0.0.1:9847/engine/workers",
+        "TRON_ENGINE_BEARER_TOKEN": "Bearer token injected by worker::spawn; send it as Authorization: Bearer <token>",
+        "TRON_ENGINE_WORKER_ID": "Stable worker id injected by worker::spawn",
         "TRON_ENGINE_WORKER_VISIBILITY": "session, workspace, or system",
         "TRON_ENGINE_WORKER_PROTOCOL_VERSION": protocol_version.to_string(),
-        "TRON_ENGINE_WORKER_TOKEN": "Scoped worker-token JSON injected by sandbox::spawn_worker; bounds pluginId, namespaceClaims, authorityGrantId, authorityGrantRevision, authorityGrantHash, resourceSelectors, visibilityCeiling, trustTier, scope binding, expiry, and signatureStatus",
+        "TRON_ENGINE_WORKER_TOKEN": "Scoped worker-token JSON injected by worker::spawn; bounds pluginId, namespaceClaims, authorityGrantId, authorityGrantRevision, authorityGrantHash, resourceSelectors, visibilityCeiling, trustTier, scope binding, expiry, and signatureStatus",
         "TRON_ENGINE_SESSION_ID": "Present for session-visible sandbox workers",
         "TRON_ENGINE_WORKSPACE_ID": "Present for workspace-visible sandbox workers"
     });
@@ -387,7 +639,6 @@ fn trace_get(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
         "approvals": trace.approvals.iter().map(|record| json!(record)).collect::<Vec<_>>(),
         "leases": trace.leases,
         "compensation": trace.compensation,
-        "outputAudit": trace.output_audit,
     }))
 }
 
@@ -846,7 +1097,6 @@ fn log_query(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
             logs.extend(trace.approvals.iter().map(approval_log_value));
             logs.extend(trace.leases.iter().map(lease_log_value));
             logs.extend(trace.compensation.iter().map(compensation_log_value));
-            logs.extend(trace.output_audit.iter().map(output_audit_log_value));
         }
         None => {
             logs.extend(host.invocations().iter().map(invocation_log_value));
@@ -904,7 +1154,6 @@ fn trace_components(host: &dyn PrimitiveRuntimeHost, trace_id: &str) -> Result<T
         streams: host.stream_records_for_trace(trace_id)?,
         leases: host.resource_leases_for_trace(trace_id)?,
         compensation: host.compensation_records_for_trace(trace_id)?,
-        output_audit: host.output_audit_for_trace(trace_id)?,
     })
 }
 
@@ -950,7 +1199,6 @@ fn trace_summary(trace_id: &str, trace: &TraceComponents) -> Value {
         "pendingApprovalCount": pending_approvals,
         "leaseCount": trace.leases.len(),
         "compensationCount": trace.compensation.len(),
-        "outputAuditCount": trace.output_audit.len(),
         "firstTimestamp": timestamps.first(),
         "lastTimestamp": timestamps.last(),
     })
@@ -987,12 +1235,6 @@ fn trace_timestamps(trace: &TraceComponents) -> Vec<String> {
             .leases
             .iter()
             .map(|record| record.acquired_at.to_rfc3339()),
-    );
-    timestamps.extend(
-        trace
-            .output_audit
-            .iter()
-            .map(|record| record.created_at.to_rfc3339()),
     );
     timestamps.extend(trace.compensation.iter().filter_map(|record| {
         record
@@ -1078,20 +1320,6 @@ fn compensation_log_value(record: &Value) -> Value {
         "functionId": record.get("functionId").and_then(Value::as_str),
         "message": "engine compensation record written",
         "error": record.get("error"),
-    })
-}
-
-fn output_audit_log_value(record: &EngineOutputAuditObservation) -> Value {
-    json!({
-        "timestamp": record.created_at.to_rfc3339(),
-        "traceId": record.trace_id.as_str(),
-        "kind": "output_audit",
-        "level": record.severity,
-        "observationId": record.observation_id,
-        "functionId": record.function_id.as_str(),
-        "outputKind": record.output_kind,
-        "outputRef": record.output_ref,
-        "message": record.message,
     })
 }
 

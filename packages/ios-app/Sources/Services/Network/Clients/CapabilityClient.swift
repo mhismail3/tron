@@ -28,6 +28,32 @@ final class CapabilityClient: EngineDomainClient {
         )
     }
 
+    func controlSnapshot(limit: Int = 100) async throws -> ControlSnapshotDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeRead(
+            "control::snapshot",
+            ControlSnapshotParams(limit: limit),
+            context: readContext
+        )
+    }
+
+    func controlInspect(
+        targetType: String,
+        targetId: String,
+        includeFullPayloads: Bool = false
+    ) async throws -> ControlInspectDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeRead(
+            "control::inspect",
+            ControlInspectRequestDTO(
+                targetType: targetType,
+                targetId: targetId,
+                includeFullPayloads: includeFullPayloads
+            ),
+            context: readContext
+        )
+    }
+
     func search(_ request: CapabilitySearchRequestDTO) async throws -> CapabilitySearchResponseDTO {
         _ = try requireTransport().requireConnection()
         let result: CapabilityPrimitiveResultDTO = try await invokeRead(
@@ -417,6 +443,7 @@ final class CapabilityClient: EngineDomainClient {
 
 private struct StatusParams: Encodable { let includeSnapshot: Bool }
 private struct SnapshotParams: Encodable { let includeDocuments: Bool; let includeBindings: Bool }
+private struct ControlSnapshotParams: Encodable { let limit: Int }
 
 private struct InspectParams: Encodable {
     let capabilityId: String?

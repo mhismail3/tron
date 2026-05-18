@@ -394,7 +394,7 @@ Tests/docs:
 
 ### Phase 5: Harden Modular Capability Development
 
-- Make `worker::protocol_guide` and `sandbox::spawn_worker` the primary path
+- Make `worker::protocol_guide` and `worker::spawn` the primary path
   for generated workers.
 - Add conformance suites for worker registration, schema metadata, approval,
   leases, compensation, streams, generated UI, and lifecycle records.

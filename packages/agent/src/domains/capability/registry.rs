@@ -65,7 +65,7 @@ const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
     "agent::cancel_subagent",
     "job::wait",
     "job::stream_output",
-    "sandbox::spawn_worker",
+    "worker::spawn",
     "sandbox::list_spawned_workers",
     "sandbox::stop_spawned_worker",
     "worker::protocol_guide",

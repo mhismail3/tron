@@ -6,9 +6,6 @@
 
 use crate::domains::agent::commands::AgentCommandService;
 use crate::domains::agent::prompt_queue::PromptQueueService;
-use crate::domains::agent::runtime::runtime::{
-    format_subagent_results, get_pending_subagent_results,
-};
 use crate::domains::agent::runtime::service::{
     PromptEngineCausality, PromptRequest, drain_prompt_queue, spawn_prompt_run,
 };

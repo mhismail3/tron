@@ -754,6 +754,7 @@ fn authorize_with_grant(
             grant.grant_id
         )));
     }
+    ensure_budget_available(grant)?;
     if grant
         .subject_actor_id
         .as_ref()
@@ -812,6 +813,27 @@ fn authorize_with_grant(
     }
     ensure_resource_selectors(grant, invocation)?;
     ensure_file_roots(grant, invocation)?;
+    Ok(())
+}
+
+fn ensure_budget_available(grant: &EngineGrant) -> Result<()> {
+    for field in [
+        "remainingInvocations",
+        "remainingTokens",
+        "remainingProcessMs",
+    ] {
+        if grant
+            .budget
+            .get(field)
+            .and_then(Value::as_u64)
+            .is_some_and(|remaining| remaining == 0)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} budget {field} is exhausted",
+                grant.grant_id
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -1006,6 +1028,7 @@ fn ensure_child_narrows_parent(parent: &EngineGrant, child: &DeriveGrant) -> Res
             "child grant risk exceeds parent".to_owned(),
         ));
     }
+    ensure_budget_narrows(&parent.budget, &child.budget)?;
     if let (Some(parent_expiry), Some(child_expiry)) = (parent.expires_at, child.expires_at)
         && child_expiry > parent_expiry
     {
@@ -1027,6 +1050,31 @@ fn ensure_child_narrows_parent(parent: &EngineGrant, child: &DeriveGrant) -> Res
         return Err(EngineError::PolicyViolation(
             "child grant cannot relax approval requirement".to_owned(),
         ));
+    }
+    Ok(())
+}
+
+fn ensure_budget_narrows(parent: &Value, child: &Value) -> Result<()> {
+    for field in [
+        "remainingInvocations",
+        "remainingTokens",
+        "remainingProcessMs",
+        "maxInvocations",
+        "maxTokens",
+        "maxProcessMs",
+    ] {
+        let Some(parent_value) = parent.get(field).and_then(Value::as_u64) else {
+            continue;
+        };
+        if child
+            .get(field)
+            .and_then(Value::as_u64)
+            .is_some_and(|child_value| child_value > parent_value)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "child grant budget {field} exceeds parent"
+            )));
+        }
     }
     Ok(())
 }

@@ -932,11 +932,11 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
 fn discovery_text_query_matches_tokens_across_canonical_id() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("sandbox", "sandbox"), true)
+        .register_worker(worker("sandbox", "worker"), true)
         .unwrap();
     catalog
         .register_function(
-            read_function("sandbox::spawn_worker", "sandbox"),
+            read_function("worker::spawn", "sandbox"),
             Some(handler()),
             true,
         )
@@ -944,13 +944,13 @@ fn discovery_text_query_matches_tokens_across_canonical_id() {
 
     let agent = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"));
     let filtered = catalog.discover_functions(&FunctionQuery {
-        text: Some("sandbox spawn worker".to_owned()),
+        text: Some("worker spawn".to_owned()),
         actor: Some(agent),
         ..FunctionQuery::default()
     });
 
     assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].id.as_str(), "sandbox::spawn_worker");
+    assert_eq!(filtered[0].id.as_str(), "worker::spawn");
 }
 
 #[test]
@@ -2532,7 +2532,7 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
     assert_eq!(guide_value["protocolVersion"], 1);
     assert_eq!(
         guide_value["environment"]["TRON_ENGINE_BEARER_TOKEN"],
-        "Bearer token injected by sandbox::spawn_worker; send it as Authorization: Bearer <token>"
+        "Bearer token injected by worker::spawn; send it as Authorization: Bearer <token>"
     );
     let template = guide_value["pythonTemplate"].as_str().unwrap();
     assert!(template.contains("Authorization: Bearer"));
@@ -4509,11 +4509,33 @@ async fn artifact_goal_decision_wrappers_produce_resource_refs() {
         .await;
     assert_eq!(goal.error, None);
 
+    let agent_result = handle
+        .invoke(host_invocation(
+            "resource::create",
+            json!({
+                "kind": "agent_result",
+                "resourceId": "agent-result-wrapper-test",
+                "payload": {
+                    "message": "Completed",
+                    "promotedRefs": ["artifact-wrapper-test"],
+                    "decisionRefs": [],
+                    "subgoalRefs": [],
+                    "stopReason": "completed",
+                    "tokenUsage": {}
+                }
+            }),
+            mutating_causal("agent-result-wrapper-create").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(agent_result.error, None);
+
     let completed = handle
         .invoke(host_invocation(
             "goal::complete",
             json!({
                 "goalResourceId": "goal-wrapper-test",
+                "agentResultResourceId": "agent-result-wrapper-test",
+                "promotedResourceIds": ["artifact-wrapper-test"],
                 "decision": {"status": "done", "summary": "Substrate checkpoint complete"}
             }),
             mutating_causal("goal-wrapper-complete").with_scope("resource.write"),
@@ -4524,6 +4546,165 @@ async fn artifact_goal_decision_wrappers_produce_resource_refs() {
     assert_eq!(value["goalVersion"]["resourceId"], "goal-wrapper-test");
     assert_eq!(value["decision"]["kind"], "decision");
     assert_eq!(value["link"]["relation"], "decided_by");
+    assert_eq!(value["agentResultLink"]["relation"], "produced");
+    assert_eq!(value["promotedLinks"][0]["relation"], "promoted_output");
+}
+
+#[tokio::test]
+async fn artifact_curation_and_goal_working_set_return_bounded_resource_refs() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+
+    let source = handle
+        .invoke(host_invocation(
+            "artifact::create",
+            json!({
+                "resourceId": "curation-source",
+                "payload": {"title": "Source", "body": "alpha beta gamma"}
+            }),
+            mutating_causal("curation-source").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(source.error, None);
+
+    let split = handle
+        .invoke(host_invocation(
+            "artifact::split",
+            json!({
+                "resourceId": "curation-source",
+                "parts": [
+                    {"resourceId": "curation-part-a", "payload": {"title": "A", "body": "alpha"}},
+                    {"resourceId": "curation-part-b", "payload": {"title": "B", "body": "beta"}}
+                ]
+            }),
+            mutating_causal("curation-split").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(split.error, None);
+    assert_eq!(
+        split.value.as_ref().unwrap()["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let composed = handle
+        .invoke(host_invocation(
+            "artifact::compose",
+            json!({
+                "resourceId": "curation-composed",
+                "inputResourceIds": ["curation-part-a", "curation-part-b"],
+                "payload": {"title": "Composed", "body": "alpha beta"}
+            }),
+            mutating_causal("curation-compose").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(composed.error, None);
+    assert_eq!(
+        composed.value.as_ref().unwrap()["resourceRefs"][0]["kind"],
+        "artifact"
+    );
+
+    let search = handle
+        .invoke(host_invocation(
+            "artifact::search",
+            json!({"query": "source", "scope": "workspace", "workspaceId": "workspace-a", "limit": 5}),
+            causal().with_scope("resource.read"),
+        ))
+        .await;
+    assert_eq!(search.error, None);
+    assert!(
+        !search.value.as_ref().unwrap()["matches"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    let goal = handle
+        .invoke(host_invocation(
+            "goal::create",
+            json!({
+                "resourceId": "curation-goal",
+                "payload": {"intent": "Curate artifacts", "successCriteria": ["candidate output identified"]}
+            }),
+            mutating_causal("curation-goal").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(goal.error, None);
+    let link = handle
+        .invoke(host_invocation(
+            "resource::link",
+            json!({
+                "sourceResourceId": "curation-goal",
+                "targetResourceId": "curation-composed",
+                "relation": "candidate_output"
+            }),
+            mutating_causal("curation-link").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(link.error, None);
+    let working_set = handle
+        .invoke(host_invocation(
+            "goal::working_set",
+            json!({"goalResourceId": "curation-goal", "previewBytes": 12, "limit": 10}),
+            causal().with_scope("resource.read"),
+        ))
+        .await;
+    assert_eq!(working_set.error, None);
+    assert_eq!(
+        working_set.value.as_ref().unwrap()["candidateOutputs"][0]["resource"]["resourceId"],
+        "curation-composed"
+    );
+    assert!(
+        working_set.value.as_ref().unwrap()["resources"][0]["preview"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count()
+            <= 12
+    );
+}
+
+#[tokio::test]
+async fn control_snapshot_projects_substrate_without_control_state() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let context = CausalContext::new(
+        actor("system"),
+        ActorKind::System,
+        grant("grant"),
+        trace("control-snapshot"),
+    )
+    .with_scope("control.read");
+    let snapshot = handle
+        .invoke(host_invocation(
+            "control::snapshot",
+            json!({"limit": 25}),
+            context,
+        ))
+        .await;
+    assert_eq!(snapshot.error, None);
+    let value = snapshot.value.as_ref().unwrap();
+    assert!(
+        value["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|capability| capability["id"] == "resource::create")
+    );
+    assert!(
+        value["resourceTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|resource_type| resource_type["kind"] == "goal")
+    );
+    assert!(
+        value["availableActions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|action| action["functionId"] != "control::act")
+    );
 }
 
 #[tokio::test]
@@ -4710,7 +4891,7 @@ async fn resource_backed_refs_are_persisted_in_invocation_records() {
 }
 
 #[tokio::test]
-async fn converted_filesystem_outputs_do_not_create_output_audit_observations() {
+async fn converted_filesystem_outputs_do_not_expose_output_audit_projection() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("filesystem", "filesystem"), false)
@@ -4774,10 +4955,10 @@ async fn converted_filesystem_outputs_do_not_create_output_audit_observations() 
         ))
         .await;
     assert_eq!(trace.error, None);
-    let audit = trace.value.as_ref().unwrap()["outputAudit"]
-        .as_array()
-        .unwrap();
-    assert!(audit.is_empty());
+    assert!(
+        trace.value.as_ref().unwrap().get("outputAudit").is_none(),
+        "output audit must not remain an active trace projection"
+    );
 }
 
 #[tokio::test]

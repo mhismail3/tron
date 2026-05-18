@@ -34,6 +34,7 @@ struct EngineConsoleCacheTests {
                 )
             ],
             workerSummaries: [],
+            controlSnapshot: nil,
             recentAuditRows: [
                 CapabilityAuditEventDTO(
                     id: "audit-1",

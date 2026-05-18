@@ -137,10 +137,6 @@ enum SessionEventType: String, Codable, Sendable {
     case subagentSpawned = "subagent.spawned"
     case subagentCompleted = "subagent.completed"
     case subagentFailed = "subagent.failed"
-    case subagentResultsConsumed = "subagent.results_consumed"
-
-    // Notifications
-    case notificationSubagentResult = "notification.subagent_result"
 
     // Process management
     case notificationProcessResult = "notification.process_result"

@@ -64,12 +64,10 @@ struct UnifiedEventTransformer {
         // Sort by turn number, then timestamp, then sequence
         let sorted = EventSorter.sortBySequence(events)
 
-        // Build maps for capability invocations, results, and subagent notification filtering.
+        // Build maps for capability invocation rendering.
         let maps = buildCapabilityInvocationMaps(from: sorted)
         let startedInvocations = maps.startedInvocations
         let completedInvocations = maps.completedInvocations
-        let consumedSubagentEventIds = maps.consumedSubagentEventIds
-        let lastTurnEndSequence = maps.lastTurnEndSequence
 
         TronLogger.shared.debug("[RECONSTRUCT] Built maps: \(startedInvocations.count) capability.invocation.started, \(completedInvocations.count) capability.invocation.completed from \(sorted.count) events", category: .session)
 
@@ -82,15 +80,6 @@ struct UnifiedEventTransformer {
                event.type == PersistedEventType.capabilityInvocationCompleted.rawValue ||
                event.type == PersistedEventType.streamThinkingComplete.rawValue {
                 continue
-            }
-
-            // Skip subagent result notifications that were already delivered:
-            // 1. Explicitly consumed by the backend (subagent.results_consumed references this event)
-            // 2. Agent continued processing after the notification (results were available to it)
-            if event.type == PersistedEventType.notificationSubagentResult.rawValue {
-                if consumedSubagentEventIds.contains(event.id) || event.sequence < lastTurnEndSequence {
-                    continue
-                }
             }
 
             // message.assistant: process content blocks in order (preserves interleaving)
@@ -152,8 +141,6 @@ struct UnifiedEventTransformer {
             return CapabilityInvocationHandlers.transformInvocationCompleted(payload, timestamp: ts)
         case .notificationInterrupted:
             return SystemEventHandlers.transformInterrupted(payload, timestamp: ts)
-        case .notificationSubagentResult:
-            return SystemEventHandlers.transformSubagentResultNotification(payload, timestamp: ts)
         case .configModelSwitch:
             return ConfigHandlers.transformModelSwitch(payload, timestamp: ts)
         case .configReasoningLevel:
@@ -193,16 +180,13 @@ struct UnifiedEventTransformer {
 
     /// Result of the first-pass collection over events.
     /// Both `transformPersistedEvents` and `reconstructSessionState` need these maps
-    /// to resolve provider `capability_invocation` content blocks and filter consumed notifications.
+    /// to resolve provider `capability_invocation` content blocks.
     struct CapabilityInvocationMapResult {
         var startedInvocations: [String: CapabilityInvocationStartedPayload] = [:]
         var completedInvocations: [String: CapabilityInvocationCompletedPayload] = [:]
-        var consumedSubagentEventIds: Set<String> = []
-        var lastTurnEndSequence: Int = -1
     }
 
-    /// Single-pass collection of started/completed capability invocations, consumed subagent notification IDs,
-    /// and the last turn_end sequence number from a sorted event array.
+    /// Single-pass collection of started/completed capability invocations from a sorted event array.
     static func buildCapabilityInvocationMaps<E: EventTransformable>(from events: [E]) -> CapabilityInvocationMapResult {
         var result = CapabilityInvocationMapResult()
         for event in events {
@@ -213,17 +197,6 @@ struct UnifiedEventTransformer {
             if event.type == PersistedEventType.capabilityInvocationCompleted.rawValue,
                let payload = CapabilityInvocationCompletedPayload(from: event.payload) {
                 result.completedInvocations[payload.invocationId] = payload
-            }
-            if event.type == PersistedEventType.subagentResultsConsumed.rawValue,
-               let ids = event.payload["consumedEventIds"]?.value as? [Any] {
-                for id in ids {
-                    if let s = id as? String {
-                        result.consumedSubagentEventIds.insert(s)
-                    }
-                }
-            }
-            if event.type == PersistedEventType.streamTurnEnd.rawValue {
-                result.lastTurnEndSequence = max(result.lastTurnEndSequence, event.sequence)
             }
         }
         return result
@@ -284,8 +257,6 @@ extension UnifiedEventTransformer {
         let maps = buildCapabilityInvocationMaps(from: sorted)
         let startedInvocations = maps.startedInvocations
         let completedInvocations = maps.completedInvocations
-        let consumedSubagentEventIds = maps.consumedSubagentEventIds
-        let lastTurnEndSequence = maps.lastTurnEndSequence
 
         var deletedEventIds = Set<String>()
         for event in sorted {
@@ -302,11 +273,6 @@ extension UnifiedEventTransformer {
         // PASS 2: Build messages, skipping deleted and consumed events
         for event in sorted {
             if deletedEventIds.contains(event.id) {
-                continue
-            }
-            // Skip subagent result notifications already delivered by the backend
-            if event.type == PersistedEventType.notificationSubagentResult.rawValue,
-               consumedSubagentEventIds.contains(event.id) || event.sequence < lastTurnEndSequence {
                 continue
             }
             guard let eventType = PersistedEventType(rawValue: event.type) else { continue }
@@ -371,7 +337,7 @@ extension UnifiedEventTransformer {
                 }
 
             case .messageUser, .messageSystem,
-                 .notificationInterrupted, .notificationSubagentResult,
+                 .notificationInterrupted,
                  .configModelSwitch, .configReasoningLevel,
                  .contextCleared, .skillDeactivated, .skillsCleared,
                  .rulesLoaded, .rulesActivated,
@@ -386,20 +352,6 @@ extension UnifiedEventTransformer {
                 if eventType == .configModelSwitch,
                    let parsed = ModelSwitchPayload(from: event.payload) {
                     state.currentModel = parsed.newModel
-                }
-                // Extract subagent result info for SubagentState reconstruction
-                if eventType == .notificationSubagentResult,
-                   let sessionId = event.payload["subagentSessionId"]?.value as? String {
-                    let info = ReconstructedState.SubagentResultInfo(
-                        subagentSessionId: sessionId,
-                        task: event.payload["task"]?.value as? String ?? "",
-                        resultSummary: event.payload["resultSummary"]?.value as? String ?? "",
-                        success: event.payload["success"]?.value as? Bool ?? true,
-                        totalTurns: event.payload["totalTurns"]?.value as? Int ?? 0,
-                        duration: event.payload["duration"]?.value as? Int,
-                        tokenUsage: nil
-                    )
-                    state.subagentResults.append(info)
                 }
 
             case .subagentSpawned, .subagentCompleted, .subagentFailed:

@@ -867,7 +867,7 @@ enum CapabilityPresentation {
         "process::stream_output": "Stream Process Output",
         "process::wait": "Wait For Process",
         "sandbox::promote_worker": "Promote Worker",
-        "sandbox::spawn_worker": "Spawn Worker",
+        "worker::spawn": "Spawn Worker",
         "sandbox::stop_spawned_worker": "Stop Worker",
         "web::fetch": "Fetch Web Page",
         "web::scrape": "Scrape Web Page",

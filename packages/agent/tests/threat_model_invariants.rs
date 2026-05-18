@@ -507,8 +507,8 @@ fn modular_engine_storage_generation_is_clean_break() {
     let storage = std::fs::read_to_string(crate_root().join("src/shared/storage.rs"))
         .expect("failed to read shared storage");
     assert!(
-        storage.contains("CURRENT_STORAGE_GENERATION: &str = \"modular-engine-v1\""),
-        "storage generation must stay on the modular-engine clean-break generation"
+        storage.contains("CURRENT_STORAGE_GENERATION: &str = \"modular-engine-v2\""),
+        "storage generation must stay on the resource-native orchestration clean-break generation"
     );
     assert!(
         storage.contains("archive_incompatible_active_database(active_db_path)?"),
@@ -519,6 +519,25 @@ fn modular_engine_storage_generation_is_clean_break() {
 #[test]
 fn resource_materialization_enforcement_gates_stay_on() {
     let crate_root = crate_root();
+    for path in rust_files_under(&crate_root.join("src/engine")) {
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with("tests.rs"))
+        {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        assert!(
+            !content.contains("engine_output_audit_observations")
+                && !content.contains("EngineOutputAudit")
+                && !content.contains("output_audit"),
+            "{} must not keep output-audit as an active runtime acceptance path",
+            path.strip_prefix(&crate_root).unwrap_or(&path).display()
+        );
+    }
+
     let process_contract =
         std::fs::read_to_string(crate_root.join("src/domains/process/contract.rs"))
             .expect("failed to read process contract");
@@ -588,6 +607,83 @@ fn resource_materialization_enforcement_gates_stay_on() {
             "engine host must not accept {retired_audit_acceptance} as an audit-only output path"
         );
     }
+}
+
+#[test]
+fn resource_native_orchestration_and_control_plane_gates_stay_on() {
+    let crate_root = crate_root();
+
+    let sandbox_contract =
+        std::fs::read_to_string(crate_root.join("src/domains/sandbox/contract.rs"))
+            .expect("failed to read sandbox contract");
+    assert!(
+        sandbox_contract.contains("worker::spawn")
+            && !sandbox_contract.contains("sandbox::spawn_worker"),
+        "worker creation must be exposed only through canonical worker::spawn"
+    );
+
+    let worker_guide = std::fs::read_to_string(crate_root.join("src/engine/primitives/worker.rs"))
+        .expect("failed to read worker primitive contracts");
+    assert!(
+        worker_guide.contains("worker::spawn") && !worker_guide.contains("sandbox::spawn_worker"),
+        "worker protocol guidance must teach worker::spawn, not sandbox::spawn_worker"
+    );
+
+    let resource = std::fs::read_to_string(crate_root.join("src/engine/primitives/resource.rs"))
+        .expect("failed to read resource primitive contracts");
+    for required in [
+        "goal::working_set",
+        "artifact::split",
+        "artifact::compose",
+        "artifact::merge",
+        "artifact::search",
+    ] {
+        assert!(
+            resource.contains(required),
+            "resource primitive worker must expose `{required}` for goal working sets and artifact curation"
+        );
+    }
+
+    let agent_contract = std::fs::read_to_string(crate_root.join("src/domains/agent/contract.rs"))
+        .expect("failed to read agent contract");
+    assert!(
+        agent_contract.contains("agent::run_goal"),
+        "agent::run_goal must be the canonical goal-run coordinator capability"
+    );
+
+    for path in rust_files_under(&crate_root.join("src/domains/agent")) {
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with("_tests.rs"))
+        {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+        assert!(
+            !content.contains("EventType::NotificationSubagentResult")
+                && !content.contains("notification.subagent_result")
+                && !content.contains("get_pending_subagent_results")
+                && !content.contains("format_subagent_results"),
+            "{} must not use notification markdown blobs as the durable subagent result path",
+            path.strip_prefix(&crate_root).unwrap_or(&path).display()
+        );
+    }
+
+    let control_contract = crate_root.join("src/engine/primitives/control.rs");
+    assert!(
+        control_contract.exists(),
+        "control worker primitive contracts must live under engine/primitives/control.rs"
+    );
+    let control =
+        std::fs::read_to_string(&control_contract).expect("failed to read control primitive");
+    assert!(
+        control.contains("control::snapshot")
+            && control.contains("control::inspect")
+            && !control.contains("control::act"),
+        "control plane must be read/projection-only; mutations must remain canonical capabilities"
+    );
 }
 
 #[test]
@@ -1156,7 +1252,7 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
         std::fs::read_to_string(crate_root.join("src/domains/sandbox/contract.rs"))
             .expect("failed to read sandbox contract");
     for required in [
-        "sandbox::spawn_worker",
+        "worker::spawn",
         "sandbox::list_spawned_workers",
         "sandbox::get_spawned_worker",
         "sandbox::stop_spawned_worker",
@@ -1166,9 +1262,13 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
     ] {
         assert!(
             sandbox_contract.contains(required),
-            "sandbox::spawn_worker must stay a high-risk domain-owned capability with complete engine metadata; missing `{required}`"
+            "worker::spawn must stay a high-risk domain-owned capability with complete engine metadata; missing `{required}`"
         );
     }
+    assert!(
+        !sandbox_contract.contains("sandbox::spawn_worker"),
+        "sandbox::spawn_worker must not remain as a parallel public worker creation API"
+    );
     for removed in [
         concat!("sandbox::", "list_", "containers"),
         concat!("sandbox::", "start_", "container"),
@@ -1562,7 +1662,6 @@ fn server_package_uses_domain_owned_engine_layout() {
         "context/queries/snapshot.rs",
         "capability_support/interactive_enrichment/payload.rs",
         "capability_support/interactive_enrichment/questions.rs",
-        "capability_support/interactive_enrichment/subagent.rs",
         "memory/retain/auto_retain/decision.rs",
         "memory/retain/auto_retain/state.rs",
         "memory/retain/auto_retain/fire.rs",

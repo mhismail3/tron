@@ -174,7 +174,7 @@ final class EventPluginTests: XCTestCase {
                 "type": "approval.pending",
                 "approval": {
                     "approvalId": "approval-1",
-                    "functionId": "sandbox::spawn_worker",
+                    "functionId": "worker::spawn",
                     "payload": {"workerId": "demo-worker"},
                     "status": "pending",
                     "sessionId": "session-1",

@@ -127,8 +127,9 @@ The engine registers first-party resource type definitions for `artifact`,
 wrappers compose the generic resource store:
 
 - `artifact::create`, `artifact::update`, `artifact::promote`,
-  `artifact::discard`, `artifact::inspect`
-- `goal::create`, `goal::complete`
+  `artifact::discard`, `artifact::inspect`, `artifact::split`,
+  `artifact::compose`, `artifact::merge`, `artifact::search`
+- `goal::create`, `goal::complete`, `goal::working_set`
 - `claim::attach`
 - `evidence::attach`
 - `decision::create`
@@ -148,8 +149,7 @@ Durable-output paths now declare output contracts and finish validation requires
 canonical resource refs. Filesystem writes and patches produce `materialized_file`
 and `patch_proposal` refs, retained process/program output produces
 `execution_output` refs, and completed agent runs produce `agent_result` refs.
-`engine_output_audit_observations` remains readable as conversion telemetry, but
-converted paths cannot use audit as an acceptance path.
+There is no audit-mode acceptance path for converted durable outputs.
 
 ## Artifact And Goal Mapping
 
@@ -163,8 +163,8 @@ resource refs and decision resources rather than loose transcript blobs.
 
 ## Control Plane
 
-The control plane is not a separate database. It reads and mutates the substrate
-through capabilities:
+The control plane is not a separate database. It reads the substrate through
+projection capabilities:
 
 - catalog workers/functions/triggers
 - resource type definitions and resources
@@ -174,8 +174,10 @@ through capabilities:
 - storage stats
 - generated UI surface resources
 
-Control actions such as inspect, enable, disable, pause, stop, approve, discard,
-archive, and promote must be normal capabilities.
+Advertised actions are templates for normal capabilities such as
+`grant::revoke`, `worker::disconnect`, `resource::link`, `artifact::promote`,
+`approval::resolve`, and `agent::abort`; there is no `control::act`
+mutation multiplexer.
 
 ## Security
 
@@ -199,6 +201,6 @@ archive, and promote must be normal capabilities.
 
 The target architecture does not include runtime compatibility with old
 mobile-first session-manager state. The current storage generation is
-`modular-engine-v1`: startup archives old active `tron.sqlite`, WAL, and SHM
+`modular-engine-v2`: startup archives old active `tron.sqlite`, WAL, and SHM
 sidecars before opening the current schema. The runtime does not read or migrate
 old product/session schemas for the new grant/resource APIs.

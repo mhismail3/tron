@@ -1,6 +1,6 @@
 use super::pending::{
-    format_process_results, format_subagent_results, format_user_job_actions,
-    get_pending_process_results, get_pending_subagent_results, get_pending_user_job_actions,
+    format_process_results, format_user_job_actions, get_pending_process_results,
+    get_pending_user_job_actions,
 };
 use super::{EventType, collect_dynamic_rule_paths};
 use crate::domains::session::context::ContextArtifactsService;
@@ -110,26 +110,7 @@ pub async fn load_prompt_bootstrap(
             source.as_deref(),
         );
 
-        let pending = get_pending_subagent_results(event_store.as_ref(), &session_id);
-        let subagent_results_context = if pending.is_empty() {
-            None
-        } else {
-            let event_ids: Vec<String> = pending.iter().map(|(id, _)| id.clone()).collect();
-            let formatted = format_subagent_results(&pending);
-            if formatted.is_some() {
-                let _ = event_store.append(&crate::domains::session::event_store::AppendOptions {
-                    session_id: &session_id,
-                    event_type: EventType::SubagentResultsConsumed,
-                    payload: serde_json::json!({
-                        "consumedEventIds": event_ids,
-                        "count": pending.len(),
-                    }),
-                    parent_id: None,
-                    sequence: None,
-                });
-            }
-            formatted
-        };
+        let subagent_results_context = None;
 
         let pending_procs = get_pending_process_results(event_store.as_ref(), &session_id);
         let process_results_context = if pending_procs.is_empty() {

@@ -82,16 +82,6 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertEqual(event.summary, "Subagent failed")
     }
 
-    func testSubagentResultsConsumed_summary() {
-        let event = makeEvent(type: "subagent.results_consumed")
-        XCTAssertEqual(event.summary, "Results consumed")
-    }
-
-    func testNotificationSubagentResult_summary() {
-        let event = makeEvent(type: "notification.subagent_result")
-        XCTAssertEqual(event.summary, "Subagent result")
-    }
-
     // MARK: - Turn Failed
 
     func testTurnFailed_withError_showsError() {
