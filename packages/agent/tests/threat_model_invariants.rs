@@ -1020,6 +1020,10 @@ fn module_package_activation_gates_stay_on() {
         "DurableOutputContract::resource_backed",
         "derive_grant",
         "revoke_grant",
+        "worker::spawn",
+        "local_process",
+        "spawnInvocationId",
+        "integrityDiagnostics",
         "packageDigest",
         "secret_ref",
     ] {
@@ -1036,12 +1040,32 @@ fn module_package_activation_gates_stay_on() {
         "authorityCeiling",
         "legacy",
         "fallback",
+        "std::process::Command",
+        "tokio::process::Command",
+        "Command::new",
     ] {
         assert!(
             !module.contains(forbidden),
             "module primitive must not reintroduce `{forbidden}`"
         );
     }
+
+    let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
+        .expect("failed to read engine host");
+    let host_dispatched = host
+        .split("fn is_host_dispatched_primitive_namespace")
+        .nth(1)
+        .expect("engine host must define primitive dispatch guard");
+    assert!(
+        !host_dispatched.contains("\"module\""),
+        "module primitives must execute as async handled primitives so activation can compose worker::spawn without holding the host lock"
+    );
+    let runtime = std::fs::read_to_string(crate_root.join("src/engine/primitives/runtime.rs"))
+        .expect("failed to read primitive runtime");
+    assert!(
+        !runtime.contains("module::dispatch"),
+        "module lifecycle execution must not remain on the sync host-dispatched primitive runtime"
+    );
 
     let control = std::fs::read_to_string(crate_root.join("src/engine/primitives/control.rs"))
         .expect("failed to read control primitive");

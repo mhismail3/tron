@@ -160,16 +160,28 @@ The first-party `module` primitive exposes:
   activation resources;
 - `module::configure` for config-schema validation and `secret_ref`-only
   secret handling before `module_config` persistence;
-- `module::activate` for deriving a narrower worker grant, validating the
-  already registered worker capabilities against the package manifest and grant
-  ceiling, and creating an `activation_record`;
+- `module::activate` for validating package/config refs, deriving or obtaining
+  the narrower activation grant, binding existing/built-in workers, launching
+  `local_process` packages only through a child `worker::spawn` invocation,
+  validating registered worker capabilities against the package manifest and
+  grant ceiling, and creating an `activation_record`;
 - `module::disable`, `module::upgrade`, `module::rollback`, and
   `module::quarantine` as explicit idempotent lifecycle capabilities. Upgrade
-  is a replacement operation: it names the current activation, persists the new
-  activation version, then revokes the superseded grant. Disable and quarantine
-  disconnect volatile workers through the canonical worker lifecycle and revoke
-  grants; non-volatile workers remain catalog-visible but lose activation
-  authority.
+  is a replacement operation: it names the current activation, validates and
+  starts the replacement, persists the new activation version, then revokes the
+  superseded grant. Disable and quarantine disconnect volatile workers through
+  the canonical worker lifecycle and revoke grants; non-volatile workers remain
+  catalog-visible but lose activation authority.
+
+`local_process` package manifests are digest-pinned to `materialized_file`
+resource refs. The runtime entrypoint declares command and args templates,
+expected function ids, working-directory policy, environment policy, visibility,
+timeout, and executable refs. Activation verifies those refs and hashes before
+invoking `worker::spawn`; module code never starts or kills processes directly.
+The resulting `activation_record` stores `spawnInvocationId`, `spawnResult`,
+`healthInvocationIds`, `integrityDiagnostics`, `workerLifecycle`,
+`supersedes`, and `rollbackTarget` so operator projections can explain what ran,
+what authority it received, and what cleanup occurred.
 
 No package table, module action multiplexer, client-side policy, or `control`
 mutation path exists. Control and generated UI surfaces expose module resources

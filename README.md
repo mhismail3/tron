@@ -479,11 +479,15 @@ rejects raw secret-like values unless they are `secret_ref`/vault handles.
 `module::activate`, `module::disable`, `module::upgrade`, `module::rollback`,
 and `module::quarantine` produce `activation_record` versions, derive or revoke
 engine grants, and never rely on a package table, `control::act`, or client-side
-policy. Activation binds an existing/built-in registered worker to a package;
-local process workers must enter through canonical `worker::spawn` before the
-module activation record can claim them. Upgrade requires the activation being
-replaced, derives a replacement grant, and revokes the superseded grant only
-after the new activation version is persisted.
+policy. Activation binds existing/built-in workers directly and launches
+`local_process` packages only by creating a child `worker::spawn` invocation
+with manifest-derived command, expected function ids, grant bounds, file roots,
+network policy, visibility, timeout, and idempotency. The activation record
+stores spawn lineage, spawn result, integrity diagnostics, worker lifecycle,
+health status, registered capability evidence, and the derived grant hash.
+Upgrade requires the activation being replaced, creates a replacement
+activation first, then revokes the superseded grant and disconnects superseded
+volatile workers only after the replacement succeeds.
 
 ---
 

@@ -17,9 +17,10 @@
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
 //! export.
 
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 
 use serde_json::{Value, json};
+use tokio::sync::Mutex as AsyncMutex;
 
 use super::approval::{
     ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
@@ -30,6 +31,7 @@ use super::compensation::{
 };
 use super::errors::{EngineError, Result};
 use super::grants::{EngineGrantStoreBackend, InMemoryEngineGrantStore, SqliteEngineGrantStore};
+use super::host::{EngineHost, EngineHostHandle};
 use super::ids::{ActorId, AuthorityGrantId, FunctionId, WorkerId};
 use super::invocation::{InProcessFunctionHandler, Invocation};
 use super::leases::{
@@ -570,6 +572,7 @@ pub(in crate::engine) struct PrimitiveStores {
     pub(in crate::engine) resources: Arc<StdMutex<ResourceStoreBackend>>,
     pub(in crate::engine) grants: Arc<StdMutex<EngineGrantStoreBackend>>,
     pub(in crate::engine) compensation: Arc<StdMutex<CompensationStoreBackend>>,
+    engine_host: Arc<OnceLock<Weak<AsyncMutex<EngineHost>>>>,
 }
 
 impl PrimitiveStores {
@@ -599,6 +602,7 @@ impl PrimitiveStores {
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
                 InMemoryEngineCompensationStore::new(),
             ))),
+            engine_host: Arc::new(OnceLock::new()),
         };
         stores
             .install_builtin_resource_types()
@@ -632,9 +636,34 @@ impl PrimitiveStores {
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
                 SqliteEngineCompensationStore::open(path)?,
             ))),
+            engine_host: Arc::new(OnceLock::new()),
         };
         stores.install_builtin_resource_types()?;
         Ok(stores)
+    }
+
+    pub(in crate::engine) fn install_engine_host(
+        &self,
+        handle: Weak<AsyncMutex<EngineHost>>,
+    ) -> Result<()> {
+        self.engine_host.set(handle).map_err(|_| {
+            EngineError::PolicyViolation(
+                "primitive engine host handle already installed".to_owned(),
+            )
+        })
+    }
+
+    pub(in crate::engine) fn engine_host(&self) -> Result<EngineHostHandle> {
+        let weak = self.engine_host.get().ok_or_else(|| {
+            EngineError::PolicyViolation(
+                "primitive engine host handle is unavailable during async primitive execution"
+                    .to_owned(),
+            )
+        })?;
+        let inner = weak.upgrade().ok_or_else(|| {
+            EngineError::PolicyViolation("primitive engine host handle was dropped".to_owned())
+        })?;
+        Ok(EngineHostHandle::from_inner(inner))
     }
 
     fn install_builtin_resource_types(&self) -> Result<()> {
@@ -691,7 +720,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(catalog::registrations()?);
     registrations.extend(control::registrations()?);
     registrations.extend(ui::registrations()?);
-    registrations.extend(module::registrations()?);
+    registrations.extend(module::registrations(stores)?);
     registrations.extend(worker::registrations()?);
     registrations.extend(observability::registrations()?);
     registrations.extend(storage::registrations()?);

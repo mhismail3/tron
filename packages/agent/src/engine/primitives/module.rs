@@ -2,21 +2,26 @@
 //!
 //! Modules are resource-backed packages plus canonical capability invocations.
 //! This primitive owns package/config/activation resource wrappers and grant
-//! derivation for activation; it does not introduce a package table or action
-//! multiplexer.
+//! derivation for activation. Local process packages launch only by composing a
+//! child `worker::spawn` invocation; module code validates package resources and
+//! records activation lineage but never owns a process runtime, package table,
+//! or action multiplexer.
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use super::runtime::PrimitiveRuntimeHost;
 use super::{
-    MODULE_WORKER_ID, PrimitiveFunctionRegistration, host_dispatched_registration, optional_string,
-    primitive_compensation, primitive_function, required_str, required_string_owned,
+    MODULE_WORKER_ID, PrimitiveFunctionRegistration, PrimitiveStores, handled_registration,
+    optional_string, primitive_compensation, primitive_function, required_str,
+    required_string_owned,
 };
 use crate::engine::discovery::{ActorContext, ActorKind, FunctionQuery};
-use crate::engine::grants::{DeriveGrant, EngineGrantLifecycle};
-use crate::engine::ids::{AuthorityGrantId, FunctionId, WorkerId};
+use crate::engine::grants::{DeriveGrant, EngineGrant, EngineGrantLifecycle};
+use crate::engine::ids::{AuthorityGrantId, FunctionId, InvocationId, WorkerId};
+use crate::engine::invocation::InProcessFunctionHandler;
 use crate::engine::resources::{
     ACTIVATION_RECORD_KIND, CreateResource, EngineResource, EngineResourceInspection,
     EngineResourceVersion, LinkResources, ListResources, MODULE_CONFIG_KIND, UpdateResource,
@@ -41,7 +46,12 @@ const MANIFEST_SCHEMA_ID: &str = "tron.module.package_manifest.v1";
 const LOCAL_DIGEST_PINNED: &str = "local_digest_pinned";
 const BUILTIN_PROVENANCE: &str = "builtin";
 
-pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
+pub(super) fn registrations(
+    stores: &PrimitiveStores,
+) -> Result<Vec<PrimitiveFunctionRegistration>> {
+    let handler = Arc::new(ModulePrimitiveHandler {
+        stores: stores.clone(),
+    });
     Ok(vec![
         module_write(
             REGISTER_PACKAGE_FUNCTION,
@@ -59,12 +69,13 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             inspect_package_schema(),
             json!({
                 "type": "object",
-                "required": ["package", "configs", "activations", "availableActions"],
+                "required": ["package", "configs", "activations", "diagnostics", "availableActions"],
                 "additionalProperties": false,
                 "properties": {
                     "package": {"type": ["object", "null"]},
                     "configs": {"type": "array"},
                     "activations": {"type": "array"},
+                    "diagnostics": {"type": "object"},
                     "availableActions": {"type": "array"}
                 }
             }),
@@ -130,7 +141,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
         ])),
     ]
     .into_iter()
-    .map(host_dispatched_registration)
+    .map(|definition| handled_registration(definition, handler.clone()))
     .collect())
 }
 
@@ -182,361 +193,479 @@ fn module_write(
     definition
 }
 
-pub(in crate::engine) fn dispatch(
-    host: &mut dyn PrimitiveRuntimeHost,
-    invocation: &Invocation,
-) -> Result<Value> {
-    match invocation.function_id.as_str() {
-        REGISTER_PACKAGE_FUNCTION => register_package(host, invocation),
-        INSPECT_PACKAGE_FUNCTION => inspect_package(host, invocation),
-        CONFIGURE_FUNCTION => configure(host, invocation),
-        ACTIVATE_FUNCTION => activate(host, invocation),
-        DISABLE_FUNCTION => disable(host, invocation),
-        UPGRADE_FUNCTION => upgrade(host, invocation),
-        ROLLBACK_FUNCTION => rollback(host, invocation),
-        QUARANTINE_FUNCTION => quarantine(host, invocation),
-        _ => Err(EngineError::NotFound {
-            kind: "function",
-            id: invocation.function_id.to_string(),
-        }),
+struct ModulePrimitiveHandler {
+    stores: PrimitiveStores,
+}
+
+#[async_trait::async_trait]
+impl InProcessFunctionHandler for ModulePrimitiveHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
+        match invocation.function_id.as_str() {
+            REGISTER_PACKAGE_FUNCTION => self.register_package(&invocation),
+            INSPECT_PACKAGE_FUNCTION => self.inspect_package(&invocation).await,
+            CONFIGURE_FUNCTION => self.configure(&invocation),
+            ACTIVATE_FUNCTION => self.activate(&invocation).await,
+            DISABLE_FUNCTION => self.disable(&invocation).await,
+            UPGRADE_FUNCTION => self.upgrade(&invocation).await,
+            ROLLBACK_FUNCTION => self.rollback(&invocation).await,
+            QUARANTINE_FUNCTION => self.quarantine(&invocation).await,
+            _ => Err(EngineError::NotFound {
+                kind: "function",
+                id: invocation.function_id.to_string(),
+            }),
+        }
     }
 }
 
-fn register_package(host: &mut dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let manifest = invocation.payload.get("manifest").cloned().ok_or_else(|| {
-        EngineError::PolicyViolation("module::register_package requires manifest".to_owned())
-    })?;
-    validate_manifest(&manifest)?;
-    let package_id = required_value_str(&manifest, "packageId")?;
-    let resource_id = package_resource_id(package_id);
-    let existing = host.inspect_resource(&resource_id)?;
-    let resource = if existing.is_some() {
-        let expected_current_version_id =
-            optional_string(invocation.payload.get("expectedCurrentVersionId"))?.or_else(|| {
-                existing
-                    .as_ref()
-                    .and_then(|item| item.resource.current_version_id.clone())
-            });
-        let version = host.update_resource(UpdateResource {
-            resource_id: resource_id.clone(),
-            expected_current_version_id,
-            lifecycle: Some("available".to_owned()),
-            payload: manifest.clone(),
-            state: None,
-            locations: Vec::new(),
-            trace_id: invocation.causal_context.trace_id.clone(),
-            invocation_id: Some(invocation.id.clone()),
+impl ModulePrimitiveHandler {
+    fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>> {
+        self.stores
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .inspect(resource_id)
+    }
+
+    fn list_resources(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
+        self.stores
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .list(filter)
+    }
+
+    fn create_resource(&self, request: CreateResource) -> Result<EngineResource> {
+        self.stores
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .create(request)
+    }
+
+    fn update_resource(&self, request: UpdateResource) -> Result<EngineResourceVersion> {
+        self.stores
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .update(request)
+    }
+
+    fn link_resources(&self, request: LinkResources) -> Result<()> {
+        let _ = self
+            .stores
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .link(request)?;
+        Ok(())
+    }
+
+    fn derive_grant(&self, request: DeriveGrant) -> Result<crate::engine::grants::EngineGrant> {
+        self.stores
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .derive(request)
+    }
+
+    fn revoke_grant(
+        &self,
+        grant_id: &AuthorityGrantId,
+        trace_id: crate::engine::ids::TraceId,
+    ) -> Result<crate::engine::grants::EngineGrant> {
+        self.stores
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .revoke(grant_id, trace_id)
+    }
+
+    fn inspect_grant(
+        &self,
+        grant_id: &AuthorityGrantId,
+    ) -> Result<Option<crate::engine::grants::EngineGrant>> {
+        self.stores
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .inspect(grant_id)
+    }
+
+    async fn inspect_worker(
+        &self,
+        worker_id: &WorkerId,
+    ) -> Result<crate::engine::WorkerDefinition> {
+        self.stores.engine_host()?.inspect_worker(worker_id).await
+    }
+
+    async fn discover_functions(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
+        match self.stores.engine_host() {
+            Ok(host) => host.discover(query).await,
+            Err(_) => Vec::new(),
+        }
+    }
+
+    async fn worker_is_volatile(&self, worker_id: &WorkerId) -> Option<bool> {
+        self.stores
+            .engine_host()
+            .ok()?
+            .worker_is_volatile(worker_id)
+            .await
+    }
+
+    async fn unregister_worker(&self, worker_id: &WorkerId, owner_actor: &str) -> Result<()> {
+        self.stores
+            .engine_host()?
+            .unregister_worker(worker_id, owner_actor)
+            .await
+    }
+
+    fn register_package(&self, invocation: &Invocation) -> Result<Value> {
+        let manifest = invocation.payload.get("manifest").cloned().ok_or_else(|| {
+            EngineError::PolicyViolation("module::register_package requires manifest".to_owned())
         })?;
-        let inspection = host
-            .inspect_resource(&resource_id)?
-            .expect("updated resource must exist");
-        return Ok(json!({
-            "resource": inspection.resource,
-            "version": version,
-            "package": {"payload": manifest},
-            "resourceRefs": [resource_ref_from_version(&version, WORKER_PACKAGE_KIND, "updated")],
-        }));
-    } else {
-        host.create_resource(CreateResource {
-            resource_id: Some(resource_id),
-            kind: WORKER_PACKAGE_KIND.to_owned(),
-            schema_id: None,
-            scope: EngineResourceScope::System,
-            owner_worker_id: WorkerId::new(MODULE_WORKER_ID)?,
-            owner_actor_id: invocation.causal_context.actor_id.clone(),
-            lifecycle: Some("available".to_owned()),
-            policy: json!({"managedBy": "module"}),
-            initial_payload: Some(manifest.clone()),
-            locations: Vec::new(),
-            trace_id: invocation.causal_context.trace_id.clone(),
-            invocation_id: Some(invocation.id.clone()),
-        })?
-    };
-    Ok(json!({
-        "resource": resource,
-        "package": {"payload": manifest},
-        "resourceRefs": [resource_ref_from_resource(&resource, "created")],
-    }))
-}
-
-fn inspect_package(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let resource_id = package_resource_id_from_payload(&invocation.payload)?;
-    let package = host.inspect_resource(&resource_id)?;
-    let package_id = package
-        .as_ref()
-        .and_then(current_payload)
-        .and_then(|payload| {
-            payload
-                .get("packageId")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .or_else(|| {
-            resource_id
-                .strip_prefix("worker-package:")
-                .map(ToOwned::to_owned)
-        });
-    let configs = host.list_resources(ListResources {
-        kind: Some(MODULE_CONFIG_KIND.to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: 100,
-    })?;
-    let activations = host.list_resources(ListResources {
-        kind: Some(ACTIVATION_RECORD_KIND.to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: 100,
-    })?;
-    let configs = filter_resources_by_package(host, configs, package_id.as_deref())?;
-    let activations = filter_resources_by_package(host, activations, package_id.as_deref())?;
-    Ok(json!({
-        "package": package,
-        "configs": configs,
-        "activations": activations,
-        "availableActions": module_actions_for_package(package_id.as_deref()),
-    }))
-}
-
-fn configure(host: &mut dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
-    let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
-    let package = require_inspection(host, &package_resource_id, WORKER_PACKAGE_KIND)?;
-    let manifest = version_payload(&package, &package_version_id)?;
-    let config = invocation.payload.get("config").cloned().ok_or_else(|| {
-        EngineError::PolicyViolation("module::configure requires config".to_owned())
-    })?;
-    let config_schema = manifest.get("configSchema").ok_or_else(|| {
-        EngineError::PolicyViolation("worker_package manifest requires configSchema".to_owned())
-    })?;
-    schema::validate_payload(
-        &FunctionId::new(CONFIGURE_FUNCTION)?,
-        "module_config",
-        config_schema,
-        &config,
-    )?;
-    reject_raw_secrets(&config)?;
-    let package_id = required_value_str(&manifest, "packageId")?;
-    let (scope, scope_token) = resource_scope_and_token(invocation)?;
-    let payload = json!({
-        "packageResourceId": package_resource_id,
-        "packageVersionId": package_version_id,
-        "packageId": package_id,
-        "scope": scope_token,
-        "configRevision": next_config_revision(host, &config_resource_id(&scope_token, package_id))?,
-        "config": config,
-        "redactionPolicy": manifest.get("redactionPolicy").cloned().unwrap_or_else(|| json!({"mode": "redacted"})),
-        "secretRefs": collect_secret_refs(invocation.payload.get("config").unwrap_or(&Value::Null)),
-        "validationHash": hash_json(invocation.payload.get("config").unwrap_or(&Value::Null))?,
-    });
-    let resource_id = config_resource_id(&scope_token, package_id);
-    let existing = host.inspect_resource(&resource_id)?;
-    let (resource, version, role) = upsert_resource(
-        host,
-        UpsertResource {
-            resource_id,
-            kind: MODULE_CONFIG_KIND,
-            lifecycle: "active",
-            scope,
-            payload,
-            expected_current_version_id: optional_string(
+        validate_manifest(&manifest)?;
+        let package_id = required_value_str(&manifest, "packageId")?;
+        let resource_id = package_resource_id(package_id);
+        let existing = self.inspect_resource(&resource_id)?;
+        let resource = if existing.is_some() {
+            let expected_current_version_id = optional_string(
                 invocation.payload.get("expectedCurrentVersionId"),
             )?
             .or_else(|| {
                 existing
                     .as_ref()
                     .and_then(|item| item.resource.current_version_id.clone())
-            }),
+            });
+            let version = self.update_resource(UpdateResource {
+                resource_id: resource_id.clone(),
+                expected_current_version_id,
+                lifecycle: Some("available".to_owned()),
+                payload: manifest.clone(),
+                state: None,
+                locations: Vec::new(),
+                trace_id: invocation.causal_context.trace_id.clone(),
+                invocation_id: Some(invocation.id.clone()),
+            })?;
+            let inspection = self
+                .inspect_resource(&resource_id)?
+                .expect("updated resource must exist");
+            return Ok(json!({
+                "resource": inspection.resource,
+                "version": version,
+                "package": {"payload": manifest},
+                "resourceRefs": [resource_ref_from_version(&version, WORKER_PACKAGE_KIND, "updated")],
+            }));
+        } else {
+            self.create_resource(CreateResource {
+                resource_id: Some(resource_id),
+                kind: WORKER_PACKAGE_KIND.to_owned(),
+                schema_id: None,
+                scope: EngineResourceScope::System,
+                owner_worker_id: WorkerId::new(MODULE_WORKER_ID)?,
+                owner_actor_id: invocation.causal_context.actor_id.clone(),
+                lifecycle: Some("available".to_owned()),
+                policy: json!({"managedBy": "module"}),
+                initial_payload: Some(manifest.clone()),
+                locations: Vec::new(),
+                trace_id: invocation.causal_context.trace_id.clone(),
+                invocation_id: Some(invocation.id.clone()),
+            })?
+        };
+        Ok(json!({
+            "resource": resource,
+            "package": {"payload": manifest},
+            "resourceRefs": [resource_ref_from_resource(&resource, "created")],
+        }))
+    }
+
+    async fn inspect_package(&self, invocation: &Invocation) -> Result<Value> {
+        let resource_id = package_resource_id_from_payload(&invocation.payload)?;
+        let package = self.inspect_resource(&resource_id)?;
+        let package_id = package
+            .as_ref()
+            .and_then(current_payload)
+            .and_then(|payload| {
+                payload
+                    .get("packageId")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .or_else(|| {
+                resource_id
+                    .strip_prefix("worker-package:")
+                    .map(ToOwned::to_owned)
+            });
+        let configs = self.list_resources(ListResources {
+            kind: Some(MODULE_CONFIG_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 100,
+        })?;
+        let activations = self.list_resources(ListResources {
+            kind: Some(ACTIVATION_RECORD_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 100,
+        })?;
+        let configs = filter_resources_by_package(self, configs, package_id.as_deref())?;
+        let activations = filter_resources_by_package(self, activations, package_id.as_deref())?;
+        let diagnostics = self
+            .package_diagnostics(invocation, package.as_ref(), &configs, &activations)
+            .await;
+        Ok(json!({
+            "package": package,
+            "configs": configs,
+            "activations": activations,
+            "diagnostics": diagnostics,
+            "availableActions": module_actions_for_package(package_id.as_deref()),
+        }))
+    }
+
+    fn configure(&self, invocation: &Invocation) -> Result<Value> {
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
+        let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        let manifest = version_payload(&package, &package_version_id)?;
+        let config = invocation.payload.get("config").cloned().ok_or_else(|| {
+            EngineError::PolicyViolation("module::configure requires config".to_owned())
+        })?;
+        let config_schema = manifest.get("configSchema").ok_or_else(|| {
+            EngineError::PolicyViolation("worker_package manifest requires configSchema".to_owned())
+        })?;
+        schema::validate_payload(
+            &FunctionId::new(CONFIGURE_FUNCTION)?,
+            "module_config",
+            config_schema,
+            &config,
+        )?;
+        reject_raw_secrets(&config)?;
+        let package_id = required_value_str(&manifest, "packageId")?;
+        let (scope, scope_token) = resource_scope_and_token(invocation)?;
+        let payload = json!({
+            "packageResourceId": package_resource_id,
+            "packageVersionId": package_version_id,
+            "packageId": package_id,
+            "scope": scope_token,
+            "configRevision": next_config_revision(self, &config_resource_id(&scope_token, package_id))?,
+            "config": config,
+            "redactionPolicy": manifest.get("redactionPolicy").cloned().unwrap_or_else(|| json!({"mode": "redacted"})),
+            "secretRefs": collect_secret_refs(invocation.payload.get("config").unwrap_or(&Value::Null)),
+            "validationHash": hash_json(invocation.payload.get("config").unwrap_or(&Value::Null))?,
+        });
+        let resource_id = config_resource_id(&scope_token, package_id);
+        let existing = self.inspect_resource(&resource_id)?;
+        let (resource, version, role) = upsert_resource(
+            self,
+            UpsertResource {
+                resource_id,
+                kind: MODULE_CONFIG_KIND,
+                lifecycle: "active",
+                scope,
+                payload,
+                expected_current_version_id: optional_string(
+                    invocation.payload.get("expectedCurrentVersionId"),
+                )?
+                .or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|item| item.resource.current_version_id.clone())
+                }),
+                trace_id: invocation.causal_context.trace_id.clone(),
+                invocation_id: Some(invocation.id.clone()),
+                actor_id: invocation.causal_context.actor_id.clone(),
+            },
+        )?;
+        link_if_possible(
+            self,
+            &package.resource.resource_id,
+            &resource.resource_id,
+            "configured_by",
+            invocation,
+        );
+        Ok(json!({
+            "resource": resource,
+            "version": version,
+            "config": {"payload": version.payload},
+            "resourceRefs": [resource_ref_from_version(&version, MODULE_CONFIG_KIND, role)],
+        }))
+    }
+
+    async fn activate(&self, invocation: &Invocation) -> Result<Value> {
+        self.activate_inner(invocation, ActivationMode::Activate)
+            .await
+    }
+
+    async fn upgrade(&self, invocation: &Invocation) -> Result<Value> {
+        self.activate_inner(invocation, ActivationMode::Upgrade)
+            .await
+    }
+
+    async fn rollback(&self, invocation: &Invocation) -> Result<Value> {
+        let activation_resource_id =
+            required_string_owned(&invocation.payload, "activationResourceId")?;
+        let target_version_id = required_string_owned(&invocation.payload, "targetVersionId")?;
+        let activation = require_inspection(self, &activation_resource_id, ACTIVATION_RECORD_KIND)?;
+        let target = version_payload(&activation, &target_version_id)?;
+        for (field, kind) in [
+            ("packageResourceId", WORKER_PACKAGE_KIND),
+            ("moduleConfigResourceId", MODULE_CONFIG_KIND),
+        ] {
+            let id = target.get(field).and_then(Value::as_str).ok_or_else(|| {
+                EngineError::PolicyViolation(format!("rollback target missing {field}"))
+            })?;
+            let _ = require_inspection(self, id, kind)?;
+        }
+        let package_resource_id = required_value_str(&target, "packageResourceId")?;
+        let package_version_id = required_value_str(&target, "packageVersionId")?;
+        let config_resource_id_value = required_value_str(&target, "moduleConfigResourceId")?;
+        let config_version_id = required_value_str(&target, "configVersionId")?;
+        let worker_id = required_value_str(&target, "workerId")?;
+        let mut payload = invocation.payload.clone();
+        payload["packageResourceId"] = json!(package_resource_id);
+        payload["packageVersionId"] = json!(package_version_id);
+        payload["moduleConfigResourceId"] = json!(config_resource_id_value);
+        payload["configVersionId"] = json!(config_version_id);
+        payload["workerId"] = json!(worker_id);
+        payload["rollbackTarget"] = json!({
+            "activationResourceId": activation_resource_id,
+            "targetVersionId": target_version_id,
+        });
+        let mut rollback_invocation = invocation.clone();
+        rollback_invocation.payload = payload;
+        self.activate_inner(&rollback_invocation, ActivationMode::Rollback)
+            .await
+    }
+
+    async fn disable(&self, invocation: &Invocation) -> Result<Value> {
+        let resource_id = required_string_owned(&invocation.payload, "activationResourceId")?;
+        let inspection = require_inspection(self, &resource_id, ACTIVATION_RECORD_KIND)?;
+        let current = current_version(&inspection).ok_or_else(|| {
+            EngineError::PolicyViolation(format!("activation {resource_id} has no current version"))
+        })?;
+        let mut payload = current.payload.clone();
+        let grant_id = required_value_str(&payload, "derivedGrantId")?;
+        let revoked_grant = self.revoke_grant(
+            &AuthorityGrantId::new(grant_id.to_owned())?,
+            invocation.causal_context.trace_id.clone(),
+        )?;
+        let worker_lifecycle =
+            if let Some(worker_id) = payload.get("workerId").and_then(Value::as_str) {
+                self.disconnect_volatile_worker(worker_id, "module disabled")
+                    .await?
+            } else {
+                None
+            };
+        payload["activationStatus"] = json!("disabled");
+        payload["disabledAt"] = json!(Utc::now().to_rfc3339());
+        payload["workerLifecycle"] = worker_lifecycle.clone().unwrap_or(Value::Null);
+        payload["compensationState"] = json!({
+            "status": "grant_revoked",
+            "workerLifecycle": worker_lifecycle,
+        });
+        let version = self.update_resource(UpdateResource {
+            resource_id: resource_id.clone(),
+            expected_current_version_id: optional_string(
+                invocation.payload.get("expectedCurrentVersionId"),
+            )?
+            .or_else(|| inspection.resource.current_version_id.clone()),
+            lifecycle: Some("disabled".to_owned()),
+            payload: payload.clone(),
+            state: None,
+            locations: Vec::new(),
             trace_id: invocation.causal_context.trace_id.clone(),
             invocation_id: Some(invocation.id.clone()),
-            actor_id: invocation.causal_context.actor_id.clone(),
-        },
-    )?;
-    link_if_possible(
-        host,
-        &package.resource.resource_id,
-        &resource.resource_id,
-        "configured_by",
-        invocation,
-    );
-    Ok(json!({
-        "resource": resource,
-        "version": version,
-        "config": {"payload": version.payload},
-        "resourceRefs": [resource_ref_from_version(&version, MODULE_CONFIG_KIND, role)],
-    }))
-}
-
-fn activate(host: &mut dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    activate_inner(host, invocation, ActivationMode::Activate)
-}
-
-fn upgrade(host: &mut dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    activate_inner(host, invocation, ActivationMode::Upgrade)
-}
-
-fn rollback(host: &mut dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let activation_resource_id =
-        required_string_owned(&invocation.payload, "activationResourceId")?;
-    let target_version_id = required_string_owned(&invocation.payload, "targetVersionId")?;
-    let activation = require_inspection(host, &activation_resource_id, ACTIVATION_RECORD_KIND)?;
-    let target = version_payload(&activation, &target_version_id)?;
-    for (field, kind) in [
-        ("packageResourceId", WORKER_PACKAGE_KIND),
-        ("moduleConfigResourceId", MODULE_CONFIG_KIND),
-    ] {
-        let id = target.get(field).and_then(Value::as_str).ok_or_else(|| {
-            EngineError::PolicyViolation(format!("rollback target missing {field}"))
         })?;
-        let _ = require_inspection(host, id, kind)?;
+        Ok(json!({
+            "activation": {"resourceId": resource_id, "payload": payload},
+            "version": version,
+            "revokedGrant": revoked_grant,
+            "workerLifecycle": worker_lifecycle,
+            "resourceRefs": [resource_ref_from_version(&version, ACTIVATION_RECORD_KIND, "disabled")],
+        }))
     }
-    let package_resource_id = required_value_str(&target, "packageResourceId")?;
-    let package_version_id = required_value_str(&target, "packageVersionId")?;
-    let config_resource_id_value = required_value_str(&target, "moduleConfigResourceId")?;
-    let config_version_id = required_value_str(&target, "configVersionId")?;
-    let worker_id = required_value_str(&target, "workerId")?;
-    let mut payload = invocation.payload.clone();
-    payload["packageResourceId"] = json!(package_resource_id);
-    payload["packageVersionId"] = json!(package_version_id);
-    payload["moduleConfigResourceId"] = json!(config_resource_id_value);
-    payload["configVersionId"] = json!(config_version_id);
-    payload["workerId"] = json!(worker_id);
-    payload["rollbackTarget"] = json!({
-        "activationResourceId": activation_resource_id,
-        "targetVersionId": target_version_id,
-    });
-    let mut rollback_invocation = invocation.clone();
-    rollback_invocation.payload = payload;
-    activate_inner(host, &rollback_invocation, ActivationMode::Rollback)
-}
 
-fn disable(host: &mut dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let resource_id = required_string_owned(&invocation.payload, "activationResourceId")?;
-    let inspection = require_inspection(host, &resource_id, ACTIVATION_RECORD_KIND)?;
-    let current = current_version(&inspection).ok_or_else(|| {
-        EngineError::PolicyViolation(format!("activation {resource_id} has no current version"))
-    })?;
-    let mut payload = current.payload.clone();
-    let grant_id = required_value_str(&payload, "derivedGrantId")?;
-    let revoked_grant = host.revoke_grant(
-        &AuthorityGrantId::new(grant_id.to_owned())?,
-        invocation.causal_context.trace_id.clone(),
-    )?;
-    let worker_lifecycle = payload
-        .get("workerId")
-        .and_then(Value::as_str)
-        .map(|worker_id| disconnect_volatile_worker(host, worker_id, "module disabled"))
-        .transpose()?
-        .flatten();
-    payload["activationStatus"] = json!("disabled");
-    payload["disabledAt"] = json!(Utc::now().to_rfc3339());
-    payload["workerLifecycle"] = worker_lifecycle.clone().unwrap_or(Value::Null);
-    payload["compensationState"] = json!({
-        "status": "grant_revoked",
-        "workerLifecycle": worker_lifecycle,
-    });
-    let version = host.update_resource(UpdateResource {
-        resource_id: resource_id.clone(),
-        expected_current_version_id: optional_string(
-            invocation.payload.get("expectedCurrentVersionId"),
-        )?
-        .or_else(|| inspection.resource.current_version_id.clone()),
-        lifecycle: Some("disabled".to_owned()),
-        payload: payload.clone(),
-        state: None,
-        locations: Vec::new(),
-        trace_id: invocation.causal_context.trace_id.clone(),
-        invocation_id: Some(invocation.id.clone()),
-    })?;
-    Ok(json!({
-        "activation": {"resourceId": resource_id, "payload": payload},
-        "version": version,
-        "revokedGrant": revoked_grant,
-        "workerLifecycle": worker_lifecycle,
-        "resourceRefs": [resource_ref_from_version(&version, ACTIVATION_RECORD_KIND, "disabled")],
-    }))
-}
-
-fn quarantine(host: &mut dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
-    let resource_id = required_string_owned(&invocation.payload, "resourceId")?;
-    let inspection = host
-        .inspect_resource(&resource_id)?
-        .ok_or_else(|| EngineError::NotFound {
-            kind: "resource",
-            id: resource_id.clone(),
-        })?;
-    if !matches!(
-        inspection.resource.kind.as_str(),
-        WORKER_PACKAGE_KIND | ACTIVATION_RECORD_KIND
-    ) {
-        return Err(EngineError::PolicyViolation(format!(
-            "module::quarantine only accepts worker_package or activation_record resources, got {}",
-            inspection.resource.kind
-        )));
-    }
-    let mut payload = current_payload(&inspection).unwrap_or_else(|| json!({}));
-    payload["quarantinedAt"] = json!(Utc::now().to_rfc3339());
-    payload["activationStatus"] = if inspection.resource.kind == ACTIVATION_RECORD_KIND {
-        json!("quarantined")
-    } else {
-        payload
-            .get("activationStatus")
+    async fn quarantine(&self, invocation: &Invocation) -> Result<Value> {
+        let resource_id = required_string_owned(&invocation.payload, "resourceId")?;
+        let inspection =
+            self.inspect_resource(&resource_id)?
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "resource",
+                    id: resource_id.clone(),
+                })?;
+        if !matches!(
+            inspection.resource.kind.as_str(),
+            WORKER_PACKAGE_KIND | ACTIVATION_RECORD_KIND
+        ) {
+            return Err(EngineError::PolicyViolation(format!(
+                "module::quarantine only accepts worker_package or activation_record resources, got {}",
+                inspection.resource.kind
+            )));
+        }
+        let mut payload = current_payload(&inspection).unwrap_or_else(|| json!({}));
+        payload["quarantinedAt"] = json!(Utc::now().to_rfc3339());
+        payload["activationStatus"] = if inspection.resource.kind == ACTIVATION_RECORD_KIND {
+            json!("quarantined")
+        } else {
+            payload
+                .get("activationStatus")
+                .cloned()
+                .unwrap_or(Value::Null)
+        };
+        payload["quarantineEvidence"] = invocation
+            .payload
+            .get("evidenceResourceIds")
             .cloned()
-            .unwrap_or(Value::Null)
-    };
-    payload["quarantineEvidence"] = invocation
-        .payload
-        .get("evidenceResourceIds")
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    let revoked_grant = if inspection.resource.kind == ACTIVATION_RECORD_KIND {
-        payload
-            .get("derivedGrantId")
-            .and_then(Value::as_str)
-            .map(|grant_id| {
-                host.revoke_grant(
-                    &AuthorityGrantId::new(grant_id.to_owned())?,
-                    invocation.causal_context.trace_id.clone(),
-                )
-            })
-            .transpose()?
-    } else {
-        None
-    };
-    let worker_lifecycle = if inspection.resource.kind == ACTIVATION_RECORD_KIND {
-        payload
-            .get("workerId")
-            .and_then(Value::as_str)
-            .map(|worker_id| disconnect_volatile_worker(host, worker_id, "module quarantined"))
-            .transpose()?
-            .flatten()
-    } else {
-        None
-    };
-    if let Some(worker_lifecycle) = &worker_lifecycle {
-        payload["workerLifecycle"] = worker_lifecycle.clone();
+            .unwrap_or_else(|| json!([]));
+        let revoked_grant = if inspection.resource.kind == ACTIVATION_RECORD_KIND {
+            payload
+                .get("derivedGrantId")
+                .and_then(Value::as_str)
+                .map(|grant_id| {
+                    self.revoke_grant(
+                        &AuthorityGrantId::new(grant_id.to_owned())?,
+                        invocation.causal_context.trace_id.clone(),
+                    )
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let worker_lifecycle = if inspection.resource.kind == ACTIVATION_RECORD_KIND {
+            if let Some(worker_id) = payload.get("workerId").and_then(Value::as_str) {
+                self.disconnect_volatile_worker(worker_id, "module quarantined")
+                    .await?
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(worker_lifecycle) = &worker_lifecycle {
+            payload["workerLifecycle"] = worker_lifecycle.clone();
+        }
+        let version = self.update_resource(UpdateResource {
+            resource_id: resource_id.clone(),
+            expected_current_version_id: optional_string(
+                invocation.payload.get("expectedCurrentVersionId"),
+            )?
+            .or_else(|| inspection.resource.current_version_id.clone()),
+            lifecycle: Some("quarantined".to_owned()),
+            payload: payload.clone(),
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        Ok(json!({
+            "resourceId": resource_id,
+            "payload": payload,
+            "version": version,
+            "revokedGrant": revoked_grant,
+            "workerLifecycle": worker_lifecycle,
+            "resourceRefs": [resource_ref_from_version(&version, &inspection.resource.kind, "quarantined")],
+        }))
     }
-    let version = host.update_resource(UpdateResource {
-        resource_id: resource_id.clone(),
-        expected_current_version_id: optional_string(
-            invocation.payload.get("expectedCurrentVersionId"),
-        )?
-        .or_else(|| inspection.resource.current_version_id.clone()),
-        lifecycle: Some("quarantined".to_owned()),
-        payload: payload.clone(),
-        state: None,
-        locations: Vec::new(),
-        trace_id: invocation.causal_context.trace_id.clone(),
-        invocation_id: Some(invocation.id.clone()),
-    })?;
-    Ok(json!({
-        "resourceId": resource_id,
-        "payload": payload,
-        "version": version,
-        "revokedGrant": revoked_grant,
-        "workerLifecycle": worker_lifecycle,
-        "resourceRefs": [resource_ref_from_version(&version, &inspection.resource.kind, "quarantined")],
-    }))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -553,181 +682,579 @@ struct UpgradeSource {
     worker_id: String,
 }
 
-fn activate_inner(
-    host: &mut dyn PrimitiveRuntimeHost,
-    invocation: &Invocation,
-    mode: ActivationMode,
-) -> Result<Value> {
-    let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
-    let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
-    let config_resource_id_value =
-        required_string_owned(&invocation.payload, "moduleConfigResourceId")?;
-    let config_version_id = required_string_owned(&invocation.payload, "configVersionId")?;
-    let package = require_inspection(host, &package_resource_id, WORKER_PACKAGE_KIND)?;
-    let config = require_inspection(host, &config_resource_id_value, MODULE_CONFIG_KIND)?;
-    let manifest = version_payload(&package, &package_version_id)?;
-    let config_payload = version_payload(&config, &config_version_id)?;
-    ensure_config_matches_package(&config_payload, &package_resource_id, &package_version_id)?;
-    let package_id = required_value_str(&manifest, "packageId")?;
-    let namespace = required_value_str(&manifest, "namespace")?;
-    let worker_id = optional_string(invocation.payload.get("workerId"))?
-        .or_else(|| {
-            manifest
-                .get("runtimeEntryPoint")
-                .and_then(|entry| entry.get("workerId"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-        })
-        .ok_or_else(|| {
-            EngineError::PolicyViolation(
-                "module::activate requires workerId or runtimeEntryPoint.workerId".to_owned(),
-            )
-        })?;
-    validate_runtime_entrypoint(&manifest, &worker_id)?;
-    let worker = host.inspect_worker(&WorkerId::new(worker_id.clone())?)?;
-    if !worker
-        .namespace_claims
-        .iter()
-        .any(|claim| claim == namespace)
-    {
-        return Err(EngineError::PolicyViolation(format!(
-            "worker {worker_id} does not claim package namespace {namespace}"
-        )));
-    }
-    let declared = declared_capabilities(&manifest)?;
-    let registered = registered_capabilities_for_worker(host, invocation, &worker.id, namespace)?;
-    validate_registered_capabilities(&declared, &registered)?;
-    let (scope, scope_token) = resource_scope_and_token(invocation)?;
-    let resource_id = activation_resource_id(&scope_token, package_id);
-    let upgrade_source =
-        upgrade_source(host, invocation, mode, &resource_id, &package_resource_id)?;
-    let child_request = child_grant_from_payload(
-        invocation,
-        &manifest,
-        &worker.id,
-        required_object(
-            invocation.payload.get("childGrantRequest"),
-            "childGrantRequest",
-        )?,
-    )?;
-    let grant = host.derive_grant(child_request)?;
-    let grant_hash = hash_json(&json!(grant))?;
-    let rollback_target = invocation
-        .payload
-        .get("rollbackTarget")
-        .cloned()
-        .unwrap_or(Value::Null);
-    let supersedes = upgrade_source
-        .as_ref()
-        .map(|source| {
-            json!({
-                "activationResourceId": source.resource_id,
-                "versionId": source.version_id,
-                "grantId": source.grant_id,
-                "workerId": source.worker_id,
-            })
-        })
-        .unwrap_or(Value::Null);
-    let status = match mode {
-        ActivationMode::Activate | ActivationMode::Upgrade => "active",
-        ActivationMode::Rollback => "rolled_back",
-    };
-    let payload = json!({
-        "packageResourceId": package_resource_id,
-        "packageVersionId": package_version_id,
-        "moduleConfigResourceId": config_resource_id_value,
-        "configVersionId": config_version_id,
-        "derivedGrantId": grant.grant_id.as_str(),
-        "derivedGrantRevision": grant.revision,
-        "derivedGrantHash": grant_hash,
-        "workerId": worker.id.as_str(),
-        "declaredCapabilities": declared.iter().map(|capability| capability.raw.clone()).collect::<Vec<_>>(),
-        "registeredCapabilities": registered.iter().map(|function| json!(function)).collect::<Vec<_>>(),
-        "healthResult": {"status": "healthy", "mode": "catalog_registered"},
-        "activationStatus": status,
-        "rollbackTarget": rollback_target,
-        "supersedes": supersedes,
-        "compensationState": {"status": "none"},
-        "scope": scope_token,
-    });
-    let existing = host.inspect_resource(&resource_id)?;
-    let lifecycle = match mode {
-        ActivationMode::Rollback => "rolled_back",
-        _ => "active",
-    };
-    let cleanup_grant_id = grant.grant_id.clone();
-    let upserted = upsert_resource(
-        host,
-        UpsertResource {
-            resource_id,
-            kind: ACTIVATION_RECORD_KIND,
-            lifecycle,
-            scope,
-            payload,
-            expected_current_version_id: optional_string(
-                invocation.payload.get("expectedCurrentVersionId"),
-            )?
+enum RuntimeEntryPoint {
+    ExistingOrBuiltin,
+    LocalProcess(Box<LocalProcessRuntime>),
+}
+
+struct LocalProcessRuntime {
+    worker_id: String,
+    command_ref: ResourceVersionRef,
+    executable_refs: Vec<ResourceVersionRef>,
+    expected_function_ids: Vec<String>,
+    args: Vec<String>,
+    visibility: String,
+    timeout_ms: Option<u64>,
+    environment_policy: Value,
+}
+
+#[derive(Clone)]
+struct ResourceVersionRef {
+    resource_id: String,
+    version_id: String,
+    content_hash: Option<String>,
+}
+
+struct SpawnedLocalProcess {
+    invocation_id: InvocationId,
+    result: Value,
+    worker: crate::engine::WorkerDefinition,
+    grant: EngineGrant,
+}
+
+impl ModulePrimitiveHandler {
+    async fn activate_inner(&self, invocation: &Invocation, mode: ActivationMode) -> Result<Value> {
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
+        let config_resource_id_value =
+            required_string_owned(&invocation.payload, "moduleConfigResourceId")?;
+        let config_version_id = required_string_owned(&invocation.payload, "configVersionId")?;
+        let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        let config = require_inspection(self, &config_resource_id_value, MODULE_CONFIG_KIND)?;
+        let manifest = version_payload(&package, &package_version_id)?;
+        let config_payload = version_payload(&config, &config_version_id)?;
+        ensure_config_matches_package(&config_payload, &package_resource_id, &package_version_id)?;
+        let package_id = required_value_str(&manifest, "packageId")?;
+        let namespace = required_value_str(&manifest, "namespace")?;
+        let worker_id = optional_string(invocation.payload.get("workerId"))?
             .or_else(|| {
-                existing
-                    .as_ref()
-                    .and_then(|item| item.resource.current_version_id.clone())
-            }),
-            trace_id: invocation.causal_context.trace_id.clone(),
-            invocation_id: Some(invocation.id.clone()),
-            actor_id: invocation.causal_context.actor_id.clone(),
-        },
-    );
-    let (resource, version, role) = match upserted {
-        Ok(value) => value,
-        Err(error) => {
-            let _ = host.revoke_grant(
-                &cleanup_grant_id,
-                invocation.causal_context.trace_id.clone(),
-            );
+                manifest
+                    .get("runtimeEntryPoint")
+                    .and_then(|entry| entry.get("workerId"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "module::activate requires workerId or runtimeEntryPoint.workerId".to_owned(),
+                )
+            })?;
+        let runtime_entrypoint = validate_runtime_entrypoint(&manifest, &worker_id)?;
+        let declared = declared_capabilities(&manifest)?;
+        let (scope, scope_token) = resource_scope_and_token(invocation)?;
+        let resource_id = activation_resource_id(&scope_token, package_id);
+        let upgrade_source =
+            upgrade_source(self, invocation, mode, &resource_id, &package_resource_id)?;
+        if mode == ActivationMode::Upgrade
+            && matches!(&runtime_entrypoint, RuntimeEntryPoint::LocalProcess(_))
+            && upgrade_source
+                .as_ref()
+                .is_some_and(|source| source.worker_id == worker_id)
+        {
+            return Err(EngineError::PolicyViolation(
+                "local_process upgrade requires a replacement workerId; in-place process mutation is not supported"
+                    .to_owned(),
+            ));
+        }
+        let child_request = child_grant_from_payload(
+            invocation,
+            &manifest,
+            &WorkerId::new(worker_id.clone())?,
+            required_object(
+                invocation.payload.get("childGrantRequest"),
+                "childGrantRequest",
+            )?,
+        )?;
+        let mut spawned_local_process = false;
+        let (worker, grant, spawn_invocation_id, spawn_result, worker_lifecycle) =
+            match runtime_entrypoint {
+                RuntimeEntryPoint::ExistingOrBuiltin => {
+                    let worker = self
+                        .inspect_worker(&WorkerId::new(worker_id.clone())?)
+                        .await?;
+                    let grant = self.derive_grant(child_request)?;
+                    (
+                        worker,
+                        grant,
+                        Value::Null,
+                        Value::Null,
+                        json!({"mode": "bound_existing"}),
+                    )
+                }
+                RuntimeEntryPoint::LocalProcess(local_process) => {
+                    spawned_local_process = true;
+                    let spawn = self
+                        .spawn_local_process_worker(
+                            invocation,
+                            &manifest,
+                            &local_process,
+                            child_request,
+                        )
+                        .await?;
+                    (
+                        spawn.worker,
+                        spawn.grant,
+                        json!(spawn.invocation_id.as_str()),
+                        spawn.result,
+                        json!({"mode": "spawned_local_process", "status": "running"}),
+                    )
+                }
+            };
+        if !worker
+            .namespace_claims
+            .iter()
+            .any(|claim| claim == namespace)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker {worker_id} does not claim package namespace {namespace}"
+            )));
+        }
+        let registered =
+            registered_capabilities_for_worker(self, invocation, &worker.id, namespace).await?;
+        if let Err(error) = validate_registered_capabilities(&declared, &registered) {
+            let _ = self.revoke_grant(&grant.grant_id, invocation.causal_context.trace_id.clone());
+            if spawned_local_process {
+                let _ = self
+                    .disconnect_volatile_worker(
+                        worker.id.as_str(),
+                        "module activation validation failed",
+                    )
+                    .await;
+            }
             return Err(error);
         }
-    };
-    let mut replaced_grant = None;
-    let mut disconnected_worker = None;
-    if let Some(source) = &upgrade_source {
-        if source.grant_id != grant.grant_id.as_str() {
-            replaced_grant = Some(host.revoke_grant(
-                &AuthorityGrantId::new(source.grant_id.clone())?,
-                invocation.causal_context.trace_id.clone(),
-            )?);
+        let grant_hash = hash_json(&json!(grant))?;
+        let rollback_target = invocation
+            .payload
+            .get("rollbackTarget")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let supersedes = upgrade_source
+            .as_ref()
+            .map(|source| {
+                json!({
+                    "activationResourceId": source.resource_id,
+                    "versionId": source.version_id,
+                    "grantId": source.grant_id,
+                    "workerId": source.worker_id,
+                })
+            })
+            .unwrap_or(Value::Null);
+        let status = match mode {
+            ActivationMode::Activate | ActivationMode::Upgrade => "active",
+            ActivationMode::Rollback => "rolled_back",
+        };
+        let payload = json!({
+            "packageResourceId": package_resource_id,
+            "packageVersionId": package_version_id,
+            "moduleConfigResourceId": config_resource_id_value,
+            "configVersionId": config_version_id,
+            "derivedGrantId": grant.grant_id.as_str(),
+            "derivedGrantRevision": grant.revision,
+            "derivedGrantHash": grant_hash,
+            "workerId": worker.id.as_str(),
+            "declaredCapabilities": declared.iter().map(|capability| capability.raw.clone()).collect::<Vec<_>>(),
+            "registeredCapabilities": registered.iter().map(|function| json!(function)).collect::<Vec<_>>(),
+            "healthResult": {"status": "healthy", "mode": "catalog_registered"},
+            "spawnInvocationId": spawn_invocation_id,
+            "spawnResult": spawn_result,
+            "healthInvocationIds": [],
+            "integrityDiagnostics": {"status": "valid"},
+            "workerLifecycle": worker_lifecycle,
+            "activationStatus": status,
+            "rollbackTarget": rollback_target,
+            "supersedes": supersedes,
+            "compensationState": {"status": "none"},
+            "scope": scope_token,
+        });
+        let existing = self.inspect_resource(&resource_id)?;
+        let lifecycle = match mode {
+            ActivationMode::Rollback => "rolled_back",
+            _ => "active",
+        };
+        let cleanup_grant_id = grant.grant_id.clone();
+        let upserted = upsert_resource(
+            self,
+            UpsertResource {
+                resource_id,
+                kind: ACTIVATION_RECORD_KIND,
+                lifecycle,
+                scope,
+                payload,
+                expected_current_version_id: optional_string(
+                    invocation.payload.get("expectedCurrentVersionId"),
+                )?
+                .or_else(|| {
+                    existing
+                        .as_ref()
+                        .and_then(|item| item.resource.current_version_id.clone())
+                }),
+                trace_id: invocation.causal_context.trace_id.clone(),
+                invocation_id: Some(invocation.id.clone()),
+                actor_id: invocation.causal_context.actor_id.clone(),
+            },
+        );
+        let (resource, version, role) = match upserted {
+            Ok(value) => value,
+            Err(error) => {
+                let _ = self.revoke_grant(
+                    &cleanup_grant_id,
+                    invocation.causal_context.trace_id.clone(),
+                );
+                if spawned_local_process {
+                    let _ = self
+                        .disconnect_volatile_worker(
+                            worker.id.as_str(),
+                            "module activation persistence failed",
+                        )
+                        .await;
+                }
+                return Err(error);
+            }
+        };
+        let mut replaced_grant = None;
+        let mut disconnected_worker = None;
+        if let Some(source) = &upgrade_source {
+            if source.grant_id != grant.grant_id.as_str() {
+                replaced_grant = Some(self.revoke_grant(
+                    &AuthorityGrantId::new(source.grant_id.clone())?,
+                    invocation.causal_context.trace_id.clone(),
+                )?);
+            }
+            if source.worker_id != worker.id.as_str() {
+                disconnected_worker = self
+                    .disconnect_volatile_worker(
+                        &source.worker_id,
+                        "module upgrade superseded worker",
+                    )
+                    .await?;
+            }
         }
-        if source.worker_id != worker.id.as_str() {
-            disconnected_worker = disconnect_volatile_worker(
-                host,
-                &source.worker_id,
-                "module upgrade superseded worker",
-            )?;
+        link_if_possible(
+            self,
+            &package.resource.resource_id,
+            &resource.resource_id,
+            "activates",
+            invocation,
+        );
+        link_if_possible(
+            self,
+            &resource.resource_id,
+            &config.resource.resource_id,
+            "configured_by",
+            invocation,
+        );
+        Ok(json!({
+            "activation": {"resourceId": resource.resource_id, "payload": version.payload},
+            "resource": resource,
+            "version": version,
+            "grant": grant,
+            "replacedGrant": replaced_grant,
+            "disconnectedWorker": disconnected_worker,
+            "worker": worker,
+            "resourceRefs": [resource_ref_from_version(&version, ACTIVATION_RECORD_KIND, role)],
+        }))
+    }
+
+    async fn spawn_local_process_worker(
+        &self,
+        invocation: &Invocation,
+        manifest: &Value,
+        runtime: &LocalProcessRuntime,
+        grant_request: DeriveGrant,
+    ) -> Result<SpawnedLocalProcess> {
+        let command = self.resolve_materialized_command(&runtime.command_ref, &grant_request)?;
+        for executable_ref in &runtime.executable_refs {
+            let _ = self.resolve_materialized_command(executable_ref, &grant_request)?;
+        }
+        let _environment_mode = runtime
+            .environment_policy
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("empty");
+        let mut context = invocation.causal_context.clone();
+        context.parent_invocation_id = Some(invocation.id.clone());
+        context.idempotency_key = Some(format!(
+            "module:{}:{}:{}:spawn",
+            required_value_str(manifest, "packageId")?,
+            runtime.worker_id,
+            invocation
+                .causal_context
+                .idempotency_key
+                .as_deref()
+                .unwrap_or(invocation.id.as_str())
+        ));
+        context.authority_scopes.push("worker.write".to_owned());
+        let working_directory = Path::new(&command)
+            .parent()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".".to_owned());
+        let payload = json!({
+            "workerId": runtime.worker_id,
+            "command": command,
+            "args": runtime.args,
+            "workingDirectory": working_directory,
+            "expectedFunctionIds": runtime.expected_function_ids,
+            "allowedAuthorityScopes": grant_request.allowed_authority_scopes,
+            "allowedResourceKinds": grant_request.allowed_resource_kinds,
+            "resourceSelectors": grant_request.resource_selectors,
+            "fileRoots": grant_request.file_roots,
+            "networkPolicy": grant_request.network_policy,
+            "maxRisk": risk_label(grant_request.max_risk),
+            "budget": grant_request.budget,
+            "approvalRequired": grant_request.approval_required,
+            "visibility": runtime.visibility,
+            "sessionId": invocation.causal_context.session_id,
+            "workspaceId": invocation.causal_context.workspace_id,
+            "timeoutMs": runtime.timeout_ms,
+        });
+        let child = Invocation::new_sync(FunctionId::new("worker::spawn")?, payload, context);
+        let invocation_id = child.id.clone();
+        let result = self.stores.engine_host()?.invoke(child).await;
+        if let Some(error) = result.error {
+            return Err(error);
+        }
+        let value = result.value.ok_or_else(|| {
+            EngineError::HandlerFailed("worker::spawn returned no result".to_owned())
+        })?;
+        let worker_id = required_value_str(&value, "workerId")?;
+        let grant_id =
+            AuthorityGrantId::new(required_value_str(&value, "authorityGrantId")?.to_owned())?;
+        let grant = self.inspect_grant(&grant_id)?.ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "worker::spawn returned missing activation grant {grant_id}"
+            ))
+        })?;
+        let worker = self
+            .inspect_worker(&WorkerId::new(worker_id.to_owned())?)
+            .await?;
+        Ok(SpawnedLocalProcess {
+            invocation_id,
+            result: value,
+            worker,
+            grant,
+        })
+    }
+
+    fn resolve_materialized_command(
+        &self,
+        command_ref: &ResourceVersionRef,
+        grant_request: &DeriveGrant,
+    ) -> Result<String> {
+        let inspection = require_inspection(self, &command_ref.resource_id, "materialized_file")?;
+        let version = inspection
+            .versions
+            .iter()
+            .find(|version| version.version_id == command_ref.version_id)
+            .ok_or_else(|| EngineError::NotFound {
+                kind: "resource_version",
+                id: command_ref.version_id.clone(),
+            })?;
+        if let Some(expected) = &command_ref.content_hash
+            && &version.content_hash != expected
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "materialized executable {} hash mismatch: expected {expected}, got {}",
+                command_ref.resource_id, version.content_hash
+            )));
+        }
+        let canonical = version
+            .payload
+            .get("canonicalPath")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                version
+                    .locations
+                    .iter()
+                    .find(|location| location.kind == "file")
+                    .map(|location| location.uri.as_str())
+            })
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(format!(
+                    "materialized executable {} has no canonical file location",
+                    command_ref.resource_id
+                ))
+            })?;
+        ensure_path_within_grant_roots(canonical, &grant_request.file_roots)?;
+        Ok(canonical.to_owned())
+    }
+
+    async fn disconnect_volatile_worker(
+        &self,
+        worker_id: &str,
+        reason: &str,
+    ) -> Result<Option<Value>> {
+        let id = WorkerId::new(worker_id.to_owned())?;
+        match self.worker_is_volatile(&id).await {
+            Some(true) => {
+                let worker = self.inspect_worker(&id).await?;
+                self.unregister_worker(&id, worker.owner_actor.as_str())
+                    .await?;
+                Ok(Some(json!({
+                    "workerId": id.as_str(),
+                    "status": "disconnected",
+                    "reason": reason,
+                })))
+            }
+            Some(false) => Ok(Some(json!({
+                "workerId": id.as_str(),
+                "status": "grant_revoked_only",
+                "reason": "non_volatile_worker",
+            }))),
+            None => Ok(Some(json!({
+                "workerId": id.as_str(),
+                "status": "not_found",
+            }))),
         }
     }
-    link_if_possible(
-        host,
-        &package.resource.resource_id,
-        &resource.resource_id,
-        "activates",
-        invocation,
-    );
-    link_if_possible(
-        host,
-        &resource.resource_id,
-        &config.resource.resource_id,
-        "configured_by",
-        invocation,
-    );
-    Ok(json!({
-        "activation": {"resourceId": resource.resource_id, "payload": version.payload},
-        "resource": resource,
-        "version": version,
-        "grant": grant,
-        "replacedGrant": replaced_grant,
-        "disconnectedWorker": disconnected_worker,
-        "worker": worker,
-        "resourceRefs": [resource_ref_from_version(&version, ACTIVATION_RECORD_KIND, role)],
-    }))
+
+    async fn package_diagnostics(
+        &self,
+        invocation: &Invocation,
+        package: Option<&EngineResourceInspection>,
+        configs: &[Value],
+        activations: &[Value],
+    ) -> Value {
+        let Some(package) = package else {
+            return json!({
+                "digestStatus": "missing",
+                "fileHashStatus": "missing",
+                "configStatus": "missing",
+                "activationStatus": "inactive",
+                "grantStatus": "missing",
+                "workerStatus": "missing",
+                "registeredCapabilityStatus": "missing",
+                "healthStatus": "unknown"
+            });
+        };
+        let manifest = current_payload(package).unwrap_or(Value::Null);
+        let digest_status =
+            match required_value_str(&manifest, "packageDigest").and_then(|declared| {
+                manifest_digest(&manifest).map(|computed| (declared.to_owned(), computed))
+            }) {
+                Ok((declared, computed)) if declared == computed => "valid",
+                Ok(_) => "invalid",
+                Err(_) => "missing",
+            };
+        let file_hash_status = self.file_hash_status(&manifest);
+        let config_status = if configs.is_empty() {
+            "missing"
+        } else {
+            "configured"
+        };
+        let activation_payload = activations
+            .first()
+            .and_then(current_payload_from_json_inspection);
+        let activation_status = activation_payload
+            .and_then(|payload| payload.get("activationStatus"))
+            .and_then(Value::as_str)
+            .unwrap_or("inactive");
+        let grant_status = activation_payload
+            .and_then(|payload| payload.get("derivedGrantId"))
+            .and_then(Value::as_str)
+            .and_then(|grant_id| AuthorityGrantId::new(grant_id.to_owned()).ok())
+            .and_then(|grant_id| self.inspect_grant(&grant_id).ok().flatten())
+            .map(|grant| match grant.lifecycle {
+                EngineGrantLifecycle::Active => "active",
+                EngineGrantLifecycle::Revoked => "revoked",
+            })
+            .unwrap_or("missing");
+        let worker_id = activation_payload
+            .and_then(|payload| payload.get("workerId"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                manifest
+                    .get("runtimeEntryPoint")
+                    .and_then(|entry| entry.get("workerId"))
+                    .and_then(Value::as_str)
+            });
+        let worker_status = if let Some(worker_id) = worker_id {
+            match WorkerId::new(worker_id.to_owned()) {
+                Ok(worker_id) if self.inspect_worker(&worker_id).await.is_ok() => "registered",
+                Ok(_) => "missing",
+                Err(_) => "invalid",
+            }
+        } else {
+            "missing"
+        };
+        let registered_capability_status = match (
+            worker_id,
+            required_value_str(&manifest, "namespace"),
+            declared_capabilities(&manifest),
+        ) {
+            (Some(worker_id), Ok(namespace), Ok(declared)) => {
+                match WorkerId::new(worker_id.to_owned()) {
+                    Ok(worker_id) => {
+                        match registered_capabilities_for_worker(
+                            self, invocation, &worker_id, namespace,
+                        )
+                        .await
+                        {
+                            Ok(registered) => {
+                                match validate_registered_capabilities(&declared, &registered) {
+                                    Ok(()) => "valid",
+                                    Err(_) => "invalid",
+                                }
+                            }
+                            Err(_) => "invalid",
+                        }
+                    }
+                    Err(_) => "invalid",
+                }
+            }
+            _ => "missing",
+        };
+        let health_status = activation_payload
+            .and_then(|payload| payload.get("healthResult"))
+            .and_then(|health| health.get("status"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        json!({
+            "digestStatus": digest_status,
+            "fileHashStatus": file_hash_status,
+            "configStatus": config_status,
+            "activationStatus": activation_status,
+            "grantStatus": grant_status,
+            "workerStatus": worker_status,
+            "registeredCapabilityStatus": registered_capability_status,
+            "healthStatus": health_status,
+        })
+    }
+
+    fn file_hash_status(&self, manifest: &Value) -> &'static str {
+        let entry = match manifest.get("runtimeEntryPoint").and_then(Value::as_object) {
+            Some(entry) if entry.get("kind").and_then(Value::as_str) == Some("local_process") => {
+                entry
+            }
+            _ => return "not_applicable",
+        };
+        let refs = match resource_version_refs(entry.get("executableRefs"), "executableRefs") {
+            Ok(refs) if !refs.is_empty() => refs,
+            _ => return "invalid",
+        };
+        for reference in refs {
+            let Ok(inspection) =
+                require_inspection(self, &reference.resource_id, "materialized_file")
+            else {
+                return "invalid";
+            };
+            let Some(version) = inspection
+                .versions
+                .iter()
+                .find(|version| version.version_id == reference.version_id)
+            else {
+                return "invalid";
+            };
+            if reference
+                .content_hash
+                .as_ref()
+                .is_some_and(|expected| expected != &version.content_hash)
+            {
+                return "invalid";
+            }
+        }
+        "valid"
+    }
 }
 
 struct DeclaredCapability {
@@ -818,7 +1345,8 @@ fn validate_manifest(manifest: &Value) -> Result<()> {
     }
     let namespace = required_value_str(manifest, "namespace")?;
     validate_namespace(namespace)?;
-    let _ = declared_capabilities(manifest)?;
+    let declared = declared_capabilities(manifest)?;
+    validate_manifest_runtime(manifest, &declared)?;
     let grants = required_object(manifest.get("requiredGrants"), "requiredGrants")?;
     for field in [
         "allowedCapabilities",
@@ -842,6 +1370,7 @@ fn validate_manifest(manifest: &Value) -> Result<()> {
         "module_config_schema",
         manifest.get("configSchema").unwrap(),
     )?;
+    reject_raw_secrets(manifest)?;
     reject_raw_secrets(manifest.get("redactionPolicy").unwrap())?;
     Ok(())
 }
@@ -906,8 +1435,8 @@ fn declared_capabilities(manifest: &Value) -> Result<Vec<DeclaredCapability>> {
         .collect()
 }
 
-fn registered_capabilities_for_worker(
-    host: &dyn PrimitiveRuntimeHost,
+async fn registered_capabilities_for_worker(
+    host: &ModulePrimitiveHandler,
     invocation: &Invocation,
     worker_id: &WorkerId,
     namespace: &str,
@@ -926,6 +1455,7 @@ fn registered_capabilities_for_worker(
             include_internal: true,
             ..FunctionQuery::default()
         })
+        .await
         .into_iter()
         .filter(|function| {
             &function.owner_worker == worker_id && function.id.namespace() == namespace
@@ -1163,16 +1693,27 @@ fn child_grant_from_payload(
     })
 }
 
-fn validate_runtime_entrypoint(manifest: &Value, worker_id: &str) -> Result<()> {
+fn validate_manifest_runtime(manifest: &Value, declared: &[DeclaredCapability]) -> Result<()> {
+    let entry = required_object(manifest.get("runtimeEntryPoint"), "runtimeEntryPoint")?;
+    let worker_id = required_map_str(entry, "workerId")?;
+    let _ = validate_runtime_entrypoint_with_declared(manifest, worker_id, declared)?;
+    Ok(())
+}
+
+fn validate_runtime_entrypoint(manifest: &Value, worker_id: &str) -> Result<RuntimeEntryPoint> {
+    let declared = declared_capabilities(manifest)?;
+    validate_runtime_entrypoint_with_declared(manifest, worker_id, &declared)
+}
+
+fn validate_runtime_entrypoint_with_declared(
+    manifest: &Value,
+    worker_id: &str,
+    declared: &[DeclaredCapability],
+) -> Result<RuntimeEntryPoint> {
     let entry = required_object(manifest.get("runtimeEntryPoint"), "runtimeEntryPoint")?;
     let kind = entry.get("kind").and_then(Value::as_str).ok_or_else(|| {
         EngineError::PolicyViolation("runtimeEntryPoint requires kind".to_owned())
     })?;
-    if !matches!(kind, "existing_worker" | "builtin") {
-        return Err(EngineError::PolicyViolation(format!(
-            "runtimeEntryPoint kind {kind} must be activated through canonical worker::spawn before module::activate"
-        )));
-    }
     if entry
         .get("workerId")
         .and_then(Value::as_str)
@@ -1182,11 +1723,138 @@ fn validate_runtime_entrypoint(manifest: &Value, worker_id: &str) -> Result<()> 
             "activation workerId {worker_id} does not match manifest runtimeEntryPoint"
         )));
     }
-    Ok(())
+    match kind {
+        "existing_worker" | "builtin" => Ok(RuntimeEntryPoint::ExistingOrBuiltin),
+        "local_process" => parse_local_process_runtime(manifest, entry, declared),
+        other => Err(EngineError::PolicyViolation(format!(
+            "unsupported runtimeEntryPoint kind {other}"
+        ))),
+    }
+}
+
+fn parse_local_process_runtime(
+    manifest: &Value,
+    entry: &serde_json::Map<String, Value>,
+    declared: &[DeclaredCapability],
+) -> Result<RuntimeEntryPoint> {
+    if manifest
+        .get("sourceProvenance")
+        .and_then(|source| source.get("kind"))
+        .and_then(Value::as_str)
+        != Some(LOCAL_DIGEST_PINNED)
+    {
+        return Err(EngineError::PolicyViolation(
+            "local_process packages must use local_digest_pinned provenance".to_owned(),
+        ));
+    }
+    reject_raw_secrets(&Value::Object(entry.clone()))?;
+    let worker_id = required_map_str(entry, "workerId")?.to_owned();
+    let declared_files = resource_version_refs(manifest.get("declaredFiles"), "declaredFiles")?;
+    let executable_refs = resource_version_refs(entry.get("executableRefs"), "executableRefs")?;
+    if executable_refs.is_empty() {
+        return Err(EngineError::PolicyViolation(
+            "local_process runtimeEntryPoint.executableRefs must not be empty".to_owned(),
+        ));
+    }
+    for executable_ref in &executable_refs {
+        if !declared_files.iter().any(|declared_file| {
+            declared_file.resource_id == executable_ref.resource_id
+                && declared_file.version_id == executable_ref.version_id
+                && declared_file.content_hash == executable_ref.content_hash
+        }) {
+            return Err(EngineError::PolicyViolation(
+                "local_process executableRefs must be declaredFiles refs".to_owned(),
+            ));
+        }
+    }
+    let command = required_object(entry.get("commandTemplate"), "commandTemplate")?;
+    if required_map_str(command, "kind")? != "materialized_file" {
+        return Err(EngineError::PolicyViolation(
+            "local_process commandTemplate must target a materialized_file ref".to_owned(),
+        ));
+    }
+    let command_ref = ResourceVersionRef {
+        resource_id: required_map_str(command, "resourceId")?.to_owned(),
+        version_id: required_map_str(command, "versionId")?.to_owned(),
+        content_hash: command
+            .get("contentHash")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+    };
+    if !executable_refs.iter().any(|reference| {
+        reference.resource_id == command_ref.resource_id
+            && reference.version_id == command_ref.version_id
+    }) {
+        return Err(EngineError::PolicyViolation(
+            "local_process commandTemplate must reference one runtimeEntryPoint.executableRefs entry"
+                .to_owned(),
+        ));
+    }
+    let expected_function_ids =
+        string_array_from(entry.get("expectedFunctionIds"), "expectedFunctionIds")?;
+    if expected_function_ids.is_empty() {
+        return Err(EngineError::PolicyViolation(
+            "local_process runtimeEntryPoint.expectedFunctionIds must not be empty".to_owned(),
+        ));
+    }
+    let declared_function_ids = declared
+        .iter()
+        .map(|capability| capability.function_id.as_str().to_owned())
+        .collect::<Vec<_>>();
+    ensure_same_set(
+        &expected_function_ids,
+        &declared_function_ids,
+        "local_process expectedFunctionIds",
+    )?;
+    let working_directory = required_object(entry.get("workingDirectory"), "workingDirectory")?;
+    if required_map_str(working_directory, "kind")? != "package_file_parent" {
+        return Err(EngineError::PolicyViolation(
+            "local_process workingDirectory must be package_file_parent".to_owned(),
+        ));
+    }
+    let environment_policy = entry.get("environmentPolicy").cloned().ok_or_else(|| {
+        EngineError::PolicyViolation(
+            "local_process runtimeEntryPoint requires environmentPolicy".to_owned(),
+        )
+    })?;
+    if environment_policy.get("mode").and_then(Value::as_str) != Some("empty") {
+        return Err(EngineError::PolicyViolation(
+            "local_process environmentPolicy.mode must be empty".to_owned(),
+        ));
+    }
+    let args = literal_args(entry.get("argsTemplate"))?;
+    let visibility = entry
+        .get("visibility")
+        .and_then(Value::as_str)
+        .unwrap_or("session")
+        .to_owned();
+    if !matches!(visibility.as_str(), "session" | "workspace" | "system") {
+        return Err(EngineError::PolicyViolation(format!(
+            "unsupported local_process visibility {visibility}"
+        )));
+    }
+    let timeout_ms = entry.get("timeoutMs").and_then(Value::as_u64);
+    if timeout_ms.is_some_and(|value| !(100..=60_000).contains(&value)) {
+        return Err(EngineError::PolicyViolation(
+            "local_process timeoutMs must be between 100 and 60000".to_owned(),
+        ));
+    }
+    Ok(RuntimeEntryPoint::LocalProcess(Box::new(
+        LocalProcessRuntime {
+            worker_id,
+            command_ref,
+            executable_refs,
+            expected_function_ids,
+            args,
+            visibility,
+            timeout_ms,
+            environment_policy,
+        },
+    )))
 }
 
 fn upgrade_source(
-    host: &dyn PrimitiveRuntimeHost,
+    host: &ModulePrimitiveHandler,
     invocation: &Invocation,
     mode: ActivationMode,
     expected_resource_id: &str,
@@ -1242,34 +1910,6 @@ fn upgrade_source(
     }))
 }
 
-fn disconnect_volatile_worker(
-    host: &mut dyn PrimitiveRuntimeHost,
-    worker_id: &str,
-    reason: &str,
-) -> Result<Option<Value>> {
-    let id = WorkerId::new(worker_id.to_owned())?;
-    match host.worker_is_volatile(&id) {
-        Some(true) => {
-            let worker = host.inspect_worker(&id)?;
-            host.unregister_worker(&id, worker.owner_actor.as_str())?;
-            Ok(Some(json!({
-                "workerId": id.as_str(),
-                "status": "disconnected",
-                "reason": reason,
-            })))
-        }
-        Some(false) => Ok(Some(json!({
-            "workerId": id.as_str(),
-            "status": "grant_revoked_only",
-            "reason": "non_volatile_worker",
-        }))),
-        None => Ok(Some(json!({
-            "workerId": id.as_str(),
-            "status": "not_found",
-        }))),
-    }
-}
-
 fn ensure_config_matches_package(
     config_payload: &Value,
     package_resource_id: &str,
@@ -1304,7 +1944,7 @@ struct UpsertResource {
 }
 
 fn upsert_resource(
-    host: &mut dyn PrimitiveRuntimeHost,
+    host: &ModulePrimitiveHandler,
     request: UpsertResource,
 ) -> Result<(EngineResource, EngineResourceVersion, &'static str)> {
     if let Some(existing) = host.inspect_resource(&request.resource_id)? {
@@ -1389,6 +2029,56 @@ fn string_array_from(value: Option<&Value>, field: &str) -> Result<Vec<String>> 
         .collect()
 }
 
+fn resource_version_refs(value: Option<&Value>, field: &str) -> Result<Vec<ResourceVersionRef>> {
+    let items = value.and_then(Value::as_array).ok_or_else(|| {
+        EngineError::PolicyViolation(format!("required field {field} must be an array"))
+    })?;
+    items
+        .iter()
+        .map(|item| {
+            let object = item.as_object().ok_or_else(|| {
+                EngineError::PolicyViolation(format!("{field} entries must be objects"))
+            })?;
+            Ok(ResourceVersionRef {
+                resource_id: required_map_str(object, "resourceId")?.to_owned(),
+                version_id: required_map_str(object, "versionId")?.to_owned(),
+                content_hash: object
+                    .get("contentHash")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+            })
+        })
+        .collect()
+}
+
+fn literal_args(value: Option<&Value>) -> Result<Vec<String>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let items = value
+        .as_array()
+        .ok_or_else(|| EngineError::PolicyViolation("argsTemplate must be an array".to_owned()))?;
+    if items.len() > 64 {
+        return Err(EngineError::PolicyViolation(
+            "argsTemplate may contain at most 64 entries".to_owned(),
+        ));
+    }
+    items
+        .iter()
+        .map(|item| {
+            let object = item.as_object().ok_or_else(|| {
+                EngineError::PolicyViolation("argsTemplate entries must be objects".to_owned())
+            })?;
+            if object.len() != 1 || !object.contains_key("literal") {
+                return Err(EngineError::PolicyViolation(
+                    "argsTemplate entries must be literal-only in this phase".to_owned(),
+                ));
+            }
+            required_map_str(object, "literal").map(ToOwned::to_owned)
+        })
+        .collect()
+}
+
 fn child_string_array(
     request: &serde_json::Map<String, Value>,
     manifest: &serde_json::Map<String, Value>,
@@ -1413,6 +2103,60 @@ fn ensure_subset(child: &[String], parent: &[String], label: &str) -> Result<()>
         }
     }
     Ok(())
+}
+
+fn ensure_same_set(child: &[String], parent: &[String], label: &str) -> Result<()> {
+    ensure_subset(child, parent, label)?;
+    ensure_subset(parent, child, label)?;
+    Ok(())
+}
+
+fn risk_label(risk: RiskLevel) -> &'static str {
+    match risk {
+        RiskLevel::Low => "low",
+        RiskLevel::Medium => "medium",
+        RiskLevel::High => "high",
+        RiskLevel::Critical => "critical",
+    }
+}
+
+fn ensure_path_within_grant_roots(path: &str, roots: &[String]) -> Result<()> {
+    if roots.iter().any(|root| root == "*") {
+        return Ok(());
+    }
+    let path = canonical_path_lossy(path)?;
+    for root in roots {
+        let root = canonical_path_lossy(root)?;
+        if path.starts_with(&root) {
+            return Ok(());
+        }
+    }
+    Err(EngineError::PolicyViolation(format!(
+        "materialized executable {} is outside activation fileRoots",
+        path.display()
+    )))
+}
+
+fn canonical_path_lossy(path: &str) -> Result<PathBuf> {
+    let path = PathBuf::from(path);
+    if path.exists() {
+        path.canonicalize().map_err(|error| {
+            EngineError::PolicyViolation(format!(
+                "failed to canonicalize materialized path {}: {error}",
+                path.display()
+            ))
+        })
+    } else if path.is_absolute() {
+        Ok(path)
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .map_err(|error| {
+                EngineError::PolicyViolation(format!(
+                    "failed to resolve relative materialized path: {error}"
+                ))
+            })
+    }
 }
 
 fn parse_effect(value: &str) -> Result<EffectClass> {
@@ -1602,7 +2346,7 @@ fn resource_scope_and_token(invocation: &Invocation) -> Result<(EngineResourceSc
     }
 }
 
-fn next_config_revision(host: &dyn PrimitiveRuntimeHost, resource_id: &str) -> Result<u64> {
+fn next_config_revision(host: &ModulePrimitiveHandler, resource_id: &str) -> Result<u64> {
     Ok(host
         .inspect_resource(resource_id)?
         .and_then(|inspection| current_payload(&inspection))
@@ -1632,7 +2376,7 @@ fn activation_resource_id(scope: &str, package_id: &str) -> String {
 }
 
 fn require_inspection(
-    host: &dyn PrimitiveRuntimeHost,
+    host: &ModulePrimitiveHandler,
     resource_id: &str,
     expected_kind: &str,
 ) -> Result<EngineResourceInspection> {
@@ -1653,6 +2397,19 @@ fn require_inspection(
 
 fn current_payload(inspection: &EngineResourceInspection) -> Option<Value> {
     current_version(inspection).map(|version| version.payload.clone())
+}
+
+fn current_payload_from_json_inspection(inspection: &Value) -> Option<&Value> {
+    let current = inspection
+        .get("resource")?
+        .get("currentVersionId")?
+        .as_str()?;
+    inspection
+        .get("versions")?
+        .as_array()?
+        .iter()
+        .find(|version| version.get("versionId").and_then(Value::as_str) == Some(current))?
+        .get("payload")
 }
 
 fn current_version(inspection: &EngineResourceInspection) -> Option<&EngineResourceVersion> {
@@ -1696,7 +2453,7 @@ fn resource_ref_from_version(version: &EngineResourceVersion, kind: &str, role: 
 }
 
 fn filter_resources_by_package(
-    host: &dyn PrimitiveRuntimeHost,
+    host: &ModulePrimitiveHandler,
     resources: Vec<EngineResource>,
     package_id: Option<&str>,
 ) -> Result<Vec<Value>> {
@@ -1724,7 +2481,7 @@ fn filter_resources_by_package(
 }
 
 fn link_if_possible(
-    host: &mut dyn PrimitiveRuntimeHost,
+    host: &ModulePrimitiveHandler,
     source: &str,
     target: &str,
     relation: &str,

@@ -23,8 +23,7 @@ use super::compensation::{EngineCompensationRecord, compensation_record};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
-    WorkerId,
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TriggerId, TriggerTypeId, WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation, InvocationResult};
 use super::leases::{AcquireResourceLease, EngineResourceLease};
@@ -105,9 +104,16 @@ impl EngineHostHandle {
     /// Wrap an initialized host.
     #[must_use]
     fn from_host(host: EngineHost) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(host)),
-        }
+        let stores = host.primitives.clone();
+        let handle = Self::from_inner(Arc::new(Mutex::new(host)));
+        stores
+            .install_engine_host(Arc::downgrade(&handle.inner))
+            .expect("engine host handle is installed exactly once");
+        handle
+    }
+
+    pub(in crate::engine) fn from_inner(inner: Arc<Mutex<EngineHost>>) -> Self {
+        Self { inner }
     }
 
     /// Register or update a worker through the host boundary.
@@ -304,6 +310,11 @@ impl EngineHostHandle {
         self.inner.lock().await.catalog.inspect_worker(id)
     }
 
+    /// Return whether a worker is a volatile runtime registration.
+    pub async fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool> {
+        self.inner.lock().await.catalog.worker_is_volatile(id)
+    }
+
     /// Inspect a trigger through the host boundary.
     pub async fn inspect_trigger(&self, id: &TriggerId) -> Result<TriggerDefinition> {
         self.inner.lock().await.catalog.inspect_trigger(id)
@@ -364,7 +375,7 @@ impl EngineHostHandle {
         if invocation.function_id.namespace() == ENGINE_WORKER_ID {
             return self.inner.lock().await.invoke(invocation).await;
         }
-        if is_host_dispatched_primitive_namespace(invocation.function_id.namespace()) {
+        if is_host_dispatched_primitive_function(&invocation.function_id) {
             return self.inner.lock().await.invoke(invocation).await;
         }
 
@@ -964,7 +975,7 @@ impl EngineHostHandle {
         let child = if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
             let mut host = self.inner.lock().await;
             host.catalog.prepare_sync_invocation(child)
-        } else if is_host_dispatched_primitive_namespace(child.function_id.namespace()) {
+        } else if is_host_dispatched_primitive_function(&child.function_id) {
             PreparedSyncInvocationDecision::Finished(Box::new(
                 self.inner
                     .lock()
@@ -1630,7 +1641,7 @@ impl EngineHost {
     /// Invoke a function through the host.
     pub async fn invoke(&mut self, invocation: Invocation) -> InvocationResult {
         if invocation.function_id.namespace() != ENGINE_WORKER_ID {
-            if is_host_dispatched_primitive_namespace(invocation.function_id.namespace()) {
+            if is_host_dispatched_primitive_function(&invocation.function_id) {
                 return self.invoke_sync_host_dispatched_primitive(invocation);
             }
             return self.catalog.invoke_sync(invocation).await;
@@ -1739,7 +1750,7 @@ impl EngineHost {
         };
         let child = if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
             self.catalog.prepare_sync_invocation(child)
-        } else if is_host_dispatched_primitive_namespace(child.function_id.namespace()) {
+        } else if is_host_dispatched_primitive_function(&child.function_id) {
             PreparedSyncInvocationDecision::Finished(Box::new(
                 self.invoke_sync_host_dispatched_primitive(child),
             ))
@@ -1958,8 +1969,7 @@ impl EngineHost {
 
     async fn meta_invoke_child(&mut self, invocation: &Invocation) -> Result<Value> {
         let child = delegated_child_invocation(invocation)?;
-        let child_result = if is_host_dispatched_primitive_namespace(child.function_id.namespace())
-        {
+        let child_result = if is_host_dispatched_primitive_function(&child.function_id) {
             self.invoke_sync_host_dispatched_primitive(child)
         } else {
             self.catalog.invoke_sync(child).await
@@ -2239,40 +2249,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
             .update(request)
-    }
-
-    fn link_resources(
-        &mut self,
-        request: super::resources::LinkResources,
-    ) -> Result<super::resources::EngineResourceLink> {
-        self.primitives
-            .resources
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
-            .link(request)
-    }
-
-    fn derive_grant(
-        &mut self,
-        request: super::grants::DeriveGrant,
-    ) -> Result<super::grants::EngineGrant> {
-        self.primitives
-            .grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .derive(request)
-    }
-
-    fn revoke_grant(
-        &mut self,
-        grant_id: &AuthorityGrantId,
-        trace_id: TraceId,
-    ) -> Result<super::grants::EngineGrant> {
-        self.primitives
-            .grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .revoke(grant_id, trace_id)
     }
 
     fn list_grants(
@@ -3016,6 +2992,11 @@ fn grant_id(value: &str) -> Result<AuthorityGrantId> {
 fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
     matches!(
         namespace,
-        "catalog" | "worker" | "control" | "observability" | "storage" | "ui" | "module"
+        "catalog" | "worker" | "control" | "observability" | "storage" | "ui"
     )
+}
+
+fn is_host_dispatched_primitive_function(function_id: &FunctionId) -> bool {
+    function_id.as_str() != "worker::spawn"
+        && is_host_dispatched_primitive_namespace(function_id.namespace())
 }

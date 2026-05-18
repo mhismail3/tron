@@ -1,8 +1,8 @@
-# Module Package Activation And Operator Action Phase
+# Package Runtime Execution And Operator Integrity Phase
 
 ## Implementation Checkpoint
 
-Implemented in the current substrate as a resource-native package lifecycle:
+Implemented in the current substrate as the executable package runtime path:
 
 - built-in `worker_package`, `module_config`, and `activation_record` resource
   type definitions;
@@ -11,10 +11,20 @@ Implemented in the current substrate as a resource-native package lifecycle:
   `module::disable`, `module::upgrade`, `module::rollback`, and
   `module::quarantine`;
 - manifest validation for digest/provenance, namespace ownership, mutating
-  idempotency, resource-backed durable outputs, config schema, risk/effect, and
-  grant ceiling;
-- activation grant derivation through the engine grant store and registered
-  worker capability validation against the manifest;
+  idempotency, resource-backed durable outputs, config schema, risk/effect,
+  grant ceiling, and `local_process` runtime entrypoint shape;
+- `module::*` execution moved off the sync host-dispatched primitive path so
+  `module::activate`, `module::upgrade`, and `module::rollback` can compose
+  child invocations without holding the host lock;
+- activation grant derivation for existing/built-in workers and canonical child
+  `worker::spawn` composition for digest-pinned `local_process` packages;
+- materialized executable refs and hashes verified before local process spawn
+  payloads are built;
+- activation records now include spawn lineage/result, health invocation ids,
+  integrity diagnostics, worker lifecycle, supersedes, and rollback target
+  fields;
+- `module::inspect_package` now reports digest, file hash, config, activation,
+  grant, worker, registered capability, and health diagnostics;
 - read-only control projections for module packages/configs/activations and
   server-authored generated UI support for package/config/activation targets;
 - iOS Engine Console decoding and rendering of module package/config/activation
@@ -23,6 +33,22 @@ Implemented in the current substrate as a resource-native package lifecycle:
 This checkpoint intentionally does not add remote marketplace installation,
 dynamic UI catalogs, a package table, `control::act`, client-side policy, or a
 storage generation bump.
+
+## Next Phase Candidate
+
+The next feature phase should start from this executable substrate and focus on
+operator integrity surfaces and long-running health:
+
+- server-authored generated surfaces for package diagnostics, failed activation
+  evidence, rollback targets, and quarantine actions;
+- recurring health checks that write evidence resources and never keep a
+  separate health table;
+- activation recovery for interrupted spawns, including lease expiry and
+  idempotency replay inspection;
+- stronger package provenance for local digest-pinned packages, including
+  optional signature verification once the package source model exists;
+- full integration coverage with a real local worker process rather than only
+  the in-memory recording spawn handler.
 
 ## Summary
 
