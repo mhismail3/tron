@@ -62,6 +62,14 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         &session_id,
         &run_id,
     );
+    let agent_result_refs = create_agent_result_resource(
+        &engine_host,
+        engine_causality.as_ref(),
+        &session_id,
+        &run_id,
+        &result,
+    )
+    .await;
 
     run_cleanup.release();
     emit_session_update(&session_manager, &event_store, &broadcast, &session_id).await;
@@ -84,6 +92,7 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
             "interrupted": result.interrupted,
             "stopReason": format!("{:?}", result.stop_reason),
             "error": result.error,
+            "resourceRefs": agent_result_refs.unwrap_or_default(),
         }),
     )
     .await;
@@ -98,6 +107,72 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         engine_causality.as_ref(),
     )
     .await;
+}
+
+async fn create_agent_result_resource(
+    engine_host: &crate::engine::EngineHostHandle,
+    causality: Option<&PromptEngineCausality>,
+    session_id: &str,
+    run_id: &str,
+    result: &crate::domains::agent::runner::types::RunResult,
+) -> Option<Vec<serde_json::Value>> {
+    let mut context = causality
+        .map(|causality| causality.context.clone())
+        .unwrap_or_else(|| {
+            CausalContext::new(
+                ActorId::new("system:agent").expect("valid actor id"),
+                ActorKind::System,
+                AuthorityGrantId::new("engine-system").expect("valid grant"),
+                TraceId::generate(),
+            )
+        });
+    context.actor_id = ActorId::new("system:agent").expect("valid actor id");
+    context.actor_kind = ActorKind::System;
+    context.authority_grant_id = AuthorityGrantId::new("engine-system").expect("valid grant");
+    if context.session_id.is_none() {
+        context = context.with_session_id(session_id.to_owned());
+    }
+    if let Some(causality) = causality {
+        context = context.with_parent_invocation(causality.invocation_id.clone());
+    }
+    context = context
+        .with_scope("resource.write")
+        .with_idempotency_key(format!("agent-result:{run_id}"));
+    let payload = serde_json::json!({
+        "kind": "agent_result",
+        "scope": "session",
+        "sessionId": session_id,
+        "payload": {
+            "message": result.error.clone().unwrap_or_default(),
+            "promotedRefs": [],
+            "decisionRefs": [],
+            "subgoalRefs": [],
+            "stopReason": format!("{:?}", result.stop_reason),
+            "tokenUsage": &result.total_token_usage,
+            "metadata": {
+                "runId": run_id,
+                "turnsExecuted": result.turns_executed,
+                "interrupted": result.interrupted,
+                "lastContextWindowTokens": result.last_context_window_tokens
+            }
+        }
+    });
+    let invocation = Invocation::new_sync(
+        FunctionId::new("resource::create").expect("valid function id"),
+        payload,
+        context,
+    );
+    let result = engine_host.invoke(invocation).await;
+    if let Some(error) = result.error {
+        warn!(?error, run_id, "failed to create agent_result resource");
+        return None;
+    }
+    result.value.and_then(|value| {
+        value
+            .get("resourceRefs")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+    })
 }
 
 async fn persist_interrupted_if_needed(

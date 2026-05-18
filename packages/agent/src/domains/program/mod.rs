@@ -42,7 +42,9 @@ use serde_json::{Value, json};
 
 use crate::domains::capability::types::CapabilityProgramRunRecord;
 use crate::domains::worker::{DomainRegistrationContext, DomainWorkerModule};
-use crate::engine::Invocation;
+use crate::engine::{
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
+};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
@@ -108,6 +110,14 @@ pub(crate) async fn run_javascript_value(
     })
     .await?;
     result.trace_id = trace_id.clone();
+    if !result.artifacts.is_empty() {
+        return Err(CapabilityError::Custom {
+            code: "PROGRAM_ARTIFACTS_REQUIRE_RESOURCE_REFS".to_owned(),
+            message: "program::run_javascript no longer accepts loose artifacts; use resource capabilities from the program body".to_owned(),
+            details: None,
+        });
+    }
+    let resource_refs = create_execution_output_resource(deps, invocation, &result).await?;
     deps.record_program_run(CapabilityProgramRunRecord {
         program_run_id: result.program_run_id.clone(),
         parent_invocation_id: parent_invocation_id.clone(),
@@ -154,8 +164,92 @@ pub(crate) async fn run_javascript_value(
         object.insert("rootInvocationId".to_owned(), json!(root_invocation_id));
         object.insert("bindingDecisionId".to_owned(), json!(binding_decision_id));
         object.insert("compensationAttempts".to_owned(), json!([]));
+        object.insert("resourceRefs".to_owned(), Value::Array(resource_refs));
+        object.remove("artifacts");
     }
     Ok(result_value)
+}
+
+async fn create_execution_output_resource(
+    deps: &Deps,
+    invocation: &Invocation,
+    result: &runtime::ProgramRunResult,
+) -> Result<Vec<Value>, CapabilityError> {
+    let created = invoke_resource_capability(
+        deps,
+        invocation,
+        "resource::create",
+        json!({
+            "kind": "execution_output",
+            "payload": {
+                "stdoutPreview": serde_json::to_string(&result.output).unwrap_or_default(),
+                "stderrPreview": result.error.as_ref().map(Value::to_string).unwrap_or_default(),
+                "logPreview": result.logs.join("\n"),
+                "exitCode": if result.status == "ok" { 0 } else { 1 },
+                "durationMs": 0,
+                "timedOut": false,
+                "outputTruncated": false,
+                "redactionPolicy": {"preview": "bounded"},
+                "metadata": {
+                    "programRunId": result.program_run_id.as_str(),
+                    "status": result.status.as_str(),
+                    "childInvocations": &result.child_invocations,
+                    "selectedImplementations": &result.selected_implementations
+                }
+            }
+        }),
+    )
+    .await?;
+    Ok(created
+        .get("resourceRefs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+async fn invoke_resource_capability(
+    deps: &Deps,
+    parent: &Invocation,
+    function_id: &str,
+    payload: Value,
+) -> Result<Value, CapabilityError> {
+    let mut causal = CausalContext::new(
+        ActorId::new("system:program").map_err(engine_capability_error)?,
+        ActorKind::System,
+        AuthorityGrantId::new("engine-system").map_err(engine_capability_error)?,
+        TraceId::new(parent.causal_context.trace_id.as_str()).map_err(engine_capability_error)?,
+    )
+    .with_parent_invocation(parent.id.clone())
+    .with_scope("resource.write")
+    .with_idempotency_key(format!("{}:{}", parent.id.as_str(), function_id));
+    if let Some(session_id) = &parent.causal_context.session_id {
+        causal = causal.with_session_id(session_id.clone());
+    }
+    if let Some(workspace_id) = &parent.causal_context.workspace_id {
+        causal = causal.with_workspace_id(workspace_id.clone());
+    }
+    let result = deps
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(function_id).map_err(engine_capability_error)?,
+            payload,
+            causal,
+        ))
+        .await;
+    if let Some(error) = result.error {
+        return Err(engine_capability_error(error));
+    }
+    result.value.ok_or_else(|| CapabilityError::Internal {
+        message: format!("{function_id} returned no value"),
+    })
+}
+
+fn engine_capability_error(error: impl std::fmt::Display) -> CapabilityError {
+    CapabilityError::Custom {
+        code: "ENGINE_RESOURCE_MATERIALIZATION_FAILED".to_owned(),
+        message: error.to_string(),
+        details: None,
+    }
 }
 
 fn program_runtime_error(error: runtime::ProgramRuntimeError) -> CapabilityError {

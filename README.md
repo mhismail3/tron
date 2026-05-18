@@ -90,17 +90,17 @@ UI harness.
 
 The implementation target for the modular-engine rebuild lives in
 [`docs/collapsed-modular-engine-architecture.md`](docs/collapsed-modular-engine-architecture.md).
-The next checkpoint plan is
+The current enforcement checkpoint is
 [`docs/modular-engine-next-phase-plan.md`](docs/modular-engine-next-phase-plan.md).
 The core rule is one substrate: workers invoke capabilities against typed
 resources under scoped grants. Artifacts, goals, claims, evidence, decisions,
 generated UI surfaces, module config, worker packages, secret refs, and
 materialized files are modeled as resource kinds rather than separate
-persistence planes. The current substrate slice adds engine-owned `grant::*`
-authority, built-in `artifact`, `goal`, `claim`, `evidence`, and `decision`
-resource type definitions, thin wrapper capabilities over the generic
-`resource::*` kernel, and output-resource audit observations for existing
-durable-output paths that are not yet resource-backed.
+persistence planes. The current substrate slice has engine-owned `grant::*`
+authority, built-in resource type definitions for artifacts, goals, claims,
+evidence, decisions, materialized files, patch proposals, execution outputs, and
+agent results, thin wrapper capabilities over the generic `resource::*` kernel,
+and resource-backed output enforcement for converted durable-output paths.
 
 ---
 
@@ -342,11 +342,14 @@ Important parity anchors are:
 | capability discovery/execution | `capability::search`, `capability::inspect`, `capability::execute` |
 
 `process::run` and `notifications::send` both have direct, low-overhead paths
-for safe/default use: the former skips the inspect round trip for classifier-
-approved read-only checks such as `date`, `git status`, and `git log`, defaults
-to the active session worktree/workspace when `cwd` is omitted, and accepts
-bounded timeout fields in milliseconds. The latter sends through the first-party
-notification delegate with an idempotency key and normal audit/event records.
+for safe/default use. `process::run` requires `executionMode`: classifier-
+approved read-only checks such as `date`, `git status`, and `git log` run
+directly with `executionMode = "read_only"`, while write-like commands must use
+`executionMode = "sandbox_materialized"` with declared `expectedOutputs` that
+are materialized back through resource refs. It defaults to the active session
+worktree/workspace when `cwd` is omitted and accepts bounded timeout fields in
+milliseconds. `notifications::send` sends through the first-party notification
+delegate with an idempotency key and normal audit/event records.
 
 Capability identity is projected from the live catalog:
 
@@ -422,10 +425,12 @@ allowed contracts/implementations, and risk budget. Child approvals pause the
 run; programs cannot self-approve or recursively invoke program mode. Every run
 is recorded in the capability registry store with parent/root invocation ids,
 binding decision id, code/args hashes, limits, child invocations, selected
-implementations, approval state, artifacts, logs, compensation attempts, trace
-id, and final status.
+implementations, approval state, retained `execution_output` resource refs,
+logs, compensation attempts, trace id, and final status. Loose program
+`artifacts` are rejected; durable outputs must be created by child resource or
+materialization capabilities.
 
-Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats `cd <dir> && git status/log/diff/show` as read-only when every segment is otherwise safe. Mutating or publishing git commands still require inspection and approval.
+Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats `cd <dir> && git status/log/diff/show` as read-only when every segment is otherwise safe. Mutating or publishing git commands still require inspection and approval, and write-like process commands must run in sandbox materialization mode with declared outputs.
 
 The same capability worker also registers operator/admin functions for native
 clients and the Engine Console. These are normal engine catalog functions, not
@@ -639,7 +644,8 @@ as the original `execute` result. Broad first-party capabilities may declare a
 conditional approval contract: for example, `process::run` allows read-only
 checks such as `date`, `pwd`, `git status`, `git log`, and test/build commands
 without a prompt, while privileged, destructive, package-installing, source-control
-mutating, or file-redirection shell commands pause for user approval.
+mutating, or file-redirection shell commands require the sandbox materialization
+request shape and may pause for user approval before execution.
 
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` capability frames when iOS clients are subscribed.
 
@@ -910,8 +916,8 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 | `engine_catalog_changes` | Live catalog audit trail for worker/function/trigger registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_approvals`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for artifacts, goals, claims, evidence, decisions, generated UI surfaces, module config, worker packages, secret refs, and materialized files |
-| `engine_output_audit_observations` | Temporary audit observations for known durable-output paths that do not yet return resource refs |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for artifacts, goals, claims, evidence, decisions, generated UI surfaces, module config, worker packages, secret refs, materialized files, patch proposals, execution outputs, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_output_audit_observations` | Read-only conversion telemetry for known durable-output paths; converted filesystem/process/program/agent paths must return canonical `resourceRefs` instead of using audit as acceptance |
 | `capability_plugins`, `capability_implementations`, `capability_bindings` | Durable capability registry layer over the live catalog: plugin manifests, concrete implementations, conformance state, signature status, and policy-selected bindings |
 | `capability_index_documents`, `capability_vector_metadata` | Search documents and persistent local vector-index metadata for hybrid capability search |
 | `capability_inspection_handles`, `capability_binding_decisions`, `capability_audit_events`, `capability_pause_records`, `capability_run_records`, `capability_program_runs` | Fresh inspect handles plus auditable records for binding resolution, pauses, async runs, program runs, and search/inspect/execute lifecycle decisions |

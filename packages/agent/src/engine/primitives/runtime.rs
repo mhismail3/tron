@@ -1195,6 +1195,7 @@ fn invocation_record_value(record: &InvocationRecord, include_full_payloads: boo
         }),
         "resourceLeaseIds": &record.resource_lease_ids,
         "compensationStatus": record.compensation_status.as_deref(),
+        "producedResourceRefs": &record.produced_resource_refs,
         "replayedFrom": record.replayed_from.as_ref().map(InvocationId::as_str),
         "succeeded": record.succeeded,
         "error": record.error.as_ref().map(error_value),

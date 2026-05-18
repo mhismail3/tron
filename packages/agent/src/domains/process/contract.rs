@@ -6,8 +6,8 @@ use serde_json::json;
 use crate::domains::catalog::CapabilitySpec;
 use crate::domains::contract::CapabilityContract;
 use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
+    CompensationContract, CompensationKind, DurableOutputContract, EffectClass,
+    IdempotencyContract, ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["process.output", "process.status"];
@@ -22,12 +22,26 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some("process.run"),
         )
-        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. If cwd is omitted, Tron uses the active session worktree when available, then the session workspace.")
+        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. Read-only commands run directly with executionMode=read_only; write-like commands must run with executionMode=sandbox_materialized and declared expected outputs. If cwd is omitted, Tron uses the active session worktree when available, then the session workspace.")
         .tags(vec!["shell", "bash", "zsh", "command", "terminal", "date", "git status", "test", "build", "process"])
         .request_schema(json!({
             "additionalProperties": false,
             "properties": {
                 "command": {"type": "string", "description": "Shell command to run, for example date, git status --short --branch, cargo test, or rg term path."},
+                "executionMode": {"type": "string", "enum": ["read_only", "sandbox_materialized"]},
+                "expectedOutputs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["path"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "path": {"type": "string"},
+                            "targetPath": {"type": "string"}
+                        }
+                    }
+                },
+                "retainOutput": {"type": "boolean"},
                 "cwd": {"type": "string", "description": "Working directory. Omit this to use the active session worktree/workspace. Prefer this field over prefixing commands with cd."},
                 "env": {"additionalProperties": true, "type": "object"},
                 "shell": {"type": "string", "enum": ["bash", "zsh", "sh"]},
@@ -37,7 +51,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "sessionId": {"type": "string"},
                 "workspaceId": {"type": "string"}
             },
-            "required": ["command"],
+            "required": ["command", "executionMode"],
             "type": "object"
         }))
         .response_schema(json!({
@@ -48,12 +62,20 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "exitCode": {"type": "integer"},
                 "durationMs": {"type": "integer"},
                 "timedOut": {"type": "boolean"},
-                "outputTruncated": {"type": "boolean"}
+                "outputTruncated": {"type": "boolean"},
+                "resourceRefs": resource_refs_schema()
             },
             "required": ["stdout", "stderr", "exitCode", "durationMs", "timedOut", "outputTruncated"],
             "type": "object"
         }))
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .output_contract(DurableOutputContract::Conditional {
+            classifier: "process_resource_output_required".to_owned(),
+            resource_backed_contract: Box::new(DurableOutputContract::resource_backed([
+                "materialized_file",
+                "execution_output",
+            ])),
+        })
         .resource_lease(ResourceLeaseRequirement::exclusive_template(
             "process",
             "process:{sessionId}",
@@ -89,7 +111,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "required": true,
                 "ttlMs": 600000
             },
-            "rollbackOrCompensation": "external processes may mutate host state and require manual compensation",
+            "rollbackOrCompensation": "write-like commands run in an engine sandbox and materialize declared outputs through resources; external side effects outside that contract require manual compensation",
             "streamTopics": STREAM_TOPICS,
             "version": 1
         }))
@@ -97,16 +119,35 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .examples(vec![json!({
             "mode": "invoke",
             "contractId": "process::run",
-            "payload": {"command": "date"},
+            "payload": {"command": "date", "executionMode": "read_only"},
             "idempotencyKey": "date-check-<turn>",
             "reason": "Check the current local date/time."
         }), json!({
             "mode": "invoke",
             "contractId": "process::run",
-            "payload": {"command": "git status --short --branch && git log --oneline -3"},
+            "payload": {"command": "git status --short --branch && git log --oneline -3", "executionMode": "read_only"},
             "idempotencyKey": "git-status-<turn>",
             "reason": "Check git state in the active session worktree."
         })])
         .build()?,
     ])
+}
+
+fn resource_refs_schema() -> serde_json::Value {
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "required": ["resourceId", "kind", "role"],
+            "additionalProperties": false,
+            "properties": {
+                "resourceId": {"type": "string"},
+                "kind": {"type": "string"},
+                "versionId": {"type": "string"},
+                "role": {"type": "string"},
+                "contentHash": {"type": "string"},
+                "relation": {"type": "string"}
+            }
+        }
+    })
 }

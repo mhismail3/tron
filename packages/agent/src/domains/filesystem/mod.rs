@@ -11,6 +11,9 @@ pub(crate) use deps::Deps;
 use crate::domains::filesystem::service as filesystem_service;
 use crate::domains::worker::DomainRegistrationContext;
 use crate::domains::worker::DomainWorkerModule;
+use crate::engine::{
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
+};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::opt_bool;
@@ -64,36 +67,172 @@ async fn file_read_value(params: Option<&Value>, _deps: &Deps) -> Result<Value, 
 }
 
 async fn filesystem_write_file_value(
-    params: Option<&Value>,
-    _deps: &Deps,
+    invocation: &Invocation,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
     let content = require_string_param(params, "content")?;
-    run_blocking_task("filesystem::write_file", move || {
+    let mut value = run_blocking_task("filesystem::write_file", move || {
         filesystem_service::write_file(&path, &content)
     })
-    .await
+    .await?;
+    attach_materialized_file_ref(deps, invocation, &mut value, "updated").await?;
+    Ok(value)
 }
 
 async fn filesystem_edit_file_value(
-    params: Option<&Value>,
-    _deps: &Deps,
+    invocation: &Invocation,
+    deps: &Deps,
+    role: &str,
 ) -> Result<Value, CapabilityError> {
+    let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
+    let path_for_ref = path.clone();
     let old_string = require_string_param(params, "oldString")?;
     let new_string = require_string_param(params, "newString")?;
     let replace_all = opt_bool(params, "replaceAll").unwrap_or(false);
-    run_blocking_task("filesystem::edit_file", move || {
+    let mut value = run_blocking_task("filesystem::edit_file", move || {
         filesystem_service::edit_file(&path, &old_string, &new_string, replace_all)
     })
-    .await
+    .await?;
+    let path_for_ref = value["path"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or(path_for_ref);
+    attach_patch_and_materialized_file_refs(deps, invocation, &mut value, &path_for_ref, role)
+        .await?;
+    Ok(value)
 }
 
 async fn filesystem_apply_patch_value(
-    params: Option<&Value>,
+    invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
-    filesystem_edit_file_value(params, deps).await
+    filesystem_edit_file_value(invocation, deps, "applied_patch").await
+}
+
+async fn attach_materialized_file_ref(
+    deps: &Deps,
+    invocation: &Invocation,
+    value: &mut Value,
+    role: &str,
+) -> Result<(), CapabilityError> {
+    let path =
+        value
+            .get("path")
+            .and_then(Value::as_str)
+            .ok_or_else(|| CapabilityError::Internal {
+                message: "filesystem mutation result missing path".to_owned(),
+            })?;
+    let content = if std::path::Path::new(path).is_dir() {
+        String::new()
+    } else {
+        std::fs::read_to_string(path).map_err(|error| CapabilityError::Internal {
+            message: format!("read materialized filesystem output: {error}"),
+        })?
+    };
+    let result = invoke_resource_capability(
+        deps,
+        invocation,
+        "materialized_file::update",
+        serde_json::json!({
+            "path": path,
+            "content": content,
+        }),
+    )
+    .await?;
+    let refs = result
+        .get("resourceRefs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|mut resource_ref| {
+            resource_ref["role"] = serde_json::json!(role);
+            resource_ref
+        })
+        .collect::<Vec<_>>();
+    value["resourceRefs"] = Value::Array(refs);
+    Ok(())
+}
+
+async fn attach_patch_and_materialized_file_refs(
+    deps: &Deps,
+    invocation: &Invocation,
+    value: &mut Value,
+    path: &str,
+    role: &str,
+) -> Result<(), CapabilityError> {
+    attach_materialized_file_ref(deps, invocation, value, "updated_file").await?;
+    let patch = invoke_resource_capability(
+        deps,
+        invocation,
+        "patch::propose",
+        serde_json::json!({
+            "targetPath": path,
+            "diff": value.get("diff").cloned().unwrap_or_else(|| serde_json::json!("")),
+        }),
+    )
+    .await?;
+    let mut refs = value
+        .get("resourceRefs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(patch_refs) = patch.get("resourceRefs").and_then(Value::as_array) {
+        refs.extend(patch_refs.iter().cloned().map(|mut resource_ref| {
+            resource_ref["role"] = serde_json::json!(role);
+            resource_ref
+        }));
+    }
+    value["resourceRefs"] = Value::Array(refs);
+    Ok(())
+}
+
+async fn invoke_resource_capability(
+    deps: &Deps,
+    parent: &Invocation,
+    function_id: &str,
+    payload: Value,
+) -> Result<Value, CapabilityError> {
+    let mut causal = CausalContext::new(
+        ActorId::new("system:filesystem").map_err(engine_capability_error)?,
+        ActorKind::System,
+        AuthorityGrantId::new("engine-system").map_err(engine_capability_error)?,
+        TraceId::new(parent.causal_context.trace_id.as_str()).map_err(engine_capability_error)?,
+    )
+    .with_parent_invocation(parent.id.clone())
+    .with_scope("resource.write")
+    .with_idempotency_key(format!("{}:{}", parent.id.as_str(), function_id));
+    if let Some(session_id) = &parent.causal_context.session_id {
+        causal = causal.with_session_id(session_id.clone());
+    }
+    if let Some(workspace_id) = &parent.causal_context.workspace_id {
+        causal = causal.with_workspace_id(workspace_id.clone());
+    }
+    let result = deps
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(function_id).map_err(engine_capability_error)?,
+            payload,
+            causal,
+        ))
+        .await;
+    if let Some(error) = result.error {
+        return Err(engine_capability_error(error));
+    }
+    result.value.ok_or_else(|| CapabilityError::Internal {
+        message: format!("{function_id} returned no value"),
+    })
+}
+
+fn engine_capability_error(error: impl std::fmt::Display) -> CapabilityError {
+    CapabilityError::Custom {
+        code: "ENGINE_RESOURCE_MATERIALIZATION_FAILED".to_owned(),
+        message: error.to_string(),
+        details: None,
+    }
 }
 
 async fn filesystem_diff_value(
@@ -172,12 +311,15 @@ async fn filesystem_search_text_value(
 }
 
 async fn filesystem_create_dir_value(
-    params: Option<&Value>,
-    _deps: &Deps,
+    invocation: &Invocation,
+    deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
-    run_blocking_task("filesystem::create_dir", move || {
+    let mut value = run_blocking_task("filesystem::create_dir", move || {
         filesystem_service::create_dir(&path)
     })
-    .await
+    .await?;
+    attach_materialized_file_ref(deps, invocation, &mut value, "created_directory").await?;
+    Ok(value)
 }

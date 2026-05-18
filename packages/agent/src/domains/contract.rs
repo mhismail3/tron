@@ -14,9 +14,9 @@ use serde_json::{Map, Value, json};
 
 use super::catalog::{CapabilitySpec, TransportIdempotencyMode};
 use crate::engine::{
-    AuthorityRequirement, CompensationContract, EffectClass, FunctionDefinition, FunctionId,
-    IdempotencyContract, Provenance, ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
-    VisibilityScope, WorkerId,
+    AuthorityRequirement, CompensationContract, DurableOutputContract, EffectClass,
+    FunctionDefinition, FunctionId, IdempotencyContract, Provenance, ResourceLeaseRequirement,
+    Result as EngineResult, RiskLevel, VisibilityScope, WorkerId,
 };
 
 /// Fully-owned contract record supplied by one domain worker.
@@ -53,6 +53,8 @@ pub(crate) struct CapabilityContract {
     pub(crate) resource_lease: Option<ResourceLeaseRequirement>,
     /// Durable compensation contract.
     pub(crate) compensation: Option<CompensationContract>,
+    /// Durable output contract enforced after handler execution.
+    pub(crate) output_contract: DurableOutputContract,
     /// Discovery-visible high-risk contract metadata.
     pub(crate) high_risk_contract: Option<Value>,
     /// Stream topics emitted by the function.
@@ -104,6 +106,7 @@ impl CapabilityContract {
             idempotency: None,
             resource_lease: None,
             compensation: None,
+            output_contract: DurableOutputContract::None,
             high_risk_contract: None,
             stream_topics: Vec::new(),
             description: None,
@@ -180,6 +183,12 @@ impl CapabilityContract {
         self
     }
 
+    /// Attach durable output contract metadata.
+    pub(crate) fn output_contract(mut self, contract: DurableOutputContract) -> Self {
+        self.output_contract = contract;
+        self
+    }
+
     /// Attach high-risk discovery metadata.
     pub(crate) fn high_risk_contract(mut self, contract: Value) -> Self {
         self.high_risk_contract = Some(contract);
@@ -240,6 +249,7 @@ impl CapabilityContract {
             idempotency: self.idempotency,
             resource_lease: self.resource_lease,
             compensation: self.compensation,
+            output_contract: self.output_contract,
             approval_required: self.approval_required,
             high_risk_contract: self.high_risk_contract,
             stream_topics: self.stream_topics,
@@ -282,6 +292,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     if let Some(contract) = &spec.compensation {
         definition = definition.with_compensation(contract.clone());
     }
+    definition = definition.with_output_contract(spec.output_contract.clone());
     if let Some(schema) = &spec.request_schema {
         definition = definition.with_request_schema(schema.clone());
     }
@@ -361,6 +372,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         "idempotencyMode": spec.idempotency_mode.as_str(),
         "domainModule": spec.domain_module,
         "highRiskContract": spec.high_risk_contract,
+        "outputContract": spec.output_contract,
         "streamTopics": spec.stream_topics,
         "lifecycle": spec.lifecycle,
         "stopsTurn": stops_turn,

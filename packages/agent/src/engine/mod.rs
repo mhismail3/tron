@@ -48,9 +48,9 @@
 //!   evidence, decisions, generated UI surfaces, worker packages, and
 //!   materialized files should be modeled as versioned resources with links and
 //!   events instead of separate persistence planes;
-//! - output-resource audit observations measure current durable-output paths
-//!   that do not yet return resource refs, allowing later enforcement without
-//!   guessing;
+//! - durable-output capabilities declare output contracts, finish validation
+//!   requires canonical resource refs, and output-audit observations remain a
+//!   read-only measurement surface for paths that are still being converted;
 //! - the trigger runtime records trigger metadata, transport/domain authority
 //!   scopes, and prepare failures before invoking in-process functions, and
 //!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;
@@ -167,12 +167,12 @@ pub use streams::{
 pub use triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 pub use types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
-    CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode, EffectClass,
-    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance, ReplayBehavior,
-    ResourceLeaseFailureBehavior, ResourceLeaseRequirement, RiskLevel, TriggerDefinition,
-    TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition, WorkerKind,
-    WorkerLifecycleState, WorkerRevision,
+    CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode,
+    DurableOutputContract, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
+    IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance,
+    ReplayBehavior, ResourceLeaseFailureBehavior, ResourceLeaseRequirement, RiskLevel,
+    TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
+    WorkerKind, WorkerLifecycleState, WorkerRevision,
 };
 
 #[cfg(test)]

@@ -517,6 +517,80 @@ fn modular_engine_storage_generation_is_clean_break() {
 }
 
 #[test]
+fn resource_materialization_enforcement_gates_stay_on() {
+    let crate_root = crate_root();
+    let process_contract =
+        std::fs::read_to_string(crate_root.join("src/domains/process/contract.rs"))
+            .expect("failed to read process contract");
+    assert!(
+        process_contract.contains("\"required\": [\"command\", \"executionMode\"]"),
+        "process::run must require executionMode so write-like commands cannot default to direct execution"
+    );
+    assert!(
+        process_contract.contains("\"executionMode\": \"read_only\""),
+        "process::run examples must not teach the retired no-executionMode request shape"
+    );
+    assert!(
+        process_contract.contains("process_resource_output_required")
+            && process_contract.contains("materialized_file")
+            && process_contract.contains("execution_output"),
+        "process::run must keep conditional resource-backed output enforcement"
+    );
+    let process_worker = std::fs::read_to_string(crate_root.join("src/domains/process/mod.rs"))
+        .expect("failed to read process worker");
+    assert!(
+        process_worker.contains("approval::run_requires_approval(&invocation.payload)")
+            && process_worker.contains("proven low-risk"),
+        "process::run read_only execution must use the strict low-risk classifier, not a write-like blacklist"
+    );
+
+    let filesystem_contract =
+        std::fs::read_to_string(crate_root.join("src/domains/filesystem/contract.rs"))
+            .expect("failed to read filesystem contract");
+    for function in [
+        "filesystem::create_dir",
+        "filesystem::write_file",
+        "filesystem::edit_file",
+        "filesystem::apply_patch",
+    ] {
+        assert!(
+            filesystem_contract.contains(function),
+            "filesystem contract must still expose {function}"
+        );
+    }
+    assert!(
+        filesystem_contract.contains("DurableOutputContract::resource_backed")
+            && filesystem_contract.contains("materialized_file")
+            && filesystem_contract.contains("patch_proposal"),
+        "filesystem mutating writes must remain resource-backed"
+    );
+
+    let program_contract =
+        std::fs::read_to_string(crate_root.join("src/domains/program/contract.rs"))
+            .expect("failed to read program contract");
+    assert!(
+        !program_contract.contains("\"artifacts\""),
+        "program::run_javascript contract must not reintroduce loose artifacts"
+    );
+    assert!(
+        program_contract.contains("execution_output") && program_contract.contains("resourceRefs"),
+        "program::run_javascript must publish retained output through execution_output resource refs"
+    );
+
+    let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
+        .expect("failed to read engine host");
+    for retired_audit_acceptance in [
+        "program_artifact_without_resource",
+        "agent_output_without_promoted_resource",
+    ] {
+        assert!(
+            !host.contains(retired_audit_acceptance),
+            "engine host must not accept {retired_audit_acceptance} as an audit-only output path"
+        );
+    }
+}
+
+#[test]
 fn retired_capability_event_surface_stays_deleted() {
     let repo_root = repo_root();
     let crate_root = crate_root();

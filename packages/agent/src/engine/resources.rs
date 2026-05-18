@@ -95,6 +95,49 @@ impl EngineResourceVersioningMode {
     }
 }
 
+/// Lifecycle of one immutable resource version.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EngineResourceVersionState {
+    /// Bytes and payload verified; this version may be current.
+    #[default]
+    Available,
+    /// Version was created by an interrupted or suspicious producer.
+    Quarantined,
+    /// Declared bytes, hash, or location are missing or inconsistent.
+    Damaged,
+    /// Version is intentionally no longer active.
+    Discarded,
+}
+
+impl EngineResourceVersionState {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Quarantined => "quarantined",
+            Self::Damaged => "damaged",
+            Self::Discarded => "discarded",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self> {
+        match value {
+            "available" => Ok(Self::Available),
+            "quarantined" => Ok(Self::Quarantined),
+            "damaged" => Ok(Self::Damaged),
+            "discarded" => Ok(Self::Discarded),
+            _ => Err(EngineError::LedgerFailure {
+                operation: "resource.version_state",
+                message: format!("unsupported resource version state {value}"),
+            }),
+        }
+    }
+
+    fn may_be_current(&self) -> bool {
+        matches!(self, Self::Available)
+    }
+}
+
 /// Resource type definition registered by a worker.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,6 +216,8 @@ pub struct EngineResourceVersion {
     pub parent_version_id: Option<String>,
     /// Hash of the payload JSON bytes.
     pub content_hash: String,
+    /// Version state.
+    pub state: EngineResourceVersionState,
     /// Version payload.
     pub payload: Value,
     /// Materialized locations for this version.
@@ -308,6 +353,8 @@ pub struct UpdateResource {
     pub lifecycle: Option<String>,
     /// New version payload.
     pub payload: Value,
+    /// Optional version state. Defaults to `available`.
+    pub state: Option<EngineResourceVersionState>,
     /// Locations for the new version.
     pub locations: Vec<EngineResourceLocation>,
     /// Trace id.
@@ -468,6 +515,108 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             vec!["evidence_for", "derived_from", "supports"],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
+        builtin_type(
+            "materialized_file",
+            "tron.resource.materialized_file.v1",
+            json!({
+                "type": "object",
+                "required": ["canonicalPath", "relativePath", "entryType", "contentHash", "sizeBytes"],
+                "additionalProperties": true,
+                "properties": {
+                    "canonicalPath": {"type": "string"},
+                    "relativePath": {"type": "string"},
+                    "entryType": {"type": "string", "enum": ["file", "directory"]},
+                    "content": {"type": "string"},
+                    "contentHash": {"type": "string"},
+                    "sizeBytes": {"type": "integer"},
+                    "mimeType": {"type": "string"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec![
+                "draft",
+                "materialized",
+                "promoted",
+                "discarded",
+                "damaged",
+                "quarantined",
+                "archived",
+            ],
+            vec!["applies_patch", "derived_from", "materializes"],
+            json!({"read": ["resource.read"], "write": ["resource.write"], "promote": ["resource.write"], "delete": ["resource.write"]}),
+        ),
+        builtin_type(
+            "patch_proposal",
+            "tron.resource.patch_proposal.v1",
+            json!({
+                "type": "object",
+                "required": ["targetPath", "diff", "status"],
+                "additionalProperties": true,
+                "properties": {
+                    "targetPath": {"type": "string"},
+                    "targetResourceId": {"type": "string"},
+                    "baseVersionId": {"type": "string"},
+                    "baseContentHash": {"type": "string"},
+                    "diff": {"type": "string"},
+                    "status": {"type": "string"},
+                    "result": {"type": "object"}
+                }
+            }),
+            vec![
+                "proposed",
+                "applied",
+                "merged",
+                "rejected",
+                "discarded",
+                "archived",
+            ],
+            vec!["applies_to", "produces", "derived_from"],
+            json!({"read": ["resource.read"], "write": ["resource.write"], "apply": ["resource.write"]}),
+        ),
+        builtin_type(
+            "execution_output",
+            "tron.resource.execution_output.v1",
+            json!({
+                "type": "object",
+                "required": ["exitCode", "durationMs", "timedOut", "outputTruncated"],
+                "additionalProperties": true,
+                "properties": {
+                    "stdoutPreview": {"type": "string"},
+                    "stderrPreview": {"type": "string"},
+                    "logPreview": {"type": "string"},
+                    "exitCode": {"type": "integer"},
+                    "durationMs": {"type": "integer"},
+                    "timedOut": {"type": "boolean"},
+                    "outputTruncated": {"type": "boolean"},
+                    "redactionPolicy": {"type": "object"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["retained", "discarded", "archived"],
+            vec!["produced_by", "derived_from"],
+            json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
+        builtin_type(
+            "agent_result",
+            "tron.resource.agent_result.v1",
+            json!({
+                "type": "object",
+                "required": ["message", "stopReason"],
+                "additionalProperties": true,
+                "properties": {
+                    "message": {"type": "string"},
+                    "promotedRefs": {"type": "array"},
+                    "decisionRefs": {"type": "array"},
+                    "subgoalRefs": {"type": "array"},
+                    "stopReason": {"type": "string"},
+                    "tokenUsage": {"type": "object"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["final", "interrupted", "discarded", "archived"],
+            vec!["answers", "decides", "promotes", "supports"],
+            json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
     ]
 }
 
@@ -577,6 +726,7 @@ impl InMemoryEngineResourceStore {
                 None,
                 None,
                 payload,
+                EngineResourceVersionState::Available,
                 request.locations,
                 request.trace_id,
                 request.invocation_id,
@@ -610,6 +760,7 @@ impl InMemoryEngineResourceStore {
             resource.current_version_id,
             request.lifecycle,
             request.payload,
+            request.state.unwrap_or_default(),
             request.locations,
             request.trace_id,
             request.invocation_id,
@@ -717,6 +868,7 @@ impl InMemoryEngineResourceStore {
         parent_version_id: Option<String>,
         lifecycle: Option<String>,
         payload: Value,
+        state: EngineResourceVersionState,
         locations: Vec<EngineResourceLocation>,
         trace_id: TraceId,
         invocation_id: Option<InvocationId>,
@@ -727,6 +879,7 @@ impl InMemoryEngineResourceStore {
             resource_id: resource_id.to_owned(),
             parent_version_id,
             content_hash: payload_hash(&payload)?,
+            state,
             payload,
             locations,
             created_by_invocation_id: invocation_id.clone(),
@@ -739,7 +892,9 @@ impl InMemoryEngineResourceStore {
             .entry(resource_id.to_owned())
             .or_default()
             .push(version.version_id.clone());
-        resource.current_version_id = Some(version.version_id.clone());
+        if version.state.may_be_current() {
+            resource.current_version_id = Some(version.version_id.clone());
+        }
         if let Some(lifecycle) = lifecycle {
             resource.lifecycle = lifecycle;
         }
@@ -748,7 +903,11 @@ impl InMemoryEngineResourceStore {
         self.record_event(resource_event(
             resource_id,
             "resource.version.created",
-            json!({"versionId": version.version_id, "contentHash": version.content_hash}),
+            json!({
+                "versionId": version.version_id,
+                "contentHash": version.content_hash,
+                "state": version.state.as_str(),
+            }),
             invocation_id,
             trace_id,
         ));
@@ -839,6 +998,7 @@ CREATE TABLE IF NOT EXISTS engine_resource_versions (
   resource_id TEXT NOT NULL REFERENCES engine_resources(resource_id),
   parent_version_id TEXT,
   content_hash TEXT NOT NULL,
+  version_state TEXT NOT NULL DEFAULT 'available',
   payload_json TEXT NOT NULL,
   locations_json TEXT NOT NULL,
   created_by_invocation_id TEXT,
@@ -1031,6 +1191,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
                 None,
                 None,
                 payload,
+                EngineResourceVersionState::Available,
                 request.locations,
                 request.trace_id,
                 request.invocation_id,
@@ -1064,6 +1225,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
             resource.current_version_id,
             request.lifecycle,
             request.payload,
+            request.state.unwrap_or_default(),
             request.locations,
             request.trace_id,
             request.invocation_id,
@@ -1182,6 +1344,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
         parent_version_id: Option<String>,
         lifecycle: Option<String>,
         payload: Value,
+        state: EngineResourceVersionState,
         locations: Vec<EngineResourceLocation>,
         trace_id: TraceId,
         invocation_id: Option<InvocationId>,
@@ -1192,6 +1355,7 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
             resource_id: resource_id.to_owned(),
             parent_version_id,
             content_hash: payload_hash(&payload)?,
+            state,
             payload,
             locations,
             created_by_invocation_id: invocation_id.clone(),
@@ -1218,14 +1382,15 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
         self.conn
             .execute(
                 "INSERT INTO engine_resource_versions
-                 (version_id, resource_id, parent_version_id, content_hash, payload_json,
-                  locations_json, created_by_invocation_id, trace_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 (version_id, resource_id, parent_version_id, content_hash, version_state,
+                  payload_json, locations_json, created_by_invocation_id, trace_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     version.version_id,
                     version.resource_id,
                     version.parent_version_id,
                     version.content_hash,
+                    version.state.as_str(),
                     payload_json,
                     json_string(&version.locations, "resource_version.locations")?,
                     version
@@ -1237,7 +1402,9 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
                 ],
             )
             .map_err(|err| sqlite_err("resource.version.insert", err.to_string()))?;
-        resource.current_version_id = Some(version.version_id.clone());
+        if version.state.may_be_current() {
+            resource.current_version_id = Some(version.version_id.clone());
+        }
         if let Some(lifecycle) = lifecycle {
             resource.lifecycle = lifecycle;
         }
@@ -1246,7 +1413,11 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
         self.record_event(resource_event(
             resource_id,
             "resource.version.created",
-            json!({"versionId": version.version_id, "contentHash": version.content_hash}),
+            json!({
+                "versionId": version.version_id,
+                "contentHash": version.content_hash,
+                "state": version.state.as_str(),
+            }),
             invocation_id,
             trace_id,
         ))?;
@@ -1336,8 +1507,8 @@ CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT version_id, resource_id, parent_version_id, content_hash, payload_json,
-                        locations_json, created_by_invocation_id, trace_id, created_at
+                "SELECT version_id, resource_id, parent_version_id, content_hash, version_state,
+                        payload_json, locations_json, created_by_invocation_id, trace_id, created_at
                  FROM engine_resource_versions WHERE resource_id = ?1 ORDER BY created_at ASC",
             )
             .map_err(|err| sqlite_err("resource.versions.prepare", err.to_string()))?;
@@ -1722,20 +1893,22 @@ fn row_to_resource_version(
     conn: &Connection,
     row: &Row<'_>,
 ) -> rusqlite::Result<EngineResourceVersion> {
-    let payload_json: String = row.get(4)?;
+    let payload_json: String = row.get(5)?;
     let payload = crate::shared::storage::resolve_stored_json_value(conn, &payload_json).map_err(
-        |error| row_engine_err(4, sqlite_err("resource_version.payload", error.to_string())),
+        |error| row_engine_err(5, sqlite_err("resource_version.payload", error.to_string())),
     )?;
     Ok(EngineResourceVersion {
         version_id: row.get(0)?,
         resource_id: row.get(1)?,
         parent_version_id: row.get(2)?,
         content_hash: row.get(3)?,
+        state: EngineResourceVersionState::parse(&row.get::<_, String>(4)?)
+            .map_err(|err| row_engine_err(4, err))?,
         payload,
-        locations: row_json(row, 5, "resource_version.locations")?,
-        created_by_invocation_id: row_invocation_id(row, 6)?,
-        trace_id: TraceId::new(row.get::<_, String>(7)?).map_err(|err| row_engine_err(7, err))?,
-        created_at: row_time(row, 8, "resource_version.created_at")?,
+        locations: row_json(row, 6, "resource_version.locations")?,
+        created_by_invocation_id: row_invocation_id(row, 7)?,
+        trace_id: TraceId::new(row.get::<_, String>(8)?).map_err(|err| row_engine_err(8, err))?,
+        created_at: row_time(row, 9, "resource_version.created_at")?,
     })
 }
 
@@ -1884,6 +2057,7 @@ mod tests {
                 expected_current_version_id: Some(current.clone()),
                 lifecycle: Some("promoted".to_owned()),
                 payload: json!({"title": "res_test", "body": "second"}),
+                state: None,
                 locations: Vec::new(),
                 trace_id: trace("trace"),
                 invocation_id: None,
@@ -1909,6 +2083,7 @@ mod tests {
                 expected_current_version_id: Some(current),
                 lifecycle: None,
                 payload: json!({"body": "second"}),
+                state: None,
                 locations: Vec::new(),
                 trace_id: trace("trace"),
                 invocation_id: None,
@@ -1921,12 +2096,37 @@ mod tests {
                 expected_current_version_id: Some("stale".to_owned()),
                 lifecycle: None,
                 payload: json!({"body": "third"}),
+                state: None,
                 locations: Vec::new(),
                 trace_id: trace("trace"),
                 invocation_id: None,
             })
             .unwrap_err();
         assert!(matches!(err, EngineError::PolicyViolation(_)));
+    }
+
+    #[test]
+    fn non_available_versions_do_not_advance_current_pointer() {
+        let mut store = InMemoryEngineResourceStore::new();
+        store.register_type(artifact_type()).unwrap();
+        let resource = store.create(create_artifact("res_test")).unwrap();
+        let current = resource.current_version_id.clone();
+        let damaged = store
+            .update(UpdateResource {
+                resource_id: "res_test".to_owned(),
+                expected_current_version_id: current.clone(),
+                lifecycle: Some("draft".to_owned()),
+                payload: json!({"title": "res_test", "body": "damaged"}),
+                state: Some(EngineResourceVersionState::Damaged),
+                locations: Vec::new(),
+                trace_id: trace("trace"),
+                invocation_id: None,
+            })
+            .unwrap();
+        assert_eq!(damaged.state, EngineResourceVersionState::Damaged);
+        let inspection = store.inspect("res_test").unwrap().unwrap();
+        assert_eq!(inspection.resource.current_version_id, current);
+        assert_eq!(inspection.versions.len(), 2);
     }
 
     #[test]
@@ -1957,6 +2157,7 @@ mod tests {
                 expected_current_version_id: resource.current_version_id,
                 lifecycle: None,
                 payload: json!({"title": "missing body"}),
+                state: None,
                 locations: Vec::new(),
                 trace_id: trace("trace"),
                 invocation_id: None,
@@ -2013,6 +2214,7 @@ mod tests {
                 expected_current_version_id: Some(current),
                 lifecycle: Some("promoted".to_owned()),
                 payload: json!({"title": "res_test", "body": "second"}),
+                state: None,
                 locations: Vec::new(),
                 trace_id: trace("trace"),
                 invocation_id: None,

@@ -3137,8 +3137,11 @@ mod tests {
         let content = value["content"][0]["text"].as_str().expect("text content");
 
         assert!(content.contains("process::run"));
-        assert!(content.contains("\"payload\":{\"command\":\"date\"}"));
-        assert!(content.contains("Required payload: command"));
+        assert!(
+            content.contains("\"payload\":{\"command\":\"date\",\"executionMode\":\"read_only\"}")
+        );
+        assert!(content.contains("Required payload: command: string"));
+        assert!(content.contains("executionMode: string"));
         assert!(!content.contains("process::run -> process::run"));
         assert_eq!(
             value["details"]["results"][0]["recipe"]["contractId"],

@@ -2,9 +2,11 @@
 //!
 //! # INVARIANT: trusted-local trust boundary
 //!
-//! `list_dir`, `create_dir`, and `read_file` accept caller-supplied path
-//! strings and pass them straight to `std::fs::*` with **no containment
-//! check**. That is a deliberate trade-off, not an oversight:
+//! These low-level service helpers accept caller-supplied path strings and pass
+//! them straight to `std::fs::*` with **no containment check**. The public
+//! capability path performs grant file-root checks before mutating handlers run;
+//! the helpers stay raw so tests and internal callers can exercise exact host
+//! filesystem behavior. That is a deliberate trade-off, not an oversight:
 //!
 //! * The server is assumed to be reachable only from the user's own
 //!   devices via Tailscale (see the project threat-model in `README.md`
@@ -14,10 +16,10 @@
 //!   to choose a working dir.
 //!
 //! If that threat model ever shifts (shared Tailnet, compromised
-//! device, multi-user host), introduce a `validate_user_path(path)`
-//! gate and route the three capabilities through it — do NOT silently add
-//! an allow-list, since every existing caller expects unrestricted
-//! access and would fail without a visible deprecation.
+//! device, multi-user host), harden the service boundary itself in addition to
+//! the engine grant checks — do NOT silently add an allow-list, since raw helper
+//! callers expect unrestricted access and would fail without a visible
+//! deprecation.
 //!
 //! The regression guard for this trust boundary is
 //! `unrestricted_filesystem_paths_under_trusted_local` (below). If that

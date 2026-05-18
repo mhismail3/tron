@@ -6,8 +6,8 @@ use serde_json::json;
 use crate::domains::catalog::CapabilitySpec;
 use crate::domains::contract::CapabilityContract;
 use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    Result as EngineResult, RiskLevel,
+    CompensationContract, CompensationKind, DurableOutputContract, EffectClass,
+    IdempotencyContract, Result as EngineResult, RiskLevel,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["filesystem.changes"];
@@ -32,8 +32,9 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .description("Create a directory and any missing parent directories.")
             .tags(vec!["mkdir", "create directory", "folder", "filesystem"])
             .request_schema(json!({"additionalProperties":false,"properties":{"path":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"created":{"type":"boolean"},"path":{"type":"string"}},"required":["created","path"],"type":"object"}))
+            .response_schema(filesystem_resource_backed_response(json!({"created":{"type":"boolean"},"path":{"type":"string"}}), vec!["created", "path"]))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .output_contract(DurableOutputContract::resource_backed(["materialized_file"]))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
         CapabilityContract::new("filesystem::read_file", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
@@ -47,8 +48,9 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .description("Create or overwrite a file with exact content.")
             .tags(vec!["write", "file", "save", "create file", "overwrite", "filesystem"])
             .request_schema(json!({"additionalProperties":false,"properties":{"content":{"type":"string"},"path":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path","content"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"bytesWritten":{"type":"integer"},"created":{"type":"boolean"},"path":{"type":"string"}},"required":["path","bytesWritten","created"],"type":"object"}))
+            .response_schema(filesystem_resource_backed_response(json!({"bytesWritten":{"type":"integer"},"created":{"type":"boolean"},"path":{"type":"string"}}), vec!["path", "bytesWritten", "created"]))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .output_contract(DurableOutputContract::resource_backed(["materialized_file"]))
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "writes are audited with byte counts; callers should inspect/diff before replacing important content"))
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::write_file","payload":{"path":"scratch/example.txt","content":"hello"},"idempotencyKey":"write-example-<turn>","reason":"Write a small example file."})])
             .build()?,
@@ -56,8 +58,9 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .description("Edit a file by replacing an exact old string with a new string.")
             .tags(vec!["edit", "replace", "modify", "file", "filesystem"])
             .request_schema(json!({"additionalProperties":false,"properties":{"newString":{"type":"string"},"oldString":{"type":"string"},"path":{"type":"string"},"replaceAll":{"type":"boolean"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path","oldString","newString"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}},"required":["path","replacements","diff"],"type":"object"}))
+            .response_schema(filesystem_resource_backed_response(json!({"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}}), vec!["path", "replacements", "diff"]))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .output_contract(DurableOutputContract::resource_backed(["materialized_file", "patch_proposal"]))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "the returned diff contains enough context for manual reversal when the edited file still exists"))
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::edit_file","payload":{"path":"README.md","oldString":"old text","newString":"new text"},"idempotencyKey":"edit-readme-<turn>","reason":"Replace exact text in README.md."})])
             .build()?,
@@ -93,10 +96,45 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .description("Apply an exact-string patch to a file and return the resulting diff.")
             .tags(vec!["patch", "apply patch", "edit", "replace", "file", "filesystem"])
             .request_schema(json!({"additionalProperties":false,"properties":{"newString":{"type":"string"},"oldString":{"type":"string"},"path":{"type":"string"},"replaceAll":{"type":"boolean"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path","oldString","newString"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}},"required":["path","replacements","diff"],"type":"object"}))
+            .response_schema(filesystem_resource_backed_response(json!({"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}}), vec!["path", "replacements", "diff"]))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .output_contract(DurableOutputContract::resource_backed(["materialized_file", "patch_proposal"]))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "patch edits return a diff for manual reversal when the edited file still exists"))
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::apply_patch","payload":{"path":"README.md","oldString":"old text","newString":"new text"},"idempotencyKey":"patch-readme-<turn>","reason":"Apply an exact text replacement."})])
             .build()?
     ])
+}
+
+fn filesystem_resource_backed_response(
+    properties: serde_json::Value,
+    mut required: Vec<&'static str>,
+) -> serde_json::Value {
+    let mut properties = properties.as_object().cloned().unwrap_or_default();
+    properties.insert("resourceRefs".to_owned(), resource_refs_schema());
+    required.push("resourceRefs");
+    json!({
+        "additionalProperties": false,
+        "properties": properties,
+        "required": required,
+        "type": "object"
+    })
+}
+
+fn resource_refs_schema() -> serde_json::Value {
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "required": ["resourceId", "kind", "role"],
+            "additionalProperties": false,
+            "properties": {
+                "resourceId": {"type": "string"},
+                "kind": {"type": "string"},
+                "versionId": {"type": "string"},
+                "role": {"type": "string"},
+                "contentHash": {"type": "string"},
+                "relation": {"type": "string"}
+            }
+        }
+    })
 }

@@ -1103,16 +1103,24 @@ fn output_audit_for_result(
 ) -> Option<EngineOutputAuditObservation> {
     let value = result.value.as_ref();
     match invocation.function_id.namespace() {
-        "filesystem" if function.effect_class.is_mutating() => Some(output_audit_observation(
-            result.trace_id.clone(),
-            result.invocation_id.clone(),
-            result.function_id.clone(),
-            "filesystem_write_without_resource",
-            output_ref_from_payload(&invocation.payload),
-            "filesystem mutation completed without a produced resource reference",
-            json!({"payload": audit_payload_summary(&invocation.payload)}),
-        )),
-        "process" if process_payload_is_write_like(&invocation.payload) => {
+        "filesystem"
+            if function.effect_class.is_mutating()
+                && value.is_some_and(|value| !value_has_resource_reference(value)) =>
+        {
+            Some(output_audit_observation(
+                result.trace_id.clone(),
+                result.invocation_id.clone(),
+                result.function_id.clone(),
+                "filesystem_write_without_resource",
+                output_ref_from_payload(&invocation.payload),
+                "filesystem mutation completed without a produced resource reference",
+                json!({"payload": audit_payload_summary(&invocation.payload)}),
+            ))
+        }
+        "process"
+            if process_payload_is_write_like(&invocation.payload)
+                && value.is_some_and(|value| !value_has_resource_reference(value)) =>
+        {
             Some(output_audit_observation(
                 result.trace_id.clone(),
                 result.invocation_id.clone(),
@@ -1121,30 +1129,6 @@ fn output_audit_for_result(
                 output_ref_from_payload(&invocation.payload),
                 "write-like process command completed without a produced resource reference",
                 json!({"payload": audit_payload_summary(&invocation.payload)}),
-            ))
-        }
-        "program" if value.is_some_and(has_unregistered_program_artifacts) => {
-            let value = result.value.as_ref()?;
-            Some(output_audit_observation(
-                result.trace_id.clone(),
-                result.invocation_id.clone(),
-                result.function_id.clone(),
-                "program_artifact_without_resource",
-                None,
-                "program result included artifacts without resource references",
-                json!({"resultShape": audit_payload_summary(value)}),
-            ))
-        }
-        "agent" if value.is_some_and(agent_result_lacks_promoted_resource_refs) => {
-            let value = result.value.as_ref()?;
-            Some(output_audit_observation(
-                result.trace_id.clone(),
-                result.invocation_id.clone(),
-                result.function_id.clone(),
-                "agent_output_without_promoted_resource",
-                None,
-                "agent result completed without promoted resource references",
-                json!({"resultShape": audit_payload_summary(value)}),
             ))
         }
         _ => None,
@@ -1204,17 +1188,6 @@ fn process_payload_is_write_like(payload: &Value) -> bool {
     ]
     .into_iter()
     .any(|needle| command_line.contains(needle))
-}
-
-fn has_unregistered_program_artifacts(value: &Value) -> bool {
-    value
-        .get("artifacts")
-        .and_then(Value::as_array)
-        .is_some_and(|items| items.iter().any(|item| !value_has_resource_reference(item)))
-}
-
-fn agent_result_lacks_promoted_resource_refs(value: &Value) -> bool {
-    !value_has_resource_reference(value)
 }
 
 fn value_has_resource_reference(value: &Value) -> bool {

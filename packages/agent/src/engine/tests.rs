@@ -22,11 +22,11 @@ use super::ledger::{
 use super::registry::LiveCatalog;
 use super::types::{
     AuthorityRequirement, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
-    CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode, EffectClass,
-    FunctionDefinition, FunctionHealth, FunctionRevision, IdempotencyContract,
-    IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance, ReplayBehavior,
-    ResourceLeaseRequirement, RiskLevel, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
-    WorkerDefinition, WorkerKind,
+    CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode,
+    DurableOutputContract, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
+    IdempotencyContract, IdempotencyKeySource, IdempotencyScope, LedgerKind, Provenance,
+    ReplayBehavior, ResourceLeaseRequirement, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
+    VisibilityScope, WorkerDefinition, WorkerKind,
 };
 use super::{
     AcquireResourceLease, AgentCapabilityClient, ApprovalStatus, CatalogWatchRequest,
@@ -170,6 +170,16 @@ struct FailHandler;
 impl InProcessFunctionHandler for FailHandler {
     async fn invoke(&self, _invocation: Invocation) -> Result<Value> {
         Err(EngineError::HandlerFailed("boom".to_owned()))
+    }
+}
+
+#[derive(Clone)]
+struct StaticValueHandler(Value);
+
+#[async_trait]
+impl InProcessFunctionHandler for StaticValueHandler {
+    async fn invoke(&self, _invocation: Invocation) -> Result<Value> {
+        Ok(self.0.clone())
     }
 }
 
@@ -4517,7 +4527,190 @@ async fn artifact_goal_decision_wrappers_produce_resource_refs() {
 }
 
 #[tokio::test]
-async fn write_like_outputs_are_reported_in_trace_output_audit() {
+async fn materialized_file_update_writes_file_and_returns_resource_refs() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("nested").join("result.txt");
+
+    let result = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "path": target.to_string_lossy(),
+                "content": "resource-owned bytes"
+            }),
+            mutating_causal("materialized-file-update").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(result.error, None);
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "resource-owned bytes"
+    );
+    let value = result.value.as_ref().unwrap();
+    assert_eq!(value["version"]["state"], "available");
+    assert_eq!(value["resourceRefs"][0]["kind"], "materialized_file");
+    assert_eq!(value["resourceRefs"][0]["role"], "updated");
+}
+
+#[tokio::test]
+async fn materialized_file_version_conflict_does_not_touch_target_file() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("result.txt");
+
+    let first = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "path": target.to_string_lossy(),
+                "content": "first version"
+            }),
+            mutating_causal("materialized-file-conflict-first").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(first.error, None);
+
+    let rejected = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "path": target.to_string_lossy(),
+                "content": "should not be written",
+                "expectedCurrentVersionId": "wrong-version"
+            }),
+            mutating_causal("materialized-file-conflict-second").with_scope("resource.write"),
+        ))
+        .await;
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("version conflict")
+    ));
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "first version");
+}
+
+#[tokio::test]
+async fn materialized_file_invalid_scope_does_not_touch_target_file() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("result.txt");
+
+    let rejected = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "path": target.to_string_lossy(),
+                "content": "should not be written",
+                "scope": "workspace",
+                "workspaceId": ""
+            }),
+            mutating_causal("materialized-file-invalid-scope").with_scope("resource.write"),
+        ))
+        .await;
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("workspaceId must not be empty")
+    ));
+    assert!(
+        !target.exists(),
+        "invalid resource scope must fail before target bytes are written"
+    );
+}
+
+#[tokio::test]
+async fn resource_backed_invocation_fails_without_top_level_resource_refs() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+    let function = FunctionDefinition::new(
+        fid("demo::write"),
+        wid("demo"),
+        "write",
+        VisibilityScope::Agent,
+        EffectClass::IdempotentWrite,
+    )
+    .with_required_authority(AuthorityRequirement::scope("demo.write"))
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_output_contract(DurableOutputContract::resource_backed(["artifact"]));
+    handle
+        .register_function_for_setup(
+            function,
+            Some(Arc::new(StaticValueHandler(json!({"ok": true})))),
+            false,
+        )
+        .unwrap();
+
+    let result = handle
+        .invoke(host_invocation(
+            "demo::write",
+            json!({}),
+            mutating_causal("resource-backed-missing-refs").with_scope("demo.write"),
+        ))
+        .await;
+    assert!(matches!(
+        result.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("resource-backed output")
+                && message.contains("resourceRefs")
+    ));
+}
+
+#[tokio::test]
+async fn resource_backed_refs_are_persisted_in_invocation_records() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+    let function = FunctionDefinition::new(
+        fid("demo::write"),
+        wid("demo"),
+        "write",
+        VisibilityScope::Agent,
+        EffectClass::IdempotentWrite,
+    )
+    .with_required_authority(AuthorityRequirement::scope("demo.write"))
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_output_contract(DurableOutputContract::resource_backed(["artifact"]));
+    handle
+        .register_function_for_setup(
+            function,
+            Some(Arc::new(StaticValueHandler(json!({
+                "resourceRefs": [{
+                    "resourceId": "artifact-test",
+                    "kind": "artifact",
+                    "versionId": "ver-test",
+                    "role": "created",
+                    "contentHash": "hash-test"
+                }]
+            })))),
+            false,
+        )
+        .unwrap();
+
+    let result = handle
+        .invoke(host_invocation(
+            "demo::write",
+            json!({}),
+            mutating_causal("resource-backed-persisted").with_scope("demo.write"),
+        ))
+        .await;
+    assert_eq!(result.error, None);
+
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    let record = records
+        .iter()
+        .find(|record| record.invocation_id == result.invocation_id)
+        .unwrap();
+    assert_eq!(record.produced_resource_refs.len(), 1);
+    assert_eq!(
+        record.produced_resource_refs[0]["resourceId"],
+        "artifact-test"
+    );
+}
+
+#[tokio::test]
+async fn converted_filesystem_outputs_do_not_create_output_audit_observations() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("filesystem", "filesystem"), false)
@@ -4530,19 +4723,42 @@ async fn write_like_outputs_are_reported_in_trace_output_audit() {
         EffectClass::IdempotentWrite,
     )
     .with_required_authority(AuthorityRequirement::scope("filesystem.write"))
-    .with_idempotency(IdempotencyContract::caller_session_engine_ledger());
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_output_contract(DurableOutputContract::resource_backed([
+        "materialized_file",
+    ]));
     handle
-        .register_function_for_setup(function, Some(handler()), false)
+        .register_function_for_setup(
+            function,
+            Some(Arc::new(StaticValueHandler(json!({
+                "path": "/tmp/tron-output-audit.txt",
+                "bytesWritten": 5,
+                "created": true,
+                "resourceRefs": [{
+                    "resourceId": "materialized_file:test",
+                    "kind": "materialized_file",
+                    "versionId": "ver-test",
+                    "role": "updated",
+                    "contentHash": "hash-test"
+                }]
+            })))),
+            false,
+        )
         .unwrap();
-
     let result = handle
         .invoke(host_invocation(
             "filesystem::write_file",
             json!({"path": "/tmp/tron-output-audit.txt", "content": "draft"}),
-            mutating_causal("filesystem-output-audit").with_scope("filesystem.write"),
+            mutating_causal("filesystem-materialized-output")
+                .with_scope("filesystem.write")
+                .with_idempotency_key("filesystem-materialized-output"),
         ))
         .await;
     assert_eq!(result.error, None);
+    let refs = result.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap();
+    assert_eq!(refs[0]["kind"], "materialized_file");
 
     let trace = handle
         .invoke(host_invocation(
@@ -4561,8 +4777,7 @@ async fn write_like_outputs_are_reported_in_trace_output_audit() {
     let audit = trace.value.as_ref().unwrap()["outputAudit"]
         .as_array()
         .unwrap();
-    assert_eq!(audit.len(), 1);
-    assert_eq!(audit[0]["outputKind"], "filesystem_write_without_resource");
+    assert!(audit.is_empty());
 }
 
 #[tokio::test]

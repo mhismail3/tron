@@ -444,6 +444,70 @@ impl CompensationContract {
     }
 }
 
+/// Durable output contract enforced by the engine after capability execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DurableOutputContract {
+    /// The capability intentionally produces no durable output.
+    None,
+    /// Successful results must include top-level resource references.
+    ResourceBacked {
+        /// Resource kinds the function may produce.
+        produced_resource_kinds: Vec<String>,
+        /// Whether a successful result must include at least one ref.
+        required_resource_refs: bool,
+    },
+    /// Contract applies only when the named engine classifier matches.
+    Conditional {
+        /// Engine-owned classifier id, for example `process_write_like`.
+        classifier: String,
+        /// Resource-backed contract used when the classifier matches.
+        resource_backed_contract: Box<DurableOutputContract>,
+    },
+}
+
+impl DurableOutputContract {
+    /// Build a resource-backed output contract requiring at least one ref.
+    #[must_use]
+    pub fn resource_backed(kinds: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        Self::ResourceBacked {
+            produced_resource_kinds: kinds.into_iter().map(Into::into).collect(),
+            required_resource_refs: true,
+        }
+    }
+
+    /// Whether this contract is the no-output form.
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    /// Whether the contract can be enforced by the host.
+    #[must_use]
+    pub fn is_enforceable(&self) -> bool {
+        match self {
+            Self::None => true,
+            Self::ResourceBacked {
+                produced_resource_kinds,
+                ..
+            } => !produced_resource_kinds.is_empty(),
+            Self::Conditional {
+                classifier,
+                resource_backed_contract,
+            } => {
+                !classifier.trim().is_empty()
+                    && matches!(resource_backed_contract.as_ref(), Self::ResourceBacked { produced_resource_kinds, .. } if !produced_resource_kinds.is_empty())
+            }
+        }
+    }
+}
+
+impl Default for DurableOutputContract {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 /// Authority needed to discover or invoke a capability.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthorityRequirement {
@@ -611,6 +675,8 @@ pub struct FunctionDefinition {
     pub resource_lease: Option<ResourceLeaseRequirement>,
     /// Durable compensation/audit contract.
     pub compensation: Option<CompensationContract>,
+    /// Durable output contract enforced by the host after handler execution.
+    pub output_contract: DurableOutputContract,
     /// Required authority.
     pub required_authority: AuthorityRequirement,
     /// Allowed delivery modes.
@@ -648,6 +714,7 @@ impl FunctionDefinition {
             idempotency: None,
             resource_lease: None,
             compensation: None,
+            output_contract: DurableOutputContract::None,
             required_authority: AuthorityRequirement::none(),
             allowed_delivery_modes: vec![DeliveryMode::Sync],
             health: FunctionHealth::Healthy,
@@ -674,6 +741,13 @@ impl FunctionDefinition {
     #[must_use]
     pub fn with_compensation(mut self, contract: CompensationContract) -> Self {
         self.compensation = Some(contract);
+        self
+    }
+
+    /// Attach a durable output contract.
+    #[must_use]
+    pub fn with_output_contract(mut self, contract: DurableOutputContract) -> Self {
+        self.output_contract = contract;
         self
     }
 

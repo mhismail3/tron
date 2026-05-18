@@ -5,8 +5,8 @@ use serde_json::json;
 use crate::domains::catalog::CapabilitySpec;
 use crate::domains::contract::CapabilityContract;
 use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    Result as EngineResult, RiskLevel, VisibilityScope,
+    CompensationContract, CompensationKind, DurableOutputContract, EffectClass,
+    IdempotencyContract, Result as EngineResult, RiskLevel, VisibilityScope,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["program.runtime"];
@@ -26,6 +26,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .request_schema(run_javascript_request_schema())
         .response_schema(run_javascript_response_schema())
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .output_contract(DurableOutputContract::resource_backed(["execution_output"]))
         .compensation(CompensationContract::new(
             CompensationKind::ManualOnly,
             "program runs only compose child capabilities; completed child invocations remain ledgered and compensation is delegated to child contracts that declare it",
@@ -92,7 +93,7 @@ fn run_javascript_response_schema() -> serde_json::Value {
     json!({
         "type": "object",
         "additionalProperties": true,
-        "required": ["status", "programRunId", "codeHash", "argsHash", "childInvocations", "selectedImplementations"],
+        "required": ["status", "programRunId", "codeHash", "argsHash", "childInvocations", "selectedImplementations", "resourceRefs"],
         "properties": {
             "status": {"type": "string"},
             "output": {},
@@ -107,9 +108,28 @@ fn run_javascript_response_schema() -> serde_json::Value {
             "childInvocations": {"type": "array", "items": {"type": "string"}},
             "selectedImplementations": {"type": "array", "items": {"type": "string"}},
             "approvalState": {"type": ["object", "null"]},
-            "artifacts": {"type": "array"},
             "logs": {"type": "array", "items": {"type": "string"}},
-            "compensationAttempts": {"type": "array"}
+            "compensationAttempts": {"type": "array"},
+            "resourceRefs": resource_refs_schema()
+        }
+    })
+}
+
+fn resource_refs_schema() -> serde_json::Value {
+    json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "required": ["resourceId", "kind", "role"],
+            "additionalProperties": false,
+            "properties": {
+                "resourceId": {"type": "string"},
+                "kind": {"type": "string"},
+                "versionId": {"type": "string"},
+                "role": {"type": "string"},
+                "contentHash": {"type": "string"},
+                "relation": {"type": "string"}
+            }
         }
     })
 }

@@ -8,6 +8,7 @@ use crate::domains::worker::DomainRegistrationContext;
 pub(crate) struct Deps {
     pub(crate) event_store: Arc<crate::domains::session::event_store::EventStore>,
     pub(crate) worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
+    pub(crate) engine_host: crate::engine::EngineHostHandle,
 }
 
 impl Deps {
@@ -15,6 +16,7 @@ impl Deps {
         Self {
             event_store: Arc::clone(&deps.event_store),
             worktree_coordinator: deps.worktree_coordinator.clone(),
+            engine_host: deps.engine_host.clone(),
         }
     }
 
@@ -25,6 +27,8 @@ impl Deps {
         Self {
             event_store,
             worktree_coordinator: None,
+            engine_host: crate::engine::EngineHostHandle::new_in_memory()
+                .expect("in-memory engine host"),
         }
     }
 }

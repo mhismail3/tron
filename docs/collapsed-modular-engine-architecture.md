@@ -144,12 +144,12 @@ Resource writes are compare-and-set protected through `expectedCurrentVersionId`
 If the current version differs, the update fails before writing a new version.
 This is the base concurrency invariant for multi-agent artifact work.
 
-The current phase audits existing durable-output paths instead of globally
-blocking them. Filesystem writes, write-like process invocations, program
-artifacts without resource refs, and agent outputs without promoted resource
-refs record `engine_output_audit_observations`, exposed through
-`observability::trace_get` and `observability::log_query`. New substrate
-wrappers must return resource refs when they produce durable output.
+Durable-output paths now declare output contracts and finish validation requires
+canonical resource refs. Filesystem writes and patches produce `materialized_file`
+and `patch_proposal` refs, retained process/program output produces
+`execution_output` refs, and completed agent runs produce `agent_result` refs.
+`engine_output_audit_observations` remains readable as conversion telemetry, but
+converted paths cannot use audit as an acceptance path.
 
 ## Artifact And Goal Mapping
 

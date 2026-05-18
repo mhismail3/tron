@@ -10,8 +10,8 @@ use serde_json::json;
 
 pub(crate) use super::contract::function_definition_for_capability;
 use crate::engine::{
-    ActorId, AuthorityGrantId, DeliveryMode, EffectClass, EngineError, FunctionId,
-    IdempotencyContract, ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
+    ActorId, AuthorityGrantId, DeliveryMode, DurableOutputContract, EffectClass, EngineError,
+    FunctionId, IdempotencyContract, ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
     TriggerTypeDefinition, TriggerTypeId, VisibilityScope, WorkerId,
 };
 #[cfg(test)]
@@ -74,6 +74,8 @@ pub struct CapabilitySpec {
     pub resource_lease: Option<ResourceLeaseRequirement>,
     /// Durable compensation/audit contract.
     pub compensation: Option<crate::engine::CompensationContract>,
+    /// Durable output contract enforced after handler execution.
+    pub output_contract: DurableOutputContract,
     /// Explicit approval metadata for agent-visible risk.
     pub approval_required: bool,
     /// High-risk contract metadata exposed through discovery.

@@ -1,14 +1,13 @@
-# Modular Engine Next Phase Plan
+# Resource Materialization And Enforcement Checkpoint
 
 ## Phase Boundary
 
-The next phase is **Resource Materialization and Enforcement**.
+This checkpoint implements **Resource Materialization and Enforcement**.
 
-The secure substrate now has engine-owned grants, typed resources, resource
-wrappers, clean storage generation reset, and audit observations for durable
-outputs that are not yet resource-backed. The next phase should close that gap:
-every durable output path must either produce resource refs through canonical
-capabilities or be rejected before execution.
+The secure substrate has engine-owned grants, typed resources, resource wrappers,
+clean storage generation reset, and historical audit observations. This phase
+closes the output gap: covered durable output paths must produce resource refs
+through canonical capabilities or be rejected before execution.
 
 This is still not the iOS control plane or generated UI phase. Those surfaces
 depend on trustworthy resource lineage, materialization, and enforcement first.
@@ -32,22 +31,22 @@ depend on trustworthy resource lineage, materialization, and enforcement first.
 
 ## Target Outcome
 
-By the end of this phase:
+This phase establishes:
 
 - `filesystem::*`, `process::*`, `program::*`, and `agent::*` durable-output
   paths either return resource refs or fail with a policy error.
 - `materialized_file` is a registered first-party resource kind with explicit
   read/write/promote/delete/materialize capabilities.
-- Program artifacts and agent final outputs are stored as typed resources with
+- Program output and agent final outputs are stored as typed resources with
   lineage to the invocation, goal, worker, and grant that produced them.
 - Output contracts are declared in capability metadata and enforced by the
   engine, not by convention in handlers.
-- The temporary output audit path is retained only as a measurement tool during
-  conversion and then deleted when enforcement is complete.
+- The output audit path is retained only as read-only conversion telemetry; it is
+  not an acceptance path for converted filesystem/process/program/agent outputs.
 
 ## Workstream 1: Resource Type And Contract Hardening
 
-Add or complete first-party resource definitions:
+Completed first-party resource definitions:
 
 - `materialized_file`: durable file bytes or path-backed file record with hash,
   size, MIME/type hint, workspace root, relative path, owner invocation, and
@@ -59,7 +58,7 @@ Add or complete first-party resource definitions:
 - `agent_result`: final answer, decision refs, promoted resources, open claims,
   and follow-up subgoal refs.
 
-Contract rules:
+Contract rules now enforced:
 
 - Every mutating capability declares produced resource kinds or explicitly
   declares `producesDurableOutput = false`.
@@ -70,7 +69,7 @@ Contract rules:
 - Delete/discard is lifecycle-first; byte deletion only happens after retention
   proves no live references.
 
-Tests first:
+Tests/gates:
 
 - Invalid resource payloads fail before persistence.
 - A resource version cannot point to missing bytes without being marked damaged.
@@ -79,7 +78,7 @@ Tests first:
 
 ## Workstream 2: Materialization Capabilities
 
-Add canonical capabilities:
+Canonical capabilities:
 
 - `artifact::materialize`
 - `materialized_file::create`
@@ -104,7 +103,7 @@ Rules:
 - Partial writes are quarantined and inspectable; prior current versions remain
   current.
 
-Tests first:
+Tests/gates:
 
 - File materialization outside grant roots fails.
 - Concurrent materialization uses CAS or a lease.
@@ -115,18 +114,20 @@ Tests first:
 
 Filesystem:
 
-- Convert write/patch/create/delete operations to produce `materialized_file`
-  refs.
+- Convert write/patch/create operations to produce `materialized_file` refs;
+  patch operations also produce `patch_proposal` refs.
 - Keep direct file reads as read-only capabilities, with optional resource
   hydration when the caller needs a durable reference.
 - Remove any durable write path that bypasses resource version registration.
 
 Process:
 
-- Require write-like process commands to declare expected output resources.
+- Require write-like process commands to use `executionMode =
+  "sandbox_materialized"` and declare expected output resources.
 - Capture stdout/stderr/log previews as `execution_output` resources when they
   are retained beyond the invocation result.
-- Commands that mutate the workspace without declared materialization fail.
+- Commands that mutate the workspace without declared materialization fail
+  before execution.
 - Read-only command classifier remains strict and test-covered.
 
 Tests first:
@@ -140,17 +141,18 @@ Tests first:
 
 Program worker:
 
-- Replace loose `artifacts` output with resource refs.
+- Reject loose `artifacts` output and require resource refs.
 - Store retained stdout/stderr/log previews as `execution_output` resources.
 - Enforce output byte limits before resource version creation.
 - Link child capability outputs to the parent program invocation.
 
 Agent runtime:
 
-- `agent::run_goal` completes with a `decision` resource plus promoted resource
-  refs.
-- Subagent outputs attach to the goal as `claim`, `evidence`, `artifact`, or
-  `decision` resources.
+- Completed prompt runs emit `agent_result` resources.
+- Goal-bound decision linking remains the next coordinator concern because this
+  phase intentionally does not introduce a new `agent::run_goal` coordinator.
+- Subagent outputs should attach to the goal as `claim`, `evidence`,
+  `artifact`, or `decision` resources in the coordinator phase.
 - Final chat text is a projection over resources and invocation state, not the
   durable source of truth.
 
@@ -165,12 +167,11 @@ Tests first:
 
 Conversion sequence:
 
-1. Keep audit observations while adding resource-backed paths.
-2. Add per-namespace enforcement flags in tests only, not runtime fallback flags.
+1. Keep audit observations readable while adding resource-backed paths.
+2. Add per-namespace enforcement through contracts and static gates.
 3. Convert one namespace at a time and update tests to expect policy failures.
-4. Remove audit observation branches after all covered paths enforce resources.
-5. Delete audit-only docs, tests, and schema only if the observations are no
-   longer needed as durable historical records. If kept, keep them read-only.
+4. Remove audit-only acceptance branches after covered paths enforce resources.
+5. Keep any audit schema read-only if historical records still matter.
 
 Static gates:
 
@@ -178,9 +179,9 @@ Static gates:
   non-durable contract.
 - No filesystem write helper reachable without resource registration.
 - No process write-like command without output resource contract.
-- No program result `artifacts` array unless each item has a resource ref.
-- No agent completion path without decision/promoted resource refs.
-- No output-audit-only acceptance path after enforcement is complete.
+- No program result `artifacts` array.
+- No completed agent run without an `agent_result` resource ref.
+- No output-audit-only acceptance path for converted durable-output paths.
 
 ## Workstream 6: Security And Abuse Cases
 

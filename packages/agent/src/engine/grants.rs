@@ -811,6 +811,7 @@ fn authorize_with_grant(
         )));
     }
     ensure_resource_selectors(grant, invocation)?;
+    ensure_file_roots(grant, invocation)?;
     Ok(())
 }
 
@@ -872,6 +873,78 @@ fn resource_kind_from_invocation(invocation: &Invocation) -> Option<String> {
     }
 }
 
+fn ensure_file_roots(grant: &EngineGrant, invocation: &Invocation) -> Result<()> {
+    if allows_item(&grant.file_roots, "*") {
+        return Ok(());
+    }
+    for path in paths_from_invocation(&invocation.payload) {
+        let canonical = canonical_payload_path(&path)?;
+        if !grant
+            .file_roots
+            .iter()
+            .filter(|root| root.as_str() != "*")
+            .any(|root| root_allows_path(root, &canonical))
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} does not allow file path {}",
+                grant.grant_id,
+                canonical.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn paths_from_invocation(payload: &Value) -> Vec<String> {
+    [
+        "path",
+        "filePath",
+        "targetPath",
+        "directory",
+        "cwd",
+        "workingDirectory",
+    ]
+    .into_iter()
+    .filter_map(|field| payload.get(field).and_then(Value::as_str))
+    .map(str::to_owned)
+    .collect()
+}
+
+fn root_allows_path(root: &str, path: &Path) -> bool {
+    canonical_payload_path(root)
+        .map(|canonical_root| path.starts_with(canonical_root))
+        .unwrap_or(false)
+}
+
+fn canonical_payload_path(path: &str) -> Result<std::path::PathBuf> {
+    let candidate = Path::new(path);
+    if candidate.exists() {
+        return candidate.canonicalize().map_err(|error| {
+            EngineError::PolicyViolation(format!("canonicalize file path {path}: {error}"))
+        });
+    }
+    let absolute = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|error| EngineError::HandlerFailed(format!("read current dir: {error}")))?
+            .join(candidate)
+    };
+    let mut ancestor = absolute.as_path();
+    while !ancestor.exists() {
+        ancestor = ancestor.parent().ok_or_else(|| {
+            EngineError::PolicyViolation(format!("file path {path} has no existing ancestor"))
+        })?;
+    }
+    let canonical_ancestor = ancestor.canonicalize().map_err(|error| {
+        EngineError::PolicyViolation(format!("canonicalize file path ancestor: {error}"))
+    })?;
+    let suffix = absolute
+        .strip_prefix(ancestor)
+        .unwrap_or_else(|_| Path::new(""));
+    Ok(canonical_ancestor.join(suffix))
+}
+
 fn wrapper_resource_kind(function_id: &str) -> Option<&'static str> {
     match function_id {
         id if id.starts_with("artifact::") => Some("artifact"),
@@ -879,6 +952,8 @@ fn wrapper_resource_kind(function_id: &str) -> Option<&'static str> {
         id if id.starts_with("claim::") => Some("claim"),
         id if id.starts_with("evidence::") => Some("evidence"),
         id if id.starts_with("decision::") => Some("decision"),
+        id if id.starts_with("materialized_file::") => Some("materialized_file"),
+        id if id.starts_with("patch::") => Some("patch_proposal"),
         _ => None,
     }
 }

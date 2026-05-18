@@ -22,10 +22,10 @@ operation_bindings! {
             file_read_value(Some(&invocation.payload), deps).await
         },
         "write_file" => |invocation, deps| {
-            filesystem_write_file_value(Some(&invocation.payload), deps).await
+            filesystem_write_file_value(invocation, deps).await
         },
         "edit_file" => |invocation, deps| {
-            filesystem_edit_file_value(Some(&invocation.payload), deps).await
+            filesystem_edit_file_value(invocation, deps, "edit").await
         },
         "find" => |invocation, deps| {
             filesystem_find_value(Some(&invocation.payload), deps).await
@@ -40,10 +40,10 @@ operation_bindings! {
             filesystem_diff_value(Some(&invocation.payload), deps).await
         },
         "apply_patch" => |invocation, deps| {
-            filesystem_apply_patch_value(Some(&invocation.payload), deps).await
+            filesystem_apply_patch_value(invocation, deps).await
         },
         "create_dir" => |invocation, deps| {
-            filesystem_create_dir_value(Some(&invocation.payload), deps).await
+            filesystem_create_dir_value(invocation, deps).await
         },
     ];
 }

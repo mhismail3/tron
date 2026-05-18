@@ -21,6 +21,12 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
             function.id
         )));
     }
+    if !function.output_contract.is_enforceable() {
+        return Err(EngineError::PolicyViolation(format!(
+            "function {} declares an invalid durable output contract",
+            function.id
+        )));
+    }
 
     if function.visibility.is_agent_visible() {
         if function

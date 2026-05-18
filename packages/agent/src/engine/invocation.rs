@@ -338,6 +338,8 @@ pub struct InvocationRecord {
     pub resource_lease_ids: Vec<String>,
     /// Durable compensation record status for this invocation.
     pub compensation_status: Option<String>,
+    /// Resource references produced by the capability result.
+    pub produced_resource_refs: Vec<Value>,
     /// Replayed invocation, when this was an idempotency replay/no-op.
     pub replayed_from: Option<InvocationId>,
     /// Whether the result was successful.
@@ -378,6 +380,7 @@ impl InvocationRecord {
             idempotency_scope,
             resource_lease_ids: Vec::new(),
             compensation_status: None,
+            produced_resource_refs: produced_resource_refs_from_result(&result.value),
             replayed_from: result.replayed_from.clone(),
             succeeded: result.error.is_none(),
             result_value: result.value.clone(),
@@ -397,6 +400,15 @@ impl InvocationRecord {
         self.compensation_status = compensation_status;
         self
     }
+}
+
+fn produced_resource_refs_from_result(value: &Option<Value>) -> Vec<Value> {
+    value
+        .as_ref()
+        .and_then(|value| value.get("resourceRefs"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Async handler for an in-process function.
