@@ -51,7 +51,7 @@ Collapsed substrate rules:
 | Test/proof strength | 12 | Static gates, focused tests, integration tests, absence tests, and failure-mode tests |
 | Docs/operations | 7 | README, architecture docs, manual QA, and ledger match current behavior |
 
-Current score: **77/100**.
+Current score: **82/100**.
 
 ## Axis Scores
 
@@ -123,7 +123,7 @@ Next action:
 - Audit deferred domain outputs and remove or convert remaining non-resource
   durable state.
 
-### Runtime reliability — 12/15
+### Runtime reliability — 14/15
 
 Evidence:
 
@@ -136,20 +136,25 @@ Evidence:
 - Trust-audit status, duplicate due-bucket enqueue, completed-bucket detection,
   missed-window reporting, schedule expiry, and advisory retention review are
   covered by focused tests.
+- Activation runtime cleanup tests now cover spawn failure, missing worker
+  registration after spawn, over-broad registered capabilities, activation
+  persistence failure after spawn, duplicate activation replay, manual recovery
+  when stop cleanup fails, and leaked grant/worker diagnostics.
 
 Blockers:
 
-- Long-running soak, repeated retry, interrupted worker, registration timeout,
-  and cleanup-leak scenarios are not yet broad enough.
+- Long-running soak, repeated retry under real queue backoff, interrupted worker
+  process exits, and registration timeout scenarios still need broader runtime
+  coverage.
 - The real local-process integration test has shown timeout sensitivity under
   full-suite load and needs hardening.
 
 Next action:
 
-- Add deterministic runtime stress tests around retries, worker registration
-  timeout, leaked grants/workers, and recovery after interrupted activation.
+- Add long-running local-process soak and queue-backoff stress tests after the
+  activation runtime helper is split into a focused module.
 
-### Operator readiness — 9/12
+### Operator readiness — 10/12
 
 Evidence:
 
@@ -163,18 +168,22 @@ Evidence:
   and retention warnings without adding status state.
 - Generated trust-audit schedule surfaces expose canonical status, run,
   retention-review, and expiry actions.
+- `module::inspect_package` now reports activation cleanup/recovery status,
+  leaked grant refs, leaked worker refs, latest recovery evidence refs, and
+  canonical next actions when activation cleanup is incomplete.
 
 Blockers:
 
 - Operator surfaces do not yet fully explain exact next-safe-action
-  consequences, retention cleanup execution, or all stale-action failure causes.
+  consequences, retention cleanup execution, or all stale-action failure causes
+  across the iOS Engine Console.
 
 Next action:
 
-- Add richer operator diagnostics for runtime cleanup/recovery outcomes and
-  stale generated UI action rejection.
+- Carry the new runtime diagnostics into any future Engine Console refinements
+  without adding client-side policy.
 
-### Code comprehensibility — 7/12
+### Code comprehensibility — 8/12
 
 Evidence:
 
@@ -182,17 +191,21 @@ Evidence:
 - Trust-review and scheduled-audit implementation are split into dedicated
   module primitive submodules.
 - Progressive module docs explain the primitive substrate.
+- Activation cleanup now flows through one internal diagnostic helper instead of
+  ad hoc grant revoke / worker disconnect branches in each failure path.
 
 Blockers:
 
 - Several large files still require careful splitting by ownership boundary.
+- `engine/primitives/module.rs` still owns activation, source trust, health,
+  integrity, recovery, and shared helpers in one large file.
 - Some static tests are broad string scans and should gradually become more
   ownership-specific.
 
 Next action:
 
-- Continue splitting stable concerns into submodules and update progressive
-  docs with each split.
+- Split the now-stabilized activation runtime diagnostics/cleanup helpers into
+  a focused module submodule without changing public function ids.
 
 ### Test/proof strength — 11/12
 
@@ -216,7 +229,7 @@ Next action:
 - Add subsystem-specific stress and failure-mode gates for runtime cleanup and
   recovery.
 
-### Docs/operations — 6/7
+### Docs/operations — 7/7
 
 Evidence:
 
@@ -228,13 +241,13 @@ Evidence:
 - Ledger entries record durable modular-engine checkpoints.
 - The scorecard is updated with the trust-audit reliability evidence and next
   runtime-stress target.
+- Runtime cleanup/recovery diagnostics and manual-recovery semantics are now
+  documented in the package trust operations guide and next-phase plan.
 
 Blockers:
 
-- Manual runtime-stress and cleanup-leak QA procedures remain incomplete.
 - The scorecard needs to be updated every maturity checkpoint.
 
 Next action:
 
-- Add manual runtime-stress/cleanup QA docs and update this scorecard with every
-  cleanup/hardening checkpoint.
+- Keep updating this scorecard with every cleanup/hardening checkpoint.

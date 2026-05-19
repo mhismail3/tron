@@ -1,77 +1,76 @@
-# Runtime Stress, Recovery, And Cleanup-Leak Hardening Phase
+# Activation Runtime Ownership And Stress Soak Phase
 
 ## Current Checkpoint
 
-The trust-audit reliability slice is implemented without adding a new durable
+The activation runtime cleanup slice is implemented without adding a new durable
 plane:
 
-- `module::trust_audit_status` is a pure read projection over schedule
-  decisions, queue items, audit evidence, affected refs, missed windows, and
-  retention warnings.
-- `module::record_trust_audit_retention` writes bounded advisory `evidence` for
-  old audit evidence and does not delete bytes, archive resources, revoke
-  grants, stop workers, or mutate schedules.
-- `module::schedule_trust_audit` stores `retentionPolicy.reviewAfterDays` in the
-  schedule decision metadata.
-- `module::expire_trust_decision` can archive `module_trust_audit_schedule`
-  decisions through the canonical trust-decision expiry path.
-- Host trust-audit enqueue uses module-owned due-bucket and completed-evidence
-  helpers, queues at most the current bucket, skips queued/completed buckets,
-  and never backfills missed buckets automatically.
-- Control and generated UI expose schedule status, run, retention review, and
-  expiry through canonical stored actions.
-- The maturity scorecard baseline is now `77/100`.
+- local-process activation still launches only through canonical `worker::spawn`;
+- spawn failure, missing registration, over-broad registration, persistence
+  failure, and manual recovery failure are covered by deterministic tests;
+- post-spawn failures revoke derived grants and stop spawned workers through
+  canonical lifecycle capabilities before returning;
+- `module::recover_activation` records `manual_recovery_required` evidence when
+  cleanup cannot be proven complete;
+- `module::inspect_package` reports cleanup/recovery status, leaked grant refs,
+  leaked worker refs, latest recovery evidence refs, and canonical next actions;
+- static gates cover the activation runtime diagnostic path and continue to
+  forbid direct process spawn/kill, package/source/policy/trust/audit/health/
+  cleanup tables, `control::act`, raw-scope authorization, compatibility paths,
+  dynamic UI catalogs, and module action multiplexers;
+- the maturity scorecard baseline is now `82/100`.
 
-The invariant remains unchanged: no package/source/policy/conformance/trust/
-audit tables, no marketplace, no remote fetch, no remote key discovery, no
-dynamic UI catalog, no `control::act`, no iOS policy, no compatibility alias,
-and no second worker-spawn path.
+The invariant remains unchanged: resources, resource versions, links, grants,
+invocations, worker/catalog records, queues/leases, decisions, evidence, and
+generated UI resources are the only durable substrate.
 
 ## Next Phase Objective
 
-Harden runtime reliability under repeated retries, interrupted local-process
-workers, worker-registration timeouts, leaked grants/workers, missed maintenance
-ticks, and cleanup failures. The target is to make package execution safe under
-stress before adding more package distribution or UI functionality.
+Make activation runtime ownership easier to reason about and prove the cleanup
+path under longer-running stress. The goal is to improve code comprehensibility
+without weakening the newly hardened activation behavior.
 
 ## Proposed Changes
 
-- Add deterministic stress tests for local-process activation, health checks,
-  disable/quarantine, queue retries, and recovery using actual `worker::spawn`
-  paths where practical.
-- Strengthen activation cleanup evidence when spawn, health, grant derivation,
-  worker registration, or post-spawn validation fails.
-- Add projection-only diagnostics for leaked grants/workers after interrupted
-  activation and recovery; any mutation must remain `module::recover_activation`,
-  `module::disable`, or `module::quarantine`.
-- Harden queue idempotency and retry behavior for module activation, health,
-  scheduled audits, and trust review actions under duplicate submissions.
-- Continue splitting stable module/runtime code only where ownership becomes
-  clearer and no public behavior changes.
+- Split the stabilized activation runtime diagnostics and cleanup helpers out of
+  `engine/primitives/module.rs` into a focused module-primitive submodule.
+- Keep public function ids, schemas, output contracts, idempotency keys,
+  generated UI actions, and storage generation unchanged.
+- Add a deterministic queue-backoff stress test for activation/health/recovery
+  retry paths, proving retries do not duplicate grants, workers, activation
+  versions, evidence resources, or child invocations.
+- Add a bounded local-process soak test that exercises activate, health,
+  disable, recover, and re-activate cycles through the real `worker::spawn`
+  implementation where practical.
+- Keep diagnostics projection-only; any mutation must remain a canonical
+  `module::*`, `worker::*`, `grant::*`, or `ui::*` capability.
+- Continue proof-driven cleanup of deferred domain/iOS product-shell surfaces
+  only when call graph, route, DTO, navigation, and test evidence proves they
+  are removable.
 
 ## Test Plan
 
-- Repeated activation/disable/quarantine cycles leave no active leaked grant or
-  volatile worker.
-- Failed spawn, delayed registration, bad capability registration, health
-  timeout, and cleanup failure produce bounded evidence and inspectable
-  activation records.
-- Duplicate queue retries replay or reject idempotently without duplicate
-  workers, grants, invocations, resource versions, or evidence resources.
-- Recovery reconstructs interrupted activations from substrate truth and never
-  spawns replacements or upgrades packages.
-- Static gates continue to forbid package/source/policy/trust/audit tables,
-  dynamic UI catalogs, `control::act`, raw-scope authorization, direct module
-  process spawn/kill, fallback manifest fields, compatibility aliases, iOS
-  local policy, and module action multiplexers.
+- Activation runtime submodule static gates prove cleanup helpers no longer live
+  directly in the parent module file.
+- Queue retry tests cover transient activation and health failures under
+  existing queue backoff and idempotency.
+- Soak tests prove repeated activation/disable/recovery cycles leave no active
+  leaked grant or volatile worker.
+- Generated UI and control tests continue to expose only canonical recovery,
+  disable, quarantine, check-health, verify-integrity, and refresh actions.
+- Static gates continue to forbid package/source/policy/trust/audit/health/
+  cleanup tables, dynamic UI catalogs, `control::act`, raw-scope authorization,
+  direct module process spawn/kill, fallback manifest fields, compatibility
+  aliases, iOS local policy, and module action multiplexers.
 
 ## Verification
 
-- Targeted Rust tests for module runtime stress, cleanup leakage, recovery,
-  queue retries, generated UI action staleness, and static gates.
+- Targeted Rust tests for activation runtime ownership, queue retries, local
+  process soak, generated UI action staleness, and static gates.
+- `cargo test module_ --lib -- --nocapture`.
+- `cargo test generated_ui --lib -- --nocapture`.
+- Targeted `cargo test module_package_activation_gates_stay_on --test threat_model_invariants -- --nocapture`.
 - `scripts/tron ci fmt check clippy test`.
 - `git diff --check`.
 - iOS `xcodegen generate` and targeted `xcodebuild test` only if Swift DTOs or
-  Engine Console view state change.
-- Update README, architecture docs, cleanup audit, scorecard, module docs, and
-  `~/LEDGER.jsonl`.
+  Engine Console state change.

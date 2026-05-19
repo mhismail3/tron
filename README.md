@@ -117,8 +117,8 @@ lifecycle, source trust, trust-root renewal, key-rotation evidence, revocation
 enforcement, trust-change simulation, trust-review evidence, decision-backed
 scheduled trust audits, trust-audit status, trust-audit retention-review
 evidence, health, integrity, and recovery capabilities, and control projections
-that expose `uiSurfaceRefs` plus module resource refs without adding durable
-control-plane state.
+that expose activation runtime cleanup diagnostics, `uiSurfaceRefs`, and module
+resource refs without adding durable control-plane state.
 
 ---
 

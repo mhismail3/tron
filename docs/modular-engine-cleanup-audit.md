@@ -116,6 +116,28 @@ Removal proof from this pass:
 - Retention review does not delete bytes, rewrite resource versions, stop
   workers, revoke grants, or mutate schedules.
 
+## 2026-05-19 Activation Runtime Cleanup Pass
+
+Local-process activation cleanup was hardened without adding a health table,
+cleanup table, status cache, alternate worker-spawn path, or iOS policy layer.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Post-spawn cleanup | `module::activate` records `module_activation_runtime_diagnostic` evidence and revokes/stops spawned runtime state when registration, validation, or persistence fails | Keep as module-owned evidence over existing resources/grants/workers |
+| Missing registration | Worker-spawn results that return a grant but never register the worker revoke the derived grant before returning | Keep; no active grant may survive a missing worker registration |
+| Manual recovery | `module::recover_activation` records `manual_recovery_required` when grant or worker cleanup fails | Keep; recovery must surface uncertainty instead of fabricating success |
+| Operator projection | `module::inspect_package` reports cleanup/recovery status, leaked grant refs, leaked worker refs, latest recovery evidence refs, and canonical next actions | Keep as projection-only diagnostics; no status table |
+| Static gates | Threat-model gates require the activation runtime diagnostic path and continue forbidding direct process spawn/kill, module action multiplexers, and health/cleanup tables | Keep as absence proof |
+
+Removal proof from this pass:
+
+- No new public runtime-status capability was justified; existing package
+  inspection and control/generated UI projections carry diagnostics.
+- No new durable state was justified; cleanup facts are `evidence` resources and
+  activation record versions.
+- No client policy or generated UI mutation shortcut was justified; recovery,
+  disable, quarantine, health, and integrity remain canonical capabilities.
+
 ## Deferred High-Scrutiny Areas
 
 These areas are not proven removable in this checkpoint and need separate

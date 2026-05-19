@@ -12,9 +12,10 @@
 //! audits, trust-audit status, trust-audit retention review, policy audits,
 //! trust reconciliation, source approvals, conformance, health, integrity, and
 //! recovery outcomes are bounded `evidence`/`decision` resources linked back to
-//! package and activation records. Trust review and scheduled audit code lives
-//! in focused submodules; this file owns the package lifecycle registration
-//! surface and shared module substrate helpers.
+//! package and activation records. Activation runtime cleanup records diagnostic
+//! evidence and projection fields instead of adding a status table. Trust review
+//! and scheduled audit code lives in focused submodules; this file owns the
+//! package lifecycle registration surface and shared module substrate helpers.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, Utc};
@@ -100,6 +101,7 @@ const SOURCE_STATUS_TRUSTED_BUILTIN: &str = "trusted_builtin";
 const SOURCE_STATUS_UNVERIFIED: &str = "unverified";
 const SOURCE_STATUS_VERIFIED: &str = "verified";
 const SOURCE_STATUS_SIGNATURE_VERIFIED: &str = "signature_verified";
+const ACTIVATION_RUNTIME_DIAGNOSTIC: &str = "module_activation_runtime_diagnostic";
 
 pub(super) fn registrations(
     stores: &PrimitiveStores,
@@ -1245,6 +1247,8 @@ impl ModulePrimitiveHandler {
         let safe_active = activation_status == "active" && integrity.status == "valid";
         let mut revoked_grant = Value::Null;
         let mut worker_lifecycle = Value::Null;
+        let mut cleanup_status = "not_needed".to_owned();
+        let mut cleanup_errors = Vec::new();
         let recovery_status = if safe_active {
             "already_safe"
         } else {
@@ -1254,18 +1258,56 @@ impl ModulePrimitiveHandler {
                     .inspect_grant(&grant_id)?
                     .is_some_and(|grant| grant.lifecycle == EngineGrantLifecycle::Active)
             {
-                revoked_grant = json!(
-                    self.revoke_grant(&grant_id, invocation.causal_context.trace_id.clone(),)?
-                );
+                match self.revoke_grant(&grant_id, invocation.causal_context.trace_id.clone()) {
+                    Ok(grant) => {
+                        cleanup_status = "revoked_grant".to_owned();
+                        revoked_grant = json!(grant);
+                    }
+                    Err(error) => {
+                        cleanup_status = "manual_recovery_required".to_owned();
+                        cleanup_errors.push(json!({
+                            "operation": "grant_revoke",
+                            "grantId": grant_id.as_str(),
+                            "message": error.to_string(),
+                        }));
+                    }
+                }
             }
-            if let Some(lifecycle) = self
+            match self
                 .disconnect_activation_worker(invocation, &payload, "module activation recovery")
-                .await?
+                .await
             {
-                worker_lifecycle = lifecycle;
+                Ok(Some(lifecycle)) => {
+                    cleanup_status = if cleanup_status == "manual_recovery_required" {
+                        "manual_recovery_required".to_owned()
+                    } else {
+                        lifecycle
+                            .get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("stopped_worker")
+                            .to_owned()
+                    };
+                    worker_lifecycle = lifecycle;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    cleanup_status = "manual_recovery_required".to_owned();
+                    cleanup_errors.push(json!({
+                        "operation": "worker_stop",
+                        "message": error.to_string(),
+                    }));
+                    worker_lifecycle = json!({
+                        "status": "cleanup_failed",
+                        "message": error.to_string(),
+                    });
+                }
             }
             payload["activationStatus"] = json!("quarantined");
-            "cleaned"
+            if cleanup_status == "manual_recovery_required" {
+                "manual_recovery_required"
+            } else {
+                "cleaned"
+            }
         };
         let evidence = self.create_evidence_resource(
             invocation,
@@ -1279,17 +1321,30 @@ impl ModulePrimitiveHandler {
                 "reason": reason,
                 "status": recovery_status,
                 "integrity": {"status": integrity.status, "findings": integrity.findings},
-                "revokedGrant": revoked_grant,
-                "workerLifecycle": worker_lifecycle,
+                "cleanupStatus": cleanup_status.clone(),
+                "cleanupErrors": cleanup_errors,
+                "revokedGrant": revoked_grant.clone(),
+                "workerLifecycle": worker_lifecycle.clone(),
             }),
         )?;
         payload["recovery"] = json!({
             "status": recovery_status,
+            "cleanupStatus": cleanup_status.clone(),
             "reason": reason,
             "recoveredAt": Utc::now().to_rfc3339(),
-            "evidenceRef": evidence.reference,
-            "revokedGrant": revoked_grant,
-            "workerLifecycle": worker_lifecycle,
+            "evidenceRef": evidence.reference.clone(),
+            "revokedGrant": revoked_grant.clone(),
+            "workerLifecycle": worker_lifecycle.clone(),
+        });
+        payload["runtimeDiagnostics"] = json!({
+            "lastFailureStage": if recovery_status == "already_safe" {
+                Value::Null
+            } else {
+                json!("cleanup")
+            },
+            "cleanupStatus": cleanup_status,
+            "recoveryStatus": recovery_status,
+            "latestRecoveryEvidenceRefs": [evidence.reference.clone()],
         });
         let lifecycle = if safe_active {
             inspection.resource.lifecycle.clone()
@@ -2996,6 +3051,15 @@ impl ModulePrimitiveHandler {
                     let worker = self
                         .inspect_worker(&WorkerId::new(worker_id.clone())?)
                         .await?;
+                    if !worker
+                        .namespace_claims
+                        .iter()
+                        .any(|claim| claim == namespace)
+                    {
+                        return Err(EngineError::PolicyViolation(format!(
+                            "worker {worker_id} does not claim package namespace {namespace}"
+                        )));
+                    }
                     let grant = self.derive_grant(child_request)?;
                     (
                         worker,
@@ -3007,14 +3071,30 @@ impl ModulePrimitiveHandler {
                 }
                 RuntimeEntryPoint::LocalProcess(local_process) => {
                     spawned_local_process = true;
-                    let spawn = self
+                    let spawn = match self
                         .spawn_local_process_worker(
                             invocation,
                             &manifest,
                             &local_process,
                             child_request,
                         )
-                        .await?;
+                        .await
+                    {
+                        Ok(spawn) => spawn,
+                        Err(error) => {
+                            self.record_activation_runtime_failure(
+                                invocation,
+                                &package_resource_id,
+                                "worker_spawn",
+                                None,
+                                Some(local_process.worker_id.as_str()),
+                                true,
+                                &error,
+                            )
+                            .await;
+                            return Err(error);
+                        }
+                    };
                     (
                         spawn.worker,
                         spawn.grant,
@@ -3029,22 +3109,34 @@ impl ModulePrimitiveHandler {
             .iter()
             .any(|claim| claim == namespace)
         {
-            return Err(EngineError::PolicyViolation(format!(
+            let error = EngineError::PolicyViolation(format!(
                 "worker {worker_id} does not claim package namespace {namespace}"
-            )));
+            ));
+            self.record_activation_runtime_failure(
+                invocation,
+                &package_resource_id,
+                "post_spawn_validation",
+                Some(&grant.grant_id),
+                Some(worker.id.as_str()),
+                spawned_local_process,
+                &error,
+            )
+            .await;
+            return Err(error);
         }
         let registered =
             registered_capabilities_for_worker(self, invocation, &worker.id, namespace).await?;
         if let Err(error) = validate_registered_capabilities(&declared, &registered) {
-            let _ = self.revoke_grant(&grant.grant_id, invocation.causal_context.trace_id.clone());
-            if spawned_local_process {
-                let _ = self
-                    .disconnect_volatile_worker(
-                        worker.id.as_str(),
-                        "module activation validation failed",
-                    )
-                    .await;
-            }
+            self.record_activation_runtime_failure(
+                invocation,
+                &package_resource_id,
+                "post_spawn_validation",
+                Some(&grant.grant_id),
+                Some(worker.id.as_str()),
+                spawned_local_process,
+                &error,
+            )
+            .await;
             return Err(error);
         }
         let grant_hash = hash_json(&json!(grant))?;
@@ -3096,6 +3188,12 @@ impl ModulePrimitiveHandler {
             "rollbackTarget": rollback_target,
             "supersedes": supersedes,
             "compensationState": {"status": "none"},
+            "runtimeDiagnostics": {
+                "lastFailureStage": Value::Null,
+                "cleanupStatus": "not_needed",
+                "recoveryStatus": "not_needed",
+                "latestRecoveryEvidenceRefs": [],
+            },
             "scope": scope_token,
         });
         let existing = self.inspect_resource(&resource_id)?;
@@ -3128,18 +3226,16 @@ impl ModulePrimitiveHandler {
         let (resource, version, role) = match upserted {
             Ok(value) => value,
             Err(error) => {
-                let _ = self.revoke_grant(
-                    &cleanup_grant_id,
-                    invocation.causal_context.trace_id.clone(),
-                );
-                if spawned_local_process {
-                    let _ = self
-                        .disconnect_volatile_worker(
-                            worker.id.as_str(),
-                            "module activation persistence failed",
-                        )
-                        .await;
-                }
+                self.record_activation_runtime_failure(
+                    invocation,
+                    &package_resource_id,
+                    "activation_record_persist",
+                    Some(&cleanup_grant_id),
+                    Some(worker.id.as_str()),
+                    spawned_local_process,
+                    &error,
+                )
+                .await;
                 return Err(error);
             }
         };
@@ -3249,6 +3345,10 @@ impl ModulePrimitiveHandler {
         let invocation_id = child.id.clone();
         let result = self.stores.engine_host()?.invoke(child).await;
         if let Some(error) = result.error {
+            let _ = self.revoke_active_grants_for_invocation(
+                &invocation_id,
+                invocation.causal_context.trace_id.clone(),
+            );
             return Err(error);
         }
         let value = result.value.ok_or_else(|| {
@@ -3262,9 +3362,14 @@ impl ModulePrimitiveHandler {
                 "worker::spawn returned missing activation grant {grant_id}"
             ))
         })?;
-        let worker = self
-            .inspect_worker(&WorkerId::new(worker_id.to_owned())?)
-            .await?;
+        let worker_id = WorkerId::new(worker_id.to_owned())?;
+        let worker = match self.inspect_worker(&worker_id).await {
+            Ok(worker) => worker,
+            Err(error) => {
+                let _ = self.revoke_grant(&grant_id, invocation.causal_context.trace_id.clone());
+                return Err(error);
+            }
+        };
         Ok(SpawnedLocalProcess {
             invocation_id,
             result: value,
@@ -3414,6 +3519,147 @@ impl ModulePrimitiveHandler {
         }))
     }
 
+    async fn record_activation_runtime_failure(
+        &self,
+        invocation: &Invocation,
+        target_resource_id: &str,
+        stage: &str,
+        grant_id: Option<&AuthorityGrantId>,
+        worker_id: Option<&str>,
+        spawned_local_process: bool,
+        error: &EngineError,
+    ) -> Value {
+        let mut cleanup_errors = Vec::new();
+        let mut cleanup_status = "not_needed".to_owned();
+        let mut revoked_grant = Value::Null;
+        if let Some(grant_id) = grant_id
+            && self
+                .inspect_grant(grant_id)
+                .ok()
+                .flatten()
+                .is_some_and(|grant| grant.lifecycle == EngineGrantLifecycle::Active)
+        {
+            match self.revoke_grant(grant_id, invocation.causal_context.trace_id.clone()) {
+                Ok(grant) => {
+                    cleanup_status = "revoked_grant".to_owned();
+                    revoked_grant = json!(grant);
+                }
+                Err(error) => {
+                    cleanup_status = "cleanup_failed".to_owned();
+                    cleanup_errors.push(json!({
+                        "operation": "grant_revoke",
+                        "grantId": grant_id.as_str(),
+                        "message": error.to_string(),
+                    }));
+                }
+            }
+        }
+        let mut worker_lifecycle = Value::Null;
+        if let Some(worker_id) = worker_id {
+            let result = if spawned_local_process {
+                self.stop_spawned_worker(invocation, worker_id, "module activation cleanup")
+                    .await
+            } else {
+                self.disconnect_volatile_worker(worker_id, "module activation cleanup")
+                    .await
+                    .map(|value| value.unwrap_or(Value::Null))
+            };
+            match result {
+                Ok(lifecycle) => {
+                    let status = lifecycle
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .unwrap_or("stopped_worker");
+                    cleanup_status = match (cleanup_status.as_str(), status) {
+                        ("cleanup_failed", _) => "cleanup_failed".to_owned(),
+                        (_, "not_found") => "worker_not_found".to_owned(),
+                        _ => "stopped_worker".to_owned(),
+                    };
+                    worker_lifecycle = lifecycle;
+                }
+                Err(error) => {
+                    cleanup_status = "manual_recovery_required".to_owned();
+                    cleanup_errors.push(json!({
+                        "operation": "worker_stop",
+                        "workerId": worker_id,
+                        "message": error.to_string(),
+                    }));
+                    worker_lifecycle = json!({
+                        "workerId": worker_id,
+                        "status": "cleanup_failed",
+                        "message": error.to_string(),
+                    });
+                }
+            }
+        }
+        let metadata = json!({
+            "evidenceType": ACTIVATION_RUNTIME_DIAGNOSTIC,
+            "stage": stage,
+            "cleanupStatus": cleanup_status.clone(),
+            "error": error.to_string(),
+            "revokedGrant": revoked_grant,
+            "workerLifecycle": worker_lifecycle,
+            "cleanupErrors": cleanup_errors,
+        });
+        let evidence_ref = match self.create_evidence_resource(
+            invocation,
+            &format!("module activation runtime failure at {stage}"),
+            ACTIVATE_FUNCTION,
+            target_resource_id,
+            metadata.clone(),
+        ) {
+            Ok(evidence) => evidence.reference,
+            Err(error) => json!({
+                "status": "evidence_failed",
+                "message": error.to_string(),
+            }),
+        };
+        json!({
+            "lastFailureStage": stage,
+            "cleanupStatus": cleanup_status.clone(),
+            "recoveryStatus": if cleanup_status == "manual_recovery_required" {
+                "manual_recovery_required"
+            } else {
+                "failed_cleaned"
+            },
+            "evidenceRef": evidence_ref,
+            "metadata": metadata,
+        })
+    }
+
+    fn revoke_active_grants_for_invocation(
+        &self,
+        invocation_id: &InvocationId,
+        trace_id: crate::engine::TraceId,
+    ) -> Vec<Value> {
+        self.list_grants(ListGrants {
+            parent_grant_id: None,
+            lifecycle: Some(EngineGrantLifecycle::Active),
+            limit: 500,
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|grant| {
+            grant
+                .subject_invocation_id
+                .as_ref()
+                .is_some_and(|id| id == invocation_id)
+                || grant
+                    .provenance
+                    .get("parentInvocationId")
+                    .and_then(Value::as_str)
+                    == Some(invocation_id.as_str())
+                || grant.provenance.get("invocationId").and_then(Value::as_str)
+                    == Some(invocation_id.as_str())
+        })
+        .filter_map(|grant| {
+            self.revoke_grant(&grant.grant_id, trace_id.clone())
+                .ok()
+                .map(|grant| json!(grant))
+        })
+        .collect()
+    }
+
     async fn package_diagnostics(
         &self,
         invocation: &Invocation,
@@ -3433,7 +3679,14 @@ impl ModulePrimitiveHandler {
                 "healthStatus": "unknown",
                 "sourceTrustStatus": "missing",
                 "sourceApprovalStatus": "missing",
-                "conformanceStatus": "missing"
+                "conformanceStatus": "missing",
+                "lastFailureStage": Value::Null,
+                "cleanupStatus": "not_needed",
+                "recoveryStatus": "not_needed",
+                "leakedGrantRefs": [],
+                "leakedWorkerRefs": [],
+                "latestRecoveryEvidenceRefs": [],
+                "recommendedCanonicalActions": []
             });
         };
         let manifest = current_payload(package).unwrap_or(Value::Null);
@@ -3543,6 +3796,79 @@ impl ModulePrimitiveHandler {
                     .map(|_| "recorded")
             })
             .unwrap_or("missing");
+        let runtime_diagnostics = activation_payload
+            .and_then(|payload| payload.get("runtimeDiagnostics"))
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let recovery = activation_payload
+            .and_then(|payload| payload.get("recovery"))
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let latest_recovery_evidence_refs = runtime_diagnostics
+            .get("latestRecoveryEvidenceRefs")
+            .cloned()
+            .or_else(|| {
+                recovery
+                    .get("evidenceRef")
+                    .map(|reference| json!([reference]))
+            })
+            .unwrap_or_else(|| json!([]));
+        let leaked_grant_refs = activation_payload
+            .and_then(|payload| payload.get("derivedGrantId"))
+            .and_then(Value::as_str)
+            .and_then(|grant_id| AuthorityGrantId::new(grant_id.to_owned()).ok())
+            .and_then(|grant_id| self.inspect_grant(&grant_id).ok().flatten())
+            .filter(|grant| {
+                grant.lifecycle == EngineGrantLifecycle::Active && activation_status != "active"
+            })
+            .map(|grant| {
+                json!([{
+                    "grantId": grant.grant_id.as_str(),
+                    "lifecycle": "active",
+                }])
+            })
+            .unwrap_or_else(|| json!([]));
+        let leaked_worker_refs = match (activation_payload, worker_id) {
+            (Some(payload), Some(worker_id))
+                if payload.get("workerId").is_some()
+                    && activation_status != "active"
+                    && worker_status == "registered" =>
+            {
+                json!([{"workerId": worker_id, "status": "registered"}])
+            }
+            _ => json!([]),
+        };
+        let recovery_status = runtime_diagnostics
+            .get("recoveryStatus")
+            .and_then(Value::as_str)
+            .or_else(|| recovery.get("status").and_then(Value::as_str))
+            .unwrap_or("not_needed");
+        let cleanup_status = runtime_diagnostics
+            .get("cleanupStatus")
+            .and_then(Value::as_str)
+            .or_else(|| recovery.get("cleanupStatus").and_then(Value::as_str))
+            .unwrap_or("not_needed");
+        let recommended_actions = if recovery_status == "manual_recovery_required"
+            || leaked_grant_refs
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+            || leaked_worker_refs
+                .as_array()
+                .is_some_and(|items| !items.is_empty())
+        {
+            json!([
+                {"targetFunctionId": RECOVER_ACTIVATION_FUNCTION},
+                {"targetFunctionId": QUARANTINE_FUNCTION},
+                {"targetFunctionId": VERIFY_INTEGRITY_FUNCTION}
+            ])
+        } else if activation_status == "active" {
+            json!([
+                {"targetFunctionId": CHECK_HEALTH_FUNCTION},
+                {"targetFunctionId": VERIFY_INTEGRITY_FUNCTION}
+            ])
+        } else {
+            json!([])
+        };
         json!({
             "digestStatus": digest_status,
             "fileHashStatus": file_hash_status,
@@ -3555,6 +3881,13 @@ impl ModulePrimitiveHandler {
             "sourceTrustStatus": source_trust_status,
             "sourceApprovalStatus": source_approval_status,
             "conformanceStatus": conformance_status,
+            "lastFailureStage": runtime_diagnostics.get("lastFailureStage").cloned().unwrap_or(Value::Null),
+            "cleanupStatus": cleanup_status,
+            "recoveryStatus": recovery_status,
+            "leakedGrantRefs": leaked_grant_refs,
+            "leakedWorkerRefs": leaked_worker_refs,
+            "latestRecoveryEvidenceRefs": latest_recovery_evidence_refs,
+            "recommendedCanonicalActions": recommended_actions,
         })
     }
 
@@ -4875,6 +5208,9 @@ impl ModulePrimitiveHandler {
         activation_invocation_id: &str,
         reason: &str,
     ) -> Result<Value> {
+        let invocation_ids = self
+            .activation_invocation_family(activation_invocation_id)
+            .await;
         let active_grants = self.list_grants(ListGrants {
             parent_grant_id: None,
             lifecycle: Some(EngineGrantLifecycle::Active),
@@ -4883,12 +5219,20 @@ impl ModulePrimitiveHandler {
         let mut revoked = Vec::new();
         let mut workers = Vec::new();
         for grant in active_grants {
-            let matches_invocation = grant
-                .subject_invocation_id
-                .as_ref()
-                .is_some_and(|id| id.as_str() == activation_invocation_id)
-                || grant.provenance.get("invocationId").and_then(Value::as_str)
-                    == Some(activation_invocation_id);
+            let matches_invocation = grant.subject_invocation_id.as_ref().is_some_and(|id| {
+                invocation_ids
+                    .iter()
+                    .any(|candidate| candidate == id.as_str())
+            }) || grant
+                .provenance
+                .get("invocationId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| invocation_ids.iter().any(|candidate| candidate == id))
+                || grant
+                    .provenance
+                    .get("parentInvocationId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| invocation_ids.iter().any(|candidate| candidate == id));
             if !matches_invocation {
                 continue;
             }
@@ -4934,6 +5278,30 @@ impl ModulePrimitiveHandler {
             "evidence": evidence.resource,
             "resourceRefs": [evidence.reference],
         }))
+    }
+
+    async fn activation_invocation_family(&self, activation_invocation_id: &str) -> Vec<String> {
+        let mut ids = vec![activation_invocation_id.to_owned()];
+        let Ok(host) = self.stores.engine_host() else {
+            return ids;
+        };
+        let records = host.invocation_records().await;
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for record in &records {
+                if record
+                    .parent_invocation_id
+                    .as_ref()
+                    .is_some_and(|parent| ids.iter().any(|id| id == parent.as_str()))
+                    && !ids.iter().any(|id| id == record.invocation_id.as_str())
+                {
+                    ids.push(record.invocation_id.as_str().to_owned());
+                    changed = true;
+                }
+            }
+        }
+        ids
     }
 }
 

@@ -1140,6 +1140,12 @@ fn module_package_activation_gates_stay_on() {
         "module_trust_audit_schedule",
         "scheduled_trust_audit",
         "trust_audit_retention_review",
+        "module_activation_runtime_diagnostic",
+        "record_activation_runtime_failure",
+        "manual_recovery_required",
+        "cleanupStatus",
+        "leakedGrantRefs",
+        "leakedWorkerRefs",
         "packageDigest",
         "secret_ref",
     ] {
@@ -1165,6 +1171,8 @@ fn module_package_activation_gates_stay_on() {
         "module_conformance_table",
         "module_trust_table",
         "module_audit_table",
+        "module_health_table",
+        "module_cleanup_table",
     ] {
         assert!(
             !module_tree.contains(forbidden),

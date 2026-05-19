@@ -58,6 +58,12 @@ or client-side policy guide.
      `module::inspect_trust`, `control::inspect`, and generated `ui_surface`
      actions to confirm no unsafe grant, volatile worker, stale package trust,
      or missing evidence remains.
+   - `module::inspect_package` reports activation runtime cleanup status,
+     recovery status, leaked grant refs, leaked worker refs, latest recovery
+     evidence refs, and canonical next actions.
+   - `module::recover_activation` is cleanup and truth materialization only. If
+     a grant or spawned worker cannot be cleaned up, it records
+     `manual_recovery_required` evidence instead of fabricating success.
 
 ## Invariants
 
@@ -70,3 +76,6 @@ or client-side policy guide.
   grants, command templates, target function ids, or action payloads.
 - Raw secrets must be `secret_ref` or vault handles and must not appear in
   manifests, configs, evidence, generated UI, logs, or caches.
+- Activation cleanup diagnostics are evidence/projections over substrate truth;
+  they are not a recovery table, health table, status cache, or control-plane
+  state.

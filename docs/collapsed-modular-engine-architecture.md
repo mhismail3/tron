@@ -244,8 +244,10 @@ The first-party `module` primitive exposes:
   unsafe activation state. Recovery reconstructs truth from invocation, grant,
   worker, and resource records, revokes leaked derived grants, disconnects
   volatile workers through canonical lifecycle APIs, and persists
-  failed/quarantined activation evidence. It does not spawn replacements,
-  upgrade packages, or multiplex arbitrary operator actions.
+  failed/quarantined activation evidence. If cleanup cannot be proven complete,
+  recovery records `manual_recovery_required` evidence instead of fabricating
+  success. It does not spawn replacements, upgrade packages, or multiplex
+  arbitrary operator actions.
 
 `local_process` package manifests are digest-pinned to `materialized_file`
 resource refs. The runtime entrypoint declares command and args templates,
@@ -259,9 +261,10 @@ requested activation. Module code never starts or kills processes directly.
 The resulting `activation_record` stores `spawnInvocationId`, `spawnResult`,
 `healthResult`, `healthEvidenceRef`, `healthInvocationIds`,
 `integrityDiagnostics`, `workerLifecycle`, `supersedes`, `rollbackTarget`, and
-recovery metadata so operator projections can explain what ran, what authority
-it received, what evidence supports the current status, and what cleanup
-occurred. Source registration, trust-root registration/revocation, trust-root
+runtime/recovery metadata so operator projections can explain what ran, what
+authority it received, what evidence supports the current status, which grants
+or workers still look leaked, and what cleanup occurred. Source registration,
+trust-root registration/revocation, trust-root
 renewal, signature-key rotation, trust-decision expiry, revocation enforcement,
 trust-change simulation reviews, scheduled trust audits, signature
 verification, policy audit, trust reconciliation, approval, conformance,

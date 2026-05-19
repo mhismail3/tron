@@ -9,6 +9,15 @@ mod trust_review;
 struct RecordingWorkerSpawnHandler {
     handle: EngineHostHandle,
     calls: Arc<std::sync::Mutex<Vec<Value>>>,
+    behavior: RecordingWorkerSpawnBehavior,
+}
+
+#[derive(Clone, Copy)]
+enum RecordingWorkerSpawnBehavior {
+    Success,
+    SpawnError,
+    MissingRegistration,
+    OverbroadRegistration,
 }
 
 #[async_trait]
@@ -18,6 +27,11 @@ impl InProcessFunctionHandler for RecordingWorkerSpawnHandler {
             .lock()
             .expect("recording spawn calls lock")
             .push(invocation.payload.clone());
+        if matches!(self.behavior, RecordingWorkerSpawnBehavior::SpawnError) {
+            return Err(EngineError::HandlerFailed(
+                "recording worker spawn failure".to_owned(),
+            ));
+        }
         let worker_id = invocation.payload["workerId"]
             .as_str()
             .expect("worker::spawn test payload has workerId");
@@ -31,38 +45,58 @@ impl InProcessFunctionHandler for RecordingWorkerSpawnHandler {
             .first()
             .and_then(|function_id| function_id.split_once("::").map(|(namespace, _)| namespace))
             .expect("expected function id has namespace");
-        self.handle
-            .register_worker(worker(worker_id, namespace), true)
-            .await?;
-        for function_id in &expected {
-            let function = if function_id.ends_with("::write_artifact") {
-                write_function(function_id, worker_id)
-                    .with_required_authority(AuthorityRequirement::scope(format!(
-                        "{namespace}.write"
-                    )))
-                    .with_output_contract(DurableOutputContract::resource_backed(["artifact"]))
-            } else {
-                read_function(function_id, worker_id).with_required_authority(
-                    AuthorityRequirement::scope(format!("{namespace}.read")),
-                )
-            };
-            let handler: Arc<dyn InProcessFunctionHandler> =
-                if function_id.ends_with("::write_artifact") {
-                    Arc::new(StaticValueHandler(json!({
-                        "resourceRefs": [{
-                            "resourceId": "artifact-from-local-process",
-                            "kind": "artifact",
-                            "versionId": "ver-artifact-from-local-process",
-                            "role": "created",
-                            "contentHash": "sha256:artifact"
-                        }]
-                    })))
-                } else {
-                    handler()
-                };
+        if !matches!(
+            self.behavior,
+            RecordingWorkerSpawnBehavior::MissingRegistration
+        ) {
             self.handle
-                .register_function(function, Some(handler), true)
+                .register_worker(worker(worker_id, namespace), true)
                 .await?;
+            for function_id in &expected {
+                let function = if function_id.ends_with("::write_artifact") {
+                    write_function(function_id, worker_id)
+                        .with_required_authority(AuthorityRequirement::scope(format!(
+                            "{namespace}.write"
+                        )))
+                        .with_output_contract(DurableOutputContract::resource_backed(["artifact"]))
+                } else {
+                    read_function(function_id, worker_id).with_required_authority(
+                        AuthorityRequirement::scope(format!("{namespace}.read")),
+                    )
+                };
+                let handler: Arc<dyn InProcessFunctionHandler> =
+                    if function_id.ends_with("::write_artifact") {
+                        Arc::new(StaticValueHandler(json!({
+                            "resourceRefs": [{
+                                "resourceId": "artifact-from-local-process",
+                                "kind": "artifact",
+                                "versionId": "ver-artifact-from-local-process",
+                                "role": "created",
+                                "contentHash": "sha256:artifact"
+                            }]
+                        })))
+                    } else {
+                        handler()
+                    };
+                self.handle
+                    .register_function(function, Some(handler), true)
+                    .await?;
+            }
+            if matches!(
+                self.behavior,
+                RecordingWorkerSpawnBehavior::OverbroadRegistration
+            ) {
+                self.handle
+                    .register_function(
+                        read_function(&format!("{namespace}::undeclared"), worker_id)
+                            .with_required_authority(AuthorityRequirement::scope(format!(
+                                "{namespace}.read"
+                            ))),
+                        Some(handler()),
+                        true,
+                    )
+                    .await?;
+            }
         }
         let grant_result = self
             .handle
@@ -111,19 +145,35 @@ impl InProcessFunctionHandler for RecordingWorkerSpawnHandler {
     }
 }
 
-struct RecordingValueHandler {
+struct RecordingSandboxStopHandler {
+    handle: EngineHostHandle,
     calls: Arc<std::sync::Mutex<Vec<Value>>>,
-    value: Value,
+    fail: bool,
 }
 
 #[async_trait]
-impl InProcessFunctionHandler for RecordingValueHandler {
+impl InProcessFunctionHandler for RecordingSandboxStopHandler {
     async fn invoke(&self, invocation: Invocation) -> Result<Value> {
         self.calls
             .lock()
-            .expect("recording value calls lock")
+            .expect("recording sandbox stop calls lock")
             .push(invocation.payload.clone());
-        Ok(self.value.clone())
+        if self.fail {
+            return Err(EngineError::HandlerFailed(
+                "recording sandbox stop failure".to_owned(),
+            ));
+        }
+        let worker_id = invocation.payload["workerId"]
+            .as_str()
+            .expect("sandbox stop payload has workerId");
+        if let Ok(worker_id) = WorkerId::new(worker_id.to_owned())
+            && let Ok(worker) = self.handle.inspect_worker(&worker_id).await
+        {
+            self.handle
+                .unregister_worker(&worker_id, worker.owner_actor.as_str())
+                .await?;
+        }
+        Ok(json!({"status": "stopped"}))
     }
 }
 
@@ -394,6 +444,13 @@ async fn inspect_resource(handle: &EngineHostHandle, resource_id: &str) -> Value
 }
 
 fn register_recording_worker_spawn(handle: &EngineHostHandle) -> Arc<std::sync::Mutex<Vec<Value>>> {
+    register_recording_worker_spawn_with_behavior(handle, RecordingWorkerSpawnBehavior::Success)
+}
+
+fn register_recording_worker_spawn_with_behavior(
+    handle: &EngineHostHandle,
+    behavior: RecordingWorkerSpawnBehavior,
+) -> Arc<std::sync::Mutex<Vec<Value>>> {
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
     handle
         .register_function_for_setup(
@@ -402,6 +459,7 @@ fn register_recording_worker_spawn(handle: &EngineHostHandle) -> Arc<std::sync::
             Some(Arc::new(RecordingWorkerSpawnHandler {
                 handle: handle.clone(),
                 calls: calls.clone(),
+                behavior,
             })),
             false,
         )
@@ -410,6 +468,13 @@ fn register_recording_worker_spawn(handle: &EngineHostHandle) -> Arc<std::sync::
 }
 
 fn register_recording_sandbox_stop(handle: &EngineHostHandle) -> Arc<std::sync::Mutex<Vec<Value>>> {
+    register_recording_sandbox_stop_with_behavior(handle, false)
+}
+
+fn register_recording_sandbox_stop_with_behavior(
+    handle: &EngineHostHandle,
+    fail: bool,
+) -> Arc<std::sync::Mutex<Vec<Value>>> {
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
     handle
         .register_worker_for_setup(worker("sandbox", "sandbox"), true)
@@ -418,9 +483,10 @@ fn register_recording_sandbox_stop(handle: &EngineHostHandle) -> Arc<std::sync::
         .register_function_for_setup(
             write_function("sandbox::stop_spawned_worker", "sandbox")
                 .with_required_authority(AuthorityRequirement::scope("sandbox.write")),
-            Some(Arc::new(RecordingValueHandler {
+            Some(Arc::new(RecordingSandboxStopHandler {
+                handle: handle.clone(),
                 calls: calls.clone(),
-                value: json!({"status": "stopped"}),
+                fail,
             })),
             true,
         )
@@ -540,7 +606,7 @@ async fn grant_count(handle: &EngineHostHandle) -> usize {
             CausalContext::new(
                 actor("system"),
                 ActorKind::System,
-                grant("grant"),
+                grant("engine-system"),
                 trace("trace"),
             )
             .with_scope("grant.read"),
@@ -551,6 +617,33 @@ async fn grant_count(handle: &EngineHostHandle) -> usize {
         .as_array()
         .unwrap()
         .len()
+}
+
+async fn grant_lifecycle(handle: &EngineHostHandle, grant_id: &str) -> Option<String> {
+    let result = handle
+        .invoke(host_invocation(
+            "grant::inspect",
+            json!({"grantId": grant_id}),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("engine-system"),
+                trace("trace"),
+            )
+            .with_scope("grant.read"),
+        ))
+        .await;
+    assert_eq!(result.error, None);
+    result.value.as_ref().unwrap()["grant"]["lifecycle"]
+        .as_str()
+        .map(ToOwned::to_owned)
+}
+
+async fn worker_is_registered(handle: &EngineHostHandle, worker_id: &str) -> bool {
+    handle
+        .inspect_worker(&WorkerId::new(worker_id.to_owned()).unwrap())
+        .await
+        .is_ok()
 }
 
 async fn resource_count(handle: &EngineHostHandle, kind: &str) -> usize {
@@ -657,6 +750,99 @@ async fn activate_demo_package(
         activation_resource_id,
         activation_version_id,
     )
+}
+
+async fn local_process_activate_payload(
+    handle: &EngineHostHandle,
+    package_id: &str,
+    worker_id: &str,
+    key_prefix: &str,
+) -> Value {
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        handle,
+        &tmp.path().join(format!("{worker_id}.sh")),
+        &format!("{key_prefix}-executable"),
+    )
+    .await;
+    let manifest = manifest_with_digest(local_process_manifest(
+        package_id,
+        "demo_local",
+        worker_id,
+        executable,
+    ));
+    let package_digest = manifest["packageDigest"].as_str().unwrap().to_owned();
+    let registered = register_package(handle, manifest, &format!("{key_prefix}-register")).await;
+    assert_eq!(registered.error, None);
+    let registered_package_version_id =
+        registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let verified = verify_source(
+        handle,
+        &format!("worker-package:{package_id}"),
+        &registered_package_version_id,
+        &format!("{key_prefix}-verify"),
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    let package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let approved = approve_source(
+        handle,
+        &format!("worker-package:{package_id}"),
+        &package_version_id,
+        &package_digest,
+        package_id,
+        &format!("{key_prefix}-approve"),
+    )
+    .await;
+    assert_eq!(approved.error, None);
+    let configured = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": format!("worker-package:{package_id}"),
+                "packageVersionId": package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true, "apiKeyRef": format!("secret_ref:{key_prefix}")}
+            }),
+            mutating_causal(&format!("{key_prefix}-configure")).with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured.error, None);
+    let config_version_id = configured.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    json!({
+        "packageResourceId": format!("worker-package:{package_id}"),
+        "packageVersionId": package_version_id,
+        "moduleConfigResourceId": format!("module-config:workspace-a:{package_id}"),
+        "configVersionId": config_version_id,
+        "scope": "workspace",
+        "workspaceId": "workspace-a",
+        "childGrantRequest": {
+            "allowedCapabilities": ["demo_local::inspect", "demo_local::write_artifact"],
+            "allowedNamespaces": ["demo_local"],
+            "allowedAuthorityScopes": ["demo_local.read", "demo_local.write"],
+            "allowedResourceKinds": ["artifact"],
+            "resourceSelectors": ["*"],
+            "fileRoots": ["*"],
+            "networkPolicy": "none",
+            "maxRisk": "medium"
+        }
+    })
 }
 
 #[tokio::test]
@@ -2394,6 +2580,87 @@ async fn module_recover_activation_revokes_unsafe_authority_and_preserves_eviden
 }
 
 #[tokio::test]
+async fn module_recover_activation_records_manual_recovery_when_spawned_worker_stop_fails() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let _spawn_calls = register_recording_worker_spawn(&handle);
+    let stop_calls = register_recording_sandbox_stop_with_behavior(&handle, true);
+    let activate_payload = local_process_activate_payload(
+        &handle,
+        "recovery-stop-failure-tools",
+        "recovery-stop-worker",
+        "module-recovery-stop-failure",
+    )
+    .await;
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            activate_payload,
+            mutating_causal("module-recovery-stop-failure-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(activated.error, None);
+    let activation_version_id = activated.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let revoked = handle
+        .invoke(host_invocation(
+            "grant::revoke",
+            json!({"grantId": "sandbox-worker:recovery-stop-worker"}),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("grant"),
+                trace("trace"),
+            )
+            .with_scope("grant.write")
+            .with_idempotency_key("module-recovery-stop-failure-revoke"),
+        ))
+        .await;
+    assert_eq!(revoked.error, None);
+
+    let recovered = handle
+        .invoke(host_invocation(
+            "module::recover_activation",
+            json!({
+                "activationResourceId": "activation:workspace-a:recovery-stop-failure-tools",
+                "expectedCurrentVersionId": activation_version_id,
+                "reason": "test detected failed stop path"
+            }),
+            mutating_causal("module-recovery-stop-failure-recover").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(recovered.error, None);
+    let recovery = &recovered.value.as_ref().unwrap()["recovery"];
+    assert_eq!(recovery["status"], "manual_recovery_required");
+    assert_eq!(recovery["cleanupStatus"], "manual_recovery_required");
+    assert_eq!(stop_calls.lock().expect("stop calls").len(), 1);
+    assert!(
+        worker_is_registered(&handle, "recovery-stop-worker").await,
+        "failed stop should surface manual recovery rather than pretending the worker is gone"
+    );
+    let inspected = handle
+        .invoke(host_invocation(
+            "module::inspect_package",
+            json!({"packageId": "recovery-stop-failure-tools"}),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(inspected.error, None);
+    let diagnostics = &inspected.value.as_ref().unwrap()["diagnostics"];
+    assert_eq!(diagnostics["cleanupStatus"], "manual_recovery_required");
+    assert_eq!(diagnostics["recoveryStatus"], "manual_recovery_required");
+    assert!(diagnostics["leakedWorkerRefs"].as_array().unwrap().len() == 1);
+    assert!(
+        diagnostics["recommendedCanonicalActions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action["targetFunctionId"] == "module::recover_activation")
+    );
+}
+
+#[tokio::test]
 async fn module_health_monitor_enqueues_due_checks_without_health_tables() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let mut manifest = package_manifest("scheduled-tools", "scheduled_demo", "scheduled-worker");
@@ -2752,6 +3019,174 @@ async fn module_activate_local_process_invokes_worker_spawn_and_records_integrit
         "duplicate activation must replay rather than spawn again"
     );
     assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+}
+
+#[tokio::test]
+async fn module_activate_local_process_cleans_missing_registration_after_spawn() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn_with_behavior(
+        &handle,
+        RecordingWorkerSpawnBehavior::MissingRegistration,
+    );
+    let activate_payload = local_process_activate_payload(
+        &handle,
+        "missing-registration-tools",
+        "missing-worker",
+        "module-missing-registration",
+    )
+    .await;
+    let evidence_before = resource_count(&handle, "evidence").await;
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            activate_payload,
+            mutating_causal("module-missing-registration-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert!(matches!(
+        activated.error,
+        Some(EngineError::NotFound { .. })
+    ));
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    assert_eq!(
+        grant_lifecycle(&handle, "sandbox-worker:missing-worker").await,
+        Some("revoked".to_owned()),
+        "a spawn grant must not stay active when worker registration is missing"
+    );
+    assert_eq!(resource_count(&handle, "activation_record").await, 0);
+    assert!(
+        resource_count(&handle, "evidence").await > evidence_before,
+        "activation runtime diagnostics should record post-spawn cleanup"
+    );
+}
+
+#[tokio::test]
+async fn module_activate_local_process_spawn_error_does_not_create_runtime_state() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn_with_behavior(
+        &handle,
+        RecordingWorkerSpawnBehavior::SpawnError,
+    );
+    let grant_count_before = grant_count(&handle).await;
+    let activation_count_before = resource_count(&handle, "activation_record").await;
+    let activate_payload = local_process_activate_payload(
+        &handle,
+        "spawn-error-tools",
+        "spawn-error-worker",
+        "module-spawn-error",
+    )
+    .await;
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            activate_payload,
+            mutating_causal("module-spawn-error-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert!(matches!(
+        activated.error,
+        Some(EngineError::HandlerFailed(message)) if message.contains("recording worker spawn failure")
+    ));
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    assert_eq!(grant_count(&handle).await, grant_count_before);
+    assert_eq!(
+        resource_count(&handle, "activation_record").await,
+        activation_count_before
+    );
+    assert!(!worker_is_registered(&handle, "spawn-error-worker").await);
+}
+
+#[tokio::test]
+async fn module_activate_local_process_cleans_overbroad_registration() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn_with_behavior(
+        &handle,
+        RecordingWorkerSpawnBehavior::OverbroadRegistration,
+    );
+    let stop_calls = register_recording_sandbox_stop(&handle);
+    let activate_payload = local_process_activate_payload(
+        &handle,
+        "overbroad-registration-tools",
+        "overbroad-worker",
+        "module-overbroad-registration",
+    )
+    .await;
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            activate_payload,
+            mutating_causal("module-overbroad-registration-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert!(matches!(
+        activated.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("not declared by package")
+    ));
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    assert_eq!(stop_calls.lock().expect("stop calls").len(), 1);
+    assert_eq!(
+        grant_lifecycle(&handle, "sandbox-worker:overbroad-worker").await,
+        Some("revoked".to_owned())
+    );
+    assert!(
+        !worker_is_registered(&handle, "overbroad-worker").await,
+        "failed spawned workers must be removed through the sandbox lifecycle"
+    );
+    assert_eq!(resource_count(&handle, "activation_record").await, 0);
+}
+
+#[tokio::test]
+async fn module_activate_local_process_persistence_failure_cleans_spawned_worker() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let (_package_version_id, _activation_resource_id, _activation_version_id) =
+        activate_demo_package(
+            &handle,
+            "persist-failure-tools",
+            "persist_existing",
+            "persist-existing-worker",
+            "module-persist-failure-existing",
+        )
+        .await;
+    let activation_count_before = resource_count(&handle, "activation_record").await;
+    let spawn_calls = register_recording_worker_spawn(&handle);
+    let stop_calls = register_recording_sandbox_stop(&handle);
+    let mut activate_payload = local_process_activate_payload(
+        &handle,
+        "persist-failure-tools",
+        "persist-failure-worker",
+        "module-persist-failure",
+    )
+    .await;
+    activate_payload["expectedCurrentVersionId"] = json!("stale-version");
+    let evidence_before = resource_count(&handle, "evidence").await;
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            activate_payload,
+            mutating_causal("module-persist-failure-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert!(
+        activated.error.is_some(),
+        "activation unexpectedly succeeded: {:?}",
+        activated.value
+    );
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    assert_eq!(stop_calls.lock().expect("stop calls").len(), 1);
+    assert_eq!(
+        grant_lifecycle(&handle, "sandbox-worker:persist-failure-worker").await,
+        Some("revoked".to_owned())
+    );
+    assert!(!worker_is_registered(&handle, "persist-failure-worker").await);
+    assert_eq!(
+        resource_count(&handle, "activation_record").await,
+        activation_count_before
+    );
+    assert!(
+        resource_count(&handle, "evidence").await > evidence_before,
+        "persistence cleanup failures should leave runtime diagnostic evidence"
+    );
 }
 
 #[tokio::test]
