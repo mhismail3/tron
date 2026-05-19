@@ -2,7 +2,10 @@
 //!
 //! Queues provide durable at-least-once handoff for engine invocations. The
 //! primitive stores invocation payload plus causality so a later drain can
-//! invoke the same function with the original authority and trace context.
+//! invoke the same function with the original authority and trace context. A
+//! retried queue item keeps the original logical idempotency key on the item,
+//! but executes retry attempts with attempt-scoped target keys so a stored
+//! handler failure does not turn into a permanent replay result.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -377,7 +380,12 @@ impl EngineQueueRuntime {
             context = context.with_workspace_id(workspace_id.clone());
         }
         if let Some(key) = &item.idempotency_key {
-            context = context.with_idempotency_key(key.clone());
+            let attempt_key = if item.attempts == 0 {
+                key.clone()
+            } else {
+                format!("{key}:queue-retry:{}", item.attempts)
+            };
+            context = context.with_idempotency_key(attempt_key);
         }
         context.delivery_mode = DeliveryMode::Sync;
         let mut invocation =

@@ -193,97 +193,132 @@ async fn e2e_local_process_module_activation_health_and_disable_use_real_worker_
         .unwrap()
         .to_owned();
     let config_resource_id = format!("module-config:system:{package_id}");
-    let activated = direct_engine_invoke(
-        &server,
-        "module::activate",
-        json!({
-            "packageResourceId": format!("worker-package:{package_id}"),
-            "packageVersionId": package_version_id,
-            "moduleConfigResourceId": config_resource_id,
-            "configVersionId": config_version_id,
-            "scope": "system",
-            "childGrantRequest": child_grant_request
-        }),
-        "runtime-local-activate",
-        &["module.write"],
-    )
-    .await;
-    assert_eq!(
-        activated["activation"]["payload"]["workerLifecycle"]["mode"],
-        "spawned_local_process"
-    );
-    assert!(activated["activation"]["payload"]["spawnInvocationId"].is_string());
     let activation_resource_id = format!("activation:system:{package_id}");
-    let activation_version_id = activated["resourceRefs"][0]["versionId"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    for cycle in 0..2 {
+        let activate_key = format!("runtime-local-activate-{cycle}");
+        let activated = direct_engine_invoke(
+            &server,
+            "module::activate",
+            json!({
+                "packageResourceId": format!("worker-package:{package_id}"),
+                "packageVersionId": package_version_id,
+                "moduleConfigResourceId": config_resource_id,
+                "configVersionId": config_version_id,
+                "scope": "system",
+                "childGrantRequest": child_grant_request.clone()
+            }),
+            &activate_key,
+            &["module.write"],
+        )
+        .await;
+        assert_eq!(
+            activated["activation"]["payload"]["workerLifecycle"]["mode"],
+            "spawned_local_process"
+        );
+        assert!(activated["activation"]["payload"]["spawnInvocationId"].is_string());
+        let activation_version_id = activated["resourceRefs"][0]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let derived_grant_id = activated["activation"]["payload"]["derivedGrantId"]
+            .as_str()
+            .expect("activation records derived grant")
+            .to_owned();
 
-    let checked = direct_engine_invoke(
-        &server,
-        "module::check_health",
-        json!({
-            "activationResourceId": activation_resource_id,
-            "activationVersionId": activation_version_id,
-            "expectedCurrentVersionId": activation_version_id,
-            "mode": "on_demand"
-        }),
-        "runtime-local-check-health",
-        &["module.write"],
-    )
-    .await;
-    assert_eq!(checked["healthResult"]["status"], "healthy");
-    assert_eq!(
-        checked["healthResult"]["childInvocationIds"]
-            .as_array()
-            .expect("health child ids")
-            .len(),
-        1
-    );
-    let checked_activation_version = checked["activation"]["version"]["versionId"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+        let health_key = format!("runtime-local-check-health-{cycle}");
+        let checked = direct_engine_invoke(
+            &server,
+            "module::check_health",
+            json!({
+                "activationResourceId": activation_resource_id,
+                "activationVersionId": activation_version_id,
+                "expectedCurrentVersionId": activation_version_id,
+                "mode": "on_demand"
+            }),
+            &health_key,
+            &["module.write"],
+        )
+        .await;
+        assert_eq!(checked["healthResult"]["status"], "healthy");
+        assert_eq!(
+            checked["healthResult"]["childInvocationIds"]
+                .as_array()
+                .expect("health child ids")
+                .len(),
+            1
+        );
+        let checked_activation_version = checked["activation"]["version"]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
 
-    let disabled = direct_engine_invoke(
-        &server,
-        "module::disable",
-        json!({
-            "activationResourceId": format!("activation:system:{package_id}"),
-            "expectedCurrentVersionId": checked_activation_version
-        }),
-        "runtime-local-disable",
-        &["module.write", "sandbox.write"],
-    )
-    .await;
-    assert_eq!(
-        disabled["activation"]["payload"]["activationStatus"],
-        "disabled"
-    );
-    assert_eq!(
-        disabled["workerLifecycle"]["status"],
-        "stopped_spawned_worker"
-    );
-    assert_eq!(
-        disabled["workerLifecycle"]["result"]["stopped"], true,
-        "sandbox stop should own spawned process cleanup"
-    );
-    let workers = direct_engine_invoke(
-        &server,
-        "worker::list",
-        json!({"includeInternal": true}),
-        "runtime-local-worker-list",
-        &["worker.read"],
-    )
-    .await;
-    assert!(
-        workers["workers"]
-            .as_array()
-            .expect("worker list")
-            .iter()
-            .all(|worker| worker["id"] != worker_id),
-        "disabled local-process package must leave no volatile worker registered"
-    );
+        let disable_key = format!("runtime-local-disable-{cycle}");
+        let disabled = direct_engine_invoke(
+            &server,
+            "module::disable",
+            json!({
+                "activationResourceId": format!("activation:system:{package_id}"),
+                "expectedCurrentVersionId": checked_activation_version
+            }),
+            &disable_key,
+            &["module.write", "sandbox.write"],
+        )
+        .await;
+        assert_eq!(
+            disabled["activation"]["payload"]["activationStatus"],
+            "disabled"
+        );
+        assert_eq!(
+            disabled["workerLifecycle"]["status"],
+            "stopped_spawned_worker"
+        );
+        assert_eq!(
+            disabled["workerLifecycle"]["result"]["stopped"], true,
+            "sandbox stop should own spawned process cleanup"
+        );
+        let worker_list_key = format!("runtime-local-worker-list-{cycle}");
+        let workers = direct_engine_invoke(
+            &server,
+            "worker::list",
+            json!({"includeInternal": true}),
+            &worker_list_key,
+            &["worker.read"],
+        )
+        .await;
+        assert!(
+            workers["workers"]
+                .as_array()
+                .expect("worker list")
+                .iter()
+                .all(|worker| worker["id"] != worker_id),
+            "disabled local-process package must leave no volatile worker registered"
+        );
+        let grant_inspect_key = format!("runtime-local-grant-inspect-{cycle}");
+        let grant = direct_engine_invoke(
+            &server,
+            "grant::inspect",
+            json!({"grantId": derived_grant_id}),
+            &grant_inspect_key,
+            &["grant.read"],
+        )
+        .await;
+        assert_eq!(
+            grant["grant"]["lifecycle"], "revoked",
+            "disabled local-process package must revoke its activation grant"
+        );
+        let inspect_key = format!("runtime-local-inspect-{cycle}");
+        let inspected = direct_engine_invoke(
+            &server,
+            "module::inspect_package",
+            json!({"packageId": package_id}),
+            &inspect_key,
+            &["module.read"],
+        )
+        .await;
+        assert_eq!(inspected["diagnostics"]["activationStatus"], "disabled");
+        assert_eq!(inspected["diagnostics"]["grantStatus"], "revoked");
+        assert_eq!(inspected["diagnostics"]["workerStatus"], "missing");
+    }
 
     server.shutdown().shutdown();
 }

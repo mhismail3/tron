@@ -1079,12 +1079,41 @@ fn module_package_activation_gates_stay_on() {
     let module_trust_audit_path = crate_root.join("src/engine/primitives/module/trust_audit.rs");
     let module_trust_audit = std::fs::read_to_string(&module_trust_audit_path)
         .unwrap_or_else(|e| panic!("failed to read {module_trust_audit_path:?}: {e}"));
+    let module_activation_runtime_path =
+        crate_root.join("src/engine/primitives/module/activation_runtime.rs");
+    let module_activation_runtime = std::fs::read_to_string(&module_activation_runtime_path)
+        .unwrap_or_else(|e| panic!("failed to read {module_activation_runtime_path:?}: {e}"));
     let module_tree = [
         module.as_str(),
         module_trust_review.as_str(),
         module_trust_audit.as_str(),
+        module_activation_runtime.as_str(),
     ]
     .join("\n");
+    assert!(
+        module.contains("mod activation_runtime;"),
+        "module primitive must declare the activation runtime ownership boundary"
+    );
+    for helper in [
+        "spawn_local_process_worker",
+        "resolve_materialized_command",
+        "disconnect_volatile_worker",
+        "disconnect_activation_worker",
+        "stop_spawned_worker",
+        "record_activation_runtime_failure",
+        "revoke_active_grants_for_invocation",
+        "recover_partial_activation_invocation",
+        "activation_invocation_family",
+    ] {
+        assert!(
+            module_activation_runtime.contains(helper),
+            "activation runtime helper `{helper}` must live in activation_runtime.rs"
+        );
+        assert!(
+            !module.contains(&format!("fn {helper}")),
+            "activation runtime helper `{helper}` must not drift back into module.rs"
+        );
+    }
     for required in [
         "module::register_package",
         "module::inspect_package",

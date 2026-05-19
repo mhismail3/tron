@@ -1,76 +1,116 @@
-# Activation Runtime Ownership And Stress Soak Phase
+# Resource Kernel Ownership And Validation Simplification Phase
 
 ## Current Checkpoint
 
-The activation runtime cleanup slice is implemented without adding a new durable
-plane:
+The activation runtime ownership slice is complete:
 
-- local-process activation still launches only through canonical `worker::spawn`;
-- spawn failure, missing registration, over-broad registration, persistence
-  failure, and manual recovery failure are covered by deterministic tests;
-- post-spawn failures revoke derived grants and stop spawned workers through
-  canonical lifecycle capabilities before returning;
-- `module::recover_activation` records `manual_recovery_required` evidence when
-  cleanup cannot be proven complete;
-- `module::inspect_package` reports cleanup/recovery status, leaked grant refs,
-  leaked worker refs, latest recovery evidence refs, and canonical next actions;
-- static gates cover the activation runtime diagnostic path and continue to
-  forbid direct process spawn/kill, package/source/policy/trust/audit/health/
-  cleanup tables, `control::act`, raw-scope authorization, compatibility paths,
-  dynamic UI catalogs, and module action multiplexers;
-- the maturity scorecard baseline is now `82/100`.
+- runtime cleanup helpers live in `engine/primitives/module/activation_runtime.rs`;
+- queue-backed local-process activation retries a transient spawn failure without
+  duplicate grants, workers, activation versions, evidence resources, or queue
+  completion state;
+- the real Unix local-process path runs two activate -> health -> disable cycles
+  through canonical `worker::spawn` and `sandbox::stop_spawned_worker`;
+- static gates prevent runtime helper bodies from drifting back into
+  `module.rs`;
+- the maturity scorecard baseline is now `86/100`.
 
-The invariant remains unchanged: resources, resource versions, links, grants,
-invocations, worker/catalog records, queues/leases, decisions, evidence, and
-generated UI resources are the only durable substrate.
+The next highest-value blocker is no longer activation cleanup. It is the size
+and mixed ownership inside the generic resource kernel and generated-UI
+validation surface.
 
-## Next Phase Objective
+## Objective
 
-Make activation runtime ownership easier to reason about and prove the cleanup
-path under longer-running stress. The goal is to improve code comprehensibility
-without weakening the newly hardened activation behavior.
+Simplify and harden the resource substrate without adding features or storage.
+The goal is to make the resource kernel easier to audit from first principles:
+type definitions, payload validation, version/blob integrity, links, lifecycle,
+and UI-surface validation should each have a clear owner and focused tests.
+
+No public capability ids, schemas, storage generation, resource kinds, iOS
+surfaces, compatibility readers, fallback renderers, dynamic UI catalogs, or
+new tables change in this phase.
 
 ## Proposed Changes
 
-- Split the stabilized activation runtime diagnostics and cleanup helpers out of
-  `engine/primitives/module.rs` into a focused module-primitive submodule.
-- Keep public function ids, schemas, output contracts, idempotency keys,
-  generated UI actions, and storage generation unchanged.
-- Add a deterministic queue-backoff stress test for activation/health/recovery
-  retry paths, proving retries do not duplicate grants, workers, activation
-  versions, evidence resources, or child invocations.
-- Add a bounded local-process soak test that exercises activate, health,
-  disable, recover, and re-activate cycles through the real `worker::spawn`
-  implementation where practical.
-- Keep diagnostics projection-only; any mutation must remain a canonical
-  `module::*`, `worker::*`, `grant::*`, or `ui::*` capability.
-- Continue proof-driven cleanup of deferred domain/iOS product-shell surfaces
-  only when call graph, route, DTO, navigation, and test evidence proves they
-  are removable.
+### 1. Build The Resource Ownership Map
 
-## Test Plan
+- Inventory `engine/resources.rs`, `engine/primitives/resource.rs`,
+  `engine/primitives/ui.rs`, resource tests, generated UI tests, docs, and
+  static gates.
+- Classify each responsibility as type definition, schema validation,
+  version/blob integrity, link management, lifecycle/retention, materialization,
+  UI-surface validation, control projection, or capability wrapper.
+- Record the map in `docs/modular-engine-cleanup-audit.md` before moving code.
 
-- Activation runtime submodule static gates prove cleanup helpers no longer live
-  directly in the parent module file.
-- Queue retry tests cover transient activation and health failures under
-  existing queue backoff and idempotency.
-- Soak tests prove repeated activation/disable/recovery cycles leave no active
-  leaked grant or volatile worker.
-- Generated UI and control tests continue to expose only canonical recovery,
-  disable, quarantine, check-health, verify-integrity, and refresh actions.
-- Static gates continue to forbid package/source/policy/trust/audit/health/
-  cleanup tables, dynamic UI catalogs, `control::act`, raw-scope authorization,
-  direct module process spawn/kill, fallback manifest fields, compatibility
-  aliases, iOS local policy, and module action multiplexers.
+### 2. Split Only Stabilized Resource Concerns
 
-## Verification
+Create focused resource-kernel modules only where ownership is clear and tests
+already protect behavior. Candidate boundaries:
 
-- Targeted Rust tests for activation runtime ownership, queue retries, local
-  process soak, generated UI action staleness, and static gates.
-- `cargo test module_ --lib -- --nocapture`.
-- `cargo test generated_ui --lib -- --nocapture`.
-- Targeted `cargo test module_package_activation_gates_stay_on --test threat_model_invariants -- --nocapture`.
-- `scripts/tron ci fmt check clippy test`.
-- `git diff --check`.
-- iOS `xcodegen generate` and targeted `xcodebuild test` only if Swift DTOs or
-  Engine Console state change.
+- `resources/types.rs`: built-in resource type definitions and allowed
+  lifecycle/link/versioning declarations.
+- `resources/validation.rs`: payload schema validation, lifecycle validation,
+  redaction checks, and resource-kind contract checks.
+- `resources/versions.rs`: version state, current-version rules, blob/hash
+  integrity, damaged/quarantined/discarded handling, and CAS helpers.
+- `resources/ui_surface.rs`: fixed-catalog `ui_surface` payload validation,
+  component/action bounds, secret checks, expiry checks, and stored-action
+  validation helpers.
+
+The parent resource module should remain the store facade and durable substrate
+contract, not a second policy plane.
+
+### 3. Preserve Behavior With Characterization Tests
+
+Before moving implementation bodies, add or strengthen tests that prove:
+
+- built-in resource type registrations are unchanged;
+- invalid payloads still fail before persistence;
+- current versions can only point to available verified versions;
+- damaged or missing bytes remain inspectable and are never silently rewritten;
+- UI surfaces reject unknown catalogs, unsupported components, oversized
+  payloads, raw secrets, stale actions, and client-authored target payloads;
+- materialized files and patch proposals still return top-level `resourceRefs`;
+- generated UI action submissions still execute only stored canonical actions.
+
+### 4. Add Static Ownership Gates
+
+Extend existing threat-model/static tests:
+
+- resource type definition constants live in the resource type owner;
+- UI-surface validation helpers live in the UI-surface validation owner, not in
+  a control or iOS path;
+- no new resource/control/UI tables exist;
+- no fallback renderer, dynamic catalog, compatibility alias, or old DTO reader
+  appears;
+- no durable output path bypasses `resourceRefs`;
+- no mutation lacks idempotency and an output contract.
+
+Use ownership and forbidden-symbol gates, not brittle line-count checks.
+
+### 5. Verification
+
+- `cargo test resource_ --lib -- --nocapture`
+- `cargo test generated_ui --lib -- --nocapture`
+- targeted `cargo test --test threat_model_invariants -- --nocapture`
+- `git diff --check`
+- `scripts/tron ci fmt check clippy test`
+
+iOS tests are not expected unless Swift DTOs or project files change.
+
+## Acceptance Criteria
+
+- The resource kernel has fewer mixed-concern files and clearer ownership.
+- Public behavior and serialized wire/resource shapes remain stable.
+- Static gates prove forbidden state planes and fallback paths did not appear.
+- The maturity scorecard can move only when tests and docs prove the split.
+- Docs and `~/LEDGER.jsonl` are updated in the same checkpoint.
+
+## Out Of Scope
+
+- New resource kinds.
+- Storage generation changes.
+- Generated UI catalog expansion.
+- iOS renderer changes.
+- Control-plane mutation shortcuts.
+- Marketplace, remote package fetch, remote key discovery, or compatibility
+  readers.

@@ -17,9 +17,9 @@
 //! trust-change simulation, trust-review evidence, and scheduled trust audits
 //! represented as decision/evidence resources. Trust-audit status, retention
 //! review, and activation runtime cleanup diagnostics stay projection/evidence
-//! only. The module primitive keeps trust-review and scheduled-audit ownership
-//! in focused submodules so the parent registration surface does not become
-//! another policy plane.
+//! only. The module primitive keeps activation-runtime, trust-review, and
+//! scheduled-audit ownership in focused submodules so the parent registration
+//! surface does not become another policy plane.
 //! `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot

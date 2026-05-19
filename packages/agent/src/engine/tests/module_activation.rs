@@ -16,6 +16,7 @@ struct RecordingWorkerSpawnHandler {
 enum RecordingWorkerSpawnBehavior {
     Success,
     SpawnError,
+    FailOnceThenSuccess,
     MissingRegistration,
     OverbroadRegistration,
 }
@@ -23,10 +24,20 @@ enum RecordingWorkerSpawnBehavior {
 #[async_trait]
 impl InProcessFunctionHandler for RecordingWorkerSpawnHandler {
     async fn invoke(&self, invocation: Invocation) -> Result<Value> {
-        self.calls
-            .lock()
-            .expect("recording spawn calls lock")
-            .push(invocation.payload.clone());
+        let call_count = {
+            let mut calls = self.calls.lock().expect("recording spawn calls lock");
+            calls.push(invocation.payload.clone());
+            calls.len()
+        };
+        if matches!(
+            self.behavior,
+            RecordingWorkerSpawnBehavior::FailOnceThenSuccess
+        ) && call_count == 1
+        {
+            return Err(EngineError::HandlerFailed(
+                "recording worker spawn transient failure".to_owned(),
+            ));
+        }
         if matches!(self.behavior, RecordingWorkerSpawnBehavior::SpawnError) {
             return Err(EngineError::HandlerFailed(
                 "recording worker spawn failure".to_owned(),
@@ -103,7 +114,12 @@ impl InProcessFunctionHandler for RecordingWorkerSpawnHandler {
             .invoke(host_invocation(
                 "grant::derive",
                 json!({
-                    "grantId": format!("sandbox-worker:{worker_id}"),
+                    "grantId": invocation
+                        .payload
+                        .get("grantId")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| format!("sandbox-worker:{worker_id}")),
                     "parentGrantId": invocation.causal_context.authority_grant_id.as_str(),
                     "subjectWorkerId": worker_id,
                     "subjectInvocationId": invocation.id.as_str(),
@@ -2603,10 +2619,15 @@ async fn module_recover_activation_records_manual_recovery_when_spawned_worker_s
         .as_str()
         .unwrap()
         .to_owned();
+    let derived_grant_id =
+        activated.value.as_ref().unwrap()["activation"]["payload"]["derivedGrantId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
     let revoked = handle
         .invoke(host_invocation(
             "grant::revoke",
-            json!({"grantId": "sandbox-worker:recovery-stop-worker"}),
+            json!({"grantId": derived_grant_id}),
             CausalContext::new(
                 actor("system"),
                 ActorKind::System,
@@ -2970,7 +2991,7 @@ async fn module_activate_local_process_invokes_worker_spawn_and_records_integrit
     assert_eq!(value["activation"]["payload"]["activationStatus"], "active");
     assert_eq!(
         value["activation"]["payload"]["derivedGrantId"],
-        "sandbox-worker:demo-local-worker"
+        value["activation"]["payload"]["spawnResult"]["authorityGrantId"]
     );
     assert_eq!(
         value["activation"]["payload"]["spawnResult"]["workerId"],
@@ -3022,6 +3043,104 @@ async fn module_activate_local_process_invokes_worker_spawn_and_records_integrit
 }
 
 #[tokio::test]
+async fn module_queued_activation_retry_does_not_duplicate_runtime_state() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn_with_behavior(
+        &handle,
+        RecordingWorkerSpawnBehavior::FailOnceThenSuccess,
+    );
+    let activate_payload = local_process_activate_payload(
+        &handle,
+        "queued-retry-tools",
+        "queued-retry-worker",
+        "module-queued-retry",
+    )
+    .await;
+    let grants_before = grant_count(&handle).await;
+    let activations_before = resource_count(&handle, "activation_record").await;
+    let evidence_before = resource_count(&handle, "evidence").await;
+
+    let queued = handle
+        .invoke(host_invocation(
+            "queue::enqueue",
+            json!({
+                "queue": "module",
+                "functionId": "module::activate",
+                "payload": activate_payload
+            }),
+            mutating_causal("module-queued-retry-activate")
+                .with_scope("queue.write")
+                .with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(queued.error, None);
+    let receipt = queued.value.as_ref().unwrap()["item"]["receiptId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let first = EngineQueueDrainer::drain_receipt(&handle, &receipt, "module-queued-retry")
+        .await
+        .unwrap()
+        .expect("queued activation should run once");
+    assert!(matches!(
+        first.error,
+        Some(EngineError::HandlerFailed(message))
+            if message.contains("recording worker spawn transient failure")
+    ));
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    assert_eq!(grant_count(&handle).await, grants_before);
+    assert_eq!(
+        resource_count(&handle, "activation_record").await,
+        activations_before
+    );
+    assert!(
+        resource_count(&handle, "evidence").await > evidence_before,
+        "failed queued activation should leave bounded runtime diagnostic evidence"
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+    let second = EngineQueueDrainer::drain_receipt(&handle, &receipt, "module-queued-retry")
+        .await
+        .unwrap()
+        .expect("queued activation should retry");
+    assert_eq!(second.error, None);
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 2);
+    let retry_grant_id = second.value.as_ref().unwrap()["activation"]["payload"]["derivedGrantId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        grant_lifecycle(&handle, &retry_grant_id).await,
+        Some("active".to_owned())
+    );
+    assert!(
+        worker_is_registered(&handle, "queued-retry-worker").await,
+        "successful retry should leave exactly one live spawned worker"
+    );
+    assert_eq!(
+        resource_count(&handle, "activation_record").await,
+        activations_before + 1
+    );
+    let activation = inspect_resource(&handle, "activation:workspace-a:queued-retry-tools").await;
+    assert_eq!(
+        activation["versions"].as_array().unwrap().len(),
+        1,
+        "retry success should not create duplicate activation versions"
+    );
+    let item = handle
+        .invoke(host_invocation(
+            "queue::get",
+            json!({"receiptId": receipt}),
+            causal().with_scope("queue.read"),
+        ))
+        .await;
+    assert_eq!(item.error, None);
+    assert_eq!(item.value.as_ref().unwrap()["item"]["status"], "completed");
+    assert_eq!(item.value.as_ref().unwrap()["item"]["attempts"], 1);
+}
+
+#[tokio::test]
 async fn module_activate_local_process_cleans_missing_registration_after_spawn() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let spawn_calls = register_recording_worker_spawn_with_behavior(
@@ -3048,8 +3167,12 @@ async fn module_activate_local_process_cleans_missing_registration_after_spawn()
         Some(EngineError::NotFound { .. })
     ));
     assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    let grant_id = spawn_calls.lock().expect("spawn calls")[0]["grantId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert_eq!(
-        grant_lifecycle(&handle, "sandbox-worker:missing-worker").await,
+        grant_lifecycle(&handle, &grant_id).await,
         Some("revoked".to_owned()),
         "a spawn grant must not stay active when worker registration is missing"
     );
@@ -3125,8 +3248,12 @@ async fn module_activate_local_process_cleans_overbroad_registration() {
     ));
     assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
     assert_eq!(stop_calls.lock().expect("stop calls").len(), 1);
+    let grant_id = spawn_calls.lock().expect("spawn calls")[0]["grantId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert_eq!(
-        grant_lifecycle(&handle, "sandbox-worker:overbroad-worker").await,
+        grant_lifecycle(&handle, &grant_id).await,
         Some("revoked".to_owned())
     );
     assert!(
@@ -3174,8 +3301,12 @@ async fn module_activate_local_process_persistence_failure_cleans_spawned_worker
     );
     assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
     assert_eq!(stop_calls.lock().expect("stop calls").len(), 1);
+    let grant_id = spawn_calls.lock().expect("spawn calls")[0]["grantId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert_eq!(
-        grant_lifecycle(&handle, "sandbox-worker:persist-failure-worker").await,
+        grant_lifecycle(&handle, &grant_id).await,
         Some("revoked".to_owned())
     );
     assert!(!worker_is_registered(&handle, "persist-failure-worker").await);

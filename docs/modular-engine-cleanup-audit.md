@@ -138,6 +138,30 @@ Removal proof from this pass:
 - No client policy or generated UI mutation shortcut was justified; recovery,
   disable, quarantine, health, and integrity remain canonical capabilities.
 
+## 2026-05-19 Activation Runtime Ownership And Stress Soak Pass
+
+Activation runtime cleanup was moved out of the parent module primitive and
+stress-tested through queue retry plus real local-process cycles without
+changing public capability ids, schemas, storage generation, generated UI
+actions, or iOS behavior.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Runtime helper ownership | `engine/primitives/module/activation_runtime.rs` owns local-process spawn composition, command resolution, volatile worker cleanup, spawned-worker stop, runtime failure evidence, partial activation recovery, invocation-family lookup, and runtime diagnostic projection helpers | Keep as focused module submodule; parent `module.rs` remains lifecycle dispatch/orchestration |
+| Static ownership proof | `threat_model_invariants::module_package_activation_gates_stay_on` requires `mod activation_runtime;` and rejects runtime helper implementations drifting back into `module.rs` | Keep as structural gate rather than a brittle line-count rule |
+| Queue retry proof | `module_queued_activation_retry_does_not_duplicate_runtime_state` uses a fail-once `worker::spawn` fixture and existing queue backoff to prove retry success creates one activation version, one active derived grant, one live worker, and a completed queue item | Keep; queue retries use attempt-scoped target idempotency after a failed attempt so a stored handler failure does not become retry acceptance state |
+| Real local-process soak | `e2e_local_process_module_activation_health_and_disable_use_real_worker_spawn` now runs two activate -> health -> disable cycles through real `worker::spawn` and `sandbox::stop_spawned_worker` | Keep as bounded e2e proof of no volatile worker or active activation grant leakage after repeated cycles |
+
+Removal proof from this pass:
+
+- No new runtime-status capability was justified; runtime diagnostics remain
+  package/control/generated-UI projections over existing activation/evidence/
+  grant/worker records.
+- No new queue, retry, health, cleanup, or status table was justified.
+- No alternate module process spawn/kill path was justified; local-process
+  packages still compose canonical `worker::spawn` and
+  `sandbox::stop_spawned_worker`.
+
 ## Deferred High-Scrutiny Areas
 
 These areas are not proven removable in this checkpoint and need separate

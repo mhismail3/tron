@@ -21,6 +21,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "additionalProperties": false,
                 "properties": {
                     "workerId": {"type": "string"},
+                    "grantId": {"type": "string"},
                     "command": {"type": "string"},
                     "args": {"type": "array", "items": {"type": "string"}, "maxItems": 64},
                     "workingDirectory": {"type": "string"},

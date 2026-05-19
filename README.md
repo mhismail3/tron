@@ -578,11 +578,14 @@ and persists failed/quarantined activation evidence. Scheduled checks are
 derived from active `activation_record` resources and enqueued through the
 existing `module` queue. Scheduled trust audits are derived from active
 `module_trust_audit_schedule` decision resources and enqueued through the same
-queue/invocation substrate. The host queue projection uses module-owned
-due-bucket helpers, enqueues at most the current bucket, skips queued or
-completed buckets, and surfaces missed buckets through
-`module::trust_audit_status` rather than backfilling mutation work. There is no
-package, health, policy, conformance, trust, audit, or recovery table.
+queue/invocation substrate. Queue items keep their logical idempotency key, but
+retry attempts execute with attempt-scoped target keys so a transient handler
+failure can be retried without becoming a permanent replay result. The host
+queue projection uses module-owned due-bucket helpers, enqueues at most the
+current bucket, skips queued or completed buckets, and surfaces missed buckets
+through `module::trust_audit_status` rather than backfilling mutation work.
+There is no package, health, policy, conformance, trust, audit, or recovery
+table.
 
 ---
 

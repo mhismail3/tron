@@ -51,11 +51,11 @@ Collapsed substrate rules:
 | Test/proof strength | 12 | Static gates, focused tests, integration tests, absence tests, and failure-mode tests |
 | Docs/operations | 7 | README, architecture docs, manual QA, and ledger match current behavior |
 
-Current score: **82/100**.
+Current score: **86/100**.
 
 ## Axis Scores
 
-### Architecture simplicity — 10/15
+### Architecture simplicity — 11/15
 
 Evidence:
 
@@ -65,11 +65,15 @@ Evidence:
 - `packages/agent/src/engine/primitives/` owns first-party primitive workers.
 - Static gates forbid control mutation multiplexers, old output-audit paths,
   public worker creation bypasses, and package/source/policy/trust/audit tables.
+- Module trust review, scheduled trust audit, and activation runtime cleanup now
+  have focused primitive submodules instead of living directly in the parent
+  package-lifecycle file.
 
 Blockers:
 
 - `engine/resources.rs`, `engine/tests.rs`, `engine/primitives/module.rs`, and
-  `engine/primitives/ui.rs` still contain multiple concerns in large files.
+  `engine/primitives/ui.rs` still contain multiple concerns in large files,
+  though `module.rs` now has clearer runtime/trust-audit ownership boundaries.
 - Several older domain and iOS product-shell surfaces remain deferred pending
   proof-driven removal.
 
@@ -123,7 +127,7 @@ Next action:
 - Audit deferred domain outputs and remove or convert remaining non-resource
   durable state.
 
-### Runtime reliability — 14/15
+### Runtime reliability — 15/15
 
 Evidence:
 
@@ -140,19 +144,23 @@ Evidence:
   registration after spawn, over-broad registered capabilities, activation
   persistence failure after spawn, duplicate activation replay, manual recovery
   when stop cleanup fails, and leaked grant/worker diagnostics.
+- Queue-backed local-process activation now has a fail-once retry test proving
+  existing queue backoff can retry a transient runtime failure without duplicate
+  grants, workers, activation versions, or queue completion state.
+- The Unix local-process integration path runs two activate -> health -> disable
+  cycles with real `worker::spawn` / `sandbox::stop_spawned_worker`, proving no
+  volatile worker or active activation grant remains after either cycle.
 
 Blockers:
 
-- Long-running soak, repeated retry under real queue backoff, interrupted worker
-  process exits, and registration timeout scenarios still need broader runtime
-  coverage.
-- The real local-process integration test has shown timeout sensitivity under
-  full-suite load and needs hardening.
+- Very long-running soak, interrupted worker process exits, and registration
+  timeout scenarios still need broader runtime coverage, but the current
+  activation/health/disable/retry/recovery substrate has focused and e2e proof.
 
 Next action:
 
-- Add long-running local-process soak and queue-backoff stress tests after the
-  activation runtime helper is split into a focused module.
+- Add targeted interruption/timeout tests only after the worker lifecycle
+  protocol has explicit timeout fixtures.
 
 ### Operator readiness — 10/12
 
@@ -183,7 +191,7 @@ Next action:
 - Carry the new runtime diagnostics into any future Engine Console refinements
   without adding client-side policy.
 
-### Code comprehensibility — 8/12
+### Code comprehensibility — 9/12
 
 Evidence:
 
@@ -193,21 +201,25 @@ Evidence:
 - Progressive module docs explain the primitive substrate.
 - Activation cleanup now flows through one internal diagnostic helper instead of
   ad hoc grant revoke / worker disconnect branches in each failure path.
+- Activation runtime helper implementations and projection helpers now live in
+  `engine/primitives/module/activation_runtime.rs`; the parent module remains a
+  registration and lifecycle orchestration surface.
 
 Blockers:
 
 - Several large files still require careful splitting by ownership boundary.
 - `engine/primitives/module.rs` still owns activation, source trust, health,
-  integrity, recovery, and shared helpers in one large file.
+  integrity, recovery, and shared helpers in one large file, but the runtime
+  cleanup helper bodies are no longer embedded there.
 - Some static tests are broad string scans and should gradually become more
   ownership-specific.
 
 Next action:
 
-- Split the now-stabilized activation runtime diagnostics/cleanup helpers into
-  a focused module submodule without changing public function ids.
+- Continue the same ownership-driven split pattern for resource-kernel and
+  generated-UI validation helpers once behavior is locked by tests.
 
-### Test/proof strength — 11/12
+### Test/proof strength — 12/12
 
 Evidence:
 
@@ -217,6 +229,10 @@ Evidence:
 - Focused tests now prove trust-audit status is projection-only, retention
   review is evidence-only, schedule expiry uses canonical CAS/evidence, and host
   enqueue does not backfill missed buckets.
+- Static gates now require the activation runtime ownership boundary and reject
+  helper implementations drifting back into `module.rs`.
+- Queue retry and real local-process soak tests cover transient runtime failure,
+  retry, cleanup, and repeated activation/disable cycles.
 
 Blockers:
 
@@ -226,8 +242,8 @@ Blockers:
 
 Next action:
 
-- Add subsystem-specific stress and failure-mode gates for runtime cleanup and
-  recovery.
+- Add subsystem-specific proof gates for resource-kernel validation and
+  generated-UI authoring once those large files are split.
 
 ### Docs/operations — 7/7
 
@@ -243,6 +259,8 @@ Evidence:
   runtime-stress target.
 - Runtime cleanup/recovery diagnostics and manual-recovery semantics are now
   documented in the package trust operations guide and next-phase plan.
+- The activation-runtime ownership split, retry proof, and real local-process
+  soak evidence are reflected in the cleanup audit and next-phase plan.
 
 Blockers:
 

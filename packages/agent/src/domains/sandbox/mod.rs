@@ -258,7 +258,8 @@ async fn derive_sandbox_worker_grant(
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     let allowed_namespaces = expected_function_namespaces(expected_function_ids)?;
-    let grant_id = format!("sandbox-worker:{worker_id}");
+    let grant_id = opt_string(Some(payload), "grantId")
+        .unwrap_or_else(|| format!("sandbox-worker:{worker_id}"));
     let mut context = CausalContext::new(
         ActorId::new("sandbox-spawn-worker").map_err(engine_invalid_params)?,
         ActorKind::System,
