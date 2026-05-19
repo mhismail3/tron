@@ -32,7 +32,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             snapshot_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "modulePackages", "moduleConfigs", "activationRecords", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
+                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "modulePackages", "moduleConfigs", "activationRecords", "moduleHealth", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
                 "additionalProperties": false,
                 "properties": {
                     "catalogRevision": {"type": "integer"},
@@ -43,6 +43,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                     "modulePackages": {"type": "array"},
                     "moduleConfigs": {"type": "array"},
                     "activationRecords": {"type": "array"},
+                    "moduleHealth": {"type": "array"},
                     "invocations": {"type": "array"},
                     "grants": {"type": "array"},
                     "queues": {"type": "array"},
@@ -173,6 +174,10 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         lifecycle: None,
         limit,
     })?;
+    let module_health = activation_records
+        .iter()
+        .filter_map(|resource| activation_health_summary(host, resource).transpose())
+        .collect::<Result<Vec<_>>>()?;
     let invocations = latest_invocations(host.invocations(), limit)
         .iter()
         .map(|record| invocation_record_value(record, false))
@@ -195,6 +200,7 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "modulePackages": module_packages,
         "moduleConfigs": module_configs,
         "activationRecords": activation_records,
+        "moduleHealth": module_health,
         "invocations": invocations,
         "grants": grants,
         "queues": queues,
@@ -205,6 +211,38 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "availableActions": substrate_actions(),
         "uiSurfaceRefs": ui_surface_refs(host, limit)?,
     }))
+}
+
+fn activation_health_summary(
+    host: &dyn PrimitiveRuntimeHost,
+    resource: &EngineResource,
+) -> Result<Option<Value>> {
+    let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
+        return Ok(None);
+    };
+    let Some(payload) = current_payload(&inspection) else {
+        return Ok(None);
+    };
+    Ok(Some(json!({
+        "activationResourceId": resource.resource_id,
+        "activationVersionId": resource.current_version_id,
+        "activationStatus": payload.get("activationStatus").cloned().unwrap_or(Value::Null),
+        "healthResult": payload.get("healthResult").cloned().unwrap_or(Value::Null),
+        "healthEvidenceRef": payload.get("healthEvidenceRef").cloned().unwrap_or(Value::Null),
+        "integrityDiagnostics": payload.get("integrityDiagnostics").cloned().unwrap_or(Value::Null),
+        "recovery": payload.get("recovery").cloned().unwrap_or(Value::Null),
+        "workerId": payload.get("workerId").cloned().unwrap_or(Value::Null),
+        "derivedGrantId": payload.get("derivedGrantId").cloned().unwrap_or(Value::Null),
+    })))
+}
+
+fn current_payload(inspection: &EngineResourceInspection) -> Option<&Value> {
+    let current = inspection.resource.current_version_id.as_ref()?;
+    inspection
+        .versions
+        .iter()
+        .find(|version| &version.version_id == current)
+        .map(|version| &version.payload)
 }
 
 fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
@@ -558,6 +596,27 @@ fn substrate_actions() -> Vec<Value> {
             "module::quarantine",
             "activation",
             "resourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::check_health",
+            "activation",
+            "activationResourceId",
+            "medium",
+            false,
+        ),
+        action_summary(
+            "module::verify_integrity",
+            "activation",
+            "resourceId",
+            "medium",
+            false,
+        ),
+        action_summary(
+            "module::recover_activation",
+            "activation",
+            "activationResourceId",
             "high",
             true,
         ),

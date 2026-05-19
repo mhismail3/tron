@@ -30,6 +30,211 @@ async fn e2e_connect_and_ping() {
     server.shutdown().shutdown();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn e2e_local_process_module_activation_health_and_disable_use_real_worker_spawn() {
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (_url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let package_id = "runtime-local-package";
+    let namespace = "runtime_local";
+    let worker_id = "runtime-local-worker";
+    let function_id = "runtime_local::health";
+
+    let guide = direct_engine_invoke(
+        &server,
+        "worker::protocol_guide",
+        json!({
+            "language": "python",
+            "workerId": worker_id,
+            "functionId": function_id
+        }),
+        "runtime-local-guide",
+        &["worker.read"],
+    )
+    .await;
+    let script = guide["pythonTemplate"]
+        .as_str()
+        .expect("worker guide returns python template");
+    let script_log = unique_runtime_path("runtime-local-worker", "log");
+    let script = script.replace(
+        "if __name__ == \"__main__\":\n    main()\n",
+        &format!(
+            "if __name__ == \"__main__\":\n    try:\n        main()\n    except Exception as exc:\n        with open({:?}, \"a\") as log:\n            log.write(str(exc) + \"\\n\")\n        raise\n",
+            script_log.to_string_lossy()
+        ),
+    );
+    let script_path = unique_runtime_path("runtime-local-worker", "py");
+    let materialized = direct_engine_invoke(
+        &server,
+        "materialized_file::update",
+        json!({
+            "path": script_path.to_string_lossy(),
+            "content": script,
+            "scope": "system"
+        }),
+        "runtime-local-materialize",
+        &["resource.write"],
+    )
+    .await;
+    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let executable_ref = materialized["resourceRefs"][0].clone();
+    let file_root = script_path
+        .parent()
+        .expect("script has parent")
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let manifest = manifest_with_digest(local_process_runtime_manifest(
+        package_id,
+        namespace,
+        worker_id,
+        function_id,
+        &executable_ref,
+        &file_root,
+    ));
+    let registered = direct_engine_invoke(
+        &server,
+        "module::register_package",
+        json!({ "manifest": manifest }),
+        "runtime-local-register",
+        &["module.write"],
+    )
+    .await;
+    let package_version_id = registered["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let package_resource_id = format!("worker-package:{package_id}");
+    let configured = direct_engine_invoke(
+        &server,
+        "module::configure",
+        json!({
+            "packageResourceId": package_resource_id,
+            "packageVersionId": package_version_id,
+            "scope": "system",
+            "config": {}
+        }),
+        "runtime-local-configure",
+        &["module.write"],
+    )
+    .await;
+    let config_version_id = configured["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let config_resource_id = format!("module-config:system:{package_id}");
+    let child_grant_request = json!({
+        "allowedCapabilities": [function_id],
+        "allowedNamespaces": [namespace],
+        "allowedAuthorityScopes": [format!("{namespace}.read")],
+        "allowedResourceKinds": ["evidence", "activation_record"],
+        "resourceSelectors": ["*"],
+        "fileRoots": [file_root],
+        "networkPolicy": "loopback",
+        "maxRisk": "low"
+    });
+    let activated = direct_engine_invoke(
+        &server,
+        "module::activate",
+        json!({
+            "packageResourceId": format!("worker-package:{package_id}"),
+            "packageVersionId": package_version_id,
+            "moduleConfigResourceId": config_resource_id,
+            "configVersionId": config_version_id,
+            "scope": "system",
+            "childGrantRequest": child_grant_request
+        }),
+        "runtime-local-activate",
+        &["module.write"],
+    )
+    .await;
+    assert_eq!(
+        activated["activation"]["payload"]["workerLifecycle"]["mode"],
+        "spawned_local_process"
+    );
+    assert!(activated["activation"]["payload"]["spawnInvocationId"].is_string());
+    let activation_resource_id = format!("activation:system:{package_id}");
+    let activation_version_id = activated["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let checked = direct_engine_invoke(
+        &server,
+        "module::check_health",
+        json!({
+            "activationResourceId": activation_resource_id,
+            "activationVersionId": activation_version_id,
+            "expectedCurrentVersionId": activation_version_id,
+            "mode": "on_demand"
+        }),
+        "runtime-local-check-health",
+        &["module.write"],
+    )
+    .await;
+    assert_eq!(checked["healthResult"]["status"], "healthy");
+    assert_eq!(
+        checked["healthResult"]["childInvocationIds"]
+            .as_array()
+            .expect("health child ids")
+            .len(),
+        1
+    );
+    let checked_activation_version = checked["activation"]["version"]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let disabled = direct_engine_invoke(
+        &server,
+        "module::disable",
+        json!({
+            "activationResourceId": format!("activation:system:{package_id}"),
+            "expectedCurrentVersionId": checked_activation_version
+        }),
+        "runtime-local-disable",
+        &["module.write", "sandbox.write"],
+    )
+    .await;
+    assert_eq!(
+        disabled["activation"]["payload"]["activationStatus"],
+        "disabled"
+    );
+    assert_eq!(
+        disabled["workerLifecycle"]["status"],
+        "stopped_spawned_worker"
+    );
+    assert_eq!(
+        disabled["workerLifecycle"]["result"]["stopped"], true,
+        "sandbox stop should own spawned process cleanup"
+    );
+    let workers = direct_engine_invoke(
+        &server,
+        "worker::list",
+        json!({"includeInternal": true}),
+        "runtime-local-worker-list",
+        &["worker.read"],
+    )
+    .await;
+    assert!(
+        workers["workers"]
+            .as_array()
+            .expect("worker list")
+            .iter()
+            .all(|worker| worker["id"] != worker_id),
+        "disabled local-process package must leave no volatile worker registered"
+    );
+
+    server.shutdown().shutdown();
+}
+
 #[tokio::test]
 async fn e2e_engine_ws_hello_discover_invoke_and_stream_poll() {
     let (url, server) = boot_server_without_deps().await;

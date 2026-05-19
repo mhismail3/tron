@@ -682,6 +682,7 @@ def function_definition():
         "request_schema": {"type": "object", "additionalProperties": True},
         "response_schema": {"type": "object", "additionalProperties": True},
         "opaque_response": False,
+        "output_contract": {"kind": "none"},
         "tags": ["demo", "echo", "sandbox-worker"],
         "visibility": ENGINE_VISIBILITY,
         "effect_class": "PureRead",

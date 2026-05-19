@@ -171,7 +171,20 @@ The first-party `module` primitive exposes:
   starts the replacement, persists the new activation version, then revokes the
   superseded grant. Disable and quarantine disconnect volatile workers through
   the canonical worker lifecycle and revoke grants; non-volatile workers remain
-  catalog-visible but lose activation authority.
+  catalog-visible but lose activation authority;
+- `module::check_health` for resource-backed activation health evidence using
+  either catalog/heartbeat inspection or a manifest-declared read-only health
+  function under the activation grant;
+- `module::verify_integrity` for package/config/activation evidence over
+  manifest digest, materialized file hashes, config validation hash, grant
+  lifecycle/hash, worker registration bounds, namespace, visibility, risk,
+  file/network policy, and redaction invariants;
+- `module::recover_activation` for cleanup-only recovery of incomplete or
+  unsafe activation state. Recovery reconstructs truth from invocation, grant,
+  worker, and resource records, revokes leaked derived grants, disconnects
+  volatile workers through canonical lifecycle APIs, and persists
+  failed/quarantined activation evidence. It does not spawn replacements,
+  upgrade packages, or multiplex arbitrary operator actions.
 
 `local_process` package manifests are digest-pinned to `materialized_file`
 resource refs. The runtime entrypoint declares command and args templates,
@@ -179,9 +192,14 @@ expected function ids, working-directory policy, environment policy, visibility,
 timeout, and executable refs. Activation verifies those refs and hashes before
 invoking `worker::spawn`; module code never starts or kills processes directly.
 The resulting `activation_record` stores `spawnInvocationId`, `spawnResult`,
-`healthInvocationIds`, `integrityDiagnostics`, `workerLifecycle`,
-`supersedes`, and `rollbackTarget` so operator projections can explain what ran,
-what authority it received, and what cleanup occurred.
+`healthResult`, `healthEvidenceRef`, `healthInvocationIds`,
+`integrityDiagnostics`, `workerLifecycle`, `supersedes`, `rollbackTarget`, and
+recovery metadata so operator projections can explain what ran, what authority
+it received, what evidence supports the current status, and what cleanup
+occurred. A runtime monitor derives due checks from active activation resources
+and their `healthPolicy.intervalSeconds`, then enqueues `module::check_health`
+through the existing queue/invocation substrate. There is no package table,
+health table, recovery table, or non-rebuildable module cache.
 
 No package table, module action multiplexer, client-side policy, or `control`
 mutation path exists. Control and generated UI surfaces expose module resources

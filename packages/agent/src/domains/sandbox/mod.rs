@@ -477,6 +477,17 @@ async fn disconnect_worker_id_with_context(
     worker_id: &WorkerId,
     reason: &str,
 ) -> Result<(), CapabilityError> {
+    match deps.engine_host.worker_is_volatile(worker_id).await {
+        Some(true) => {}
+        None => return Ok(()),
+        Some(false) => {
+            return Err(CapabilityError::Internal {
+                message: format!(
+                    "worker::disconnect can only disconnect volatile workers ({worker_id})"
+                ),
+            });
+        }
+    }
     let trace_id = parent
         .map(|invocation| invocation.causal_context.trace_id.clone())
         .unwrap_or_else(TraceId::generate);

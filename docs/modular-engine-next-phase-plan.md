@@ -1,375 +1,272 @@
-# Package Runtime Execution And Operator Integrity Phase
+# Package Trust, Policy Hardening, And Runtime Conformance Phase
 
-## Implementation Checkpoint
+## Current Checkpoint
 
-Implemented in the current substrate as the executable package runtime path:
+The module runtime now has the substrate needed for safe local execution and
+operator recovery:
 
-- built-in `worker_package`, `module_config`, and `activation_record` resource
-  type definitions;
-- first-party `module` primitive with `module::register_package`,
+- package lifecycle resources: `worker_package`, `module_config`, and
+  `activation_record`;
+- canonical lifecycle capabilities: `module::register_package`,
   `module::inspect_package`, `module::configure`, `module::activate`,
-  `module::disable`, `module::upgrade`, `module::rollback`, and
-  `module::quarantine`;
-- manifest validation for digest/provenance, namespace ownership, mutating
-  idempotency, resource-backed durable outputs, config schema, risk/effect,
-  grant ceiling, and `local_process` runtime entrypoint shape;
-- `module::*` execution moved off the sync host-dispatched primitive path so
-  `module::activate`, `module::upgrade`, and `module::rollback` can compose
-  child invocations without holding the host lock;
-- activation grant derivation for existing/built-in workers and canonical child
-  `worker::spawn` composition for digest-pinned `local_process` packages;
-- materialized executable refs and hashes verified before local process spawn
-  payloads are built;
-- activation records now include spawn lineage/result, health invocation ids,
-  integrity diagnostics, worker lifecycle, supersedes, and rollback target
-  fields;
-- `module::inspect_package` now reports digest, file hash, config, activation,
-  grant, worker, registered capability, and health diagnostics;
-- read-only control projections for module packages/configs/activations and
-  server-authored generated UI support for package/config/activation targets;
-- iOS Engine Console decoding and rendering of module package/config/activation
-  refs as read-only substrate projections.
+  `module::disable`, `module::upgrade`, `module::rollback`,
+  `module::quarantine`, `module::check_health`, `module::verify_integrity`,
+  and `module::recover_activation`;
+- digest-pinned `local_process` activation through child `worker::spawn`, with
+  manifest-declared materialized executable refs, expected functions, file
+  roots, network policy, visibility, timeout, and child grant bounds;
+- activation records that carry spawn lineage/result, health evidence refs,
+  health child invocations, integrity diagnostics, worker lifecycle, recovery
+  metadata, supersedes, and rollback target fields;
+- scheduled health checks derived from active activation resources and enqueued
+  through the existing `module` queue, with no health table;
+- recovery that reconstructs partial or unsafe activation truth from invocation,
+  grant, worker, and resource records, then revokes leaked grants and disconnects
+  volatile workers without spawning replacements;
+- control/generated UI projections that expose health, integrity, recovery, and
+  module lifecycle actions as canonical capability targets;
+- an end-to-end local-process integration test that activates a real
+  `/engine/workers` process, runs health through the live worker, disables it
+  through `sandbox::stop_spawned_worker`, and verifies no volatile worker remains
+  registered.
 
-This checkpoint intentionally does not add remote marketplace installation,
-dynamic UI catalogs, a package table, `control::act`, client-side policy, or a
-storage generation bump.
+This checkpoint still has no package tables, health tables, marketplace,
+dynamic UI catalog, `control::act`, compatibility reader, client-side policy, or
+second worker-spawn path.
 
-## Next Phase Candidate
+## Next Phase Summary
 
-The next feature phase should start from this executable substrate and focus on
-operator integrity surfaces and long-running health:
+The next phase should turn package execution from "digest-pinned local packages
+can run safely" into "operators and agents can trust why a package is allowed to
+run." The work is package source trust, runtime policy hardening, and conformance
+evidence. It should keep the same durable truth: resources, grants, invocations,
+worker/catalog records, queues/leases, and generated UI resources.
 
-- server-authored generated surfaces for package diagnostics, failed activation
-  evidence, rollback targets, and quarantine actions;
-- recurring health checks that write evidence resources and never keep a
-  separate health table;
-- activation recovery for interrupted spawns, including lease expiry and
-  idempotency replay inspection;
-- stronger package provenance for local digest-pinned packages, including
-  optional signature verification once the package source model exists;
-- full integration coverage with a real local worker process rather than only
-  the in-memory recording spawn handler.
-
-## Summary
-
-The generated UI authoring phase established deterministic `ui_surface`
-resources, strict validation, refresh, expiry, and thin iOS rendering. The next
-phase should make the modular engine genuinely plug-and-play without adding a
-new state plane: modules become resource-backed packages, activation becomes a
-grant-scoped capability flow, and generated surfaces expose real canonical
-actions for inspecting, enabling, disabling, configuring, upgrading, and
-recovering workers and capabilities.
-
-This phase is not a marketplace, not a compatibility layer, and not a new
-dashboard system. It is the minimum secure module lifecycle needed for a
-collapsed architecture where workers invoke capabilities against resources under
-scoped grants.
+This phase must not add a package marketplace, package tables, health tables,
+dynamic component catalogs, a control mutation multiplexer, local iOS policy, or
+compatibility paths.
 
 ## First-Principles Objective
 
-A modular engine needs a way to answer four questions from substrate truth:
+A plug-and-play engine has to answer these questions before a package receives
+authority:
 
-- What modules and workers are installed, active, unhealthy, or available?
-- What capabilities do they provide, and what effects, risks, resources, files,
-  network access, approvals, and budgets do they need?
-- What authority was granted, by whom, for which purpose, for how long, and with
-  what delegation limits?
-- What operator actions can be taken now without trusting the client, hidden
-  runtime state, or stale handwritten screens?
+- What bytes are being executed, and are those bytes exactly the bytes the
+  operator approved?
+- Who or what source asserted the package manifest, and what trust tier does
+  that source justify?
+- What policy allows this package to run in this scope with this grant?
+- Does the runtime behavior match the manifest after activation?
+- Can the operator inspect all evidence without trusting hidden process state or
+  client-local decisions?
 
-The target state for this phase:
+The target state:
 
-- module packages are typed resources with signed manifests, source provenance,
-  declared capabilities, required grants, config schema, runtime entrypoint, and
-  integrity status;
-- activation is a canonical capability invocation that derives grants and starts
-  workers only after package, config, policy, and resource selector validation;
-- disabling, revoking, upgrading, and rollback are canonical capabilities, not
-  bespoke product actions;
-- generated surfaces for packages, workers, capabilities, grants, approvals, and
-  integrity expose useful actions through stored `ui_surface` templates;
-- iOS remains a renderer and action submitter only;
-- all projections remain rebuildable from catalog/worker records, invocation
-  ledger, grant ledger, and resource store.
+- source provenance is explicit and machine-checked before package registration;
+- every package gets a bounded trust tier from verifiable evidence, not from a
+  manifest string alone;
+- runtime conformance tests prove declared capabilities, output contracts,
+  risk/effect classes, redaction, health behavior, file roots, and network
+  policy before activation is considered trustworthy;
+- package policy violations produce evidence resources and quarantine/disable
+  recommendations, not silent repairs;
+- generated operator surfaces show package source, trust, conformance, health,
+  integrity, and recovery state using refs/previews only.
 
 ## Non-Goals
 
-- Do not add a storage generation bump unless active schemas are removed or the
-  runtime can no longer safely open existing `modular-engine-v2` stores.
-- Do not add package marketplace discovery, remote installation, billing,
-  ratings, or third-party catalog distribution.
-- Do not add dynamic UI component catalogs.
-- Do not add `control::act`, client-side policy decisions, route aliases,
-  compatibility readers, or renderer aliases.
-- Do not let a package self-enable, self-expand grants, or register capabilities
-  beyond its activation grant.
-- Do not make iOS a module manager with local truth. It can render server
-  surfaces and submit stored actions only.
+- No remote marketplace or package discovery service.
+- No storage generation bump unless an unsafe active schema incompatibility is
+  discovered.
+- No package, health, conformance, or policy tables.
+- No dynamic third-party UI catalogs.
+- No `control::act` or package action multiplexer.
+- No client-side package/grant/policy decisions.
+- No fallback manifest fields, aliases, retired route readers, or old DTO
+  acceptance paths.
 
-## Core Resource Types
+## Resource Model
 
-Register these first-party resource kinds in the existing resource kernel:
+Use existing resource kinds and add only resource type definitions if the current
+schemas cannot represent the evidence cleanly.
 
 - `worker_package`
-  - Manifest, package digest, source provenance, signature status, trust tier,
-    declared worker kind, declared capabilities, runtime entrypoint, config
-    schema, required grants, output contracts, sandbox profile, install scope,
-    and integrity status.
-  - Lifecycle: `draft`, `available`, `active`, `disabled`, `superseded`,
-    `quarantined`, `discarded`, `damaged`.
+  - Add source-trust fields to the payload contract: `sourceRef`,
+    `sourceDigest`, `sourceTrustTier`, `signature`, `signatureKeyRef`,
+    `signatureVerification`, `operatorApprovalRef`, and `conformanceEvidenceRef`.
+  - Keep local unsigned packages as `local_digest_pinned`; they require explicit
+    operator authority and approval evidence.
 
-- `module_config`
-  - Config payload validated against the package config schema, redaction
-    policy, secret refs, target package id/version, scope, and current revision.
-  - Lifecycle: `draft`, `active`, `superseded`, `disabled`, `discarded`,
-    `damaged`.
+- `evidence`
+  - Use for signature verification, digest verification, conformance run output,
+    policy decisions, network/file-root observations, and quarantine reasons.
+  - Store bounded diagnostics and redacted previews only.
 
-- `activation_record`
-  - The resource-backed result of enabling or upgrading a package. It links the
-    package, config, derived grant, worker id, worker registration, health
-    result, and rollback target.
-  - Lifecycle: `pending`, `active`, `failed`, `disabled`, `rolled_back`,
-    `superseded`, `damaged`.
+- `decision`
+  - Use for operator/package policy decisions such as "approved local package
+    source for scope X until expiry Y" or "quarantine because conformance failed."
 
-These are resources, not tables. Any indexes, control summaries, or iOS caches
-must be rebuildable projections.
-
-## Package Manifest Contract
-
-Each `worker_package` manifest must declare:
-
-- package id, version, schema id, display name, description, owner namespace,
-  trust tier, and source provenance;
-- signed digest over package bytes plus manifest content;
-- worker kind: first-party Rust module, local process worker, MCP adapter,
-  model-backed worker, script worker, or system service;
-- runtime entrypoint and sandbox profile for non-in-process workers;
-- declared capabilities with request schema, response schema, accepted input
-  resource kinds, produced output resource kinds, effect class, risk,
-  idempotency, output contract, lease requirements, approval policy, and stream
-  topics;
-- required grants and maximum authority ceiling;
-- required resource selectors, file roots, network policy, process policy,
-  secret refs, budget defaults, and delegation limits;
-- config schema and redaction rules;
-- health check capability and readiness criteria;
-- uninstall, disable, upgrade, and rollback notes.
-
-Registration rejects packages that omit idempotency for mutating capabilities,
-omit resource output contracts for durable outputs, request unsupported risk, or
-declare capability ids outside their namespace.
+- `ui_surface`
+  - Continue using generated surfaces for package trust and conformance views.
+  - Do not store full package files, command output, payload templates, or raw
+    secrets in surfaces.
 
 ## Capability Additions
 
-Add package lifecycle capabilities under a first-party `module` worker:
+Add explicit capabilities under the existing `module` primitive. Each mutation
+must be idempotent and resource-backed.
 
-- `module::register_package`
-  - Resource-backed.
-  - Validates manifest, digest, signature/provenance status, config schema,
-    capability namespace ownership, output contracts, risk, and grant ceiling.
-  - Creates or updates a `worker_package` resource version.
+- `module::verify_source`
+  - Verifies package source refs, materialized file hashes, package digest,
+    optional signature material, source trust tier, and operator approval refs.
+  - Produces `evidence`; updates package diagnostics through CAS only when the
+    target is a `worker_package`.
+  - Does not fetch remote package bytes in this phase.
 
-- `module::inspect_package`
-  - Pure read.
-  - Returns package resource, current version, declared capabilities, config
-    schema summary, integrity state, activation status, linked worker, linked
-    config, and available canonical actions.
+- `module::run_conformance`
+  - Executes a bounded conformance plan against a registered package/config or
+    active activation.
+  - Verifies declared functions, schemas, effect/risk classes, output contracts,
+    idempotency metadata, redaction, health mode, grant bounds, file roots, and
+    network policy.
+  - Produces `evidence` and links it to package/config/activation resources.
+  - May invoke read-only package functions under the activation grant; mutating
+    probes require declared scratch resources and explicit operator approval.
 
-- `module::configure`
-  - Resource-backed CAS update.
-  - Validates config payload against the package config schema, stores secrets
-    only as `secret_ref`, and creates or updates a `module_config` resource.
+- `module::policy_decide`
+  - Pure policy evaluation with no side effects beyond optional evidence when
+    invoked through a resource-backed wrapper.
+  - Inputs are package/config/activation refs, target scope, requested grant, and
+    operator intent.
+  - Output explains allow/deny/quarantine recommendations and required approvals.
 
-- `module::activate`
-  - Resource-backed and idempotent.
-  - Requires `packageResourceId`, `packageVersionId`,
-    `moduleConfigResourceId`, `configVersionId`, child grant request, lifecycle
-    policy, health policy, and rollback policy.
-  - Derives a grant, binds an already registered built-in or `worker::spawn`
-    worker, verifies declared capabilities against the grant, runs health
-    checks, and creates an `activation_record` resource.
+- `module::approve_source`
+  - Resource-backed operator decision that approves a local digest-pinned source
+    for a specific package digest, scope, trust tier ceiling, grant ceiling, and
+    expiry.
+  - Never expands package authority; it only records a decision resource that
+    `register_package` / `activate` can require.
 
-- `module::disable`
-  - Resource-backed and idempotent.
-  - Disconnects volatile workers through canonical worker lifecycle paths,
-    revokes the derived grant, records the worker lifecycle outcome, and updates
-    the activation record. Non-volatile built-in workers remain catalog-visible
-    but lose activation authority.
+- `module::revoke_source_approval`
+  - Resource-backed decision lifecycle update.
+  - Active packages that depend on the revoked decision become integrity-warning
+    targets; automatic disable remains explicit policy, not a hidden side effect.
 
-- `module::upgrade`
-  - Resource-backed and idempotent.
-  - Requires the activation being replaced, validates the new package/config
-    versions, performs grant narrowing/derivation, persists the replacement
-    activation version, then revokes the superseded grant. If the old worker was
-    volatile and is replaced by a different worker, it is disconnected through
-    the canonical worker lifecycle.
+## Policy Rules
 
-- `module::rollback`
-  - Resource-backed and idempotent.
-  - Reverts to a prior activation record only when the prior package/config/grant
-    remain valid and narrower than current policy.
+- Package manifests are untrusted until `module::verify_source` has produced
+  valid evidence and any required `decision` resource exists.
+- A manifest-declared trust tier is only a request. The engine computes the
+  effective trust tier from provenance, signature evidence, operator decisions,
+  digest pinning, and package source policy.
+- Local unsigned packages may run only as `local_digest_pinned` with explicit
+  approval scoped to package digest, package id/version, scope, grant ceiling,
+  file roots, network policy, expiry, and operator actor.
+- Package source approval does not imply activation approval. Activation still
+  derives a narrower child grant and validates runtime registration.
+- Conformance failure does not silently mutate package bytes, config, or grants.
+  It produces evidence and available canonical actions such as quarantine,
+  disable, rollback, rerun conformance, or refresh UI.
+- Revoked source approval makes dependent activations integrity-stale. Recovery
+  may clean leaked authority, but replacement remains activate/upgrade/rollback.
+- Raw secrets in manifests, source evidence, signatures, conformance output,
+  generated UI, logs, or iOS caches are rejected unless represented as
+  `secret_ref`/vault handles with redacted previews.
 
-- `module::quarantine`
-  - Resource-backed and idempotent.
-  - Disables worker execution, revokes activation grants, marks package or
-    activation state as quarantined, and preserves inspection evidence.
+## Runtime Conformance
 
-Do not add a separate public package action multiplexer. Each operation is its
-own capability with explicit schemas, idempotency, output contract, risk, and
-grant requirements.
+Conformance should run in bounded phases:
 
-## Activation Flow
+1. Static manifest check: schema, namespace, function ids, idempotency,
+   resource-backed outputs, risk/effect, config schema, runtime entrypoint,
+   file refs, digest, source approval, and redaction.
+2. Grant simulation: requested activation grant is proven narrower than caller
+   grant, source policy, package required grants, and target scope.
+3. Registration check: spawned or bound worker registers exactly the declared
+   functions or a narrower allowed subset when the package explicitly supports
+   optional functions.
+4. Health check: catalog or invoke-function health produces evidence within
+   timeout and redaction bounds.
+5. Resource-output check: resource-backed functions return top-level
+   `resourceRefs`; read-only functions do not produce durable output.
+6. Cleanup check: disable/quarantine/recovery revoke grants and disconnect
+   volatile workers through canonical lifecycle APIs.
 
-1. A package file, in-repo module declaration, or local worker script is
-   registered through `module::register_package`.
-2. The engine validates the package manifest, digest, namespace, declared
-   capabilities, output contracts, and authority ceiling before persistence.
-3. An operator or coordinator creates a `module_config` through
-   `module::configure`.
-4. `module::activate` prepares an invocation with package refs, config refs,
-   constraints, grant request, idempotency key, and output contract.
-5. The engine derives a child grant from the caller grant.
-6. The worker must already be registered through the built-in catalog or
-   canonical `worker::spawn`. Activation fails if runtime declarations exceed
-   the package manifest, config, grant, resource selectors, file roots, network
-   policy, risk ceiling, visibility ceiling, or trust tier.
-7. A health check runs under the derived grant.
-8. The activation record links package, config, worker, grant, health result,
-   invocation, and rollback target.
-9. Control projections and generated surfaces reflect the new active module
-   from existing substrate truth.
+## Control And Generated UI
 
-## Generated UI Actions
+Control remains read-only. `control::snapshot` and `control::inspect` should
+project:
 
-Extend `ui::surface_for_target` authoring so package and worker surfaces expose
-real canonical actions when allowed by the active grant:
+- package source trust summary;
+- latest source verification evidence;
+- latest conformance evidence;
+- source approval decisions and expiry;
+- active activations affected by revoked/stale source decisions;
+- available canonical actions for verify source, approve/revoke source,
+  run conformance, activate, disable, rollback, quarantine, recover, and refresh
+  surface.
 
-- package surface actions: inspect, configure, activate, disable, upgrade,
-  rollback, quarantine, refresh;
-- worker surface actions: health, disconnect, inspect grant, inspect package,
-  refresh;
-- capability surface actions: inspect schema, validate output contract, run
-  health probe, inspect owning package, refresh;
-- grant surface actions: inspect, revoke, derive narrower grant where policy
-  permits, refresh;
-- approval surface actions: approve/reject through `approval::resolve`;
-- integrity surface actions: inspect damaged resource, quarantine package,
-  refresh, export evidence.
+Generated surfaces should show bounded evidence previews and refs. Actions must
+be stored in `ui_surface` resources, target canonical functions only, include
+target revisions, carry idempotency templates for mutations, and be revalidated
+by `ui::submit_action`.
 
-Rules:
+## iOS Scope
 
-- generated actions target canonical capability ids only;
-- action payload templates must validate against target request schemas;
-- mutating targets require idempotency and output contracts;
-- action risk cannot exceed the authoring grant;
-- action target revisions are stored and revalidated on submit;
-- surfaces must not inline secret values, package bytes, logs, or large resource
-  bodies;
-- control may advertise surface authoring and refresh actions, but it must not
-  inline layout or action templates.
+iOS remains a renderer/action submitter:
 
-## Security Rules
+- decode added source trust, conformance, approval, and integrity summaries if
+  server DTOs expose them;
+- render generated surfaces strictly from inspected `ui_surface` resources;
+- cache only redacted read-only previews;
+- submit only surface id, version id, action id, user input, and idempotency key;
+- do not construct package manifests, grants, source approval policy, target
+  function ids, command templates, or conformance payloads locally.
 
-- Package manifests are untrusted input until validated and persisted as
-  `worker_package` resources.
-- A package cannot grant itself authority. Only `module::activate` can derive an
-  activation grant, and only narrower than the caller grant.
-- Runtime worker registration is checked against both package manifest and
-  derived grant.
-- Worker capability ids must stay inside the package namespace unless the
-  package is first-party and explicitly authorized.
-- Config payloads cannot contain raw secrets. Secrets must be `secret_ref`
-  resources or vault handles with redacted previews.
-- Package bytes and manifests are content-addressed. Hash mismatch creates a
-  damaged/quarantined version and leaves prior active versions current.
-- Upgrade and rollback are new activations, not in-place mutation of truth.
-- Disable and quarantine preserve evidence and lineage.
-- iOS cannot construct package activation payloads from local policy; it submits
-  only stored generated UI actions or typed capability requests that the server
-  authorizes.
+## Test Plan
 
-## Failure Modes
+Write failing tests first:
 
-- Package registration fails: no worker is started and no active package version
-  is created.
-- Config validation fails: package remains available, previous config remains
-  current.
-- Grant derivation fails: activation fails before worker spawn.
-- Worker spawn fails: activation record is `failed`; package/config refs remain
-  inspectable; derived grants are revoked or expired by compensation.
-- Worker registers extra capability: activation fails and worker is disconnected.
-- Health check fails: activation record is `failed`; rollback remains available
-  only if prior activation is valid.
-- Upgrade partially succeeds: old activation remains current until new health
-  and registration pass.
-- Disable crashes midway: invocation compensation resumes from resource/worker
-  and grant ledger state.
-- Package bytes disappear: package version becomes damaged; active worker is
-  quarantined if integrity policy requires it.
-- Surface action goes stale: `ui::submit_action` rejects before target execution.
+- `module::verify_source` accepts digest-pinned local package refs only when
+  file hashes and manifest digest match, and rejects missing refs, hash drift,
+  raw secrets, unsupported provenance, stale package versions, or forged trust
+  tier.
+- `module::approve_source` creates scoped decision resources and refuses broader
+  trust/grant/file/network authority than the caller grant allows.
+- `module::revoke_source_approval` marks dependent package/activation integrity
+  stale through evidence/projections without deleting package bytes.
+- `module::run_conformance` catches schema drift, missing output contracts,
+  mutating functions without idempotency, over-risk registration, grant
+  expansion, health failure, raw secret output, and cleanup leakage.
+- Existing `module::activate` requires valid source/conformance evidence where
+  package policy demands it and still works for approved built-ins.
+- Duplicate source verification, approval, revocation, and conformance keys
+  replay existing evidence/decisions without duplicate resource versions.
+- Generated package/integrity surfaces advertise only canonical stored actions
+  and stale actions fail before target execution.
+- Real local-process integration continues to prove activate, health, disable,
+  quarantine, and recovery leave no leaked active grants or volatile workers.
 
-## iOS Engine Console Scope
+Static gates:
 
-iOS should render package/module surfaces through the existing strict generated
-UI renderer and typed capability client:
-
-- load package and activation refs from `control::snapshot` and
-  `control::inspect`;
-- inspect package/worker/config surfaces through `ui::inspect_surface`;
-- request `ui::surface_for_target` only when the server advertises it;
-- submit stored actions only through `ui::submit_action`;
-- show approval-required, stale, rejected, failed health, quarantine, and
-  rollback states from server responses;
-- keep offline cache read-only and redacted.
-
-Do not add fixed package dashboards or local package policy.
-
-## TDD Sequence
-
-1. Add static gates that no module activation path bypasses `module::*`,
-   `grant::*`, `worker::*`, resource output contracts, or `ui::submit_action`.
-2. Add failing tests for `worker_package`, `module_config`, and
-   `activation_record` resource type registration and schema validation.
-3. Add `module::register_package` tests for manifest digest, namespace, risk,
-   output contract, idempotency, signature/provenance, and malformed config
-   schema rejection.
-4. Add `module::configure` tests for CAS, config schema validation, secret
-   redaction, and damaged-version handling.
-5. Add `module::activate` tests for grant derivation, worker registration
-   ceiling checks, resource selector checks, health checks, idempotent replay,
-   and failed activation compensation.
-6. Add disable, upgrade, rollback, and quarantine tests with resource lineage and
-   grant revocation assertions.
-7. Extend generated UI tests so package, worker, capability, grant, approval,
-   and integrity surfaces expose only target-schema-valid canonical actions.
-8. Extend iOS DTO/state tests for package refs, generated package surfaces,
-   server-advertised action gating, action result rendering, stale/approval
-   states, and offline read-only cache behavior.
-9. Run absence scans for compatibility routes, local iOS policy, dynamic
-   catalogs, renderer aliases, and package action multiplexers.
+- no package/source/conformance/health tables;
+- no direct process spawn/kill from `module::*`;
+- no public worker creation API except `worker::spawn`;
+- no `control::act`;
+- no dynamic UI catalog;
+- no iOS local package/grant/source policy;
+- no raw-scope authorization;
+- no compatibility aliases, retired route names, fallback manifest fields, or
+  old storage readers.
 
 ## Verification
 
-- Targeted Rust tests for resource types, module capabilities, grant narrowing,
-  worker registration, health, generated UI action authoring, and compensation.
-- Static gates in `packages/agent/tests/threat_model_invariants.rs`.
+- Targeted Rust tests for source verification, source approval/revocation,
+  conformance, activation policy integration, generated UI actions, and local
+  process cleanup.
 - `scripts/tron ci fmt check clippy test`.
-- `cd packages/ios-app && xcodegen generate`.
-- Targeted `xcodebuild test` for Engine Console state, generated UI DTOs,
-  renderer, source guards, cache redaction, and action submission.
 - `git diff --check`.
-- README, architecture docs, module docs, and `~/LEDGER.jsonl` updated in the
-  same checkpoint.
-
-## Exit Criteria
-
-- A local first-party package can be registered, configured, activated,
-  inspected, disabled, upgraded, rolled back, and quarantined through canonical
-  capabilities.
-- Active workers cannot register capabilities beyond their package manifest or
-  derived grant.
-- Package/config/activation state is represented only as resources and links.
-- Generated surfaces expose meaningful package and worker actions without
-  adding a control mutation plane or fixed iOS dashboards.
-- The system can explain exactly what is installed, what is active, what each
-  module can do, what authority it has, and what action is safe next.
+- iOS `xcodegen generate` and targeted `xcodebuild test` only if DTOs/views or
+  project files change.
+- Update README, architecture docs, progressive module/runtime docs, and
+  `~/LEDGER.jsonl`.

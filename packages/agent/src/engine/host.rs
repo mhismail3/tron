@@ -10,6 +10,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
@@ -23,7 +24,8 @@ use super::compensation::{EngineCompensationRecord, compensation_record};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TriggerId, TriggerTypeId, WorkerId,
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
+    WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation, InvocationResult};
 use super::leases::{AcquireResourceLease, EngineResourceLease};
@@ -313,6 +315,124 @@ impl EngineHostHandle {
     /// Return whether a worker is a volatile runtime registration.
     pub async fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool> {
         self.inner.lock().await.catalog.worker_is_volatile(id)
+    }
+
+    /// Return a snapshot of invocation records.
+    pub async fn invocation_records(&self) -> Vec<super::invocation::InvocationRecord> {
+        self.inner.lock().await.catalog.invocations().to_vec()
+    }
+
+    /// Enqueue due module health checks from active activation resources.
+    pub async fn enqueue_due_module_health_checks(&self, now: DateTime<Utc>) -> Result<usize> {
+        let host = self.inner.lock().await;
+        let function_id = FunctionId::new(primitives::module::CHECK_HEALTH_FUNCTION)?;
+        let actor = ActorContext::new(
+            ActorId::new(ENGINE_OWNER_ACTOR)?,
+            ActorKind::System,
+            AuthorityGrantId::new(ENGINE_AUTHORITY_GRANT)?,
+        );
+        let function = host.catalog.inspect_function(&function_id, Some(&actor))?;
+        let resources = {
+            let resources = host.primitives.resources.lock().map_err(|_| {
+                EngineError::HandlerFailed("resource store lock poisoned".to_owned())
+            })?;
+            resources.list(super::resources::ListResources {
+                kind: Some(super::resources::ACTIVATION_RECORD_KIND.to_owned()),
+                scope: None,
+                lifecycle: Some("active".to_owned()),
+                limit: 500,
+            })?
+        };
+        let mut enqueued = 0usize;
+        for resource in resources {
+            let Some((version_id, payload)) = ({
+                let resources = host.primitives.resources.lock().map_err(|_| {
+                    EngineError::HandlerFailed("resource store lock poisoned".to_owned())
+                })?;
+                resources
+                    .inspect(&resource.resource_id)?
+                    .and_then(|inspection| {
+                        let current = inspection.resource.current_version_id.clone()?;
+                        let payload = inspection
+                            .versions
+                            .iter()
+                            .find(|version| version.version_id == current)?
+                            .payload
+                            .clone();
+                        Some((current, payload))
+                    })
+            }) else {
+                continue;
+            };
+            let interval = payload
+                .get("healthPolicy")
+                .and_then(|policy| policy.get("intervalSeconds"))
+                .and_then(Value::as_u64)
+                .filter(|value| *value > 0);
+            let Some(interval) = interval else {
+                continue;
+            };
+            if let Some(checked_at) = payload.get("checkedAt").and_then(Value::as_str)
+                && let Ok(checked_at) = DateTime::parse_from_rfc3339(checked_at)
+            {
+                let elapsed = now
+                    .signed_duration_since(checked_at.with_timezone(&Utc))
+                    .num_seconds();
+                if elapsed >= 0 && elapsed < interval as i64 {
+                    continue;
+                }
+            }
+            let bucket = now.timestamp().div_euclid(interval as i64);
+            let idempotency_key = format!(
+                "module.health:{}:{}:{}",
+                resource.resource_id, version_id, bucket
+            );
+            let already_queued = {
+                let queue = host.primitives.queue.lock().map_err(|_| {
+                    EngineError::HandlerFailed("queue store lock poisoned".to_owned())
+                })?;
+                queue
+                    .list("module", 500)?
+                    .iter()
+                    .any(|item| item.idempotency_key.as_deref() == Some(idempotency_key.as_str()))
+            };
+            if already_queued {
+                continue;
+            }
+            let (session_id, workspace_id) = match &resource.scope {
+                super::resources::EngineResourceScope::System => (None, None),
+                super::resources::EngineResourceScope::Workspace(id) => (None, Some(id.clone())),
+                super::resources::EngineResourceScope::Session(id) => (Some(id.clone()), None),
+            };
+            let item = EnqueueInvocation {
+                queue: "module".to_owned(),
+                function_id: function_id.clone(),
+                target_revision: Some(function.revision),
+                payload: json!({
+                    "activationResourceId": resource.resource_id,
+                    "activationVersionId": version_id,
+                    "expectedCurrentVersionId": version_id,
+                    "mode": "scheduled",
+                }),
+                actor_id: ActorId::new(ENGINE_OWNER_ACTOR)?,
+                actor_kind: ActorKind::System,
+                authority_grant_id: AuthorityGrantId::new(ENGINE_AUTHORITY_GRANT)?,
+                authority_scopes: vec!["module.write".to_owned()],
+                trace_id: TraceId::generate(),
+                parent_invocation_id: None,
+                trigger_id: None,
+                session_id,
+                workspace_id,
+                idempotency_key: Some(idempotency_key),
+            };
+            host.primitives
+                .queue
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
+                .enqueue(item)?;
+            enqueued = enqueued.saturating_add(1);
+        }
+        Ok(enqueued)
     }
 
     /// Inspect a trigger through the host boundary.

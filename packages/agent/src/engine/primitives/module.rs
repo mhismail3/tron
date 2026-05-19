@@ -5,7 +5,9 @@
 //! derivation for activation. Local process packages launch only by composing a
 //! child `worker::spawn` invocation; module code validates package resources and
 //! records activation lineage but never owns a process runtime, package table,
-//! or action multiplexer.
+//! health table, recovery table, or action multiplexer. Health, integrity, and
+//! recovery outcomes are bounded `evidence` resources linked back to activation
+//! records.
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -19,7 +21,7 @@ use super::{
     required_string_owned,
 };
 use crate::engine::discovery::{ActorContext, ActorKind, FunctionQuery};
-use crate::engine::grants::{DeriveGrant, EngineGrant, EngineGrantLifecycle};
+use crate::engine::grants::{DeriveGrant, EngineGrant, EngineGrantLifecycle, ListGrants};
 use crate::engine::ids::{AuthorityGrantId, FunctionId, InvocationId, WorkerId};
 use crate::engine::invocation::InProcessFunctionHandler;
 use crate::engine::resources::{
@@ -41,6 +43,9 @@ pub(crate) const DISABLE_FUNCTION: &str = "module::disable";
 pub(crate) const UPGRADE_FUNCTION: &str = "module::upgrade";
 pub(crate) const ROLLBACK_FUNCTION: &str = "module::rollback";
 pub(crate) const QUARANTINE_FUNCTION: &str = "module::quarantine";
+pub(crate) const CHECK_HEALTH_FUNCTION: &str = "module::check_health";
+pub(crate) const VERIFY_INTEGRITY_FUNCTION: &str = "module::verify_integrity";
+pub(crate) const RECOVER_ACTIVATION_FUNCTION: &str = "module::recover_activation";
 
 const MANIFEST_SCHEMA_ID: &str = "tron.module.package_manifest.v1";
 const LOCAL_DIGEST_PINNED: &str = "local_digest_pinned";
@@ -139,6 +144,39 @@ pub(super) fn registrations(
             WORKER_PACKAGE_KIND,
             ACTIVATION_RECORD_KIND,
         ])),
+        module_write(
+            CHECK_HEALTH_FUNCTION,
+            "record resource-backed module activation health evidence",
+            check_health_schema(),
+            module_resource_response_schema("activation_record"),
+            RiskLevel::Medium,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "evidence",
+            ACTIVATION_RECORD_KIND,
+        ])),
+        module_write(
+            VERIFY_INTEGRITY_FUNCTION,
+            "record resource-backed package, config, or activation integrity evidence",
+            verify_integrity_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::Medium,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "evidence",
+            ACTIVATION_RECORD_KIND,
+        ])),
+        module_write(
+            RECOVER_ACTIVATION_FUNCTION,
+            "materialize recovery evidence and clean unsafe activation authority",
+            recover_activation_schema(),
+            module_resource_response_schema("activation_record"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "evidence",
+            ACTIVATION_RECORD_KIND,
+        ])),
     ]
     .into_iter()
     .map(|definition| handled_registration(definition, handler.clone()))
@@ -209,6 +247,9 @@ impl InProcessFunctionHandler for ModulePrimitiveHandler {
             UPGRADE_FUNCTION => self.upgrade(&invocation).await,
             ROLLBACK_FUNCTION => self.rollback(&invocation).await,
             QUARANTINE_FUNCTION => self.quarantine(&invocation).await,
+            CHECK_HEALTH_FUNCTION => self.check_health(&invocation).await,
+            VERIFY_INTEGRITY_FUNCTION => self.verify_integrity(&invocation).await,
+            RECOVER_ACTIVATION_FUNCTION => self.recover_activation(&invocation).await,
             _ => Err(EngineError::NotFound {
                 kind: "function",
                 id: invocation.function_id.to_string(),
@@ -289,6 +330,14 @@ impl ModulePrimitiveHandler {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
             .inspect(grant_id)
+    }
+
+    fn list_grants(&self, filter: ListGrants) -> Result<Vec<EngineGrant>> {
+        self.stores
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .list(filter)
     }
 
     async fn inspect_worker(
@@ -549,13 +598,9 @@ impl ModulePrimitiveHandler {
             &AuthorityGrantId::new(grant_id.to_owned())?,
             invocation.causal_context.trace_id.clone(),
         )?;
-        let worker_lifecycle =
-            if let Some(worker_id) = payload.get("workerId").and_then(Value::as_str) {
-                self.disconnect_volatile_worker(worker_id, "module disabled")
-                    .await?
-            } else {
-                None
-            };
+        let worker_lifecycle = self
+            .disconnect_activation_worker(invocation, &payload, "module disabled")
+            .await?;
         payload["activationStatus"] = json!("disabled");
         payload["disabledAt"] = json!(Utc::now().to_rfc3339());
         payload["workerLifecycle"] = worker_lifecycle.clone().unwrap_or(Value::Null);
@@ -632,12 +677,8 @@ impl ModulePrimitiveHandler {
             None
         };
         let worker_lifecycle = if inspection.resource.kind == ACTIVATION_RECORD_KIND {
-            if let Some(worker_id) = payload.get("workerId").and_then(Value::as_str) {
-                self.disconnect_volatile_worker(worker_id, "module quarantined")
-                    .await?
-            } else {
-                None
-            }
+            self.disconnect_activation_worker(invocation, &payload, "module quarantined")
+                .await?
         } else {
             None
         };
@@ -664,6 +705,304 @@ impl ModulePrimitiveHandler {
             "revokedGrant": revoked_grant,
             "workerLifecycle": worker_lifecycle,
             "resourceRefs": [resource_ref_from_version(&version, &inspection.resource.kind, "quarantined")],
+        }))
+    }
+
+    async fn check_health(&self, invocation: &Invocation) -> Result<Value> {
+        let resource_id = required_string_owned(&invocation.payload, "activationResourceId")?;
+        let activation_version_id =
+            required_string_owned(&invocation.payload, "activationVersionId")?;
+        let expected_current_version_id =
+            required_string_owned(&invocation.payload, "expectedCurrentVersionId")?;
+        let mode = required_string_owned(&invocation.payload, "mode")?;
+        if !matches!(mode.as_str(), "on_demand" | "scheduled") {
+            return Err(EngineError::PolicyViolation(format!(
+                "unsupported module health check mode {mode}"
+            )));
+        }
+        let activation = require_inspection(self, &resource_id, ACTIVATION_RECORD_KIND)?;
+        let current = current_version(&activation).ok_or_else(|| {
+            EngineError::PolicyViolation(format!("activation {resource_id} has no current version"))
+        })?;
+        ensure_expected_current_version(&activation, &expected_current_version_id)?;
+        if current.version_id != activation_version_id {
+            return Err(EngineError::PolicyViolation(format!(
+                "activationVersionId {activation_version_id} is not current activation version {}",
+                current.version_id
+            )));
+        }
+        let mut payload = current.payload.clone();
+        let package = require_inspection(
+            self,
+            required_value_str(&payload, "packageResourceId")?,
+            WORKER_PACKAGE_KIND,
+        )?;
+        let manifest =
+            version_payload(&package, required_value_str(&payload, "packageVersionId")?)?;
+        let health_policy = payload
+            .get("healthPolicy")
+            .or_else(|| manifest.get("healthPolicy"))
+            .cloned()
+            .unwrap_or_else(|| json!({"mode": "catalog_registered"}));
+        let outcome = self
+            .evaluate_health_policy(invocation, &payload, &manifest, &health_policy)
+            .await?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            &format!(
+                "module activation {} health is {}",
+                resource_id, outcome.status
+            ),
+            CHECK_HEALTH_FUNCTION,
+            &resource_id,
+            json!({
+                "mode": mode,
+                "healthPolicy": health_policy,
+                "status": outcome.status,
+                "diagnostics": outcome.diagnostics,
+                "childInvocationIds": outcome.child_invocation_ids,
+                "checkedAt": outcome.checked_at,
+            }),
+        )?;
+        payload["healthResult"] = json!({
+            "status": outcome.status,
+            "mode": health_policy.get("mode").and_then(Value::as_str).unwrap_or("catalog_registered"),
+            "checkedAt": outcome.checked_at,
+            "diagnostics": outcome.diagnostics,
+            "childInvocationIds": outcome.child_invocation_ids,
+        });
+        payload["healthEvidenceRef"] = evidence.reference.clone();
+        payload["checkedAt"] = json!(outcome.checked_at);
+        payload["healthInvocationIds"] = append_string_array(
+            payload.get("healthInvocationIds"),
+            std::iter::once(invocation.id.as_str().to_owned())
+                .chain(outcome.child_invocation_ids.clone())
+                .collect(),
+        );
+        let version = self.update_resource(UpdateResource {
+            resource_id: resource_id.clone(),
+            expected_current_version_id: Some(expected_current_version_id),
+            lifecycle: Some(activation.resource.lifecycle.clone()),
+            payload: payload.clone(),
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        let activation_ref =
+            resource_ref_from_version(&version, ACTIVATION_RECORD_KIND, "health_checked");
+        Ok(json!({
+            "activation": {"resourceId": resource_id, "payload": payload, "version": version},
+            "healthResult": payload["healthResult"],
+            "evidence": evidence.resource,
+            "resourceRefs": [evidence.reference, activation_ref],
+        }))
+    }
+
+    async fn verify_integrity(&self, invocation: &Invocation) -> Result<Value> {
+        let target_type = required_string_owned(&invocation.payload, "targetType")?;
+        let resource_id = required_string_owned(&invocation.payload, "resourceId")?;
+        let resource_version_id = required_string_owned(&invocation.payload, "resourceVersionId")?;
+        let inspection =
+            self.inspect_resource(&resource_id)?
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "resource",
+                    id: resource_id.clone(),
+                })?;
+        if inspection.resource.kind != target_type {
+            return Err(EngineError::PolicyViolation(format!(
+                "integrity target {resource_id} is {}, expected {target_type}",
+                inspection.resource.kind
+            )));
+        }
+        if let Some(expected) = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+        {
+            ensure_expected_current_version(&inspection, &expected)?;
+        }
+        let target_payload = version_payload(&inspection, &resource_version_id)?;
+        let integrity = match target_type.as_str() {
+            WORKER_PACKAGE_KIND => self.verify_package_payload(&target_payload),
+            MODULE_CONFIG_KIND => self.verify_config_payload(&target_payload),
+            ACTIVATION_RECORD_KIND => {
+                self.verify_activation_payload(invocation, &target_payload)
+                    .await
+            }
+            other => Err(EngineError::PolicyViolation(format!(
+                "module::verify_integrity does not support resource kind {other}"
+            ))),
+        }?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            &format!(
+                "module integrity for {} is {}",
+                resource_id, integrity.status
+            ),
+            VERIFY_INTEGRITY_FUNCTION,
+            &resource_id,
+            json!({
+                "targetType": target_type,
+                "resourceVersionId": resource_version_id,
+                "status": integrity.status,
+                "findings": integrity.findings,
+                "checkedAt": integrity.checked_at,
+            }),
+        )?;
+        let mut refs = vec![evidence.reference.clone()];
+        let mut activation_value = Value::Null;
+        if inspection.resource.kind == ACTIVATION_RECORD_KIND {
+            let expected = required_string_owned(&invocation.payload, "expectedCurrentVersionId")?;
+            let mut payload = target_payload.clone();
+            payload["integrityDiagnostics"] = json!({
+                "status": integrity.status,
+                "checkedAt": integrity.checked_at,
+                "findings": integrity.findings,
+                "evidenceRef": evidence.reference,
+            });
+            let version = self.update_resource(UpdateResource {
+                resource_id: resource_id.clone(),
+                expected_current_version_id: Some(expected),
+                lifecycle: Some(inspection.resource.lifecycle.clone()),
+                payload: payload.clone(),
+                state: None,
+                locations: Vec::new(),
+                trace_id: invocation.causal_context.trace_id.clone(),
+                invocation_id: Some(invocation.id.clone()),
+            })?;
+            refs.push(resource_ref_from_version(
+                &version,
+                ACTIVATION_RECORD_KIND,
+                "integrity_checked",
+            ));
+            activation_value = json!({
+                "resourceId": resource_id,
+                "payload": payload,
+                "version": version,
+            });
+        }
+        Ok(json!({
+            "integrity": {"status": integrity.status, "findings": integrity.findings, "checkedAt": integrity.checked_at},
+            "evidence": evidence.resource,
+            "activation": activation_value,
+            "resourceRefs": refs,
+        }))
+    }
+
+    async fn recover_activation(&self, invocation: &Invocation) -> Result<Value> {
+        let reason = required_string_owned(&invocation.payload, "reason")?;
+        let activation_invocation_id =
+            optional_string(invocation.payload.get("activationInvocationId"))?;
+        let activation_resource_id = if let Some(resource_id) =
+            optional_string(invocation.payload.get("activationResourceId"))?
+        {
+            resource_id
+        } else if let Some(invocation_id) = &activation_invocation_id {
+            match self
+                .activation_resource_id_from_invocation(invocation_id)
+                .await
+            {
+                Some(resource_id) => resource_id,
+                None => {
+                    return self
+                        .recover_partial_activation_invocation(invocation, invocation_id, &reason)
+                        .await;
+                }
+            }
+        } else {
+            return Err(EngineError::PolicyViolation(
+                    "module::recover_activation requires activationResourceId or activationInvocationId"
+                        .to_owned(),
+                ));
+        };
+        let inspection = require_inspection(self, &activation_resource_id, ACTIVATION_RECORD_KIND)?;
+        if let Some(expected) = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+        {
+            ensure_expected_current_version(&inspection, &expected)?;
+        }
+        let current = current_version(&inspection).ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "activation {activation_resource_id} has no current version"
+            ))
+        })?;
+        let mut payload = current.payload.clone();
+        let integrity = self.verify_activation_payload(invocation, &payload).await?;
+        let activation_status = payload
+            .get("activationStatus")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let safe_active = activation_status == "active" && integrity.status == "valid";
+        let mut revoked_grant = Value::Null;
+        let mut worker_lifecycle = Value::Null;
+        let recovery_status = if safe_active {
+            "already_safe"
+        } else {
+            if let Some(grant_id) = payload.get("derivedGrantId").and_then(Value::as_str)
+                && let Ok(grant_id) = AuthorityGrantId::new(grant_id.to_owned())
+                && self
+                    .inspect_grant(&grant_id)?
+                    .is_some_and(|grant| grant.lifecycle == EngineGrantLifecycle::Active)
+            {
+                revoked_grant = json!(
+                    self.revoke_grant(&grant_id, invocation.causal_context.trace_id.clone(),)?
+                );
+            }
+            if let Some(lifecycle) = self
+                .disconnect_activation_worker(invocation, &payload, "module activation recovery")
+                .await?
+            {
+                worker_lifecycle = lifecycle;
+            }
+            payload["activationStatus"] = json!("quarantined");
+            "cleaned"
+        };
+        let evidence = self.create_evidence_resource(
+            invocation,
+            &format!(
+                "module activation {} recovery {}",
+                activation_resource_id, recovery_status
+            ),
+            RECOVER_ACTIVATION_FUNCTION,
+            &activation_resource_id,
+            json!({
+                "reason": reason,
+                "status": recovery_status,
+                "integrity": {"status": integrity.status, "findings": integrity.findings},
+                "revokedGrant": revoked_grant,
+                "workerLifecycle": worker_lifecycle,
+            }),
+        )?;
+        payload["recovery"] = json!({
+            "status": recovery_status,
+            "reason": reason,
+            "recoveredAt": Utc::now().to_rfc3339(),
+            "evidenceRef": evidence.reference,
+            "revokedGrant": revoked_grant,
+            "workerLifecycle": worker_lifecycle,
+        });
+        let lifecycle = if safe_active {
+            inspection.resource.lifecycle.clone()
+        } else {
+            "quarantined".to_owned()
+        };
+        let version = self.update_resource(UpdateResource {
+            resource_id: activation_resource_id.clone(),
+            expected_current_version_id: optional_string(
+                invocation.payload.get("expectedCurrentVersionId"),
+            )?
+            .or_else(|| inspection.resource.current_version_id.clone()),
+            lifecycle: Some(lifecycle),
+            payload: payload.clone(),
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        let activation_ref =
+            resource_ref_from_version(&version, ACTIVATION_RECORD_KIND, "recovered");
+        Ok(json!({
+            "activation": {"resourceId": activation_resource_id, "payload": payload, "version": version},
+            "recovery": payload["recovery"],
+            "evidence": evidence.resource,
+            "resourceRefs": [evidence.reference, activation_ref],
         }))
     }
 }
@@ -710,6 +1049,24 @@ struct SpawnedLocalProcess {
     result: Value,
     worker: crate::engine::WorkerDefinition,
     grant: EngineGrant,
+}
+
+struct EvidenceCreation {
+    resource: EngineResource,
+    reference: Value,
+}
+
+struct HealthOutcome {
+    status: &'static str,
+    diagnostics: Value,
+    child_invocation_ids: Vec<String>,
+    checked_at: String,
+}
+
+struct IntegrityOutcome {
+    status: &'static str,
+    findings: Value,
+    checked_at: String,
 }
 
 impl ModulePrimitiveHandler {
@@ -829,6 +1186,12 @@ impl ModulePrimitiveHandler {
             .get("rollbackTarget")
             .cloned()
             .unwrap_or(Value::Null);
+        let health_policy = invocation
+            .payload
+            .get("healthPolicy")
+            .cloned()
+            .or_else(|| manifest.get("healthPolicy").cloned())
+            .unwrap_or_else(|| json!({"mode": "catalog_registered"}));
         let supersedes = upgrade_source
             .as_ref()
             .map(|source| {
@@ -858,6 +1221,7 @@ impl ModulePrimitiveHandler {
             "healthResult": {"status": "healthy", "mode": "catalog_registered"},
             "spawnInvocationId": spawn_invocation_id,
             "spawnResult": spawn_result,
+            "healthPolicy": health_policy,
             "healthInvocationIds": [],
             "integrityDiagnostics": {"status": "valid"},
             "workerLifecycle": worker_lifecycle,
@@ -989,7 +1353,7 @@ impl ModulePrimitiveHandler {
             .parent()
             .map(|path| path.to_string_lossy().into_owned())
             .unwrap_or_else(|| ".".to_owned());
-        let payload = json!({
+        let mut payload = json!({
             "workerId": runtime.worker_id,
             "command": command,
             "args": runtime.args,
@@ -1004,10 +1368,16 @@ impl ModulePrimitiveHandler {
             "budget": grant_request.budget,
             "approvalRequired": grant_request.approval_required,
             "visibility": runtime.visibility,
-            "sessionId": invocation.causal_context.session_id,
-            "workspaceId": invocation.causal_context.workspace_id,
-            "timeoutMs": runtime.timeout_ms,
         });
+        if let Some(timeout_ms) = runtime.timeout_ms {
+            payload["timeoutMs"] = json!(timeout_ms);
+        }
+        if let Some(session_id) = &invocation.causal_context.session_id {
+            payload["sessionId"] = json!(session_id);
+        }
+        if let Some(workspace_id) = &invocation.causal_context.workspace_id {
+            payload["workspaceId"] = json!(workspace_id);
+        }
         let child = Invocation::new_sync(FunctionId::new("worker::spawn")?, payload, context);
         let invocation_id = child.id.clone();
         let result = self.stores.engine_host()?.invoke(child).await;
@@ -1106,6 +1476,75 @@ impl ModulePrimitiveHandler {
                 "status": "not_found",
             }))),
         }
+    }
+
+    async fn disconnect_activation_worker(
+        &self,
+        invocation: &Invocation,
+        activation_payload: &Value,
+        reason: &str,
+    ) -> Result<Option<Value>> {
+        let Some(worker_id) = activation_payload.get("workerId").and_then(Value::as_str) else {
+            return Ok(None);
+        };
+        if activation_payload
+            .get("workerLifecycle")
+            .and_then(|lifecycle| lifecycle.get("mode"))
+            .and_then(Value::as_str)
+            == Some("spawned_local_process")
+        {
+            return self
+                .stop_spawned_worker(invocation, worker_id, reason)
+                .await
+                .map(Some);
+        }
+        self.disconnect_volatile_worker(worker_id, reason).await
+    }
+
+    async fn stop_spawned_worker(
+        &self,
+        invocation: &Invocation,
+        worker_id: &str,
+        reason: &str,
+    ) -> Result<Value> {
+        let mut context = invocation.causal_context.clone();
+        context.parent_invocation_id = Some(invocation.id.clone());
+        context.idempotency_key = Some(format!(
+            "module.worker.stop:{}:{}",
+            worker_id,
+            invocation
+                .causal_context
+                .idempotency_key
+                .as_deref()
+                .unwrap_or(invocation.id.as_str())
+        ));
+        context.authority_scopes.push("sandbox.write".to_owned());
+        let mut payload = json!({
+            "workerId": worker_id,
+            "reason": reason,
+        });
+        if let Some(session_id) = &invocation.causal_context.session_id {
+            payload["sessionId"] = json!(session_id);
+        }
+        if let Some(workspace_id) = &invocation.causal_context.workspace_id {
+            payload["workspaceId"] = json!(workspace_id);
+        }
+        let child = Invocation::new_sync(
+            FunctionId::new("sandbox::stop_spawned_worker")?,
+            payload,
+            context,
+        );
+        let result = self.stores.engine_host()?.invoke(child).await;
+        if let Some(error) = result.error {
+            return Err(error);
+        }
+        Ok(json!({
+            "workerId": worker_id,
+            "status": "stopped_spawned_worker",
+            "reason": reason,
+            "stopInvocationId": result.invocation_id.as_str(),
+            "result": result.value.unwrap_or(Value::Null),
+        }))
     }
 
     async fn package_diagnostics(
@@ -1254,6 +1693,409 @@ impl ModulePrimitiveHandler {
             }
         }
         "valid"
+    }
+
+    async fn evaluate_health_policy(
+        &self,
+        invocation: &Invocation,
+        activation_payload: &Value,
+        manifest: &Value,
+        policy: &Value,
+    ) -> Result<HealthOutcome> {
+        let checked_at = Utc::now().to_rfc3339();
+        match policy
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("catalog_registered")
+        {
+            "catalog_registered" => {
+                let integrity = self
+                    .verify_activation_payload(invocation, activation_payload)
+                    .await?;
+                Ok(HealthOutcome {
+                    status: if integrity.status == "valid" {
+                        "healthy"
+                    } else {
+                        "unhealthy"
+                    },
+                    diagnostics: integrity.findings,
+                    child_invocation_ids: Vec::new(),
+                    checked_at,
+                })
+            }
+            "invoke_function" => {
+                let function_id = FunctionId::new(required_value_str(policy, "functionId")?)?;
+                let namespace = required_value_str(manifest, "namespace")?;
+                if function_id.namespace() != namespace {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "health function {function_id} exceeds package namespace {namespace}"
+                    )));
+                }
+                let functions = self
+                    .discover_functions(&FunctionQuery {
+                        actor: Some(ActorContext {
+                            actor_id: invocation.causal_context.actor_id.clone(),
+                            actor_kind: ActorKind::System,
+                            authority_grant_id: invocation
+                                .causal_context
+                                .authority_grant_id
+                                .clone(),
+                            authority_scopes: Vec::new(),
+                            session_id: invocation.causal_context.session_id.clone(),
+                            workspace_id: invocation.causal_context.workspace_id.clone(),
+                        }),
+                        include_internal: true,
+                        ..FunctionQuery::default()
+                    })
+                    .await;
+                let function = functions
+                    .iter()
+                    .find(|candidate| candidate.id == function_id)
+                    .ok_or_else(|| EngineError::NotFound {
+                        kind: "function",
+                        id: function_id.to_string(),
+                    })?;
+                if !matches!(
+                    function.effect_class,
+                    EffectClass::PureRead | EffectClass::DeterministicCompute
+                ) || function.risk_level > RiskLevel::Low
+                    || function.required_authority.approval_required
+                {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "health function {function_id} must be read-only, low-risk, and approval-free"
+                    )));
+                }
+                let health_payload = policy.get("payload").cloned().unwrap_or_else(|| json!({}));
+                reject_raw_secrets(&health_payload)?;
+                let grant_id = AuthorityGrantId::new(
+                    required_value_str(activation_payload, "derivedGrantId")?.to_owned(),
+                )?;
+                let mut context = invocation.causal_context.clone();
+                context.authority_grant_id = grant_id;
+                context.parent_invocation_id = self
+                    .inspect_grant(&context.authority_grant_id)?
+                    .and_then(|grant| grant.subject_invocation_id)
+                    .or_else(|| Some(invocation.id.clone()));
+                context.idempotency_key = Some(format!(
+                    "module.health.invoke:{}:{}",
+                    required_value_str(activation_payload, "workerId")?,
+                    invocation
+                        .causal_context
+                        .idempotency_key
+                        .as_deref()
+                        .unwrap_or(invocation.id.as_str())
+                ));
+                let child = Invocation::new_sync(function_id.clone(), health_payload, context);
+                let result = self.stores.engine_host()?.invoke(child).await;
+                let child_id = result.invocation_id.as_str().to_owned();
+                if let Some(error) = result.error {
+                    Ok(HealthOutcome {
+                        status: "unhealthy",
+                        diagnostics: json!({
+                            "mode": "invoke_function",
+                            "functionId": function_id.as_str(),
+                            "error": error.to_string(),
+                        }),
+                        child_invocation_ids: vec![child_id],
+                        checked_at,
+                    })
+                } else {
+                    if let Some(value) = &result.value {
+                        reject_raw_secrets(value)?;
+                    }
+                    Ok(HealthOutcome {
+                        status: "healthy",
+                        diagnostics: json!({
+                            "mode": "invoke_function",
+                            "functionId": function_id.as_str(),
+                            "result": bounded_json(result.value.as_ref().unwrap_or(&Value::Null), 2048),
+                        }),
+                        child_invocation_ids: vec![child_id],
+                        checked_at,
+                    })
+                }
+            }
+            other => Err(EngineError::PolicyViolation(format!(
+                "unsupported module healthPolicy mode {other}"
+            ))),
+        }
+    }
+
+    fn verify_package_payload(&self, manifest: &Value) -> Result<IntegrityOutcome> {
+        let mut findings = Vec::new();
+        if let Err(error) = validate_manifest(manifest) {
+            findings.push(json!({"code": "manifest_invalid", "message": error.to_string()}));
+        }
+        let file_hash_status = self.file_hash_status(manifest);
+        if !matches!(file_hash_status, "valid" | "not_applicable") {
+            findings.push(json!({"code": "file_hash_invalid", "status": file_hash_status}));
+        }
+        Ok(integrity_outcome(findings))
+    }
+
+    fn verify_config_payload(&self, config_payload: &Value) -> Result<IntegrityOutcome> {
+        let mut findings = Vec::new();
+        let package_resource_id = required_value_str(config_payload, "packageResourceId")?;
+        let package_version_id = required_value_str(config_payload, "packageVersionId")?;
+        match require_inspection(self, package_resource_id, WORKER_PACKAGE_KIND)
+            .and_then(|package| version_payload(&package, package_version_id))
+        {
+            Ok(manifest) => {
+                if let Some(config) = config_payload.get("config") {
+                    if let Some(schema) = manifest.get("configSchema")
+                        && let Err(error) = schema::validate_payload(
+                            &FunctionId::new(CONFIGURE_FUNCTION)?,
+                            "module_config",
+                            schema,
+                            config,
+                        )
+                    {
+                        findings.push(
+                            json!({"code": "config_schema_invalid", "message": error.to_string()}),
+                        );
+                    }
+                    let computed = hash_json(config)?;
+                    if config_payload.get("validationHash").and_then(Value::as_str)
+                        != Some(computed.as_str())
+                    {
+                        findings.push(json!({"code": "config_hash_mismatch"}));
+                    }
+                    if let Err(error) = reject_raw_secrets(config) {
+                        findings.push(json!({"code": "raw_secret", "message": error.to_string()}));
+                    }
+                }
+            }
+            Err(error) => {
+                findings.push(json!({"code": "package_ref_invalid", "message": error.to_string()}));
+            }
+        }
+        Ok(integrity_outcome(findings))
+    }
+
+    async fn verify_activation_payload(
+        &self,
+        invocation: &Invocation,
+        payload: &Value,
+    ) -> Result<IntegrityOutcome> {
+        let mut findings = Vec::new();
+        let package_resource_id = required_value_str(payload, "packageResourceId")?;
+        let package_version_id = required_value_str(payload, "packageVersionId")?;
+        let manifest = match require_inspection(self, package_resource_id, WORKER_PACKAGE_KIND)
+            .and_then(|package| version_payload(&package, package_version_id))
+        {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                findings.push(json!({"code": "package_ref_invalid", "message": error.to_string()}));
+                Value::Null
+            }
+        };
+        if manifest.is_object() {
+            let package_integrity = self.verify_package_payload(&manifest)?;
+            extend_findings(&mut findings, &package_integrity.findings);
+        }
+        let config_resource_id = required_value_str(payload, "moduleConfigResourceId")?;
+        let config_version_id = required_value_str(payload, "configVersionId")?;
+        match require_inspection(self, config_resource_id, MODULE_CONFIG_KIND)
+            .and_then(|config| version_payload(&config, config_version_id))
+        {
+            Ok(config_payload) => {
+                let config_integrity = self.verify_config_payload(&config_payload)?;
+                extend_findings(&mut findings, &config_integrity.findings);
+            }
+            Err(error) => {
+                findings.push(json!({"code": "config_ref_invalid", "message": error.to_string()}));
+            }
+        }
+        let grant_id = required_value_str(payload, "derivedGrantId")?;
+        match AuthorityGrantId::new(grant_id.to_owned())
+            .ok()
+            .and_then(|grant_id| self.inspect_grant(&grant_id).ok().flatten())
+        {
+            Some(grant) if grant.lifecycle == EngineGrantLifecycle::Active => {
+                if let Ok(hash) = hash_json(&json!(grant))
+                    && payload.get("derivedGrantHash").and_then(Value::as_str)
+                        != Some(hash.as_str())
+                {
+                    findings.push(json!({"code": "grant_hash_mismatch"}));
+                }
+            }
+            Some(_) => findings.push(json!({"code": "grant_revoked"})),
+            None => findings.push(json!({"code": "grant_missing"})),
+        }
+        let worker_id = required_value_str(payload, "workerId")?;
+        let worker_result = match WorkerId::new(worker_id.to_owned()) {
+            Ok(id) => self.inspect_worker(&id).await.map(|worker| (id, worker)),
+            Err(error) => Err(error),
+        };
+        let worker = match worker_result {
+            Ok((id, worker)) => Some((id, worker)),
+            Err(error) => {
+                findings.push(json!({"code": "worker_missing", "message": error.to_string()}));
+                None
+            }
+        };
+        if let Some((worker_id, worker)) = worker
+            && manifest.is_object()
+        {
+            let namespace = required_value_str(&manifest, "namespace")?;
+            if !worker
+                .namespace_claims
+                .iter()
+                .any(|claim| claim == namespace)
+            {
+                findings.push(json!({"code": "worker_namespace_mismatch"}));
+            }
+            match (
+                declared_capabilities(&manifest),
+                registered_capabilities_for_worker(self, invocation, &worker_id, namespace).await,
+            ) {
+                (Ok(declared), Ok(registered)) => {
+                    if let Err(error) = validate_registered_capabilities(&declared, &registered) {
+                        findings.push(json!({"code": "registered_capability_invalid", "message": error.to_string()}));
+                    }
+                    if registered
+                        .iter()
+                        .any(|function| !function.health.is_routable())
+                    {
+                        findings.push(json!({"code": "registered_capability_unhealthy"}));
+                    }
+                }
+                (Err(error), _) | (_, Err(error)) => {
+                    findings.push(json!({"code": "registered_capability_invalid", "message": error.to_string()}));
+                }
+            }
+        }
+        Ok(integrity_outcome(findings))
+    }
+
+    fn create_evidence_resource(
+        &self,
+        invocation: &Invocation,
+        summary: &str,
+        source: &str,
+        target_resource_id: &str,
+        metadata: Value,
+    ) -> Result<EvidenceCreation> {
+        let payload = json!({
+            "summary": summary,
+            "source": source,
+            "resourceRef": target_resource_id,
+            "metadata": metadata,
+        });
+        reject_raw_secrets(&payload)?;
+        let resource = self.create_resource(CreateResource {
+            resource_id: None,
+            kind: "evidence".to_owned(),
+            schema_id: None,
+            scope: EngineResourceScope::System,
+            owner_worker_id: WorkerId::new(MODULE_WORKER_ID)?,
+            owner_actor_id: invocation.causal_context.actor_id.clone(),
+            lifecycle: Some("accepted".to_owned()),
+            policy: json!({"managedBy": "module"}),
+            initial_payload: Some(payload),
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        link_if_possible(
+            self,
+            &resource.resource_id,
+            target_resource_id,
+            "evidence_for",
+            invocation,
+        );
+        Ok(EvidenceCreation {
+            reference: resource_ref_from_resource(&resource, "evidence"),
+            resource,
+        })
+    }
+
+    async fn activation_resource_id_from_invocation(&self, invocation_id: &str) -> Option<String> {
+        self.stores
+            .engine_host()
+            .ok()?
+            .invocation_records()
+            .await
+            .into_iter()
+            .find(|record| record.invocation_id.as_str() == invocation_id)
+            .and_then(|record| {
+                record
+                    .produced_resource_refs
+                    .iter()
+                    .find(|reference| {
+                        reference.get("kind").and_then(Value::as_str)
+                            == Some(ACTIVATION_RECORD_KIND)
+                    })
+                    .and_then(|reference| reference.get("resourceId").and_then(Value::as_str))
+                    .map(ToOwned::to_owned)
+            })
+    }
+
+    async fn recover_partial_activation_invocation(
+        &self,
+        invocation: &Invocation,
+        activation_invocation_id: &str,
+        reason: &str,
+    ) -> Result<Value> {
+        let active_grants = self.list_grants(ListGrants {
+            parent_grant_id: None,
+            lifecycle: Some(EngineGrantLifecycle::Active),
+            limit: 500,
+        })?;
+        let mut revoked = Vec::new();
+        let mut workers = Vec::new();
+        for grant in active_grants {
+            let matches_invocation = grant
+                .subject_invocation_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == activation_invocation_id)
+                || grant.provenance.get("invocationId").and_then(Value::as_str)
+                    == Some(activation_invocation_id);
+            if !matches_invocation {
+                continue;
+            }
+            let grant_id = grant.grant_id.clone();
+            revoked.push(json!(self.revoke_grant(
+                &grant_id,
+                invocation.causal_context.trace_id.clone(),
+            )?));
+            if let Some(worker_id) = grant.subject_worker_id {
+                if let Some(lifecycle) = self
+                    .disconnect_volatile_worker(
+                        worker_id.as_str(),
+                        "module partial activation recovery",
+                    )
+                    .await?
+                {
+                    workers.push(lifecycle);
+                }
+            }
+        }
+        let evidence = self.create_evidence_resource(
+            invocation,
+            &format!("module partial activation invocation {activation_invocation_id} recovered"),
+            RECOVER_ACTIVATION_FUNCTION,
+            &format!("invocation:{activation_invocation_id}"),
+            json!({
+                "reason": reason,
+                "status": "partial_cleaned",
+                "activationInvocationId": activation_invocation_id,
+                "revokedGrants": revoked.clone(),
+                "workerLifecycle": workers.clone(),
+            }),
+        )?;
+        Ok(json!({
+            "activation": Value::Null,
+            "recovery": {
+                "status": "partial_cleaned",
+                "reason": reason,
+                "activationInvocationId": activation_invocation_id,
+                "revokedGrants": revoked,
+                "workerLifecycle": workers,
+            },
+            "evidence": evidence.resource,
+            "resourceRefs": [evidence.reference],
+        }))
     }
 }
 
@@ -2240,6 +3082,70 @@ fn hash_json(value: &Value) -> Result<String> {
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
 }
 
+fn ensure_expected_current_version(
+    inspection: &EngineResourceInspection,
+    expected: &str,
+) -> Result<()> {
+    if inspection.resource.current_version_id.as_deref() == Some(expected) {
+        Ok(())
+    } else {
+        Err(EngineError::PolicyViolation(format!(
+            "expectedCurrentVersionId {expected} does not match current version {:?}",
+            inspection.resource.current_version_id
+        )))
+    }
+}
+
+fn append_string_array(existing: Option<&Value>, additions: Vec<String>) -> Value {
+    let mut values = existing
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for addition in additions {
+        if !values.iter().any(|value| value == &addition) {
+            values.push(addition);
+        }
+    }
+    json!(values)
+}
+
+fn integrity_outcome(findings: Vec<Value>) -> IntegrityOutcome {
+    IntegrityOutcome {
+        status: if findings.is_empty() {
+            "valid"
+        } else {
+            "invalid"
+        },
+        findings: Value::Array(findings),
+        checked_at: Utc::now().to_rfc3339(),
+    }
+}
+
+fn extend_findings(target: &mut Vec<Value>, findings: &Value) {
+    if let Some(items) = findings.as_array() {
+        target.extend(items.iter().cloned());
+    }
+}
+
+fn bounded_json(value: &Value, max_bytes: usize) -> Value {
+    let text = value.to_string();
+    if text.len() <= max_bytes {
+        return value.clone();
+    }
+    let mut preview = text;
+    preview.truncate(max_bytes);
+    json!({
+        "truncated": true,
+        "preview": preview,
+    })
+}
+
 fn reject_raw_secrets(value: &Value) -> Result<()> {
     reject_raw_secrets_at(value, "$", None)
 }
@@ -2637,6 +3543,48 @@ fn quarantine_schema() -> Value {
             "resourceId": {"type": "string"},
             "evidenceResourceIds": {"type": "array", "items": {"type": "string"}},
             "expectedCurrentVersionId": {"type": "string"}
+        }
+    })
+}
+
+fn check_health_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["activationResourceId", "activationVersionId", "expectedCurrentVersionId", "mode"],
+        "additionalProperties": false,
+        "properties": {
+            "activationResourceId": {"type": "string"},
+            "activationVersionId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "mode": {"type": "string", "enum": ["on_demand", "scheduled"]}
+        }
+    })
+}
+
+fn verify_integrity_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["targetType", "resourceId", "resourceVersionId"],
+        "additionalProperties": false,
+        "properties": {
+            "targetType": {"type": "string", "enum": ["worker_package", "module_config", "activation_record"]},
+            "resourceId": {"type": "string"},
+            "resourceVersionId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"}
+        }
+    })
+}
+
+fn recover_activation_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["reason"],
+        "additionalProperties": false,
+        "properties": {
+            "activationResourceId": {"type": "string"},
+            "activationInvocationId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "reason": {"type": "string"}
         }
     })
 }

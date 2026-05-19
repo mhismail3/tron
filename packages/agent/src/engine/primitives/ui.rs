@@ -1200,6 +1200,104 @@ fn generated_actions(
                 "expiresAt": default_expires_at()
             }));
         }
+        if let Some(verify_integrity) = functions
+            .iter()
+            .find(|function| function.id.as_str() == "module::verify_integrity")
+        {
+            let resource_id = if request.target_id.starts_with("worker-package:") {
+                request.target_id.clone()
+            } else {
+                format!("worker-package:{}", request.target_id)
+            };
+            if let Some(inspection) = host.inspect_resource(&resource_id)?
+                && let Some(version_id) = inspection.resource.current_version_id
+            {
+                actions.push(json!({
+                    "actionId": "verify-package-integrity",
+                    "label": "Verify Integrity",
+                    "targetFunctionId": "module::verify_integrity",
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": {
+                        "targetType": "worker_package",
+                        "resourceId": resource_id,
+                        "resourceVersionId": version_id
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&verify_integrity.risk_level),
+                    "approvalPolicy": {"required": verify_integrity.required_authority.approval_required},
+                    "targetRevision": verify_integrity.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+        }
+    }
+    if request.target_type == "activation" {
+        let resource_id = if request.target_id.starts_with("activation:") {
+            request.target_id.clone()
+        } else {
+            format!("activation:{}", request.target_id)
+        };
+        let version_id = host
+            .inspect_resource(&resource_id)?
+            .and_then(|inspection| inspection.resource.current_version_id)
+            .ok_or_else(|| EngineError::NotFound {
+                kind: "resource_version",
+                id: resource_id.clone(),
+            })?;
+        for (action_id, label, target_function, payload) in [
+            (
+                "check-activation-health",
+                "Check Health",
+                "module::check_health",
+                json!({
+                    "activationResourceId": resource_id,
+                    "activationVersionId": version_id,
+                    "expectedCurrentVersionId": version_id,
+                    "mode": "on_demand"
+                }),
+            ),
+            (
+                "verify-activation-integrity",
+                "Verify Integrity",
+                "module::verify_integrity",
+                json!({
+                    "targetType": "activation_record",
+                    "resourceId": resource_id,
+                    "resourceVersionId": version_id,
+                    "expectedCurrentVersionId": version_id
+                }),
+            ),
+            (
+                "recover-activation",
+                "Recover",
+                "module::recover_activation",
+                json!({
+                    "activationResourceId": resource_id,
+                    "expectedCurrentVersionId": version_id,
+                    "reason": "operator requested recovery from generated surface"
+                }),
+            ),
+        ] {
+            if let Some(target) = functions
+                .iter()
+                .find(|function| function.id.as_str() == target_function)
+            {
+                actions.push(json!({
+                    "actionId": action_id,
+                    "label": label,
+                    "targetFunctionId": target_function,
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": payload,
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&target.risk_level),
+                    "approvalPolicy": {"required": target.required_authority.approval_required},
+                    "targetRevision": target.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+        }
     }
     Ok(actions)
 }

@@ -1017,12 +1017,16 @@ fn module_package_activation_gates_stay_on() {
         "module::upgrade",
         "module::rollback",
         "module::quarantine",
+        "module::check_health",
+        "module::verify_integrity",
+        "module::recover_activation",
         "DurableOutputContract::resource_backed",
         "derive_grant",
         "revoke_grant",
         "worker::spawn",
         "local_process",
         "spawnInvocationId",
+        "healthEvidenceRef",
         "integrityDiagnostics",
         "packageDigest",
         "secret_ref",
@@ -1043,6 +1047,7 @@ fn module_package_activation_gates_stay_on() {
         "std::process::Command",
         "tokio::process::Command",
         "Command::new",
+        "health_report",
     ] {
         assert!(
             !module.contains(forbidden),
@@ -1074,6 +1079,9 @@ fn module_package_activation_gates_stay_on() {
             && control.contains("moduleConfigs")
             && control.contains("activationRecords")
             && control.contains("module::inspect_package")
+            && control.contains("module::check_health")
+            && control.contains("module::verify_integrity")
+            && control.contains("module::recover_activation")
             && !control.contains("module::act\""),
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
@@ -1084,7 +1092,10 @@ fn module_package_activation_gates_stay_on() {
         ui.contains("\"package\"")
             && ui.contains("\"module_config\"")
             && ui.contains("\"activation\"")
-            && ui.contains("module::inspect_package"),
+            && ui.contains("module::inspect_package")
+            && ui.contains("module::check_health")
+            && ui.contains("module::verify_integrity")
+            && ui.contains("module::recover_activation"),
         "generated UI authoring must support module package targets through canonical actions"
     );
 

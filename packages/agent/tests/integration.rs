@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -12,6 +14,7 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt, stream};
 use parking_lot::RwLock;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
@@ -98,6 +101,13 @@ fn profile_runtime_for_settings_path(
 
 /// Boot a test server and return the WS URL + shutdown handle.
 async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
+    boot_server_without_deps_with_config(ServerConfig::default(), "localhost:9847".to_owned()).await
+}
+
+async fn boot_server_without_deps_with_config(
+    config: ServerConfig,
+    origin: String,
+) -> (String, Arc<TronServer>) {
     let event_store = unique_event_store();
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
@@ -125,7 +135,7 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         subagent_manager: None,
         health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
-        origin: "localhost:9847".to_string(),
+        origin,
         cron_scheduler: None,
         worktree_coordinator: None,
         device_request_broker: None,
@@ -148,7 +158,6 @@ async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
         updater_state_path: unique_runtime_path("updater-state", "json"),
     };
 
-    let config = ServerConfig::default(); // port 0 = auto-assign
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
@@ -757,6 +766,145 @@ fn integration_idempotency_key(id: u64, function_id: &str, payload: &Value) -> S
         function_id.replace("::", "-"),
         hasher.finish()
     )
+}
+
+async fn direct_engine_invoke(
+    server: &Arc<TronServer>,
+    function_id: &str,
+    payload: Value,
+    idempotency_key: &str,
+    scopes: &[&str],
+) -> Value {
+    let mut context = CausalContext::new(
+        ActorId::new("integration-system").unwrap(),
+        ActorKind::System,
+        AuthorityGrantId::new("engine-system").unwrap(),
+        TraceId::generate(),
+    )
+    .with_idempotency_key(idempotency_key.to_owned())
+    .with_session_id("integration-session");
+    for scope in scopes {
+        context = context.with_scope(*scope);
+    }
+    let result = server
+        .runtime_context()
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(function_id).unwrap(),
+            payload,
+            context,
+        ))
+        .await;
+    if let Some(error) = result.error {
+        panic!("{function_id} failed: {error}");
+    }
+    result.value.unwrap_or(Value::Null)
+}
+
+#[cfg(unix)]
+fn reserve_loopback_port() -> u16 {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    port
+}
+
+fn sha256_prefixed(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn manifest_with_digest(mut manifest: Value) -> Value {
+    let digest = manifest_digest(&manifest);
+    manifest["packageDigest"] = json!(digest);
+    manifest
+}
+
+fn manifest_digest(manifest: &Value) -> String {
+    let mut canonical = manifest.clone();
+    if let Some(object) = canonical.as_object_mut() {
+        object.remove("packageDigest");
+    }
+    sha256_prefixed(&serde_json::to_vec(&canonical).unwrap())
+}
+
+fn local_process_runtime_manifest(
+    package_id: &str,
+    namespace: &str,
+    worker_id: &str,
+    function_id: &str,
+    executable_ref: &Value,
+    file_root: &str,
+) -> Value {
+    json!({
+        "packageId": package_id,
+        "version": "1.0.0",
+        "manifestSchemaId": "tron.module.package_manifest.v1",
+        "sourceProvenance": {"kind": "local_digest_pinned"},
+        "packageDigest": "sha256:pending",
+        "trustTier": "local_digest_pinned",
+        "signatureStatus": "unsigned_digest_pinned",
+        "declaredWorkerKind": "local_process",
+        "namespace": namespace,
+        "declaredFiles": [executable_ref],
+        "declaredCapabilities": [
+            {
+                "functionId": function_id,
+                "effectClass": "PureRead",
+                "risk": "low",
+                "requiredAuthority": [],
+                "outputResourceKinds": []
+            }
+        ],
+        "requiredGrants": {
+            "allowedCapabilities": [function_id],
+            "allowedNamespaces": [namespace],
+            "allowedAuthorityScopes": [format!("{namespace}.read")],
+            "allowedResourceKinds": ["evidence", "activation_record"],
+            "resourceSelectors": ["*"],
+            "fileRoots": [file_root],
+            "networkPolicy": "loopback",
+            "maxRisk": "low",
+            "canDelegate": false,
+            "approvalRequired": false
+        },
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
+        },
+        "runtimeEntryPoint": {
+            "kind": "local_process",
+            "workerId": worker_id,
+            "commandTemplate": {
+                "kind": "materialized_file",
+                "resourceId": executable_ref["resourceId"],
+                "versionId": executable_ref["versionId"],
+                "contentHash": executable_ref["contentHash"]
+            },
+            "argsTemplate": [],
+            "workingDirectory": {
+                "kind": "package_file_parent",
+                "resourceId": executable_ref["resourceId"],
+                "versionId": executable_ref["versionId"]
+            },
+            "executableRefs": [executable_ref],
+            "expectedFunctionIds": [function_id],
+            "environmentPolicy": {"mode": "empty"},
+            "visibility": "system",
+            "timeoutMs": 10000
+        },
+        "healthPolicy": {
+            "mode": "invoke_function",
+            "functionId": function_id,
+            "payload": {"ping": true},
+            "intervalSeconds": 60
+        },
+        "sandboxProcessPolicy": {
+            "networkPolicy": "loopback",
+            "fileRoots": [file_root]
+        },
+        "redactionPolicy": {"mode": "redacted"}
+    })
 }
 
 fn ping_params() -> Value {

@@ -98,18 +98,19 @@ The next substrate checkpoint is planned in
 [`docs/modular-engine-next-phase-plan.md`](docs/modular-engine-next-phase-plan.md).
 The core rule is one substrate: workers invoke capabilities against typed
 resources under scoped grants. Artifacts, goals, claims, evidence, decisions,
-generated UI surfaces, module config, worker packages, secret refs, and
-activation records, and materialized files are modeled as resource kinds rather than separate
-persistence planes. The current substrate slice has engine-owned `grant::*`
-authority, built-in resource type definitions for artifacts, goals, claims,
-evidence, decisions, generated UI surfaces, materialized files, patch proposals,
-execution outputs, agent results, worker packages, module configs, and
-activation records, thin wrapper capabilities over the generic `resource::*`
-kernel, resource-backed output enforcement for converted durable-output paths,
-a fixed `tron.ui.catalog.core.v1` generated UI catalog, server-authored
-`ui::*` surface/action capabilities, `module::*` package lifecycle
-capabilities, and control projections that expose `uiSurfaceRefs` plus module
-resource refs without adding durable control-plane state.
+generated UI surfaces, module config, worker packages, activation records,
+secret refs, and materialized files are modeled as resource kinds rather than
+separate persistence planes. The current substrate slice has engine-owned
+`grant::*` authority, built-in resource type definitions for artifacts, goals,
+claims, evidence, decisions, generated UI surfaces, materialized files, patch
+proposals, execution outputs, agent results, worker packages, module configs,
+and activation records, thin wrapper capabilities over the generic
+`resource::*` kernel, resource-backed output enforcement for converted
+durable-output paths, a fixed `tron.ui.catalog.core.v1` generated UI catalog,
+server-authored `ui::*` surface/action capabilities, `module::*` package
+lifecycle, health, integrity, and recovery capabilities, and control
+projections that expose `uiSurfaceRefs` plus module resource refs without
+adding durable control-plane state.
 
 ---
 
@@ -488,6 +489,20 @@ health status, registered capability evidence, and the derived grant hash.
 Upgrade requires the activation being replaced, creates a replacement
 activation first, then revokes the superseded grant and disconnects superseded
 volatile workers only after the replacement succeeds.
+
+Runtime package integrity is also capability-driven. `module::check_health`
+writes bounded `evidence` and updates the activation record through CAS using
+either catalog/heartbeat inspection or a manifest-declared read-only health
+function invoked under the activation grant. `module::verify_integrity`
+recomputes package digests, materialized file hashes, config validation hashes,
+grant state, worker registration bounds, visibility/risk/file/network policy,
+and redaction invariants without rewriting damaged bytes. `module::recover_activation`
+reconstructs incomplete or unsafe activations from invocation, grant, worker,
+and resource records, revokes leaked derived grants, disconnects volatile
+workers through canonical lifecycle APIs, and persists failed/quarantined
+activation evidence. Scheduled checks are derived from active
+`activation_record` resources and enqueued through the existing `module` queue;
+there is no package, health, or recovery table.
 
 ---
 
