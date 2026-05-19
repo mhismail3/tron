@@ -91,6 +91,10 @@ recent modular-engine additions lives in
 [`docs/modular-engine-cleanup-audit.md`](docs/modular-engine-cleanup-audit.md).
 The measurable maturity target and current score live in
 [`docs/modular-engine-maturity-scorecard.md`](docs/modular-engine-maturity-scorecard.md).
+The repo-wide package/submodule hygiene audit lives in
+[`docs/production-grade-codebase-audit.md`](docs/production-grade-codebase-audit.md),
+with the 100-point production-grade rubric in
+[`docs/production-grade-rubric.md`](docs/production-grade-rubric.md).
 The current operator checklist for local package trust, audits, revocation, and
 cleanup lives in
 [`docs/module-package-trust-operations.md`](docs/module-package-trust-operations.md).
@@ -146,6 +150,8 @@ tron/
 |   +-- modular-engine-cleanup-audit.md Proof map for cleanup/removal decisions
 |   +-- modular-engine-maturity-scorecard.md 100-point maturity rubric and blockers
 |   +-- module-package-trust-operations.md Operator checklist for package trust/audits
+|   +-- production-grade-codebase-audit.md Repo-wide package/submodule hygiene proof map
+|   +-- production-grade-rubric.md Repo-wide 100-point production-grade rubric
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms

@@ -1061,3 +1061,45 @@ async fn control_snapshot_and_inspect_expose_ui_surface_refs() {
             .any(|surface| surface["resourceId"] == "ui-surface-control")
     );
 }
+
+#[tokio::test]
+async fn control_snapshot_projects_substrate_without_control_state() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let context = CausalContext::new(
+        actor("system"),
+        ActorKind::System,
+        grant("grant"),
+        trace("control-snapshot"),
+    )
+    .with_scope("control.read");
+    let snapshot = handle
+        .invoke(host_invocation(
+            "control::snapshot",
+            json!({"limit": 25}),
+            context,
+        ))
+        .await;
+    assert_eq!(snapshot.error, None);
+    let value = snapshot.value.as_ref().unwrap();
+    assert!(
+        value["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|capability| capability["id"] == "resource::create")
+    );
+    assert!(
+        value["resourceTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|resource_type| resource_type["kind"] == "goal")
+    );
+    assert!(
+        value["availableActions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|action| action["functionId"] != "control::act")
+    );
+}

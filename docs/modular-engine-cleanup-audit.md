@@ -45,6 +45,21 @@ runtime caller, thin-client purpose, or test/support role.
 - Split the generated-UI engine tests into `engine/tests/generated_ui.rs` as the
   first test-module boundary around the previously monolithic engine test file.
 
+## 2026-05-19 Engine Test Ownership Split
+
+The remaining central `engine/tests.rs` body was replaced by an owned
+`engine/tests/` module tree. This was a behavior-preserving test organization
+change only: public capability ids, schemas, storage, runtime behavior, and
+client surfaces did not change.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Test root | `engine/tests/mod.rs` contains ownership docs, module declarations, and a shared fixture export; static gates forbid test bodies there | Keep as declaration-only test map |
+| Shared fixtures | `engine/tests/support.rs` owns reusable IDs, handlers, causal contexts, resource/ledger helpers, and external-worker test imports | Keep; promote shared setup here only when multiple concern files need it |
+| Concern-owned tests | `ids_types`, `catalog_discovery`, `ledger_idempotency`, `host_invocation`, `meta_primitives`, `triggers`, `streams`, `state_queue`, `leases_compensation`, `approval`, and `external_worker` own the moved central tests | Keep; new engine tests must land in an owning concern file |
+| Existing focused tests | `generated_ui`, `grant_authority`, `module_activation`, `resource_kernel`, `domain_outputs`, and `prompt_library_resources` remain focused proof boundaries | Keep; no consolidation back into a catch-all file |
+| Coverage proof | The old central 100 test names were compared against the split tree with no missing tests and no duplicate names across engine tests | Keep as checkpoint evidence; future coverage is protected by focused filters and static gates |
+
 ## 2026-05-19 Trust Review Cleanup Pass
 
 The package trust review and scheduled-audit phase was audited before the next
@@ -311,8 +326,9 @@ call-graph/test-backed passes:
 - `prompt_library` and `voice_notes` are no longer durable-output ambiguity
   blockers: both now use resources as runtime truth, though their chat/iOS
   affordances remain as thin shells.
-- The remaining broad `engine/tests.rs` body: continue moving cases into
-  focused proof modules only when the behavior boundary is stable.
+- Engine test ownership is no longer a broad-file blocker: the root is
+  declaration-only, fixtures are isolated in `engine/tests/support.rs`, and
+  behavior tests live in concern-owned files.
 
 ## Static Gates
 

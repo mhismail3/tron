@@ -80,6 +80,13 @@
 //! capability domains, or settings. Server-owned services register those
 //! subsystems as in-process workers at startup without making the engine core
 //! depend on them.
+//!
+//! ## Test Ownership
+//!
+//! Engine tests live in `engine/tests/` by substrate concern. `tests/mod.rs`
+//! is declaration-only, `tests/support.rs` owns shared fixtures, and behavior
+//! tests belong in the focused file for their concern instead of a catch-all
+//! root.
 
 #![deny(unsafe_code)]
 

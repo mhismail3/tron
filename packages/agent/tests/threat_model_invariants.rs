@@ -232,9 +232,271 @@ fn modular_engine_maturity_scorecard_stays_current() {
 }
 
 #[test]
+fn production_grade_codebase_audit_and_rubric_stay_current() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+    let audit_path = repo_root
+        .join("docs")
+        .join("production-grade-codebase-audit.md");
+    let rubric_path = repo_root.join("docs").join("production-grade-rubric.md");
+    let audit = std::fs::read_to_string(&audit_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", audit_path.display()));
+    let rubric = std::fs::read_to_string(&rubric_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", rubric_path.display()));
+    let readme_path = repo_root.join("README.md");
+    let readme = std::fs::read_to_string(&readme_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
+
+    for required in [
+        "Package Map",
+        "Rust Agent Package",
+        "Engine Submodule Map",
+        "Engine Primitive Map",
+        "Resource Kernel Map",
+        "Module Primitive Map",
+        "Rust Domain Map",
+        "iOS Package Map",
+        "Mac Package Map",
+        "Repo Support Map",
+        "Test Organization Findings",
+        "Prioritized Cleanup Backlog",
+        "docs/product-shell-reachability-map.md",
+        "packages/agent/src/engine/tests/mod.rs",
+        "packages/agent/src/engine/tests/support.rs",
+        "Rust Test Placement Convention",
+        "prompt_history",
+        "prompt_snippets",
+    ] {
+        assert!(
+            audit.contains(required),
+            "production-grade audit must include `{required}`"
+        );
+    }
+
+    for package in [
+        "`packages/agent`",
+        "`packages/ios-app`",
+        "`packages/mac-app`",
+        "`scripts/`",
+        "`.github/`",
+        "`docs/`",
+        "`packages/agent/skills/`",
+        "Generated Xcode projects",
+    ] {
+        assert!(
+            audit.contains(package),
+            "production-grade audit must classify top-level package/support area `{package}`"
+        );
+    }
+
+    for primitive in [
+        "`action_summary`",
+        "`approval`",
+        "`catalog`",
+        "`control`",
+        "`grant`",
+        "`module`",
+        "`observability`",
+        "`queue`",
+        "`resource`",
+        "`runtime`",
+        "`state`",
+        "`storage`",
+        "`stream`",
+        "`ui`",
+        "`worker`",
+    ] {
+        assert!(
+            audit.contains(primitive),
+            "production-grade audit must classify engine primitive `{primitive}`"
+        );
+    }
+
+    for resource_submodule in [
+        "`types`",
+        "`definitions`",
+        "`validation`",
+        "`versions`",
+        "`ui_surface`",
+        "`store`",
+    ] {
+        assert!(
+            audit.contains(resource_submodule),
+            "production-grade audit must classify resource kernel submodule `{resource_submodule}`"
+        );
+    }
+
+    for module_submodule in [
+        "Parent `module.rs`",
+        "`activation_runtime`",
+        "`source_trust`",
+        "`health_integrity`",
+        "`trust_review`",
+        "`trust_audit`",
+    ] {
+        assert!(
+            audit.contains(module_submodule),
+            "production-grade audit must classify module primitive boundary `{module_submodule}`"
+        );
+    }
+
+    for domain in [
+        "`agent`",
+        "`auth`",
+        "`blob`",
+        "`browser`",
+        "`capability`",
+        "`capability_support`",
+        "`context`",
+        "`cron`",
+        "`device`",
+        "`display`",
+        "`events`",
+        "`filesystem`",
+        "`git`",
+        "`import`",
+        "`job`",
+        "`logs`",
+        "`mcp`",
+        "`memory`",
+        "`message`",
+        "`model`",
+        "`notifications`",
+        "`plan`",
+        "`process`",
+        "`program`",
+        "`prompt_library`",
+        "`repo`",
+        "`sandbox`",
+        "`session`",
+        "`settings`",
+        "`skills`",
+        "`system`",
+        "`transcription`",
+        "`tree`",
+        "`voice_notes`",
+        "`web`",
+        "`worktree`",
+    ] {
+        assert!(
+            audit.contains(domain),
+            "production-grade audit must classify Rust domain `{domain}`"
+        );
+    }
+
+    for ios_area in [
+        "`App`",
+        "`Core`",
+        "`Database`",
+        "`Models`",
+        "`Services`",
+        "`ViewModels`",
+        "`Views`",
+        "`Theme`",
+        "`Utilities`",
+        "`Protocols`",
+        "`Resources`",
+        "`Tests`",
+        "`project.yml`",
+    ] {
+        assert!(
+            audit.contains(ios_area),
+            "production-grade audit must classify iOS area `{ios_area}`"
+        );
+    }
+
+    let axes = [
+        ("Architecture and ownership", 12_u32),
+        ("Folder and test organization", 10),
+        ("Reachability and dead code", 10),
+        ("State and persistence", 10),
+        ("Security and authority", 12),
+        ("Resource/output correctness", 8),
+        ("Runtime reliability", 10),
+        ("Client thinness", 7),
+        ("Observability and operations", 7),
+        ("Dependency and supply-chain hygiene", 5),
+        ("Docs and drift protection", 6),
+        ("Deletion discipline", 3),
+    ];
+    let mut total = 0_u32;
+    for (axis, expected_points) in axes {
+        let table_line = rubric
+            .lines()
+            .find(|line| line.starts_with('|') && line.contains(axis))
+            .unwrap_or_else(|| panic!("production-grade rubric missing axis {axis}"));
+        let columns = table_line.split('|').map(str::trim).collect::<Vec<_>>();
+        let points = columns
+            .get(2)
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("rubric axis {axis} must include point value"));
+        assert_eq!(points, expected_points, "point value changed for {axis}");
+        total += points;
+    }
+    assert_eq!(total, 100, "production-grade rubric must total 100");
+    assert!(
+        rubric.contains("Current repo-wide score: **93/100**")
+            && rubric.contains("Ranked 100% Backlog")
+            && rubric.contains("Standardize Rust domain test placement")
+            && rubric.contains("Resolve retired prompt schema ambiguity")
+            && rubric.contains("No raw-scope/client-policy trust")
+            && rubric.contains("No current blocker"),
+        "production-grade rubric must include score, blockers, and next actions"
+    );
+    assert!(
+        readme.contains("docs/production-grade-codebase-audit.md")
+            && readme.contains("docs/production-grade-rubric.md"),
+        "README must link the repo-wide audit and production-grade rubric"
+    );
+
+    let old_engine_tests = crate_root.join("src/engine/tests.rs");
+    assert!(
+        !old_engine_tests.exists(),
+        "engine/tests.rs must stay removed; engine tests belong in src/engine/tests/"
+    );
+    let engine_tests_mod_path = crate_root.join("src/engine/tests/mod.rs");
+    let engine_tests_mod = std::fs::read_to_string(&engine_tests_mod_path)
+        .unwrap_or_else(|error| panic!("failed to read {engine_tests_mod_path:?}: {error}"));
+    let support_path = crate_root.join("src/engine/tests/support.rs");
+    assert!(
+        support_path.is_file(),
+        "engine test shared fixtures must live in src/engine/tests/support.rs"
+    );
+    for module in [
+        "approval",
+        "catalog_discovery",
+        "external_worker",
+        "host_invocation",
+        "ids_types",
+        "leases_compensation",
+        "ledger_idempotency",
+        "meta_primitives",
+        "state_queue",
+        "streams",
+        "triggers",
+    ] {
+        let file = crate_root
+            .join("src/engine/tests")
+            .join(format!("{module}.rs"));
+        assert!(
+            file.is_file(),
+            "engine test concern module {module}.rs must exist"
+        );
+        assert!(
+            engine_tests_mod.contains(&format!("mod {module};")),
+            "engine tests mod.rs must declare concern module `{module}`"
+        );
+    }
+    assert!(
+        !engine_tests_mod.contains("#[test]") && !engine_tests_mod.contains("#[tokio::test]"),
+        "engine/tests/mod.rs must contain declarations only, not test bodies"
+    );
+}
+
+#[test]
 fn grant_manifest_resource_and_ui_hardening_tests_stay_in_owning_boundaries() {
     let crate_root = crate_root();
-    let engine_tests = std::fs::read_to_string(crate_root.join("src/engine/tests.rs"))
+    let engine_tests = std::fs::read_to_string(crate_root.join("src/engine/tests/mod.rs"))
         .expect("failed to read engine tests root");
     let grant_authority =
         std::fs::read_to_string(crate_root.join("src/engine/tests/grant_authority.rs"))
@@ -3047,7 +3309,7 @@ fn operator_consequence_and_voice_note_resource_boundaries_stay_enforced() {
     }
 
     let engine_tests =
-        std::fs::read_to_string(root.join("src/engine/tests.rs")).expect("read engine tests");
+        std::fs::read_to_string(root.join("src/engine/tests/mod.rs")).expect("read engine tests");
     assert!(
         engine_tests.contains("mod domain_outputs;"),
         "voice-note resource-backed domain output tests must stay in the focused boundary"
@@ -3145,7 +3407,7 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
     );
 
     let engine_tests =
-        std::fs::read_to_string(crate_root.join("src/engine/tests.rs")).expect("read tests.rs");
+        std::fs::read_to_string(crate_root.join("src/engine/tests/mod.rs")).expect("read tests.rs");
     assert!(
         engine_tests.contains("mod prompt_library_resources;"),
         "prompt-library resource tests must stay in their focused boundary"
