@@ -20,6 +20,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -1855,49 +1856,54 @@ fn declared_capabilities(manifest: &Value) -> Result<Vec<DeclaredCapability>> {
             "worker_package must declare at least one capability".to_owned(),
         ));
     }
-    capabilities
-        .iter()
-        .map(|capability| {
-            let function_id = FunctionId::new(required_value_str(capability, "functionId")?)?;
-            if function_id.namespace() != namespace {
-                return Err(EngineError::PolicyViolation(format!(
-                    "declared capability {} exceeds package namespace {namespace}",
-                    function_id
-                )));
-            }
-            let effect = parse_effect(required_value_str(capability, "effectClass")?)?;
-            let risk = parse_risk(required_value_str(capability, "risk")?)?;
-            let required_authority =
-                string_array_from(capability.get("requiredAuthority"), "requiredAuthority")?;
-            let output_resource_kinds =
-                string_array_from(capability.get("outputResourceKinds"), "outputResourceKinds")?;
-            if effect.requires_idempotency()
-                && !capability
-                    .get("idempotent")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-            {
-                return Err(EngineError::PolicyViolation(format!(
-                    "declared mutating capability {} requires idempotency",
-                    function_id
-                )));
-            }
-            if effect.requires_idempotency() && output_resource_kinds.is_empty() {
-                return Err(EngineError::PolicyViolation(format!(
-                    "declared mutating capability {} requires an output resource contract",
-                    function_id
-                )));
-            }
-            Ok(DeclaredCapability {
-                raw: capability.clone(),
-                function_id,
-                effect,
-                risk,
-                required_authority,
-                output_resource_kinds,
-            })
-        })
-        .collect()
+    let mut seen_function_ids = BTreeSet::new();
+    let mut declared = Vec::new();
+    for capability in capabilities {
+        let function_id = FunctionId::new(required_value_str(capability, "functionId")?)?;
+        if !seen_function_ids.insert(function_id.clone()) {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker_package declaredCapabilities contains duplicate functionId {function_id}"
+            )));
+        }
+        if function_id.namespace() != namespace {
+            return Err(EngineError::PolicyViolation(format!(
+                "declared capability {} exceeds package namespace {namespace}",
+                function_id
+            )));
+        }
+        let effect = parse_effect(required_value_str(capability, "effectClass")?)?;
+        let risk = parse_risk(required_value_str(capability, "risk")?)?;
+        let required_authority =
+            string_array_from(capability.get("requiredAuthority"), "requiredAuthority")?;
+        let output_resource_kinds =
+            string_array_from(capability.get("outputResourceKinds"), "outputResourceKinds")?;
+        if effect.requires_idempotency()
+            && !capability
+                .get("idempotent")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "declared mutating capability {} requires idempotency",
+                function_id
+            )));
+        }
+        if effect.requires_idempotency() && output_resource_kinds.is_empty() {
+            return Err(EngineError::PolicyViolation(format!(
+                "declared mutating capability {} requires an output resource contract",
+                function_id
+            )));
+        }
+        declared.push(DeclaredCapability {
+            raw: capability.clone(),
+            function_id,
+            effect,
+            risk,
+            required_authority,
+            output_resource_kinds,
+        });
+    }
+    Ok(declared)
 }
 
 async fn registered_capabilities_for_worker(

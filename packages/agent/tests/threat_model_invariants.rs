@@ -231,6 +231,59 @@ fn modular_engine_maturity_scorecard_stays_current() {
     );
 }
 
+#[test]
+fn grant_manifest_resource_and_ui_hardening_tests_stay_in_owning_boundaries() {
+    let crate_root = crate_root();
+    let engine_tests = std::fs::read_to_string(crate_root.join("src/engine/tests.rs"))
+        .expect("failed to read engine tests root");
+    let grant_authority =
+        std::fs::read_to_string(crate_root.join("src/engine/tests/grant_authority.rs"))
+            .expect("failed to read grant authority tests");
+    let module_source_trust = std::fs::read_to_string(
+        crate_root.join("src/engine/tests/module_activation/source_trust.rs"),
+    )
+    .expect("failed to read module source-trust tests");
+    let resource_kernel =
+        std::fs::read_to_string(crate_root.join("src/engine/tests/resource_kernel.rs"))
+            .expect("failed to read resource kernel tests");
+    let generated_ui = std::fs::read_to_string(crate_root.join("src/engine/tests/generated_ui.rs"))
+        .expect("failed to read generated UI tests");
+
+    assert!(
+        engine_tests.contains("mod grant_authority;")
+            && grant_authority
+                .contains("grant_derive_rejects_child_expansion_by_authority_dimension")
+            && grant_authority.contains(
+                "rejected_grants_fail_before_handler_execution_or_successful_resource_refs"
+            )
+            && grant_authority.contains("raw-scope"),
+        "grant-authority hardening must live in the focused grant_authority test module"
+    );
+    assert!(
+        module_source_trust.contains(
+            "module_register_package_rejects_adversarial_manifest_shapes_without_persistence"
+        ) && module_source_trust.contains("duplicate functionId")
+            && module_source_trust.contains("secret-like value"),
+        "adversarial package/source-trust tests must live in module_activation/source_trust.rs"
+    );
+    assert!(
+        resource_kernel.contains(
+            "resource_backed_invocation_rejects_malformed_or_wrong_kind_refs_without_persisting_refs"
+        )
+            && resource_kernel.contains("wrong-kind")
+            && resource_kernel.contains("invalid-hash"),
+        "resource-ref hardening tests must live in resource_kernel.rs"
+    );
+    assert!(
+        generated_ui.contains(
+            "ui_submit_action_rejects_invalid_input_and_stale_target_before_child_invocation"
+        ) && generated_ui.contains("invalid user input must fail before target child invocation")
+            && generated_ui
+                .contains("stale target revision must fail before target child invocation"),
+        "generated UI action hardening tests must live in generated_ui.rs"
+    );
+}
+
 fn assert_site(root: &Path, relative: &str, keyword: &str) {
     let path = root.join(relative);
     let content =

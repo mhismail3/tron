@@ -36,6 +36,7 @@ use super::{
 };
 
 mod generated_ui;
+mod grant_authority;
 mod module_activation;
 mod resource_kernel;
 

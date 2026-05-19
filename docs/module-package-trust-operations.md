@@ -9,8 +9,9 @@ or client-side policy guide.
 1. Register package bytes with `module::register_package`.
    - Built-in packages use deterministic built-in provenance.
    - Local packages must be digest-pinned through materialized file refs.
-   - Registration validates schema, digest, namespace, output contracts, config
-     schema, redaction, and runtime policy. It does not grant activation trust.
+   - Registration validates schema, digest, namespace, duplicate function ids,
+     output contracts, config schema, redaction, and runtime policy. It does
+     not grant activation trust.
 
 2. Establish source trust.
    - Unsigned local packages require `module::verify_source` evidence plus a

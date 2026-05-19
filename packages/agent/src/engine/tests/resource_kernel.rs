@@ -281,6 +281,121 @@ async fn resource_backed_invocation_fails_without_top_level_resource_refs() {
 }
 
 #[tokio::test]
+async fn resource_backed_invocation_rejects_malformed_or_wrong_kind_refs_without_persisting_refs() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+
+    let cases = [
+        (
+            "wrong-kind",
+            json!({
+                "resourceRefs": [{
+                    "resourceId": "artifact-wrong-kind",
+                    "kind": "materialized_file",
+                    "versionId": "ver-test",
+                    "role": "created",
+                    "contentHash": "hash-test"
+                }]
+            }),
+            "allowed kinds",
+        ),
+        (
+            "missing-role",
+            json!({
+                "resourceRefs": [{
+                    "resourceId": "artifact-missing-role",
+                    "kind": "artifact",
+                    "versionId": "ver-test",
+                    "contentHash": "hash-test"
+                }]
+            }),
+            "without role",
+        ),
+        (
+            "invalid-version",
+            json!({
+                "resourceRefs": [{
+                    "resourceId": "artifact-invalid-version",
+                    "kind": "artifact",
+                    "versionId": "",
+                    "role": "created",
+                    "contentHash": "hash-test"
+                }]
+            }),
+            "invalid resourceRef versionId",
+        ),
+        (
+            "invalid-hash",
+            json!({
+                "resourceRefs": [{
+                    "resourceId": "artifact-invalid-hash",
+                    "kind": "artifact",
+                    "versionId": "ver-test",
+                    "role": "created",
+                    "contentHash": 42
+                }]
+            }),
+            "invalid resourceRef contentHash",
+        ),
+        (
+            "non-object",
+            json!({"resourceRefs": ["artifact-id"]}),
+            "non-object",
+        ),
+    ];
+
+    for (case, response, expected) in cases {
+        let function_id = format!("demo::write_{case}");
+        let function = FunctionDefinition::new(
+            fid(&function_id),
+            wid("demo"),
+            "write",
+            VisibilityScope::Agent,
+            EffectClass::IdempotentWrite,
+        )
+        .with_required_authority(AuthorityRequirement::scope("demo.write"))
+        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_output_contract(DurableOutputContract::resource_backed(["artifact"]));
+        handle
+            .register_function_for_setup(
+                function,
+                Some(Arc::new(StaticValueHandler(response))),
+                false,
+            )
+            .unwrap();
+
+        let result = handle
+            .invoke(host_invocation(
+                &function_id,
+                json!({}),
+                mutating_causal(&format!("resource-backed-invalid-{case}"))
+                    .with_scope("demo.write"),
+            ))
+            .await;
+        assert!(
+            matches!(
+                result.error,
+                Some(EngineError::PolicyViolation(ref message)) if message.contains(expected)
+            ),
+            "case {case} should reject with `{expected}`, got {:?}",
+            result.error
+        );
+        let records = handle.lock().await.catalog().invocations().to_vec();
+        let record = records
+            .iter()
+            .find(|record| record.invocation_id == result.invocation_id)
+            .expect("failed output-contract invocation should stay inspectable");
+        assert!(!record.succeeded);
+        assert!(
+            record.produced_resource_refs.is_empty(),
+            "invalid refs must not be persisted as produced refs"
+        );
+    }
+}
+
+#[tokio::test]
 async fn resource_backed_refs_are_persisted_in_invocation_records() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle

@@ -858,6 +858,140 @@ async fn ui_submit_action_validates_stored_surface_and_creates_child_invocation(
 }
 
 #[tokio::test]
+async fn ui_submit_action_rejects_invalid_input_and_stale_target_before_child_invocation() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("demo", "demo"), false)
+        .unwrap();
+    let target = FunctionDefinition::new(
+        fid("demo::write"),
+        wid("demo"),
+        "resource-backed write",
+        VisibilityScope::Agent,
+        EffectClass::IdempotentWrite,
+    )
+    .with_required_authority(AuthorityRequirement::scope("demo.write"))
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_output_contract(DurableOutputContract::resource_backed(["artifact"]));
+    handle
+        .register_function_for_setup(
+            target,
+            Some(Arc::new(StaticValueHandler(json!({
+                "accepted": true,
+                "resourceRefs": [{
+                    "resourceId": "artifact-from-invalid-ui",
+                    "kind": "artifact",
+                    "versionId": "ver-ui",
+                    "role": "created",
+                    "contentHash": "hash-ui"
+                }]
+            })))),
+            false,
+        )
+        .unwrap();
+
+    let created = handle
+        .invoke(host_invocation(
+            "ui::create_surface",
+            json!({
+                "resourceId": "ui-surface-reject-action",
+                "surface": valid_ui_surface("demo::write", 1)
+            }),
+            mutating_causal("ui-reject-action-create").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let surface_version = created.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let child_count = || async {
+        handle
+            .lock()
+            .await
+            .catalog()
+            .invocations()
+            .iter()
+            .filter(|record| record.function_id.as_str() == "demo::write")
+            .count()
+    };
+
+    let before = child_count().await;
+    let invalid_input = handle
+        .invoke(host_invocation(
+            "ui::submit_action",
+            json!({
+                "surfaceResourceId": "ui-surface-reject-action",
+                "surfaceVersionId": surface_version,
+                "actionId": "submit-test",
+                "userInput": {},
+                "idempotencyKey": "ui-invalid-input"
+            }),
+            mutating_causal("ui-invalid-input").with_scope("ui.write"),
+        ))
+        .await;
+    assert!(matches!(
+        invalid_input.error,
+        Some(EngineError::SchemaViolation { .. })
+    ));
+    assert_eq!(
+        child_count().await,
+        before,
+        "invalid user input must fail before target child invocation"
+    );
+
+    let changed_target = FunctionDefinition::new(
+        fid("demo::write"),
+        wid("demo"),
+        "resource-backed write with changed revision",
+        VisibilityScope::Agent,
+        EffectClass::IdempotentWrite,
+    )
+    .with_required_authority(AuthorityRequirement::scope("demo.write"))
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_output_contract(DurableOutputContract::resource_backed(["artifact"]));
+    handle
+        .register_function_for_setup(
+            changed_target,
+            Some(Arc::new(StaticValueHandler(json!({
+                "accepted": true,
+                "resourceRefs": [{
+                    "resourceId": "artifact-from-stale-ui",
+                    "kind": "artifact",
+                    "versionId": "ver-ui-stale",
+                    "role": "created",
+                    "contentHash": "hash-ui-stale"
+                }]
+            })))),
+            false,
+        )
+        .unwrap();
+    let stale_target = handle
+        .invoke(host_invocation(
+            "ui::submit_action",
+            json!({
+                "surfaceResourceId": "ui-surface-reject-action",
+                "surfaceVersionId": created.value.as_ref().unwrap()["resourceRefs"][0]["versionId"],
+                "actionId": "submit-test",
+                "userInput": {"message": "hello"},
+                "idempotencyKey": "ui-stale-target"
+            }),
+            mutating_causal("ui-stale-target").with_scope("ui.write"),
+        ))
+        .await;
+    assert!(matches!(
+        stale_target.error,
+        Some(EngineError::StaleFunctionRevision { .. })
+    ));
+    assert_eq!(
+        child_count().await,
+        before,
+        "stale target revision must fail before target child invocation"
+    );
+}
+
+#[tokio::test]
 async fn control_snapshot_and_inspect_expose_ui_surface_refs() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle

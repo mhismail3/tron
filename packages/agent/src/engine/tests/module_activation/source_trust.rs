@@ -1275,3 +1275,90 @@ async fn module_verify_source_rejects_signature_material_without_trust_root() {
             if message.contains("signature_verification_unsupported")
     ));
 }
+
+#[tokio::test]
+async fn module_register_package_rejects_adversarial_manifest_shapes_without_persistence() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("adversarial-worker.sh"),
+        "module-adversarial-manifest-executable",
+    )
+    .await;
+
+    let mut duplicate = local_process_manifest(
+        "adversarial-duplicate",
+        "demo_local",
+        "adversarial-worker",
+        executable.clone(),
+    );
+    duplicate["declaredCapabilities"][1]["functionId"] =
+        duplicate["declaredCapabilities"][0]["functionId"].clone();
+
+    let mut raw_secret = local_process_manifest(
+        "adversarial-secret",
+        "demo_local",
+        "adversarial-worker",
+        executable.clone(),
+    );
+    raw_secret["runtimeEntryPoint"]["environmentPolicy"] = json!({
+        "mode": "empty",
+        "apiSecret": "sk-abcdefghijklmnopqrstuvwxyz012345"
+    });
+
+    let mut missing_command_ref = local_process_manifest(
+        "adversarial-command-ref",
+        "demo_local",
+        "adversarial-worker",
+        executable.clone(),
+    );
+    missing_command_ref["runtimeEntryPoint"]["commandTemplate"]["resourceId"] =
+        json!("materialized_file:missing");
+
+    let mut unsafe_visibility = local_process_manifest(
+        "adversarial-visibility",
+        "demo_local",
+        "adversarial-worker",
+        executable,
+    );
+    unsafe_visibility["runtimeEntryPoint"]["visibility"] = json!("admin");
+
+    let cases = [
+        ("adversarial-duplicate", duplicate, "duplicate functionId"),
+        ("adversarial-secret", raw_secret, "secret-like value"),
+        (
+            "adversarial-command-ref",
+            missing_command_ref,
+            "commandTemplate",
+        ),
+        (
+            "adversarial-visibility",
+            unsafe_visibility,
+            "unsupported local_process visibility",
+        ),
+    ];
+
+    for (package_id, manifest, expected) in cases {
+        let rejected = register_package(
+            &handle,
+            manifest_with_digest(manifest),
+            &format!("module-register-{package_id}"),
+        )
+        .await;
+        assert!(
+            matches!(
+                rejected.error,
+                Some(EngineError::PolicyViolation(ref message)) if message.contains(expected)
+            ),
+            "package {package_id} should reject with `{expected}`, got {:?}",
+            rejected.error
+        );
+        let inspected = inspect_resource(&handle, &format!("worker-package:{package_id}")).await;
+        assert_eq!(
+            inspected,
+            Value::Null,
+            "rejected package {package_id} must not persist a worker_package resource"
+        );
+    }
+}

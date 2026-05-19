@@ -51,7 +51,7 @@ Collapsed substrate rules:
 | Test/proof strength | 12 | Static gates, focused tests, integration tests, absence tests, and failure-mode tests |
 | Docs/operations | 7 | README, architecture docs, manual QA, and ledger match current behavior |
 
-Current score: **93/100**.
+Current score: **95/100**.
 
 ## Axis Scores
 
@@ -88,34 +88,43 @@ Next action:
 - Continue proof-driven removal/domain audits and keep lifecycle helpers narrow
   as package behavior matures.
 
-### Security/authority — 13/15
+### Security/authority — 14/15
 
 Evidence:
 
 - `grant::*` is the authority substrate, with child grant narrowing and static
   gates against `authorityCeiling` fallback.
+- `engine/tests/grant_authority.rs` now proves child grants cannot expand
+  capabilities, namespaces, authority labels, resource kinds/selectors, file
+  roots, network policy, risk, budget, expiry, or approval; rejected grants fail
+  before handler execution or produced-resource bookkeeping.
 - Module package activation validates package source policy, grants, worker
   registration, risk, visibility, file/network bounds, and trust state before
   activation.
+- Adversarial package manifest tests now cover duplicate function ids, unsafe
+  local-process command refs, unsupported visibility, and raw secret-like values
+  before `worker_package` persistence.
 - Source-trust and health/integrity policy code now has focused ownership plus
   static gates that keep it out of the parent lifecycle coordinator and forbid
   parallel package/source/policy/trust/audit/health tables.
 - `ui::submit_action` executes only stored canonical actions from validated
-  `ui_surface` versions.
+  `ui_surface` versions, and tests prove invalid input or stale target
+  revisions fail before child invocation.
 
 Blockers:
 
 - `authority_scopes` still exist as audit/derived labels and need continued
   protection from becoming permission truth.
-- More fuzz/property coverage is needed for grant selectors, UI templates, and
-  package manifests.
+- More exhaustive property coverage is still useful for large selector/template
+  cross-products, but the current deterministic adversarial cases now cover the
+  highest-risk boundaries.
 
 Next action:
 
-- Add targeted property/failure tests for grant narrowing, resource selectors,
-  secret redaction, and stale UI action rejection.
+- Add deeper projection/operator consequence tests without creating client-side
+  policy or new control-plane state.
 
-### Resource model — 11/12
+### Resource model — 12/12
 
 Evidence:
 
@@ -128,12 +137,14 @@ Evidence:
 - `engine/tests/resource_kernel.rs` now characterizes built-in resource kinds,
   trust link relations, invalid-payload rejection, stale CAS rejection,
   non-current damaged versions, unsupported links, materialized-file output
-  refs, and the absence of the retired output-audit trace projection.
+  refs, malformed/wrong-kind `resourceRefs`, failed output-contract persistence,
+  and the absence of the retired output-audit trace projection.
 
 Blockers:
 
-- Some older domain outputs and product-shell caches still need proof-driven
-  audit for full resource-native coverage.
+- No current blocker for the converted resource-backed substrate. Older domain
+  and product-shell audits remain cleanup work, not a competing durable output
+  model.
 
 Next action:
 
@@ -263,6 +274,10 @@ Evidence:
 - Focused resource and generated-UI tests cover resource-kernel invariants,
   UI payload bounds, raw secret/local-file rejection, stale/discarded surface
   action rejection, and stable resource-backed output refs.
+- Focused grant, manifest, resource-ref, and generated UI hardening tests now
+  prove malformed/adversarial inputs fail in the owning subsystem before
+  handler execution, package persistence, child invocation, or produced-ref
+  bookkeeping.
 
 Blockers:
 

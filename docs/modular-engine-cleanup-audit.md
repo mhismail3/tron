@@ -215,6 +215,30 @@ Removal proof from this pass:
 - No iOS change was justified because the server-side DTO and generated UI
   catalog remained stable.
 
+## 2026-05-19 Grant, Manifest, Resource Ref, And UI Action Hardening Pass
+
+This pass added proof-depth hardening without changing public capability ids,
+wire schemas, storage generation, resource kinds, generated UI catalogs, iOS
+surfaces, or package/runtime state planes.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Grant authority | `engine/tests/grant_authority.rs` now owns grant-narrowing and rejected-prepare tests for capabilities, namespaces, authority labels, resource kinds/selectors, file roots, network policy, risk, budget, expiry, approval, missing grants, revoked grants, expired grants, subject mismatches, selector mismatches, file-root escapes, exhausted budgets, and raw-scope non-authority | Keep as the focused grant proof boundary |
+| Package manifest validation | `module_register_package_rejects_adversarial_manifest_shapes_without_persistence` covers duplicate function ids, raw secret-like values, unsafe local-process command refs, and unsupported local-process visibility | Keep manifest hardening in module activation/source-trust tests because package trust policy consumes the same manifest shape |
+| Manifest parser | `declared_capabilities` now rejects duplicate `functionId` entries before package resource persistence | Keep as a root-cause validation fix, not a compatibility layer |
+| Resource output refs | `resource_backed_invocation_rejects_malformed_or_wrong_kind_refs_without_persisting_refs` covers wrong resource kind, missing role, invalid version/hash fields, non-object refs, and failed produced-ref persistence | Keep in the resource-kernel test boundary |
+| Generated UI actions | `ui_submit_action_rejects_invalid_input_and_stale_target_before_child_invocation` proves invalid stored-action input and stale target revisions fail before child invocation | Keep in generated UI tests; iOS remains a thin submitter |
+| Static gates | `grant_manifest_resource_and_ui_hardening_tests_stay_in_owning_boundaries` requires these proof cases to remain in the owning test modules | Keep as ownership proof |
+
+Removal/consolidation proof from this pass:
+
+- No new table, cache, compatibility reader, fallback manifest field, dynamic UI
+  catalog, control action multiplexer, or worker-spawn path was introduced.
+- No iOS DTO or surface change was justified because server wire shapes were
+  unchanged.
+- The only production behavior change is stricter manifest validation for
+  duplicate declared function ids, which fails before persistence.
+
 ## Deferred High-Scrutiny Areas
 
 These areas are not proven removable in this checkpoint and need separate

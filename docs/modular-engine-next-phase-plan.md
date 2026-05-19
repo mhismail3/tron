@@ -1,151 +1,102 @@
-# Grant, Manifest, And UI Action Property Hardening Phase
+# Operator Projection Consequence And Deferred Domain Output Audit Phase
 
 ## Current Checkpoint
 
-The module primitive ownership split is complete:
+The grant, manifest, resource-ref, and generated UI hardening checkpoint is
+complete:
 
-- source-trust and trust-policy operations live in
-  `engine/primitives/module/source_trust.rs`;
-- health, integrity, conformance, and recovery entrypoint logic live in
-  `engine/primitives/module/health_integrity.rs`;
-- activation runtime cleanup, trust review, and scheduled trust audit ownership
-  remain in their focused submodules;
-- module activation tests are split by source-trust, health/integrity,
-  trust-review, and lifecycle/runtime concern;
-- static gates prevent these helpers from drifting back into the parent module
-  primitive or adding package/source/policy/trust/audit/health tables;
-- the maturity scorecard baseline is now `93/100`.
-
-The next highest-value blocker is proof depth rather than another feature. The
-engine has the right ownership boundaries, but the remaining risk is malformed
-or adversarial inputs around grant selectors, package manifests, resource refs,
-secret-like values, and generated UI action templates.
+- focused grant-authority tests prove child grant narrowing and failed prepare
+  behavior across grant dimensions;
+- package manifest tests reject duplicate declared function ids, raw
+  secret-like values, unsafe local-process command refs, and unsupported
+  local-process visibility before package persistence;
+- resource-kernel tests reject malformed/wrong-kind `resourceRefs` without
+  recording produced refs;
+- generated UI action tests reject invalid input and stale target revisions
+  before child invocation;
+- static gates keep the proof cases in their owning test modules;
+- the maturity scorecard baseline is now `95/100`.
 
 ## Objective
 
-Harden the substrate with property/failure-mode tests that prove malformed
-grant, manifest, resource, and generated UI inputs fail closed before durable
-mutation or handler execution.
+Close the next maturity gap by making operator projections explain consequences
+and by auditing deferred domain outputs that still predate the collapsed
+resource substrate.
 
-This phase is a proof checkpoint. It must not add new public capability ids,
+This phase should remain proof-driven. It must not add public capability ids,
 request/response schemas, storage generation, resource kinds, generated UI
-catalogs, iOS surfaces, package tables, policy tables, trust tables, audit
-tables, compatibility readers, fallback manifest fields, or worker-spawn paths.
+catalogs, iOS policy, compatibility readers, fallback DTOs, package/source/
+policy/trust/audit tables, or alternate worker-spawn paths.
 
 ## Implementation Plan
 
-### 1. Grant Selector Property Tests
+### 1. Operator Projection Consequence Tests
 
-Add focused tests for grant narrowing and resource selector behavior:
+Add targeted tests for `control::inspect`, `module::inspect_package`,
+`module::inspect_trust`, `ui::validate_surface`, and generated target surfaces
+that prove stale/rejected actions explain:
 
-- child grants cannot expand allowed capabilities, namespaces, authority labels,
-  resource kinds/selectors, file roots, network policy, risk, expiry, approval,
-  budget, visibility, or delegation;
-- malformed wildcard/selector combinations are rejected or normalized exactly
-  once by the grant substrate;
-- revoked, expired, subject-mismatched, or stale-revision grants fail before
-  handler execution;
-- generated UI action submissions cannot widen the stored action grant or target
-  selector.
+- target function/resource/grant revision that caused staleness;
+- required canonical next action;
+- whether the action is safe, approval-gated, or high-risk;
+- which resource/evidence/grant/worker refs support the recommendation;
+- why the server rejected a submitted action.
 
-Prefer deterministic table/property cases over broad string scans. Keep
-authorization truth in `grant::*`; do not reintroduce raw scope authority.
+Keep this projection-only. Do not add `control::act`, local iOS policy, status
+tables, or cached operator state.
 
-### 2. Package Manifest And Source Trust Failure Tests
+### 2. Deferred Domain Durable Output Audit
 
-Add negative and boundary tests around `worker_package` manifests:
+Build a proof map for the remaining high-scrutiny domains listed in the cleanup
+audit: notifications, prompt library, AgentControl/source-change sheets,
+browser/display/device, transcription, and voice notes.
 
-- malformed declared capabilities, duplicate function ids, namespace escapes,
-  missing idempotency, missing output contracts, unsupported risk/effect,
-  invalid runtime policies, raw secrets, and bad materialized file refs fail
-  before persistence or activation;
-- signed local packages reject stale trust roots, expired/rotated-only keys,
-  selector mismatches, signature digest drift, unknown key refs, and malformed
-  signature bytes;
-- unsigned local packages still require current source verification plus scoped
-  approval;
-- conformance evidence remains evidence-only and never silently repairs package
-  or activation resources.
+For each domain, classify current durable output as:
 
-Keep package state resource-native. No package/source/policy/conformance tables
-or manifest compatibility aliases are allowed.
+- already resource-backed;
+- ephemeral/projection-only;
+- still event/session-store backed and acceptable for the thin chat harness;
+- remove candidate;
+- convert-to-resource candidate.
 
-### 3. Resource Ref And Durable Output Failure Tests
+Back each decision with route/capability registration, caller, DTO, test, or
+docs evidence. Remove only when proof shows the path is unreachable, duplicated,
+or architecture-violating.
 
-Strengthen resource/output proof:
+### 3. Static Gates And Absence Proof
 
-- resource refs with wrong kind, wrong version, stale current version, damaged
-  bytes, missing blobs, or mismatched content hashes fail output-contract
-  validation;
-- resource-backed capabilities cannot claim durable output without top-level
-  `resourceRefs`;
-- materialized-file and patch flows leave prior current versions unchanged on
-  hash/CAS failure;
-- damaged resources remain inspectable and are not silently rewritten.
+Add static/absence gates for any retired domain output or product-shell state
+removed in this phase. Preserve existing gates forbidding raw-scope
+authorization, dynamic UI catalogs, `control::act`, compatibility aliases,
+fallback manifest fields, module action multiplexers, package/source/policy/
+trust/audit tables, and direct module process spawn/kill.
 
-This is test/proof hardening only. Do not add a new storage generation or output
-audit mode.
+### 4. Documentation And Scorecard
 
-### 4. Generated UI Action Template Hardening
+Update the cleanup audit with the domain-output proof map and any removal or
+defer decisions. Update the maturity scorecard only after tests pass; target
+movement is `95/100` to `97/100` if operator projection consequence coverage and
+at least one deferred domain-output audit/removal are completed with proof.
 
-Add tests for server-authored `ui_surface` actions:
+## Verification
 
-- stale surface versions, expired actions, unknown target functions, target
-  revision drift, invalid user input, missing idempotency for mutating actions,
-  unsupported catalog components, raw secrets, and oversized templates fail
-  before child invocation;
-- stored actions may target only canonical capabilities and may not let iOS
-  supply target function ids, payload templates, grants, or policy decisions;
-- generated package/trust/activation surfaces expose only bounded previews and
-  refs, not large evidence bodies or secrets.
+Run focused Rust tests for control projections, generated UI validation,
+module package/trust inspection, and any touched domain. Finish with:
 
-Keep iOS unchanged unless Swift decoding fails; the client remains a thin
-renderer/action submitter.
-
-## Tests And Static Gates
-
-Add or strengthen static gates for:
-
-- no raw-scope authorization;
-- no package/source/policy/trust/audit/health/status tables;
-- no fallback manifest fields or compatibility aliases;
-- no dynamic UI catalog or fallback renderer;
-- no `control::act` or module action multiplexer;
-- no direct process spawn/kill from module code;
-- no iOS local grant/package/policy/action-target construction.
-
-Run focused tests first:
-
-- grant/resource selector tests;
-- module package/source-trust failure tests;
-- generated UI action validation tests;
-- resource output-contract tests;
-- `cargo test module_ --lib -- --nocapture`;
 - `cargo test generated_ui --lib -- --nocapture`;
-- `cargo test --test threat_model_invariants -- --nocapture`.
-
-Finish with:
-
+- `cargo test module_ --lib -- --nocapture`;
+- targeted domain tests for audited/removed domains;
+- `cargo test --test threat_model_invariants -- --nocapture`;
 - `git diff --check`;
-- `scripts/tron ci fmt check clippy test`;
-- iOS `xcodegen generate` and targeted `xcodebuild test` only if Swift or
-  project files change.
+- `scripts/tron ci fmt check clippy test`.
 
-## Acceptance Criteria
-
-- The scorecard can move from `93/100` only if the new tests catch realistic
-  malformed/adversarial inputs and all verification passes.
-- No behavior broadening or new persistence is introduced.
-- Failure-mode coverage is subsystem-specific and easier to read than broad
-  string scans.
-- Docs, scorecard, cleanup audit, and `~/LEDGER.jsonl` are updated in the same
-  checkpoint.
+Run iOS `xcodegen generate` and targeted Engine Console/source-guard tests only
+if Swift/project files change.
 
 ## Out Of Scope
 
-- New package trust features.
-- New signature algorithms.
+- New package trust features or signature algorithms.
 - Remote package distribution, marketplace install, or remote key discovery.
 - Control-plane mutation shortcuts.
-- iOS renderer or DTO changes unless forced by existing wire-shape decoding.
+- iOS policy or local action construction.
 - Storage deletion/archive execution.
