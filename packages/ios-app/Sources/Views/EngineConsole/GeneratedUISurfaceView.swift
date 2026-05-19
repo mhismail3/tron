@@ -66,7 +66,17 @@ enum GeneratedUIRenderer {
     }
 
     private static func isExpired(_ value: String, now: Date) -> Bool {
-        ISO8601DateFormatter().date(from: value).map { $0 <= now } ?? true
+        parseISO8601Date(value).map { $0 <= now } ?? true
+    }
+
+    private static func parseISO8601Date(_ value: String) -> Date? {
+        let standard = ISO8601DateFormatter()
+        if let date = standard.date(from: value) {
+            return date
+        }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: value)
     }
 }
 

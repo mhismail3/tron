@@ -77,6 +77,33 @@ struct GeneratedUIRendererTests {
         #expect(GeneratedUIRenderer.validate(surface: surface, resourceRef: damagedRef).status == .damaged("damaged"))
     }
 
+    @Test("server RFC3339 timestamps with fractional seconds stay renderable")
+    func serverFractionalOffsetTimestampsRender() throws {
+        var surface = baseSurface(componentType: "Button")
+        surface.expiresAt = "2026-05-20T00:01:14.053095+00:00"
+        surface.actions = [
+            UiActionDTO(
+                actionId: "create-snippet",
+                label: "Create",
+                targetFunctionId: "prompt_library::snippet_create",
+                inputSchema: AnyCodable(["type": "object"]),
+                payloadTemplate: AnyCodable(["name": "${input.name}", "text": "${input.text}"]),
+                idempotencyKeyTemplate: "${submission.idempotencyKey}",
+                requiredGrant: "prompt_library.write",
+                requiredRisk: "medium",
+                approvalPolicy: AnyCodable(["required": false]),
+                targetRevision: 1,
+                expiresAt: "2026-05-20T00:01:14.053095+00:00"
+            )
+        ]
+        let now = try #require(ISO8601DateFormatter().date(from: "2026-05-19T23:01:14Z"))
+
+        let state = GeneratedUIRenderer.validate(surface: surface, now: now)
+
+        #expect(state.status == .renderable)
+        #expect(state.actionsEnabled)
+    }
+
     private func baseSurface(componentType: String) -> UiSurfaceDTO {
         UiSurfaceDTO(
             surfaceId: "surface",

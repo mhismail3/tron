@@ -409,6 +409,19 @@ session-idempotent and failed before handler execution.
 | Resource wrapper writes | The same test follows the stored Prompt Library create action through `artifact::create`; static gates require resource wrapper writes to stay system-idempotent | Resource scope controls visibility/ownership; wrapper idempotency must not require a session for resource-backed domains |
 | Prompt Library resources | Prompt history/snippet creation now writes system-scoped `artifact:prompt-*` resources, matching the documented selection-only picker and generated management surface | Prompt Library snippets/history are reusable library state, not hidden session/workspace state |
 
+## 2026-05-19 Manual Test 2 Renderer Timestamp Parsing Fix
+
+After the server-side sessionless-management fix, the Prompt Library management
+sheet loaded active `ui_surface` resources but rendered `Expired Surface`.
+Database inspection showed future `expiresAt` values in server RFC3339 format
+with fractional seconds and explicit offset, for example
+`2026-05-20T00:01:14.053095+00:00`.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| iOS renderer parsing | `GeneratedUIRendererTests.serverFractionalOffsetTimestampsRender` covers the server timestamp shape for both surface and action expiry | Keep the server's RFC3339 resource timestamps; the renderer accepts standard and fractional ISO8601 forms |
+| Fail-closed state | Existing renderer tests still prove genuinely expired, stale, damaged, and offline surfaces disable actions | Parse failures remain closed; valid server timestamps no longer look expired |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:
