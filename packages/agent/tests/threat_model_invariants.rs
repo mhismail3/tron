@@ -1226,6 +1226,15 @@ fn resource_native_orchestration_and_control_plane_gates_stay_on() {
             "resource primitive worker must expose `{required}` for goal working sets and artifact curation"
         );
     }
+    let resource_wrapper = resource
+        .split("fn resource_wrapper_function")
+        .nth(1)
+        .expect("resource primitive must keep resource_wrapper_function");
+    assert!(
+        resource_wrapper
+            .contains(".with_idempotency(IdempotencyContract::caller_system_engine_ledger())"),
+        "resource wrapper writes must stay system-idempotent for sessionless resource-backed domains"
+    );
 
     let agent_contract = std::fs::read_to_string(crate_root.join("src/domains/agent/contract.rs"))
         .expect("failed to read agent contract");
@@ -1587,6 +1596,7 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
     assert!(
         ui.contains("mod validation;")
             && ui.contains("use validation::{")
+            && ui.contains("IdempotencyContract::caller_system_engine_ledger()")
             && ui_validation.contains("fn validate_action_target")
             && ui_validation.contains("fn validate_action_payload_template_against_target_schema")
             && ui_validation.contains("pub(super) fn validate_surface")
@@ -1594,8 +1604,9 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
             && ui_validation.contains("pub(in crate::engine) fn action_child_invocation")
             && !ui.contains("fn validate_action_target")
             && !ui.contains("fn surface_validation_state")
-            && !ui.contains("fn validate_action_payload_template_against_target_schema"),
-        "generated UI stored-surface and action validation must live in ui/validation.rs"
+            && !ui.contains("fn validate_action_payload_template_against_target_schema")
+            && !ui.contains("IdempotencyContract::caller_session_engine_ledger()"),
+        "generated UI validation must stay split and UI writes must stay system-idempotent"
     );
     for forbidden in [
         "control::act",

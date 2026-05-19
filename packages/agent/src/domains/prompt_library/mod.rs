@@ -3,7 +3,9 @@
 //! This module owns canonical function execution for the prompt library
 //! namespace and keeps domain contracts, services, and tests beside the worker
 //! that uses them. Prompt snippets and captured prompt history are `artifact`
-//! resources; old prompt-library SQLite rows are not runtime source truth.
+//! resources with system scope because they are reusable library state, not
+//! chat-session state. Old prompt-library SQLite rows are not runtime source
+//! truth.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -175,7 +177,7 @@ async fn prompt_history_record_value(
         (
             json!({
                 "resourceId": resource_id,
-                "scope": "workspace",
+                "scope": "system",
                 "lifecycle": "promoted",
                 "payload": payload,
                 "policy": {"retention": "prompt_history"}
@@ -284,7 +286,7 @@ async fn prompt_snippet_create_value(
         "artifact::create",
         json!({
             "resourceId": snippet_resource_id(&id),
-            "scope": "workspace",
+            "scope": "system",
             "lifecycle": "promoted",
             "payload": snippet_payload,
             "policy": {"retention": "prompt_snippet"}

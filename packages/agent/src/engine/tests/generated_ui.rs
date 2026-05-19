@@ -29,6 +29,14 @@ fn prompt_ui_context(key: &str) -> CausalContext {
         .with_scope("prompt_library.write")
 }
 
+fn sessionless_prompt_ui_context(key: &str) -> CausalContext {
+    causal()
+        .with_idempotency_key(key)
+        .with_scope("ui.write")
+        .with_scope("prompt_library.read")
+        .with_scope("prompt_library.write")
+}
+
 fn prompt_write_context(key: &str) -> CausalContext {
     mutating_causal(key).with_scope("prompt_library.write")
 }
@@ -604,6 +612,74 @@ async fn ui_prompt_collection_actions_submit_through_stored_surface_coordinates(
         }),
         "generated prompt action must execute as a child invocation"
     );
+}
+
+#[tokio::test]
+async fn ui_prompt_collection_management_is_sessionless_and_system_idempotent() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let created = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_prompt_collection_request(
+                "prompt_library.snippets.v1",
+                "artifact:prompt-snippet",
+            ),
+            sessionless_prompt_ui_context("generated-ui-sessionless-surface"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let value = created.value.as_ref().unwrap();
+    let resource_ref = &value["resourceRefs"][0];
+    let resource_id = resource_ref["resourceId"].as_str().unwrap();
+    let surface_version_id = resource_ref["versionId"].as_str().unwrap();
+
+    let submitted = handle
+        .invoke(host_invocation(
+            "ui::submit_action",
+            json!({
+                "surfaceResourceId": resource_id,
+                "surfaceVersionId": surface_version_id,
+                "actionId": "create-snippet",
+                "userInput": {
+                    "name": "Sessionless generated action",
+                    "text": "Created outside a chat session"
+                },
+                "idempotencyKey": "generated-ui-sessionless-create-snippet"
+            }),
+            sessionless_prompt_ui_context("generated-ui-sessionless-submit"),
+        ))
+        .await;
+    assert_eq!(submitted.error, None);
+
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    let surface_record = records
+        .iter()
+        .find(|record| record.invocation_id == created.invocation_id)
+        .expect("surface_for_target invocation should be recorded");
+    assert_eq!(surface_record.session_id, None);
+    assert_eq!(
+        surface_record.idempotency_scope,
+        Some(IdempotencyScope::new("system", "system"))
+    );
+    let submit_record = records
+        .iter()
+        .find(|record| record.invocation_id == submitted.invocation_id)
+        .expect("ui::submit_action invocation should be recorded");
+    assert_eq!(submit_record.session_id, None);
+    assert_eq!(
+        submit_record.idempotency_scope,
+        Some(IdempotencyScope::new("system", "system"))
+    );
+    assert!(records.iter().any(|record| {
+        record.function_id.as_str() == "prompt_library::snippet_create"
+            && record
+                .parent_invocation_id
+                .as_ref()
+                .is_some_and(|parent| parent == &submitted.invocation_id)
+            && record.session_id.is_none()
+            && record.idempotency_scope == Some(IdempotencyScope::new("system", "system"))
+    }));
 }
 
 #[tokio::test]

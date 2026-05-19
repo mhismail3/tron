@@ -135,6 +135,10 @@ async fn prompt_snippets_are_resource_backed_without_retired_tables() {
         .as_str()
         .unwrap();
     let inspection = inspect_resource(&handle, resource_id).await;
+    assert_eq!(
+        inspection["resource"]["scope"], "system",
+        "prompt snippets are reusable library state, not chat-session state"
+    );
     assert_eq!(inspection["resource"]["lifecycle"], "discarded");
 }
 
@@ -159,6 +163,14 @@ async fn prompt_history_is_resource_backed_deduped_without_retired_tables() {
             .unwrap()
             .iter()
             .any(|reference| reference["kind"] == "artifact")
+    );
+    let history_resource_id = first.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap();
+    let history_inspection = inspect_resource(&handle, history_resource_id).await;
+    assert_eq!(
+        history_inspection["resource"]["scope"], "system",
+        "prompt history is reusable library state, not chat-session state"
     );
 
     let second = handle

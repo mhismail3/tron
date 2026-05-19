@@ -4,6 +4,8 @@
 //! - **History** is stored as `artifact:prompt-history:{hash}` resources,
 //!   deduplicated by normalized-text hash.
 //! - **Snippets** are stored as `artifact:prompt-snippet:{id}` resources.
+//! - Both resource families are system-scoped library state so generated
+//!   management can run outside a chat session.
 //!
 //! # Submodules
 //!

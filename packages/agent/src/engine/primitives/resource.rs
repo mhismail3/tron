@@ -641,7 +641,7 @@ fn resource_wrapper_function(
     let function = primitive_function(id, RESOURCE_WORKER_ID, description, effect, authority);
     if effect.requires_idempotency() {
         function
-            .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
             .with_output_contract(DurableOutputContract::resource_backed(["*"]))
     } else {
         function

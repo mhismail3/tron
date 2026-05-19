@@ -214,7 +214,7 @@ fn ui_write(
         EffectClass::IdempotentWrite,
         "ui.write",
     )
-    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
     .with_request_schema(request_schema)
     .with_response_schema(response_schema);
     definition.visibility = VisibilityScope::System;
@@ -2458,12 +2458,10 @@ fn normalized_surface_payload(invocation: &crate::engine::Invocation) -> Result<
 fn resource_scope_from_payload(
     invocation: &crate::engine::Invocation,
 ) -> Result<EngineResourceScope> {
-    match optional_string(invocation.payload.get("scope"))?
-        .unwrap_or_else(|| "session".to_owned())
-        .as_str()
-    {
-        "system" => Ok(EngineResourceScope::System),
-        "workspace" => {
+    match optional_string(invocation.payload.get("scope"))?.as_deref() {
+        None => Ok(default_resource_scope(invocation)),
+        Some("system") => Ok(EngineResourceScope::System),
+        Some("workspace") => {
             let workspace_id = optional_string(invocation.payload.get("workspaceId"))?
                 .or(invocation.causal_context.workspace_id.clone())
                 .ok_or_else(|| {
@@ -2478,7 +2476,7 @@ fn resource_scope_from_payload(
             }
             Ok(EngineResourceScope::Workspace(workspace_id))
         }
-        "session" => {
+        Some("session") => {
             let session_id = optional_string(invocation.payload.get("sessionId"))?
                 .or(invocation.causal_context.session_id.clone())
                 .ok_or_else(|| {
@@ -2493,10 +2491,20 @@ fn resource_scope_from_payload(
             }
             Ok(EngineResourceScope::Session(session_id))
         }
-        other => Err(EngineError::PolicyViolation(format!(
+        Some(other) => Err(EngineError::PolicyViolation(format!(
             "unsupported resource scope {other}"
         ))),
     }
+}
+
+fn default_resource_scope(invocation: &crate::engine::Invocation) -> EngineResourceScope {
+    if let Some(session_id) = invocation.causal_context.session_id.clone() {
+        return EngineResourceScope::Session(session_id);
+    }
+    if let Some(workspace_id) = invocation.causal_context.workspace_id.clone() {
+        return EngineResourceScope::Workspace(workspace_id);
+    }
+    EngineResourceScope::System
 }
 
 fn surface_lifecycle(invocation: &crate::engine::Invocation, default: &str) -> Result<String> {

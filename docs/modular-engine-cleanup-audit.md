@@ -396,6 +396,19 @@ state, not durable engine truth, so the picker remains as a gated thin shell.
 | Client policy boundary | Swift and Rust static gates forbid target function ids, payload templates, grants, lineage, or `UiActionSubmissionDTO` construction in the picker/state/list files | Keep iOS free of policy/action construction in the composer picker |
 | Scorecard closure | `docs/production-grade-rubric.md` reaches `100/100` only because the remaining fixed shell is explicitly classified, documented, and guarded | Treat future fixed shells the same way: generated/resource replacement or proof-backed local affordance |
 
+## 2026-05-19 Manual Test 2 Generated Management Idempotency Fix
+
+Manual Prompt Library management testing found a server-side contract bug:
+opening the generated management sheet invoked `ui::surface_for_target` from a
+valid sessionless picker context, but generated UI writes were still
+session-idempotent and failed before handler execution.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Generated UI writes | `ui_prompt_collection_management_is_sessionless_and_system_idempotent` proves `ui::surface_for_target` and `ui::submit_action` work without a chat session and record system-scoped idempotency | Generated UI resources and the action gateway are substrate/operator boundaries, not chat-session state |
+| Resource wrapper writes | The same test follows the stored Prompt Library create action through `artifact::create`; static gates require resource wrapper writes to stay system-idempotent | Resource scope controls visibility/ownership; wrapper idempotency must not require a session for resource-backed domains |
+| Prompt Library resources | Prompt history/snippet creation now writes system-scoped `artifact:prompt-*` resources, matching the documented selection-only picker and generated management surface | Prompt Library snippets/history are reusable library state, not hidden session/workspace state |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:
