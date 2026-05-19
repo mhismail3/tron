@@ -94,6 +94,30 @@ Removal proof from this pass:
 - No storage change was justified; the scorecard explicitly forbids adding
   package/source/policy/trust/audit tables.
 
+## 2026-05-19 Module Primitive Ownership Split
+
+The source-trust and health/integrity paths were extracted from the parent
+module primitive without changing public function ids, schemas, output
+contracts, generated UI actions, resource kinds, storage generation, or iOS
+surfaces.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Source-trust ownership | `engine/primitives/module/source_trust.rs` owns source registration, source verification, Ed25519 signature verification, source approvals/revocations, policy decisions, policy audits, trust inspection, renewal, rotation, expiry, reconciliation, and revocation enforcement | Keep as the single module trust/policy implementation boundary |
+| Health/integrity ownership | `engine/primitives/module/health_integrity.rs` owns health checks, integrity verification, conformance evidence, activation recovery entrypoint logic, and health/integrity schemas | Keep separate from activation runtime cleanup so recovery can compose canonical grant/worker cleanup without reimplementing it |
+| Parent module role | `engine/primitives/module.rs` now remains package lifecycle registration, dispatch, activation orchestration, and shared substrate helper glue | Keep narrow; do not move policy behavior back into the parent coordinator |
+| Test ownership | `engine/tests/module_activation/source_trust.rs` and `engine/tests/module_activation/health_integrity.rs` hold the moved concern tests with shared fixtures in the parent module activation test file | Keep tests organized by substrate concern instead of one monolithic activation file |
+| Static gates | `tests/threat_model_invariants.rs` requires `mod source_trust`, `mod health_integrity`, moved helper ownership, split tests, and the existing forbidden-path rules | Keep as absence proof against helper drift, parallel state planes, direct process spawn/kill, and local iOS policy |
+
+Removal proof from this pass:
+
+- No compatibility alias, fallback route, table, storage reset, or public DTO
+  reader was added.
+- No source-trust or health/integrity implementation body remains in the parent
+  module primitive.
+- Shared helpers remain in the parent only when they are used by multiple module
+  submodules.
+
 ## 2026-05-19 Trust Audit Reliability Pass
 
 Scheduled module trust audits were hardened without adding a scheduler, audit

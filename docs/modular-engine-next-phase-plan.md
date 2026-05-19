@@ -1,147 +1,151 @@
-# Module Primitive Ownership And Policy Boundary Phase
+# Grant, Manifest, And UI Action Property Hardening Phase
 
 ## Current Checkpoint
 
-The resource/UI ownership split is complete:
+The module primitive ownership split is complete:
 
-- `engine/resources/mod.rs` is now a small facade with stable re-exports;
-- resource substrate types, built-in definitions, generic validation, version
-  hashing, fixed-catalog `ui_surface` validation, and store implementations
-  each have focused files;
-- stored generated-UI validation and action-submission checks live in
-  `engine/primitives/ui/validation.rs`;
-- resource/materialization tests live in `engine/tests/resource_kernel.rs`;
-- static gates prevent resource definitions, UI-surface validation, and
-  generated-UI action validation from drifting back into mixed owners;
-- the maturity scorecard baseline is now `90/100`.
+- source-trust and trust-policy operations live in
+  `engine/primitives/module/source_trust.rs`;
+- health, integrity, conformance, and recovery entrypoint logic live in
+  `engine/primitives/module/health_integrity.rs`;
+- activation runtime cleanup, trust review, and scheduled trust audit ownership
+  remain in their focused submodules;
+- module activation tests are split by source-trust, health/integrity,
+  trust-review, and lifecycle/runtime concern;
+- static gates prevent these helpers from drifting back into the parent module
+  primitive or adding package/source/policy/trust/audit/health tables;
+- the maturity scorecard baseline is now `93/100`.
 
-The next highest-value blocker is the parent module primitive. `module.rs`
-still owns package lifecycle dispatch, source trust, source approvals,
-signature verification, policy decisions, conformance, health, integrity,
-recovery, activation orchestration, and shared helper glue. Runtime cleanup,
-trust review, and scheduled trust audits have already been split; the remaining
-goal is to reduce module policy ownership without adding behavior.
+The next highest-value blocker is proof depth rather than another feature. The
+engine has the right ownership boundaries, but the remaining risk is malformed
+or adversarial inputs around grant selectors, package manifests, resource refs,
+secret-like values, and generated UI action templates.
 
 ## Objective
 
-Simplify and harden the module primitive by moving stabilized source-trust and
-health/integrity/recovery concerns into focused submodules while preserving all
-public capability ids, request/response schemas, output contracts, idempotency,
-generated UI actions, storage generation, resource kinds, and operator behavior.
+Harden the substrate with property/failure-mode tests that prove malformed
+grant, manifest, resource, and generated UI inputs fail closed before durable
+mutation or handler execution.
 
-This phase is a refactor/proof checkpoint. It must not add package tables,
-policy tables, trust tables, conformance tables, health tables, status caches,
-dynamic UI catalogs, marketplace flow, remote fetch, remote key discovery,
-`control::act`, iOS policy, compatibility aliases, or a second worker-spawn path.
+This phase is a proof checkpoint. It must not add new public capability ids,
+request/response schemas, storage generation, resource kinds, generated UI
+catalogs, iOS surfaces, package tables, policy tables, trust tables, audit
+tables, compatibility readers, fallback manifest fields, or worker-spawn paths.
 
-## Proposed Ownership Split
+## Implementation Plan
 
-### 1. Source Trust Boundary
+### 1. Grant Selector Property Tests
 
-Create `engine/primitives/module/source_trust.rs` for source and trust-root
-policy that is already stable:
+Add focused tests for grant narrowing and resource selector behavior:
 
-- `module::verify_source`;
-- `module::approve_source`;
-- `module::revoke_source_approval`;
-- `module::policy_decide`;
-- `module::register_source`;
-- `module::verify_signature`;
-- `module::audit_policy`;
-- `module::record_policy_audit`;
-- `module::reconcile_trust`;
-- `module::inspect_trust`;
-- `module::renew_trust_root`;
-- `module::rotate_signature_key`;
-- `module::expire_trust_decision`;
-- `module::enforce_revocation`;
-- source/trust helper structs, digest/signature checks, trust graph traversal,
-  effective trust calculation, and policy diagnostics.
+- child grants cannot expand allowed capabilities, namespaces, authority labels,
+  resource kinds/selectors, file roots, network policy, risk, expiry, approval,
+  budget, visibility, or delegation;
+- malformed wildcard/selector combinations are rejected or normalized exactly
+  once by the grant substrate;
+- revoked, expired, subject-mismatched, or stale-revision grants fail before
+  handler execution;
+- generated UI action submissions cannot widen the stored action grant or target
+  selector.
 
-The parent `module.rs` should remain the registration/dispatch and package
-lifecycle coordinator. Source-trust code may compose existing resource, grant,
-invocation, and generated-UI helpers, but it must not create a policy state
-plane or action multiplexer.
+Prefer deterministic table/property cases over broad string scans. Keep
+authorization truth in `grant::*`; do not reintroduce raw scope authority.
 
-### 2. Health And Integrity Boundary
+### 2. Package Manifest And Source Trust Failure Tests
 
-Create `engine/primitives/module/health_integrity.rs` for package runtime
-evidence checks that are already represented as resources:
+Add negative and boundary tests around `worker_package` manifests:
 
-- `module::check_health`;
-- `module::verify_integrity`;
-- `module::recover_activation` coordination that is not already runtime
-  cleanup-owned;
-- health policy parsing;
-- invoke-function health validation;
-- integrity diagnostics over package/config/activation/grant/worker state;
-- evidence payload shaping and redaction for health/integrity results.
+- malformed declared capabilities, duplicate function ids, namespace escapes,
+  missing idempotency, missing output contracts, unsupported risk/effect,
+  invalid runtime policies, raw secrets, and bad materialized file refs fail
+  before persistence or activation;
+- signed local packages reject stale trust roots, expired/rotated-only keys,
+  selector mismatches, signature digest drift, unknown key refs, and malformed
+  signature bytes;
+- unsigned local packages still require current source verification plus scoped
+  approval;
+- conformance evidence remains evidence-only and never silently repairs package
+  or activation resources.
 
-Keep activation runtime cleanup helpers in `activation_runtime.rs`. The new
-health/integrity boundary may call those helpers for recovery cleanup, but it
-must not reimplement grant revocation, volatile worker disconnect, local process
-spawn/kill, or activation runtime diagnostics.
+Keep package state resource-native. No package/source/policy/conformance tables
+or manifest compatibility aliases are allowed.
 
-### 3. Parent Module Role
+### 3. Resource Ref And Durable Output Failure Tests
 
-After the split, `module.rs` should own only:
+Strengthen resource/output proof:
 
-- public function registration and dispatch;
-- package/config/activation entrypoints;
-- activation/upgrade/rollback orchestration;
-- shared resource/grant/invocation helper glue that is genuinely cross-cutting;
-- submodule imports and re-exports needed by host/control/UI projections.
+- resource refs with wrong kind, wrong version, stale current version, damaged
+  bytes, missing blobs, or mismatched content hashes fail output-contract
+  validation;
+- resource-backed capabilities cannot claim durable output without top-level
+  `resourceRefs`;
+- materialized-file and patch flows leave prior current versions unchanged on
+  hash/CAS failure;
+- damaged resources remain inspectable and are not silently rewritten.
 
-No behavior broadening is allowed. If a helper has unclear ownership, keep it in
-the parent and document why rather than creating a new abstraction.
+This is test/proof hardening only. Do not add a new storage generation or output
+audit mode.
+
+### 4. Generated UI Action Template Hardening
+
+Add tests for server-authored `ui_surface` actions:
+
+- stale surface versions, expired actions, unknown target functions, target
+  revision drift, invalid user input, missing idempotency for mutating actions,
+  unsupported catalog components, raw secrets, and oversized templates fail
+  before child invocation;
+- stored actions may target only canonical capabilities and may not let iOS
+  supply target function ids, payload templates, grants, or policy decisions;
+- generated package/trust/activation surfaces expose only bounded previews and
+  refs, not large evidence bodies or secrets.
+
+Keep iOS unchanged unless Swift decoding fails; the client remains a thin
+renderer/action submitter.
 
 ## Tests And Static Gates
 
-Write characterization/static tests first:
+Add or strengthen static gates for:
 
-- source-trust capability ids, request schemas, response shapes, output
-  contracts, and generated UI action behavior remain unchanged;
-- health, integrity, and recovery capability ids and resource-backed evidence
-  behavior remain unchanged;
-- source-trust helper implementations live in `source_trust.rs`, not
-  `module.rs`;
-- health/integrity helper implementations live in `health_integrity.rs`, not
-  `module.rs`;
-- activation runtime helpers stay in `activation_runtime.rs`;
-- parent `module.rs` remains dispatch/orchestration, not a second policy plane;
-- no direct process spawn/kill appears in any module submodule except canonical
-  worker/sandbox lifecycle composition;
-- no package/source/policy/trust/audit/health/status tables appear;
-- no `control::act`, dynamic UI catalog, module action multiplexer, raw-scope
-  authorization, fallback manifest field, compatibility alias, or iOS policy
-  path appears.
+- no raw-scope authorization;
+- no package/source/policy/trust/audit/health/status tables;
+- no fallback manifest fields or compatibility aliases;
+- no dynamic UI catalog or fallback renderer;
+- no `control::act` or module action multiplexer;
+- no direct process spawn/kill from module code;
+- no iOS local grant/package/policy/action-target construction.
 
-Run focused tests after each split:
+Run focused tests first:
 
+- grant/resource selector tests;
+- module package/source-trust failure tests;
+- generated UI action validation tests;
+- resource output-contract tests;
 - `cargo test module_ --lib -- --nocapture`;
 - `cargo test generated_ui --lib -- --nocapture`;
-- `cargo test --test threat_model_invariants -- --nocapture`;
-- any existing local-process activation integration test if touched helpers
-  affect recovery or health;
+- `cargo test --test threat_model_invariants -- --nocapture`.
+
+Finish with:
+
 - `git diff --check`;
-- `scripts/tron ci fmt check clippy test`.
+- `scripts/tron ci fmt check clippy test`;
+- iOS `xcodegen generate` and targeted `xcodebuild test` only if Swift or
+  project files change.
 
 ## Acceptance Criteria
 
-- Public behavior is unchanged.
-- Module source-trust and health/integrity code has clear file ownership.
-- The parent module file becomes easier to scan and reason about.
-- Static gates prevent helper drift back into the parent module.
-- Resource/evidence/grant/invocation substrate remains the only durable truth.
+- The scorecard can move from `93/100` only if the new tests catch realistic
+  malformed/adversarial inputs and all verification passes.
+- No behavior broadening or new persistence is introduced.
+- Failure-mode coverage is subsystem-specific and easier to read than broad
+  string scans.
 - Docs, scorecard, cleanup audit, and `~/LEDGER.jsonl` are updated in the same
   checkpoint.
 
 ## Out Of Scope
 
 - New package trust features.
-- Signature algorithm expansion.
-- Remote marketplace, remote package fetch, or remote key discovery.
-- New resource kinds or storage generation changes.
-- iOS renderer or DTO changes.
+- New signature algorithms.
+- Remote package distribution, marketplace install, or remote key discovery.
 - Control-plane mutation shortcuts.
-- Retention deletion/archive execution.
+- iOS renderer or DTO changes unless forced by existing wire-shape decoding.
+- Storage deletion/archive execution.

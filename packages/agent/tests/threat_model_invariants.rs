@@ -1240,6 +1240,13 @@ fn module_package_activation_gates_stay_on() {
     let module_trust_audit_path = crate_root.join("src/engine/primitives/module/trust_audit.rs");
     let module_trust_audit = std::fs::read_to_string(&module_trust_audit_path)
         .unwrap_or_else(|e| panic!("failed to read {module_trust_audit_path:?}: {e}"));
+    let module_source_trust_path = crate_root.join("src/engine/primitives/module/source_trust.rs");
+    let module_source_trust = std::fs::read_to_string(&module_source_trust_path)
+        .unwrap_or_else(|e| panic!("failed to read {module_source_trust_path:?}: {e}"));
+    let module_health_integrity_path =
+        crate_root.join("src/engine/primitives/module/health_integrity.rs");
+    let module_health_integrity = std::fs::read_to_string(&module_health_integrity_path)
+        .unwrap_or_else(|e| panic!("failed to read {module_health_integrity_path:?}: {e}"));
     let module_activation_runtime_path =
         crate_root.join("src/engine/primitives/module/activation_runtime.rs");
     let module_activation_runtime = std::fs::read_to_string(&module_activation_runtime_path)
@@ -1248,12 +1255,18 @@ fn module_package_activation_gates_stay_on() {
         module.as_str(),
         module_trust_review.as_str(),
         module_trust_audit.as_str(),
+        module_source_trust.as_str(),
+        module_health_integrity.as_str(),
         module_activation_runtime.as_str(),
     ]
     .join("\n");
     assert!(
         module.contains("mod activation_runtime;"),
         "module primitive must declare the activation runtime ownership boundary"
+    );
+    assert!(
+        module.contains("mod source_trust;") && module.contains("mod health_integrity;"),
+        "module primitive must declare source-trust and health/integrity ownership boundaries"
     );
     for helper in [
         "spawn_local_process_worker",
@@ -1273,6 +1286,69 @@ fn module_package_activation_gates_stay_on() {
         assert!(
             !module.contains(&format!("fn {helper}")),
             "activation runtime helper `{helper}` must not drift back into module.rs"
+        );
+    }
+    for helper in [
+        "register_source",
+        "register_ed25519_trust_root",
+        "register_local_digest_source",
+        "register_source_revocation",
+        "verify_source",
+        "verify_signature",
+        "approve_source",
+        "revoke_source_approval",
+        "policy_decide",
+        "audit_policy",
+        "record_policy_audit",
+        "reconcile_trust",
+        "inspect_trust",
+        "renew_trust_root",
+        "rotate_signature_key",
+        "expire_trust_decision",
+        "enforce_revocation",
+        "evaluate_source_policy",
+        "active_source_approval",
+        "active_trust_root",
+        "source_verification",
+        "register_source_schema",
+        "verify_source_schema",
+        "verify_signature_schema",
+        "audit_policy_schema",
+        "inspect_trust_schema",
+        "enforce_revocation_schema",
+    ] {
+        assert!(
+            module_source_trust.contains(helper),
+            "source-trust helper `{helper}` must live in source_trust.rs"
+        );
+        assert!(
+            !module.contains(&format!("fn {helper}")),
+            "source-trust helper `{helper}` must not drift back into module.rs"
+        );
+    }
+    for helper in [
+        "check_health",
+        "verify_integrity",
+        "recover_activation",
+        "run_conformance",
+        "evaluate_health_policy",
+        "verify_package_payload",
+        "verify_config_payload",
+        "verify_activation_payload",
+        "conformance_for_package",
+        "verify_materialized_ref",
+        "check_health_schema",
+        "verify_integrity_schema",
+        "recover_activation_schema",
+        "run_conformance_schema",
+    ] {
+        assert!(
+            module_health_integrity.contains(helper),
+            "health/integrity helper `{helper}` must live in health_integrity.rs"
+        );
+        assert!(
+            !module.contains(&format!("fn {helper}")),
+            "health/integrity helper `{helper}` must not drift back into module.rs"
         );
     }
     for required in [
@@ -1372,6 +1448,8 @@ fn module_package_activation_gates_stay_on() {
     assert!(
         module.contains("mod trust_review;")
             && module.contains("mod trust_audit;")
+            && module.contains("mod source_trust;")
+            && module.contains("mod health_integrity;")
             && module_trust_review.contains("TRUST_REVIEW_OPERATIONS")
             && module_trust_review.contains("fn resolve_trust_review")
             && module_trust_review.contains("fn recommended_actions_for_trust_review")
@@ -1388,6 +1466,38 @@ fn module_package_activation_gates_stay_on() {
             && !module.contains("fn run_scheduled_trust_audit")
             && !module.contains("fn record_trust_audit_retention"),
         "trust review/audit implementation must stay in focused module primitive submodules"
+    );
+
+    let module_activation_tests =
+        std::fs::read_to_string(crate_root.join("src/engine/tests/module_activation.rs"))
+            .expect("failed to read module activation tests");
+    let module_activation_source_trust_tests = std::fs::read_to_string(
+        crate_root.join("src/engine/tests/module_activation/source_trust.rs"),
+    )
+    .expect("failed to read module source-trust tests");
+    let module_activation_health_integrity_tests = std::fs::read_to_string(
+        crate_root.join("src/engine/tests/module_activation/health_integrity.rs"),
+    )
+    .expect("failed to read module health/integrity tests");
+    assert!(
+        module_activation_tests.contains("mod source_trust;")
+            && module_activation_tests.contains("mod health_integrity;")
+            && module_activation_source_trust_tests.contains(
+                "module_local_source_policy_requires_verification_and_approval_before_spawn"
+            )
+            && module_activation_source_trust_tests
+                .contains("module_enforce_revocation_composes_canonical_activation_mutations")
+            && module_activation_health_integrity_tests
+                .contains("module_check_health_writes_evidence_and_updates_activation")
+            && module_activation_health_integrity_tests.contains(
+                "module_recover_activation_revokes_unsafe_authority_and_preserves_evidence"
+            )
+            && !module_activation_tests.contains(
+                "module_local_source_policy_requires_verification_and_approval_before_spawn"
+            )
+            && !module_activation_tests
+                .contains("module_check_health_writes_evidence_and_updates_activation"),
+        "module activation tests must stay split by source-trust and health/integrity concern"
     );
 
     let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
@@ -1477,6 +1587,8 @@ fn module_package_activation_gates_stay_on() {
         crate_root.join("src/engine/primitives/module.rs"),
         crate_root.join("src/engine/primitives/module/trust_review.rs"),
         crate_root.join("src/engine/primitives/module/trust_audit.rs"),
+        crate_root.join("src/engine/primitives/module/source_trust.rs"),
+        crate_root.join("src/engine/primitives/module/health_integrity.rs"),
     ] {
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));

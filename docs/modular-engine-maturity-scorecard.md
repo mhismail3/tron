@@ -51,11 +51,11 @@ Collapsed substrate rules:
 | Test/proof strength | 12 | Static gates, focused tests, integration tests, absence tests, and failure-mode tests |
 | Docs/operations | 7 | README, architecture docs, manual QA, and ledger match current behavior |
 
-Current score: **90/100**.
+Current score: **93/100**.
 
 ## Axis Scores
 
-### Architecture simplicity — 12/15
+### Architecture simplicity — 13/15
 
 Evidence:
 
@@ -65,9 +65,9 @@ Evidence:
 - `packages/agent/src/engine/primitives/` owns first-party primitive workers.
 - Static gates forbid control mutation multiplexers, old output-audit paths,
   public worker creation bypasses, and package/source/policy/trust/audit tables.
-- Module trust review, scheduled trust audit, and activation runtime cleanup now
-  have focused primitive submodules instead of living directly in the parent
-  package-lifecycle file.
+- Module trust review, scheduled trust audit, source trust, health/integrity,
+  and activation runtime cleanup now have focused primitive submodules instead
+  of living directly in the parent package-lifecycle file.
 - The resource kernel is split into focused owners for public substrate types,
   built-in definitions, generic validation, version hashing, fixed-catalog
   `ui_surface` validation, and store implementations.
@@ -77,18 +77,18 @@ Evidence:
 
 Blockers:
 
-- `engine/primitives/module.rs` still owns activation, source trust, health,
-  integrity, recovery, and shared helpers in one large file, though runtime,
-  trust-review, and trust-audit ownership boundaries are now split out.
+- `engine/primitives/module.rs` still owns activation lifecycle orchestration
+  and shared helpers; those cross-cutting helpers need continued pressure
+  against becoming a second policy layer.
 - Some older domain and iOS product-shell surfaces remain deferred pending
   proof-driven removal.
 
 Next action:
 
-- Continue focused file splits and domain removal audits without changing public
-  behavior.
+- Continue proof-driven removal/domain audits and keep lifecycle helpers narrow
+  as package behavior matures.
 
-### Security/authority — 12/15
+### Security/authority — 13/15
 
 Evidence:
 
@@ -97,6 +97,9 @@ Evidence:
 - Module package activation validates package source policy, grants, worker
   registration, risk, visibility, file/network bounds, and trust state before
   activation.
+- Source-trust and health/integrity policy code now has focused ownership plus
+  static gates that keep it out of the parent lifecycle coordinator and forbid
+  parallel package/source/policy/trust/audit/health tables.
 - `ui::submit_action` executes only stored canonical actions from validated
   `ui_surface` versions.
 
@@ -201,7 +204,7 @@ Next action:
 - Carry the new runtime diagnostics into any future Engine Console refinements
   without adding client-side policy.
 
-### Code comprehensibility — 11/12
+### Code comprehensibility — 12/12
 
 Evidence:
 
@@ -221,18 +224,22 @@ Evidence:
   stale/expired/damaged checks, action target validation, and template checks.
 - Resource/materialization tests were moved out of the monolithic engine test
   file into `engine/tests/resource_kernel.rs`.
+- `engine/primitives/module/source_trust.rs` now owns source registration,
+  signature verification, source approvals, policy audit, trust inspection,
+  renewal/rotation/expiry, reconciliation, and revocation enforcement.
+- `engine/primitives/module/health_integrity.rs` now owns health checks,
+  integrity verification, conformance evidence, and recovery entrypoint logic.
+- Module activation tests are split into source-trust, health/integrity,
+  trust-review, and lifecycle/runtime groups while sharing one fixture boundary.
 
 Blockers:
 
-- `engine/primitives/module.rs` still requires a future source-trust/health
-  ownership split once behavior is stable enough to move safely.
 - Some older domain tests remain broad string scans and should gradually become
   more ownership-specific.
 
 Next action:
 
-- Continue the same ownership-driven split pattern for module source-trust and
-  activation health/integrity helpers.
+- Continue turning broad string scans into subsystem-specific proof gates.
 
 ### Test/proof strength — 12/12
 
@@ -251,6 +258,8 @@ Evidence:
 - Static gates now require the resource-kernel submodule split, fixed
   UI-surface payload validation ownership, and generated UI action-validation
   boundary.
+- Static gates now require the module source-trust and health/integrity
+  ownership boundaries and the matching focused module activation test files.
 - Focused resource and generated-UI tests cover resource-kernel invariants,
   UI payload bounds, raw secret/local-file rejection, stale/discarded surface
   action rejection, and stable resource-backed output refs.
