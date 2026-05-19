@@ -1027,6 +1027,34 @@ fn substrate_actions() -> Vec<Value> {
             "high",
             true,
         ),
+        action_summary(
+            "module::simulate_trust_change",
+            "package",
+            "targetResourceId",
+            "low",
+            false,
+        ),
+        action_summary(
+            "module::record_trust_review",
+            "package",
+            "targetResourceId",
+            "medium",
+            false,
+        ),
+        action_summary(
+            "module::schedule_trust_audit",
+            "package",
+            "selectors",
+            "medium",
+            false,
+        ),
+        action_summary(
+            "module::run_scheduled_trust_audit",
+            "decision",
+            "scheduleDecisionResourceId",
+            "medium",
+            false,
+        ),
     ]
 }
 

@@ -3,6 +3,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
+mod trust_review;
+
 #[derive(Clone)]
 struct RecordingWorkerSpawnHandler {
     handle: EngineHostHandle,
@@ -551,6 +553,36 @@ async fn grant_count(handle: &EngineHostHandle) -> usize {
         .len()
 }
 
+async fn resource_count(handle: &EngineHostHandle, kind: &str) -> usize {
+    let result = handle
+        .invoke(host_invocation(
+            "resource::list",
+            json!({"kind": kind, "limit": 500}),
+            causal().with_scope("resource.read"),
+        ))
+        .await;
+    assert_eq!(result.error, None);
+    result.value.as_ref().unwrap()["resources"]
+        .as_array()
+        .unwrap()
+        .len()
+}
+
+async fn queue_count(handle: &EngineHostHandle, queue: &str) -> usize {
+    let result = handle
+        .invoke(host_invocation(
+            "queue::list",
+            json!({"queue": queue, "limit": 500}),
+            causal().with_scope("queue.read"),
+        ))
+        .await;
+    assert_eq!(result.error, None);
+    result.value.as_ref().unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .len()
+}
+
 async fn activate_demo_package(
     handle: &EngineHostHandle,
     package_id: &str,
@@ -708,6 +740,10 @@ async fn module_resource_types_and_capabilities_are_registered() {
         "module::rotate_signature_key",
         "module::expire_trust_decision",
         "module::enforce_revocation",
+        "module::simulate_trust_change",
+        "module::record_trust_review",
+        "module::schedule_trust_audit",
+        "module::run_scheduled_trust_audit",
     ] {
         let function = value["capabilities"]
             .as_array()
@@ -721,6 +757,7 @@ async fn module_resource_types_and_capabilities_are_registered() {
                 | "module::policy_decide"
                 | "module::audit_policy"
                 | "module::inspect_trust"
+                | "module::simulate_trust_change"
         ) {
             assert!(
                 function["idempotency"].is_object(),
@@ -3020,24 +3057,28 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                 .any(|action| action["targetFunctionId"] == "ui::refresh_surface")
         );
         if target_type == "package" {
-            assert!(
-                surface.value.as_ref().unwrap()["surface"]["actions"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|action| action["targetFunctionId"] == "module::verify_source")
-            );
-            assert!(
-                surface.value.as_ref().unwrap()["surface"]["actions"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|action| action["targetFunctionId"] == "module::run_conformance")
-            );
+            for function_id in [
+                "module::verify_source",
+                "module::run_conformance",
+                "module::simulate_trust_change",
+                "module::record_trust_review",
+                "module::schedule_trust_audit",
+            ] {
+                assert!(
+                    surface.value.as_ref().unwrap()["surface"]["actions"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|action| action["targetFunctionId"] == function_id),
+                    "package surface must expose {function_id}"
+                );
+            }
         }
         if target_type == "decision" {
             for function_id in [
                 "module::inspect_trust",
+                "module::simulate_trust_change",
+                "module::record_trust_review",
                 "module::renew_trust_root",
                 "module::rotate_signature_key",
                 "module::expire_trust_decision",

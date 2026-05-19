@@ -40,6 +40,15 @@ impl ModuleHealthMonitorService {
                             tracing::warn!(error = %error, "module health monitor failed");
                         }
                     }
+                    match self.host.enqueue_due_module_trust_audits(chrono::Utc::now()).await {
+                        Ok(count) if count > 0 => {
+                            tracing::debug!(count, "enqueued module trust audits");
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            tracing::warn!(error = %error, "module trust audit monitor failed");
+                        }
+                    }
                 }
             }
         }

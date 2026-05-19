@@ -1057,6 +1057,9 @@ fn module_package_activation_gates_stay_on() {
         "signature_key_rotation",
         "trust_decision_expired",
         "revocation_enforcement",
+        "trust_review",
+        "module_trust_audit_schedule",
+        "scheduled_trust_audit",
         "packageDigest",
         "secret_ref",
     ] {
@@ -1080,6 +1083,8 @@ fn module_package_activation_gates_stay_on() {
         "module_source_table",
         "module_policy_table",
         "module_conformance_table",
+        "module_trust_table",
+        "module_audit_table",
     ] {
         assert!(
             !module.contains(forbidden),
@@ -1128,6 +1133,10 @@ fn module_package_activation_gates_stay_on() {
             && control.contains("module::rotate_signature_key")
             && control.contains("module::expire_trust_decision")
             && control.contains("module::enforce_revocation")
+            && control.contains("module::simulate_trust_change")
+            && control.contains("module::record_trust_review")
+            && control.contains("module::schedule_trust_audit")
+            && control.contains("module::run_scheduled_trust_audit")
             && !control.contains("module::act\""),
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
@@ -1162,6 +1171,8 @@ fn module_package_activation_gates_stay_on() {
             !content.contains("CREATE TABLE module_")
                 && !content.contains("CREATE TABLE package_")
                 && !content.contains("CREATE TABLE source_")
+                && !content.contains("CREATE TABLE trust_")
+                && !content.contains("CREATE TABLE audit_")
                 && !content.contains("CREATE TABLE conformance_")
                 && !content.contains("CREATE TABLE policy_"),
             "module source trust must stay resource-native, not table-backed: {}",
@@ -1190,6 +1201,10 @@ fn module_package_activation_gates_stay_on() {
             && ui.contains("module::rotate_signature_key")
             && ui.contains("module::expire_trust_decision")
             && ui.contains("module::enforce_revocation")
+            && ui.contains("module::simulate_trust_change")
+            && ui.contains("module::record_trust_review")
+            && ui.contains("module::schedule_trust_audit")
+            && ui.contains("module::run_scheduled_trust_audit")
             && ui.contains("module::run_conformance"),
         "generated UI authoring must support module package targets through canonical actions"
     );

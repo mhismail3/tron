@@ -109,9 +109,10 @@ and activation records, thin wrapper capabilities over the generic
 durable-output paths, a fixed `tron.ui.catalog.core.v1` generated UI catalog,
 server-authored `ui::*` surface/action capabilities, `module::*` package
 lifecycle, source trust, trust-root renewal, key-rotation evidence, revocation
-enforcement, health, integrity, and recovery capabilities, and control
-projections that expose `uiSurfaceRefs` plus module resource refs without
-adding durable control-plane state.
+enforcement, trust-change simulation, trust-review evidence, decision-backed
+scheduled trust audits, health, integrity, and recovery capabilities, and
+control projections that expose `uiSurfaceRefs` plus module resource refs
+without adding durable control-plane state.
 
 ---
 
@@ -522,6 +523,18 @@ unexpired scoped source approval decision pass policy; signed local packages
 require current signature evidence from an active trust root that permits the
 requested activation authority.
 
+Operator trust review is also capability-driven. `module::simulate_trust_change`
+is pure read and explains the affected packages, activations, grants, workers,
+generated UI surfaces, policy deltas, missing prerequisites, and canonical
+actions for renewal, rotation, expiry, revocation, source approval, trust
+reconciliation, and revocation enforcement scenarios. `module::record_trust_review`
+recomputes the simulation server-side and stores bounded `evidence` without
+changing live authority. `module::schedule_trust_audit` stores daily or weekly
+fixed wall-clock audit schedules as `decision` resources, and
+`module::run_scheduled_trust_audit` writes bounded audit evidence for due
+schedules. Scheduled audits never approve trust, disable workers, quarantine
+activations, or enforce revocation.
+
 `module::activate`, `module::disable`, `module::upgrade`,
 `module::rollback`, and `module::quarantine` produce `activation_record`
 versions, derive or revoke engine grants, and never rely on a package table,
@@ -550,8 +563,10 @@ activations from invocation, grant, worker, and resource records, revokes leaked
 derived grants, disconnects volatile workers through canonical lifecycle APIs,
 and persists failed/quarantined activation evidence. Scheduled checks are
 derived from active `activation_record` resources and enqueued through the
-existing `module` queue; there is no package, health, policy, conformance, or
-recovery table.
+existing `module` queue. Scheduled trust audits are derived from active
+`module_trust_audit_schedule` decision resources and enqueued through the same
+queue/invocation substrate. There is no package, health, policy, conformance,
+trust, audit, or recovery table.
 
 ---
 

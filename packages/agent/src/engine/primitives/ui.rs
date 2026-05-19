@@ -1484,6 +1484,98 @@ fn generated_actions(
                     "expiresAt": default_expires_at()
                 }));
             }
+            if let Some(simulate_trust) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::simulate_trust_change")
+            {
+                actions.push(json!({
+                    "actionId": "simulate-package-trust",
+                    "label": "Simulate Trust",
+                    "targetFunctionId": "module::simulate_trust_change",
+                    "inputSchema": trust_review_operation_input_schema(false),
+                    "payloadTemplate": {
+                        "targetType": "package",
+                        "targetResourceId": resource_id,
+                        "targetVersionId": version_id,
+                        "operation": "${input.operation}",
+                        "includeGeneratedUi": true,
+                        "limit": 50
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&simulate_trust.risk_level),
+                    "approvalPolicy": {"required": simulate_trust.required_authority.approval_required},
+                    "targetRevision": simulate_trust.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if let Some(record_review) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::record_trust_review")
+            {
+                actions.push(json!({
+                    "actionId": "record-package-trust-review",
+                    "label": "Record Review",
+                    "targetFunctionId": "module::record_trust_review",
+                    "inputSchema": trust_review_operation_input_schema(true),
+                    "payloadTemplate": {
+                        "targetType": "package",
+                        "targetResourceId": resource_id,
+                        "targetVersionId": version_id,
+                        "operation": "${input.operation}",
+                        "operatorNotes": "${input.operatorNotes}",
+                        "limit": 50
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&record_review.risk_level),
+                    "approvalPolicy": {"required": record_review.required_authority.approval_required},
+                    "targetRevision": record_review.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if let Some(schedule_audit) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::schedule_trust_audit")
+            {
+                actions.push(json!({
+                    "actionId": "schedule-package-trust-audit",
+                    "label": "Schedule Audit",
+                    "targetFunctionId": "module::schedule_trust_audit",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["scheduleId", "cadence", "timezone", "wallClockTime", "expiresAt", "reason"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "scheduleId": {"type": "string"},
+                            "cadence": {"type": "string", "enum": ["daily", "weekly"]},
+                            "timezone": {"type": "string"},
+                            "wallClockTime": {"type": "string"},
+                            "dayOfWeek": {"type": "string"},
+                            "expiresAt": {"type": "string"},
+                            "reason": {"type": "string"}
+                        }
+                    },
+                    "payloadTemplate": {
+                        "scheduleId": "${input.scheduleId}",
+                        "scope": "system",
+                        "selectors": [manifest.get("packageId").cloned().unwrap_or_else(|| json!(resource_id))],
+                        "cadence": "${input.cadence}",
+                        "timezone": "${input.timezone}",
+                        "wallClockTime": "${input.wallClockTime}",
+                        "dayOfWeek": "${input.dayOfWeek}",
+                        "expiresAt": "${input.expiresAt}",
+                        "grantCeiling": manifest.get("requiredGrants").cloned().unwrap_or_else(|| json!({})),
+                        "reason": "${input.reason}"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&schedule_audit.risk_level),
+                    "approvalPolicy": {"required": schedule_audit.required_authority.approval_required},
+                    "targetRevision": schedule_audit.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
             if let Some(run_conformance) = functions
                 .iter()
                 .find(|function| function.id.as_str() == "module::run_conformance")
@@ -1574,6 +1666,10 @@ fn generated_actions(
             .and_then(|metadata| metadata.get("decisionType"))
             .and_then(Value::as_str)
             == Some("module_trust_root");
+        let is_trust_audit_schedule = decision_metadata
+            .and_then(|metadata| metadata.get("decisionType"))
+            .and_then(Value::as_str)
+            == Some("module_trust_audit_schedule");
         for (action_id, label, target_function, input_schema, payload) in [
             (
                 "inspect-trust-decision",
@@ -1585,6 +1681,34 @@ fn generated_actions(
                     "targetResourceId": resource_id,
                     "targetVersionId": version_id,
                     "includeEvidence": true,
+                    "limit": 50
+                }),
+            ),
+            (
+                "simulate-trust-decision",
+                "Simulate",
+                "module::simulate_trust_change",
+                trust_review_operation_input_schema(false),
+                json!({
+                    "targetType": "decision",
+                    "targetResourceId": resource_id,
+                    "targetVersionId": version_id,
+                    "operation": "${input.operation}",
+                    "includeGeneratedUi": true,
+                    "limit": 50
+                }),
+            ),
+            (
+                "record-trust-review",
+                "Record Review",
+                "module::record_trust_review",
+                trust_review_operation_input_schema(true),
+                json!({
+                    "targetType": "decision",
+                    "targetResourceId": resource_id,
+                    "targetVersionId": version_id,
+                    "operation": "${input.operation}",
+                    "operatorNotes": "${input.operatorNotes}",
                     "limit": 50
                 }),
             ),
@@ -1679,6 +1803,22 @@ fn generated_actions(
                     "reason": "${input.reason}"
                 }),
             ),
+            (
+                "run-scheduled-trust-audit",
+                "Run Audit",
+                "module::run_scheduled_trust_audit",
+                json!({
+                    "type": "object",
+                    "required": ["dueBucket"],
+                    "additionalProperties": false,
+                    "properties": {"dueBucket": {"type": "string"}}
+                }),
+                json!({
+                    "scheduleDecisionResourceId": resource_id,
+                    "scheduleDecisionVersionId": version_id,
+                    "dueBucket": "${input.dueBucket}"
+                }),
+            ),
         ] {
             if matches!(
                 target_function,
@@ -1687,6 +1827,9 @@ fn generated_actions(
                     | "module::enforce_revocation"
             ) && !is_trust_root
             {
+                continue;
+            }
+            if target_function == "module::run_scheduled_trust_audit" && !is_trust_audit_schedule {
                 continue;
             }
             if let Some(function) = functions
@@ -2191,6 +2334,26 @@ fn risk_label(risk: &RiskLevel) -> &'static str {
         RiskLevel::High => "high",
         RiskLevel::Critical => "critical",
     }
+}
+
+fn trust_review_operation_input_schema(with_operator_notes: bool) -> Value {
+    let mut required = vec!["operation"];
+    let mut properties = json!({
+        "operation": {
+            "type": "string",
+            "enum": super::module::TRUST_REVIEW_OPERATIONS
+        }
+    });
+    if with_operator_notes {
+        required.push("operatorNotes");
+        properties["operatorNotes"] = json!({"type": "string"});
+    }
+    json!({
+        "type": "object",
+        "required": required,
+        "additionalProperties": false,
+        "properties": properties
+    })
 }
 
 struct SurfaceValidation {

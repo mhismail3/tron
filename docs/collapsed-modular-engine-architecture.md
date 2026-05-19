@@ -198,6 +198,20 @@ The first-party `module` primitive exposes:
   live authority changes after trust revocation or expiry. It accepts explicit
   affected activation ids and composes only canonical `module::disable` or
   `module::quarantine` child invocations;
+- `module::simulate_trust_change` as a pure read trust-review projection for
+  renewal, rotation, expiry, revocation, source approval, reconciliation, and
+  revocation-enforcement scenarios. Simulation returns bounded affected refs,
+  policy/grant deltas, missing prerequisites, stale refs, warnings, and
+  canonical recommended actions without mutating resources, grants, workers,
+  queues, decisions, or evidence;
+- `module::record_trust_review` for bounded `evidence` that recomputes the
+  trust simulation server-side and links affected packages and activations. It
+  never changes trust status or live activation authority;
+- `module::schedule_trust_audit` and `module::run_scheduled_trust_audit` for
+  decision-backed daily or weekly trust audit policies and evidence-producing
+  scheduled runs. Schedules are `decision` resources with scoped selectors,
+  fixed wall-clock cadence, expiry, grant ceiling, and redaction policy; due
+  runs write `evidence` only;
 - `module::run_conformance` for bounded package/config/activation conformance
   evidence over manifest rules, grant simulation, registration bounds,
   resource-output contracts, health policy, redaction, and cleanup behavior;
@@ -243,14 +257,18 @@ recovery metadata so operator projections can explain what ran, what authority
 it received, what evidence supports the current status, and what cleanup
 occurred. Source registration, trust-root registration/revocation, trust-root
 renewal, signature-key rotation, trust-decision expiry, revocation enforcement,
-signature verification, policy audit, trust reconciliation, approval,
-conformance, health, integrity, and recovery outcomes are `evidence`/`decision`
-resources linked to package and activation records. A runtime monitor derives
-due checks from active
-activation resources and their `healthPolicy.intervalSeconds`, then enqueues
-`module::check_health` through the existing queue/invocation substrate. There
+trust-change simulation reviews, scheduled trust audits, signature
+verification, policy audit, trust reconciliation, approval, conformance,
+health, integrity, and recovery outcomes are `evidence`/`decision` resources
+linked to package and activation records. A runtime monitor derives due health
+checks from active activation resources and their `healthPolicy.intervalSeconds`,
+then enqueues `module::check_health` through the existing queue/invocation
+substrate. Trust audit runs are derived from active
+`module_trust_audit_schedule` decision resources and enqueue
+`module::run_scheduled_trust_audit` with deterministic idempotency keys. There
 is no package table, source table, health table, policy table, conformance
-table, recovery table, or non-rebuildable module cache.
+table, trust table, audit table, recovery table, or non-rebuildable module
+cache.
 
 No package table, module action multiplexer, client-side policy, or `control`
 mutation path exists. Control and generated UI surfaces expose module resources

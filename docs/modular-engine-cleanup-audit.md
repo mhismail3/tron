@@ -1,6 +1,6 @@
 # Modular Engine Cleanup Audit
 
-Last verified: 2026-05-18 on `next/modular-capability-engine`.
+Last verified: 2026-05-19 on `next/modular-capability-engine`.
 
 This document is the proof map for the cleanup pass that follows the generated
 UI substrate checkpoint. The rule for this pass is remove with proof: code is
@@ -44,6 +44,33 @@ runtime caller, thin-client purpose, or test/support role.
   until the browser/display capability family is audited end-to-end.
 - Split the generated-UI engine tests into `engine/tests/generated_ui.rs` as the
   first test-module boundary around the previously monolithic engine test file.
+
+## 2026-05-19 Trust Review Cleanup Pass
+
+The package trust review and scheduled-audit phase was audited before the next
+feature phase. No new package, trust, audit, schedule, or policy table was
+justified; the added behavior remains represented as `decision` and `evidence`
+resources plus queue projections.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Trust-review capabilities | Registered as `module::*` functions with tests in `engine/tests/module_activation/trust_review.rs` and static gates in `tests/threat_model_invariants.rs` | Keep; they are canonical module capabilities over resource/decision/evidence truth |
+| Scheduled audit due calculation | `EngineHostHandle::enqueue_due_module_trust_audits` scans active `module_trust_audit_schedule` decision resources and enqueues deterministic module queue work | Keep as projection; no scheduler table or automation plane |
+| Duplicate schedule parsers | The module primitive and host had separate wall-clock/day parsing after the scheduled-audit phase | Consolidated into module-owned helpers used by both schedule validation and host queue projection |
+| Trust operation enum strings | Operation lists were duplicated between module validation/schema and generated UI input schemas | Consolidated into `TRUST_REVIEW_OPERATIONS`; UI now builds operation inputs from the same source |
+| Trust-review tests | Recent tests made `engine/tests/module_activation.rs` carry schedule/simulation/review concerns directly | Split into `engine/tests/module_activation/trust_review.rs`; shared fixtures remain in the parent module |
+| Bounded evidence string truncation | Byte-count `String::truncate` could panic on a multibyte UTF-8 boundary for operator notes or bounded JSON previews | Replaced with char-boundary-safe truncation and added multibyte operator-note coverage |
+
+Removal proof from this pass:
+
+- No safe public capability removal was found in the recent trust-review work:
+  all four new functions have registration, generated UI/control action
+  exposure, focused tests, and static gates.
+- No iOS cleanup was required: no Swift files reference the new trust-review
+  function ids, and existing generated UI rendering remains the thin action
+  submission path.
+- No storage reset was justified: schemas did not add tables and remain within
+  the existing resource/decision/evidence substrate.
 
 ## Deferred High-Scrutiny Areas
 

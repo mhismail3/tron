@@ -10,7 +10,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc};
 use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
@@ -413,6 +413,180 @@ impl EngineHostHandle {
                     "activationVersionId": version_id,
                     "expectedCurrentVersionId": version_id,
                     "mode": "scheduled",
+                }),
+                actor_id: ActorId::new(ENGINE_OWNER_ACTOR)?,
+                actor_kind: ActorKind::System,
+                authority_grant_id: AuthorityGrantId::new(ENGINE_AUTHORITY_GRANT)?,
+                authority_scopes: vec!["module.write".to_owned()],
+                trace_id: TraceId::generate(),
+                parent_invocation_id: None,
+                trigger_id: None,
+                session_id,
+                workspace_id,
+                idempotency_key: Some(idempotency_key),
+            };
+            host.primitives
+                .queue
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
+                .enqueue(item)?;
+            enqueued = enqueued.saturating_add(1);
+        }
+        Ok(enqueued)
+    }
+
+    /// Enqueue due module trust audits from active schedule decision resources.
+    pub async fn enqueue_due_module_trust_audits(&self, now: DateTime<Utc>) -> Result<usize> {
+        let host = self.inner.lock().await;
+        let function_id = FunctionId::new(primitives::module::RUN_SCHEDULED_TRUST_AUDIT_FUNCTION)?;
+        let actor = ActorContext::new(
+            ActorId::new(ENGINE_OWNER_ACTOR)?,
+            ActorKind::System,
+            AuthorityGrantId::new(ENGINE_AUTHORITY_GRANT)?,
+        );
+        let function = host.catalog.inspect_function(&function_id, Some(&actor))?;
+        let resources = {
+            let resources = host.primitives.resources.lock().map_err(|_| {
+                EngineError::HandlerFailed("resource store lock poisoned".to_owned())
+            })?;
+            resources.list(super::resources::ListResources {
+                kind: Some("decision".to_owned()),
+                scope: None,
+                lifecycle: Some("final".to_owned()),
+                limit: 500,
+            })?
+        };
+        let mut enqueued = 0usize;
+        for resource in resources {
+            let Some((version_id, payload)) = ({
+                let resources = host.primitives.resources.lock().map_err(|_| {
+                    EngineError::HandlerFailed("resource store lock poisoned".to_owned())
+                })?;
+                resources
+                    .inspect(&resource.resource_id)?
+                    .and_then(|inspection| {
+                        let current = inspection.resource.current_version_id.clone()?;
+                        let payload = inspection
+                            .versions
+                            .iter()
+                            .find(|version| version.version_id == current)?
+                            .payload
+                            .clone();
+                        Some((current, payload))
+                    })
+            }) else {
+                continue;
+            };
+            if payload.get("status").and_then(Value::as_str) != Some("active") {
+                continue;
+            }
+            let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
+                continue;
+            };
+            if metadata.get("decisionType").and_then(Value::as_str)
+                != Some("module_trust_audit_schedule")
+            {
+                continue;
+            }
+            let Some(expires_at) = metadata
+                .get("expiresAt")
+                .and_then(Value::as_str)
+                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&Utc))
+            else {
+                continue;
+            };
+            if expires_at <= now {
+                continue;
+            }
+            let Some(cadence) = metadata.get("cadence").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(timezone) = metadata
+                .get("timezone")
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse::<chrono_tz::Tz>().ok())
+            else {
+                continue;
+            };
+            let Some((hour, minute)) = metadata
+                .get("wallClockTime")
+                .and_then(Value::as_str)
+                .and_then(|value| {
+                    primitives::module::parse_trust_audit_wall_clock_time(value).ok()
+                })
+            else {
+                continue;
+            };
+            let local_now = now.with_timezone(&timezone);
+            if local_now.hour() < hour || local_now.hour() == hour && local_now.minute() < minute {
+                continue;
+            }
+            if cadence == "weekly" {
+                let Some(day) =
+                    metadata
+                        .get("dayOfWeek")
+                        .and_then(Value::as_str)
+                        .and_then(|value| {
+                            primitives::module::trust_audit_day_of_week_number(value).ok()
+                        })
+                else {
+                    continue;
+                };
+                if local_now.weekday().number_from_monday() != day {
+                    continue;
+                }
+            } else if cadence != "daily" {
+                continue;
+            }
+            let due_bucket = match cadence {
+                "daily" => format!(
+                    "{}T{:02}:{:02}:{}",
+                    local_now.date_naive(),
+                    hour,
+                    minute,
+                    timezone
+                ),
+                "weekly" => format!(
+                    "{}-W{:02}-{}T{:02}:{:02}:{}",
+                    local_now.iso_week().year(),
+                    local_now.iso_week().week(),
+                    local_now.weekday().number_from_monday(),
+                    hour,
+                    minute,
+                    timezone
+                ),
+                _ => continue,
+            };
+            let idempotency_key = format!(
+                "module.trust_audit:{}:{}:{}",
+                resource.resource_id, version_id, due_bucket
+            );
+            let already_queued = {
+                let queue = host.primitives.queue.lock().map_err(|_| {
+                    EngineError::HandlerFailed("queue store lock poisoned".to_owned())
+                })?;
+                queue
+                    .list("module", 500)?
+                    .iter()
+                    .any(|item| item.idempotency_key.as_deref() == Some(idempotency_key.as_str()))
+            };
+            if already_queued {
+                continue;
+            }
+            let (session_id, workspace_id) = match &resource.scope {
+                super::resources::EngineResourceScope::System => (None, None),
+                super::resources::EngineResourceScope::Workspace(id) => (None, Some(id.clone())),
+                super::resources::EngineResourceScope::Session(id) => (Some(id.clone()), None),
+            };
+            let item = EnqueueInvocation {
+                queue: "module".to_owned(),
+                function_id: function_id.clone(),
+                target_revision: Some(function.revision),
+                payload: json!({
+                    "scheduleDecisionResourceId": resource.resource_id,
+                    "scheduleDecisionVersionId": version_id,
+                    "dueBucket": due_bucket,
                 }),
                 actor_id: ActorId::new(ENGINE_OWNER_ACTOR)?,
                 actor_kind: ActorKind::System,
