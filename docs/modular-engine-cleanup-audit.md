@@ -343,6 +343,18 @@ wire schemas.
 | Retired prompt schema | Storage generation is `modular-engine-v3`; fresh consolidated schema no longer creates `prompt_history`, `prompt_snippets`, `idx_prompt_history_*`, or `idx_prompt_snippets_*` | Remove with clean-break storage boundary; no migration reader, compatibility table reader, or row-copy path |
 | Prompt Library resources | Prompt Library tests assert resource-backed history/snippet behavior when retired tables are absent | Keep `artifact:prompt-*` resources as durable truth |
 
+## 2026-05-19 Product-Shell Readiness, Dependency Hygiene, And Mac Audit
+
+This pass added proof and static gates without deleting an active product shell
+or changing runtime behavior.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Product-shell replacement readiness | `docs/product-shell-reachability-map.md` now records replacement candidate, blocking gap, deletion risk, next prerequisite, and phase decision for AgentControl, SourceChanges, subagent sheets/plugins, notification inbox/detail views, Prompt Library, display stream views, and voice recording affordances | Defer every remaining fixed shell with proof; delete only after generated/resource replacement covers the current operator role |
+| Dependency/dead-code tooling | `docs/production-grade-codebase-audit.md` records local checks for `cargo machete`, `cargo udeps`, `cargo llvm-cov`, and `periphery` and defers each with revisit criteria | Keep current CI/static gates as authoritative until optional tools are pinned and low-noise |
+| Mac app focused audit | `docs/production-grade-codebase-audit.md` now classifies Mac menu bar, onboarding wizard, server lifecycle, pairing/local connection, observability/feedback, bundled resources, generated project/signing config, helper scripts, and tests | Keep Mac as platform/support thin client; no Mac policy, grant, package trust, resource truth, or generated UI action construction ownership |
+| Static gates | `production_grade_codebase_audit_and_rubric_stay_current` and `product_shell_reachability_and_prompt_library_resources_stay_enforced` require the new readiness, dependency-tooling, and Mac audit evidence | Keep gates as drift protection for the 98/100 repo-wide checkpoint |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:

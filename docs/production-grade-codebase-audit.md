@@ -51,7 +51,7 @@ Every audited area is evaluated against these questions:
 |---|---|---|---|---|---|
 | `packages/agent` | substrate / capability host | `Cargo.toml`, `src/lib.rs`, `src/main.rs`, README Rust module table, full Rust CI | Keep | High | All modules classified; no unowned public capability/state path |
 | `packages/ios-app` | thin client | `project.yml`, `Sources/`, `Tests/`, Engine Console/generated UI tests, product-shell reachability map | Keep | Medium | Every remaining fixed shell has reachability decision or generated UI replacement |
-| `packages/mac-app` | platform/support thin client | `project.yml`, `Sources/MenuBar`, `Sources/Wizard`, server lifecycle services, tests | Keep | Medium | Mac docs/tests classify install wizard, server lifecycle, pairing, and generated project state |
+| `packages/mac-app` | platform/support thin client | `project.yml`, `Sources/MenuBar`, `Sources/Wizard`, server lifecycle services, tests, focused Mac app audit below | Keep | Medium | Mac docs/tests classify menu bar, install wizard, server lifecycle, pairing, observability, resources, project generation, scripts, and tests |
 | `scripts/` | platform/support | README CLI table, `scripts/tron`, release/version helpers, CI usage | Keep | High | Every script has README or docs entry and no production deploy is run by agents |
 | `.github/` | platform/support | workflow files, README repository structure | Keep | Medium | CI/release jobs match current build/test policy and secrets assumptions |
 | `docs/` | docs | README links, architecture/audit/scorecard/proof docs | Keep | Medium | Docs distinguish current behavior from future plans and local links pass |
@@ -218,6 +218,41 @@ Every audited area is evaluated against these questions:
 | `project.yml` / generated project | generated support | XcodeGen inputs/project | Keep | Medium | Generated project regenerates cleanly |
 | `scripts` | platform/support | Mac helper scripts | Keep | Medium | Scripts are documented and do not duplicate root deploy behavior |
 
+## Mac App Focused Audit
+
+This pass reviewed tracked Mac sources only. The Mac wrapper remains a
+platform/support thin client: it manages local app lifecycle, onboarding,
+pairing, diagnostics, and release packaging around the Rust server. It does not
+own grants, package trust, durable substrate truth, generated UI target
+construction, or server policy.
+
+| Area | Classification | Evidence | Decision | Risk | 100% acceptance |
+|---|---|---|---|---|---|
+| Menu bar | thin client | `Sources/MenuBar/{MenuBarController,MenuBarItemBuilder,MenuBarActionHandler,MenuBarLogReader,MenuBarLogsView}.swift`; `Tests/MenuBar/*`; architecture menu-bar mode docs | Keep | Medium | Menu actions stay bounded to server lifecycle, logs, pairing, feedback, and dev takeover recovery; no server policy or grant decisions move into Swift |
+| Onboarding wizard | thin client | `Sources/Wizard/**`, `Sources/Services/Onboarding/**`, `Tests/Wizard/*`, install/permission/Tailscale tests, architecture first-launch flow | Keep | Medium | Wizard remains a setup shell over local permissions, helper install, transcription opt-in, beta handoff, and pairing; it does not fabricate server state |
+| Server lifecycle | platform/support | `LaunchAgentManaging`, `MacCommandLineMode`, `MacRuntimeVariant`, `ServerPing`, `ServerStatusPoller`, `DevServerStopper`, `TronUninstaller`, server lifecycle tests | Keep | High | Start/stop/restart/uninstall use `SMAppService` and bounded helper commands; no production deploy path or alternate engine policy path appears |
+| Pairing/local connection | platform/support | `BearerTokenReader`, `PairingURLBuilder`, `QRCodeGenerator`, `LocalComputerName`, Pairing Info step, pairing/server tests | Keep | Medium | Pairing reads local `auth.json` with permission checks and renders connection payloads; it does not own token issuance or server authorization policy |
+| Observability and feedback | platform/support | `DiagnosticsRedactor`, `FeedbackComposer`, `MenuBarFeedbackAction`, menu log reader, redaction/feedback/log tests | Keep | Medium | Diagnostics remain bounded/redacted and never store raw tokens, chat content, package trust decisions, or resource bodies |
+| Bundled resources | platform/support | `Sources/Resources/Library`, LaunchAgent plists, app icons, fonts, managed skills and transcription resources copied by build scripts, resource docs | Keep | Medium | Bundle resources are immutable app inputs; mutable runtime data stays under `~/.tron` and server/resource truth remains in the Rust substrate |
+| Generated project and signing config | generated / platform/support | `project.yml`, `Configuration/*.xcconfig`, `TronMac.entitlements`, release workflow references, XcodeGen docs | Keep | Medium | `project.yml` stays canonical, generated project drift is checked with XcodeGen, and signing/notarization assumptions stay documented |
+| Mac helper scripts | platform/support | `scripts/bundle-agent.sh`, release workflow, development docs | Keep | Medium | Scripts stage helper binaries/resources only; they do not run production deploys or create a second runtime policy path |
+| Mac tests | test/support | `Tests/MenuBar`, `Tests/Services`, `Tests/Observability`, `Tests/Wizard`, `Tests/Mocks` | Keep | Medium | Tests remain grouped by wrapper concern and cover menu bar, server lifecycle, pairing, wizard, observability, startup maintenance, paths, and uninstall behavior |
+
+Focused security result:
+
+- No tracked Mac source constructs generated UI target function ids, payload
+  templates, required grants, package/source policy, module trust decisions, or
+  resource lineage.
+- Pairing and ping paths read bearer tokens only from
+  `~/.tron/profiles/auth.json`, enforce owner-only token file permissions, and
+  pass tokens to the server transport rather than interpreting server
+  authority locally.
+- Diagnostics and feedback routes use explicit redaction helpers before
+  exposing logs or issue URLs.
+- Server lifecycle operations remain wrapper/platform support; they do not
+  replace engine grants, worker lifecycle, package activation policy, or
+  generated UI action submission.
+
 ## Repo Support Map
 
 | Area | Classification | Evidence | Decision | Risk | 100% acceptance |
@@ -262,13 +297,48 @@ Every audited area is evaluated against these questions:
   `tests/mod.rs`, shared setup in `tests/support.rs`, and concern files named
   for behavior rather than implementation accidents.
 
+## Product-Shell Replacement Readiness
+
+The product-shell reachability map now includes a readiness table for every
+remaining fixed iOS shell. The current phase decision is `defer with proof` for
+AgentControl, SourceChanges, subagent sheets/plugins, notification inbox/detail
+views, Prompt Library, display stream views, and voice recording affordances.
+No shell is removed in this checkpoint because each has an active entrypoint or
+a missing generated/resource replacement.
+
+Deletion remains allowed only after the map proves: the replacement candidate
+covers the current operator role, the blocking gap is closed, navigation and
+DTO/client references can be deleted, tests/previews/docs are updated, and an
+absence gate protects the retired symbols.
+
+## Dependency Tooling Decision
+
+Local tool availability was checked on 2026-05-19 as part of this audit pass.
+None of the optional dependency/dead-code tools is currently installed in the
+repo-local workflow:
+
+| Tool | Local result | Decision | Revisit criteria |
+|---|---|---|---|
+| cargo machete: deferred | `command -v cargo-machete` returned no tool | Defer adoption; do not add an unpinned local-only check to CI | Revisit when the tool is installed or pinned through a documented bootstrap path and false positives are triaged |
+| cargo udeps: deferred | `command -v cargo-udeps` returned no tool | Defer adoption; nightly/toolchain sensitivity would destabilize the current CI gate | Revisit when a pinned nightly and documented invocation are accepted for the repo |
+| cargo llvm-cov: deferred | `command -v cargo-llvm-cov` returned no tool | Defer coverage gate; coverage policy is not yet part of the production-grade score | Revisit when coverage targets and output retention are specified |
+| periphery: deferred | `command -v periphery` returned no tool | Defer Swift dead-code scan; no stable local Swift dead-code tool is in the repo workflow | Revisit when Periphery or an equivalent tool is installed/pinned and configured for both iOS and Mac projects |
+
+Current dependency hygiene remains protected by locked manifests, full Rust CI,
+XcodeGen project regeneration, focused static gates, package trust/signature
+tests, and remove-with-proof audits. The defer decision is intentional debt,
+not an invisible omission.
+
 ## Prioritized Cleanup Backlog
 
 | Priority | Work | Acceptance criteria |
 |---:|---|---|
-| 1 | Replace one remaining fixed iOS shell | Product-shell reachability map proves replacement; old view/navigation/DTO/tests removed with absence gate |
-| 2 | Add optional dependency/dead-code tooling | `cargo machete`/`cargo udeps` or equivalent is added to documented local audit path if stable |
-| 3 | Mac app deep audit | Add focused Mac score/evidence for server lifecycle, pairing, wizard, generated project, and tests |
+| 1 | Replace one remaining fixed iOS shell | Product-shell replacement readiness map proves the replacement; old view/navigation/DTO/tests removed with absence gate |
+| 2 | Adopt optional dependency/dead-code tooling when stable | `cargo machete`/`cargo udeps`/coverage/Swift dead-code tooling is installed or pinned, configured, documented, and low-noise enough for repeatable use |
+| 3 | Add deeper lifecycle/soak proof if runtime reliability target rises | New stress tests cover longer interrupted process exits, worker registration timeouts, and cleanup residue without new state planes |
+| Completed | Product-shell readiness proof | Every remaining fixed iOS shell has replacement candidate, blocking gap, deletion risk, next prerequisite, and `defer with proof` phase decision |
+| Completed | Dependency/dead-code tooling decision | Optional tools are explicitly deferred with local availability evidence and revisit criteria |
+| Completed | Mac app focused audit | Menu bar, onboarding wizard, server lifecycle, pairing, observability/feedback, resources, generated project, scripts, and tests are classified with evidence |
 | Completed | Resolve inert prompt schema ambiguity | `modular-engine-v3` fresh schema no longer creates `prompt_history`, `prompt_snippets`, or prompt indexes; static gates enforce absence |
 | Completed | Migrate current high-churn Rust domain tests | Memory retain, MCP product protocol, and session commands broad tests are split into focused `tests/` folders |
 

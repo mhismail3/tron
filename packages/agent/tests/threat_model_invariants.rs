@@ -257,8 +257,11 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
         "Rust Domain Map",
         "iOS Package Map",
         "Mac Package Map",
+        "Mac App Focused Audit",
         "Repo Support Map",
         "Test Organization Findings",
+        "Product-Shell Replacement Readiness",
+        "Dependency Tooling Decision",
         "Prioritized Cleanup Backlog",
         "docs/product-shell-reachability-map.md",
         "packages/agent/src/engine/tests/mod.rs",
@@ -269,6 +272,10 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
         "Rust Test Placement Convention",
         "prompt_history",
         "prompt_snippets",
+        "cargo machete: deferred",
+        "cargo udeps: deferred",
+        "cargo llvm-cov: deferred",
+        "periphery: deferred",
     ] {
         assert!(
             audit.contains(required),
@@ -408,6 +415,23 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
         );
     }
 
+    for mac_area in [
+        "Menu bar",
+        "Onboarding wizard",
+        "Server lifecycle",
+        "Pairing/local connection",
+        "Observability and feedback",
+        "Bundled resources",
+        "Generated project and signing config",
+        "Mac helper scripts",
+        "Mac tests",
+    ] {
+        assert!(
+            audit.contains(mac_area),
+            "production-grade audit must include focused Mac audit row `{mac_area}`"
+        );
+    }
+
     let axes = [
         ("Architecture and ownership", 12_u32),
         ("Folder and test organization", 10),
@@ -438,10 +462,14 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
     }
     assert_eq!(total, 100, "production-grade rubric must total 100");
     assert!(
-        rubric.contains("Current repo-wide score: **96/100**")
+        rubric.contains("Current repo-wide score: **98/100**")
             && rubric.contains("Ranked 100% Backlog")
-            && rubric.contains("Domain test ownership")
-            && rubric.contains("Retired prompt schema removed")
+            && rubric.contains("broad/high-churn domain test")
+            && rubric.contains("retired prompt schema ambiguity")
+            && rubric.contains("Product-shell readiness proof")
+            && rubric.contains("dependency-tooling decision")
+            && rubric.contains("Mac app")
+            && rubric.contains("focused audit")
             && rubric.contains("No raw-scope/client-policy trust")
             && rubric.contains("No current blocker"),
         "production-grade rubric must include score, blockers, and next actions"
@@ -542,6 +570,27 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
             assert!(
                 mod_text.contains(&format!("mod {module};")),
                 "{new_root}/mod.rs must declare `{module}`"
+            );
+        }
+    }
+
+    let mac_sources = repo_root.join("packages/mac-app/Sources");
+    for path in files_with_extensions(&mac_sources, &["swift"]) {
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        for forbidden in [
+            "control::act",
+            "targetFunctionId",
+            "payloadTemplate",
+            "requiredGrant",
+            "module::activate",
+            "worker::spawn",
+            "signatureKeyRef",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{} must not construct server policy, package trust, worker spawn, or generated UI action targets",
+                path.strip_prefix(&repo_root).unwrap_or(&path).display()
             );
         }
     }
@@ -3398,13 +3447,34 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
         "Prompt Library",
         "display stream",
         "voice recording",
+        "Product-Shell Replacement Readiness",
+        "Replacement candidate",
+        "Blocking gap",
+        "Deletion risk",
+        "Next prerequisite",
+        "Phase decision",
         "keep thin shell",
         "convert to generated UI",
         "defer with reason",
+        "defer with proof",
     ] {
         assert!(
             reachability_text.contains(required),
             "product-shell reachability map must classify `{required}`"
+        );
+    }
+    for shell in [
+        "AgentControl sheets/cards",
+        "SourceChanges sheets",
+        "Subagent sheets/plugins",
+        "notification inbox/detail views",
+        "Prompt Library sheets/state",
+        "display stream views",
+        "voice recording affordances",
+    ] {
+        assert!(
+            reachability_text.contains(shell),
+            "product-shell readiness map must include `{shell}`"
         );
     }
 

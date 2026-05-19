@@ -1,34 +1,39 @@
-# Product Shell Replacement, Dependency Audit, And Client Thinness Phase
+# Fixed Product-Shell Replacement And Generated UI Coverage Phase
 
 ## Current Checkpoint
 
-The domain test ownership and retired prompt schema cleanup checkpoint is
-complete:
+The product-shell readiness, dependency-tooling, and Mac production audit
+checkpoint is complete:
 
-- broad/high-churn Rust domain tests for memory retain, MCP product protocol,
-  and session commands now use focused `tests/` module trees with
-  declaration-only roots and shared support fixtures;
-- storage generation is `modular-engine-v3`;
-- fresh consolidated SQLite schema no longer creates retired
-  `prompt_history`, `prompt_snippets`, or prompt-library indexes;
-- Prompt Library history/snippets continue to use `artifact:prompt-*`
-  resources as durable truth and tests prove behavior with retired tables
-  absent;
-- static gates protect the new domain test layout, clean storage generation,
-  prompt-table absence, and resource-backed Prompt Library runtime.
+- `docs/product-shell-reachability-map.md` now records replacement readiness
+  for every remaining fixed iOS shell;
+- no remaining fixed shell was deleted because each still has an active
+  entrypoint or a missing generated/resource replacement;
+- dependency/dead-code tools (`cargo machete`, `cargo udeps`,
+  `cargo llvm-cov`, and `periphery`) are explicitly deferred with local
+  availability evidence and revisit criteria;
+- `docs/production-grade-codebase-audit.md` now includes a focused Mac app
+  audit covering menu bar, onboarding wizard, server lifecycle, pairing,
+  observability/feedback, bundled resources, generated project state, scripts,
+  and tests;
+- static gates require the readiness map, dependency-tooling decision, and Mac
+  audit rows to remain current.
 
-The repo-wide production-grade baseline is now `96/100`.
+The repo-wide production-grade baseline is now `98/100`.
 
 ## Objective
 
-Close the remaining repo-wide blockers without broadening the architecture:
+Close the remaining repo-wide blockers without broadening the architecture by
+replacing one fixed product shell only after the generated/resource path fully
+covers the current operator role.
 
-1. replace or remove one remaining fixed product-shell surface only when
-   generated UI/control/resource projections cover the current role;
-2. add or explicitly defer dependency/dead-code tooling with a stable local
-   workflow;
-3. perform a focused Mac app production-grade audit comparable to the Rust/iOS
-   audit depth.
+The safest first candidate is Prompt Library inspection/history/snippet
+management because its durable server truth is already `artifact` resources.
+Deletion of the entire Prompt Library sheet is not assumed: the chat composer
+insertion affordance may remain a thin local UI if generated UI cannot express
+inserting text into the draft composer. The phase should separate
+server/resource inspection from local composer editing and remove only the
+fixed surface area that is actually replaced.
 
 No new public capability ids, storage tables, resource kinds, generated UI
 catalogs, compatibility readers, fallback DTOs, `control::act`, iOS/Mac policy
@@ -37,72 +42,52 @@ allowed.
 
 ## Implementation Plan
 
-### 1. Re-evaluate Product-Shell Reachability
+### 1. Select One Replacement Slice
 
-Use `docs/product-shell-reachability-map.md` as the deletion bar. For each
-remaining fixed shell, verify current entrypoints, DTO/client dependencies,
-server capability/event dependencies, tests, and operator role:
+Use the readiness table in `docs/product-shell-reachability-map.md` as the
+gate. Select one surface or sub-surface where:
 
-- AgentControl inspection cards;
-- SourceChanges sheets;
-- subagent sheets/plugins;
-- notification inbox/detail views;
-- Prompt Library sheets/state;
-- display stream views;
-- voice recording affordances.
+- the server truth is already resource/control/generated-UI backed;
+- the generated surface can cover the existing operator workflow;
+- no local hardware affordance, composer editing affordance, or live media
+  renderer is required for that slice;
+- the blast radius can be captured with Swift navigation/DTO/client tests and
+  Rust static gates.
 
-Classify exactly one candidate as ready for generated UI/control replacement,
-or document why no candidate meets the bar. Do not delete an active surface
-unless the map proves the replacement preserves the current operator workflow.
+Recommended starting slice: Prompt Library resource inspection and management.
+Likely keep: local composer insertion. Likely replace/remove: fixed snippet and
+history list/detail management if generated `artifact` surfaces can provide the
+same read/delete/update actions.
 
-### 2. Replace Before Removing
+### 2. Build The Replacement Path First
 
-For the selected shell:
+For the selected slice:
 
-- identify every Swift view, navigation path, DTO/client, view model, test,
-  preview, project reference, and README/doc reference;
-- identify the canonical server projection, resource refs, or generated
-  `ui_surface` that replaces it;
+- enumerate every Swift view, navigation path, DTO/client, state object, test,
+  preview, project reference, and docs reference;
+- identify the canonical server projection, resource refs, generated
+  `ui_surface`, and stored actions that replace the fixed surface behavior;
 - add replacement-path tests before deletion;
-- delete the fixed surface, stale navigation, DTO/client code, tests/previews,
-  and docs in the same checkpoint;
-- add absence gates for retired symbols and route names.
+- update generated UI authoring only if the existing authoring path cannot
+  produce the needed surface from substrate truth;
+- keep `ui::submit_action` as the only generated action gateway.
 
 The client must remain a thin renderer/action submitter. It must not construct
 target function ids, grants, payload templates, resource lineage, or policy
 decisions.
 
-### 3. Dependency And Dead-Code Tooling Decision
+### 3. Remove Only Proven-Redundant Code
 
-Evaluate stable local tooling for the repo:
+After replacement tests pass:
 
-- Rust dependency hygiene: `cargo machete`, `cargo udeps`, or a documented
-  explicit defer if toolchain support is unstable;
-- Swift dead-code/dependency scan: use a stable local tool only if already
-  available or trivial to document without adding maintenance risk;
-- generated Xcode project drift: ensure `xcodegen generate` remains the
-  canonical verification path for touched clients.
+- delete fixed Swift views/state/client helpers that are no longer reachable;
+- delete obsolete tests/previews/project references/docs in the same change;
+- regenerate Xcode project files if Swift file membership changes;
+- add absence gates for retired symbols and route names;
+- update the product-shell readiness table from `defer with proof` to
+  `converted` only for the exact replaced slice.
 
-If a tool is adopted, add it to docs and static/CI guidance only when it is
-reliable locally. If deferred, record the reason and the trigger for revisiting.
-
-### 4. Mac App Focused Audit
-
-Create or extend audit evidence for `packages/mac-app`:
-
-- menu bar entrypoints;
-- onboarding wizard;
-- server lifecycle control;
-- pairing and local connection management;
-- services and test coverage;
-- generated project ownership;
-- scripts and signing/build assumptions.
-
-Classify each area as `thin client`, `platform/support`, `test/support`,
-`generated`, `remove candidate`, or `defer with reason`. Identify whether any
-Mac code owns policy, secrets, durable state, or server truth incorrectly.
-
-### 5. Static Gates
+### 4. Static Gates
 
 Add or update gates for:
 
@@ -115,10 +100,7 @@ Add or update gates for:
 - no raw-scope authorization or worker-spawn bypass;
 - no compatibility alias, fallback DTO reader, or migration reader.
 
-If dependency tooling is deferred, add a rubric entry that makes the defer
-explicit instead of letting it become invisible debt.
-
-### 6. Documentation And Scorecard
+### 5. Documentation And Scorecard
 
 Update:
 
@@ -143,13 +125,14 @@ Run focused tests for any touched shell/domain, then:
 - `git diff --check`;
 - `scripts/tron ci fmt check clippy test`.
 
-If Swift or project files change:
+If Swift or project files change, which is expected for product-shell
+replacement:
 
 - `cd packages/ios-app && xcodegen generate`;
 - targeted iOS tests for the removed/replaced surface plus Engine
   Console/generated UI DTO/cache tests;
-- `cd packages/mac-app && xcodegen generate`;
-- targeted Mac tests for server lifecycle, pairing, and touched views/services.
+
+Run Mac verification only if Mac files or project generation inputs change.
 
 ## Out Of Scope
 

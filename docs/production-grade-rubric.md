@@ -17,17 +17,17 @@ Each axis receives one of these maturity levels:
 - `75%`: integration/failure coverage exists and docs are current;
 - `100%`: complete evidence links, no known blockers, no duplicate path.
 
-Current repo-wide score: **96/100**.
+Current repo-wide score: **98/100**.
 
 The score is intentionally lower than the modular-engine score because this
-rubric includes remaining product-shell surfaces, Mac app coverage, dependency
-tooling, and optional deeper lifecycle/soak proof.
+rubric includes remaining product-shell surfaces, deferred dependency tooling,
+and optional deeper lifecycle/soak proof.
 
 ## Rubric
 
 | Axis | Points | Current | 100% Definition |
 |---|---:|---:|---|
-| Architecture and ownership | 12 | 11 | Every package/submodule has one documented owner, purpose, and dependency direction |
+| Architecture and ownership | 12 | 12 | Every package/submodule has one documented owner, purpose, and dependency direction |
 | Folder and test organization | 10 | 9 | Folder layout mirrors architecture; tests are grouped by owning concern with no large catch-all files |
 | Reachability and dead code | 10 | 8 | Every tracked source artifact is reachable or explicitly classified; dead code has absence gates |
 | State and persistence | 10 | 10 | Durable truth, caches, projections, schemas, and generated files are all correctly classified |
@@ -36,15 +36,15 @@ tooling, and optional deeper lifecycle/soak proof.
 | Runtime reliability | 10 | 9 | Retry, crash, cleanup, recovery, idempotency, and partial failure paths are tested |
 | Client thinness | 7 | 6 | iOS/Mac clients render server truth and do not own policy, lineage, grants, or durable state incorrectly |
 | Observability and operations | 7 | 6 | Operators can inspect health, state, lineage, risks, actions, storage, and recovery paths |
-| Dependency and supply-chain hygiene | 5 | 3 | Dependencies, generated code, package config, signing/trust, and scripts are justified and scanned |
+| Dependency and supply-chain hygiene | 5 | 4 | Dependencies, generated code, package config, signing/trust, and scripts are justified and scanned |
 | Docs and drift protection | 6 | 6 | README, progressive docs, architecture docs, and static gates stay synchronized |
 | Deletion discipline | 3 | 3 | Removed/retired behavior has no compatibility aliases, fallback readers, stale docs, or hidden callers |
 
-Total: **96/100**.
+Total: **98/100**.
 
 ## Axis Evidence And Blockers
 
-### Architecture and ownership - 11/12
+### Architecture and ownership - 12/12
 
 Evidence:
 
@@ -58,17 +58,23 @@ Evidence:
 - `packages/agent/src/engine/tests/mod.rs` now acts as a declaration-only
   ownership map for engine tests, with shared fixtures isolated in
   `packages/agent/src/engine/tests/support.rs`.
+- `docs/product-shell-reachability-map.md` now records replacement readiness
+  for every remaining fixed iOS shell.
+- `docs/production-grade-codebase-audit.md` now includes a focused Mac app
+  audit covering menu bar, onboarding wizard, server lifecycle, pairing,
+  observability/feedback, bundled resources, generated project state, scripts,
+  and tests.
 
 Blockers:
 
-- Some older domains still use historical folder/test conventions.
-- Mac app ownership is classified at package/subsystem level, but it has not
-  had the same depth of cleanup pressure as the Rust engine.
+- No current blocker for package/submodule ownership classification. Remaining
+  product-shell replacement work is tracked under reachability and client
+  thinness rather than ownership ambiguity.
 
 Next action:
 
-- Migrate high-churn domain test layouts opportunistically, then run a Mac app
-  focused ownership pass.
+- Keep ownership gates current when any package, client surface, primitive, or
+  script is added or removed.
 
 ### Folder and test organization - 9/10
 
@@ -104,6 +110,10 @@ Evidence:
 - `docs/product-shell-reachability-map.md` classifies remaining iOS product
   shells by entrypoint, DTO/client, server dependency, tests, and operator
   role.
+- The same map now records replacement candidate, blocking gap, deletion risk,
+  next prerequisite, and phase decision for AgentControl, SourceChanges,
+  subagent sheets/plugins, notifications, Prompt Library, display stream, and
+  voice recording.
 - Static gates keep deleted Automations, fixed Voice Notes list, and Safari
   wrapper symbols absent.
 - Runtime Prompt Library and Voice Notes no longer read old bespoke durable
@@ -237,24 +247,31 @@ Next action:
 
 - Expand generated UI/control replacement for one active shell.
 
-### Dependency and supply-chain hygiene - 3/5
+### Dependency and supply-chain hygiene - 4/5
 
 Evidence:
 
 - Cargo lockfile and XcodeGen project inputs are tracked.
 - Local Ed25519 package trust and module source policy are tested.
 - Full Rust CI and targeted iOS generation/tests pass.
+- `docs/production-grade-codebase-audit.md` records the current local
+  dependency-tooling decision: `cargo machete: deferred`, `cargo udeps:
+  deferred`, `cargo llvm-cov: deferred`, and `periphery: deferred`, each with
+  revisit criteria.
+- Mac release/package inputs, generated project ownership, helper staging, and
+  signing/notarization assumptions are documented in Mac docs and the focused
+  audit.
 
 Blockers:
 
-- `cargo machete`, `cargo udeps`, and `cargo llvm-cov` were not installed
-  during the last audit.
-- No Swift dead-code tool is part of the documented workflow.
+- Optional dependency/dead-code tools are explicitly deferred rather than
+  adopted. The current repo does not yet have a pinned, low-noise
+  dependency/dead-code scan for Rust or Swift.
 
 Next action:
 
-- Decide whether to add optional dependency/dead-code tools to the documented
-  audit workflow or explicitly defer them.
+- Adopt a stable optional tool only after it is installed or pinned, configured
+  for this repo, and proven low-noise enough for repeatable local/CI use.
 
 ### Docs and drift protection - 6/6
 
@@ -294,16 +311,17 @@ Next action:
 
 ## Ranked 100% Backlog
 
-1. Standardize Rust domain test placement where broad/high-churn domain test
+1. Replace or remove one remaining fixed iOS product shell using generated UI
+   and the reachability map.
+2. Adopt optional dependency/dead-code tooling when a stable, pinned, low-noise
+   workflow exists. Current state is explicitly deferred with revisit criteria.
+3. Add longer lifecycle/soak tests if runtime reliability target rises.
+4. Standardize Rust domain test placement where broad/high-churn domain test
    files still obscure ownership. Completed for the current broad blockers
    (`memory::retain`, `mcp::product_protocol`, and `session::commands`); keep
    splitting future broad files before they become catch-alls.
-2. Resolve retired prompt schema ambiguity. Completed by the
+5. Resolve retired prompt schema ambiguity. Completed by the
    modular-engine-v3 clean storage reset; keep absence gates on the fresh
    schema and Prompt Library runtime.
-3. Domain test ownership and Retired prompt schema removed. Completed evidence
-   for the 96/100 checkpoint.
-4. Replace or remove one remaining fixed iOS product shell using generated UI
-   and the reachability map.
-5. Add or explicitly defer optional dependency/dead-code tooling.
-6. Run a Mac app focused production-grade audit.
+6. Product-shell readiness proof, dependency-tooling decision, and Mac app
+   focused audit are completed evidence for the 98/100 checkpoint.
