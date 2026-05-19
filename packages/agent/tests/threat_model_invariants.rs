@@ -263,6 +263,9 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
         "docs/product-shell-reachability-map.md",
         "packages/agent/src/engine/tests/mod.rs",
         "packages/agent/src/engine/tests/support.rs",
+        "packages/agent/src/domains/memory/retain/tests/mod.rs",
+        "packages/agent/src/domains/mcp/product_protocol/tests/mod.rs",
+        "packages/agent/src/domains/session/commands/tests/mod.rs",
         "Rust Test Placement Convention",
         "prompt_history",
         "prompt_snippets",
@@ -435,10 +438,10 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
     }
     assert_eq!(total, 100, "production-grade rubric must total 100");
     assert!(
-        rubric.contains("Current repo-wide score: **93/100**")
+        rubric.contains("Current repo-wide score: **96/100**")
             && rubric.contains("Ranked 100% Backlog")
-            && rubric.contains("Standardize Rust domain test placement")
-            && rubric.contains("Resolve retired prompt schema ambiguity")
+            && rubric.contains("Domain test ownership")
+            && rubric.contains("Retired prompt schema removed")
             && rubric.contains("No raw-scope/client-policy trust")
             && rubric.contains("No current blocker"),
         "production-grade rubric must include score, blockers, and next actions"
@@ -491,6 +494,57 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
         !engine_tests_mod.contains("#[test]") && !engine_tests_mod.contains("#[tokio::test]"),
         "engine/tests/mod.rs must contain declarations only, not test bodies"
     );
+
+    for (old_file, new_root, modules) in [
+        (
+            "src/domains/memory/retain/tests.rs",
+            "src/domains/memory/retain/tests",
+            &[
+                "formatting",
+                "parsing",
+                "writers",
+                "handler_events",
+                "interactive_ids",
+                "interactive_serialization",
+            ][..],
+        ),
+        (
+            "src/domains/mcp/product_protocol/tests.rs",
+            "src/domains/mcp/product_protocol/tests",
+            &["client", "manager", "router", "capability_index"][..],
+        ),
+        (
+            "src/domains/session/commands/tests.rs",
+            "src/domains/session/commands/tests",
+            &["archive_delete", "archive_older_than"][..],
+        ),
+    ] {
+        assert!(
+            !crate_root.join(old_file).exists(),
+            "broad domain test file {old_file} must stay split into concern modules"
+        );
+        let root = crate_root.join(new_root);
+        let mod_path = root.join("mod.rs");
+        let support_path = root.join("support.rs");
+        assert!(mod_path.is_file(), "{new_root}/mod.rs must exist");
+        assert!(support_path.is_file(), "{new_root}/support.rs must exist");
+        let mod_text = std::fs::read_to_string(&mod_path)
+            .unwrap_or_else(|error| panic!("failed to read {mod_path:?}: {error}"));
+        assert!(
+            !mod_text.contains("#[test]") && !mod_text.contains("#[tokio::test]"),
+            "{new_root}/mod.rs must contain declarations only"
+        );
+        for module in modules {
+            assert!(
+                root.join(format!("{module}.rs")).is_file(),
+                "{new_root}/{module}.rs must own its concern tests"
+            );
+            assert!(
+                mod_text.contains(&format!("mod {module};")),
+                "{new_root}/mod.rs must declare `{module}`"
+            );
+        }
+    }
 }
 
 #[test]
@@ -982,8 +1036,8 @@ fn modular_engine_storage_generation_is_clean_break() {
     let storage = std::fs::read_to_string(crate_root().join("src/shared/storage.rs"))
         .expect("failed to read shared storage");
     assert!(
-        storage.contains("CURRENT_STORAGE_GENERATION: &str = \"modular-engine-v2\""),
-        "storage generation must stay on the resource-native orchestration clean-break generation"
+        storage.contains("CURRENT_STORAGE_GENERATION: &str = \"modular-engine-v3\""),
+        "storage generation must stay on the retired prompt-schema clean-break generation"
     );
     assert!(
         storage.contains("archive_incompatible_active_database(active_db_path)?"),
@@ -3373,6 +3427,22 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
         "prompt_library durable state must compose resource capabilities through the engine host"
     );
 
+    let schema = std::fs::read_to_string(
+        crate_root.join("src/domains/session/event_store/sqlite/migrations/v001_schema.sql"),
+    )
+    .expect("read consolidated schema");
+    for forbidden in [
+        "CREATE TABLE IF NOT EXISTS prompt_history",
+        "CREATE TABLE IF NOT EXISTS prompt_snippets",
+        "idx_prompt_history_",
+        "idx_prompt_snippets_",
+    ] {
+        assert!(
+            !schema.contains(forbidden),
+            "active consolidated schema must not recreate retired prompt-library table/index `{forbidden}`"
+        );
+    }
+
     for rel in [
         "src/domains/prompt_library/mod.rs",
         "src/domains/prompt_library/deps.rs",
@@ -3416,8 +3486,8 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
         std::fs::read_to_string(crate_root.join("src/engine/tests/prompt_library_resources.rs"))
             .expect("read prompt_library resource tests");
     for required in [
-        "prompt_snippets_are_resource_backed_and_ignore_retired_rows",
-        "prompt_history_is_resource_backed_deduped_and_ignores_retired_rows",
+        "prompt_snippets_are_resource_backed_without_retired_tables",
+        "prompt_history_is_resource_backed_deduped_without_retired_tables",
         "prompt_history_skip_and_validation_fail_without_accepted_refs",
         "prompt_library_idempotency_and_history_delete_clear_do_not_duplicate_resources",
     ] {

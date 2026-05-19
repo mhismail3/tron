@@ -383,7 +383,8 @@ delegate with an idempotency key and normal audit/event records.
 `materialized_file` outputs; `voice_notes::list` and `voice_notes::delete` read
 and discard resource state rather than treating Markdown files as source truth.
 Prompt Library history and snippets are also resource-backed `artifact`
-records; old prompt-library SQLite rows are ignored by the runtime.
+records; fresh modular-engine-v3 storage does not create prompt-library SQLite
+tables.
 
 Capability identity is projected from the live catalog:
 
@@ -1046,7 +1047,7 @@ Async lifecycle hooks execute before/after capability invocations and around pro
 
 ## Database Schema
 
-All active server storage lives in `~/.tron/internal/database/tron.sqlite`. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v2"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v2-*` and starts fresh. Old product/session data is archived, not migrated or read by the new runtime. Retired pre-unified database artifacts are archived the same way and are never read as active storage.
+All active server storage lives in `~/.tron/internal/database/tron.sqlite`. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v3"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v3-*` and starts fresh. Old product/session data is archived, not migrated or read by the new runtime. Retired pre-unified database artifacts are archived the same way and are never read as active storage.
 
 The unified database has one migration surface for session/log/blob tables and engine-owned stores for primitive state. Fresh databases start from consolidated `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`; additive follow-up migrations such as `v002_constitution_audit.sql`, `v004_session_profile.sql`, and `v005_drop_profile_migrations.sql` are registered in `migrations/mod.rs` (the source of truth for schema versioning). Every constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, `CHECK (use_worktree IS NULL OR use_worktree IN (0, 1))` on sessions, and a `COALESCE`-nullable unique index on `device_tokens (device_token, platform, workspace_id, bundle_id)` so the same APNs push token can register across multiple workspaces or bundles without clobbering. The runner applies pending versions in order, verifies each applied migration with `PRAGMA foreign_key_check`, and refuses to commit if any dangling reference would be left behind.
 
@@ -1079,13 +1080,11 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 | `notification_read_state` | Per-event read receipts for client notifications |
 | `cron_jobs` | Cron job definitions: schedule, payload, delivery, overlap/misfire policies, runtime state (next/last run, consecutive failures) |
 | `cron_runs` | Per-run history for cron jobs (status, started/completed timestamps, output, exit code) |
-| `prompt_history` | Retired inert table from the consolidated v001 schema. Runtime Prompt Library history now uses `artifact:prompt-history:*` resources and does not read this table. |
-| `prompt_snippets` | Retired inert table from the consolidated v001 schema. Runtime Prompt Library snippets now use `artifact:prompt-snippet:*` resources and do not read this table. |
 | `constitution_home_audit` | Audited creates, updates, moves, deletes, seeds, repairs, and external edits for files under `~/.tron/` |
 | `constitution_resolution_audit` | Settings, instruction, context, provider-payload, vault, automation, and outcome resolution records with effective hashes and blob refs |
 | `constitution_context_blocks` | Typed model-context blocks for replay: source home/path/blob, hash, sensitivity, cache class, inclusion reason, precedence, and provider surface |
 
-The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Cron state still lives in dedicated cron tables. Prompt Library history/snippets are resource-backed artifacts; session/task views are reconstructed from the canonical event log.
+The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Cron state still lives in dedicated cron tables. Prompt Library history/snippets are resource-backed `artifact:prompt-*` resources; fresh modular-engine-v3 databases no longer create retired prompt-library tables. Session/task views are reconstructed from the canonical event log.
 
 ---
 

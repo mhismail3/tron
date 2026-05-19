@@ -239,6 +239,7 @@ Every audited area is evaluated against these questions:
 |---|---|---|---|
 | Engine catch-all split completed | `packages/agent/src/engine/tests/mod.rs` has declarations only; `support.rs` owns shared fixtures; concern files own behavior tests | Keep | Static gates require the old `engine/tests.rs` to stay absent and focused modules to exist |
 | Engine focused tests are current | `engine/tests/{ids_types,catalog_discovery,ledger_idempotency,host_invocation,meta_primitives,triggers,streams,state_queue,leases_compensation,approval,external_worker,generated_ui,grant_authority,module_activation,prompt_library_resources,resource_kernel,domain_outputs}.rs` | Keep | New engine tests go into the owning concern file or a new concern-named file |
+| Domain test ownership split completed | `packages/agent/src/domains/memory/retain/tests/mod.rs`, `packages/agent/src/domains/mcp/product_protocol/tests/mod.rs`, and `packages/agent/src/domains/session/commands/tests/mod.rs` are declaration-only roots with `support.rs` fixtures and concern-owned test files | Keep | Static gates require old broad `tests.rs` files to stay absent and new concern modules to exist |
 | Rust domains use mixed but documented layouts | Inline `#[cfg(test)]`, sibling `tests.rs`, and `*_tests.rs` are accepted by convention for small/local concerns | Standardize when touched | High-churn or broad domains migrate toward focused `tests/` folders as cleanup work |
 | iOS tests use top-level test root | `packages/ios-app/project.yml` includes `Tests` source root | Keep | Continue category grouping unless app chooses source-co-located tests later |
 | Mac tests use top-level test root | `packages/mac-app/Tests` | Keep | Keep category grouping and project-generation checks |
@@ -257,16 +258,19 @@ Every audited area is evaluated against these questions:
 - New engine tests must not be added to a catch-all root. They belong in the
   owning `engine/tests/*.rs` concern file, with shared setup promoted to
   `engine/tests/support.rs` only when at least two concern files need it.
+- New broad domain tests follow the same pattern: a declaration-only
+  `tests/mod.rs`, shared setup in `tests/support.rs`, and concern files named
+  for behavior rather than implementation accidents.
 
 ## Prioritized Cleanup Backlog
 
 | Priority | Work | Acceptance criteria |
 |---:|---|---|
-| 1 | Resolve inert prompt schema ambiguity | Either clean storage generation removes `prompt_history`/`prompt_snippets`, or docs/static gates keep them explicitly inert |
-| 2 | Migrate high-churn Rust domains to focused test folders when touched | Domain-local broad test files are split only with ownership proof and targeted verification |
-| 3 | Replace one remaining fixed iOS shell | Product-shell reachability map proves replacement; old view/navigation/DTO/tests removed with absence gate |
-| 4 | Add optional dependency/dead-code tooling | `cargo machete`/`cargo udeps` or equivalent is added to documented local audit path if stable |
-| 5 | Mac app deep audit | Add focused Mac score/evidence for server lifecycle, pairing, wizard, generated project, and tests |
+| 1 | Replace one remaining fixed iOS shell | Product-shell reachability map proves replacement; old view/navigation/DTO/tests removed with absence gate |
+| 2 | Add optional dependency/dead-code tooling | `cargo machete`/`cargo udeps` or equivalent is added to documented local audit path if stable |
+| 3 | Mac app deep audit | Add focused Mac score/evidence for server lifecycle, pairing, wizard, generated project, and tests |
+| Completed | Resolve inert prompt schema ambiguity | `modular-engine-v3` fresh schema no longer creates `prompt_history`, `prompt_snippets`, or prompt indexes; static gates enforce absence |
+| Completed | Migrate current high-churn Rust domain tests | Memory retain, MCP product protocol, and session commands broad tests are split into focused `tests/` folders |
 
 ## Verification Record
 

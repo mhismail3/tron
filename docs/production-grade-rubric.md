@@ -17,20 +17,20 @@ Each axis receives one of these maturity levels:
 - `75%`: integration/failure coverage exists and docs are current;
 - `100%`: complete evidence links, no known blockers, no duplicate path.
 
-Current repo-wide score: **93/100**.
+Current repo-wide score: **96/100**.
 
 The score is intentionally lower than the modular-engine score because this
-rubric includes remaining product-shell surfaces, older mixed domain test
-layouts, Mac app coverage, dependency tooling, and retired schema ambiguity.
+rubric includes remaining product-shell surfaces, Mac app coverage, dependency
+tooling, and optional deeper lifecycle/soak proof.
 
 ## Rubric
 
 | Axis | Points | Current | 100% Definition |
 |---|---:|---:|---|
 | Architecture and ownership | 12 | 11 | Every package/submodule has one documented owner, purpose, and dependency direction |
-| Folder and test organization | 10 | 8 | Folder layout mirrors architecture; tests are grouped by owning concern with no large catch-all files |
+| Folder and test organization | 10 | 9 | Folder layout mirrors architecture; tests are grouped by owning concern with no large catch-all files |
 | Reachability and dead code | 10 | 8 | Every tracked source artifact is reachable or explicitly classified; dead code has absence gates |
-| State and persistence | 10 | 8 | Durable truth, caches, projections, schemas, and generated files are all correctly classified |
+| State and persistence | 10 | 10 | Durable truth, caches, projections, schemas, and generated files are all correctly classified |
 | Security and authority | 12 | 12 | No raw-scope/client-policy trust; grants, secrets, sandboxing, file/network bounds are enforced |
 | Resource/output correctness | 8 | 8 | Durable outputs are resource-backed or explicitly non-durable projections |
 | Runtime reliability | 10 | 9 | Retry, crash, cleanup, recovery, idempotency, and partial failure paths are tested |
@@ -40,7 +40,7 @@ layouts, Mac app coverage, dependency tooling, and retired schema ambiguity.
 | Docs and drift protection | 6 | 6 | README, progressive docs, architecture docs, and static gates stay synchronized |
 | Deletion discipline | 3 | 3 | Removed/retired behavior has no compatibility aliases, fallback readers, stale docs, or hidden callers |
 
-Total: **93/100**.
+Total: **96/100**.
 
 ## Axis Evidence And Blockers
 
@@ -70,28 +70,32 @@ Next action:
 - Migrate high-churn domain test layouts opportunistically, then run a Mac app
   focused ownership pass.
 
-### Folder and test organization - 8/10
+### Folder and test organization - 9/10
 
 Evidence:
 
 - Engine tests are fully in focused modules under
   `packages/agent/src/engine/tests/`; `mod.rs` has declarations only and
   `support.rs` owns shared fixtures.
+- Broad/high-churn domain tests for memory retain, MCP product protocol, and
+  session commands now use focused `tests/` module trees with declaration-only
+  roots and shared `support.rs` fixtures.
 - iOS and Mac tests are grouped under top-level Xcode test roots.
-- Static gates protect several concern-owned engine test boundaries.
+- Static gates protect concern-owned engine and high-churn domain test
+  boundaries.
 - `docs/production-grade-codebase-audit.md` documents the Rust Test Placement
   Convention for large subsystem test trees, sibling test files, and inline
   helper tests.
 
 Blockers:
 
-- Rust domains mix inline `#[cfg(test)]`, sibling `tests.rs`, and
-  `*_tests.rs` layouts.
+- Some smaller domains still use sibling or inline tests by convention. They
+  are acceptable today, but should be split if they become broad/high-churn.
 
 Next action:
 
-- Apply the documented Rust test placement convention to broad/high-churn
-  domains when those domains are touched.
+- Keep the convention enforced and split any future broad test file before it
+  becomes a catch-all ownership problem.
 
 ### Reachability and dead code - 8/10
 
@@ -116,7 +120,7 @@ Next action:
 - Replace or remove one fixed product shell only after reachability proof shows
   a generated UI/control replacement.
 
-### State and persistence - 8/10
+### State and persistence - 10/10
 
 Evidence:
 
@@ -124,19 +128,22 @@ Evidence:
   workers, queues, leases, approvals, decisions, evidence, streams, and
   generated UI resources.
 - Prompt Library and Voice Notes durable outputs are resource-backed.
+- Storage generation `modular-engine-v3` is a clean break that removes retired
+  Prompt Library tables from fresh schemas. Static gates prove the active
+  consolidated schema no longer creates `prompt_history`, `prompt_snippets`, or
+  their indexes.
 - Xcode projects are generated from `project.yml` and regenerate cleanly.
 
 Blockers:
 
-- Retired `prompt_history` and `prompt_snippets` tables still exist in the
-  consolidated schema as inert documented tables.
-- Notifications and some chat/product-shell state remain outside the resource
-  model by explicit defer decisions.
+- No current blocker for known durable-output ownership. Notifications and
+  remaining product-shell state are classified separately as transport,
+  projection, or explicit deferred work before conversion.
 
 Next action:
 
-- Decide whether final cleanup needs a clean storage generation reset or keeps
-  inert tables with permanent static gates.
+- Keep fresh-schema absence gates on and require resource-backed durable output
+  for any newly converted domain.
 
 ### Security and authority - 12/12
 
@@ -273,8 +280,8 @@ Evidence:
 
 - Removed iOS product-shell surfaces have absence gates.
 - Old Prompt Library store code remains deleted.
-- Runtime ignores retired prompt tables and tests prove they are not source
-  truth.
+- Retired Prompt Library tables are absent from fresh modular-engine-v3
+  schemas; runtime Prompt Library truth is `artifact:prompt-*` resources.
 
 Blockers:
 
@@ -288,10 +295,15 @@ Next action:
 ## Ranked 100% Backlog
 
 1. Standardize Rust domain test placement where broad/high-churn domain test
-   files still obscure ownership.
-2. Resolve retired prompt schema ambiguity with either a clean storage reset or
-   permanent inert-table gates.
-3. Replace or remove one remaining fixed iOS product shell using generated UI
+   files still obscure ownership. Completed for the current broad blockers
+   (`memory::retain`, `mcp::product_protocol`, and `session::commands`); keep
+   splitting future broad files before they become catch-alls.
+2. Resolve retired prompt schema ambiguity. Completed by the
+   modular-engine-v3 clean storage reset; keep absence gates on the fresh
+   schema and Prompt Library runtime.
+3. Domain test ownership and Retired prompt schema removed. Completed evidence
+   for the 96/100 checkpoint.
+4. Replace or remove one remaining fixed iOS product shell using generated UI
    and the reachability map.
-4. Add or explicitly defer optional dependency/dead-code tooling.
-5. Run a Mac app focused production-grade audit.
+5. Add or explicitly defer optional dependency/dead-code tooling.
+6. Run a Mac app focused production-grade audit.

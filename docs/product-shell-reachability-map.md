@@ -32,7 +32,7 @@ static gates:
 
 | Domain | Current durable/output state | Decision |
 |---|---|---|
-| `prompt_library` | History and snippets are `artifact:prompt-history:*` and `artifact:prompt-snippet:*` resources. Retired `prompt_history` and `prompt_snippets` tables are ignored by runtime code. | Converted; keep the iOS sheet only as a thin capability client. |
+| `prompt_library` | History and snippets are `artifact:prompt-history:*` and `artifact:prompt-snippet:*` resources. Fresh modular-engine-v3 databases do not create retired prompt-library tables. | Converted; keep the iOS sheet only as a thin capability client. |
 | `voice_notes` | Saved notes produce `artifact` and `materialized_file` refs; list/delete use resource truth. | Converted; no file-scan compatibility reader. |
 | `notifications` | APNs/inbox read state still uses notification event/read-state tables and iOS notification views. | Defer with reason; convert only after notification delivery, read receipts, and APNs operator UX have a resource-backed contract. |
 | `display` | Display frames are stream/projection data for active sessions. | Keep as ephemeral capability output; materialize only if display captures become durable artifacts. |

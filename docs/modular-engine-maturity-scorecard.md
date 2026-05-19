@@ -150,8 +150,8 @@ Evidence:
   `voice_notes::delete` use resource truth instead of scanning or deleting
   Markdown files as source truth.
 - `prompt_library::history_*` and `prompt_library::snippet_*` now use
-  `artifact` resources as durable truth; retired `prompt_history` and
-  `prompt_snippets` rows are ignored.
+  `artifact` resources as durable truth; fresh modular-engine-v3 databases no
+  longer create retired prompt-library tables.
 
 Blockers:
 
@@ -302,8 +302,8 @@ Evidence:
   resource-backed, idempotent, and fail invalid audio without accepted produced
   refs.
 - `engine/tests/prompt_library_resources.rs` proves prompt snippets/history are
-  artifact-backed, idempotent, ignore retired prompt tables, and fail validation
-  without accepted produced refs.
+  artifact-backed, idempotent, work with retired prompt tables absent, and fail
+  validation without accepted produced refs.
 - `operator_consequence_and_voice_note_resource_boundaries_stay_enforced`
   statically protects the action-summary helper boundary and prevents direct
   file write/read/delete APIs from becoming voice-note durable truth again.

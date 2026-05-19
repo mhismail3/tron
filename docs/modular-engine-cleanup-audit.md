@@ -290,8 +290,8 @@ client/server dependency, test, or current operator role.
 | Area | Evidence | Decision |
 |------|----------|----------|
 | Product-shell reachability | `docs/product-shell-reachability-map.md` maps AgentControl, SourceChanges, subagent sheets/plugins, notification inbox/detail views, Prompt Library, display stream views, and voice recording affordances by entrypoint, DTO/client, server/event dependency, tests, role, and decision | Keep as the deletion bar for the remaining product shell |
-| Prompt history | `engine/tests/prompt_library_resources.rs` proves `prompt_library::history_record/list/delete/clear` use `artifact:prompt-history:*` resources, dedupe by normalized text hash, ignore retired table rows, and skip disabled/cron captures without accepted refs | Converted; old `prompt_history` rows are not runtime truth |
-| Prompt snippets | The same test module proves `prompt_library::snippet_create/update/delete/list/get` use `artifact:prompt-snippet:*` resources, return `resourceRefs` for mutations, discard lifecycle on delete, and ignore retired table rows | Converted; old `prompt_snippets` rows are not runtime truth |
+| Prompt history | `engine/tests/prompt_library_resources.rs` proves `prompt_library::history_record/list/delete/clear` use `artifact:prompt-history:*` resources, dedupe by normalized text hash, run with retired prompt tables absent, and skip disabled/cron captures without accepted refs | Converted; old `prompt_history` rows are not runtime truth and fresh v3 schema no longer creates the table |
+| Prompt snippets | The same test module proves `prompt_library::snippet_create/update/delete/list/get` use `artifact:prompt-snippet:*` resources, return `resourceRefs` for mutations, discard lifecycle on delete, and run with retired prompt tables absent | Converted; old `prompt_snippets` rows are not runtime truth and fresh v3 schema no longer creates the table |
 | Prompt-library contracts | `prompt_library::history_record/delete/clear` and `prompt_library::snippet_create/update/delete` declare artifact-backed output contracts and additive top-level `resourceRefs` | Keep stable public ids/current response fields; no fallback DTO reader |
 | iOS Prompt Library | `PromptLibrarySheet`, `PromptLibraryState`, and `PromptLibraryClient` still call canonical `prompt_library::*` capabilities and Decodable DTOs tolerate additive `resourceRefs` | Keep thin shell; no local policy/resource truth |
 | Static gates | `product_shell_reachability_and_prompt_library_resources_stay_enforced` requires the reachability map, resource-backed prompt contracts, engine-host resource composition, deleted prompt store, and focused prompt-resource tests | Keep as absence proof against DB-backed prompt truth |
@@ -302,9 +302,9 @@ Removal proof from this pass:
   SourceChanges, subagent sheets/plugins, notification inbox/detail, Prompt
   Library, display stream views, and voice recording affordances remain
   classified with evidence in the reachability map.
-- No prompt-library storage compatibility path was added. Legacy prompt tables
-  may still exist in old consolidated SQLite schema files, but runtime
-  prompt-library code does not read or migrate them.
+- No prompt-library storage compatibility path was added. The
+  modular-engine-v3 clean break removes legacy prompt tables from fresh active
+  schema creation; old databases are archived rather than read or migrated.
 - No iOS change was needed: the existing Swift response DTOs ignore additive
   `resourceRefs`, and mutations still go through canonical server
   capabilities.
@@ -329,6 +329,19 @@ call-graph/test-backed passes:
 - Engine test ownership is no longer a broad-file blocker: the root is
   declaration-only, fixtures are isolated in `engine/tests/support.rs`, and
   behavior tests live in concern-owned files.
+
+## 2026-05-19 Domain Test Ownership And Retired Prompt Schema Cleanup
+
+This pass closed two proof blockers without changing public capability ids or
+wire schemas.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Memory retain tests | `domains/memory/retain/tests/` has declaration-only `mod.rs`, shared `support.rs`, and concern files for formatting, parsing, writers, handler/event flow, interactive ids, and interactive serialization | Keep split; old `tests.rs` stays absent |
+| MCP product protocol tests | `domains/mcp/product_protocol/tests/` owns stdio client protocol, manager lifecycle, router/schema refresh, and capability-index behavior separately | Keep split; shared mock server fixtures stay in `support.rs` |
+| Session command tests | `domains/session/commands/tests/` separates archive/delete from archive-older-than behavior with shared repo/context setup in `support.rs` | Keep split; old broad test file stays absent |
+| Retired prompt schema | Storage generation is `modular-engine-v3`; fresh consolidated schema no longer creates `prompt_history`, `prompt_snippets`, `idx_prompt_history_*`, or `idx_prompt_snippets_*` | Remove with clean-break storage boundary; no migration reader, compatibility table reader, or row-copy path |
+| Prompt Library resources | Prompt Library tests assert resource-backed history/snippet behavior when retired tables are absent | Keep `artifact:prompt-*` resources as durable truth |
 
 ## Static Gates
 

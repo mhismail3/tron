@@ -14,8 +14,6 @@
 --   • device_tokens           — APNs push-notification tokens
 --   • notification_read_state — per-event read tracking
 --   • cron_jobs / cron_runs   — scheduled task machinery
---   • prompt_history          — dedup'd auto-captured user prompts
---   • prompt_snippets         — named reusable prompts
 --
 -- Invariants enforced at the DB layer:
 --   • events.UNIQUE(session_id, sequence)                     — append-only ordering
@@ -315,43 +313,6 @@ CREATE INDEX IF NOT EXISTS idx_cron_runs_status
     ON cron_runs(status) WHERE status = 'running';
 CREATE INDEX IF NOT EXISTS idx_cron_runs_created
     ON cron_runs(created_at);
-
--- ═══════════════════════════════════════════════════════════════════════════════
--- Prompt Library
--- ═══════════════════════════════════════════════════════════════════════════════
---
--- prompt_history  — auto-captured log of every interactive user prompt,
---                   deduplicated by normalized text hash.
--- prompt_snippets — user-authored named quick prompts with CRUD.
--- Both are exposed as canonical prompt-library capabilities and browsed
--- from the iOS composer's Prompt Library sheet.
-
-CREATE TABLE IF NOT EXISTS prompt_history (
-  id             TEXT    PRIMARY KEY,                  -- uuid_v7
-  text           TEXT    NOT NULL,                     -- original (trimmed) display text
-  text_hash      TEXT    NOT NULL UNIQUE,              -- sha256 hex of normalized text
-  first_used_at  TEXT    NOT NULL,                     -- ISO-8601 UTC
-  last_used_at   TEXT    NOT NULL,                     -- ISO-8601 UTC
-  use_count      INTEGER NOT NULL DEFAULT 1 CHECK(use_count > 0),
-  char_count     INTEGER NOT NULL CHECK(char_count > 0)
-);
-
-CREATE INDEX IF NOT EXISTS idx_prompt_history_last_used
-  ON prompt_history(last_used_at DESC, id DESC);
-
-CREATE INDEX IF NOT EXISTS idx_prompt_history_use_count
-  ON prompt_history(use_count DESC);
-
-CREATE TABLE IF NOT EXISTS prompt_snippets (
-  id         TEXT PRIMARY KEY,                         -- uuid_v7
-  name       TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 100),
-  text       TEXT NOT NULL CHECK(length(text) > 0),
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_prompt_snippets_updated
-  ON prompt_snippets(updated_at DESC);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- Tron Constitution Audit

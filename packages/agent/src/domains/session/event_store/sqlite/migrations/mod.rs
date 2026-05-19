@@ -307,8 +307,6 @@ mod tests {
             "events",
             "logs",
             "notification_read_state",
-            "prompt_history",
-            "prompt_snippets",
             "schema_version",
             "sessions",
             "workspaces",
@@ -527,10 +525,6 @@ mod tests {
             "idx_cron_runs_job_started",
             "idx_cron_runs_status",
             "idx_cron_runs_created",
-            // prompt library
-            "idx_prompt_history_last_used",
-            "idx_prompt_history_use_count",
-            "idx_prompt_snippets_updated",
         ];
         for idx in &expected {
             assert!(indexes.contains(&idx.to_string()), "missing index: {idx}");
@@ -1435,127 +1429,48 @@ mod tests {
         }
     }
 
-    // ── prompt library ────────────────────────────────────────────────────
+    // ── retired prompt library tables ─────────────────────────────────────
 
     #[test]
-    fn prompt_history_use_count_check_rejects_zero() {
+    fn fresh_schema_omits_retired_prompt_tables() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
 
-        let err = conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at,
-                                         use_count, char_count)
-             VALUES ('p1', 'hello', 'h1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, 5)",
-            [],
-        );
-        assert!(err.is_err(), "use_count = 0 should be rejected by CHECK");
-    }
-
-    #[test]
-    fn prompt_history_char_count_check_rejects_zero() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let err = conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at,
-                                         use_count, char_count)
-             VALUES ('p1', 'hello', 'h1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 0)",
-            [],
-        );
-        assert!(err.is_err(), "char_count = 0 should be rejected by CHECK");
-    }
-
-    #[test]
-    fn prompt_history_text_hash_unique_enforced() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at,
-                                         use_count, char_count)
-             VALUES ('p1', 'hello', 'hash1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 5)",
-            [],
-        )
-        .unwrap();
-
-        let dup = conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at,
-                                         use_count, char_count)
-             VALUES ('p2', 'hello again', 'hash1', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 11)",
-            [],
-        );
-        assert!(dup.is_err());
-    }
-
-    #[test]
-    fn prompt_snippets_name_length_check() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        // Empty name rejected.
-        let err_empty = conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s1', '', 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        );
-        assert!(err_empty.is_err());
-
-        // 101-char name rejected.
-        let long = "a".repeat(101);
-        let err_long = conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s2', ?1, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [&long],
-        );
-        assert!(err_long.is_err());
-
-        // 100-char name accepted.
-        let max = "a".repeat(100);
-        conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s3', ?1, 'hello', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [&max],
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn prompt_snippets_text_non_empty_check() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        let err = conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s1', 'n', '', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        );
-        assert!(err.is_err());
-    }
-
-    #[test]
-    fn prompt_snippets_duplicate_names_allowed() {
-        let conn = open_memory();
-        run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s1', 'Shared', 'a', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('s2', 'Shared', 'b', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        let count: i64 = conn
+        let table_count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM prompt_snippets WHERE name = 'Shared'",
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name IN ('prompt_history', 'prompt_snippets')",
                 [],
-                |r| r.get(0),
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(
+            table_count, 0,
+            "fresh v3 schema must not create retired prompt-library tables"
+        );
+    }
+
+    #[test]
+    fn fresh_schema_omits_retired_prompt_indexes() {
+        let conn = open_memory();
+        run_migrations(&conn).unwrap();
+
+        let index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index'
+                   AND name IN (
+                     'idx_prompt_history_last_used',
+                     'idx_prompt_history_use_count',
+                     'idx_prompt_snippets_updated'
+                   )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            index_count, 0,
+            "fresh v3 schema must not create retired prompt-library indexes"
+        );
     }
 }

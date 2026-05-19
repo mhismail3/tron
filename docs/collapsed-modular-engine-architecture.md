@@ -378,6 +378,6 @@ mutation multiplexer.
 
 The target architecture does not include runtime compatibility with old
 mobile-first session-manager state. The current storage generation is
-`modular-engine-v2`: startup archives old active `tron.sqlite`, WAL, and SHM
+`modular-engine-v3`: startup archives old active `tron.sqlite`, WAL, and SHM
 sidecars before opening the current schema. The runtime does not read or migrate
 old product/session schemas for the new grant/resource APIs.

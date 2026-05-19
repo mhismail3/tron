@@ -49,19 +49,27 @@ async fn inspect_resource(handle: &EngineHostHandle, resource_id: &str) -> Value
     inspected.value.unwrap()["inspection"].clone()
 }
 
-#[tokio::test]
-async fn prompt_snippets_are_resource_backed_and_ignore_retired_rows() {
-    let ctx = crate::shared::server::test_support::make_test_context();
-    let handle = ctx.engine_host.clone();
-    {
-        let conn = ctx.event_store.pool().get().unwrap();
-        conn.execute(
-            "INSERT INTO prompt_snippets (id, name, text, created_at, updated_at)
-             VALUES ('retired-snippet', 'Retired', 'retired text', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+fn assert_retired_prompt_tables_absent(ctx: &crate::shared::server::context::ServerRuntimeContext) {
+    let conn = ctx.event_store.pool().get().unwrap();
+    let retired_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name IN ('prompt_history', 'prompt_snippets')",
             [],
+            |row| row.get(0),
         )
         .unwrap();
-    }
+    assert_eq!(
+        retired_count, 0,
+        "fresh modular-engine-v3 databases must not create retired prompt-library tables"
+    );
+}
+
+#[tokio::test]
+async fn prompt_snippets_are_resource_backed_without_retired_tables() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    assert_retired_prompt_tables_absent(&ctx);
 
     let created = handle
         .invoke(host_invocation(
@@ -93,12 +101,6 @@ async fn prompt_snippets_are_resource_backed_and_ignore_retired_rows() {
     let items = listed.value.as_ref().unwrap()["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], snippet["id"]);
-    assert!(
-        items
-            .iter()
-            .all(|item| item["id"].as_str() != Some("retired-snippet")),
-        "retired prompt_snippets rows must not be source truth"
-    );
 
     let updated = handle
         .invoke(host_invocation(
@@ -137,18 +139,10 @@ async fn prompt_snippets_are_resource_backed_and_ignore_retired_rows() {
 }
 
 #[tokio::test]
-async fn prompt_history_is_resource_backed_deduped_and_ignores_retired_rows() {
+async fn prompt_history_is_resource_backed_deduped_without_retired_tables() {
     let ctx = crate::shared::server::test_support::make_test_context();
     let handle = ctx.engine_host.clone();
-    {
-        let conn = ctx.event_store.pool().get().unwrap();
-        conn.execute(
-            "INSERT INTO prompt_history (id, text, text_hash, first_used_at, last_used_at, use_count, char_count)
-             VALUES ('retired-history', 'retired prompt', 'retired-hash', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 14)",
-            [],
-        )
-        .unwrap();
-    }
+    assert_retired_prompt_tables_absent(&ctx);
 
     let first = handle
         .invoke(host_invocation(
@@ -188,12 +182,6 @@ async fn prompt_history_is_resource_backed_deduped_and_ignores_retired_rows() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["text"], "Remember this prompt");
     assert_eq!(items[0]["useCount"], 2);
-    assert!(
-        items
-            .iter()
-            .all(|item| item["id"].as_str() != Some("retired-history")),
-        "retired prompt_history rows must not be source truth"
-    );
     assert_eq!(
         prompt_artifacts(&handle, "artifact:prompt-history:")
             .await
