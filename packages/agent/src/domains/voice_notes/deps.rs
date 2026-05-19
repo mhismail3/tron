@@ -7,12 +7,14 @@ use std::sync::Arc;
 pub(crate) struct Deps {
     pub(super) transcription_engine:
         Arc<std::sync::OnceLock<Arc<crate::domains::transcription::MlxEngine>>>,
+    pub(super) engine_host: crate::engine::EngineHostHandle,
 }
 
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             transcription_engine: deps.transcription_engine.clone(),
+            engine_host: deps.engine_host.clone(),
         }
     }
 }

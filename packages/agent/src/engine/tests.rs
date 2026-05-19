@@ -35,6 +35,7 @@ use super::{
     TriggerDispatchRequest,
 };
 
+mod domain_outputs;
 mod generated_ui;
 mod grant_authority;
 mod module_activation;

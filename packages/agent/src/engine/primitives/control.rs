@@ -6,6 +6,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use super::action_summary::operator_action_summary;
 use super::runtime::{
     PrimitiveRuntimeHost, actor_context, invocation_record_value, optional_u64, required_str,
     trace_components, trace_summary,
@@ -1110,12 +1111,12 @@ fn action_summary(
     risk: &str,
     approval_required: bool,
 ) -> Value {
-    json!({
-        "functionId": function_id,
-        "targetType": target_type,
-        "targetField": target_field,
-        "requiredRisk": risk,
-        "approvalRequired": approval_required,
-        "targetRevision": Value::Null,
-    })
+    operator_action_summary(
+        function_id,
+        target_type,
+        target_field,
+        Value::Null,
+        risk,
+        approval_required,
+    )
 }

@@ -1,102 +1,97 @@
-# Operator Projection Consequence And Deferred Domain Output Audit Phase
+# Deferred Product-Shell And Domain Output Finalization Phase
 
 ## Current Checkpoint
 
-The grant, manifest, resource-ref, and generated UI hardening checkpoint is
+The operator consequence and voice-notes resource conversion checkpoint is
 complete:
 
-- focused grant-authority tests prove child grant narrowing and failed prepare
-  behavior across grant dimensions;
-- package manifest tests reject duplicate declared function ids, raw
-  secret-like values, unsafe local-process command refs, and unsupported
-  local-process visibility before package persistence;
-- resource-kernel tests reject malformed/wrong-kind `resourceRefs` without
-  recording produced refs;
-- generated UI action tests reject invalid input and stale target revisions
-  before child invocation;
-- static gates keep the proof cases in their owning test modules;
-- the maturity scorecard baseline is now `95/100`.
+- control/module/trust-audit/generated UI action summaries now share one
+  bounded consequence projection helper;
+- generated UI stored actions still execute only through canonical target
+  capabilities;
+- `voice_notes::save` produces `artifact` and `materialized_file` refs;
+- `voice_notes::list` and `voice_notes::delete` use resource truth rather than
+  filesystem scans or physical deletion as durable state;
+- static gates prevent direct voice-note file write/read/delete APIs from
+  becoming source truth again;
+- the maturity scorecard baseline is now `97/100`.
 
 ## Objective
 
-Close the next maturity gap by making operator projections explain consequences
-and by auditing deferred domain outputs that still predate the collapsed
-resource substrate.
+Close the remaining cleanup gap by auditing and simplifying the product-shell
+and deferred domain surfaces that still predate the collapsed substrate.
 
-This phase should remain proof-driven. It must not add public capability ids,
-request/response schemas, storage generation, resource kinds, generated UI
-catalogs, iOS policy, compatibility readers, fallback DTOs, package/source/
-policy/trust/audit tables, or alternate worker-spawn paths.
+This phase should be proof-driven and may remove code only when reachability
+evidence proves it has no current caller, route, test, or durable contract. It
+must not add public capability ids, request/response schemas, storage
+generation, resource kinds, generated UI catalogs, compatibility readers,
+fallback DTOs, package/source/policy/trust/audit tables, `control::act`, iOS
+policy, remote package fetch, or alternate worker-spawn paths.
 
 ## Implementation Plan
 
-### 1. Operator Projection Consequence Tests
+### 1. Product-Shell Reachability Map
 
-Add targeted tests for `control::inspect`, `module::inspect_package`,
-`module::inspect_trust`, `ui::validate_surface`, and generated target surfaces
-that prove stale/rejected actions explain:
+Build a current iOS/server reachability map for:
 
-- target function/resource/grant revision that caused staleness;
-- required canonical next action;
-- whether the action is safe, approval-gated, or high-risk;
-- which resource/evidence/grant/worker refs support the recommendation;
-- why the server rejected a submitted action.
+- AgentControl sheets and cards;
+- SourceChanges sheets;
+- Subagent result notification views;
+- notification inbox/detail views;
+- prompt library sheets and state;
+- display stream views;
+- voice recording affordances.
 
-Keep this projection-only. Do not add `control::act`, local iOS policy, status
-tables, or cached operator state.
+For each surface, record the entrypoint, navigation path, DTO/client, server
+capability or event dependency, tests, and current operator role. Classify it as
+`keep thin shell`, `convert to generated UI`, `remove candidate`, or `defer with
+reason`.
 
-### 2. Deferred Domain Durable Output Audit
+### 2. Remove Or Consolidate One Proven-Unreachable Surface
 
-Build a proof map for the remaining high-scrutiny domains listed in the cleanup
-audit: notifications, prompt library, AgentControl/source-change sheets,
-browser/display/device, transcription, and voice notes.
+Delete exactly one product-shell or DTO path only if the reachability map proves
+it is unreachable or duplicated by current generated UI/control projections.
+The same change must delete navigation references, DTO/client references,
+previews/tests/docs, and add a static absence gate. Do not remove active chat
+affordances or device/runtime infrastructure without a replacement path.
 
-For each domain, classify current durable output as:
+### 3. Deferred Domain Output Decisions
 
-- already resource-backed;
-- ephemeral/projection-only;
-- still event/session-store backed and acceptable for the thin chat harness;
-- remove candidate;
-- convert-to-resource candidate.
+For `notifications`, `prompt_library`, `browser`, `display`, `device`, and
+`transcription`, classify each durable output path as resource-backed,
+ephemeral/projection-only, acceptable chat/session harness state, remove
+candidate, or convert-to-resource candidate. Add tests or static gates for the
+decision. If a low-risk domain output can be converted without wire/schema/iOS
+changes, convert it; otherwise document the exact future conversion boundary.
 
-Back each decision with route/capability registration, caller, DTO, test, or
-docs evidence. Remove only when proof shows the path is unreachable, duplicated,
-or architecture-violating.
+### 4. Operator Consequence Consumption
 
-### 3. Static Gates And Absence Proof
-
-Add static/absence gates for any retired domain output or product-shell state
-removed in this phase. Preserve existing gates forbidding raw-scope
-authorization, dynamic UI catalogs, `control::act`, compatibility aliases,
-fallback manifest fields, module action multiplexers, package/source/policy/
-trust/audit tables, and direct module process spawn/kill.
-
-### 4. Documentation And Scorecard
-
-Update the cleanup audit with the domain-output proof map and any removal or
-defer decisions. Update the maturity scorecard only after tests pass; target
-movement is `95/100` to `97/100` if operator projection consequence coverage and
-at least one deferred domain-output audit/removal are completed with proof.
+If Swift DTOs already tolerate the added action consequence fields, keep iOS
+unchanged. If decoding drops or rejects the fields, update only the Engine
+Console/generated UI DTO layer to decode and display server-provided
+consequence metadata. iOS must still submit only stored action coordinates,
+user input, and idempotency key.
 
 ## Verification
 
-Run focused Rust tests for control projections, generated UI validation,
-module package/trust inspection, and any touched domain. Finish with:
+Run focused checks for any touched product shell/domain, then:
 
-- `cargo test generated_ui --lib -- --nocapture`;
-- `cargo test module_ --lib -- --nocapture`;
+- `cd packages/agent && cargo test generated_ui --lib -- --nocapture`;
+- `cd packages/agent && cargo test module_ --lib -- --nocapture`;
+- `cd packages/agent && cargo test voice_notes --lib -- --nocapture`;
 - targeted domain tests for audited/removed domains;
-- `cargo test --test threat_model_invariants -- --nocapture`;
+- `cd packages/agent && cargo test --test threat_model_invariants -- --nocapture`;
 - `git diff --check`;
 - `scripts/tron ci fmt check clippy test`.
 
-Run iOS `xcodegen generate` and targeted Engine Console/source-guard tests only
-if Swift/project files change.
+Run `cd packages/ios-app && xcodegen generate` plus targeted Engine Console or
+surface tests only if Swift/project files change.
 
 ## Out Of Scope
 
 - New package trust features or signature algorithms.
 - Remote package distribution, marketplace install, or remote key discovery.
 - Control-plane mutation shortcuts.
-- iOS policy or local action construction.
+- Client-side policy or local action construction.
 - Storage deletion/archive execution.
+- Broad iOS redesign.

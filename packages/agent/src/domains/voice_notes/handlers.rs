@@ -11,10 +11,10 @@ operation_bindings! {
             list(&invocation.payload, deps).await
         },
         "save" => |invocation, deps| {
-            save(&invocation.payload, deps).await
+            save(invocation, deps).await
         },
         "delete" => |invocation, deps| {
-            delete(&invocation.payload, deps).await
+            delete(invocation, deps).await
         },
     ];
 }

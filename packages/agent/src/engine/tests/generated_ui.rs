@@ -234,6 +234,14 @@ async fn ui_surface_for_target_creates_deterministic_worker_surface() {
         value["surface"]["actions"][0]["payloadTemplate"]["surfaceResourceId"],
         "${surface.resourceId}"
     );
+    assert_eq!(
+        value["surface"]["actions"][0]["consequence"]["targetFunctionId"],
+        "ui::refresh_surface"
+    );
+    assert_eq!(
+        value["surface"]["actions"][0]["consequence"]["recommendedCanonicalAction"],
+        "ui::refresh_surface"
+    );
 
     let replayed = handle
         .invoke(host_invocation(
@@ -592,7 +600,8 @@ async fn control_advertises_generated_surface_authoring_without_layout_templates
             .as_array()
             .unwrap()
             .iter()
-            .any(|action| action["functionId"] == "ui::surface_for_target")
+            .any(|action| action["functionId"] == "ui::surface_for_target"
+                && action["consequence"]["recommendedCanonicalAction"] == "ui::surface_for_target")
     );
     let text = serde_json::to_string(value).unwrap();
     assert!(!text.contains("payloadTemplate"));

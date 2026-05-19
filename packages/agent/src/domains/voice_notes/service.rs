@@ -1,8 +1,9 @@
-//! Voice notes service: storage and listing for `~/.tron/workspace/inbox/voice-notes/`.
+//! Voice notes projection helpers.
+//!
+//! Voice-note durability lives in typed resources. Filesystem paths are only
+//! materialized locations attached to `materialized_file` resource versions.
 
-use serde_json::Value;
-
-use crate::shared::server::errors::CapabilityError;
+use serde_json::{Value, json};
 
 pub(crate) fn notes_dir() -> String {
     crate::shared::paths::voice_notes_dir()
@@ -10,126 +11,33 @@ pub(crate) fn notes_dir() -> String {
         .into_owned()
 }
 
-pub(crate) fn ensure_notes_dir(dir: &str) -> Result<(), CapabilityError> {
-    std::fs::create_dir_all(dir).map_err(|error| CapabilityError::Internal {
-        message: format!("Failed to create voice notes directory: {error}"),
-    })
-}
-
-pub(crate) fn write_note(filepath: &str, content: &str) -> Result<(), CapabilityError> {
-    std::fs::write(filepath, content).map_err(|error| CapabilityError::Internal {
-        message: format!("Failed to write voice note: {error}"),
-    })
-}
-
-pub(crate) fn list_notes(dir: &str, limit: usize, offset: usize) -> Value {
-    let mut notes = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let is_md = std::path::Path::new(&name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("md"));
-            if !is_md || name.starts_with('.') {
-                continue;
-            }
-
-            let path = entry.path();
-            let content = std::fs::read_to_string(&path).unwrap_or_default();
-            let note = parse_note(&name, &path.to_string_lossy(), &content);
-            notes.push(note);
-        }
-    }
-
-    notes.sort_by(|left, right| {
-        let left_created = left["createdAt"].as_str().unwrap_or("");
-        let right_created = right["createdAt"].as_str().unwrap_or("");
-        right_created.cmp(left_created)
-    });
-
-    let total_count = notes.len();
-    let has_more = offset + limit < total_count;
-    let notes: Vec<Value> = notes.into_iter().skip(offset).take(limit).collect();
-
-    serde_json::json!({
-        "notes": notes,
-        "totalCount": total_count,
-        "hasMore": has_more,
-    })
-}
-
-pub(crate) fn delete_note(filepath: &str, filename: &str) -> Value {
-    let _ = std::fs::remove_file(filepath);
-    serde_json::json!({
-        "success": true,
-        "filename": filename,
-    })
-}
-
-fn parse_note(filename: &str, filepath: &str, content: &str) -> Value {
-    let mut created_at = String::new();
-    let mut duration_seconds: Option<f64> = None;
-    let mut language: Option<String> = None;
-    let mut transcript = String::new();
-
-    if let Some(stripped) = content.strip_prefix("---\n")
-        && let Some(end) = stripped.find("---\n")
-    {
-        let frontmatter = &stripped[..end];
-        for line in frontmatter.lines() {
-            if let Some(value) = line.strip_prefix("created: ") {
-                created_at = value.trim().to_string();
-            } else if let Some(value) = line.strip_prefix("duration: ") {
-                duration_seconds = match value.trim().parse() {
-                    Ok(d) => Some(d),
-                    Err(e) => {
-                        tracing::warn!(
-                            filename = %filename,
-                            raw = %value.trim(),
-                            error = %e,
-                            "voice_notes: corrupt `duration:` frontmatter field"
-                        );
-                        None
-                    }
-                };
-            } else if let Some(value) = line.strip_prefix("language: ") {
-                language = Some(value.trim().to_string());
-            }
-        }
-        transcript = content[4 + end + 4..].trim().to_string();
-    }
-
-    let preview = if transcript.len() > 100 {
-        transcript[..100].to_string()
-    } else {
-        transcript.clone()
-    };
-
-    serde_json::json!({
+pub(crate) fn note_projection_from_payload(payload: &Value) -> Option<Value> {
+    let filename = payload.get("filename")?.as_str()?;
+    let filepath = payload.get("filepath")?.as_str()?;
+    let transcript = payload
+        .get("body")
+        .or_else(|| payload.get("transcript"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let preview = transcript
+        .char_indices()
+        .nth(100)
+        .map(|(idx, _)| transcript[..idx].to_owned())
+        .unwrap_or_else(|| transcript.to_owned());
+    Some(json!({
         "filename": filename,
         "filepath": filepath,
-        "createdAt": created_at,
-        "durationSeconds": duration_seconds,
-        "language": language,
+        "createdAt": payload.get("createdAt").and_then(Value::as_str).unwrap_or_default(),
+        "durationSeconds": payload.get("durationSeconds").cloned().unwrap_or(Value::Null),
+        "language": payload.get("language").cloned().unwrap_or(Value::Null),
         "preview": preview,
         "transcript": transcript,
-    })
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn list_notes_ignores_non_matching_files() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("ignore.txt"), "x").unwrap();
-
-        let result = list_notes(dir.path().to_str().unwrap(), 10, 0);
-
-        assert!(result["notes"].as_array().unwrap().is_empty());
-    }
 
     #[test]
     fn notes_dir_points_to_voice_notes() {
@@ -141,32 +49,17 @@ mod tests {
     }
 
     #[test]
-    fn list_notes_includes_all_md_files() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("2026-01-01-000000-000-voice-note.md"),
-            "---\ntype: voice-note\ncreated: 2026-01-01\nduration: 1.0\nlanguage: en\n---\n\nHello",
-        )
-        .unwrap();
-        std::fs::write(dir.path().join("another-note.md"), "Also a voice note").unwrap();
+    fn projection_truncates_preview_on_character_boundary() {
+        let payload = json!({
+            "filename": "note.md",
+            "filepath": "/tmp/note.md",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "durationSeconds": 1.0,
+            "language": "en",
+            "body": "é".repeat(120),
+        });
 
-        let result = list_notes(dir.path().to_str().unwrap(), 10, 0);
-        let notes = result["notes"].as_array().unwrap();
-        assert_eq!(
-            notes.len(),
-            2,
-            "all .md files in voice-notes dir should be listed"
-        );
-    }
-
-    #[test]
-    fn list_notes_skips_hidden_files() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("visible.md"), "note").unwrap();
-        std::fs::write(dir.path().join(".hidden.md"), "hidden").unwrap();
-
-        let result = list_notes(dir.path().to_str().unwrap(), 10, 0);
-        let notes = result["notes"].as_array().unwrap();
-        assert_eq!(notes.len(), 1);
+        let note = note_projection_from_payload(&payload).unwrap();
+        assert_eq!(note["preview"].as_str().unwrap().chars().count(), 100);
     }
 }

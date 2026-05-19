@@ -12,7 +12,10 @@
 //! validates/refreshes/expires generated versions, and routes submitted actions
 //! back through canonical capability invocations. Stored-surface/action
 //! validation is owned by the UI primitive's validation submodule so authoring
-//! and execution checks do not blur together. `module::*` registers,
+//! and execution checks do not blur together. Operator action summaries and
+//! consequence projections are shaped by the local `action_summary` helper so
+//! control, module, trust-audit, and generated UI surfaces do not drift.
+//! `module::*` registers,
 //! configures, activates, disables, upgrades, rolls back, and quarantines
 //! worker packages as typed resources under derived grants, with trust-root
 //! renewal, key-rotation evidence, expiry, explicit revocation enforcement,
@@ -70,6 +73,7 @@ use super::types::{
     RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
 };
 
+pub(crate) mod action_summary;
 pub(crate) mod approval;
 pub(crate) mod catalog;
 pub(crate) mod control;

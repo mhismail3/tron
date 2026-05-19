@@ -33,6 +33,7 @@ use crate::engine::discovery::{ActorContext, ActorKind, FunctionQuery};
 use crate::engine::grants::{DeriveGrant, EngineGrant, EngineGrantLifecycle, ListGrants};
 use crate::engine::ids::{AuthorityGrantId, FunctionId, InvocationId, WorkerId};
 use crate::engine::invocation::InProcessFunctionHandler;
+use crate::engine::primitives::action_summary::operator_action_summary;
 use crate::engine::resources::{
     ACTIVATION_RECORD_KIND, CreateResource, EngineResource, EngineResourceInspection,
     EngineResourceVersion, LinkResources, ListResources, MODULE_CONFIG_KIND, UpdateResource,
@@ -3386,68 +3387,86 @@ fn trust_warnings_for_status(status: &str) -> Vec<Value> {
 
 fn module_actions_for_trust_target(target_type: &str, target_resource_id: &str) -> Vec<Value> {
     let mut actions = vec![
-        json!({
-            "functionId": INSPECT_TRUST_FUNCTION,
-            "targetType": target_type,
-            "targetField": "targetResourceId",
-            "target": target_resource_id,
-            "requiredRisk": "low",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": SIMULATE_TRUST_CHANGE_FUNCTION,
-            "targetType": target_type,
-            "targetField": "targetResourceId",
-            "target": target_resource_id,
-            "requiredRisk": "low",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": RECORD_TRUST_REVIEW_FUNCTION,
-            "targetType": target_type,
-            "targetField": "targetResourceId",
-            "target": target_resource_id,
-            "requiredRisk": "medium",
-            "approvalRequired": false,
-        }),
+        module_action(
+            INSPECT_TRUST_FUNCTION,
+            target_type,
+            "targetResourceId",
+            json!(target_resource_id),
+            "low",
+            false,
+        ),
+        module_action(
+            SIMULATE_TRUST_CHANGE_FUNCTION,
+            target_type,
+            "targetResourceId",
+            json!(target_resource_id),
+            "low",
+            false,
+        ),
+        module_action(
+            RECORD_TRUST_REVIEW_FUNCTION,
+            target_type,
+            "targetResourceId",
+            json!(target_resource_id),
+            "medium",
+            false,
+        ),
     ];
     if matches!(target_type, "trust_root" | "decision") {
         actions.extend([
-            json!({
-                "functionId": RENEW_TRUST_ROOT_FUNCTION,
-                "targetType": "trust_root",
-                "targetField": "trustRootDecisionResourceId",
-                "target": target_resource_id,
-                "requiredRisk": "high",
-                "approvalRequired": true,
-            }),
-            json!({
-                "functionId": ROTATE_SIGNATURE_KEY_FUNCTION,
-                "targetType": "trust_root",
-                "targetField": "oldTrustRootDecisionResourceId",
-                "target": target_resource_id,
-                "requiredRisk": "high",
-                "approvalRequired": true,
-            }),
-            json!({
-                "functionId": EXPIRE_TRUST_DECISION_FUNCTION,
-                "targetType": "decision",
-                "targetField": "decisionResourceId",
-                "target": target_resource_id,
-                "requiredRisk": "high",
-                "approvalRequired": true,
-            }),
-            json!({
-                "functionId": ENFORCE_REVOCATION_FUNCTION,
-                "targetType": "decision",
-                "targetField": "trustDecisionResourceId",
-                "target": target_resource_id,
-                "requiredRisk": "high",
-                "approvalRequired": true,
-            }),
+            module_action(
+                RENEW_TRUST_ROOT_FUNCTION,
+                "trust_root",
+                "trustRootDecisionResourceId",
+                json!(target_resource_id),
+                "high",
+                true,
+            ),
+            module_action(
+                ROTATE_SIGNATURE_KEY_FUNCTION,
+                "trust_root",
+                "oldTrustRootDecisionResourceId",
+                json!(target_resource_id),
+                "high",
+                true,
+            ),
+            module_action(
+                EXPIRE_TRUST_DECISION_FUNCTION,
+                "decision",
+                "decisionResourceId",
+                json!(target_resource_id),
+                "high",
+                true,
+            ),
+            module_action(
+                ENFORCE_REVOCATION_FUNCTION,
+                "decision",
+                "trustDecisionResourceId",
+                json!(target_resource_id),
+                "high",
+                true,
+            ),
         ]);
     }
     actions
+}
+
+fn module_action(
+    function_id: &str,
+    target_type: &str,
+    target_field: &str,
+    target: Value,
+    risk: &str,
+    approval_required: bool,
+) -> Value {
+    operator_action_summary(
+        function_id,
+        target_type,
+        target_field,
+        target,
+        risk,
+        approval_required,
+    )
 }
 
 fn ensure_grant_ceiling_within_ceiling(
@@ -3552,112 +3571,112 @@ fn link_if_possible(
 }
 
 fn module_actions_for_package(package_id: Option<&str>) -> Vec<Value> {
-    let target = package_id.map(package_resource_id);
+    let target = package_id.map(package_resource_id).map(Value::String);
     vec![
-        json!({
-            "functionId": VERIFY_SOURCE_FUNCTION,
-            "targetType": "package",
-            "targetField": "packageResourceId",
-            "target": target,
-            "requiredRisk": "medium",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": APPROVE_SOURCE_FUNCTION,
-            "targetType": "package",
-            "targetField": "packageResourceId",
-            "target": target,
-            "requiredRisk": "high",
-            "approvalRequired": true,
-        }),
-        json!({
-            "functionId": REVOKE_SOURCE_APPROVAL_FUNCTION,
-            "targetType": "package",
-            "targetField": "decisionResourceId",
-            "target": Value::Null,
-            "requiredRisk": "high",
-            "approvalRequired": true,
-        }),
-        json!({
-            "functionId": POLICY_DECIDE_FUNCTION,
-            "targetType": "package",
-            "targetField": "packageResourceId",
-            "target": target,
-            "requiredRisk": "low",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": INSPECT_TRUST_FUNCTION,
-            "targetType": "package",
-            "targetField": "targetResourceId",
-            "target": target,
-            "requiredRisk": "low",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": SIMULATE_TRUST_CHANGE_FUNCTION,
-            "targetType": "package",
-            "targetField": "targetResourceId",
-            "target": target,
-            "requiredRisk": "low",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": RECORD_TRUST_REVIEW_FUNCTION,
-            "targetType": "package",
-            "targetField": "targetResourceId",
-            "target": target,
-            "requiredRisk": "medium",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": SCHEDULE_TRUST_AUDIT_FUNCTION,
-            "targetType": "package",
-            "targetField": "selectors",
-            "target": target,
-            "requiredRisk": "medium",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": RUN_SCHEDULED_TRUST_AUDIT_FUNCTION,
-            "targetType": "decision",
-            "targetField": "scheduleDecisionResourceId",
-            "target": Value::Null,
-            "requiredRisk": "medium",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": ENFORCE_REVOCATION_FUNCTION,
-            "targetType": "decision",
-            "targetField": "trustDecisionResourceId",
-            "target": Value::Null,
-            "requiredRisk": "high",
-            "approvalRequired": true,
-        }),
-        json!({
-            "functionId": RUN_CONFORMANCE_FUNCTION,
-            "targetType": "package",
-            "targetField": "resourceId",
-            "target": target,
-            "requiredRisk": "medium",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": CONFIGURE_FUNCTION,
-            "targetType": "package",
-            "targetField": "packageResourceId",
-            "target": target,
-            "requiredRisk": "medium",
-            "approvalRequired": false,
-        }),
-        json!({
-            "functionId": ACTIVATE_FUNCTION,
-            "targetType": "package",
-            "targetField": "packageResourceId",
-            "target": target,
-            "requiredRisk": "high",
-            "approvalRequired": true,
-        }),
+        module_action(
+            VERIFY_SOURCE_FUNCTION,
+            "package",
+            "packageResourceId",
+            target.clone().unwrap_or(Value::Null),
+            "medium",
+            false,
+        ),
+        module_action(
+            APPROVE_SOURCE_FUNCTION,
+            "package",
+            "packageResourceId",
+            target.clone().unwrap_or(Value::Null),
+            "high",
+            true,
+        ),
+        module_action(
+            REVOKE_SOURCE_APPROVAL_FUNCTION,
+            "package",
+            "decisionResourceId",
+            Value::Null,
+            "high",
+            true,
+        ),
+        module_action(
+            POLICY_DECIDE_FUNCTION,
+            "package",
+            "packageResourceId",
+            target.clone().unwrap_or(Value::Null),
+            "low",
+            false,
+        ),
+        module_action(
+            INSPECT_TRUST_FUNCTION,
+            "package",
+            "targetResourceId",
+            target.clone().unwrap_or(Value::Null),
+            "low",
+            false,
+        ),
+        module_action(
+            SIMULATE_TRUST_CHANGE_FUNCTION,
+            "package",
+            "targetResourceId",
+            target.clone().unwrap_or(Value::Null),
+            "low",
+            false,
+        ),
+        module_action(
+            RECORD_TRUST_REVIEW_FUNCTION,
+            "package",
+            "targetResourceId",
+            target.clone().unwrap_or(Value::Null),
+            "medium",
+            false,
+        ),
+        module_action(
+            SCHEDULE_TRUST_AUDIT_FUNCTION,
+            "package",
+            "selectors",
+            target.clone().unwrap_or(Value::Null),
+            "medium",
+            false,
+        ),
+        module_action(
+            RUN_SCHEDULED_TRUST_AUDIT_FUNCTION,
+            "decision",
+            "scheduleDecisionResourceId",
+            Value::Null,
+            "medium",
+            false,
+        ),
+        module_action(
+            ENFORCE_REVOCATION_FUNCTION,
+            "decision",
+            "trustDecisionResourceId",
+            Value::Null,
+            "high",
+            true,
+        ),
+        module_action(
+            RUN_CONFORMANCE_FUNCTION,
+            "package",
+            "resourceId",
+            target.clone().unwrap_or(Value::Null),
+            "medium",
+            false,
+        ),
+        module_action(
+            CONFIGURE_FUNCTION,
+            "package",
+            "packageResourceId",
+            target.clone().unwrap_or(Value::Null),
+            "medium",
+            false,
+        ),
+        module_action(
+            ACTIVATE_FUNCTION,
+            "package",
+            "packageResourceId",
+            target.unwrap_or(Value::Null),
+            "high",
+            true,
+        ),
     ]
 }
 

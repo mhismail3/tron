@@ -2993,6 +2993,80 @@ fn main_background_work_is_registered_with_shutdown() {
     }
 }
 
+#[test]
+fn operator_consequence_and_voice_note_resource_boundaries_stay_enforced() {
+    let root = crate_root();
+    let primitives_mod = std::fs::read_to_string(root.join("src/engine/primitives/mod.rs"))
+        .expect("read primitives mod");
+    assert!(
+        primitives_mod.contains("mod action_summary"),
+        "operator action summaries must have one primitive-owned helper boundary"
+    );
+
+    for rel in [
+        "src/engine/primitives/control.rs",
+        "src/engine/primitives/module.rs",
+        "src/engine/primitives/module/trust_audit.rs",
+        "src/engine/primitives/ui.rs",
+    ] {
+        let content = std::fs::read_to_string(root.join(rel)).unwrap_or_else(|error| {
+            panic!("failed to read {rel}: {error}");
+        });
+        assert!(
+            content.contains("action_summary"),
+            "{rel} must use the canonical action-summary/consequence helper"
+        );
+    }
+
+    let voice_contract = std::fs::read_to_string(root.join("src/domains/voice_notes/contract.rs"))
+        .expect("read voice notes contract");
+    assert!(
+        voice_contract.contains("DurableOutputContract::resource_backed")
+            && voice_contract.contains("materialized_file")
+            && voice_contract.contains("artifact")
+            && voice_contract.contains("\"resourceRefs\""),
+        "voice_notes::save/delete must stay resource-backed and expose resourceRefs"
+    );
+    for rel in [
+        "src/domains/voice_notes/mod.rs",
+        "src/domains/voice_notes/service.rs",
+    ] {
+        let content = std::fs::read_to_string(root.join(rel)).unwrap_or_else(|error| {
+            panic!("failed to read {rel}: {error}");
+        });
+        for forbidden in [
+            "std::fs::write",
+            "std::fs::read_dir",
+            "std::fs::remove_file",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{rel} must not use {forbidden} as durable voice-note truth"
+            );
+        }
+    }
+
+    let engine_tests =
+        std::fs::read_to_string(root.join("src/engine/tests.rs")).expect("read engine tests");
+    assert!(
+        engine_tests.contains("mod domain_outputs;"),
+        "voice-note resource-backed domain output tests must stay in the focused boundary"
+    );
+    let domain_output_tests =
+        std::fs::read_to_string(root.join("src/engine/tests/domain_outputs.rs"))
+            .expect("read domain output tests");
+    for required in [
+        "voice_notes_save_list_and_delete_are_resource_backed",
+        "voice_notes_save_idempotency_does_not_duplicate_resources",
+        "voice_notes_invalid_audio_fails_without_accepted_resource_refs",
+    ] {
+        assert!(
+            domain_output_tests.contains(required),
+            "domain output hardening test `{required}` must remain present"
+        );
+    }
+}
+
 fn rust_files_under(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     visit_rust_files(root, &mut files);

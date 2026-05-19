@@ -15,10 +15,10 @@ runtime caller, thin-client purpose, or test/support role.
 | `engine` fabric | substrate | 38 Rust files under `packages/agent/src/engine`; primitive workers register catalog, control, grant, resource, storage, UI, worker, queue, stream, state, approval, observability | Keep; consolidate projection logic into owning primitives |
 | `engine/primitives/control.rs` | substrate thin projection | public `control::snapshot` and `control::inspect`; static gate forbids `control::act` | Keep; owns control projection shaping and action summaries |
 | `engine/primitives/runtime.rs` | runtime dispatch | host-dispatched primitive boundary and host trait | Keep; should dispatch to primitive owners, not accumulate projection code |
-| `engine/resources.rs` | substrate resource kernel | built-in resource definitions, validation, resource/version/link stores, UI-surface validation | Keep for now; candidate for later file split after behavior is stable |
+| `engine/resources/` | substrate resource kernel | focused modules for built-in resource definitions, validation, resource/version/link stores, and UI-surface validation | Keep; resource ownership split is complete |
 | Domain registration | capability modules | 36 domain contract files and 32 startup worker-module registrations in `domains/registration.rs` | Keep as current capability surface until each domain is individually proven unused or duplicated |
 | `cron` server domain and iOS DTO/client | capability module | `cron::` contracts, `CronClient`, DTO tests | Keep as reusable capability module; remove fixed iOS dashboard shell |
-| `voice_notes` server domain and recording components | capability module / chat affordance | `voice_notes::` contracts and chat recording sheet/button still have callers | Keep; remove fixed iOS list shell |
+| `voice_notes` server domain and recording components | resource-backed capability module / chat affordance | `voice_notes::save/list/delete` contracts and chat recording sheet/button still have callers; durable notes are `artifact`/`materialized_file` resources | Keep; no file-backed list/delete truth |
 | iOS chat/session surfaces | thin shell | `ContentView`, `SessionSidebar`, `ChatView`, onboarding/settings pairing paths | Keep as thin chat harness until replaced by generated surfaces |
 | iOS Engine Console | thin control client | `NavigationMode.engine`, `EngineConsoleState`, `control::*` DTOs, generated UI renderer | Keep; no local policy truth |
 | Fixed iOS Automations dashboard | remove candidate | only reached through `NavigationMode.automations`; duplicates future control/generated UI surface for cron | Remove from top-level navigation and delete fixed views |
@@ -239,6 +239,32 @@ Removal/consolidation proof from this pass:
 - The only production behavior change is stricter manifest validation for
   duplicate declared function ids, which fails before persistence.
 
+## 2026-05-19 Operator Consequence And Voice-Notes Resource Conversion Pass
+
+This pass closed one deferred durable-output domain and added consequence
+projections without adding a control-plane state model.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Operator action summaries | `engine/primitives/action_summary.rs` is used by control projections, module package/trust actions, trust-audit status, and generated UI action authoring | Keep one helper so action state, risk, approval, target revision, supporting refs, and recommended canonical action do not drift by surface |
+| Generated UI stored actions | `generated_ui` tests now assert stored actions carry consequence projections and still target canonical capabilities only | Keep as projection data; `ui::submit_action` remains the only generated-UI action gateway |
+| Module/package/trust projections | Module activation and trust-audit tests assert `module::inspect_package` and `module::trust_audit_status` expose consequence-bearing available actions | Keep read-only projection shape; do not add `control::act` or action multiplexers |
+| `voice_notes::save` | `engine/tests/domain_outputs.rs` proves save returns `artifact` and `materialized_file` `resourceRefs`, duplicate idempotency does not duplicate resources, and invalid audio records no accepted produced refs | Convert durable note output to resources; Markdown file path is materialized location only |
+| `voice_notes::list` | The same tests create an unrelated Markdown file and prove list returns only resource-backed notes | Keep old unregistered files ignored; no compatibility reader or migration path |
+| `voice_notes::delete` | Tests prove delete discards resource lifecycle and does not depend on physical file deletion | Keep byte cleanup deferred to resource retention/storage policy |
+| Static gates | `operator_consequence_and_voice_note_resource_boundaries_stay_enforced` requires the action-summary helper, resource-backed voice-note contracts, focused domain-output tests, and no direct `std::fs::write/read_dir/remove_file` durable path in the voice-notes domain | Keep as absence proof against reintroducing file-backed truth |
+
+Deferred domain-output proof map:
+
+| Domain/surface | Current evidence | Decision |
+|----------------|------------------|----------|
+| `notifications` | `notifications::send/list/mark_read/mark_all_read` still drive APNs, notification inbox, and iOS notification views | Defer; convert inbox state to resources only after delivery semantics and APNs operator UX are specified |
+| `prompt_library` | Server store plus iOS input-bar/history/snippet callers remain active | Defer; likely convert snippets/history to artifacts or a resource-backed capability before removal |
+| AgentControl/source-change/subagent sheets | iOS chat sheets and event-state dependencies remain active | Defer; replace with resource lineage/control/generated UI before deleting fixed sheets |
+| `browser`, `display`, `device` | Server domains still register workers and support local device/display flows; iOS display stream DTOs remain active | Keep as capability modules until each output path is separately proven resource-backed or ephemeral |
+| `transcription` | Server domain remains the reusable audio-to-text capability used by voice notes; model cache/sidecar state is runtime infrastructure | Keep; audit retained transcript outputs separately if direct transcription results become durable |
+| `voice_notes` | Now resource-backed through `artifact` and `materialized_file`; list/delete use resource truth | Converted; remove any future file-scan compatibility proposals |
+
 ## Deferred High-Scrutiny Areas
 
 These areas are not proven removable in this checkpoint and need separate
@@ -252,12 +278,13 @@ call-graph/test-backed passes:
 - `AgentControl`, `SourceChanges`, and subagent sheets: still have chat-sheet
   callers and event-state dependencies. Replace with resource lineage/control
   projections before deletion.
-- `browser`, `display`, `device`, `transcription`, and `voice_notes` server
-  domains: still register capability workers and may support chat or local device
-  flows. Demote or remove only with route, DTO, and event-plugin proof.
-- `engine/resources.rs` and the remaining `engine/tests.rs` body: large files
-  that need further mechanical splitting, but no behavior should move until the
-  current cleanup tests pass.
+- `browser`, `display`, `device`, and `transcription` server domains: still
+  register capability workers and may support chat or local device flows.
+  Demote or remove only with route, DTO, and event-plugin proof. `voice_notes`
+  is no longer in this deferred set because its durable note output is now
+  resource-backed.
+- The remaining broad `engine/tests.rs` body: continue moving cases into
+  focused proof modules only when the behavior boundary is stable.
 
 ## Static Gates
 

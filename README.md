@@ -360,6 +360,7 @@ Important parity anchors are:
 | shell/process | `process::run` |
 | web search/fetch | `web::search`, `web::fetch` |
 | app notification | `notifications::send` |
+| voice note save/list/delete | `voice_notes::save`, `voice_notes::list`, `voice_notes::delete` |
 | capability discovery/execution | `capability::search`, `capability::inspect`, `capability::execute` |
 
 `process::run` and `notifications::send` both have direct, low-overhead paths
@@ -371,6 +372,9 @@ are materialized back through resource refs. It defaults to the active session
 worktree/workspace when `cwd` is omitted and accepts bounded timeout fields in
 milliseconds. `notifications::send` sends through the first-party notification
 delegate with an idempotency key and normal audit/event records.
+`voice_notes::save` transcribes audio into resource-backed `artifact` and
+`materialized_file` outputs; `voice_notes::list` and `voice_notes::delete` read
+and discard resource state rather than treating Markdown files as source truth.
 
 Capability identity is projected from the live catalog:
 

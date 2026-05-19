@@ -51,7 +51,7 @@ Collapsed substrate rules:
 | Test/proof strength | 12 | Static gates, focused tests, integration tests, absence tests, and failure-mode tests |
 | Docs/operations | 7 | README, architecture docs, manual QA, and ledger match current behavior |
 
-Current score: **95/100**.
+Current score: **97/100**.
 
 ## Axis Scores
 
@@ -121,8 +121,8 @@ Blockers:
 
 Next action:
 
-- Add deeper projection/operator consequence tests without creating client-side
-  policy or new control-plane state.
+- Keep protecting `authority_scopes` as audit labels while deferred domain
+  output audits continue.
 
 ### Resource model — 12/12
 
@@ -139,12 +139,16 @@ Evidence:
   non-current damaged versions, unsupported links, materialized-file output
   refs, malformed/wrong-kind `resourceRefs`, failed output-contract persistence,
   and the absence of the retired output-audit trace projection.
+- `voice_notes::save` now returns resource-backed `artifact` and
+  `materialized_file` refs, while `voice_notes::list` and
+  `voice_notes::delete` use resource truth instead of scanning or deleting
+  Markdown files as source truth.
 
 Blockers:
 
-- No current blocker for the converted resource-backed substrate. Older domain
-  and product-shell audits remain cleanup work, not a competing durable output
-  model.
+- No current blocker for the converted resource-backed substrate. Remaining
+  deferred domains need proof maps, but voice notes no longer carries a
+  competing file-backed durable-output model.
 
 Next action:
 
@@ -186,7 +190,7 @@ Next action:
 - Add targeted interruption/timeout tests only after the worker lifecycle
   protocol has explicit timeout fixtures.
 
-### Operator readiness — 10/12
+### Operator readiness — 12/12
 
 Evidence:
 
@@ -203,17 +207,24 @@ Evidence:
 - `module::inspect_package` now reports activation cleanup/recovery status,
   leaked grant refs, leaked worker refs, latest recovery evidence refs, and
   canonical next actions when activation cleanup is incomplete.
+- Control, module, trust-audit status, and generated UI surfaces now use one
+  canonical action-summary helper that adds bounded consequence projections:
+  target function, risk, approval requirement, action state, stale/block
+  placeholders, supporting refs, and recommended canonical action.
+- Focused generated UI and module tests prove stored UI actions and module
+  available actions carry consequence projections without adding client-side
+  policy or a control mutation path.
 
 Blockers:
 
-- Operator surfaces do not yet fully explain exact next-safe-action
-  consequences, retention cleanup execution, or all stale-action failure causes
-  across the iOS Engine Console.
+- No current server-side blocker for operator projections. iOS Engine Console
+  may later render the new consequence fields more explicitly, but the server
+  remains the policy/action source of truth.
 
 Next action:
 
-- Carry the new runtime diagnostics into any future Engine Console refinements
-  without adding client-side policy.
+- Audit any remaining fixed iOS product-shell surfaces against generated UI and
+  control projections before adding new client behavior.
 
 ### Code comprehensibility — 12/12
 
@@ -278,6 +289,12 @@ Evidence:
   prove malformed/adversarial inputs fail in the owning subsystem before
   handler execution, package persistence, child invocation, or produced-ref
   bookkeeping.
+- `engine/tests/domain_outputs.rs` now proves voice-note save/list/delete are
+  resource-backed, idempotent, and fail invalid audio without accepted produced
+  refs.
+- `operator_consequence_and_voice_note_resource_boundaries_stay_enforced`
+  statically protects the action-summary helper boundary and prevents direct
+  file write/read/delete APIs from becoming voice-note durable truth again.
 
 Blockers:
 
@@ -308,6 +325,9 @@ Evidence:
   soak evidence are reflected in the cleanup audit and next-phase plan.
 - The resource-kernel split and generated-UI validation boundary are reflected
   in the cleanup audit and next-phase plan.
+- The voice-notes resource conversion, operator consequence projections, and
+  deferred domain-output proof map are reflected in README, cleanup audit, and
+  the next-phase plan.
 
 Blockers:
 

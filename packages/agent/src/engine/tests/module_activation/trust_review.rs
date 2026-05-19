@@ -550,6 +550,17 @@ async fn module_trust_audit_status_reports_queue_missed_and_retention_without_mu
     assert_eq!(status_value["schedule"]["status"], "active");
     assert!(status_value["due"]["currentDueBucket"].is_string());
     assert!(
+        status_value["availableActions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(
+                |action| action["functionId"] == "module::trust_audit_status"
+                    && action["consequence"]["recommendedCanonicalAction"]
+                        == "module::trust_audit_status"
+            )
+    );
+    assert!(
         !status_value["due"]["missedBuckets"]
             .as_array()
             .unwrap()

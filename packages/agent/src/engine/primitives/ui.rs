@@ -15,6 +15,7 @@ use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+use super::action_summary::with_stored_action_consequence;
 use super::{
     PrimitiveFunctionRegistration, UI_WORKER_ID, host_dispatched_registration, optional_string,
     primitive_function, required_str, required_string_owned,
@@ -1843,7 +1844,10 @@ fn generated_actions(
             }
         }
     }
-    Ok(actions)
+    Ok(actions
+        .into_iter()
+        .map(with_stored_action_consequence)
+        .collect())
 }
 
 fn actor_context(invocation: &crate::engine::Invocation) -> ActorContext {

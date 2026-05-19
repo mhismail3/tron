@@ -1246,6 +1246,14 @@ async fn module_activate_local_process_invokes_worker_spawn_and_records_integrit
     assert_eq!(diagnostics["workerStatus"], "registered");
     assert_eq!(diagnostics["registeredCapabilityStatus"], "valid");
     assert_eq!(diagnostics["healthStatus"], "healthy");
+    assert!(
+        inspection.value.as_ref().unwrap()["availableActions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action["functionId"] == "module::verify_source"
+                && action["consequence"]["recommendedCanonicalAction"] == "module::verify_source")
+    );
 
     let replayed = handle
         .invoke(host_invocation(
@@ -1843,7 +1851,9 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|action| action["targetFunctionId"] == "ui::refresh_surface")
+                .any(|action| action["targetFunctionId"] == "ui::refresh_surface"
+                    && action["consequence"]["recommendedCanonicalAction"]
+                        == "ui::refresh_surface")
         );
         if target_type == "package" {
             for function_id in [
@@ -1858,7 +1868,8 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                         .as_array()
                         .unwrap()
                         .iter()
-                        .any(|action| action["targetFunctionId"] == function_id),
+                        .any(|action| action["targetFunctionId"] == function_id
+                            && action["consequence"]["targetFunctionId"] == function_id),
                     "package surface must expose {function_id}"
                 );
             }

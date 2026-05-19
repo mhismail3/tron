@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use chrono::{Datelike, Duration as ChronoDuration, TimeZone, Timelike};
 
 use super::*;
+use crate::engine::primitives::action_summary::operator_action_summary;
 use crate::engine::queue::EngineQueueItem;
 
 pub(crate) const SCHEDULE_TRUST_AUDIT_FUNCTION: &str = "module::schedule_trust_audit";
@@ -1024,14 +1025,52 @@ fn retention_warnings(
 
 fn trust_audit_status_actions(schedule: &TrustAuditSchedule) -> Vec<Value> {
     let mut actions = vec![
-        json!({"functionId": TRUST_AUDIT_STATUS_FUNCTION, "targetResourceId": schedule.resource_id}),
-        json!({"functionId": RECORD_TRUST_AUDIT_RETENTION_FUNCTION, "targetResourceId": schedule.resource_id}),
+        trust_audit_action(
+            TRUST_AUDIT_STATUS_FUNCTION,
+            &schedule.resource_id,
+            "low",
+            false,
+        ),
+        trust_audit_action(
+            RECORD_TRUST_AUDIT_RETENTION_FUNCTION,
+            &schedule.resource_id,
+            "medium",
+            false,
+        ),
     ];
     if schedule.lifecycle != "archived" && schedule.status == "active" {
-        actions.push(json!({"functionId": RUN_SCHEDULED_TRUST_AUDIT_FUNCTION, "targetResourceId": schedule.resource_id}));
-        actions.push(json!({"functionId": EXPIRE_TRUST_DECISION_FUNCTION, "targetResourceId": schedule.resource_id}));
+        actions.push(trust_audit_action(
+            RUN_SCHEDULED_TRUST_AUDIT_FUNCTION,
+            &schedule.resource_id,
+            "medium",
+            false,
+        ));
+        actions.push(trust_audit_action(
+            EXPIRE_TRUST_DECISION_FUNCTION,
+            &schedule.resource_id,
+            "high",
+            true,
+        ));
     }
     actions
+}
+
+fn trust_audit_action(
+    function_id: &str,
+    schedule_resource_id: &str,
+    risk: &str,
+    approval_required: bool,
+) -> Value {
+    let mut action = operator_action_summary(
+        function_id,
+        "decision",
+        "scheduleDecisionResourceId",
+        json!(schedule_resource_id),
+        risk,
+        approval_required,
+    );
+    action["targetResourceId"] = json!(schedule_resource_id);
+    action
 }
 
 pub(super) fn trust_audit_status_schema() -> Value {
