@@ -2739,6 +2739,8 @@ fn ui_structural_identifier_key(key: &str) -> bool {
             | "targetVersionId"
             | "decisionResourceId"
             | "decisionVersionId"
+            | "scheduleDecisionResourceId"
+            | "scheduleDecisionVersionId"
             | "expectedDecisionVersionId"
             | "trustDecisionResourceId"
             | "trustRootDecisionResourceId"

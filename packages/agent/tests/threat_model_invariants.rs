@@ -1112,6 +1112,8 @@ fn module_package_activation_gates_stay_on() {
         "module::rotate_signature_key",
         "module::expire_trust_decision",
         "module::enforce_revocation",
+        "module::trust_audit_status",
+        "module::record_trust_audit_retention",
         "DurableOutputContract::resource_backed",
         "ed25519",
         "trust-root:",
@@ -1137,6 +1139,7 @@ fn module_package_activation_gates_stay_on() {
         "trust_review",
         "module_trust_audit_schedule",
         "scheduled_trust_audit",
+        "trust_audit_retention_review",
         "packageDigest",
         "secret_ref",
     ] {
@@ -1175,11 +1178,17 @@ fn module_package_activation_gates_stay_on() {
             && module_trust_review.contains("fn resolve_trust_review")
             && module_trust_review.contains("fn recommended_actions_for_trust_review")
             && module_trust_audit.contains("fn schedule_trust_audit")
+            && module_trust_audit.contains("fn trust_audit_status")
             && module_trust_audit.contains("fn run_scheduled_trust_audit")
+            && module_trust_audit.contains("fn record_trust_audit_retention")
             && module_trust_audit.contains("parse_trust_audit_wall_clock_time")
+            && module_trust_audit.contains("fn missed_buckets")
+            && module_trust_audit.contains("trust_audit_current_due_bucket")
             && !module.contains("fn resolve_trust_review")
             && !module.contains("fn schedule_trust_audit")
-            && !module.contains("fn run_scheduled_trust_audit"),
+            && !module.contains("fn trust_audit_status")
+            && !module.contains("fn run_scheduled_trust_audit")
+            && !module.contains("fn record_trust_audit_retention"),
         "trust review/audit implementation must stay in focused module primitive submodules"
     );
 
@@ -1226,8 +1235,10 @@ fn module_package_activation_gates_stay_on() {
             && control.contains("module::enforce_revocation")
             && control.contains("module::simulate_trust_change")
             && control.contains("module::record_trust_review")
+            && control.contains("module::trust_audit_status")
             && control.contains("module::schedule_trust_audit")
             && control.contains("module::run_scheduled_trust_audit")
+            && control.contains("module::record_trust_audit_retention")
             && !control.contains("module::act\""),
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
@@ -1296,8 +1307,10 @@ fn module_package_activation_gates_stay_on() {
             && ui.contains("module::enforce_revocation")
             && ui.contains("module::simulate_trust_change")
             && ui.contains("module::record_trust_review")
+            && ui.contains("module::trust_audit_status")
             && ui.contains("module::schedule_trust_audit")
             && ui.contains("module::run_scheduled_trust_audit")
+            && ui.contains("module::record_trust_audit_retention")
             && ui.contains("module::run_conformance"),
         "generated UI authoring must support module package targets through canonical actions"
     );
@@ -1309,9 +1322,11 @@ fn module_package_activation_gates_stay_on() {
         "generated UI must derive trust-review operation schemas from the canonical module source"
     );
     assert!(
-        host.contains("primitives::module::parse_trust_audit_wall_clock_time")
-            && host.contains("primitives::module::trust_audit_day_of_week_number"),
-        "host queue projection must use module-owned trust audit schedule parsing"
+        host.contains("primitives::module::trust_audit_current_due_bucket")
+            && host.contains("primitives::module::trust_audit_evidence_matches_due_bucket")
+            && !host.contains("parse_trust_audit_wall_clock_time")
+            && !host.contains("trust_audit_day_of_week_number"),
+        "host queue projection must use module-owned trust audit due-bucket and completed-evidence helpers"
     );
 
     let capability_client_path = repo_root

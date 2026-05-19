@@ -91,6 +91,9 @@ recent modular-engine additions lives in
 [`docs/modular-engine-cleanup-audit.md`](docs/modular-engine-cleanup-audit.md).
 The measurable maturity target and current score live in
 [`docs/modular-engine-maturity-scorecard.md`](docs/modular-engine-maturity-scorecard.md).
+The current operator checklist for local package trust, audits, revocation, and
+cleanup lives in
+[`docs/module-package-trust-operations.md`](docs/module-package-trust-operations.md).
 
 ## Collapsed Modular Engine
 
@@ -112,9 +115,10 @@ durable-output paths, a fixed `tron.ui.catalog.core.v1` generated UI catalog,
 server-authored `ui::*` surface/action capabilities, `module::*` package
 lifecycle, source trust, trust-root renewal, key-rotation evidence, revocation
 enforcement, trust-change simulation, trust-review evidence, decision-backed
-scheduled trust audits, health, integrity, and recovery capabilities, and
-control projections that expose `uiSurfaceRefs` plus module resource refs
-without adding durable control-plane state.
+scheduled trust audits, trust-audit status, trust-audit retention-review
+evidence, health, integrity, and recovery capabilities, and control projections
+that expose `uiSurfaceRefs` plus module resource refs without adding durable
+control-plane state.
 
 ---
 
@@ -141,6 +145,7 @@ tron/
 |   +-- modular-engine-audit.md     Audit and target direction for the modular engine pivot
 |   +-- modular-engine-cleanup-audit.md Proof map for cleanup/removal decisions
 |   +-- modular-engine-maturity-scorecard.md 100-point maturity rubric and blockers
+|   +-- module-package-trust-operations.md Operator checklist for package trust/audits
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
@@ -534,9 +539,14 @@ reconciliation, and revocation enforcement scenarios. `module::record_trust_revi
 recomputes the simulation server-side and stores bounded `evidence` without
 changing live authority. `module::schedule_trust_audit` stores daily or weekly
 fixed wall-clock audit schedules as `decision` resources, and
-`module::run_scheduled_trust_audit` writes bounded audit evidence for due
-schedules. Scheduled audits never approve trust, disable workers, quarantine
-activations, or enforce revocation.
+`module::trust_audit_status` projects current due buckets, queued/completed
+buckets, missed windows, evidence refs, affected package/activation refs, and
+retention warnings from substrate truth. `module::run_scheduled_trust_audit`
+writes bounded audit evidence for a requested due bucket, while
+`module::record_trust_audit_retention` records advisory retention-review
+evidence for old audit evidence without deleting bytes or rewriting history.
+Scheduled audits never approve trust, disable workers, quarantine activations,
+or enforce revocation.
 
 `module::activate`, `module::disable`, `module::upgrade`,
 `module::rollback`, and `module::quarantine` produce `activation_record`
@@ -568,8 +578,11 @@ and persists failed/quarantined activation evidence. Scheduled checks are
 derived from active `activation_record` resources and enqueued through the
 existing `module` queue. Scheduled trust audits are derived from active
 `module_trust_audit_schedule` decision resources and enqueued through the same
-queue/invocation substrate. There is no package, health, policy, conformance,
-trust, audit, or recovery table.
+queue/invocation substrate. The host queue projection uses module-owned
+due-bucket helpers, enqueues at most the current bucket, skips queued or
+completed buckets, and surfaces missed buckets through
+`module::trust_audit_status` rather than backfilling mutation work. There is no
+package, health, policy, conformance, trust, audit, or recovery table.
 
 ---
 

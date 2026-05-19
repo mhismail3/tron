@@ -1,28 +1,26 @@
-# Trust Audit Reliability, Retention, And Operator Readiness Phase
+# Runtime Stress, Recovery, And Cleanup-Leak Hardening Phase
 
 ## Current Checkpoint
 
-The module package substrate now supports operator-grade trust review without
-adding a new persistence plane:
+The trust-audit reliability slice is implemented without adding a new durable
+plane:
 
-- `module::simulate_trust_change` explains renewal, rotation, expiry,
-  revocation, source approval, reconciliation, and revocation-enforcement
-  scenarios without mutating resources, grants, workers, queues, decisions, or
-  evidence.
-- `module::record_trust_review` recomputes the review server-side and stores
-  bounded `evidence` linked to affected package and activation resources.
-- `module::schedule_trust_audit` stores daily or weekly fixed wall-clock audit
-  schedules as `decision` resources.
-- `module::run_scheduled_trust_audit` writes bounded audit `evidence` for due
-  schedule decisions, and the module runtime monitor enqueues due audits through
-  the existing module queue.
-- Control projections and generated UI surfaces advertise only canonical stored
-  actions.
-- `docs/modular-engine-maturity-scorecard.md` now tracks the 100-point maturity
-  target, current score, evidence, blockers, and next action for each axis.
-- Trust-review and scheduled-audit implementation now lives in focused module
-  primitive submodules; the parent module remains the registration and lifecycle
-  coordinator.
+- `module::trust_audit_status` is a pure read projection over schedule
+  decisions, queue items, audit evidence, affected refs, missed windows, and
+  retention warnings.
+- `module::record_trust_audit_retention` writes bounded advisory `evidence` for
+  old audit evidence and does not delete bytes, archive resources, revoke
+  grants, stop workers, or mutate schedules.
+- `module::schedule_trust_audit` stores `retentionPolicy.reviewAfterDays` in the
+  schedule decision metadata.
+- `module::expire_trust_decision` can archive `module_trust_audit_schedule`
+  decisions through the canonical trust-decision expiry path.
+- Host trust-audit enqueue uses module-owned due-bucket and completed-evidence
+  helpers, queues at most the current bucket, skips queued/completed buckets,
+  and never backfills missed buckets automatically.
+- Control and generated UI expose schedule status, run, retention review, and
+  expiry through canonical stored actions.
+- The maturity scorecard baseline is now `77/100`.
 
 The invariant remains unchanged: no package/source/policy/conformance/trust/
 audit tables, no marketplace, no remote fetch, no remote key discovery, no
@@ -31,61 +29,49 @@ and no second worker-spawn path.
 
 ## Next Phase Objective
 
-Harden trust audit operations for long-running use. The engine should make
-scheduled audit behavior explainable across restarts, retries, missed windows,
-operator review, retention cleanup, and generated UI action staleness without
-adding durable scheduler or policy tables.
-
-This phase should raise the scorecard axes for runtime reliability, operator
-readiness, code comprehensibility, and test/proof strength without adding new
-state planes.
+Harden runtime reliability under repeated retries, interrupted local-process
+workers, worker-registration timeouts, leaked grants/workers, missed maintenance
+ticks, and cleanup failures. The target is to make package execution safe under
+stress before adding more package distribution or UI functionality.
 
 ## Proposed Changes
 
-- Add a pure read `module::trust_audit_status` projection for schedule
-  decisions, latest evidence, due bucket, last queued bucket, missed buckets,
-  affected refs, stale action refs, and retention warnings.
-- Add `module::record_trust_audit_retention` as resource-backed evidence that
-  records which old review/audit evidence is eligible for archival under
-  existing resource retention policy. It must not delete bytes or rewrite
-  history.
-- Harden due-bucket calculation with explicit missed-window behavior:
-  enqueue at most one current bucket per schedule tick, surface missed buckets
-  as evidence/status, and never backfill mutation work without an explicit
-  operator action.
-- Extend generated package/trust/audit surfaces to show latest audit status,
-  missed windows, stale schedules, and canonical actions for refresh, simulate,
-  record review, run audit, expire schedule, reconcile, enforce, disable, and
-  quarantine.
-- Add manual-readiness docs for the full local package trust lifecycle:
-  register source, verify signature/source, approve unsigned package, activate,
-  simulate trust change, schedule audit, run audit, expire/revoke trust,
-  enforce revocation, disable/quarantine, and verify cleanup.
+- Add deterministic stress tests for local-process activation, health checks,
+  disable/quarantine, queue retries, and recovery using actual `worker::spawn`
+  paths where practical.
+- Strengthen activation cleanup evidence when spawn, health, grant derivation,
+  worker registration, or post-spawn validation fails.
+- Add projection-only diagnostics for leaked grants/workers after interrupted
+  activation and recovery; any mutation must remain `module::recover_activation`,
+  `module::disable`, or `module::quarantine`.
+- Harden queue idempotency and retry behavior for module activation, health,
+  scheduled audits, and trust review actions under duplicate submissions.
+- Continue splitting stable module/runtime code only where ownership becomes
+  clearer and no public behavior changes.
 
 ## Test Plan
 
-- Trust audit status returns only rebuildable projections from resources,
-  evidence, decisions, queue items, grants, workers, and invocations.
-- Missed-window scenarios produce status/evidence and do not enqueue backfill
-  mutation work automatically.
-- Duplicate due buckets remain idempotent across queue retries and completed
-  queue records.
-- Retention review marks eligible evidence only; it does not delete resources,
-  rewrite versions, stop workers, revoke grants, or change activation lifecycle.
-- Generated UI surfaces expose status and canonical stored actions without
-  inlining large evidence bodies or action templates.
-- Static gates continue to forbid trust/audit tables, remote fetch/discovery,
-  marketplace symbols, dynamic UI catalogs, `control::act`, iOS policy,
-  raw-scope authorization, direct module process spawn/kill, compatibility
-  aliases, fallback manifest fields, and module action multiplexers.
+- Repeated activation/disable/quarantine cycles leave no active leaked grant or
+  volatile worker.
+- Failed spawn, delayed registration, bad capability registration, health
+  timeout, and cleanup failure produce bounded evidence and inspectable
+  activation records.
+- Duplicate queue retries replay or reject idempotently without duplicate
+  workers, grants, invocations, resource versions, or evidence resources.
+- Recovery reconstructs interrupted activations from substrate truth and never
+  spawns replacements or upgrades packages.
+- Static gates continue to forbid package/source/policy/trust/audit tables,
+  dynamic UI catalogs, `control::act`, raw-scope authorization, direct module
+  process spawn/kill, fallback manifest fields, compatibility aliases, iOS
+  local policy, and module action multiplexers.
 
 ## Verification
 
-- Targeted Rust tests for audit status, missed windows, retention review,
-  generated UI actions, queue idempotency, and static gates.
+- Targeted Rust tests for module runtime stress, cleanup leakage, recovery,
+  queue retries, generated UI action staleness, and static gates.
 - `scripts/tron ci fmt check clippy test`.
 - `git diff --check`.
 - iOS `xcodegen generate` and targeted `xcodebuild test` only if Swift DTOs or
   Engine Console view state change.
-- Update README, architecture docs, module docs, manual testing docs, and
+- Update README, architecture docs, cleanup audit, scorecard, module docs, and
   `~/LEDGER.jsonl`.

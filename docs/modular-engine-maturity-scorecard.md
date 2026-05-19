@@ -51,7 +51,7 @@ Collapsed substrate rules:
 | Test/proof strength | 12 | Static gates, focused tests, integration tests, absence tests, and failure-mode tests |
 | Docs/operations | 7 | README, architecture docs, manual QA, and ledger match current behavior |
 
-Current score: **71/100**.
+Current score: **77/100**.
 
 ## Axis Scores
 
@@ -123,7 +123,7 @@ Next action:
 - Audit deferred domain outputs and remove or convert remaining non-resource
   durable state.
 
-### Runtime reliability — 10/15
+### Runtime reliability — 12/15
 
 Evidence:
 
@@ -133,10 +133,13 @@ Evidence:
   scheduled audits.
 - Integration coverage exercises a real local-process package activation,
   health check, disable path, and cleanup.
+- Trust-audit status, duplicate due-bucket enqueue, completed-bucket detection,
+  missed-window reporting, schedule expiry, and advisory retention review are
+  covered by focused tests.
 
 Blockers:
 
-- Long-running soak, repeated retry, interrupted worker, missed schedule window,
+- Long-running soak, repeated retry, interrupted worker, registration timeout,
   and cleanup-leak scenarios are not yet broad enough.
 - The real local-process integration test has shown timeout sensitivity under
   full-suite load and needs hardening.
@@ -144,9 +147,9 @@ Blockers:
 Next action:
 
 - Add deterministic runtime stress tests around retries, worker registration
-  timeout, leaked grants/workers, and scheduled audit missed windows.
+  timeout, leaked grants/workers, and recovery after interrupted activation.
 
-### Operator readiness — 7/12
+### Operator readiness — 9/12
 
 Evidence:
 
@@ -155,17 +158,21 @@ Evidence:
   activation refs, and generated UI refs.
 - `ui::surface_for_target` authors package, activation, decision, worker, grant,
   resource, and integrity surfaces with stored canonical actions.
+- `module::trust_audit_status` explains schedule lifecycle, current due bucket,
+  queued/completed buckets, missed windows, latest evidence refs, affected refs,
+  and retention warnings without adding status state.
+- Generated trust-audit schedule surfaces expose canonical status, run,
+  retention-review, and expiry actions.
 
 Blockers:
 
-- Operator surfaces do not yet fully explain audit status, missed schedule
-  windows, retention eligibility, stale actions, or exact next-safe-action
-  consequences.
+- Operator surfaces do not yet fully explain exact next-safe-action
+  consequences, retention cleanup execution, or all stale-action failure causes.
 
 Next action:
 
-- Implement trust-audit status and retention evidence as the next operator
-  readiness slice.
+- Add richer operator diagnostics for runtime cleanup/recovery outcomes and
+  stale generated UI action rejection.
 
 ### Code comprehensibility — 7/12
 
@@ -187,42 +194,47 @@ Next action:
 - Continue splitting stable concerns into submodules and update progressive
   docs with each split.
 
-### Test/proof strength — 10/12
+### Test/proof strength — 11/12
 
 Evidence:
 
 - Full Rust CI covers formatting, compile check, clippy, 5k+ library tests,
   integration tests, DB path guards, and threat-model invariant gates.
 - Static gates enforce absence of legacy surfaces and forbidden state planes.
+- Focused tests now prove trust-audit status is projection-only, retention
+  review is evidence-only, schedule expiry uses canonical CAS/evidence, and host
+  enqueue does not backfill missed buckets.
 
 Blockers:
 
-- The maturity score itself is new and needs future calibration as more
-  subsystems are audited.
+- The maturity score needs continued calibration as more subsystems are audited.
 - iOS generated UI tests only need to run when Swift/project files change, so
   server-only changes still rely primarily on DTO stability.
 
 Next action:
 
-- Add scorecard gates and more subsystem-specific absence tests as cleanup
-  continues.
+- Add subsystem-specific stress and failure-mode gates for runtime cleanup and
+  recovery.
 
-### Docs/operations — 5/7
+### Docs/operations — 6/7
 
 Evidence:
 
 - `README.md`, `docs/collapsed-modular-engine-architecture.md`,
   `docs/modular-engine-cleanup-audit.md`, and
   `docs/modular-engine-next-phase-plan.md` reflect the current substrate.
+- `docs/module-package-trust-operations.md` documents the local package trust,
+  audit, revocation, and cleanup operator lifecycle.
 - Ledger entries record durable modular-engine checkpoints.
+- The scorecard is updated with the trust-audit reliability evidence and next
+  runtime-stress target.
 
 Blockers:
 
-- Manual operator readiness docs for the complete package trust lifecycle remain
-  incomplete.
+- Manual runtime-stress and cleanup-leak QA procedures remain incomplete.
 - The scorecard needs to be updated every maturity checkpoint.
 
 Next action:
 
-- Add manual readiness docs for local package trust lifecycle and update this
-  scorecard with every cleanup/hardening checkpoint.
+- Add manual runtime-stress/cleanup QA docs and update this scorecard with every
+  cleanup/hardening checkpoint.

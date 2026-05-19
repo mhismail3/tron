@@ -742,8 +742,10 @@ async fn module_resource_types_and_capabilities_are_registered() {
         "module::enforce_revocation",
         "module::simulate_trust_change",
         "module::record_trust_review",
+        "module::trust_audit_status",
         "module::schedule_trust_audit",
         "module::run_scheduled_trust_audit",
+        "module::record_trust_audit_retention",
     ] {
         let function = value["capabilities"]
             .as_array()
@@ -758,6 +760,7 @@ async fn module_resource_types_and_capabilities_are_registered() {
                 | "module::audit_policy"
                 | "module::inspect_trust"
                 | "module::simulate_trust_change"
+                | "module::trust_audit_status"
         ) {
             assert!(
                 function["idempotency"].is_object(),
@@ -3094,5 +3097,57 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                 );
             }
         }
+    }
+
+    let scheduled = handle
+        .invoke(host_invocation(
+            "module::schedule_trust_audit",
+            json!({
+                "scheduleId": "ui-schedule",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "selectors": ["demo-tools"],
+                "cadence": "daily",
+                "timezone": "UTC",
+                "wallClockTime": "00:00",
+                "expiresAt": "2100-01-01T00:00:00Z",
+                "grantCeiling": grant_ceiling_for_namespace("demo"),
+                "reason": "generate schedule surface"
+            }),
+            mutating_causal("module-ui-schedule-audit").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(scheduled.error, None);
+    let schedule_decision_id = scheduled.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "decision")
+        .unwrap()["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let surface = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_surface_request("decision", &schedule_decision_id),
+            mutating_causal("module-ui-schedule-decision").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(surface.error, None);
+    for function_id in [
+        "module::trust_audit_status",
+        "module::run_scheduled_trust_audit",
+        "module::record_trust_audit_retention",
+        "module::expire_trust_decision",
+    ] {
+        assert!(
+            surface.value.as_ref().unwrap()["surface"]["actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action["targetFunctionId"] == function_id),
+            "schedule trust surface must expose {function_id}"
+        );
     }
 }

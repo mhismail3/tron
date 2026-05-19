@@ -15,9 +15,10 @@
 //! worker packages as typed resources under derived grants, with trust-root
 //! renewal, key-rotation evidence, expiry, explicit revocation enforcement,
 //! trust-change simulation, trust-review evidence, and scheduled trust audits
-//! represented as decision/evidence resources. The module primitive keeps
-//! trust-review and scheduled-audit ownership in focused submodules so the
-//! parent registration surface does not become another policy plane.
+//! represented as decision/evidence resources. Trust-audit status and retention
+//! review stay projection/evidence-only. The module primitive keeps trust-review
+//! and scheduled-audit ownership in focused submodules so the parent
+//! registration surface does not become another policy plane.
 //! `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot

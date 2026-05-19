@@ -9,11 +9,12 @@
 //! registration, local Ed25519 trust roots, signature verification, trust-root
 //! renewal, key-rotation evidence, trust-decision expiry, revocation
 //! enforcement, trust-change simulation, trust-review evidence, scheduled trust
-//! audits, policy audits, trust reconciliation, source approvals, conformance,
-//! health, integrity, and recovery outcomes are bounded `evidence`/`decision`
-//! resources linked back to package and activation records. Trust review and
-//! scheduled audit code lives in focused submodules; this file owns the package
-//! lifecycle registration surface and shared module substrate helpers.
+//! audits, trust-audit status, trust-audit retention review, policy audits,
+//! trust reconciliation, source approvals, conformance, health, integrity, and
+//! recovery outcomes are bounded `evidence`/`decision` resources linked back to
+//! package and activation records. Trust review and scheduled audit code lives
+//! in focused submodules; this file owns the package lifecycle registration
+//! surface and shared module substrate helpers.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, Utc};
@@ -46,11 +47,17 @@ use crate::engine::{ActorId, EngineError, EngineResourceScope, Invocation, Resul
 mod trust_audit;
 mod trust_review;
 
-pub(crate) use trust_audit::{RUN_SCHEDULED_TRUST_AUDIT_FUNCTION, SCHEDULE_TRUST_AUDIT_FUNCTION};
-pub(in crate::engine) use trust_audit::{
-    parse_trust_audit_wall_clock_time, trust_audit_day_of_week_number,
+pub(crate) use trust_audit::{
+    RECORD_TRUST_AUDIT_RETENTION_FUNCTION, RUN_SCHEDULED_TRUST_AUDIT_FUNCTION,
+    SCHEDULE_TRUST_AUDIT_FUNCTION, TRUST_AUDIT_STATUS_FUNCTION,
 };
-use trust_audit::{run_scheduled_trust_audit_schema, schedule_trust_audit_schema};
+use trust_audit::{
+    record_trust_audit_retention_schema, run_scheduled_trust_audit_schema,
+    schedule_trust_audit_schema, trust_audit_status_schema,
+};
+pub(in crate::engine) use trust_audit::{
+    trust_audit_current_due_bucket, trust_audit_evidence_matches_due_bucket,
+};
 pub(crate) use trust_review::{
     RECORD_TRUST_REVIEW_FUNCTION, SIMULATE_TRUST_CHANGE_FUNCTION, TRUST_REVIEW_OPERATIONS,
 };
@@ -393,6 +400,23 @@ pub(super) fn registrations(
             RiskLevel::Medium,
         )
         .with_output_contract(DurableOutputContract::resource_backed(["evidence"])),
+        module_read(
+            TRUST_AUDIT_STATUS_FUNCTION,
+            "project status for a decision-backed module trust audit schedule",
+            trust_audit_status_schema(),
+            json!({
+                "type": "object",
+                "required": ["schedule", "due", "warnings", "retentionWarnings", "availableActions"],
+                "additionalProperties": true,
+                "properties": {
+                    "schedule": {"type": "object"},
+                    "due": {"type": "object"},
+                    "warnings": {"type": "array"},
+                    "retentionWarnings": {"type": "array"},
+                    "availableActions": {"type": "array"}
+                }
+            }),
+        ),
         module_write(
             SCHEDULE_TRUST_AUDIT_FUNCTION,
             "create or CAS-update a decision-backed module trust audit schedule",
@@ -407,6 +431,14 @@ pub(super) fn registrations(
             RUN_SCHEDULED_TRUST_AUDIT_FUNCTION,
             "run a decision-backed module trust audit and persist bounded evidence",
             run_scheduled_trust_audit_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::Medium,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed(["evidence"])),
+        module_write(
+            RECORD_TRUST_AUDIT_RETENTION_FUNCTION,
+            "persist bounded retention-review evidence for scheduled trust audits",
+            record_trust_audit_retention_schema(),
             module_resource_response_schema("evidence"),
             RiskLevel::Medium,
         )
@@ -501,8 +533,10 @@ impl InProcessFunctionHandler for ModulePrimitiveHandler {
             ENFORCE_REVOCATION_FUNCTION => self.enforce_revocation(&invocation).await,
             SIMULATE_TRUST_CHANGE_FUNCTION => self.simulate_trust_change(&invocation),
             RECORD_TRUST_REVIEW_FUNCTION => self.record_trust_review(&invocation),
+            TRUST_AUDIT_STATUS_FUNCTION => self.trust_audit_status(&invocation),
             SCHEDULE_TRUST_AUDIT_FUNCTION => self.schedule_trust_audit(&invocation),
             RUN_SCHEDULED_TRUST_AUDIT_FUNCTION => self.run_scheduled_trust_audit(&invocation),
+            RECORD_TRUST_AUDIT_RETENTION_FUNCTION => self.record_trust_audit_retention(&invocation),
             _ => Err(EngineError::NotFound {
                 kind: "function",
                 id: invocation.function_id.to_string(),
@@ -2184,7 +2218,10 @@ impl ModulePrimitiveHandler {
             })?;
         if !matches!(
             decision_type.as_str(),
-            "module_trust_root" | "module_source_registration" | "module_source_approval"
+            "module_trust_root"
+                | "module_source_registration"
+                | "module_source_approval"
+                | "module_trust_audit_schedule"
         ) {
             return Err(EngineError::PolicyViolation(format!(
                 "expire_trust_decision does not accept {decision_type}"

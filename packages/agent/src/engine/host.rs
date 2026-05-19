@@ -10,7 +10,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono::{DateTime, Utc};
 use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
@@ -477,87 +477,51 @@ impl EngineHostHandle {
             }) else {
                 continue;
             };
-            if payload.get("status").and_then(Value::as_str) != Some("active") {
+            let Some(due_bucket) = primitives::module::trust_audit_current_due_bucket(
+                &resource.resource_id,
+                &version_id,
+                &resource.lifecycle,
+                resource.created_at,
+                &payload,
+                now,
+            )
+            .ok()
+            .flatten() else {
+                continue;
+            };
+            let already_completed = {
+                let resources = host.primitives.resources.lock().map_err(|_| {
+                    EngineError::HandlerFailed("resource store lock poisoned".to_owned())
+                })?;
+                resources
+                    .list(super::resources::ListResources {
+                        kind: Some("evidence".to_owned()),
+                        scope: None,
+                        lifecycle: None,
+                        limit: 500,
+                    })?
+                    .into_iter()
+                    .filter_map(|evidence| resources.inspect(&evidence.resource_id).ok().flatten())
+                    .filter_map(|inspection| {
+                        let current = inspection.resource.current_version_id.clone()?;
+                        inspection
+                            .versions
+                            .iter()
+                            .find(|version| version.version_id == current)
+                            .map(|version| version.payload.clone())
+                    })
+                    .any(|payload| {
+                        primitives::module::trust_audit_evidence_matches_due_bucket(
+                            &payload,
+                            &resource.resource_id,
+                            &version_id,
+                            &due_bucket,
+                        )
+                    })
+            };
+            if already_completed {
                 continue;
             }
-            let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
-                continue;
-            };
-            if metadata.get("decisionType").and_then(Value::as_str)
-                != Some("module_trust_audit_schedule")
-            {
-                continue;
-            }
-            let Some(expires_at) = metadata
-                .get("expiresAt")
-                .and_then(Value::as_str)
-                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-                .map(|value| value.with_timezone(&Utc))
-            else {
-                continue;
-            };
-            if expires_at <= now {
-                continue;
-            }
-            let Some(cadence) = metadata.get("cadence").and_then(Value::as_str) else {
-                continue;
-            };
-            let Some(timezone) = metadata
-                .get("timezone")
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse::<chrono_tz::Tz>().ok())
-            else {
-                continue;
-            };
-            let Some((hour, minute)) = metadata
-                .get("wallClockTime")
-                .and_then(Value::as_str)
-                .and_then(|value| {
-                    primitives::module::parse_trust_audit_wall_clock_time(value).ok()
-                })
-            else {
-                continue;
-            };
-            let local_now = now.with_timezone(&timezone);
-            if local_now.hour() < hour || local_now.hour() == hour && local_now.minute() < minute {
-                continue;
-            }
-            if cadence == "weekly" {
-                let Some(day) =
-                    metadata
-                        .get("dayOfWeek")
-                        .and_then(Value::as_str)
-                        .and_then(|value| {
-                            primitives::module::trust_audit_day_of_week_number(value).ok()
-                        })
-                else {
-                    continue;
-                };
-                if local_now.weekday().number_from_monday() != day {
-                    continue;
-                }
-            } else if cadence != "daily" {
-                continue;
-            }
-            let due_bucket = match cadence {
-                "daily" => format!(
-                    "{}T{:02}:{:02}:{}",
-                    local_now.date_naive(),
-                    hour,
-                    minute,
-                    timezone
-                ),
-                "weekly" => format!(
-                    "{}-W{:02}-{}T{:02}:{:02}:{}",
-                    local_now.iso_week().year(),
-                    local_now.iso_week().week(),
-                    local_now.weekday().number_from_monday(),
-                    hour,
-                    minute,
-                    timezone
-                ),
-                _ => continue,
-            };
             let idempotency_key = format!(
                 "module.trust_audit:{}:{}:{}",
                 resource.resource_id, version_id, due_bucket

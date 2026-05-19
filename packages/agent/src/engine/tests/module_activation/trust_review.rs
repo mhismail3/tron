@@ -478,3 +478,304 @@ async fn module_trust_audit_schedules_are_decision_backed_and_queued() {
         Some(EngineError::PolicyViolation(message)) if message.contains("not current")
     ));
 }
+
+#[tokio::test]
+async fn module_trust_audit_status_reports_queue_missed_and_retention_without_mutation() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    register_demo_worker(&handle, "audit_status_demo", "audit-status-worker");
+    let registered = register_package(
+        &handle,
+        manifest_with_digest(package_manifest(
+            "audit-status-tools",
+            "audit_status_demo",
+            "audit-status-worker",
+        )),
+        "module-trust-audit-status-register",
+    )
+    .await;
+    assert_eq!(registered.error, None);
+
+    let scheduled = handle
+        .invoke(host_invocation(
+            "module::schedule_trust_audit",
+            json!({
+                "scheduleId": "status-audit",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "selectors": ["audit-status-tools"],
+                "cadence": "daily",
+                "timezone": "UTC",
+                "wallClockTime": "00:00",
+                "expiresAt": "2100-01-01T00:00:00Z",
+                "grantCeiling": grant_ceiling_for_namespace("audit_status_demo"),
+                "retentionPolicy": {"reviewAfterDays": 0},
+                "reason": "test status projection"
+            }),
+            mutating_causal("module-trust-audit-status-schedule").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(scheduled.error, None);
+    let schedule_ref = scheduled.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "decision")
+        .unwrap()
+        .clone();
+    let schedule_resource_id = schedule_ref["resourceId"].as_str().unwrap().to_owned();
+    let schedule_version_id = schedule_ref["versionId"].as_str().unwrap().to_owned();
+    let as_of = Utc::now() + ChronoDuration::days(2);
+
+    let evidence_before = resource_count(&handle, "evidence").await;
+    let decision_before = resource_count(&handle, "decision").await;
+    let queue_before = queue_count(&handle, "module").await;
+    let status = handle
+        .invoke(host_invocation(
+            "module::trust_audit_status",
+            json!({
+                "scheduleDecisionResourceId": schedule_resource_id,
+                "scheduleDecisionVersionId": schedule_version_id,
+                "asOf": as_of.to_rfc3339(),
+                "includeEvidence": true,
+                "includeQueue": true,
+                "limit": 25
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(status.error, None);
+    let status_value = status.value.as_ref().unwrap();
+    assert_eq!(status_value["schedule"]["resourceId"], schedule_resource_id);
+    assert_eq!(status_value["schedule"]["versionId"], schedule_version_id);
+    assert_eq!(status_value["schedule"]["status"], "active");
+    assert!(status_value["due"]["currentDueBucket"].is_string());
+    assert!(
+        !status_value["due"]["missedBuckets"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "status must expose missed buckets instead of backfilling them"
+    );
+    assert_eq!(resource_count(&handle, "evidence").await, evidence_before);
+    assert_eq!(resource_count(&handle, "decision").await, decision_before);
+    assert_eq!(queue_count(&handle, "module").await, queue_before);
+
+    let enqueued = handle.enqueue_due_module_trust_audits(as_of).await.unwrap();
+    assert_eq!(enqueued, 1);
+    let duplicate_enqueue = handle.enqueue_due_module_trust_audits(as_of).await.unwrap();
+    assert_eq!(duplicate_enqueue, 0);
+
+    let queued_status = handle
+        .invoke(host_invocation(
+            "module::trust_audit_status",
+            json!({
+                "scheduleDecisionResourceId": schedule_resource_id,
+                "scheduleDecisionVersionId": schedule_version_id,
+                "asOf": as_of.to_rfc3339(),
+                "includeEvidence": true,
+                "includeQueue": true
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(queued_status.error, None);
+    let queued_status = queued_status.value.as_ref().unwrap();
+    assert!(queued_status["due"]["lastQueuedBucket"].is_string());
+    assert_eq!(
+        queued_status["due"]["lastQueuedBucket"],
+        queued_status["due"]["currentDueBucket"]
+    );
+    assert!(
+        !queued_status["queueRefs"].as_array().unwrap().is_empty(),
+        "status should include queue refs when requested"
+    );
+
+    let drained = EngineQueueDrainer::drain_once(&handle, "module", "module-trust-audit-status")
+        .await
+        .unwrap()
+        .expect("module trust audit queue item should drain");
+    assert_eq!(drained.error, None);
+    let completed_evidence_id = drained.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let completed_status = handle
+        .invoke(host_invocation(
+            "module::trust_audit_status",
+            json!({
+                "scheduleDecisionResourceId": schedule_resource_id,
+                "scheduleDecisionVersionId": schedule_version_id,
+                "asOf": as_of.to_rfc3339(),
+                "includeEvidence": true,
+                "includeQueue": true
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(completed_status.error, None);
+    let completed_status = completed_status.value.as_ref().unwrap();
+    assert_eq!(
+        completed_status["due"]["lastCompletedBucket"],
+        completed_status["due"]["currentDueBucket"]
+    );
+    assert!(
+        completed_status["latestEvidenceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["resourceId"] == completed_evidence_id)
+    );
+    assert!(
+        !completed_status["retentionWarnings"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "retention warnings should surface eligible audit evidence"
+    );
+}
+
+#[tokio::test]
+async fn module_trust_audit_retention_review_is_evidence_only_and_schedule_expiry_stops_enqueue() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    register_demo_worker(&handle, "audit_retention_demo", "audit-retention-worker");
+    let registered = register_package(
+        &handle,
+        manifest_with_digest(package_manifest(
+            "audit-retention-tools",
+            "audit_retention_demo",
+            "audit-retention-worker",
+        )),
+        "module-trust-audit-retention-register",
+    )
+    .await;
+    assert_eq!(registered.error, None);
+
+    let scheduled = handle
+        .invoke(host_invocation(
+            "module::schedule_trust_audit",
+            json!({
+                "scheduleId": "retention-audit",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "selectors": ["audit-retention-tools"],
+                "cadence": "daily",
+                "timezone": "UTC",
+                "wallClockTime": "00:00",
+                "expiresAt": "2100-01-01T00:00:00Z",
+                "grantCeiling": grant_ceiling_for_namespace("audit_retention_demo"),
+                "retentionPolicy": {"reviewAfterDays": 0},
+                "reason": "test retention review"
+            }),
+            mutating_causal("module-trust-audit-retention-schedule").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(scheduled.error, None);
+    let schedule_ref = scheduled.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "decision")
+        .unwrap()
+        .clone();
+    let schedule_resource_id = schedule_ref["resourceId"].as_str().unwrap().to_owned();
+    let schedule_version_id = schedule_ref["versionId"].as_str().unwrap().to_owned();
+    let as_of = Utc::now() + ChronoDuration::days(2);
+    assert_eq!(
+        handle.enqueue_due_module_trust_audits(as_of).await.unwrap(),
+        1
+    );
+    let drained = EngineQueueDrainer::drain_once(&handle, "module", "module-trust-audit-retention")
+        .await
+        .unwrap()
+        .expect("module trust audit queue item should drain");
+    assert_eq!(drained.error, None);
+    let audit_evidence_id = drained.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let schedule_before = inspect_resource(&handle, &schedule_resource_id).await;
+    let evidence_before = resource_count(&handle, "evidence").await;
+    let decision_before = resource_count(&handle, "decision").await;
+    let queue_before = queue_count(&handle, "module").await;
+    let retention = handle
+        .invoke(host_invocation(
+            "module::record_trust_audit_retention",
+            json!({
+                "scheduleDecisionResourceId": schedule_resource_id,
+                "scheduleDecisionVersionId": schedule_version_id,
+                "olderThan": (Utc::now() + ChronoDuration::days(1)).to_rfc3339(),
+                "limit": 25,
+                "reason": "record eligible audit evidence"
+            }),
+            mutating_causal("module-trust-audit-retention-review").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(retention.error, None);
+    let retention_value = retention.value.as_ref().unwrap();
+    assert!(
+        retention_value["eligibleEvidenceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["resourceId"] == audit_evidence_id)
+    );
+    assert_eq!(
+        resource_count(&handle, "evidence").await,
+        evidence_before + 1
+    );
+    assert_eq!(resource_count(&handle, "decision").await, decision_before);
+    assert_eq!(queue_count(&handle, "module").await, queue_before);
+    let schedule_after_retention = inspect_resource(&handle, &schedule_resource_id).await;
+    assert_eq!(
+        schedule_after_retention["resource"]["currentVersionId"],
+        schedule_before["resource"]["currentVersionId"],
+        "retention review must not mutate the schedule"
+    );
+
+    let raw_secret_retention = handle
+        .invoke(host_invocation(
+            "module::record_trust_audit_retention",
+            json!({
+                "scheduleDecisionResourceId": schedule_resource_id,
+                "scheduleDecisionVersionId": schedule_version_id,
+                "reason": "secret=raw"
+            }),
+            mutating_causal("module-trust-audit-retention-secret").with_scope("module.write"),
+        ))
+        .await;
+    assert!(raw_secret_retention.error.is_some());
+
+    let expired = handle
+        .invoke(host_invocation(
+            "module::expire_trust_decision",
+            json!({
+                "decisionResourceId": schedule_resource_id,
+                "decisionVersionId": schedule_version_id,
+                "expectedCurrentVersionId": schedule_version_id,
+                "reason": "retire audit schedule"
+            }),
+            mutating_causal("module-trust-audit-expire-schedule").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(expired.error, None);
+    let expired_schedule = inspect_resource(&handle, &schedule_resource_id).await;
+    assert_eq!(expired_schedule["resource"]["lifecycle"], "archived");
+    assert_eq!(
+        expired_schedule["versions"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["payload"]["status"],
+        "expired"
+    );
+    let enqueue_after_expiry = handle
+        .enqueue_due_module_trust_audits(as_of + ChronoDuration::days(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        enqueue_after_expiry, 0,
+        "archived trust audit schedules must not enqueue future work"
+    );
+}

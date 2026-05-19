@@ -94,6 +94,28 @@ Removal proof from this pass:
 - No storage change was justified; the scorecard explicitly forbids adding
   package/source/policy/trust/audit tables.
 
+## 2026-05-19 Trust Audit Reliability Pass
+
+Scheduled module trust audits were hardened without adding a scheduler, audit
+table, policy table, status cache, or iOS policy layer.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Trust audit status | `module::trust_audit_status` projects due buckets, queued/completed buckets, missed windows, latest evidence, affected refs, and retention warnings from existing decisions/evidence/queue/resources | Keep as pure read projection; no durable status cache |
+| Trust audit retention | `module::record_trust_audit_retention` writes bounded `evidence` with eligible audit evidence refs and links back to the schedule/old evidence | Keep as advisory evidence only; no deletion or archive mutation |
+| Due-bucket ownership | Host queue projection calls module-owned due-bucket and completed-evidence helpers | Keep; host remains a queue projection and no longer owns schedule parsing logic |
+| Schedule expiry | `module::expire_trust_decision` accepts `module_trust_audit_schedule` decisions through the same CAS/evidence path as other trust decisions | Keep; no schedule-specific mutation multiplexer |
+| Generated operator actions | Control and generated UI expose schedule status, run, retention review, and expiry through canonical stored actions | Keep; no `control::act` or client-authored payload path |
+
+Removal proof from this pass:
+
+- No new public scheduler/status/table API was justified; status is rebuilt
+  from substrate truth.
+- Missed audit windows are surfaced as facts and are not backfilled
+  automatically.
+- Retention review does not delete bytes, rewrite resource versions, stop
+  workers, revoke grants, or mutate schedules.
+
 ## Deferred High-Scrutiny Areas
 
 These areas are not proven removable in this checkpoint and need separate

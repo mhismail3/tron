@@ -1713,6 +1713,19 @@ fn generated_actions(
                 }),
             ),
             (
+                "trust-audit-status",
+                "Audit Status",
+                "module::trust_audit_status",
+                json!({"type": "object", "additionalProperties": false, "properties": {}}),
+                json!({
+                    "scheduleDecisionResourceId": resource_id,
+                    "scheduleDecisionVersionId": version_id,
+                    "includeEvidence": true,
+                    "includeQueue": true,
+                    "limit": 50
+                }),
+            ),
+            (
                 "renew-trust-root",
                 "Renew",
                 "module::renew_trust_root",
@@ -1819,6 +1832,26 @@ fn generated_actions(
                     "dueBucket": "${input.dueBucket}"
                 }),
             ),
+            (
+                "record-trust-audit-retention",
+                "Review Retention",
+                "module::record_trust_audit_retention",
+                json!({
+                    "type": "object",
+                    "required": ["olderThan", "reason"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "olderThan": {"type": "string"},
+                        "reason": {"type": "string"}
+                    }
+                }),
+                json!({
+                    "scheduleDecisionResourceId": resource_id,
+                    "scheduleDecisionVersionId": version_id,
+                    "olderThan": "${input.olderThan}",
+                    "reason": "${input.reason}"
+                }),
+            ),
         ] {
             if matches!(
                 target_function,
@@ -1829,7 +1862,13 @@ fn generated_actions(
             {
                 continue;
             }
-            if target_function == "module::run_scheduled_trust_audit" && !is_trust_audit_schedule {
+            if matches!(
+                target_function,
+                "module::trust_audit_status"
+                    | "module::run_scheduled_trust_audit"
+                    | "module::record_trust_audit_retention"
+            ) && !is_trust_audit_schedule
+            {
                 continue;
             }
             if let Some(function) = functions

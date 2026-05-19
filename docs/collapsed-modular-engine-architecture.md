@@ -195,7 +195,8 @@ The first-party `module` primitive exposes:
   roots. Rotation records lineage only; it never rewrites package manifests or
   converts old-key signature verification into new-key trust;
 - `module::expire_trust_decision` for archiving module source/trust/approval
-  decisions and writing evidence without deleting bytes or stopping workers;
+  decisions or trust-audit schedules and writing evidence without deleting
+  bytes or stopping workers;
 - `module::enforce_revocation` as the explicit high-risk operator mutation for
   live authority changes after trust revocation or expiry. It accepts explicit
   affected activation ids and composes only canonical `module::disable` or
@@ -209,11 +210,14 @@ The first-party `module` primitive exposes:
 - `module::record_trust_review` for bounded `evidence` that recomputes the
   trust simulation server-side and links affected packages and activations. It
   never changes trust status or live activation authority;
-- `module::schedule_trust_audit` and `module::run_scheduled_trust_audit` for
-  decision-backed daily or weekly trust audit policies and evidence-producing
-  scheduled runs. Schedules are `decision` resources with scoped selectors,
-  fixed wall-clock cadence, expiry, grant ceiling, and redaction policy; due
-  runs write `evidence` only;
+- `module::schedule_trust_audit`, `module::trust_audit_status`,
+  `module::run_scheduled_trust_audit`, and
+  `module::record_trust_audit_retention` for decision-backed daily or weekly
+  trust audit policies, rebuildable status projections, bounded audit evidence,
+  and advisory retention-review evidence. Schedules are `decision` resources
+  with scoped selectors, fixed wall-clock cadence, expiry, grant ceiling,
+  redaction policy, and retention-review policy; due runs and retention reviews
+  write `evidence` only;
 - `module::run_conformance` for bounded package/config/activation conformance
   evidence over manifest rules, grant simulation, registration bounds,
   resource-output contracts, health policy, redaction, and cleanup behavior;
@@ -267,10 +271,12 @@ checks from active activation resources and their `healthPolicy.intervalSeconds`
 then enqueues `module::check_health` through the existing queue/invocation
 substrate. Trust audit runs are derived from active
 `module_trust_audit_schedule` decision resources and enqueue
-`module::run_scheduled_trust_audit` with deterministic idempotency keys. There
-is no package table, source table, health table, policy table, conformance
-table, trust table, audit table, recovery table, or non-rebuildable module
-cache.
+`module::run_scheduled_trust_audit` with deterministic idempotency keys. The
+queue projection enqueues at most the current due bucket, skips queued or
+completed buckets, and leaves missed buckets as inspectable status rather than
+implicit backfill work. There is no package table, source table, health table,
+policy table, conformance table, trust table, audit table, recovery table, or
+non-rebuildable module cache.
 
 No package table, module action multiplexer, client-side policy, or `control`
 mutation path exists. Control and generated UI surfaces expose module resources
