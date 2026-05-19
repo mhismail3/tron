@@ -70,11 +70,22 @@ async fn voice_notes_save_list_and_delete_are_resource_backed() {
     assert!(refs.iter().any(|reference| reference["kind"] == "artifact"));
 
     let filename = value["filename"].as_str().unwrap();
-    std::fs::write(
-        crate::shared::paths::voice_notes_dir().join("unregistered.md"),
-        "this file must not become list truth",
-    )
-    .unwrap();
+    let materialized_only_path =
+        crate::shared::server::test_support::unique_test_path("unregistered-voice-note", "md");
+    let materialized_only = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "resourceId": "materialized_file:voice-note:unregistered.md",
+                "path": materialized_only_path.to_string_lossy(),
+                "content": "this materialized file must not become list truth",
+                "scope": "workspace",
+                "policy": {"retention": "voice_note"}
+            }),
+            mutating_causal("voice-notes-materialized-only").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(materialized_only.error, None);
 
     let listed = handle
         .invoke(host_invocation(

@@ -265,7 +265,7 @@ projections without adding a control-plane state model.
 | Generated UI stored actions | `generated_ui` tests now assert stored actions carry consequence projections and still target canonical capabilities only | Keep as projection data; `ui::submit_action` remains the only generated-UI action gateway |
 | Module/package/trust projections | Module activation and trust-audit tests assert `module::inspect_package` and `module::trust_audit_status` expose consequence-bearing available actions | Keep read-only projection shape; do not add `control::act` or action multiplexers |
 | `voice_notes::save` | `engine/tests/domain_outputs.rs` proves save returns `artifact` and `materialized_file` `resourceRefs`, duplicate idempotency does not duplicate resources, and invalid audio records no accepted produced refs | Convert durable note output to resources; Markdown file path is materialized location only |
-| `voice_notes::list` | The same tests create an unrelated Markdown file and prove list returns only resource-backed notes | Keep old unregistered files ignored; no compatibility reader or migration path |
+| `voice_notes::list` | The same tests create an unrelated materialized-file resource without a voice-note artifact and prove list returns only resource-backed note artifacts | Keep old unregistered materializations ignored; no compatibility reader or migration path |
 | `voice_notes::delete` | Tests prove delete discards resource lifecycle and does not depend on physical file deletion | Keep byte cleanup deferred to resource retention/storage policy |
 | Static gates | `operator_consequence_and_voice_note_resource_boundaries_stay_enforced` requires the action-summary helper, resource-backed voice-note contracts, focused domain-output tests, and no direct `std::fs::write/read_dir/remove_file` durable path in the voice-notes domain | Keep as absence proof against reintroducing file-backed truth |
 
@@ -279,6 +279,20 @@ Deferred domain-output proof map:
 | `browser`, `display`, `device` | Server domains still register workers and support local device/display flows; iOS display stream DTOs remain active | Keep as capability modules until each output path is separately proven resource-backed or ephemeral |
 | `transcription` | Server domain remains the reusable audio-to-text capability used by voice notes; model cache/sidecar state is runtime infrastructure | Keep; audit retained transcript outputs separately if direct transcription results become durable |
 | `voice_notes` | Now resource-backed through `artifact` and `materialized_file`; list/delete use resource truth | Converted; remove any future file-scan compatibility proposals |
+
+## 2026-05-19 Test Harness Hermeticity Fix
+
+Full-suite verification exposed a non-hermetic test path: engine tests that
+used `make_test_context()` could still reach the process-global settings cache,
+and a reset cache could lazily load the developer's live `~/.tron` profile.
+That made domain-output tests depend on local machine profile shape instead of
+the isolated test home.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Settings test default | `get_settings_test_default_never_reads_live_profile` proves `#[cfg(test)]` lazy settings initialization uses in-crate defaults instead of the live profile path | Keep live profile reads out of unit tests unless a test explicitly calls a path-based loader |
+| Server test context | `make_test_context_seeds_global_settings_from_isolated_profile` proves the standard server test context installs settings loaded from its isolated profile home | Keep `make_test_context()` as the server-domain harness boundary for engine/domain capability tests |
+| Voice-notes negative case | `voice_notes_save_list_and_delete_are_resource_backed` now creates a materialized-only resource rather than writing under the real voice-notes directory | Keep tests hermetic; prove source truth through resources and static gates, not live filesystem side effects |
 
 ## 2026-05-19 Product-Shell Reachability And Prompt-Library Conversion Pass
 

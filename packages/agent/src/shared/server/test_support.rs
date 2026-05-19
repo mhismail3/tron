@@ -171,6 +171,9 @@ pub fn make_test_context() -> ServerRuntimeContext {
     let settings_path = test_user_profile_path(&home);
     let auth_path = test_auth_path(&home);
     let profile_runtime = test_profile_runtime(&home);
+    let settings = crate::domains::settings::load_settings_from_path(&settings_path)
+        .expect("test profile settings should load from isolated Tron home");
+    crate::domains::settings::init_settings(settings);
     let ctx = ServerRuntimeContext {
         orchestrator: orch,
         session_manager: mgr,
@@ -209,4 +212,31 @@ pub fn make_test_context() -> ServerRuntimeContext {
     };
     crate::transport::setup::register_server_domains_for_context(&ctx).unwrap();
     ctx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn make_test_context_seeds_global_settings_from_isolated_profile() {
+        let _guard = crate::domains::settings::test_settings_lock()
+            .lock()
+            .expect("settings test lock");
+        crate::domains::settings::reset_settings();
+
+        let ctx = make_test_context();
+        assert!(
+            ctx.settings_path.starts_with(std::env::temp_dir()),
+            "test settings path must be isolated from the live user profile"
+        );
+
+        let settings = crate::domains::settings::get_settings();
+        assert_eq!(
+            settings.prompt_library.history_enabled,
+            crate::domains::settings::TronSettings::default()
+                .prompt_library
+                .history_enabled
+        );
+    }
 }

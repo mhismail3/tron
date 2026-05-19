@@ -93,6 +93,9 @@ pub fn get_settings() -> Arc<TronSettings> {
     // race here, both will produce a valid Arc from the same deterministic
     // source (file or defaults) and one's store overwrites the other; both
     // return a valid snapshot. The loser's Arc is dropped. No lock involved.
+    #[cfg(test)]
+    let fresh = Arc::new(TronSettings::default());
+    #[cfg(not(test))]
     let fresh = Arc::new(load_settings().expect("failed to load settings"));
     slot.store(Some(Arc::clone(&fresh)));
     fresh
@@ -229,6 +232,20 @@ authProfile = "default"
         init_settings(custom);
         let s = get_settings();
         assert_eq!(s.server.heartbeat_interval_ms, 99_000);
+        reset_settings();
+    }
+
+    #[test]
+    fn get_settings_test_default_never_reads_live_profile() {
+        let _lock = lock_settings();
+        reset_settings();
+
+        let settings = get_settings();
+        assert_eq!(
+            settings.server.heartbeat_interval_ms,
+            TronSettings::default().server.heartbeat_interval_ms
+        );
+
         reset_settings();
     }
 
