@@ -952,30 +952,6 @@ async fn main() -> Result<()> {
     let event_store = Arc::new(EventStore::new(pool));
     let engine_host = init_engine_host(&db_path)?;
 
-    // Opportunistic prompt-history prune on startup. Fire-and-forget: runtime
-    // must not block on this. Skipped entirely unless retention is configured.
-    {
-        let pl = settings.prompt_library.clone();
-        if pl.history_auto_prune && (pl.history_max_entries > 0 || pl.history_max_age_days > 0) {
-            let pool = event_store.pool().clone();
-            tokio::task::spawn_blocking(move || {
-                let age = (pl.history_max_age_days > 0).then_some(pl.history_max_age_days);
-                let cap = (pl.history_max_entries > 0).then_some(pl.history_max_entries);
-                match tron::domains::prompt_library::store::prune_history(&pool, age, cap) {
-                    Ok(n) if n > 0 => {
-                        tracing::debug!(deleted = n, "pruned prompt history on startup");
-                    }
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::warn!(error = %e, "failed to prune prompt history on startup");
-                    }
-                }
-            })
-            .await
-            .context("Prompt history prune task panicked")?;
-        }
-    }
-
     // Phase 3: Core services (orchestrator, providers, capabilities, subagents)
     let push_service = init_push();
     let mcp = init_mcp(&settings, &settings_path).await;

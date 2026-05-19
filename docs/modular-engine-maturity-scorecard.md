@@ -51,11 +51,11 @@ Collapsed substrate rules:
 | Test/proof strength | 12 | Static gates, focused tests, integration tests, absence tests, and failure-mode tests |
 | Docs/operations | 7 | README, architecture docs, manual QA, and ledger match current behavior |
 
-Current score: **97/100**.
+Current score: **99/100**.
 
 ## Axis Scores
 
-### Architecture simplicity — 13/15
+### Architecture simplicity — 14/15
 
 Evidence:
 
@@ -74,21 +74,27 @@ Evidence:
 - Generated UI stored-surface/action validation now lives in
   `engine/primitives/ui/validation.rs`; the parent UI primitive remains
   registration, dispatch, and authoring coordination.
+- `docs/product-shell-reachability-map.md` now classifies the remaining fixed
+  iOS/product-shell surfaces by entrypoint, DTO/client, server/event
+  dependency, tests, operator role, and keep/convert/defer decision.
+- Prompt Library durable state no longer has a bespoke runtime store:
+  snippets/history are artifact resources and the deleted prompt store is
+  protected by static gates.
 
 Blockers:
 
 - `engine/primitives/module.rs` still owns activation lifecycle orchestration
   and shared helpers; those cross-cutting helpers need continued pressure
   against becoming a second policy layer.
-- Some older domain and iOS product-shell surfaces remain deferred pending
-  proof-driven removal.
+- Some older iOS product-shell surfaces remain active thin shells pending
+  generated UI/control replacement proof.
 
 Next action:
 
-- Continue proof-driven removal/domain audits and keep lifecycle helpers narrow
-  as package behavior matures.
+- Replace or remove the remaining fixed product shells only when generated
+  UI/control/resource projections cover their current operator role.
 
-### Security/authority — 14/15
+### Security/authority — 15/15
 
 Evidence:
 
@@ -110,19 +116,19 @@ Evidence:
 - `ui::submit_action` executes only stored canonical actions from validated
   `ui_surface` versions, and tests prove invalid input or stale target
   revisions fail before child invocation.
+- Prompt-library mutating capabilities now reject raw secret-like prompt
+  content before resource persistence, and static gates prevent the old
+  prompt DB store from returning as a parallel authority/state path.
 
 Blockers:
 
-- `authority_scopes` still exist as audit/derived labels and need continued
-  protection from becoming permission truth.
-- More exhaustive property coverage is still useful for large selector/template
-  cross-products, but the current deterministic adversarial cases now cover the
-  highest-risk boundaries.
+- No current authority blocker. `authority_scopes` remain derived audit labels
+  only and are protected by static gates.
 
 Next action:
 
-- Keep protecting `authority_scopes` as audit labels while deferred domain
-  output audits continue.
+- Keep deterministic adversarial tests at every new boundary and avoid
+  client-owned policy or compatibility paths.
 
 ### Resource model — 12/12
 
@@ -143,17 +149,20 @@ Evidence:
   `materialized_file` refs, while `voice_notes::list` and
   `voice_notes::delete` use resource truth instead of scanning or deleting
   Markdown files as source truth.
+- `prompt_library::history_*` and `prompt_library::snippet_*` now use
+  `artifact` resources as durable truth; retired `prompt_history` and
+  `prompt_snippets` rows are ignored.
 
 Blockers:
 
-- No current blocker for the converted resource-backed substrate. Remaining
-  deferred domains need proof maps, but voice notes no longer carries a
-  competing file-backed durable-output model.
+- No current blocker for converted prompt and voice-note durable output.
+  Remaining deferred domains are either projection/transport state or need
+  separate proof before conversion/removal.
 
 Next action:
 
-- Audit deferred domain outputs and remove or convert remaining non-resource
-  durable state.
+- Finish the final product-shell replacement/removal proof after generated UI
+  can cover the still-active fixed surfaces.
 
 ### Runtime reliability — 15/15
 
@@ -292,20 +301,26 @@ Evidence:
 - `engine/tests/domain_outputs.rs` now proves voice-note save/list/delete are
   resource-backed, idempotent, and fail invalid audio without accepted produced
   refs.
+- `engine/tests/prompt_library_resources.rs` proves prompt snippets/history are
+  artifact-backed, idempotent, ignore retired prompt tables, and fail validation
+  without accepted produced refs.
 - `operator_consequence_and_voice_note_resource_boundaries_stay_enforced`
   statically protects the action-summary helper boundary and prevents direct
   file write/read/delete APIs from becoming voice-note durable truth again.
+- `product_shell_reachability_and_prompt_library_resources_stay_enforced`
+  requires the product-shell reachability map, resource-backed prompt-library
+  contracts, deleted prompt store, and focused prompt-resource tests.
 
 Blockers:
 
-- The maturity score needs continued calibration as more subsystems are audited.
 - iOS generated UI tests only need to run when Swift/project files change, so
-  server-only changes still rely primarily on DTO stability.
+  server-only changes still rely primarily on DTO stability and static
+  reachability proof.
 
 Next action:
 
-- Add subsystem-specific proof gates for the remaining large module source-trust
-  and health/integrity paths.
+- Use the reachability map as the deletion bar for the remaining fixed product
+  shells.
 
 ### Docs/operations — 7/7
 
@@ -328,6 +343,8 @@ Evidence:
 - The voice-notes resource conversion, operator consequence projections, and
   deferred domain-output proof map are reflected in README, cleanup audit, and
   the next-phase plan.
+- The prompt-library resource conversion and product-shell reachability map are
+  reflected in README, cleanup audit, and the next-phase plan.
 
 Blockers:
 

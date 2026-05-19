@@ -1,97 +1,130 @@
-# Deferred Product-Shell And Domain Output Finalization Phase
+# Final Product-Shell Replacement And Legacy Schema Cleanup Phase
 
 ## Current Checkpoint
 
-The operator consequence and voice-notes resource conversion checkpoint is
-complete:
+The product-shell reachability and Prompt Library resource conversion checkpoint
+is complete:
 
-- control/module/trust-audit/generated UI action summaries now share one
-  bounded consequence projection helper;
-- generated UI stored actions still execute only through canonical target
-  capabilities;
-- `voice_notes::save` produces `artifact` and `materialized_file` refs;
-- `voice_notes::list` and `voice_notes::delete` use resource truth rather than
-  filesystem scans or physical deletion as durable state;
-- static gates prevent direct voice-note file write/read/delete APIs from
-  becoming source truth again;
-- the maturity scorecard baseline is now `97/100`.
+- `docs/product-shell-reachability-map.md` classifies the remaining fixed iOS
+  shells by entrypoint, DTO/client, server/event dependency, tests, current
+  operator role, and keep/convert/defer decision;
+- `prompt_library::history_*` and `prompt_library::snippet_*` use `artifact`
+  resources as durable truth;
+- retired `prompt_history` and `prompt_snippets` rows are ignored by runtime
+  prompt-library code;
+- prompt-library mutating responses preserve existing fields and add
+  top-level `resourceRefs`;
+- static gates prevent the deleted prompt store and product-shell proof map
+  from drifting;
+- the maturity scorecard baseline is now `99/100`.
 
 ## Objective
 
-Close the remaining cleanup gap by auditing and simplifying the product-shell
-and deferred domain surfaces that still predate the collapsed substrate.
+Close the final cleanup gap without broadening the architecture: replace or
+remove remaining fixed product-shell surfaces only when generated UI/control/
+resource projections cover their current role, and remove inert retired schema
+surface only behind a deliberate clean storage boundary.
 
-This phase should be proof-driven and may remove code only when reachability
-evidence proves it has no current caller, route, test, or durable contract. It
-must not add public capability ids, request/response schemas, storage
-generation, resource kinds, generated UI catalogs, compatibility readers,
-fallback DTOs, package/source/policy/trust/audit tables, `control::act`, iOS
-policy, remote package fetch, or alternate worker-spawn paths.
+This phase should move the scorecard from `99/100` to `100/100` only if the
+remaining product-shell and retired-schema blockers are resolved with tests,
+docs, and static gates. Do not add new public capability ids, resource kinds,
+storage tables, generated UI catalogs, compatibility readers, fallback DTOs,
+`control::act`, iOS policy, marketplace flows, remote fetch, or alternate
+worker-spawn paths.
 
 ## Implementation Plan
 
-### 1. Product-Shell Reachability Map
+### 1. Choose One Remaining Fixed Shell
 
-Build a current iOS/server reachability map for:
+Use `docs/product-shell-reachability-map.md` as the deletion bar. Pick exactly
+one active surface whose current operator role can be replaced by existing
+control/generated UI/resource projections, likely:
 
-- AgentControl sheets and cards;
-- SourceChanges sheets;
-- Subagent result notification views;
-- notification inbox/detail views;
-- prompt library sheets and state;
-- display stream views;
-- voice recording affordances.
+- AgentControl inspection cards, if generated session/context/source-control
+  surfaces can cover the same information;
+- Prompt Library sheet, if generated UI can safely author snippet/history
+  operations and chat composer insertion remains ergonomic;
+- notification inbox, only if notification delivery/read semantics first have
+  a resource-backed contract.
 
-For each surface, record the entrypoint, navigation path, DTO/client, server
-capability or event dependency, tests, and current operator role. Classify it as
-`keep thin shell`, `convert to generated UI`, `remove candidate`, or `defer with
-reason`.
+If no surface meets the bar, do not delete UI. Instead, document the missing
+generated UI/control primitive and keep the scorecard at `99/100`.
 
-### 2. Remove Or Consolidate One Proven-Unreachable Surface
+### 2. Replace Before Removing
 
-Delete exactly one product-shell or DTO path only if the reachability map proves
-it is unreachable or duplicated by current generated UI/control projections.
-The same change must delete navigation references, DTO/client references,
-previews/tests/docs, and add a static absence gate. Do not remove active chat
-affordances or device/runtime infrastructure without a replacement path.
+For the selected shell:
 
-### 3. Deferred Domain Output Decisions
+- identify every Swift entrypoint, navigation path, DTO/client, test, preview,
+  and doc reference;
+- identify the canonical server projection or `ui_surface` that replaces it;
+- add tests for the replacement path before deleting fixed UI;
+- delete the fixed surface, navigation case, DTO/client code, tests/previews,
+  and docs in the same checkpoint;
+- add static absence gates for the retired symbols and route names.
 
-For `notifications`, `prompt_library`, `browser`, `display`, `device`, and
-`transcription`, classify each durable output path as resource-backed,
-ephemeral/projection-only, acceptable chat/session harness state, remove
-candidate, or convert-to-resource candidate. Add tests or static gates for the
-decision. If a low-risk domain output can be converted without wire/schema/iOS
-changes, convert it; otherwise document the exact future conversion boundary.
+No client-owned target functions, grants, payload templates, resource lineage,
+or policy decisions are allowed.
 
-### 4. Operator Consequence Consumption
+### 3. Legacy Schema Decision
 
-If Swift DTOs already tolerate the added action consequence fields, keep iOS
-unchanged. If decoding drops or rejects the fields, update only the Engine
-Console/generated UI DTO layer to decode and display server-provided
-consequence metadata. iOS must still submit only stored action coordinates,
-user input, and idempotency key.
+Audit the consolidated SQLite schema for inert tables that no runtime code reads
+after recent resource conversions:
+
+- `prompt_history`;
+- `prompt_snippets`;
+- any other tables made inert by the modular-engine conversion.
+
+If removing them requires a clean storage generation boundary, draft and
+implement a new generation reset. Do not add migration readers or compatibility
+paths. If the generation reset is not justified, leave the tables documented as
+inert and keep runtime static gates proving they are not read.
+
+### 4. Final Static Gates
+
+Add or update gates for:
+
+- no fixed UI symbol for any removed shell;
+- no runtime prompt-library table reader;
+- no old prompt store module;
+- no generated UI fallback renderer;
+- no client-authored generated UI action target/payload/grant;
+- no `control::act`;
+- no package/source/policy/trust/audit tables;
+- no compatibility alias or fallback DTO reader;
+- no raw-scope authorization or worker-spawn bypass.
+
+### 5. Documentation And Scorecard
+
+Update:
+
+- `README.md` for any removed iOS shell or database-schema boundary;
+- `docs/product-shell-reachability-map.md` with the replacement/removal proof;
+- `docs/modular-engine-cleanup-audit.md` with the final decision;
+- `docs/modular-engine-maturity-scorecard.md` only after verification passes;
+- progressive module/view docs for any touched area;
+- `~/LEDGER.jsonl`.
 
 ## Verification
 
-Run focused checks for any touched product shell/domain, then:
+Run focused tests for any touched shell/domain, then:
 
+- `cd packages/agent && cargo test prompt_library --lib -- --nocapture`;
 - `cd packages/agent && cargo test generated_ui --lib -- --nocapture`;
-- `cd packages/agent && cargo test module_ --lib -- --nocapture`;
-- `cd packages/agent && cargo test voice_notes --lib -- --nocapture`;
-- targeted domain tests for audited/removed domains;
+- `cd packages/agent && cargo test resource_ --lib -- --nocapture`;
 - `cd packages/agent && cargo test --test threat_model_invariants -- --nocapture`;
 - `git diff --check`;
 - `scripts/tron ci fmt check clippy test`.
 
-Run `cd packages/ios-app && xcodegen generate` plus targeted Engine Console or
-surface tests only if Swift/project files change.
+If Swift/project files change:
+
+- `cd packages/ios-app && xcodegen generate`;
+- targeted tests for the removed/replaced surface plus Engine Console/generated
+  UI DTO/cache tests.
 
 ## Out Of Scope
 
-- New package trust features or signature algorithms.
-- Remote package distribution, marketplace install, or remote key discovery.
-- Control-plane mutation shortcuts.
-- Client-side policy or local action construction.
-- Storage deletion/archive execution.
-- Broad iOS redesign.
+- Remote package distribution or marketplace installation.
+- New trust-root algorithms.
+- New scheduler, package, source, policy, trust, audit, health, or prompt tables.
+- Product redesign of chat.
+- Broad storage deletion without a clean generation decision.

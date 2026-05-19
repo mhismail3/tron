@@ -12,16 +12,16 @@ operation_bindings! {
     hidden = [];
     bindings = [
         "history_record" => |invocation, deps| {
-            prompt_history_record_value(Some(&invocation.payload), deps).await
+            prompt_history_record_value(invocation, deps).await
         },
         "history_list" => |invocation, deps| {
             prompt_history_list_value(Some(&invocation.payload), deps).await
         },
         "history_delete" => |invocation, deps| {
-            prompt_history_delete_value(Some(&invocation.payload), deps).await
+            prompt_history_delete_value(invocation, deps).await
         },
-        "history_clear" => |_invocation, deps| {
-            prompt_history_clear_value(deps).await
+        "history_clear" => |invocation, deps| {
+            prompt_history_clear_value(invocation, deps).await
         },
         "snippet_list" => |_invocation, deps| {
             prompt_snippet_list_value(deps).await
@@ -30,13 +30,13 @@ operation_bindings! {
             prompt_snippet_get_value(Some(&invocation.payload), deps).await
         },
         "snippet_create" => |invocation, deps| {
-            prompt_snippet_create_value(Some(&invocation.payload), deps).await
+            prompt_snippet_create_value(invocation, deps).await
         },
         "snippet_update" => |invocation, deps| {
-            prompt_snippet_update_value(Some(&invocation.payload), deps).await
+            prompt_snippet_update_value(invocation, deps).await
         },
         "snippet_delete" => |invocation, deps| {
-            prompt_snippet_delete_value(Some(&invocation.payload), deps).await
+            prompt_snippet_delete_value(invocation, deps).await
         },
     ];
 }

@@ -1,11 +1,9 @@
-//! Prompt Library — history and snippets persistence.
+//! Prompt Library — resource-backed history and snippets helpers.
 //!
-//! Provides two server-persisted datasets exposed via engine capabilities:
-//! - **History** (`prompt_history` table): auto-captured log of every
-//!   interactive user prompt, deduplicated by normalized-text hash. Each
-//!   row tracks `first_used_at`, `last_used_at`, and `use_count`.
-//! - **Snippets** (`prompt_snippets` table): user-authored named quick
-//!   prompts with full CRUD.
+//! Prompt library durability lives in the engine resource substrate:
+//! - **History** is stored as `artifact:prompt-history:{hash}` resources,
+//!   deduplicated by normalized-text hash.
+//! - **Snippets** are stored as `artifact:prompt-snippet:{id}` resources.
 //!
 //! # Submodules
 //!
@@ -13,28 +11,15 @@
 //! |-------------|-----------------------------------------------------------|
 //! | [`normalize`] | Text normalization + SHA-256 hashing for dedup.          |
 //! | [`types`]     | Public data types returned to engine clients.               |
-//! | [`store`]     | SQLite-backed CRUD over the shared event-store pool.     |
 //!
 //! # Invariants
 //!
-//! - `prompt_history.text_hash` is the SHA-256 hex of the NFC-normalized,
-//!   whitespace-trimmed, LF-normalized input. Dedup is exact after
-//!   normalization.
-//! - `record_prompt` never blocks the agent's prompt dispatch path — callers
-//!   invoke it from a fire-and-forget `spawn_blocking`. Write failures are
-//!   logged and swallowed.
-//! - `record_prompt_and_prune` is the canonical entry point for the engine-owned
-//!   `agent::prompt_apply` runtime: it folds insert + amortized retention prune
-//!   into a single call so the row count stays bounded without a separate
-//!   housekeeping job. Pruning only fires when the outcome is `Inserted`
-//!   AND at least one retention axis is enabled.
+//! - Prompt history ids are the SHA-256 hex of the NFC-normalized,
+//!   whitespace-trimmed, LF-normalized input.
+//! - List/get/delete capabilities read resource truth only; retired
+//!   prompt-library tables are not runtime readers.
 //! - Capture is interactive-only: cron- and subagent-dispatched prompts are
 //!   never recorded (the prompt payload's `source: "cron"` param gates this).
 
 pub mod normalize;
-pub mod store;
 pub mod types;
-
-#[cfg(test)]
-#[path = "store_tests.rs"]
-mod store_tests;

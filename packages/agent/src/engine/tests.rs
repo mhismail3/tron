@@ -39,6 +39,7 @@ mod domain_outputs;
 mod generated_ui;
 mod grant_authority;
 mod module_activation;
+mod prompt_library_resources;
 mod resource_kernel;
 
 fn wid(value: &str) -> WorkerId {

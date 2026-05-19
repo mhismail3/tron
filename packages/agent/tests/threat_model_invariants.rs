@@ -3067,6 +3067,105 @@ fn operator_consequence_and_voice_note_resource_boundaries_stay_enforced() {
     }
 }
 
+#[test]
+fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
+    let repo = repo_root();
+    let crate_root = crate_root();
+    let reachability_map = repo.join("docs").join("product-shell-reachability-map.md");
+    let reachability_text = std::fs::read_to_string(&reachability_map)
+        .unwrap_or_else(|error| panic!("failed to read {reachability_map:?}: {error}"));
+    for required in [
+        "AgentControl",
+        "SourceChanges",
+        "subagent",
+        "notification inbox",
+        "Prompt Library",
+        "display stream",
+        "voice recording",
+        "keep thin shell",
+        "convert to generated UI",
+        "defer with reason",
+    ] {
+        assert!(
+            reachability_text.contains(required),
+            "product-shell reachability map must classify `{required}`"
+        );
+    }
+
+    let prompt_contract =
+        std::fs::read_to_string(crate_root.join("src/domains/prompt_library/contract.rs"))
+            .expect("read prompt_library contract");
+    assert!(
+        prompt_contract.contains("DurableOutputContract")
+            && prompt_contract.contains("resourceRefs")
+            && prompt_contract.contains("artifact"),
+        "prompt_library mutating contracts must stay resource-backed artifact outputs"
+    );
+
+    let prompt_deps =
+        std::fs::read_to_string(crate_root.join("src/domains/prompt_library/deps.rs"))
+            .expect("read prompt_library deps");
+    assert!(
+        prompt_deps.contains("engine_host: crate::engine::EngineHostHandle")
+            && !prompt_deps.contains("event_store"),
+        "prompt_library durable state must compose resource capabilities through the engine host"
+    );
+
+    for rel in [
+        "src/domains/prompt_library/mod.rs",
+        "src/domains/prompt_library/deps.rs",
+        "src/domains/prompt_library/handlers.rs",
+        "src/domains/prompt_library/implementation/mod.rs",
+    ] {
+        let content = std::fs::read_to_string(crate_root.join(rel))
+            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
+        let production_content = content
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(content.as_str());
+        for forbidden in [
+            "rusqlite",
+            "prompt_snippets",
+            "INSERT INTO prompt_",
+            "UPDATE prompt_",
+            "DELETE FROM prompt_",
+            "SELECT ",
+        ] {
+            assert!(
+                !production_content.contains(forbidden),
+                "{rel} must not use prompt-library DB tables as runtime truth"
+            );
+        }
+    }
+    assert!(
+        !crate_root
+            .join("src/domains/prompt_library/implementation/store.rs")
+            .exists(),
+        "prompt_library store.rs must stay deleted; resources are source truth"
+    );
+
+    let engine_tests =
+        std::fs::read_to_string(crate_root.join("src/engine/tests.rs")).expect("read tests.rs");
+    assert!(
+        engine_tests.contains("mod prompt_library_resources;"),
+        "prompt-library resource tests must stay in their focused boundary"
+    );
+    let prompt_resource_tests =
+        std::fs::read_to_string(crate_root.join("src/engine/tests/prompt_library_resources.rs"))
+            .expect("read prompt_library resource tests");
+    for required in [
+        "prompt_snippets_are_resource_backed_and_ignore_retired_rows",
+        "prompt_history_is_resource_backed_deduped_and_ignores_retired_rows",
+        "prompt_history_skip_and_validation_fail_without_accepted_refs",
+        "prompt_library_idempotency_and_history_delete_clear_do_not_duplicate_resources",
+    ] {
+        assert!(
+            prompt_resource_tests.contains(required),
+            "prompt-library resource proof test `{required}` must remain present"
+        );
+    }
+}
+
 fn rust_files_under(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     visit_rust_files(root, &mut files);

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// - `history_enabled`: globally toggle the auto-capture hook. Defaults `true`.
 /// - `history_max_entries`: soft cap on total rows (oldest-first prune). `0` = unlimited.
 /// - `history_max_age_days`: time-based prune cutoff. `0` = no age limit.
-/// - `history_auto_prune`: run prune opportunistically on server start. Defaults `true`.
+/// - `history_auto_prune`: prune resource-backed history after captures. Defaults `true`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct PromptLibrarySettings {
@@ -19,7 +19,7 @@ pub struct PromptLibrarySettings {
     pub history_max_entries: u32,
     /// Maximum history age in days. `0` = no age limit.
     pub history_max_age_days: u32,
-    /// Run prune opportunistically on startup.
+    /// Prune resource-backed prompt history after captures.
     pub history_auto_prune: bool,
 }
 

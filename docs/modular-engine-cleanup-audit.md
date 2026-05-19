@@ -259,11 +259,40 @@ Deferred domain-output proof map:
 | Domain/surface | Current evidence | Decision |
 |----------------|------------------|----------|
 | `notifications` | `notifications::send/list/mark_read/mark_all_read` still drive APNs, notification inbox, and iOS notification views | Defer; convert inbox state to resources only after delivery semantics and APNs operator UX are specified |
-| `prompt_library` | Server store plus iOS input-bar/history/snippet callers remain active | Defer; likely convert snippets/history to artifacts or a resource-backed capability before removal |
+| `prompt_library` | Server resource-backed artifacts plus iOS input-bar/history/snippet callers remain active | Converted durable state; keep the iOS sheet as a thin capability client |
 | AgentControl/source-change/subagent sheets | iOS chat sheets and event-state dependencies remain active | Defer; replace with resource lineage/control/generated UI before deleting fixed sheets |
 | `browser`, `display`, `device` | Server domains still register workers and support local device/display flows; iOS display stream DTOs remain active | Keep as capability modules until each output path is separately proven resource-backed or ephemeral |
 | `transcription` | Server domain remains the reusable audio-to-text capability used by voice notes; model cache/sidecar state is runtime infrastructure | Keep; audit retained transcript outputs separately if direct transcription results become durable |
 | `voice_notes` | Now resource-backed through `artifact` and `materialized_file`; list/delete use resource truth | Converted; remove any future file-scan compatibility proposals |
+
+## 2026-05-19 Product-Shell Reachability And Prompt-Library Conversion Pass
+
+This pass converted the other active chat-product durable-output domain and
+added a dedicated reachability proof map for the remaining fixed iOS shells.
+No product shell was deleted: every listed surface still has a live entrypoint,
+client/server dependency, test, or current operator role.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Product-shell reachability | `docs/product-shell-reachability-map.md` maps AgentControl, SourceChanges, subagent sheets/plugins, notification inbox/detail views, Prompt Library, display stream views, and voice recording affordances by entrypoint, DTO/client, server/event dependency, tests, role, and decision | Keep as the deletion bar for the remaining product shell |
+| Prompt history | `engine/tests/prompt_library_resources.rs` proves `prompt_library::history_record/list/delete/clear` use `artifact:prompt-history:*` resources, dedupe by normalized text hash, ignore retired table rows, and skip disabled/cron captures without accepted refs | Converted; old `prompt_history` rows are not runtime truth |
+| Prompt snippets | The same test module proves `prompt_library::snippet_create/update/delete/list/get` use `artifact:prompt-snippet:*` resources, return `resourceRefs` for mutations, discard lifecycle on delete, and ignore retired table rows | Converted; old `prompt_snippets` rows are not runtime truth |
+| Prompt-library contracts | `prompt_library::history_record/delete/clear` and `prompt_library::snippet_create/update/delete` declare artifact-backed output contracts and additive top-level `resourceRefs` | Keep stable public ids/current response fields; no fallback DTO reader |
+| iOS Prompt Library | `PromptLibrarySheet`, `PromptLibraryState`, and `PromptLibraryClient` still call canonical `prompt_library::*` capabilities and Decodable DTOs tolerate additive `resourceRefs` | Keep thin shell; no local policy/resource truth |
+| Static gates | `product_shell_reachability_and_prompt_library_resources_stay_enforced` requires the reachability map, resource-backed prompt contracts, engine-host resource composition, deleted prompt store, and focused prompt-resource tests | Keep as absence proof against DB-backed prompt truth |
+
+Removal proof from this pass:
+
+- No active iOS product shell met the deletion bar. AgentControl,
+  SourceChanges, subagent sheets/plugins, notification inbox/detail, Prompt
+  Library, display stream views, and voice recording affordances remain
+  classified with evidence in the reachability map.
+- No prompt-library storage compatibility path was added. Legacy prompt tables
+  may still exist in old consolidated SQLite schema files, but runtime
+  prompt-library code does not read or migrate them.
+- No iOS change was needed: the existing Swift response DTOs ignore additive
+  `resourceRefs`, and mutations still go through canonical server
+  capabilities.
 
 ## Deferred High-Scrutiny Areas
 
@@ -273,16 +302,15 @@ call-graph/test-backed passes:
 - `notifications`: still drives APNs, notification inbox, and engine-delivered
   operator notices. Remove only after notification delivery is replaced by
   resource/control projections or a generated surface.
-- `prompt_library`: still has settings, input-bar, history, and snippet callers.
-  It should become artifact/resource-backed before any deeper deletion.
 - `AgentControl`, `SourceChanges`, and subagent sheets: still have chat-sheet
   callers and event-state dependencies. Replace with resource lineage/control
   projections before deletion.
 - `browser`, `display`, `device`, and `transcription` server domains: still
   register capability workers and may support chat or local device flows.
-  Demote or remove only with route, DTO, and event-plugin proof. `voice_notes`
-  is no longer in this deferred set because its durable note output is now
-  resource-backed.
+  Demote or remove only with route, DTO, and event-plugin proof.
+- `prompt_library` and `voice_notes` are no longer durable-output ambiguity
+  blockers: both now use resources as runtime truth, though their chat/iOS
+  affordances remain as thin shells.
 - The remaining broad `engine/tests.rs` body: continue moving cases into
   focused proof modules only when the behavior boundary is stable.
 

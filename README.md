@@ -61,7 +61,7 @@ This README is the single, canonical reference for the project and is expected t
 |                         Event Store (SQLite)                                |
 |   - Immutable event log with tree structure (fork/rewind)                   |
 |   - Session state reconstruction via ancestor traversal                     |
-|   - SQLite-backed sessions, events, branches, cron, prompts, and devices    |
+|   - SQLite-backed sessions, events, branches, cron, devices, resources      |
 +-----------------------------------------------------------------------------+
 
 ```
@@ -361,6 +361,7 @@ Important parity anchors are:
 | web search/fetch | `web::search`, `web::fetch` |
 | app notification | `notifications::send` |
 | voice note save/list/delete | `voice_notes::save`, `voice_notes::list`, `voice_notes::delete` |
+| prompt history/snippets | `prompt_library::history_*`, `prompt_library::snippet_*` |
 | capability discovery/execution | `capability::search`, `capability::inspect`, `capability::execute` |
 
 `process::run` and `notifications::send` both have direct, low-overhead paths
@@ -375,6 +376,8 @@ delegate with an idempotency key and normal audit/event records.
 `voice_notes::save` transcribes audio into resource-backed `artifact` and
 `materialized_file` outputs; `voice_notes::list` and `voice_notes::delete` read
 and discard resource state rather than treating Markdown files as source truth.
+Prompt Library history and snippets are also resource-backed `artifact`
+records; old prompt-library SQLite rows are ignored by the runtime.
 
 Capability identity is projected from the live catalog:
 
@@ -1070,13 +1073,13 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 | `notification_read_state` | Per-event read receipts for client notifications |
 | `cron_jobs` | Cron job definitions: schedule, payload, delivery, overlap/misfire policies, runtime state (next/last run, consecutive failures) |
 | `cron_runs` | Per-run history for cron jobs (status, started/completed timestamps, output, exit code) |
-| `prompt_history` | Deduplicated interactive-prompt history keyed by normalized text hash (use_count, first/last_used_at, char_count) |
-| `prompt_snippets` | User-authored reusable prompt snippets (`name`, `text`, timestamps) |
+| `prompt_history` | Retired inert table from the consolidated v001 schema. Runtime Prompt Library history now uses `artifact:prompt-history:*` resources and does not read this table. |
+| `prompt_snippets` | Retired inert table from the consolidated v001 schema. Runtime Prompt Library snippets now use `artifact:prompt-snippet:*` resources and do not read this table. |
 | `constitution_home_audit` | Audited creates, updates, moves, deletes, seeds, repairs, and external edits for files under `~/.tron/` |
 | `constitution_resolution_audit` | Settings, instruction, context, provider-payload, vault, automation, and outcome resolution records with effective hashes and blob refs |
 | `constitution_context_blocks` | Typed model-context blocks for replay: source home/path/blob, hash, sensitivity, cache class, inclusion reason, precedence, and provider surface |
 
-The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Prompt history and cron state live in their dedicated tables; session/task views are reconstructed from the canonical event log.
+The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Cron state still lives in dedicated cron tables. Prompt Library history/snippets are resource-backed artifacts; session/task views are reconstructed from the canonical event log.
 
 ---
 

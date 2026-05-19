@@ -16,6 +16,8 @@ for artifacts, goals, work items, UI surfaces, and control-plane state.
 
 The cleanup proof map for removing fixed product-shell code and consolidating
 recent substrate additions lives in `docs/modular-engine-cleanup-audit.md`.
+The current reachability map for deferred fixed iOS/product-shell surfaces
+lives in `docs/product-shell-reachability-map.md`.
 The measurable 100% definition and current maturity blockers live in
 `docs/modular-engine-maturity-scorecard.md`.
 
