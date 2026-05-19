@@ -369,6 +369,60 @@ struct SourceGuardTests {
         #expect(!appEntry.contains("if #available(iOS 26.0, *)"))
     }
 
+    @Test("Prompt Library management is generated UI only")
+    func testPromptLibraryManagementIsGeneratedUIOnly() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let promptRoot = iosRoot.appendingPathComponent("Sources/Views/PromptLibrary")
+        let sheet = try String(
+            contentsOf: promptRoot.appendingPathComponent("PromptLibrarySheet.swift"),
+            encoding: .utf8
+        )
+        let historyList = try String(
+            contentsOf: promptRoot.appendingPathComponent("PromptHistoryListView.swift"),
+            encoding: .utf8
+        )
+        let snippetList = try String(
+            contentsOf: promptRoot.appendingPathComponent("PromptSnippetListView.swift"),
+            encoding: .utf8
+        )
+        let managementSheet = try String(
+            contentsOf: promptRoot.appendingPathComponent("PromptLibraryManagementSurfaceSheet.swift"),
+            encoding: .utf8
+        )
+        let generatedRenderer = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/GeneratedUISurfaceView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(sheet.contains("PromptLibraryManagementSurfaceSheet"))
+        #expect(!sheet.contains("SnippetEditorSheet"))
+        #expect(!sheet.contains("showClearHistoryAlert"))
+        #expect(!sheet.contains("isCreatingSnippet"))
+        #expect(!sheet.contains("editingSnippet"))
+        #expect(!historyList.contains(".swipeActions"))
+        #expect(!historyList.contains("deleteHistory"))
+        #expect(!snippetList.contains(".swipeActions"))
+        #expect(!snippetList.contains("deleteSnippet"))
+        #expect(!snippetList.contains("onEdit"))
+
+        #expect(managementSheet.contains(#"targetType: "resource_collection""#))
+        #expect(managementSheet.contains(#"prompt_library.snippets.v1"#))
+        #expect(managementSheet.contains(#"prompt_library.history.v1"#))
+        #expect(managementSheet.contains("GeneratedUISurfaceView"))
+        #expect(managementSheet.contains("submitUiAction"))
+        #expect(!managementSheet.contains("targetFunctionId"))
+        #expect(!managementSheet.contains("payloadTemplate"))
+        #expect(!managementSheet.contains("requiredGrant"))
+
+        #expect(generatedRenderer.contains("seedFormDefaultsIfNeeded"))
+        #expect(generatedRenderer.contains(#"component.props?["value"]"#))
+        #expect(generatedRenderer.contains(#""TextField", "TextArea", "Select", "Toggle", "Stepper", "DateTime""#))
+        #expect(generatedRenderer.contains("UiActionSubmissionDTO"))
+    }
+
     @Test("feedback recipient has tracked non-placeholder default")
     func testFeedbackRecipientConfigDefault() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

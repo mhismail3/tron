@@ -462,7 +462,7 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
     }
     assert_eq!(total, 100, "production-grade rubric must total 100");
     assert!(
-        rubric.contains("Current repo-wide score: **98/100**")
+        rubric.contains("Current repo-wide score: **99/100**")
             && rubric.contains("Ranked 100% Backlog")
             && rubric.contains("broad/high-churn domain test")
             && rubric.contains("retired prompt schema ambiguity")
@@ -470,6 +470,7 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
             && rubric.contains("dependency-tooling decision")
             && rubric.contains("Mac app")
             && rubric.contains("focused audit")
+            && rubric.contains("Prompt Library composer insertion shell")
             && rubric.contains("No raw-scope/client-policy trust")
             && rubric.contains("No current blocker"),
         "production-grade rubric must include score, blockers, and next actions"
@@ -644,7 +645,11 @@ fn grant_manifest_resource_and_ui_hardening_tests_stay_in_owning_boundaries() {
             "ui_submit_action_rejects_invalid_input_and_stale_target_before_child_invocation"
         ) && generated_ui.contains("invalid user input must fail before target child invocation")
             && generated_ui
-                .contains("stale target revision must fail before target child invocation"),
+                .contains("stale target revision must fail before target child invocation")
+            && generated_ui
+                .contains("ui_surface_for_target_authors_prompt_library_resource_collections")
+            && generated_ui
+                .contains("ui_prompt_collection_actions_submit_through_stored_surface_coordinates"),
         "generated UI action hardening tests must live in generated_ui.rs"
     );
 }
@@ -3455,6 +3460,7 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
         "Phase decision",
         "keep thin shell",
         "convert to generated UI",
+        "partially converted",
         "defer with reason",
         "defer with proof",
     ] {
@@ -3475,6 +3481,66 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
         assert!(
             reachability_text.contains(shell),
             "product-shell readiness map must include `{shell}`"
+        );
+    }
+
+    let prompt_library_root = repo
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("Views")
+        .join("PromptLibrary");
+    let prompt_sheet =
+        std::fs::read_to_string(prompt_library_root.join("PromptLibrarySheet.swift"))
+            .expect("read PromptLibrarySheet");
+    assert!(
+        prompt_sheet.contains("PromptLibraryManagementSurfaceSheet")
+            && !prompt_sheet.contains("SnippetEditorSheet")
+            && !prompt_sheet.contains("showClearHistoryAlert")
+            && !prompt_sheet.contains("isCreatingSnippet")
+            && !prompt_sheet.contains("editingSnippet"),
+        "PromptLibrarySheet must remain a thin picker and delegate management to generated UI"
+    );
+    assert!(
+        !prompt_library_root
+            .join("SnippetEditorSheet.swift")
+            .exists(),
+        "fixed Prompt Library snippet editor must stay removed"
+    );
+    for (file, forbidden) in [
+        ("PromptHistoryListView.swift", "deleteHistory"),
+        ("PromptHistoryListView.swift", ".swipeActions"),
+        ("PromptSnippetListView.swift", "deleteSnippet"),
+        ("PromptSnippetListView.swift", ".swipeActions"),
+        ("PromptSnippetListView.swift", "onEdit"),
+    ] {
+        let content = std::fs::read_to_string(prompt_library_root.join(file))
+            .unwrap_or_else(|error| panic!("read {file}: {error}"));
+        assert!(
+            !content.contains(forbidden),
+            "{file} must not own fixed Prompt Library management path `{forbidden}`"
+        );
+    }
+    let prompt_management = std::fs::read_to_string(
+        prompt_library_root.join("PromptLibraryManagementSurfaceSheet.swift"),
+    )
+    .expect("read generated prompt management sheet");
+    for required in [
+        "resource_collection",
+        "prompt_library.snippets.v1",
+        "prompt_library.history.v1",
+        "GeneratedUISurfaceView",
+        "submitUiAction",
+    ] {
+        assert!(
+            prompt_management.contains(required),
+            "generated Prompt Library management sheet must include `{required}`"
+        );
+    }
+    for forbidden in ["targetFunctionId", "payloadTemplate", "requiredGrant"] {
+        assert!(
+            !prompt_management.contains(forbidden),
+            "iOS generated Prompt Library management must not construct `{forbidden}`"
         );
     }
 

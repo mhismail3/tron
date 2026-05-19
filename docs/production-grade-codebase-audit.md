@@ -299,12 +299,15 @@ Focused security result:
 
 ## Product-Shell Replacement Readiness
 
-The product-shell reachability map now includes a readiness table for every
-remaining fixed iOS shell. The current phase decision is `defer with proof` for
-AgentControl, SourceChanges, subagent sheets/plugins, notification inbox/detail
-views, Prompt Library, display stream views, and voice recording affordances.
-No shell is removed in this checkpoint because each has an active entrypoint or
-a missing generated/resource replacement.
+The product-shell reachability map includes a readiness table for every
+remaining fixed iOS shell. Prompt Library management is now partially
+converted: snippet/history create, update, delete, and clear management is
+server-authored generated UI over `artifact:prompt-*` resources, while the
+fixed sheet remains as a thin local picker for composer insertion. The current
+phase decision remains `defer with proof` for AgentControl, SourceChanges,
+subagent sheets/plugins, notification inbox/detail views, display stream views,
+and voice recording affordances because each has an active entrypoint or a
+missing generated/resource replacement.
 
 Deletion remains allowed only after the map proves: the replacement candidate
 covers the current operator role, the blocking gap is closed, navigation and
@@ -333,9 +336,11 @@ not an invisible omission.
 
 | Priority | Work | Acceptance criteria |
 |---:|---|---|
-| 1 | Replace one remaining fixed iOS shell | Product-shell replacement readiness map proves the replacement; old view/navigation/DTO/tests removed with absence gate |
-| 2 | Adopt optional dependency/dead-code tooling when stable | `cargo machete`/`cargo udeps`/coverage/Swift dead-code tooling is installed or pinned, configured, documented, and low-noise enough for repeatable use |
-| 3 | Add deeper lifecycle/soak proof if runtime reliability target rises | New stress tests cover longer interrupted process exits, worker registration timeouts, and cleanup residue without new state planes |
+| 1 | Finish or explicitly retain Prompt Library composer insertion shell | Either generated-result-to-composer insertion is specified and replaces the local picker, or the picker is documented as intentionally local with a permanent thin-shell test gate |
+| 2 | Replace one remaining fixed iOS shell | Product-shell replacement readiness map proves the replacement; old view/navigation/DTO/tests removed with absence gate |
+| 3 | Adopt optional dependency/dead-code tooling when stable | `cargo machete`/`cargo udeps`/coverage/Swift dead-code tooling is installed or pinned, configured, documented, and low-noise enough for repeatable use |
+| 4 | Add deeper lifecycle/soak proof if runtime reliability target rises | New stress tests cover longer interrupted process exits, worker registration timeouts, and cleanup residue without new state planes |
+| Completed | Prompt Library generated management | Fixed Prompt Library create/edit/delete/clear controls are removed; generated `resource_collection` surfaces own management actions through `ui::submit_action` |
 | Completed | Product-shell readiness proof | Every remaining fixed iOS shell has replacement candidate, blocking gap, deletion risk, next prerequisite, and `defer with proof` phase decision |
 | Completed | Dependency/dead-code tooling decision | Optional tools are explicitly deferred with local availability evidence and revisit criteria |
 | Completed | Mac app focused audit | Menu bar, onboarding wizard, server lifecycle, pairing, observability/feedback, resources, generated project, scripts, and tests are classified with evidence |

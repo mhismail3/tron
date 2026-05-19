@@ -1,13 +1,11 @@
 import SwiftUI
 
-/// List of user-authored prompt snippets. Tap selects; swipe exposes
-/// edit/delete actions.
+/// List of user-authored prompt snippets. Tap selects text for composer
+/// insertion; management lives in generated UI surfaces.
 @available(iOS 26.0, *)
 struct PromptSnippetListView: View {
     @Bindable var state: PromptLibraryState
-    let engineClient: EngineClient
     let onSelect: (String) -> Void
-    let onEdit: (PromptSnippet) -> Void
 
     var body: some View {
         Group {
@@ -29,17 +27,6 @@ struct PromptSnippetListView: View {
                 PromptSnippetRow(snippet: snippet)
                     .contentShape(Rectangle())
                     .onTapGesture { onSelect(snippet.text) }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) {
-                            Task { await state.deleteSnippet(id: snippet.id, rpc: engineClient) }
-                        } label: { Label("Delete", systemImage: "trash") }
-                        .tint(.tronError)
-
-                        Button {
-                            onEdit(snippet)
-                        } label: { Label("Edit", systemImage: "pencil") }
-                        .tint(.tronEmerald)
-                    }
                     .listRowBackground(Color.clear)
                     .listRowSeparatorTint(.tronEmerald.opacity(0.15))
             }
@@ -56,7 +43,7 @@ struct PromptSnippetListView: View {
             Text("No snippets yet")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(.tronTextPrimary)
-            Text("Tap + to create your first snippet.")
+            Text("Use Manage to create your first snippet.")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM))
                 .foregroundStyle(.tronTextMuted)
                 .multilineTextAlignment(.center)

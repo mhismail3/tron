@@ -10,9 +10,7 @@ struct PromptLibrarySheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var state = PromptLibraryState()
-    @State private var editingSnippet: PromptSnippet?
-    @State private var isCreatingSnippet = false
-    @State private var showClearHistoryAlert = false
+    @State private var showManagement = false
     @State private var previewingItem: PromptHistoryItem?
 
     var body: some View {
@@ -43,12 +41,10 @@ struct PromptLibrarySheet: View {
                     case .snippets:
                         PromptSnippetListView(
                             state: state,
-                            engineClient: engineClient,
                             onSelect: { text in
                                 onSelect(text)
                                 dismiss()
-                            },
-                            onEdit: { snippet in editingSnippet = snippet }
+                            }
                         )
                     }
                 }
@@ -73,26 +69,14 @@ struct PromptLibrarySheet: View {
                     SheetTitle(title: "Prompt Library", color: .tronEmerald)
                 }
                 ToolbarItem(placement: .topBarLeading) {
-                    if state.activeTab == .history && !state.historyItems.isEmpty {
-                        Button(role: .destructive) {
-                            showClearHistoryAlert = true
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(.tronError)
-                        }
-                        .accessibilityLabel("Clear history")
+                    Button {
+                        showManagement = true
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(.tronEmerald)
                     }
-                    if state.activeTab == .snippets {
-                        Button {
-                            isCreatingSnippet = true
-                        } label: {
-                            Image(systemName: "plus")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(.tronEmerald)
-                        }
-                        .accessibilityLabel("Add snippet")
-                    }
+                    .accessibilityLabel("Manage prompt library")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -116,33 +100,19 @@ struct PromptLibrarySheet: View {
                 }
             }
             .tronErrorAlert(message: $state.errorMessage)
-            .alert("Clear all history?", isPresented: $showClearHistoryAlert) {
-                Button("Cancel", role: .cancel) {}
-                Button("Clear", role: .destructive) {
-                    Task { await state.clearHistory(rpc: engineClient) }
-                }
-            } message: {
-                Text("This permanently removes every entry in your prompt history.")
-            }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
-        .sheet(isPresented: $isCreatingSnippet) {
-            SnippetEditorSheet(
-                initialSnippet: nil,
-                onSave: { name, text in
-                    await state.createSnippet(name: name, text: text, rpc: engineClient) != nil
-                }
-            )
+        .sheet(isPresented: $showManagement) {
+            PromptLibraryManagementSurfaceSheet(engineClient: engineClient)
         }
-        .sheet(item: $editingSnippet) { snippet in
-            SnippetEditorSheet(
-                initialSnippet: snippet,
-                onSave: { name, text in
-                    await state.updateSnippet(id: snippet.id, name: name, text: text, rpc: engineClient)
-                }
-            )
+        .onChange(of: showManagement) { _, isPresented in
+            guard !isPresented else { return }
+            Task {
+                await state.loadSnippets(rpc: engineClient)
+                await state.loadHistory(rpc: engineClient, reset: true)
+            }
         }
         .sheet(item: $previewingItem) { item in
             PromptPreviewSheet(text: item.text) {

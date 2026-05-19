@@ -1,39 +1,34 @@
-# Fixed Product-Shell Replacement And Generated UI Coverage Phase
+# Final Product-Shell Boundary Decision And 100% Readiness Phase
 
 ## Current Checkpoint
 
-The product-shell readiness, dependency-tooling, and Mac production audit
-checkpoint is complete:
+The Prompt Library generated management checkpoint is complete:
 
-- `docs/product-shell-reachability-map.md` now records replacement readiness
-  for every remaining fixed iOS shell;
-- no remaining fixed shell was deleted because each still has an active
-  entrypoint or a missing generated/resource replacement;
-- dependency/dead-code tools (`cargo machete`, `cargo udeps`,
-  `cargo llvm-cov`, and `periphery`) are explicitly deferred with local
-  availability evidence and revisit criteria;
-- `docs/production-grade-codebase-audit.md` now includes a focused Mac app
-  audit covering menu bar, onboarding wizard, server lifecycle, pairing,
-  observability/feedback, bundled resources, generated project state, scripts,
-  and tests;
-- static gates require the readiness map, dependency-tooling decision, and Mac
-  audit rows to remain current.
+- `ui::surface_for_target` now authors narrow `resource_collection` surfaces
+  for Prompt Library snippet and history artifact collections;
+- generated surfaces own snippet/history create, update, delete, clear, and
+  refresh management actions through stored canonical `prompt_library::*`
+  actions;
+- `PromptLibrarySheet` no longer owns fixed add/edit/delete/clear controls and
+  remains only a local picker/composer insertion affordance;
+- `GeneratedUISurfaceView` seeds editable form state from server-provided
+  `value` props and keeps unsupported/stale/expired/damaged surfaces closed;
+- static gates protect generated Prompt Library management and forbid client
+  target-function/payload/grant construction.
 
-The repo-wide production-grade baseline is now `98/100`.
+The repo-wide production-grade baseline is now `99/100`.
 
 ## Objective
 
-Close the remaining repo-wide blockers without broadening the architecture by
-replacing one fixed product shell only after the generated/resource path fully
-covers the current operator role.
+Close the final repo-wide blocker without broadening the architecture: decide
+whether the Prompt Library composer insertion picker is an intentionally local
+thin shell or whether it should be replaced by a narrow generated-result bridge
+that can safely insert selected prompt text into the draft composer.
 
-The safest first candidate is Prompt Library inspection/history/snippet
-management because its durable server truth is already `artifact` resources.
-Deletion of the entire Prompt Library sheet is not assumed: the chat composer
-insertion affordance may remain a thin local UI if generated UI cannot express
-inserting text into the draft composer. The phase should separate
-server/resource inspection from local composer editing and remove only the
-fixed surface area that is actually replaced.
+Do not chase a nominal 100/100 by deleting useful local editing UI. The bar is
+proof: either composer insertion becomes a safe generated-UI-compatible
+handoff, or the remaining picker is documented, gated, and scored as a
+permanent local affordance that owns no durable truth or policy.
 
 No new public capability ids, storage tables, resource kinds, generated UI
 catalogs, compatibility readers, fallback DTOs, `control::act`, iOS/Mac policy
@@ -42,50 +37,50 @@ allowed.
 
 ## Implementation Plan
 
-### 1. Select One Replacement Slice
+### 1. Decide The Composer Insertion Boundary
 
 Use the readiness table in `docs/product-shell-reachability-map.md` as the
-gate. Select one surface or sub-surface where:
+gate. For Prompt Library insertion, prove:
 
-- the server truth is already resource/control/generated-UI backed;
-- the generated surface can cover the existing operator workflow;
-- no local hardware affordance, composer editing affordance, or live media
-  renderer is required for that slice;
-- the blast radius can be captured with Swift navigation/DTO/client tests and
-  Rust static gates.
+- the fixed sheet owns no create/update/delete/clear management;
+- the picker reads bounded server truth and calls only `onSelect(text)`;
+- insertion into the draft composer is local editing state, not durable engine
+  truth;
+- no server policy, resource lineage, target function, payload template, grant,
+  or generated action is constructed locally;
+- Settings may still call explicit Prompt Library clear-history only if that
+  path remains intentionally outside the picker management slice.
 
-Recommended starting slice: Prompt Library resource inspection and management.
-Likely keep: local composer insertion. Likely replace/remove: fixed snippet and
-history list/detail management if generated `artifact` surfaces can provide the
-same read/delete/update actions.
+If those statements are true, convert the blocker into a documented permanent
+thin-shell exception with static gates. If not, implement a generated-result
+handoff that lets a server-authored surface select a prompt resource and return
+text to the composer without allowing arbitrary client action construction.
 
-### 2. Build The Replacement Path First
+### 2. Prove Or Implement The Boundary
 
-For the selected slice:
+If retaining the picker:
 
-- enumerate every Swift view, navigation path, DTO/client, state object, test,
-  preview, project reference, and docs reference;
-- identify the canonical server projection, resource refs, generated
-  `ui_surface`, and stored actions that replace the fixed surface behavior;
-- add replacement-path tests before deletion;
-- update generated UI authoring only if the existing authoring path cannot
-  produce the needed surface from substrate truth;
-- keep `ui::submit_action` as the only generated action gateway.
+- add source/static tests proving the picker has selection-only behavior;
+- document the local-editing exception in the reachability map and rubric;
+- update score to 100/100 only if every remaining blocker is converted or
+  explicitly accepted with gates.
 
-The client must remain a thin renderer/action submitter. It must not construct
-target function ids, grants, payload templates, resource lineage, or policy
-decisions.
+If replacing the picker:
 
-### 3. Remove Only Proven-Redundant Code
+- design a server-authored read-only selection surface that returns a selected
+  resource/text result without mutating durable state;
+- keep mutation through `ui::submit_action` and stored actions only;
+- add Swift tests showing the client consumes only the returned selected text
+  and never constructs target functions/payloads/grants.
 
-After replacement tests pass:
+### 3. Remove Or Gate The Remaining Fixed Code
 
-- delete fixed Swift views/state/client helpers that are no longer reachable;
-- delete obsolete tests/previews/project references/docs in the same change;
+After the boundary decision:
+
+- delete any code proven redundant;
+- keep and gate any code proven intentionally local;
 - regenerate Xcode project files if Swift file membership changes;
-- add absence gates for retired symbols and route names;
-- update the product-shell readiness table from `defer with proof` to
-  `converted` only for the exact replaced slice.
+- update README/docs and absence/static gates in the same change.
 
 ### 4. Static Gates
 

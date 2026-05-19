@@ -244,6 +244,7 @@ fn validate_ui_bindings(value: Option<&Value>) -> Result<()> {
                     | "capability"
                     | "grant"
                     | "goal"
+                    | "resource_collection"
                     | "package"
                     | "module_config"
                     | "decision"
@@ -565,7 +566,7 @@ fn secret_like_key(key: &str) -> bool {
 fn ui_structural_identifier_key(key: &str) -> bool {
     matches!(
         key,
-        "surfaceId"
+        "id" | "surfaceId"
             | "resourceId"
             | "versionId"
             | "resourceVersionId"

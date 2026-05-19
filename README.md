@@ -383,8 +383,10 @@ delegate with an idempotency key and normal audit/event records.
 `materialized_file` outputs; `voice_notes::list` and `voice_notes::delete` read
 and discard resource state rather than treating Markdown files as source truth.
 Prompt Library history and snippets are also resource-backed `artifact`
-records; fresh modular-engine-v3 storage does not create prompt-library SQLite
-tables.
+records; generated `ui_surface` resource-collection surfaces own management
+actions, while the iOS sheet remains only a prompt picker/composer insertion
+affordance. Fresh modular-engine-v3 storage does not create prompt-library
+SQLite tables.
 
 Capability identity is projected from the live catalog:
 

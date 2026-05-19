@@ -480,7 +480,9 @@ final class CapabilityClient: EngineDomainClient {
             "ui.write",
             "capability.admin.read",
             "resource.read",
-            "resource.write"
+            "resource.write",
+            "prompt_library.read",
+            "prompt_library.write"
         ])
     }
 

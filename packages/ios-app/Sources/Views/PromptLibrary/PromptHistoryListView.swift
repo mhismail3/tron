@@ -29,12 +29,6 @@ struct PromptHistoryListView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { onSelect(item.text) }
                     .onLongPressGesture { onPreview(item) }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            Task { await state.deleteHistory(id: item.id, rpc: engineClient) }
-                        } label: { Label("Delete", systemImage: "trash") }
-                        .tint(.tronError)
-                    }
                     .listRowBackground(Color.clear)
                     .listRowSeparatorTint(.tronEmerald.opacity(0.15))
                     .onAppear {

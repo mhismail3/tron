@@ -78,9 +78,14 @@ struct GeneratedUISurfaceView: View {
     var onSubmit: (UiActionSubmissionDTO) -> Void = { _ in }
 
     @State private var formValues: [String: AnyCodable] = [:]
+    @State private var seededSurfaceKey: String?
 
     var body: some View {
         renderedBody
+            .onAppear { seedFormDefaultsIfNeeded() }
+            .onChange(of: surfaceSeedKey) { _, _ in
+                seedFormDefaultsIfNeeded(reset: true)
+            }
     }
 
     private var renderedBody: AnyView {
@@ -263,6 +268,33 @@ struct GeneratedUISurfaceView: View {
             get: { formValues[key]?.intValue ?? 0 },
             set: { formValues[key] = AnyCodable($0) }
         )
+    }
+
+    private var surfaceSeedKey: String {
+        [
+            resourceRef?.resourceId ?? surface.surfaceId,
+            resourceRef?.versionId ?? "",
+            surface.authoring?.projectionHash ?? ""
+        ].joined(separator: ":")
+    }
+
+    private func seedFormDefaultsIfNeeded(reset: Bool = false) {
+        guard reset || seededSurfaceKey != surfaceSeedKey else { return }
+        formValues = [:]
+        seedFormDefaults(from: surface.layout)
+        seededSurfaceKey = surfaceSeedKey
+    }
+
+    private func seedFormDefaults(from component: UiComponentDTO) {
+        if ["TextField", "TextArea", "Select", "Toggle", "Stepper", "DateTime"].contains(component.type),
+           let key = component.props?.string("name") ?? component.id,
+           let value = component.props?["value"],
+           !value.isNull {
+            formValues[key] = value
+        }
+        for child in component.children ?? [] {
+            seedFormDefaults(from: child)
+        }
     }
 
     private func submit(actionId: String?) {

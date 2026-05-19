@@ -25,8 +25,8 @@ use crate::engine::ids::FunctionId;
 use crate::engine::primitives::runtime::{PrimitiveRuntimeHost, invocation_record_value};
 use crate::engine::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion,
-    EngineResourceVersionState, UI_CATALOG_REVISION, UI_SURFACE_KIND, UpdateResource,
-    ui_component_catalog, validate_ui_surface_payload,
+    EngineResourceVersionState, ListResources, UI_CATALOG_REVISION, UI_SURFACE_KIND,
+    UpdateResource, ui_component_catalog, validate_ui_surface_payload,
 };
 use crate::engine::types::{
     DurableOutputContract, EffectClass, FunctionDefinition, IdempotencyContract, RiskLevel,
@@ -46,6 +46,14 @@ pub(crate) const REFRESH_SURFACE_FUNCTION: &str = "ui::refresh_surface";
 pub(crate) const EXPIRE_SURFACE_FUNCTION: &str = "ui::expire_surface";
 
 const GENERATED_AUTHORING_MODE: &str = "generated";
+const RESOURCE_COLLECTION_TARGET: &str = "resource_collection";
+const PROMPT_SNIPPET_COLLECTION_TARGET: &str = "artifact:prompt-snippet";
+const PROMPT_HISTORY_COLLECTION_TARGET: &str = "artifact:prompt-history";
+const PROMPT_SNIPPET_RESOURCE_PREFIX: &str = "artifact:prompt-snippet:";
+const PROMPT_HISTORY_RESOURCE_PREFIX: &str = "artifact:prompt-history:";
+const PROMPT_SNIPPET_LAYOUT_PROFILE: &str = "prompt_library.snippets.v1";
+const PROMPT_HISTORY_LAYOUT_PROFILE: &str = "prompt_library.history.v1";
+const PROMPT_COLLECTION_LIMIT: usize = 25;
 
 pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
     Ok(vec![
@@ -716,7 +724,7 @@ fn author_surface_for_target(
         "title": projection.title,
         "purpose": request.purpose,
         "catalog": {"id": "tron.ui.catalog.core.v1", "revision": UI_CATALOG_REVISION},
-        "layout": layout_for_projection(&projection),
+        "layout": layout_for_projection(request, &projection),
         "bindings": bindings,
         "actions": generated_actions(host, invocation, request)?,
         "redactionPolicy": {"mode": "redacted"},
@@ -815,6 +823,7 @@ fn target_projection(
                 graph: bounded_json(json!({"resource": inspection}), request.max_preview_bytes),
             })
         }
+        RESOURCE_COLLECTION_TARGET => prompt_library_collection_projection(host, request),
         "package" => {
             let resource_id = if request.target_id.starts_with("worker-package:") {
                 request.target_id.clone()
@@ -1039,7 +1048,225 @@ fn target_projection(
     }
 }
 
-fn layout_for_projection(projection: &TargetProjection) -> Value {
+fn prompt_library_collection_projection(
+    host: &dyn PrimitiveRuntimeHost,
+    request: &SurfaceAuthoringRequest,
+) -> Result<TargetProjection> {
+    let (prefix, title, expected_profile, row_kind) = match request.target_id.as_str() {
+        PROMPT_SNIPPET_COLLECTION_TARGET => (
+            PROMPT_SNIPPET_RESOURCE_PREFIX,
+            "Prompt Snippets",
+            PROMPT_SNIPPET_LAYOUT_PROFILE,
+            "snippet",
+        ),
+        PROMPT_HISTORY_COLLECTION_TARGET => (
+            PROMPT_HISTORY_RESOURCE_PREFIX,
+            "Prompt History",
+            PROMPT_HISTORY_LAYOUT_PROFILE,
+            "history",
+        ),
+        other => {
+            return Err(EngineError::PolicyViolation(format!(
+                "unsupported resource_collection target {other}"
+            )));
+        }
+    };
+    if request.layout_profile != expected_profile {
+        return Err(EngineError::PolicyViolation(format!(
+            "resource_collection target {} requires layoutProfile {expected_profile}",
+            request.target_id
+        )));
+    }
+
+    let resources = host.list_resources(ListResources {
+        kind: Some("artifact".to_owned()),
+        scope: None,
+        lifecycle: None,
+        limit: 10_000,
+    })?;
+    let mut rows = Vec::new();
+    for resource in resources.into_iter().filter(|resource| {
+        resource.resource_id.starts_with(prefix)
+            && resource.lifecycle != "discarded"
+            && resource.current_version_id.is_some()
+    }) {
+        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
+            continue;
+        };
+        let Some(payload) = current_payload(&inspection) else {
+            continue;
+        };
+        let row = match row_kind {
+            "snippet" => prompt_snippet_collection_row(&inspection, &payload, request),
+            "history" => prompt_history_collection_row(&inspection, &payload, request),
+            _ => None,
+        };
+        if let Some(row) = row {
+            rows.push(row);
+        }
+    }
+    rows.sort_by(|left, right| {
+        right
+            .get("sortKey")
+            .and_then(Value::as_str)
+            .cmp(&left.get("sortKey").and_then(Value::as_str))
+            .then_with(|| {
+                left.get("resourceId")
+                    .and_then(Value::as_str)
+                    .cmp(&right.get("resourceId").and_then(Value::as_str))
+            })
+    });
+    let truncated = rows.len() > PROMPT_COLLECTION_LIMIT;
+    rows.truncate(PROMPT_COLLECTION_LIMIT);
+    let summary = format!(
+        "{} {}{}",
+        rows.len(),
+        if row_kind == "snippet" {
+            "snippets"
+        } else {
+            "history entries"
+        },
+        if truncated { " shown" } else { "" }
+    );
+    Ok(TargetProjection {
+        title: title.to_owned(),
+        summary,
+        revision: host.catalog_revision().0,
+        graph: json!({
+            "collection": {
+                "targetId": request.target_id,
+                "layoutProfile": request.layout_profile,
+                "resourceKind": "artifact",
+                "rowKind": row_kind,
+                "rows": rows,
+                "truncated": truncated,
+                "limit": PROMPT_COLLECTION_LIMIT,
+            }
+        }),
+    })
+}
+
+fn prompt_snippet_collection_row(
+    inspection: &EngineResourceInspection,
+    payload: &Value,
+    request: &SurfaceAuthoringRequest,
+) -> Option<Value> {
+    let id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            inspection
+                .resource
+                .resource_id
+                .strip_prefix(PROMPT_SNIPPET_RESOURCE_PREFIX)
+        })?
+        .to_owned();
+    let name = bounded_prompt_preview(
+        payload
+            .get("name")
+            .or_else(|| payload.get("title"))
+            .and_then(Value::as_str)
+            .unwrap_or("Untitled snippet"),
+        request,
+    );
+    let text = bounded_prompt_preview(
+        payload
+            .get("text")
+            .or_else(|| payload.get("body"))
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        request,
+    );
+    Some(json!({
+        "id": id,
+        "resourceId": inspection.resource.resource_id,
+        "versionId": inspection.resource.current_version_id,
+        "kind": inspection.resource.kind,
+        "lifecycle": inspection.resource.lifecycle,
+        "name": name,
+        "text": text,
+        "updatedAt": payload.get("updatedAt").cloned().unwrap_or(Value::Null),
+        "sortKey": payload
+            .get("updatedAt")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("createdAt").and_then(Value::as_str))
+            .unwrap_or_default(),
+    }))
+}
+
+fn prompt_history_collection_row(
+    inspection: &EngineResourceInspection,
+    payload: &Value,
+    request: &SurfaceAuthoringRequest,
+) -> Option<Value> {
+    let id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            inspection
+                .resource
+                .resource_id
+                .strip_prefix(PROMPT_HISTORY_RESOURCE_PREFIX)
+        })?
+        .to_owned();
+    let text = bounded_prompt_preview(
+        payload
+            .get("text")
+            .or_else(|| payload.get("body"))
+            .and_then(Value::as_str)
+            .unwrap_or_default(),
+        request,
+    );
+    Some(json!({
+        "id": id,
+        "resourceId": inspection.resource.resource_id,
+        "versionId": inspection.resource.current_version_id,
+        "kind": inspection.resource.kind,
+        "lifecycle": inspection.resource.lifecycle,
+        "text": text,
+        "lastUsedAt": payload.get("lastUsedAt").cloned().unwrap_or(Value::Null),
+        "useCount": payload.get("useCount").cloned().unwrap_or_else(|| json!(1)),
+        "sortKey": payload
+            .get("lastUsedAt")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("firstUsedAt").and_then(Value::as_str))
+            .unwrap_or_default(),
+    }))
+}
+
+fn bounded_prompt_preview(text: &str, request: &SurfaceAuthoringRequest) -> String {
+    if unsafe_prompt_preview_text(text) {
+        return "[redacted]".to_owned();
+    }
+    let max_chars = request.max_preview_bytes.clamp(64, 512);
+    if text.chars().count() <= max_chars {
+        text.to_owned()
+    } else {
+        let mut preview = text.chars().take(max_chars).collect::<String>();
+        preview.push_str("...");
+        preview
+    }
+}
+
+fn unsafe_prompt_preview_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("secret=")
+        || lower.contains("api_key")
+        || lower.contains("access_token")
+        || lower.contains("private_key")
+        || lower.contains("file://")
+        || lower.contains("javascript:")
+        || lower.contains("<script")
+        || text.contains("sk-")
+}
+
+fn layout_for_projection(
+    request: &SurfaceAuthoringRequest,
+    projection: &TargetProjection,
+) -> Value {
+    if request.target_type == RESOURCE_COLLECTION_TARGET {
+        return prompt_collection_layout(request, projection);
+    }
     json!({
         "type": "Section",
         "props": {"title": projection.title},
@@ -1050,6 +1277,155 @@ fn layout_for_projection(projection: &TargetProjection) -> Value {
             {"type": "Button", "props": {"label": "Refresh", "actionId": "refresh-surface"}}
         ]
     })
+}
+
+fn prompt_collection_layout(
+    request: &SurfaceAuthoringRequest,
+    projection: &TargetProjection,
+) -> Value {
+    let rows = projection
+        .graph
+        .pointer("/collection/rows")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if request.layout_profile == PROMPT_SNIPPET_LAYOUT_PROFILE {
+        return prompt_snippet_collection_layout(projection, &rows);
+    }
+    prompt_history_collection_layout(projection, &rows)
+}
+
+fn prompt_snippet_collection_layout(projection: &TargetProjection, rows: &[Value]) -> Value {
+    let mut children = vec![
+        json!({"type": "Heading", "props": {"text": projection.title}}),
+        json!({"type": "Text", "props": {"text": projection.summary}}),
+        json!({
+            "type": "Disclosure",
+            "props": {"title": "Create snippet", "open": false},
+            "children": [
+                {"type": "TextField", "props": {"name": "name", "label": "Name", "required": true}},
+                {"type": "TextArea", "props": {"name": "text", "label": "Text", "required": true}},
+                {"type": "Button", "props": {"label": "Create", "actionId": "create-snippet"}}
+            ]
+        }),
+    ];
+    if rows.is_empty() {
+        children.push(json!({
+            "type": "EmptyState",
+            "props": {
+                "title": "No snippets",
+                "message": "Create a snippet to make it available in the picker."
+            }
+        }));
+    } else {
+        for row in rows {
+            let Some(resource_id) = row.get("resourceId").and_then(Value::as_str) else {
+                continue;
+            };
+            let row_key = collection_row_key(resource_id);
+            children.push(json!({
+                "type": "Disclosure",
+                "props": {
+                    "title": row.get("name").and_then(Value::as_str).unwrap_or("Snippet"),
+                    "open": false
+                },
+                "children": [
+                    {"type": "ResourceRef", "props": {
+                        "resourceId": resource_id,
+                        "versionId": row.get("versionId").cloned().unwrap_or(Value::Null),
+                        "kind": "artifact",
+                        "label": "Snippet resource"
+                    }},
+                    {"type": "TextField", "props": {
+                        "name": format!("name_{row_key}"),
+                        "label": "Name",
+                        "value": row.get("name").cloned().unwrap_or(Value::Null),
+                        "required": true
+                    }},
+                    {"type": "TextArea", "props": {
+                        "name": format!("text_{row_key}"),
+                        "label": "Text",
+                        "value": row.get("text").cloned().unwrap_or(Value::Null),
+                        "required": true
+                    }},
+                    {"type": "ButtonGroup", "props": {
+                        "actions": [
+                            format!("update-snippet-{row_key}"),
+                            format!("delete-snippet-{row_key}")
+                        ]
+                    }}
+                ]
+            }));
+        }
+    }
+    children.push(json!({
+        "type": "Button",
+        "props": {"label": "Refresh", "actionId": "refresh-surface"}
+    }));
+    json!({"type": "Section", "props": {"title": projection.title}, "children": children})
+}
+
+fn prompt_history_collection_layout(projection: &TargetProjection, rows: &[Value]) -> Value {
+    let mut children = vec![
+        json!({"type": "Heading", "props": {"text": projection.title}}),
+        json!({"type": "Text", "props": {"text": projection.summary}}),
+        json!({
+            "type": "Confirmation",
+            "props": {
+                "title": "Clear history",
+                "message": "Discard all prompt history artifacts.",
+                "confirmActionId": "clear-history"
+            }
+        }),
+    ];
+    if rows.is_empty() {
+        children.push(json!({
+            "type": "EmptyState",
+            "props": {
+                "title": "No history",
+                "message": "Prompt history artifacts will appear here."
+            }
+        }));
+    } else {
+        for row in rows {
+            let Some(resource_id) = row.get("resourceId").and_then(Value::as_str) else {
+                continue;
+            };
+            let row_key = collection_row_key(resource_id);
+            children.push(json!({
+                "type": "Disclosure",
+                "props": {
+                    "title": row.get("text").and_then(Value::as_str).unwrap_or("Prompt"),
+                    "open": false
+                },
+                "children": [
+                    {"type": "ResourceRef", "props": {
+                        "resourceId": resource_id,
+                        "versionId": row.get("versionId").cloned().unwrap_or(Value::Null),
+                        "kind": "artifact",
+                        "label": "History resource"
+                    }},
+                    {"type": "Text", "props": {
+                        "text": row.get("text").cloned().unwrap_or(Value::Null)
+                    }},
+                    {"type": "Metric", "props": {
+                        "label": "Uses",
+                        "value": row.get("useCount").cloned().unwrap_or_else(|| json!(1))
+                    }},
+                    {"type": "Confirmation", "props": {
+                        "title": "Delete entry",
+                        "message": "Discard this prompt history artifact.",
+                        "confirmActionId": format!("delete-history-{row_key}")
+                    }}
+                ]
+            }));
+        }
+    }
+    children.push(json!({
+        "type": "Button",
+        "props": {"label": "Refresh", "actionId": "refresh-surface"}
+    }));
+    json!({"type": "Section", "props": {"title": projection.title}, "children": children})
 }
 
 fn generated_actions(
@@ -1085,6 +1461,11 @@ fn generated_actions(
         "targetRevision": refresh.revision.0,
         "expiresAt": default_expires_at()
     })];
+    if request.target_type == RESOURCE_COLLECTION_TARGET {
+        actions.extend(prompt_collection_actions(
+            host, invocation, request, &functions,
+        )?);
+    }
     if request.target_type == "package" {
         if let Some(inspect_package) = functions
             .iter()
@@ -1850,6 +2231,202 @@ fn generated_actions(
         .collect())
 }
 
+fn prompt_collection_actions(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    request: &SurfaceAuthoringRequest,
+    functions: &[FunctionDefinition],
+) -> Result<Vec<Value>> {
+    match (request.target_id.as_str(), request.layout_profile.as_str()) {
+        (PROMPT_SNIPPET_COLLECTION_TARGET, PROMPT_SNIPPET_LAYOUT_PROFILE) => {
+            prompt_snippet_collection_actions(host, invocation, functions)
+        }
+        (PROMPT_HISTORY_COLLECTION_TARGET, PROMPT_HISTORY_LAYOUT_PROFILE) => {
+            prompt_history_collection_actions(host, invocation, functions)
+        }
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn prompt_snippet_collection_actions(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    functions: &[FunctionDefinition],
+) -> Result<Vec<Value>> {
+    let mut actions = Vec::new();
+    actions.push(prompt_collection_action(
+        invocation,
+        functions,
+        "create-snippet",
+        "Create Snippet",
+        "prompt_library::snippet_create",
+        json!({
+            "type": "object",
+            "required": ["name", "text"],
+            "additionalProperties": false,
+            "properties": {
+                "name": {"type": "string"},
+                "text": {"type": "string"}
+            }
+        }),
+        json!({
+            "name": "${input.name}",
+            "text": "${input.text}"
+        }),
+    )?);
+
+    for row in prompt_collection_rows(host, PROMPT_SNIPPET_RESOURCE_PREFIX)? {
+        let resource_id = row["resourceId"].as_str().unwrap_or_default();
+        let row_key = collection_row_key(resource_id);
+        let id = row["id"].as_str().unwrap_or_default();
+        actions.push(prompt_collection_action(
+            invocation,
+            functions,
+            &format!("update-snippet-{row_key}"),
+            "Update Snippet",
+            "prompt_library::snippet_update",
+            json!({
+                "type": "object",
+                "required": [format!("name_{row_key}"), format!("text_{row_key}")],
+                "additionalProperties": false,
+                "properties": {
+                    format!("name_{row_key}"): {"type": "string"},
+                    format!("text_{row_key}"): {"type": "string"}
+                }
+            }),
+            json!({
+                "id": id,
+                "name": format!("${{input.name_{row_key}}}"),
+                "text": format!("${{input.text_{row_key}}}")
+            }),
+        )?);
+        actions.push(prompt_collection_action(
+            invocation,
+            functions,
+            &format!("delete-snippet-{row_key}"),
+            "Delete Snippet",
+            "prompt_library::snippet_delete",
+            json!({"type": "object", "additionalProperties": false, "properties": {}}),
+            json!({"id": id}),
+        )?);
+    }
+    Ok(actions)
+}
+
+fn prompt_history_collection_actions(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    functions: &[FunctionDefinition],
+) -> Result<Vec<Value>> {
+    let mut actions = Vec::new();
+    actions.push(prompt_collection_action(
+        invocation,
+        functions,
+        "clear-history",
+        "Clear History",
+        "prompt_library::history_clear",
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        json!({}),
+    )?);
+    for row in prompt_collection_rows(host, PROMPT_HISTORY_RESOURCE_PREFIX)? {
+        let resource_id = row["resourceId"].as_str().unwrap_or_default();
+        let row_key = collection_row_key(resource_id);
+        let id = row["id"].as_str().unwrap_or_default();
+        actions.push(prompt_collection_action(
+            invocation,
+            functions,
+            &format!("delete-history-{row_key}"),
+            "Delete History",
+            "prompt_library::history_delete",
+            json!({"type": "object", "additionalProperties": false, "properties": {}}),
+            json!({"id": id}),
+        )?);
+    }
+    Ok(actions)
+}
+
+fn prompt_collection_rows(host: &dyn PrimitiveRuntimeHost, prefix: &str) -> Result<Vec<Value>> {
+    let resources = host.list_resources(ListResources {
+        kind: Some("artifact".to_owned()),
+        scope: None,
+        lifecycle: None,
+        limit: 10_000,
+    })?;
+    let mut rows = Vec::new();
+    for resource in resources.into_iter().filter(|resource| {
+        resource.resource_id.starts_with(prefix)
+            && resource.lifecycle != "discarded"
+            && resource.current_version_id.is_some()
+    }) {
+        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
+            continue;
+        };
+        let Some(payload) = current_payload(&inspection) else {
+            continue;
+        };
+        let id = payload
+            .get("id")
+            .and_then(Value::as_str)
+            .or_else(|| inspection.resource.resource_id.strip_prefix(prefix))
+            .unwrap_or_default()
+            .to_owned();
+        rows.push(json!({
+            "id": id,
+            "resourceId": inspection.resource.resource_id,
+            "sortKey": payload
+                .get("updatedAt")
+                .and_then(Value::as_str)
+                .or_else(|| payload.get("lastUsedAt").and_then(Value::as_str))
+                .or_else(|| payload.get("createdAt").and_then(Value::as_str))
+                .unwrap_or_default(),
+        }));
+    }
+    rows.sort_by(|left, right| {
+        right
+            .get("sortKey")
+            .and_then(Value::as_str)
+            .cmp(&left.get("sortKey").and_then(Value::as_str))
+            .then_with(|| {
+                left.get("resourceId")
+                    .and_then(Value::as_str)
+                    .cmp(&right.get("resourceId").and_then(Value::as_str))
+            })
+    });
+    rows.truncate(PROMPT_COLLECTION_LIMIT);
+    Ok(rows)
+}
+
+fn prompt_collection_action(
+    invocation: &crate::engine::Invocation,
+    functions: &[FunctionDefinition],
+    action_id: &str,
+    label: &str,
+    target_function: &str,
+    input_schema: Value,
+    payload_template: Value,
+) -> Result<Value> {
+    let target = functions
+        .iter()
+        .find(|function| function.id.as_str() == target_function)
+        .ok_or_else(|| EngineError::NotFound {
+            kind: "function",
+            id: target_function.to_owned(),
+        })?;
+    Ok(json!({
+        "actionId": action_id,
+        "label": label,
+        "targetFunctionId": target_function,
+        "inputSchema": input_schema,
+        "payloadTemplate": payload_template,
+        "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+        "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+        "requiredRisk": risk_label(&target.risk_level),
+        "approvalPolicy": {"required": target.required_authority.approval_required},
+        "targetRevision": target.revision.0,
+        "expiresAt": default_expires_at()
+    }))
+}
+
 fn actor_context(invocation: &crate::engine::Invocation) -> ActorContext {
     ActorContext {
         actor_id: invocation.causal_context.actor_id.clone(),
@@ -2054,6 +2631,7 @@ fn ensure_supported_target_type(target_type: &str) -> Result<()> {
         "worker"
             | "capability"
             | "goal"
+            | RESOURCE_COLLECTION_TARGET
             | "package"
             | "module_config"
             | "decision"
@@ -2098,6 +2676,12 @@ fn slug(value: &str) -> String {
         slug = slug.replace("--", "-");
     }
     slug.trim_matches('-').chars().take(48).collect::<String>()
+}
+
+fn collection_row_key(value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    let hex = format!("{digest:x}");
+    format!("r{}", &hex[..12])
 }
 
 fn hash_json(value: &Value) -> Result<String> {
@@ -2203,7 +2787,7 @@ fn surface_for_target_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "goal", "package", "module_config", "decision", "activation", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
+                "enum": ["worker", "capability", "goal", "resource_collection", "package", "module_config", "decision", "activation", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "purpose": {"type": "string"},

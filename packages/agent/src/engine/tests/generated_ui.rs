@@ -11,6 +11,32 @@ fn generated_surface_request(target_type: &str, target_id: &str) -> Value {
     })
 }
 
+fn generated_prompt_collection_request(layout_profile: &str, target_id: &str) -> Value {
+    json!({
+        "targetType": "resource_collection",
+        "targetId": target_id,
+        "purpose": "Manage prompt library resources",
+        "layoutProfile": layout_profile,
+        "maxPreviewBytes": 512,
+        "expiresAt": "2100-01-01T00:00:00Z"
+    })
+}
+
+fn prompt_ui_context(key: &str) -> CausalContext {
+    mutating_causal(key)
+        .with_scope("ui.write")
+        .with_scope("prompt_library.read")
+        .with_scope("prompt_library.write")
+}
+
+fn prompt_write_context(key: &str) -> CausalContext {
+    mutating_causal(key).with_scope("prompt_library.write")
+}
+
+fn prompt_internal_write_context(key: &str) -> CausalContext {
+    prompt_write_context(key).with_scope(crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE)
+}
+
 #[tokio::test]
 async fn ui_surface_resource_type_is_registered_and_validated() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
@@ -327,6 +353,289 @@ async fn ui_surface_for_target_supports_core_substrate_targets() {
         assert_eq!(
             created.value.as_ref().unwrap()["surface"]["authoring"]["targetType"],
             target_type
+        );
+    }
+}
+
+#[tokio::test]
+async fn ui_surface_for_target_authors_prompt_library_resource_collections() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+
+    let snippet = handle
+        .invoke(host_invocation(
+            "prompt_library::snippet_create",
+            json!({"name": "Explain", "text": "Explain the selected code"}),
+            prompt_write_context("generated-ui-prompt-snippet"),
+        ))
+        .await;
+    assert_eq!(snippet.error, None);
+    let unrelated = handle
+        .invoke(host_invocation(
+            "resource::create",
+            json!({
+                "kind": "artifact",
+                "resourceId": "artifact:not-a-prompt",
+                "payload": {"title": "Unrelated", "body": "not prompt library"}
+            }),
+            mutating_causal("generated-ui-unrelated-artifact").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(unrelated.error, None);
+    let history = handle
+        .invoke(host_invocation(
+            "prompt_library::history_record",
+            json!({"prompt": "Summarize the current plan"}),
+            prompt_internal_write_context("generated-ui-prompt-history"),
+        ))
+        .await;
+    assert_eq!(history.error, None);
+
+    let snippets = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_prompt_collection_request(
+                "prompt_library.snippets.v1",
+                "artifact:prompt-snippet",
+            ),
+            prompt_ui_context("generated-ui-snippet-collection"),
+        ))
+        .await;
+    assert_eq!(snippets.error, None);
+    let snippet_surface = &snippets.value.as_ref().unwrap()["surface"];
+    assert_eq!(
+        snippet_surface["authoring"]["targetType"],
+        "resource_collection"
+    );
+    assert_eq!(
+        snippet_surface["authoring"]["layoutProfile"],
+        "prompt_library.snippets.v1"
+    );
+    assert!(
+        snippet_surface["layout"].to_string().contains("Explain"),
+        "snippet surface should include bounded prompt-library previews"
+    );
+    assert!(
+        !snippet_surface["layout"]
+            .to_string()
+            .contains("not-a-prompt"),
+        "resource_collection must filter unrelated artifacts"
+    );
+    let snippet_actions = snippet_surface["actions"].as_array().unwrap();
+    for action_id in ["refresh-surface", "create-snippet"] {
+        assert!(
+            snippet_actions
+                .iter()
+                .any(|action| action["actionId"] == action_id),
+            "missing prompt snippet action {action_id}"
+        );
+    }
+    assert!(snippet_actions.iter().any(|action| {
+        action["targetFunctionId"] == "prompt_library::snippet_update"
+            && action["payloadTemplate"]["id"].is_string()
+            && action["targetRevision"].is_u64()
+            && action["idempotencyKeyTemplate"] == "${submission.idempotencyKey}"
+    }));
+    assert!(snippet_actions.iter().any(|action| {
+        action["targetFunctionId"] == "prompt_library::snippet_delete"
+            && action["approvalPolicy"]["required"] == true
+    }));
+
+    let histories = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_prompt_collection_request(
+                "prompt_library.history.v1",
+                "artifact:prompt-history",
+            ),
+            prompt_ui_context("generated-ui-history-collection"),
+        ))
+        .await;
+    assert_eq!(histories.error, None);
+    let history_surface = &histories.value.as_ref().unwrap()["surface"];
+    assert_eq!(
+        history_surface["authoring"]["layoutProfile"],
+        "prompt_library.history.v1"
+    );
+    assert!(
+        history_surface["layout"]
+            .to_string()
+            .contains("Summarize the current plan")
+    );
+    let history_actions = history_surface["actions"].as_array().unwrap();
+    assert!(history_actions.iter().any(|action| {
+        action["actionId"] == "clear-history"
+            && action["targetFunctionId"] == "prompt_library::history_clear"
+            && action["approvalPolicy"]["required"] == true
+    }));
+    assert!(history_actions.iter().any(|action| {
+        action["targetFunctionId"] == "prompt_library::history_delete"
+            && action["payloadTemplate"]["id"].is_string()
+    }));
+}
+
+#[tokio::test]
+async fn ui_prompt_collection_bounds_and_redacts_prompt_previews() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let long_prompt = "x".repeat(900);
+    for (resource_id, payload) in [
+        (
+            "artifact:prompt-snippet:redacted",
+            json!({
+                "id": "redacted",
+                "title": "Unsafe",
+                "name": "Unsafe",
+                "body": "api_key=secret_ref:prompt-value",
+                "text": "api_key=secret_ref:prompt-value",
+                "updatedAt": "2100-01-01T00:00:00Z"
+            }),
+        ),
+        (
+            "artifact:prompt-snippet:long",
+            json!({
+                "id": "long",
+                "title": "Long",
+                "name": "Long",
+                "body": long_prompt,
+                "text": long_prompt,
+                "updatedAt": "2100-01-02T00:00:00Z"
+            }),
+        ),
+    ] {
+        let created = handle
+            .invoke(host_invocation(
+                "resource::create",
+                json!({
+                    "kind": "artifact",
+                    "resourceId": resource_id,
+                    "payload": payload
+                }),
+                mutating_causal(&format!("generated-ui-prompt-preview-{resource_id}"))
+                    .with_scope("resource.write"),
+            ))
+            .await;
+        assert_eq!(created.error, None);
+    }
+
+    let surface = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_prompt_collection_request(
+                "prompt_library.snippets.v1",
+                "artifact:prompt-snippet",
+            ),
+            prompt_ui_context("generated-ui-prompt-preview-surface"),
+        ))
+        .await;
+    assert_eq!(surface.error, None);
+    let layout = surface.value.as_ref().unwrap()["surface"]["layout"].to_string();
+    assert!(
+        layout.contains("[redacted]"),
+        "unsafe prompt previews must be redacted before rendering"
+    );
+    assert!(
+        !layout.contains("api_key=secret_ref:prompt-value"),
+        "raw secret-like prompt text must not appear in the surface"
+    );
+    assert!(
+        !layout.contains(&"x".repeat(900)),
+        "oversized prompt bodies must be bounded previews"
+    );
+}
+
+#[tokio::test]
+async fn ui_prompt_collection_actions_submit_through_stored_surface_coordinates() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let created = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_prompt_collection_request(
+                "prompt_library.snippets.v1",
+                "artifact:prompt-snippet",
+            ),
+            prompt_ui_context("generated-ui-submit-collection"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let value = created.value.as_ref().unwrap();
+    let resource_ref = &value["resourceRefs"][0];
+    let resource_id = resource_ref["resourceId"].as_str().unwrap();
+    let surface_version_id = resource_ref["versionId"].as_str().unwrap();
+
+    let submitted = handle
+        .invoke(host_invocation(
+            "ui::submit_action",
+            json!({
+                "surfaceResourceId": resource_id,
+                "surfaceVersionId": surface_version_id,
+                "actionId": "create-snippet",
+                "userInput": {
+                    "name": "Generated action",
+                    "text": "Created from a stored generated UI action"
+                },
+                "idempotencyKey": "generated-ui-create-snippet"
+            }),
+            prompt_ui_context("generated-ui-create-snippet"),
+        ))
+        .await;
+    assert_eq!(submitted.error, None);
+    let submitted_value = submitted.value.as_ref().unwrap();
+    assert_eq!(
+        submitted_value["targetFunctionId"],
+        "prompt_library::snippet_create"
+    );
+    assert!(
+        submitted_value["result"]["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "artifact")
+    );
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    assert!(
+        records.iter().any(|record| {
+            record.function_id.as_str() == "prompt_library::snippet_create"
+                && record
+                    .parent_invocation_id
+                    .as_ref()
+                    .is_some_and(|parent| parent == &submitted.invocation_id)
+        }),
+        "generated prompt action must execute as a child invocation"
+    );
+}
+
+#[tokio::test]
+async fn ui_prompt_collection_rejects_unknown_targets_and_profiles() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    for (layout_profile, target_id, expected) in [
+        (
+            "prompt_library.snippets.v1",
+            "artifact:unknown",
+            "unsupported resource_collection target",
+        ),
+        (
+            "prompt_library.history.v1",
+            "artifact:prompt-snippet",
+            "requires layoutProfile prompt_library.snippets.v1",
+        ),
+    ] {
+        let rejected = handle
+            .invoke(host_invocation(
+                "ui::surface_for_target",
+                generated_prompt_collection_request(layout_profile, target_id),
+                prompt_ui_context(&format!("generated-ui-reject-{target_id}-{layout_profile}")),
+            ))
+            .await;
+        assert!(
+            matches!(
+                rejected.error,
+                Some(EngineError::PolicyViolation(ref message)) if message.contains(expected)
+            ),
+            "expected `{expected}` rejection, got {:?}",
+            rejected.error
         );
     }
 }

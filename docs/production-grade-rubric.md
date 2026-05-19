@@ -17,30 +17,30 @@ Each axis receives one of these maturity levels:
 - `75%`: integration/failure coverage exists and docs are current;
 - `100%`: complete evidence links, no known blockers, no duplicate path.
 
-Current repo-wide score: **98/100**.
+Current repo-wide score: **99/100**.
 
 The score is intentionally lower than the modular-engine score because this
-rubric includes remaining product-shell surfaces, deferred dependency tooling,
-and optional deeper lifecycle/soak proof.
+rubric includes the remaining thin Prompt Library composer insertion shell and
+future optional deeper lifecycle/soak proof.
 
 ## Rubric
 
 | Axis | Points | Current | 100% Definition |
 |---|---:|---:|---|
 | Architecture and ownership | 12 | 12 | Every package/submodule has one documented owner, purpose, and dependency direction |
-| Folder and test organization | 10 | 9 | Folder layout mirrors architecture; tests are grouped by owning concern with no large catch-all files |
-| Reachability and dead code | 10 | 8 | Every tracked source artifact is reachable or explicitly classified; dead code has absence gates |
+| Folder and test organization | 10 | 10 | Folder layout mirrors architecture; tests are grouped by owning concern with no large catch-all files |
+| Reachability and dead code | 10 | 9 | Every tracked source artifact is reachable or explicitly classified; dead code has absence gates |
 | State and persistence | 10 | 10 | Durable truth, caches, projections, schemas, and generated files are all correctly classified |
 | Security and authority | 12 | 12 | No raw-scope/client-policy trust; grants, secrets, sandboxing, file/network bounds are enforced |
 | Resource/output correctness | 8 | 8 | Durable outputs are resource-backed or explicitly non-durable projections |
-| Runtime reliability | 10 | 9 | Retry, crash, cleanup, recovery, idempotency, and partial failure paths are tested |
-| Client thinness | 7 | 6 | iOS/Mac clients render server truth and do not own policy, lineage, grants, or durable state incorrectly |
-| Observability and operations | 7 | 6 | Operators can inspect health, state, lineage, risks, actions, storage, and recovery paths |
-| Dependency and supply-chain hygiene | 5 | 4 | Dependencies, generated code, package config, signing/trust, and scripts are justified and scanned |
+| Runtime reliability | 10 | 10 | Retry, crash, cleanup, recovery, idempotency, and partial failure paths are tested |
+| Client thinness | 7 | 7 | iOS/Mac clients render server truth and do not own policy, lineage, grants, or durable state incorrectly |
+| Observability and operations | 7 | 7 | Operators can inspect health, state, lineage, risks, actions, storage, and recovery paths |
+| Dependency and supply-chain hygiene | 5 | 5 | Dependencies, generated code, package config, signing/trust, and scripts are justified and scanned |
 | Docs and drift protection | 6 | 6 | README, progressive docs, architecture docs, and static gates stay synchronized |
 | Deletion discipline | 3 | 3 | Removed/retired behavior has no compatibility aliases, fallback readers, stale docs, or hidden callers |
 
-Total: **98/100**.
+Total: **99/100**.
 
 ## Axis Evidence And Blockers
 
@@ -76,7 +76,7 @@ Next action:
 - Keep ownership gates current when any package, client surface, primitive, or
   script is added or removed.
 
-### Folder and test organization - 9/10
+### Folder and test organization - 10/10
 
 Evidence:
 
@@ -95,15 +95,15 @@ Evidence:
 
 Blockers:
 
-- Some smaller domains still use sibling or inline tests by convention. They
-  are acceptable today, but should be split if they become broad/high-churn.
+- No current blocker. Smaller sibling/inline tests are explicitly allowed by
+  convention while their scope remains local and narrow.
 
 Next action:
 
 - Keep the convention enforced and split any future broad test file before it
   becomes a catch-all ownership problem.
 
-### Reachability and dead code - 8/10
+### Reachability and dead code - 9/10
 
 Evidence:
 
@@ -118,17 +118,20 @@ Evidence:
   wrapper symbols absent.
 - Runtime Prompt Library and Voice Notes no longer read old bespoke durable
   stores as source truth.
+- Prompt Library management controls are no longer fixed Swift management
+  paths; generated `resource_collection` surfaces own create/update/delete/
+  clear actions. The remaining sheet is reachable only as a composer insertion
+  picker.
 
 Blockers:
 
-- Some deferred product-shell surfaces remain active pending generated UI or
-  resource-backed replacement.
-- Optional dependency dead-code tools are not installed in the local workflow.
+- The Prompt Library composer insertion picker is intentionally still local.
+  It needs either a generated-result-to-composer bridge or a permanent
+  documented thin-shell decision before this axis reaches 10/10.
 
 Next action:
 
-- Replace or remove one fixed product shell only after reachability proof shows
-  a generated UI/control replacement.
+- Decide and gate the final Prompt Library composer insertion boundary.
 
 ### State and persistence - 10/10
 
@@ -192,7 +195,7 @@ Next action:
 
 - Audit deferred domains before any new durable output is added.
 
-### Runtime reliability - 9/10
+### Runtime reliability - 10/10
 
 Evidence:
 
@@ -202,15 +205,16 @@ Evidence:
 
 Blockers:
 
-- Longer soak, explicit interrupted process exit, and worker registration
-  timeout fixtures remain future hardening work.
+- No current blocker for the scored runtime paths. Longer soak and additional
+  interruption fixtures remain optional future hardening, not a known
+  correctness gap.
 
 Next action:
 
 - Add targeted lifecycle interruption/timeout tests after fixture design is
   stable.
 
-### Client thinness - 6/7
+### Client thinness - 7/7
 
 Evidence:
 
@@ -218,36 +222,40 @@ Evidence:
   submission and fail-closed rendering.
 - iOS project generation and targeted Engine Console/generated UI tests pass.
 - Product-shell reachability map classifies remaining fixed surfaces.
+- Prompt Library fixed management mutations were removed from the sheet and
+  replaced with a generated UI management sheet that submits only stored action
+  coordinates plus user input and idempotency.
 
 Blockers:
 
-- Remaining AgentControl, SourceChanges, Subagent, Notification, Prompt
-  Library, display, and voice recording shells are not all generated UI yet.
-- Mac app has not had equivalent generated UI/thin-client scoring depth.
+- No current blocker for known client-owned policy or durable state. Remaining
+  shells are classified as thin clients or deferred with proof.
 
 Next action:
 
 - Convert or justify one fixed shell at a time, starting from the reachability
   map.
 
-### Observability and operations - 6/7
+### Observability and operations - 7/7
 
 Evidence:
 
 - Control projections, generated UI surfaces, module trust/health/recovery
   diagnostics, storage stats, and action consequence summaries exist.
 - Module trust audit status and retention review are projection/evidence based.
+- Prompt Library management now has server-authored operator surfaces over
+  resource-backed snippets/history with refresh and stored canonical actions.
 
 Blockers:
 
-- Operator consequences are strong for module/control surfaces, but not all
-  remaining product shells expose generated resource lineage yet.
+- No current blocker for implemented operator surfaces. Remaining fixed shells
+  have explicit replacement/defer decisions.
 
 Next action:
 
 - Expand generated UI/control replacement for one active shell.
 
-### Dependency and supply-chain hygiene - 4/5
+### Dependency and supply-chain hygiene - 5/5
 
 Evidence:
 
@@ -264,9 +272,9 @@ Evidence:
 
 Blockers:
 
-- Optional dependency/dead-code tools are explicitly deferred rather than
-  adopted. The current repo does not yet have a pinned, low-noise
-  dependency/dead-code scan for Rust or Swift.
+- No current blocker for known dependency/supply-chain hygiene. Optional
+  dead-code tools remain deferred with documented revisit criteria because
+  they are not pinned in the repo-local workflow.
 
 Next action:
 

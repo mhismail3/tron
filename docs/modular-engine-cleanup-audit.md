@@ -355,6 +355,20 @@ or changing runtime behavior.
 | Mac app focused audit | `docs/production-grade-codebase-audit.md` now classifies Mac menu bar, onboarding wizard, server lifecycle, pairing/local connection, observability/feedback, bundled resources, generated project/signing config, helper scripts, and tests | Keep Mac as platform/support thin client; no Mac policy, grant, package trust, resource truth, or generated UI action construction ownership |
 | Static gates | `production_grade_codebase_audit_and_rubric_stay_current` and `product_shell_reachability_and_prompt_library_resources_stay_enforced` require the new readiness, dependency-tooling, and Mac audit evidence | Keep gates as drift protection for the 98/100 repo-wide checkpoint |
 
+## 2026-05-19 Prompt Library Generated Management Conversion
+
+This pass converted Prompt Library management from fixed Swift controls to
+server-authored generated UI while preserving the local composer insertion
+picker.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Generated UI authoring | `ui::surface_for_target` supports `targetType = "resource_collection"` only for `prompt_library.snippets.v1` over `artifact:prompt-snippet` and `prompt_library.history.v1` over `artifact:prompt-history` | Keep narrow v1 target; no dynamic catalog or generic client-authored action path |
+| Prompt Library management | Rust generated UI tests prove snippet/history surfaces include bounded artifact previews, resource refs, schema-valid stored actions, and `ui::submit_action` child lineage | Manage snippets/history through generated `ui_surface` resources and canonical `prompt_library::*` actions |
+| iOS fixed shell | `PromptLibrarySheet` no longer owns add/edit/delete/clear controls; `PromptLibraryManagementSurfaceSheet` requests the two resource-collection surfaces and submits stored UI action coordinates only | Keep fixed sheet only as local prompt picker/composer insertion affordance |
+| Renderer state | `GeneratedUISurfaceView` seeds form state from server-provided `value` props and keeps stale/expired/damaged/offline action handling closed | Keep iOS as renderer/action submitter; no target function, payload template, grant, or policy construction |
+| Static gates | `product_shell_reachability_and_prompt_library_resources_stay_enforced` and iOS source guards require generated Prompt Library management and absence of fixed management symbols | Keep gates until the remaining composer insertion boundary is explicitly retained or replaced |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:
