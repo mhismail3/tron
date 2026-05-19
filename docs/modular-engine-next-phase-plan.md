@@ -18,6 +18,11 @@ adding a new persistence plane:
   the existing module queue.
 - Control projections and generated UI surfaces advertise only canonical stored
   actions.
+- `docs/modular-engine-maturity-scorecard.md` now tracks the 100-point maturity
+  target, current score, evidence, blockers, and next action for each axis.
+- Trust-review and scheduled-audit implementation now lives in focused module
+  primitive submodules; the parent module remains the registration and lifecycle
+  coordinator.
 
 The invariant remains unchanged: no package/source/policy/conformance/trust/
 audit tables, no marketplace, no remote fetch, no remote key discovery, no
@@ -30,6 +35,10 @@ Harden trust audit operations for long-running use. The engine should make
 scheduled audit behavior explainable across restarts, retries, missed windows,
 operator review, retention cleanup, and generated UI action staleness without
 adding durable scheduler or policy tables.
+
+This phase should raise the scorecard axes for runtime reliability, operator
+readiness, code comprehensibility, and test/proof strength without adding new
+state planes.
 
 ## Proposed Changes
 

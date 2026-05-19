@@ -89,6 +89,8 @@ UI harness.
 The cleanup proof map for removing product-shell surfaces and consolidating the
 recent modular-engine additions lives in
 [`docs/modular-engine-cleanup-audit.md`](docs/modular-engine-cleanup-audit.md).
+The measurable maturity target and current score live in
+[`docs/modular-engine-maturity-scorecard.md`](docs/modular-engine-maturity-scorecard.md).
 
 ## Collapsed Modular Engine
 
@@ -138,6 +140,7 @@ tron/
 |   +-- manual-testing-readiness.md Clean manual-QA checklist for the capability runtime
 |   +-- modular-engine-audit.md     Audit and target direction for the modular engine pivot
 |   +-- modular-engine-cleanup-audit.md Proof map for cleanup/removal decisions
+|   +-- modular-engine-maturity-scorecard.md 100-point maturity rubric and blockers
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms

@@ -166,6 +166,71 @@ fn cleanup_audit_and_fixed_ios_dashboard_removals_stay_in_force() {
     }
 }
 
+#[test]
+fn modular_engine_maturity_scorecard_stays_current() {
+    let repo_root = repo_root();
+    let scorecard_path = repo_root
+        .join("docs")
+        .join("modular-engine-maturity-scorecard.md");
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+
+    let axes = [
+        ("Architecture simplicity", 15_u32),
+        ("Security/authority", 15),
+        ("Resource model", 12),
+        ("Runtime reliability", 15),
+        ("Operator readiness", 12),
+        ("Code comprehensibility", 12),
+        ("Test/proof strength", 12),
+        ("Docs/operations", 7),
+    ];
+
+    let mut total = 0_u32;
+    for (axis, points) in axes {
+        let table_line = scorecard
+            .lines()
+            .find(|line| line.starts_with('|') && line.contains(axis))
+            .unwrap_or_else(|| panic!("scorecard missing rubric row for {axis}"));
+        let columns = table_line.split('|').map(str::trim).collect::<Vec<_>>();
+        let scored_points = columns
+            .get(2)
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("scorecard row for {axis} must include numeric points"));
+        assert_eq!(scored_points, points, "scorecard points changed for {axis}");
+        total += scored_points;
+
+        let section_marker = format!("### {axis} ");
+        let section_start = scorecard
+            .find(&section_marker)
+            .unwrap_or_else(|| panic!("scorecard missing axis section for {axis}"));
+        let section = &scorecard[section_start..];
+        let section_end = section.find("\n### ").unwrap_or(section.len());
+        let section = &section[..section_end];
+        assert!(
+            section.contains("Evidence:") && section.contains("Blockers:"),
+            "scorecard axis {axis} must include evidence and blockers"
+        );
+    }
+    assert_eq!(total, 100, "maturity scorecard rubric must total 100");
+    assert!(
+        scorecard.contains("Current score:")
+            && scorecard.contains("100% Definition")
+            && scorecard.contains("Collapsed substrate rules")
+            && scorecard.contains("package/source/policy/trust/audit tables are forbidden")
+            && scorecard
+                .contains("workers invoke capabilities against resources under scoped grants")
+            && scorecard.contains("control and iOS state are rebuildable projections only")
+            && scorecard.contains("control::act")
+            && scorecard.contains("dynamic UI catalogs")
+            && scorecard.contains("raw-scope authorization")
+            && scorecard.contains("fallback manifest fields")
+            && scorecard.contains("compatibility aliases")
+            && scorecard.contains("module action multiplexers"),
+        "scorecard must encode the collapsed substrate and forbidden-path rules"
+    );
+}
+
 fn assert_site(root: &Path, relative: &str, keyword: &str) {
     let path = root.join(relative);
     let content =
@@ -1008,6 +1073,18 @@ fn module_package_activation_gates_stay_on() {
     let module_path = crate_root.join("src/engine/primitives/module.rs");
     let module = std::fs::read_to_string(&module_path)
         .unwrap_or_else(|e| panic!("failed to read {module_path:?}: {e}"));
+    let module_trust_review_path = crate_root.join("src/engine/primitives/module/trust_review.rs");
+    let module_trust_review = std::fs::read_to_string(&module_trust_review_path)
+        .unwrap_or_else(|e| panic!("failed to read {module_trust_review_path:?}: {e}"));
+    let module_trust_audit_path = crate_root.join("src/engine/primitives/module/trust_audit.rs");
+    let module_trust_audit = std::fs::read_to_string(&module_trust_audit_path)
+        .unwrap_or_else(|e| panic!("failed to read {module_trust_audit_path:?}: {e}"));
+    let module_tree = [
+        module.as_str(),
+        module_trust_review.as_str(),
+        module_trust_audit.as_str(),
+    ]
+    .join("\n");
     for required in [
         "module::register_package",
         "module::inspect_package",
@@ -1064,7 +1141,7 @@ fn module_package_activation_gates_stay_on() {
         "secret_ref",
     ] {
         assert!(
-            module.contains(required),
+            module_tree.contains(required),
             "module primitive must keep `{required}`"
         );
     }
@@ -1087,10 +1164,24 @@ fn module_package_activation_gates_stay_on() {
         "module_audit_table",
     ] {
         assert!(
-            !module.contains(forbidden),
+            !module_tree.contains(forbidden),
             "module primitive must not reintroduce `{forbidden}`"
         );
     }
+    assert!(
+        module.contains("mod trust_review;")
+            && module.contains("mod trust_audit;")
+            && module_trust_review.contains("TRUST_REVIEW_OPERATIONS")
+            && module_trust_review.contains("fn resolve_trust_review")
+            && module_trust_review.contains("fn recommended_actions_for_trust_review")
+            && module_trust_audit.contains("fn schedule_trust_audit")
+            && module_trust_audit.contains("fn run_scheduled_trust_audit")
+            && module_trust_audit.contains("parse_trust_audit_wall_clock_time")
+            && !module.contains("fn resolve_trust_review")
+            && !module.contains("fn schedule_trust_audit")
+            && !module.contains("fn run_scheduled_trust_audit"),
+        "trust review/audit implementation must stay in focused module primitive submodules"
+    );
 
     let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
         .expect("failed to read engine host");
@@ -1164,6 +1255,8 @@ fn module_package_activation_gates_stay_on() {
         crate_root.join("src/engine/resources.rs"),
         crate_root.join("src/engine/invocation.rs"),
         crate_root.join("src/engine/primitives/module.rs"),
+        crate_root.join("src/engine/primitives/module/trust_review.rs"),
+        crate_root.join("src/engine/primitives/module/trust_audit.rs"),
     ] {
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
@@ -1207,6 +1300,18 @@ fn module_package_activation_gates_stay_on() {
             && ui.contains("module::run_scheduled_trust_audit")
             && ui.contains("module::run_conformance"),
         "generated UI authoring must support module package targets through canonical actions"
+    );
+    assert!(
+        ui.contains("trust_review_operation_input_schema")
+            && ui.contains("TRUST_REVIEW_OPERATIONS")
+            && !ui.contains("\"expire\", \"renew\", \"rotate\", \"revoke\"")
+            && !ui.contains("\"enforce_disable\", \"enforce_quarantine\""),
+        "generated UI must derive trust-review operation schemas from the canonical module source"
+    );
+    assert!(
+        host.contains("primitives::module::parse_trust_audit_wall_clock_time")
+            && host.contains("primitives::module::trust_audit_day_of_week_number"),
+        "host queue projection must use module-owned trust audit schedule parsing"
     );
 
     let capability_client_path = repo_root

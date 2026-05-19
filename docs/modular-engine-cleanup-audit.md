@@ -72,6 +72,28 @@ Removal proof from this pass:
 - No storage reset was justified: schemas did not add tables and remain within
   the existing resource/decision/evidence substrate.
 
+## 2026-05-19 Maturity Scorecard And Module Split
+
+The first maturity checkpoint added a measurable scorecard and applied the
+lowest-risk production-code split around recent trust-review work.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Maturity tracking | `docs/modular-engine-maturity-scorecard.md` defines an 8-axis 100-point rubric with current scores, evidence, blockers, and next actions | Keep as the durable definition of progress toward the 100% end state |
+| Scorecard gates | `tests/threat_model_invariants.rs` verifies the scorecard exists, contains all axes, totals 100 points, and preserves collapsed-substrate/forbidden-path rules | Keep in static gates so maturity tracking cannot drift into aspirational docs |
+| Trust review implementation ownership | `engine/primitives/module/trust_review.rs` owns simulation, review evidence, operation constants, schemas, and recommended review actions | Consolidated from the parent module file without changing public function ids or wire shape |
+| Scheduled trust audit implementation ownership | `engine/primitives/module/trust_audit.rs` owns schedule creation, due-run evidence, schedule parsing, schedule ids, and audit schemas | Consolidated from the parent module file; host remains a queue projection only |
+| Parent module primitive | `engine/primitives/module.rs` still owns registration, dispatch, lifecycle, package source/trust, activation, health, integrity, and shared helpers | Keep for now; future splits should target source/signature and activation/health once behavior is stable |
+
+Removal proof from this pass:
+
+- No runtime capability or public response shape was removed; this checkpoint is
+  organization plus measurement only.
+- No iOS changes were needed because generated UI action submission remains
+  server-authored and dynamic.
+- No storage change was justified; the scorecard explicitly forbids adding
+  package/source/policy/trust/audit tables.
+
 ## Deferred High-Scrutiny Areas
 
 These areas are not proven removable in this checkpoint and need separate

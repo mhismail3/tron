@@ -16,6 +16,8 @@ for artifacts, goals, work items, UI surfaces, and control-plane state.
 
 The cleanup proof map for removing fixed product-shell code and consolidating
 recent substrate additions lives in `docs/modular-engine-cleanup-audit.md`.
+The measurable 100% definition and current maturity blockers live in
+`docs/modular-engine-maturity-scorecard.md`.
 
 ## Invariants
 
