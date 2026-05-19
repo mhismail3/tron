@@ -45,17 +45,21 @@ protocol response handling.
 The repository includes `.codex/environments/environment.toml` for Codex app
 toolbar actions. `Dev Server` starts `scripts/tron dev -bdt` from the project
 root, and `Stop Dev Server` runs `scripts/tron dev --stop`. `Rebuild + Install
-iOS Beta` runs `scripts/tron-ios-beta install`; it regenerates the Xcode project,
-preflights the active Xcode toolchain, builds the `Tron Beta` scheme for a
-physical iOS destination, writes a full log plus `.xcresult` bundle, installs
-the resulting app bundle with `xcrun devicectl`, and launches the resolved
-bundle ID on the device. `Launch Installed iOS Beta` runs
-`scripts/tron-ios-beta launch` for the already-installed app, which is useful
-after unlocking a device whose launch was denied during install.
+iOS Beta on iPhone` and `Rebuild + Install iOS Beta on iPad` run
+`scripts/tron-ios-beta install` with generic device-name selectors; the helper
+regenerates the Xcode project, preflights the active Xcode toolchain, builds the
+`Tron Beta` scheme for a physical iOS destination, writes a full log plus
+`.xcresult` bundle, installs the resulting app bundle with `xcrun devicectl`,
+and launches the resolved bundle ID with a bounded `devicectl` launch timeout.
+The matching launch actions run `scripts/tron-ios-beta launch` for the
+already-installed app without rebuilding.
 
-Keep device-specific values out of the repo. The helper auto-selects the only
-available physical iOS device. If multiple devices are available, set one of
-these in your local terminal environment before running it:
+Keep device-specific values out of the repo. The Codex app actions use generic
+`TRON_IOS_DEVICE_NAME=iPhone` and `TRON_IOS_DEVICE_NAME=iPad` selectors. For
+manual terminal use, the helper auto-selects the only selectable physical iOS
+device, where selectable means CoreDevice reports it as `available` or
+`connected`. If multiple devices are selectable, set one of these before running
+it:
 
 ```bash
 export TRON_IOS_DEVICE_ID=<device-identifier>

@@ -18,13 +18,25 @@ command = "scripts/tron dev --stop"
 platform = "darwin"
 
 [[actions]]
-name = "Rebuild + Install iOS Beta"
+name = "Rebuild + Install iOS Beta on iPhone"
 icon = "debug"
-command = "scripts/tron-ios-beta install"
+command = "env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install"
 platform = "darwin"
 
 [[actions]]
-name = "Launch Installed iOS Beta"
+name = "Rebuild + Install iOS Beta on iPad"
+icon = "debug"
+command = "env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta install"
+platform = "darwin"
+
+[[actions]]
+name = "Launch Installed iOS Beta on iPhone"
 icon = "run"
-command = "scripts/tron-ios-beta launch"
+command = "env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta launch"
+platform = "darwin"
+
+[[actions]]
+name = "Launch Installed iOS Beta on iPad"
+icon = "run"
+command = "env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta launch"
 platform = "darwin"

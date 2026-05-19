@@ -16,13 +16,25 @@ scripts/tron-ios-beta status
 
 `install` regenerates the Xcode project, builds the `Tron Beta` scheme with the
 `Beta` configuration for a physical iOS destination, installs the app with
-`xcrun devicectl`, and launches the resolved bundle ID.
+`xcrun devicectl`, and launches the resolved bundle ID unless `--no-launch` is
+provided.
 
-`launch` launches the already-installed beta app without rebuilding.
+`launch` launches the already-installed beta app without rebuilding. Launch is
+bounded by `TRON_IOS_LAUNCH_TIMEOUT_SECONDS`, defaulting to 20 seconds.
 
 `stop` finds running `TronMobile.app/TronMobile` processes on the selected
 device and terminates them by PID.
 
-The script auto-selects the only available physical iOS device. If multiple
-devices are available, set `TRON_IOS_DEVICE_ID`, `TRON_IOS_DEVICE_NAME`, or
-`TRON_IOS_DESTINATION` locally before running it.
+Codex app toolbar actions are split by generic device class:
+
+```bash
+env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install
+env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta install
+env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta launch
+env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta launch
+```
+
+The script auto-selects the only selectable physical iOS device, where
+selectable means CoreDevice reports it as `available` or `connected`. If
+multiple devices are selectable, set `TRON_IOS_DEVICE_ID`,
+`TRON_IOS_DEVICE_NAME`, or `TRON_IOS_DESTINATION` locally before running it.

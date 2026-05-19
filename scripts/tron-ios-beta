@@ -12,6 +12,7 @@ DEVICE_ID="${TRON_IOS_DEVICE_ID:-}"
 DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
 DESTINATION="${TRON_IOS_DESTINATION:-}"
 LAUNCH_AFTER_INSTALL=1
+LAUNCH_TIMEOUT_SECONDS="${TRON_IOS_LAUNCH_TIMEOUT_SECONDS:-20}"
 
 usage() {
     cat <<'USAGE'
@@ -28,9 +29,11 @@ Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
   TRON_IOS_DEVICE_NAME     Physical iOS device name
   TRON_IOS_DESTINATION     Full xcodebuild destination, e.g. platform=iOS,id=<id>
+  TRON_IOS_LAUNCH_TIMEOUT_SECONDS
+                           devicectl process launch timeout, defaults to 20
 
-Without a device override, the script selects the only available physical iOS
-device. If multiple physical devices are available, set TRON_IOS_DEVICE_ID or
+Without a device override, the script selects the only selectable physical iOS
+device. If multiple physical devices are selectable, set TRON_IOS_DEVICE_ID or
 TRON_IOS_DEVICE_NAME locally.
 USAGE
 }
@@ -83,10 +86,7 @@ device_uuid_from_line() {
 available_physical_devices() {
     local output
     for _attempt in 1 2 3 4 5 6 7 8 9 10; do
-        output="$(
-            xcrun devicectl list devices 2>&1 \
-                | awk 'NR > 2 && $0 !~ /unavailable/ && $0 ~ /available/ && $0 ~ /(iPhone|iPad|iPod)/ { print }'
-        )"
+        output="$(available_physical_devices_once)"
         if [ -n "$output" ]; then
             printf '%s\n' "$output"
             return 0
@@ -95,29 +95,41 @@ available_physical_devices() {
     done
 }
 
+available_physical_devices_once() {
+    xcrun devicectl list devices 2>&1 \
+        | awk 'NR > 2 && $0 !~ /unavailable/ && $0 ~ /(available|connected)/ && $0 ~ /(iPhone|iPad|iPod)/ { print }'
+}
+
+device_line_matching_name() {
+    local name="$1"
+    awk -v name="$name" 'index(tolower($0), tolower(name)) { print; exit }'
+}
+
 resolve_device_id() {
     if [ -n "$DEVICE_ID" ]; then
         printf '%s\n' "$DEVICE_ID"
         return 0
     fi
 
-    local devices
-    devices="$(available_physical_devices || true)"
+    local devices matched
 
     if [ -n "$DEVICE_NAME" ]; then
-        local matched
-        matched="$(
-            printf '%s\n' "$devices" \
-                | awk -v name="$DEVICE_NAME" 'index(tolower($0), tolower(name)) { print; exit }'
-        )"
-        if [ -z "$matched" ]; then
-            echo "Available physical devices:" >&2
-            printf '%s\n' "$devices" >&2
-            die "no available physical iOS device matched TRON_IOS_DEVICE_NAME=$DEVICE_NAME"
-        fi
-        printf '%s\n' "$matched" | device_uuid_from_line
-        return 0
+        for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+            devices="$(available_physical_devices_once || true)"
+            matched="$(printf '%s\n' "$devices" | device_line_matching_name "$DEVICE_NAME")"
+            if [ -n "$matched" ]; then
+                printf '%s\n' "$matched" | device_uuid_from_line
+                return 0
+            fi
+            sleep 1
+        done
+
+        echo "Selectable physical devices:" >&2
+        printf '%s\n' "$devices" >&2
+        die "no selectable physical iOS device matched TRON_IOS_DEVICE_NAME=$DEVICE_NAME"
     fi
+
+    devices="$(available_physical_devices || true)"
 
     local count
     count="$(printf '%s\n' "$devices" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
@@ -126,9 +138,9 @@ resolve_device_id() {
         return 0
     fi
 
-    echo "Available physical devices:" >&2
+    echo "Selectable physical devices:" >&2
     printf '%s\n' "$devices" >&2
-    die "set TRON_IOS_DEVICE_ID or TRON_IOS_DEVICE_NAME when zero or multiple physical devices are available"
+    die "set TRON_IOS_DEVICE_ID or TRON_IOS_DEVICE_NAME when zero or multiple physical devices are selectable"
 }
 
 project_selector() {
@@ -260,8 +272,12 @@ build_install_launch() {
 launch_beta_for_device() {
     local device_id="$1"
     local bundle_id="$2"
-    if ! xcrun devicectl device process launch --device "$device_id" "$bundle_id"; then
-        die "launch failed. Unlock the device, then run scripts/tron-ios-beta launch"
+    if ! xcrun devicectl device process launch \
+        --device "$device_id" \
+        --timeout "$LAUNCH_TIMEOUT_SECONDS" \
+        --terminate-existing \
+        "$bundle_id"; then
+        die "launch failed or timed out after ${LAUNCH_TIMEOUT_SECONDS}s. The app may still be installed; check the device or run scripts/tron-ios-beta status."
     fi
 }
 
