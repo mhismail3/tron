@@ -367,7 +367,20 @@ picker.
 | Prompt Library management | Rust generated UI tests prove snippet/history surfaces include bounded artifact previews, resource refs, schema-valid stored actions, and `ui::submit_action` child lineage | Manage snippets/history through generated `ui_surface` resources and canonical `prompt_library::*` actions |
 | iOS fixed shell | `PromptLibrarySheet` no longer owns add/edit/delete/clear controls; `PromptLibraryManagementSurfaceSheet` requests the two resource-collection surfaces and submits stored UI action coordinates only | Keep fixed sheet only as local prompt picker/composer insertion affordance |
 | Renderer state | `GeneratedUISurfaceView` seeds form state from server-provided `value` props and keeps stale/expired/damaged/offline action handling closed | Keep iOS as renderer/action submitter; no target function, payload template, grant, or policy construction |
-| Static gates | `product_shell_reachability_and_prompt_library_resources_stay_enforced` and iOS source guards require generated Prompt Library management and absence of fixed management symbols | Keep gates until the remaining composer insertion boundary is explicitly retained or replaced |
+| Static gates | `product_shell_reachability_and_prompt_library_resources_stay_enforced` and iOS source guards require generated Prompt Library management and absence of fixed management symbols | Keep gates as proof for generated management and the selection-only composer picker |
+
+## 2026-05-19 Prompt Library Composer Boundary Decision
+
+This pass closed the final product-shell ambiguity without adding a generated
+handoff. Selecting prompt text into an unsent composer draft is local editing
+state, not durable engine truth, so the picker remains as a gated thin shell.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Composer insertion | `PromptLibrarySheet`, `PromptHistoryListView`, and `PromptSnippetListView` call only `onSelect(text)` / `onSelect(item.text)` / `onSelect(snippet.text)` into the local draft composer | Keep as permanent local editing affordance; no server mutation or durable state is produced by selection |
+| Management separation | `PromptLibraryManagementSurfaceSheet` remains the only Prompt Library management path and submits generated UI actions through `ui::submit_action` | Keep generated `ui_surface` management as the mutation boundary |
+| Client policy boundary | Swift and Rust static gates forbid target function ids, payload templates, grants, lineage, or `UiActionSubmissionDTO` construction in the picker/state/list files | Keep iOS free of policy/action construction in the composer picker |
+| Scorecard closure | `docs/production-grade-rubric.md` reaches `100/100` only because the remaining fixed shell is explicitly classified, documented, and guarded | Treat future fixed shells the same way: generated/resource replacement or proof-backed local affordance |
 
 ## Static Gates
 

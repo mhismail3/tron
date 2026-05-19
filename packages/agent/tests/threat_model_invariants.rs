@@ -462,15 +462,15 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
     }
     assert_eq!(total, 100, "production-grade rubric must total 100");
     assert!(
-        rubric.contains("Current repo-wide score: **99/100**")
-            && rubric.contains("Ranked 100% Backlog")
+        rubric.contains("Current repo-wide score: **100/100**")
+            && rubric.contains("Post-100 Maintenance Backlog")
             && rubric.contains("broad/high-churn domain test")
             && rubric.contains("retired prompt schema ambiguity")
             && rubric.contains("Product-shell readiness proof")
             && rubric.contains("dependency-tooling decision")
             && rubric.contains("Mac app")
             && rubric.contains("focused audit")
-            && rubric.contains("Prompt Library composer insertion shell")
+            && rubric.contains("Prompt Library composer insertion boundary")
             && rubric.contains("No raw-scope/client-policy trust")
             && rubric.contains("No current blocker"),
         "production-grade rubric must include score, blockers, and next actions"
@@ -3460,7 +3460,8 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
         "Phase decision",
         "keep thin shell",
         "convert to generated UI",
-        "partially converted",
+        "complete with gated local composer insertion",
+        "accepted local editing boundary",
         "defer with reason",
         "defer with proof",
     ] {
@@ -3495,6 +3496,8 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
             .expect("read PromptLibrarySheet");
     assert!(
         prompt_sheet.contains("PromptLibraryManagementSurfaceSheet")
+            && prompt_sheet.contains("onSelect(text)")
+            && prompt_sheet.contains("onSelect(item.text)")
             && !prompt_sheet.contains("SnippetEditorSheet")
             && !prompt_sheet.contains("showClearHistoryAlert")
             && !prompt_sheet.contains("isCreatingSnippet")
@@ -3507,19 +3510,44 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
             .exists(),
         "fixed Prompt Library snippet editor must stay removed"
     );
-    for (file, forbidden) in [
-        ("PromptHistoryListView.swift", "deleteHistory"),
-        ("PromptHistoryListView.swift", ".swipeActions"),
-        ("PromptSnippetListView.swift", "deleteSnippet"),
-        ("PromptSnippetListView.swift", ".swipeActions"),
-        ("PromptSnippetListView.swift", "onEdit"),
+    let prompt_history_list =
+        std::fs::read_to_string(prompt_library_root.join("PromptHistoryListView.swift"))
+            .expect("read PromptHistoryListView");
+    let prompt_snippet_list =
+        std::fs::read_to_string(prompt_library_root.join("PromptSnippetListView.swift"))
+            .expect("read PromptSnippetListView");
+    let prompt_picker_state = std::fs::read_to_string(
+        repo.join("packages/ios-app/Sources/ViewModels/State/PromptLibraryState.swift"),
+    )
+    .expect("read PromptLibraryState");
+    assert!(
+        prompt_history_list.contains(".onTapGesture { onSelect(item.text) }")
+            && prompt_snippet_list.contains(".onTapGesture { onSelect(snippet.text) }"),
+        "Prompt Library picker lists must remain selection-only composer insertion"
+    );
+    for (file, content) in [
+        ("PromptLibrarySheet.swift", prompt_sheet.as_str()),
+        ("PromptHistoryListView.swift", prompt_history_list.as_str()),
+        ("PromptSnippetListView.swift", prompt_snippet_list.as_str()),
+        ("PromptLibraryState.swift", prompt_picker_state.as_str()),
     ] {
-        let content = std::fs::read_to_string(prompt_library_root.join(file))
-            .unwrap_or_else(|error| panic!("read {file}: {error}"));
-        assert!(
-            !content.contains(forbidden),
-            "{file} must not own fixed Prompt Library management path `{forbidden}`"
-        );
+        for forbidden in [
+            "createSnippet",
+            "updateSnippet",
+            "deleteSnippet",
+            "deleteHistory",
+            "clearHistory",
+            ".swipeActions",
+            "targetFunctionId",
+            "payloadTemplate",
+            "requiredGrant",
+            "UiActionSubmissionDTO",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{file} must not own fixed management or generated action path `{forbidden}`"
+            );
+        }
     }
     let prompt_management = std::fs::read_to_string(
         prompt_library_root.join("PromptLibraryManagementSurfaceSheet.swift"),

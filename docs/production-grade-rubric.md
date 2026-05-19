@@ -17,11 +17,12 @@ Each axis receives one of these maturity levels:
 - `75%`: integration/failure coverage exists and docs are current;
 - `100%`: complete evidence links, no known blockers, no duplicate path.
 
-Current repo-wide score: **99/100**.
+Current repo-wide score: **100/100**.
 
-The score is intentionally lower than the modular-engine score because this
-rubric includes the remaining thin Prompt Library composer insertion shell and
-future optional deeper lifecycle/soak proof.
+This score means every known source artifact, state owner, product shell, and
+security boundary is either implemented, tested, documented, or explicitly
+classified with static gates. It does not mean the product is feature-complete;
+future work should keep the same proof standard.
 
 ## Rubric
 
@@ -29,7 +30,7 @@ future optional deeper lifecycle/soak proof.
 |---|---:|---:|---|
 | Architecture and ownership | 12 | 12 | Every package/submodule has one documented owner, purpose, and dependency direction |
 | Folder and test organization | 10 | 10 | Folder layout mirrors architecture; tests are grouped by owning concern with no large catch-all files |
-| Reachability and dead code | 10 | 9 | Every tracked source artifact is reachable or explicitly classified; dead code has absence gates |
+| Reachability and dead code | 10 | 10 | Every tracked source artifact is reachable or explicitly classified; dead code has absence gates |
 | State and persistence | 10 | 10 | Durable truth, caches, projections, schemas, and generated files are all correctly classified |
 | Security and authority | 12 | 12 | No raw-scope/client-policy trust; grants, secrets, sandboxing, file/network bounds are enforced |
 | Resource/output correctness | 8 | 8 | Durable outputs are resource-backed or explicitly non-durable projections |
@@ -40,7 +41,7 @@ future optional deeper lifecycle/soak proof.
 | Docs and drift protection | 6 | 6 | README, progressive docs, architecture docs, and static gates stay synchronized |
 | Deletion discipline | 3 | 3 | Removed/retired behavior has no compatibility aliases, fallback readers, stale docs, or hidden callers |
 
-Total: **99/100**.
+Total: **100/100**.
 
 ## Axis Evidence And Blockers
 
@@ -103,7 +104,7 @@ Next action:
 - Keep the convention enforced and split any future broad test file before it
   becomes a catch-all ownership problem.
 
-### Reachability and dead code - 9/10
+### Reachability and dead code - 10/10
 
 Evidence:
 
@@ -120,18 +121,21 @@ Evidence:
   stores as source truth.
 - Prompt Library management controls are no longer fixed Swift management
   paths; generated `resource_collection` surfaces own create/update/delete/
-  clear actions. The remaining sheet is reachable only as a composer insertion
-  picker.
+  clear actions.
+- The remaining Prompt Library sheet is an accepted local editing boundary:
+  it reads server-backed prompt projections and calls only `onSelect(text)`
+  into an unsent draft composer. Swift and Rust static gates forbid fixed
+  management and local generated-action construction in that picker.
 
 Blockers:
 
-- The Prompt Library composer insertion picker is intentionally still local.
-  It needs either a generated-result-to-composer bridge or a permanent
-  documented thin-shell decision before this axis reaches 10/10.
+- No current blocker. Remaining fixed shells are either deleted, converted, or
+  explicitly classified with proof and a deletion bar.
 
 Next action:
 
-- Decide and gate the final Prompt Library composer insertion boundary.
+- Keep reachability decisions updated as generated UI replaces additional
+  product-shell affordances.
 
 ### State and persistence - 10/10
 
@@ -225,16 +229,20 @@ Evidence:
 - Prompt Library fixed management mutations were removed from the sheet and
   replaced with a generated UI management sheet that submits only stored action
   coordinates plus user input and idempotency.
+- Prompt Library composer insertion boundary is selection-only local draft
+  editing; it owns no durable state, policy, lineage, grant, target function, or
+  action template.
 
 Blockers:
 
 - No current blocker for known client-owned policy or durable state. Remaining
-  shells are classified as thin clients or deferred with proof.
+  shells are classified as thin clients, generated UI renderers, accepted local
+  editing affordances, or deferred with proof.
 
 Next action:
 
-- Convert or justify one fixed shell at a time, starting from the reachability
-  map.
+- Convert additional fixed shells only after a generated/resource replacement
+  covers the current operator role.
 
 ### Observability and operations - 7/7
 
@@ -317,19 +325,19 @@ Next action:
 
 - Continue remove-with-proof only; no compatibility aliases or fallback readers.
 
-## Ranked 100% Backlog
+## Post-100 Maintenance Backlog
 
-1. Replace or remove one remaining fixed iOS product shell using generated UI
-   and the reachability map.
-2. Adopt optional dependency/dead-code tooling when a stable, pinned, low-noise
+1. Adopt optional dependency/dead-code tooling when a stable, pinned, low-noise
    workflow exists. Current state is explicitly deferred with revisit criteria.
-3. Add longer lifecycle/soak tests if runtime reliability target rises.
-4. Standardize Rust domain test placement where broad/high-churn domain test
+2. Add longer lifecycle/soak tests if runtime reliability target rises.
+3. Standardize Rust domain test placement where broad/high-churn domain test
    files still obscure ownership. Completed for the current broad blockers
    (`memory::retain`, `mcp::product_protocol`, and `session::commands`); keep
    splitting future broad files before they become catch-alls.
-5. Resolve retired prompt schema ambiguity. Completed by the
+4. Resolve retired prompt schema ambiguity. Completed by the
    modular-engine-v3 clean storage reset; keep absence gates on the fresh
    schema and Prompt Library runtime.
-6. Product-shell readiness proof, dependency-tooling decision, and Mac app
+5. Product-shell readiness proof, dependency-tooling decision, and Mac app
    focused audit are completed evidence for the 98/100 checkpoint.
+6. Prompt Library generated management and gated local composer insertion are
+   completed evidence for the final 100/100 checkpoint.

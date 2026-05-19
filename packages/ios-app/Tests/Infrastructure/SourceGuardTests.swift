@@ -369,8 +369,8 @@ struct SourceGuardTests {
         #expect(!appEntry.contains("if #available(iOS 26.0, *)"))
     }
 
-    @Test("Prompt Library management is generated UI only")
-    func testPromptLibraryManagementIsGeneratedUIOnly() throws {
+    @Test("Prompt Library picker is selection-only and management is generated UI")
+    func testPromptLibraryPickerBoundaryAndGeneratedManagement() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -388,6 +388,10 @@ struct SourceGuardTests {
             contentsOf: promptRoot.appendingPathComponent("PromptSnippetListView.swift"),
             encoding: .utf8
         )
+        let pickerState = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/PromptLibraryState.swift"),
+            encoding: .utf8
+        )
         let managementSheet = try String(
             contentsOf: promptRoot.appendingPathComponent("PromptLibraryManagementSurfaceSheet.swift"),
             encoding: .utf8
@@ -398,14 +402,26 @@ struct SourceGuardTests {
         )
 
         #expect(sheet.contains("PromptLibraryManagementSurfaceSheet"))
+        #expect(sheet.contains("onSelect(text)"))
+        #expect(sheet.contains("onSelect(item.text)"))
+        #expect(historyList.contains(".onTapGesture { onSelect(item.text) }"))
+        #expect(snippetList.contains(".onTapGesture { onSelect(snippet.text) }"))
         #expect(!sheet.contains("SnippetEditorSheet"))
         #expect(!sheet.contains("showClearHistoryAlert"))
         #expect(!sheet.contains("isCreatingSnippet"))
         #expect(!sheet.contains("editingSnippet"))
-        #expect(!historyList.contains(".swipeActions"))
-        #expect(!historyList.contains("deleteHistory"))
-        #expect(!snippetList.contains(".swipeActions"))
-        #expect(!snippetList.contains("deleteSnippet"))
+        for pickerFile in [sheet, historyList, snippetList, pickerState] {
+            #expect(!pickerFile.contains(".swipeActions"))
+            #expect(!pickerFile.contains("createSnippet"))
+            #expect(!pickerFile.contains("updateSnippet"))
+            #expect(!pickerFile.contains("deleteSnippet"))
+            #expect(!pickerFile.contains("deleteHistory"))
+            #expect(!pickerFile.contains("clearHistory"))
+            #expect(!pickerFile.contains("targetFunctionId"))
+            #expect(!pickerFile.contains("payloadTemplate"))
+            #expect(!pickerFile.contains("requiredGrant"))
+            #expect(!pickerFile.contains("UiActionSubmissionDTO"))
+        }
         #expect(!snippetList.contains("onEdit"))
 
         #expect(managementSheet.contains(#"targetType: "resource_collection""#))
