@@ -484,19 +484,33 @@ declared `trustTier` is never permission truth. `module::configure` validates
 config and rejects raw secret-like values unless they are `secret_ref`/vault
 handles.
 
-Package source trust is explicit. `module::verify_source` verifies package
-digest, provenance, materialized file refs/hashes, and redaction, then writes
-bounded `evidence` and CAS-updates the package source trust fields. Explicit
-signature material fails closed until local trust roots and signature
-verification are added; unsigned local packages must stay digest-pinned.
-`module::approve_source` records a scoped operator `decision` for a local
-digest-pinned package digest/version/scope, trust ceiling, grant ceiling,
-file/network bounds, and expiry.
+Package source trust is explicit. `module::verify_source` verifies unsigned
+digest-pinned package provenance, materialized file refs/hashes, and redaction,
+then writes bounded `evidence` and CAS-updates the package source trust fields.
+`module::register_source` records local source registrations, local Ed25519
+public-key trust roots, and revocations as `decision`/`evidence` resources; it
+does not fetch remote bytes or create a package/source table.
+`module::verify_signature` verifies signed local package manifests against
+registered trust roots using the exact message
+`tron.module.package_manifest.v1\n{packageDigest}` and CAS-updates
+`signatureVerification`, `sourceEvidenceRefs`, `effectiveTrustTier`, and
+bounded policy diagnostics. Unsupported algorithms, unknown/revoked/expired
+trust roots, raw secret material, digest drift, stale package versions, and
+out-of-policy selectors fail closed. `module::approve_source` records a scoped
+operator `decision` for an unsigned local digest-pinned package digest/version/
+scope, trust ceiling, grant ceiling, file/network bounds, and expiry.
 `module::revoke_source_approval` archives that decision and writes evidence.
-`module::policy_decide` is a pure read projection over package source evidence,
-approval decisions, requested child grant, and conformance refs. Local unsigned
+`module::policy_decide` and `module::audit_policy` are pure read projections
+over package source evidence, signature evidence, trust-root decisions, approval
+decisions, requested child grants, conformance refs, activations, health, and
+revocations. `module::record_policy_audit` persists the same bounded audit as
+`evidence`; `module::reconcile_trust` writes evidence and recommendations for
+packages/activations affected by revoked or expired trust without disabling,
+quarantining, killing workers, or revoking grants. Local unsigned
 `local_process` packages cannot activate until source verification and an
-unexpired scoped approval decision pass policy.
+unexpired scoped source approval decision pass policy; signed local packages
+require current signature evidence from an active trust root that permits the
+requested activation authority.
 
 `module::activate`, `module::disable`, `module::upgrade`,
 `module::rollback`, and `module::quarantine` produce `activation_record`

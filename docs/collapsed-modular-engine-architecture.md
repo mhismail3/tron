@@ -162,15 +162,26 @@ The first-party `module` primitive exposes:
 - `module::configure` for config-schema validation and `secret_ref`-only
   secret handling before `module_config` persistence;
 - `module::verify_source` for resource-backed package source evidence over
-  package digest, provenance, materialized file refs/hashes, and redaction;
-  explicit signature material fails closed until local trust roots and signature
-  verification are added;
+  unsigned package digest, provenance, materialized file refs/hashes, and
+  redaction;
+- `module::register_source` for local digest-source registrations, Ed25519
+  public-key trust roots, and source/trust revocation decisions represented as
+  resource-backed `decision`/`evidence`;
+- `module::verify_signature` for resource-backed Ed25519 verification of signed
+  local packages against registered trust roots. Signature verification never
+  fetches remote keys or package bytes, and updates package trust fields only
+  through CAS;
 - `module::approve_source` and `module::revoke_source_approval` for scoped
   operator `decision` resources that approve or revoke local digest-pinned
   package sources by package digest/version/scope, trust ceiling, grant ceiling,
   file/network bounds, and expiry;
-- `module::policy_decide` as a pure read projection over package source
-  evidence, approval decisions, requested child grants, and conformance refs;
+- `module::policy_decide` and `module::audit_policy` as pure read projections
+  over package source evidence, signature evidence, trust-root decisions,
+  approval decisions, requested child grants, conformance refs, activations,
+  health, and revocations;
+- `module::record_policy_audit` and `module::reconcile_trust` for bounded audit
+  and stale-trust evidence. They recommend canonical operator actions but do not
+  disable, quarantine, kill workers, revoke grants, or repair bytes;
 - `module::run_conformance` for bounded package/config/activation conformance
   evidence over manifest rules, grant simulation, registration bounds,
   resource-output contracts, health policy, redaction, and cleanup behavior;
@@ -204,21 +215,24 @@ The first-party `module` primitive exposes:
 resource refs. The runtime entrypoint declares command and args templates,
 expected function ids, working-directory policy, environment policy, visibility,
 timeout, and executable refs. Activation verifies those refs and hashes and
-requires valid source verification plus an unexpired scoped source approval
-before invoking `worker::spawn`; module code never starts or kills processes
-directly.
+requires source policy to pass before invoking `worker::spawn`: unsigned local
+packages need current source-verification evidence plus an unexpired scoped
+approval, while signed local packages need current Ed25519 signature evidence
+from an active local trust root whose selectors and grant ceilings cover the
+requested activation. Module code never starts or kills processes directly.
 The resulting `activation_record` stores `spawnInvocationId`, `spawnResult`,
 `healthResult`, `healthEvidenceRef`, `healthInvocationIds`,
 `integrityDiagnostics`, `workerLifecycle`, `supersedes`, `rollbackTarget`, and
 recovery metadata so operator projections can explain what ran, what authority
 it received, what evidence supports the current status, and what cleanup
-occurred. Source verification, approval, conformance, health, integrity, and
-recovery outcomes are `evidence`/`decision` resources linked to package and
-activation records. A runtime monitor derives due checks from active activation
-resources and their `healthPolicy.intervalSeconds`, then enqueues
+occurred. Source registration, trust-root registration/revocation, signature
+verification, policy audit, trust reconciliation, approval, conformance, health,
+integrity, and recovery outcomes are `evidence`/`decision` resources linked to
+package and activation records. A runtime monitor derives due checks from active
+activation resources and their `healthPolicy.intervalSeconds`, then enqueues
 `module::check_health` through the existing queue/invocation substrate. There
-is no package table, health table, policy table, conformance table, recovery
-table, or non-rebuildable module cache.
+is no package table, source table, health table, policy table, conformance
+table, recovery table, or non-rebuildable module cache.
 
 No package table, module action multiplexer, client-side policy, or `control`
 mutation path exists. Control and generated UI surfaces expose module resources

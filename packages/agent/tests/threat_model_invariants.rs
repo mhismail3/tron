@@ -1025,7 +1025,18 @@ fn module_package_activation_gates_stay_on() {
         "module::revoke_source_approval",
         "module::policy_decide",
         "module::run_conformance",
+        "module::register_source",
+        "module::verify_signature",
+        "module::audit_policy",
+        "module::record_policy_audit",
+        "module::reconcile_trust",
         "DurableOutputContract::resource_backed",
+        "ed25519",
+        "trust-root:",
+        "module_trust_root",
+        "module_source_registration",
+        "module_source_revocation",
+        "signatureVerification",
         "derive_grant",
         "revoke_grant",
         "worker::spawn",
@@ -1098,6 +1109,11 @@ fn module_package_activation_gates_stay_on() {
             && control.contains("module::verify_source")
             && control.contains("module::approve_source")
             && control.contains("module::run_conformance")
+            && control.contains("module::register_source")
+            && control.contains("module::verify_signature")
+            && control.contains("module::audit_policy")
+            && control.contains("module::record_policy_audit")
+            && control.contains("module::reconcile_trust")
             && !control.contains("module::act\""),
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
@@ -1140,6 +1156,11 @@ fn module_package_activation_gates_stay_on() {
             && ui.contains("module::verify_integrity")
             && ui.contains("module::recover_activation")
             && ui.contains("module::verify_source")
+            && ui.contains("module::register_source")
+            && ui.contains("module::verify_signature")
+            && ui.contains("module::audit_policy")
+            && ui.contains("module::record_policy_audit")
+            && ui.contains("module::reconcile_trust")
             && ui.contains("module::run_conformance"),
         "generated UI authoring must support module package targets through canonical actions"
     );

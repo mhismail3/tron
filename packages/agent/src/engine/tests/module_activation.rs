@@ -1,4 +1,6 @@
 use super::*;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
 #[derive(Clone)]
@@ -234,6 +236,101 @@ fn manifest_digest(manifest: &Value) -> String {
     }
     let bytes = serde_json::to_vec(&canonical).unwrap();
     format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+fn signing_fixture() -> (SigningKey, String, String) {
+    signing_fixture_with_seed(7)
+}
+
+fn signing_fixture_with_seed(seed: u8) -> (SigningKey, String, String) {
+    let signing_key = SigningKey::from_bytes(&[seed; 32]);
+    let public_key = signing_key.verifying_key().to_bytes();
+    let key_id = format!("ed25519:{:x}", Sha256::digest(public_key));
+    (signing_key, BASE64_STANDARD.encode(public_key), key_id)
+}
+
+fn signed_package_manifest(mut manifest: Value, signing_key: &SigningKey, key_id: &str) -> Value {
+    let digest = manifest_digest(&manifest);
+    let message = format!("tron.module.package_manifest.v1\n{digest}");
+    let signature = signing_key.sign(message.as_bytes());
+    manifest["packageDigest"] = json!(digest);
+    manifest["signature"] = json!({
+        "algorithm": "ed25519",
+        "value": format!("base64:{}", BASE64_STANDARD.encode(signature.to_bytes()))
+    });
+    manifest["signatureKeyRef"] = json!(format!("trust-root:{key_id}"));
+    manifest
+}
+
+fn grant_ceiling_for_namespace(namespace: &str) -> Value {
+    json!({
+        "allowedCapabilities": [
+            format!("{namespace}::inspect"),
+            format!("{namespace}::write_artifact")
+        ],
+        "allowedNamespaces": [namespace],
+        "allowedAuthorityScopes": [
+            format!("{namespace}.read"),
+            format!("{namespace}.write")
+        ],
+        "allowedResourceKinds": ["artifact"],
+        "resourceSelectors": ["*"],
+        "fileRoots": ["*"],
+        "networkPolicy": "none",
+        "maxRisk": "medium",
+        "canDelegate": false,
+        "approvalRequired": false
+    })
+}
+
+async fn register_trust_root(
+    handle: &EngineHostHandle,
+    public_key: &str,
+    key_id: &str,
+    selector: &str,
+    namespace: &str,
+    key: &str,
+) -> super::super::InvocationResult {
+    handle
+        .invoke(host_invocation(
+            "module::register_source",
+            json!({
+                "sourceKind": "ed25519_trust_root",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "algorithm": "ed25519",
+                "publicKey": format!("base64:{public_key}"),
+                "keyId": key_id,
+                "allowedPackageSelectors": [selector],
+                "trustTierCeiling": "signed_local",
+                "grantCeiling": grant_ceiling_for_namespace(namespace),
+                "expiresAt": "2100-01-01T00:00:00Z",
+                "reason": "test registers local Ed25519 trust root"
+            }),
+            mutating_causal(key).with_scope("module.write"),
+        ))
+        .await
+}
+
+async fn verify_signature(
+    handle: &EngineHostHandle,
+    package_resource_id: &str,
+    package_version_id: &str,
+    key: &str,
+) -> super::super::InvocationResult {
+    handle
+        .invoke(host_invocation(
+            "module::verify_signature",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": package_version_id,
+                "expectedCurrentVersionId": package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a"
+            }),
+            mutating_causal(key).with_scope("module.write"),
+        ))
+        .await
 }
 
 fn generated_surface_request(target_type: &str, target_id: &str) -> Value {
@@ -523,6 +620,11 @@ async fn module_resource_types_and_capabilities_are_registered() {
         "module::revoke_source_approval",
         "module::policy_decide",
         "module::run_conformance",
+        "module::register_source",
+        "module::verify_signature",
+        "module::audit_policy",
+        "module::record_policy_audit",
+        "module::reconcile_trust",
     ] {
         let function = value["capabilities"]
             .as_array()
@@ -532,7 +634,7 @@ async fn module_resource_types_and_capabilities_are_registered() {
             .unwrap_or_else(|| panic!("{function_id} must be discoverable"));
         if !matches!(
             function_id,
-            "module::inspect_package" | "module::policy_decide"
+            "module::inspect_package" | "module::policy_decide" | "module::audit_policy"
         ) {
             assert!(
                 function["idempotency"].is_object(),
@@ -862,6 +964,469 @@ async fn module_source_approval_revocation_and_conformance_are_resource_backed()
             .iter()
             .any(|warning| warning["code"] == "source_approval_revoked")
     );
+}
+
+#[tokio::test]
+async fn module_trust_root_signature_policy_allows_signed_activation() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn(&handle);
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("signed-local-worker.sh"),
+        "module-signed-policy-executable",
+    )
+    .await;
+    let (signing_key, public_key, key_id) = signing_fixture();
+    let manifest = signed_package_manifest(
+        local_process_manifest(
+            "signed-policy-tools",
+            "demo_local",
+            "signed-policy-worker",
+            executable,
+        ),
+        &signing_key,
+        &key_id,
+    );
+    let package_resource_id = "worker-package:signed-policy-tools";
+    let registered = register_package(&handle, manifest, "module-signed-policy-register").await;
+    assert_eq!(registered.error, None);
+    let registered_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let configured_unverified = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": registered_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true, "apiKeyRef": "secret_ref:signed-policy-key"}
+            }),
+            mutating_causal("module-signed-policy-configure-unverified").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured_unverified.error, None);
+    let unverified_config_version_id =
+        configured_unverified.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+    let child_grant = grant_ceiling_for_namespace("demo_local");
+    let denied = handle
+        .invoke(host_invocation(
+            "module::activate",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": registered_version_id,
+                "moduleConfigResourceId": "module-config:workspace-a:signed-policy-tools",
+                "configVersionId": unverified_config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": child_grant
+            }),
+            mutating_causal("module-signed-policy-denied").with_scope("module.write"),
+        ))
+        .await;
+    assert!(matches!(
+        denied.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("signature trust") || message.contains("signature verification")
+    ));
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 0);
+
+    let trust_root = register_trust_root(
+        &handle,
+        &public_key,
+        &key_id,
+        "signed-policy-tools",
+        "demo_local",
+        "module-signed-policy-trust-root",
+    )
+    .await;
+    assert_eq!(trust_root.error, None);
+    assert_eq!(
+        trust_root.value.as_ref().unwrap()["trustRoot"]["trustRootRef"],
+        format!("trust-root:{key_id}")
+    );
+
+    let verified = verify_signature(
+        &handle,
+        package_resource_id,
+        &registered_version_id,
+        "module-signed-policy-verify-signature",
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    assert_eq!(
+        verified.value.as_ref().unwrap()["signatureVerification"]["status"],
+        "verified"
+    );
+    let verified_package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let audit = handle
+        .invoke(host_invocation(
+            "module::audit_policy",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(audit.error, None);
+    assert_eq!(audit.value.as_ref().unwrap()["audit"]["decision"], "allow");
+    assert_eq!(
+        audit.value.as_ref().unwrap()["audit"]["approval"]["status"],
+        "trusted_signature"
+    );
+
+    let configured_verified = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true, "apiKeyRef": "secret_ref:signed-policy-key"}
+            }),
+            mutating_causal("module-signed-policy-configure-verified").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured_verified.error, None);
+    let verified_config_version_id = configured_verified.value.as_ref().unwrap()["resourceRefs"][0]
+        ["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "moduleConfigResourceId": "module-config:workspace-a:signed-policy-tools",
+                "configVersionId": verified_config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            mutating_causal("module-signed-policy-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(activated.error, None);
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    assert!(
+        activated.value.as_ref().unwrap()["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "activation_record")
+    );
+}
+
+#[tokio::test]
+async fn module_verify_signature_rejects_unknown_keys_and_bad_signatures() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("unknown-key-worker.sh"),
+        "module-signature-unknown-key-executable",
+    )
+    .await;
+    let (signing_key, public_key, key_id) = signing_fixture();
+    let manifest = signed_package_manifest(
+        local_process_manifest(
+            "unknown-key-tools",
+            "demo_local",
+            "unknown-key-worker",
+            executable,
+        ),
+        &signing_key,
+        &key_id,
+    );
+    let package_resource_id = "worker-package:unknown-key-tools";
+    let registered =
+        register_package(&handle, manifest, "module-signature-unknown-key-register").await;
+    assert_eq!(registered.error, None);
+    let package_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let unknown_key = verify_signature(
+        &handle,
+        package_resource_id,
+        &package_version_id,
+        "module-signature-unknown-key-verify",
+    )
+    .await;
+    assert!(matches!(
+        unknown_key.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("active trust root")
+    ));
+
+    let trust_root = register_trust_root(
+        &handle,
+        &public_key,
+        &key_id,
+        "bad-signature-tools",
+        "demo_local",
+        "module-signature-bad-trust-root",
+    )
+    .await;
+    assert_eq!(trust_root.error, None);
+
+    let bad_executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("bad-signature-worker.sh"),
+        "module-signature-bad-executable",
+    )
+    .await;
+    let (wrong_signing_key, _, _) = signing_fixture_with_seed(9);
+    let bad_manifest = signed_package_manifest(
+        local_process_manifest(
+            "bad-signature-tools",
+            "demo_local",
+            "bad-signature-worker",
+            bad_executable,
+        ),
+        &wrong_signing_key,
+        &key_id,
+    );
+    let bad_registered =
+        register_package(&handle, bad_manifest, "module-signature-bad-register").await;
+    assert_eq!(bad_registered.error, None);
+    let bad_version_id = bad_registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let bad_signature = verify_signature(
+        &handle,
+        "worker-package:bad-signature-tools",
+        &bad_version_id,
+        "module-signature-bad-verify",
+    )
+    .await;
+    assert!(matches!(
+        bad_signature.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("signature verification failed")
+    ));
+}
+
+#[tokio::test]
+async fn module_policy_audit_and_reconcile_track_revoked_trust_roots() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn(&handle);
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("revoked-trust-worker.sh"),
+        "module-revoked-trust-executable",
+    )
+    .await;
+    let (signing_key, public_key, key_id) = signing_fixture();
+    let manifest = signed_package_manifest(
+        local_process_manifest(
+            "revoked-trust-tools",
+            "demo_local",
+            "revoked-trust-worker",
+            executable,
+        ),
+        &signing_key,
+        &key_id,
+    );
+    let package_resource_id = "worker-package:revoked-trust-tools";
+    let registered = register_package(&handle, manifest, "module-revoked-trust-register").await;
+    assert_eq!(registered.error, None);
+    let registered_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let trust_root = register_trust_root(
+        &handle,
+        &public_key,
+        &key_id,
+        "revoked-trust-tools",
+        "demo_local",
+        "module-revoked-trust-root",
+    )
+    .await;
+    assert_eq!(trust_root.error, None);
+    let trust_root_decision_id =
+        trust_root.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+    let verified = verify_signature(
+        &handle,
+        package_resource_id,
+        &registered_version_id,
+        "module-revoked-trust-verify-signature",
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    let verified_package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let configured = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true, "apiKeyRef": "secret_ref:revoked-trust-key"}
+            }),
+            mutating_causal("module-revoked-trust-configure").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured.error, None);
+    let config_version_id = configured.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "moduleConfigResourceId": "module-config:workspace-a:revoked-trust-tools",
+                "configVersionId": config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            mutating_causal("module-revoked-trust-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(activated.error, None);
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    let activation_resource_id = activated.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let revoked = handle
+        .invoke(host_invocation(
+            "module::register_source",
+            json!({
+                "sourceKind": "source_revocation",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "revokedDecisionResourceId": trust_root_decision_id,
+                "reason": "test revokes local trust root"
+            }),
+            mutating_causal("module-revoked-trust-revoke").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(revoked.error, None);
+
+    let audit = handle
+        .invoke(host_invocation(
+            "module::audit_policy",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(audit.error, None);
+    assert_eq!(audit.value.as_ref().unwrap()["audit"]["decision"], "deny");
+    assert!(
+        audit.value.as_ref().unwrap()["audit"]["missingPrerequisites"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "signature_trust")
+    );
+
+    let recorded = handle
+        .invoke(host_invocation(
+            "module::record_policy_audit",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            mutating_causal("module-revoked-trust-record-audit").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(recorded.error, None);
+    assert!(
+        recorded.value.as_ref().unwrap()["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "evidence")
+    );
+
+    let reconciled = handle
+        .invoke(host_invocation(
+            "module::reconcile_trust",
+            json!({
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "packageResourceId": package_resource_id,
+                "reason": "test reconcile after trust-root revocation"
+            }),
+            mutating_causal("module-revoked-trust-reconcile").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(reconciled.error, None);
+    assert!(
+        reconciled.value.as_ref().unwrap()["reconciliation"]["affectedPackages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|package| package["packageResourceId"] == package_resource_id)
+    );
+    assert!(
+        reconciled.value.as_ref().unwrap()["reconciliation"]["affectedActivations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|activation| activation["activationResourceId"] == activation_resource_id)
+    );
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
 }
 
 #[tokio::test]

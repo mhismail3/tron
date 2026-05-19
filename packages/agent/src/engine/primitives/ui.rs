@@ -1263,6 +1263,184 @@ fn generated_actions(
                     "expiresAt": default_expires_at()
                 }));
             }
+            if let Some(register_source) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::register_source")
+            {
+                if manifest
+                    .get("sourceProvenance")
+                    .and_then(|source| source.get("kind"))
+                    .and_then(Value::as_str)
+                    == Some("local_digest_pinned")
+                {
+                    actions.push(json!({
+                        "actionId": "register-local-package-source",
+                        "label": "Register Source",
+                        "targetFunctionId": "module::register_source",
+                        "inputSchema": {
+                            "type": "object",
+                            "required": ["reason", "expiresAt"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "reason": {"type": "string"},
+                                "expiresAt": {"type": "string"}
+                            }
+                        },
+                        "payloadTemplate": {
+                            "sourceKind": "local_digest_source",
+                            "scope": "system",
+                            "sourceDigest": manifest.get("packageDigest").cloned().unwrap_or(Value::Null),
+                            "sourceRef": manifest.get("sourceRef").cloned().unwrap_or_else(|| json!({})),
+                            "allowedPackageSelectors": [manifest.get("packageId").cloned().unwrap_or(Value::Null)],
+                            "grantCeiling": manifest.get("requiredGrants").cloned().unwrap_or_else(|| json!({})),
+                            "expiresAt": "${input.expiresAt}",
+                            "reason": "${input.reason}"
+                        },
+                        "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                        "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                        "requiredRisk": risk_label(&register_source.risk_level),
+                        "approvalPolicy": {"required": register_source.required_authority.approval_required},
+                        "targetRevision": register_source.revision.0,
+                        "expiresAt": default_expires_at()
+                    }));
+                }
+                if manifest
+                    .get("signature")
+                    .is_some_and(|value| !value.is_null())
+                {
+                    actions.push(json!({
+                        "actionId": "register-ed25519-trust-root",
+                        "label": "Register Trust Root",
+                        "targetFunctionId": "module::register_source",
+                        "inputSchema": {
+                            "type": "object",
+                            "required": ["publicKey", "keyId", "reason", "expiresAt"],
+                            "additionalProperties": false,
+                            "properties": {
+                                "publicKey": {"type": "string"},
+                                "keyId": {"type": "string"},
+                                "reason": {"type": "string"},
+                                "expiresAt": {"type": "string"}
+                            }
+                        },
+                        "payloadTemplate": {
+                            "sourceKind": "ed25519_trust_root",
+                            "scope": "system",
+                            "algorithm": "ed25519",
+                            "publicKey": "${input.publicKey}",
+                            "keyId": "${input.keyId}",
+                            "allowedPackageSelectors": [manifest.get("packageId").cloned().unwrap_or(Value::Null)],
+                            "trustTierCeiling": "signed_local",
+                            "grantCeiling": manifest.get("requiredGrants").cloned().unwrap_or_else(|| json!({})),
+                            "expiresAt": "${input.expiresAt}",
+                            "reason": "${input.reason}"
+                        },
+                        "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                        "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                        "requiredRisk": risk_label(&register_source.risk_level),
+                        "approvalPolicy": {"required": register_source.required_authority.approval_required},
+                        "targetRevision": register_source.revision.0,
+                        "expiresAt": default_expires_at()
+                    }));
+                }
+            }
+            if manifest
+                .get("signature")
+                .is_some_and(|value| !value.is_null())
+                && let Some(verify_signature) = functions
+                    .iter()
+                    .find(|function| function.id.as_str() == "module::verify_signature")
+            {
+                actions.push(json!({
+                    "actionId": "verify-package-signature",
+                    "label": "Verify Signature",
+                    "targetFunctionId": "module::verify_signature",
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": {
+                        "packageResourceId": resource_id,
+                        "packageVersionId": version_id,
+                        "expectedCurrentVersionId": version_id,
+                        "scope": "system"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&verify_signature.risk_level),
+                    "approvalPolicy": {"required": verify_signature.required_authority.approval_required},
+                    "targetRevision": verify_signature.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if let Some(audit_policy) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::audit_policy")
+            {
+                actions.push(json!({
+                    "actionId": "audit-package-policy",
+                    "label": "Audit Policy",
+                    "targetFunctionId": "module::audit_policy",
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": {
+                        "packageResourceId": resource_id,
+                        "packageVersionId": version_id,
+                        "scope": "system"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&audit_policy.risk_level),
+                    "approvalPolicy": {"required": audit_policy.required_authority.approval_required},
+                    "targetRevision": audit_policy.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if let Some(record_policy_audit) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::record_policy_audit")
+            {
+                actions.push(json!({
+                    "actionId": "record-package-policy-audit",
+                    "label": "Record Audit",
+                    "targetFunctionId": "module::record_policy_audit",
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": {
+                        "packageResourceId": resource_id,
+                        "packageVersionId": version_id,
+                        "scope": "system"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&record_policy_audit.risk_level),
+                    "approvalPolicy": {"required": record_policy_audit.required_authority.approval_required},
+                    "targetRevision": record_policy_audit.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if let Some(reconcile_trust) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::reconcile_trust")
+            {
+                actions.push(json!({
+                    "actionId": "reconcile-package-trust",
+                    "label": "Reconcile Trust",
+                    "targetFunctionId": "module::reconcile_trust",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["reason"],
+                        "additionalProperties": false,
+                        "properties": {"reason": {"type": "string"}}
+                    },
+                    "payloadTemplate": {
+                        "scope": "system",
+                        "packageResourceId": resource_id,
+                        "reason": "${input.reason}"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&reconcile_trust.risk_level),
+                    "approvalPolicy": {"required": reconcile_trust.required_authority.approval_required},
+                    "targetRevision": reconcile_trust.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
             if let Some(run_conformance) = functions
                 .iter()
                 .find(|function| function.id.as_str() == "module::run_conformance")

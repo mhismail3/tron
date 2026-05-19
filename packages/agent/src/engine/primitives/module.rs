@@ -6,11 +6,14 @@
 //! child `worker::spawn` invocation; module code validates package resources and
 //! records activation lineage but never owns a process runtime, package table,
 //! health table, policy table, recovery table, or action multiplexer. Source
-//! verification, source approvals, conformance, health, integrity, and recovery
-//! outcomes are bounded `evidence`/`decision` resources linked back to package
-//! and activation records.
+//! registration, local Ed25519 trust roots, signature verification, policy
+//! audits, trust reconciliation, source approvals, conformance, health,
+//! integrity, and recovery outcomes are bounded `evidence`/`decision`
+//! resources linked back to package and activation records.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, Utc};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -52,13 +55,21 @@ pub(crate) const APPROVE_SOURCE_FUNCTION: &str = "module::approve_source";
 pub(crate) const REVOKE_SOURCE_APPROVAL_FUNCTION: &str = "module::revoke_source_approval";
 pub(crate) const POLICY_DECIDE_FUNCTION: &str = "module::policy_decide";
 pub(crate) const RUN_CONFORMANCE_FUNCTION: &str = "module::run_conformance";
+pub(crate) const REGISTER_SOURCE_FUNCTION: &str = "module::register_source";
+pub(crate) const VERIFY_SIGNATURE_FUNCTION: &str = "module::verify_signature";
+pub(crate) const AUDIT_POLICY_FUNCTION: &str = "module::audit_policy";
+pub(crate) const RECORD_POLICY_AUDIT_FUNCTION: &str = "module::record_policy_audit";
+pub(crate) const RECONCILE_TRUST_FUNCTION: &str = "module::reconcile_trust";
 
 const MANIFEST_SCHEMA_ID: &str = "tron.module.package_manifest.v1";
 const LOCAL_DIGEST_PINNED: &str = "local_digest_pinned";
 const BUILTIN_PROVENANCE: &str = "builtin";
+const SIGNED_LOCAL_TRUST: &str = "signed_local";
+const TRUST_ROOT_PREFIX: &str = "trust-root:";
 const SOURCE_STATUS_TRUSTED_BUILTIN: &str = "trusted_builtin";
 const SOURCE_STATUS_UNVERIFIED: &str = "unverified";
 const SOURCE_STATUS_VERIFIED: &str = "verified";
+const SOURCE_STATUS_SIGNATURE_VERIFIED: &str = "signature_verified";
 
 pub(super) fn registrations(
     stores: &PrimitiveStores,
@@ -245,6 +256,49 @@ pub(super) fn registrations(
             WORKER_PACKAGE_KIND,
             ACTIVATION_RECORD_KIND,
         ])),
+        module_write(
+            REGISTER_SOURCE_FUNCTION,
+            "register a local package source or trust root as resource-backed decisions and evidence",
+            register_source_schema(),
+            module_resource_response_schema("decision"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "decision", "evidence",
+        ])),
+        module_write(
+            VERIFY_SIGNATURE_FUNCTION,
+            "verify a package Ed25519 signature against local trust-root decisions",
+            verify_signature_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::Medium,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "evidence",
+            WORKER_PACKAGE_KIND,
+        ])),
+        module_read(
+            AUDIT_POLICY_FUNCTION,
+            "reconstruct package source policy from durable substrate truth",
+            audit_policy_schema(),
+            policy_audit_response_schema(),
+        ),
+        module_write(
+            RECORD_POLICY_AUDIT_FUNCTION,
+            "persist a bounded package source-policy audit evidence record",
+            audit_policy_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::Medium,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed(["evidence"])),
+        module_write(
+            RECONCILE_TRUST_FUNCTION,
+            "record trust reconciliation evidence without mutating package runtime state",
+            reconcile_trust_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::Medium,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed(["evidence"])),
     ]
     .into_iter()
     .map(|definition| handled_registration(definition, handler.clone()))
@@ -323,6 +377,11 @@ impl InProcessFunctionHandler for ModulePrimitiveHandler {
             REVOKE_SOURCE_APPROVAL_FUNCTION => self.revoke_source_approval(&invocation),
             POLICY_DECIDE_FUNCTION => self.policy_decide(&invocation),
             RUN_CONFORMANCE_FUNCTION => self.run_conformance(&invocation).await,
+            REGISTER_SOURCE_FUNCTION => self.register_source(&invocation),
+            VERIFY_SIGNATURE_FUNCTION => self.verify_signature(&invocation),
+            AUDIT_POLICY_FUNCTION => self.audit_policy(&invocation),
+            RECORD_POLICY_AUDIT_FUNCTION => self.record_policy_audit(&invocation),
+            RECONCILE_TRUST_FUNCTION => self.reconcile_trust(&invocation),
             _ => Err(EngineError::NotFound {
                 kind: "function",
                 id: invocation.function_id.to_string(),
@@ -1161,7 +1220,590 @@ struct SourceVerification {
     checked_at: String,
 }
 
+struct ActiveTrustRoot {
+    decision_resource_id: String,
+    decision_version_id: Option<String>,
+    key_id: String,
+    public_key: String,
+    expires_at: DateTime<Utc>,
+}
+
 impl ModulePrimitiveHandler {
+    fn register_source(&self, invocation: &Invocation) -> Result<Value> {
+        let source_kind = required_string_owned(&invocation.payload, "sourceKind")?;
+        let (scope, scope_token) = resource_scope_and_token(invocation)?;
+        let reason = required_string_owned(&invocation.payload, "reason")?;
+        reject_raw_secrets(&json!({"reason": reason}))?;
+        match source_kind.as_str() {
+            "ed25519_trust_root" => {
+                self.register_ed25519_trust_root(invocation, scope, &scope_token, &reason)
+            }
+            "local_digest_source" => {
+                self.register_local_digest_source(invocation, scope, &scope_token, &reason)
+            }
+            "source_revocation" => {
+                self.register_source_revocation(invocation, scope, &scope_token, &reason)
+            }
+            other => Err(EngineError::PolicyViolation(format!(
+                "unsupported module sourceKind {other}"
+            ))),
+        }
+    }
+
+    fn register_ed25519_trust_root(
+        &self,
+        invocation: &Invocation,
+        scope: EngineResourceScope,
+        scope_token: &str,
+        reason: &str,
+    ) -> Result<Value> {
+        let algorithm = optional_string(invocation.payload.get("algorithm"))?
+            .unwrap_or_else(|| "ed25519".to_owned());
+        if algorithm != "ed25519" {
+            return Err(EngineError::PolicyViolation(format!(
+                "unsupported trust-root algorithm {algorithm}"
+            )));
+        }
+        let public_key = required_string_owned(&invocation.payload, "publicKey")?;
+        let public_key_bytes = decode_base64_prefixed(&public_key, "publicKey")?;
+        let _ = verifying_key_from_bytes(&public_key_bytes)?;
+        let key_id = key_id_for_public_key(&public_key_bytes);
+        if let Some(requested) = optional_string(invocation.payload.get("keyId"))?
+            && requested != key_id
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "trust-root keyId {requested} does not match derived {key_id}"
+            )));
+        }
+        let expires_at = parse_datetime(required_value_str(&invocation.payload, "expiresAt")?)?;
+        if expires_at <= Utc::now() {
+            return Err(EngineError::PolicyViolation(
+                "trust-root expiresAt must be in the future".to_owned(),
+            ));
+        }
+        let trust_tier_ceiling = optional_string(invocation.payload.get("trustTierCeiling"))?
+            .unwrap_or_else(|| SIGNED_LOCAL_TRUST.to_owned());
+        if trust_tier_ceiling != SIGNED_LOCAL_TRUST {
+            return Err(EngineError::PolicyViolation(format!(
+                "trust-root trustTierCeiling {trust_tier_ceiling} exceeds {SIGNED_LOCAL_TRUST}"
+            )));
+        }
+        let selectors = string_array_from(
+            invocation.payload.get("allowedPackageSelectors"),
+            "allowedPackageSelectors",
+        )?;
+        if selectors.is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "trust-root allowedPackageSelectors must not be empty".to_owned(),
+            ));
+        }
+        let grant_ceiling =
+            required_object(invocation.payload.get("grantCeiling"), "grantCeiling")?;
+        ensure_grant_ceiling_narrows_caller(self, invocation, grant_ceiling)?;
+        let payload = json!({
+            "status": "active",
+            "summary": format!("Registered Ed25519 trust root {}", trust_root_ref(&key_id)),
+            "metadata": {
+                "decisionType": "module_trust_root",
+                "algorithm": "ed25519",
+                "keyId": key_id,
+                "trustRootRef": trust_root_ref(&key_id),
+                "publicKey": public_key,
+                "publicKeyEncoding": "base64",
+                "scope": scope_token,
+                "allowedPackageSelectors": selectors,
+                "trustTierCeiling": trust_tier_ceiling,
+                "grantCeiling": grant_ceiling,
+                "expiresAt": expires_at.to_rfc3339(),
+                "operatorActor": invocation.causal_context.actor_id.as_str(),
+                "reason": reason,
+                "registeredAt": Utc::now().to_rfc3339(),
+            }
+        });
+        let decision = self.create_decision_resource(
+            invocation,
+            payload.clone(),
+            Some(scope),
+            &trust_root_ref(payload["metadata"]["keyId"].as_str().unwrap_or_default()),
+            "trusts_source",
+        )?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module trust root registered",
+            REGISTER_SOURCE_FUNCTION,
+            &decision.resource.resource_id,
+            json!({
+                "evidenceType": "source_registration",
+                "decisionType": "module_trust_root",
+                "keyId": payload["metadata"]["keyId"],
+                "scope": scope_token,
+                "registeredAt": payload["metadata"]["registeredAt"],
+            }),
+        )?;
+        Ok(json!({
+            "decision": payload,
+            "resource": decision.resource,
+            "evidence": evidence.resource,
+            "trustRoot": payload["metadata"],
+            "resourceRefs": [decision.reference, evidence.reference],
+        }))
+    }
+
+    fn register_local_digest_source(
+        &self,
+        invocation: &Invocation,
+        scope: EngineResourceScope,
+        scope_token: &str,
+        reason: &str,
+    ) -> Result<Value> {
+        let source_digest = required_string_owned(&invocation.payload, "sourceDigest")?;
+        if !source_digest.starts_with("sha256:") {
+            return Err(EngineError::PolicyViolation(
+                "local sourceDigest must be sha256-prefixed".to_owned(),
+            ));
+        }
+        let source_ref = required_object(invocation.payload.get("sourceRef"), "sourceRef")?;
+        reject_raw_secrets(&Value::Object(source_ref.clone()))?;
+        let selectors = string_array_from(
+            invocation.payload.get("allowedPackageSelectors"),
+            "allowedPackageSelectors",
+        )?;
+        if selectors.is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "local source allowedPackageSelectors must not be empty".to_owned(),
+            ));
+        }
+        let expires_at = parse_datetime(required_value_str(&invocation.payload, "expiresAt")?)?;
+        if expires_at <= Utc::now() {
+            return Err(EngineError::PolicyViolation(
+                "local source expiresAt must be in the future".to_owned(),
+            ));
+        }
+        if let Some(grant_ceiling) = invocation
+            .payload
+            .get("grantCeiling")
+            .and_then(Value::as_object)
+        {
+            ensure_grant_ceiling_narrows_caller(self, invocation, grant_ceiling)?;
+        }
+        let payload = json!({
+            "status": "active",
+            "summary": format!("Registered local package source {source_digest}"),
+            "metadata": {
+                "decisionType": "module_source_registration",
+                "sourceKind": "local_digest_source",
+                "sourceDigest": source_digest,
+                "sourceRef": source_ref,
+                "scope": scope_token,
+                "allowedPackageSelectors": selectors,
+                "grantCeiling": invocation.payload.get("grantCeiling").cloned().unwrap_or(Value::Null),
+                "expiresAt": expires_at.to_rfc3339(),
+                "operatorActor": invocation.causal_context.actor_id.as_str(),
+                "reason": reason,
+                "registeredAt": Utc::now().to_rfc3339(),
+            }
+        });
+        let decision = self.create_decision_resource(
+            invocation,
+            payload.clone(),
+            Some(scope),
+            &format!("source:{source_digest}"),
+            "trusts_source",
+        )?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module local source registered",
+            REGISTER_SOURCE_FUNCTION,
+            &decision.resource.resource_id,
+            json!({
+                "evidenceType": "source_registration",
+                "decisionType": "module_source_registration",
+                "sourceDigest": source_digest,
+                "scope": scope_token,
+                "registeredAt": payload["metadata"]["registeredAt"],
+            }),
+        )?;
+        Ok(json!({
+            "decision": payload,
+            "resource": decision.resource,
+            "evidence": evidence.resource,
+            "resourceRefs": [decision.reference, evidence.reference],
+        }))
+    }
+
+    fn register_source_revocation(
+        &self,
+        invocation: &Invocation,
+        scope: EngineResourceScope,
+        scope_token: &str,
+        reason: &str,
+    ) -> Result<Value> {
+        let revoked_decision_resource_id =
+            required_string_owned(&invocation.payload, "revokedDecisionResourceId")?;
+        let revoked = require_inspection(self, &revoked_decision_resource_id, "decision")?;
+        let current = current_version(&revoked).ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "decision {revoked_decision_resource_id} has no current version"
+            ))
+        })?;
+        let metadata = current
+            .payload
+            .get("metadata")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let payload = json!({
+            "status": "revoked",
+            "summary": format!("Revoked module source decision {revoked_decision_resource_id}"),
+            "metadata": {
+                "decisionType": "module_source_revocation",
+                "revokedDecisionResourceId": revoked_decision_resource_id,
+                "revokedDecisionVersionId": current.version_id,
+                "revokedDecisionMetadata": bounded_json(&metadata, 2048),
+                "scope": scope_token,
+                "operatorActor": invocation.causal_context.actor_id.as_str(),
+                "reason": reason,
+                "revokedAt": Utc::now().to_rfc3339(),
+            }
+        });
+        let decision = self.create_decision_resource(
+            invocation,
+            payload.clone(),
+            Some(scope),
+            &revoked_decision_resource_id,
+            "revokes",
+        )?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module source decision revoked",
+            REGISTER_SOURCE_FUNCTION,
+            &revoked_decision_resource_id,
+            json!({
+                "evidenceType": "source_registration",
+                "decisionType": "module_source_revocation",
+                "revokedDecisionResourceId": revoked_decision_resource_id,
+                "scope": scope_token,
+                "revokedAt": payload["metadata"]["revokedAt"],
+            }),
+        )?;
+        Ok(json!({
+            "decision": payload,
+            "resource": decision.resource,
+            "evidence": evidence.resource,
+            "resourceRefs": [decision.reference, evidence.reference],
+        }))
+    }
+
+    fn verify_signature(&self, invocation: &Invocation) -> Result<Value> {
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
+        let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        if let Some(expected) = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+        {
+            ensure_expected_current_version(&package, &expected)?;
+        }
+        ensure_version_is_current(&package, &package_version_id)?;
+        let mut manifest = version_payload(&package, &package_version_id)?;
+        if source_kind(&manifest)? != LOCAL_DIGEST_PINNED {
+            return Err(EngineError::PolicyViolation(
+                "module::verify_signature only supports local_digest_pinned packages".to_owned(),
+            ));
+        }
+        validate_manifest_signature_inputs(&manifest, |reference| {
+            self.verify_materialized_ref(reference)
+        })?;
+        let key_ref = required_value_str(&manifest, "signatureKeyRef")?;
+        let key_id = key_ref.strip_prefix(TRUST_ROOT_PREFIX).ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "signatureKeyRef must start with {TRUST_ROOT_PREFIX}"
+            ))
+        })?;
+        let (_, scope_token) = resource_scope_and_token(invocation)?;
+        let trust_root =
+            self.active_trust_root(key_id, &manifest, &package_resource_id, &scope_token, None)?;
+        let signature_bytes = signature_bytes_from_manifest(&manifest)?;
+        let public_key_bytes = decode_base64_prefixed(&trust_root.public_key, "publicKey")?;
+        let verifying_key = verifying_key_from_bytes(&public_key_bytes)?;
+        let signature = Signature::from_slice(&signature_bytes).map_err(|error| {
+            EngineError::PolicyViolation(format!("invalid ed25519 signature bytes: {error}"))
+        })?;
+        let package_digest = required_value_str(&manifest, "packageDigest")?.to_owned();
+        verifying_key
+            .verify(
+                signed_package_message(&package_digest).as_bytes(),
+                &signature,
+            )
+            .map_err(|error| {
+                EngineError::PolicyViolation(format!(
+                    "package signature verification failed: {error}"
+                ))
+            })?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            &format!("module package {package_resource_id} signature verified"),
+            VERIFY_SIGNATURE_FUNCTION,
+            &package_resource_id,
+            json!({
+                "evidenceType": "signature_verification",
+                "packageVersionId": package_version_id,
+                "packageDigest": package_digest,
+                "algorithm": "ed25519",
+                "keyId": trust_root.key_id,
+                "trustRootDecisionResourceId": trust_root.decision_resource_id,
+                "trustRootDecisionVersionId": trust_root.decision_version_id,
+                "expiresAt": trust_root.expires_at.to_rfc3339(),
+                "verifiedAt": Utc::now().to_rfc3339(),
+            }),
+        )?;
+        manifest["sourceDigest"] = json!(package_digest);
+        manifest["sourceTrustStatus"] = json!(SOURCE_STATUS_SIGNATURE_VERIFIED);
+        manifest["effectiveTrustTier"] = json!(SIGNED_LOCAL_TRUST);
+        manifest["signatureVerification"] = json!({
+            "status": "verified",
+            "method": "ed25519",
+            "keyId": trust_root.key_id,
+            "trustRootDecisionResourceId": trust_root.decision_resource_id,
+            "trustRootDecisionVersionId": trust_root.decision_version_id,
+            "evidenceRef": evidence.reference,
+        });
+        manifest["sourceEvidenceRefs"] = append_value_array(
+            manifest.get("sourceEvidenceRefs"),
+            evidence.reference.clone(),
+        );
+        if !manifest
+            .get("policyDiagnostics")
+            .is_some_and(Value::is_object)
+        {
+            manifest["policyDiagnostics"] = json!({});
+        }
+        manifest["policyDiagnostics"]["source"] = json!({
+            "status": SOURCE_STATUS_SIGNATURE_VERIFIED,
+            "checkedAt": Utc::now().to_rfc3339(),
+            "evidenceRef": evidence.reference,
+        });
+        let version = self.update_resource(UpdateResource {
+            resource_id: package_resource_id.clone(),
+            expected_current_version_id: Some(package_version_id),
+            lifecycle: Some(package.resource.lifecycle.clone()),
+            payload: manifest.clone(),
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        Ok(json!({
+            "signatureVerification": manifest["signatureVerification"],
+            "resource": package.resource,
+            "version": version,
+            "evidence": evidence.resource,
+            "resourceRefs": [
+                evidence.reference,
+                resource_ref_from_version(&version, WORKER_PACKAGE_KIND, "signature_verified")
+            ],
+        }))
+    }
+
+    fn audit_policy(&self, invocation: &Invocation) -> Result<Value> {
+        Ok(json!({
+            "audit": self.policy_audit(invocation)?,
+        }))
+    }
+
+    fn record_policy_audit(&self, invocation: &Invocation) -> Result<Value> {
+        let audit = self.policy_audit(invocation)?;
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module package policy audit recorded",
+            RECORD_POLICY_AUDIT_FUNCTION,
+            &package_resource_id,
+            json!({
+                "evidenceType": "policy_audit",
+                "audit": bounded_json(&audit, 4096),
+                "recordedAt": Utc::now().to_rfc3339(),
+            }),
+        )?;
+        Ok(json!({
+            "audit": audit,
+            "evidence": evidence.resource,
+            "resourceRefs": [evidence.reference],
+        }))
+    }
+
+    fn reconcile_trust(&self, invocation: &Invocation) -> Result<Value> {
+        let scope_filter = optional_string(invocation.payload.get("scope"))?;
+        let (_, scope_token) = if scope_filter.is_some() {
+            resource_scope_and_token(invocation)?
+        } else {
+            (EngineResourceScope::System, "system".to_owned())
+        };
+        let package_filter = optional_string(invocation.payload.get("packageResourceId"))?;
+        let packages = self.list_resources(ListResources {
+            kind: Some(WORKER_PACKAGE_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        let mut affected_packages = Vec::new();
+        let mut affected_activations = Vec::new();
+        for package in packages {
+            if package_filter
+                .as_deref()
+                .is_some_and(|filter| filter != package.resource_id)
+            {
+                continue;
+            }
+            let Some(inspection) = self.inspect_resource(&package.resource_id)? else {
+                continue;
+            };
+            let Some(current) = current_version(&inspection) else {
+                continue;
+            };
+            let audit = self.policy_audit_for_manifest(
+                &package.resource_id,
+                &current.version_id,
+                &current.payload,
+                &scope_token,
+                None,
+                true,
+            )?;
+            if audit["decision"] != "allow" {
+                affected_packages.push(json!({
+                    "packageResourceId": package.resource_id,
+                    "packageVersionId": current.version_id,
+                    "decision": audit["decision"],
+                    "reasons": audit["reasons"],
+                    "missingPrerequisites": audit["missingPrerequisites"],
+                    "recommendedActions": audit["recommendedActions"],
+                }));
+                if let Some(items) = audit.get("affectedActivations").and_then(Value::as_array) {
+                    affected_activations.extend(items.iter().cloned());
+                }
+            }
+        }
+        let reason = optional_string(invocation.payload.get("reason"))?
+            .unwrap_or_else(|| "operator requested trust reconciliation".to_owned());
+        reject_raw_secrets(&json!({"reason": reason}))?;
+        let affected_packages_value = json!(affected_packages);
+        let affected_activations_value = json!(affected_activations);
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module trust reconciliation recorded",
+            RECONCILE_TRUST_FUNCTION,
+            package_filter.as_deref().unwrap_or("module:trust"),
+            json!({
+                "evidenceType": "trust_reconciliation",
+                "scope": scope_filter.unwrap_or_else(|| "system".to_owned()),
+                "scopeValue": scope_token,
+                "reason": reason,
+                "affectedPackages": affected_packages_value.clone(),
+                "affectedActivations": affected_activations_value.clone(),
+                "reconciledAt": Utc::now().to_rfc3339(),
+            }),
+        )?;
+        Ok(json!({
+            "reconciliation": {
+                "affectedPackages": affected_packages_value,
+                "affectedActivations": affected_activations_value,
+            },
+            "evidence": evidence.resource,
+            "resourceRefs": [evidence.reference],
+        }))
+    }
+
+    fn policy_audit(&self, invocation: &Invocation) -> Result<Value> {
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
+        let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        let manifest = version_payload(&package, &package_version_id)?;
+        let (_, scope_token) = resource_scope_and_token(invocation)?;
+        let child_request = policy_child_request(invocation, &manifest)?;
+        self.policy_audit_for_manifest(
+            &package_resource_id,
+            &package_version_id,
+            &manifest,
+            &scope_token,
+            child_request.as_ref(),
+            invocation
+                .payload
+                .get("includeActivations")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        )
+    }
+
+    fn policy_audit_for_manifest(
+        &self,
+        package_resource_id: &str,
+        package_version_id: &str,
+        manifest: &Value,
+        scope_token: &str,
+        child_request: Option<&DeriveGrant>,
+        include_activations: bool,
+    ) -> Result<Value> {
+        let evaluation = self.evaluate_source_policy(
+            manifest,
+            package_resource_id,
+            package_version_id,
+            scope_token,
+            child_request,
+        )?;
+        let affected_activations = if include_activations {
+            self.activations_for_package(package_resource_id)?
+        } else {
+            Vec::new()
+        };
+        let mut audit = policy_evaluation_value(evaluation);
+        let decision = audit
+            .get("decision")
+            .and_then(Value::as_str)
+            .unwrap_or("deny");
+        let recommended_actions = recommended_actions_for_policy(decision, &affected_activations);
+        audit["packageResourceId"] = json!(package_resource_id);
+        audit["packageVersionId"] = json!(package_version_id);
+        audit["packageDigest"] = manifest
+            .get("packageDigest")
+            .cloned()
+            .unwrap_or(Value::Null);
+        audit["signatureVerification"] = manifest
+            .get("signatureVerification")
+            .cloned()
+            .unwrap_or(Value::Null);
+        audit["affectedActivations"] = json!(affected_activations);
+        audit["recommendedActions"] = json!(recommended_actions);
+        audit["auditedAt"] = json!(Utc::now().to_rfc3339());
+        Ok(audit)
+    }
+
+    fn activations_for_package(&self, package_resource_id: &str) -> Result<Vec<Value>> {
+        let activations = self.list_resources(ListResources {
+            kind: Some(ACTIVATION_RECORD_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        let mut values = Vec::new();
+        for activation in activations {
+            let Some(inspection) = self.inspect_resource(&activation.resource_id)? else {
+                continue;
+            };
+            let Some(payload) = current_payload(&inspection) else {
+                continue;
+            };
+            if payload.get("packageResourceId").and_then(Value::as_str) != Some(package_resource_id)
+            {
+                continue;
+            }
+            values.push(json!({
+                "activationResourceId": activation.resource_id,
+                "activationVersionId": activation.current_version_id,
+                "activationStatus": payload.get("activationStatus").cloned().unwrap_or(Value::Null),
+                "workerId": payload.get("workerId").cloned().unwrap_or(Value::Null),
+                "derivedGrantId": payload.get("derivedGrantId").cloned().unwrap_or(Value::Null),
+            }));
+        }
+        Ok(values)
+    }
+
     fn verify_source(&self, invocation: &Invocation) -> Result<Value> {
         let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
         let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
@@ -2591,10 +3233,14 @@ impl ModulePrimitiveHandler {
         let package_integrity = self.verify_package_payload(manifest)?;
         extend_findings(&mut findings, &package_integrity.findings);
         if source_kind(manifest)? == LOCAL_DIGEST_PINNED {
-            if manifest.get("sourceTrustStatus").and_then(Value::as_str)
-                != Some(SOURCE_STATUS_VERIFIED)
-            {
-                findings.push(json!({"code": "source_unverified"}));
+            let signed_local = package_has_signature(manifest);
+            let expected_status = if signed_local {
+                SOURCE_STATUS_SIGNATURE_VERIFIED
+            } else {
+                SOURCE_STATUS_VERIFIED
+            };
+            if manifest.get("sourceTrustStatus").and_then(Value::as_str) != Some(expected_status) {
+                findings.push(json!({"code": if signed_local { "signature_unverified" } else { "source_unverified" }}));
             }
             if manifest
                 .get("sourceEvidenceRefs")
@@ -2660,8 +3306,32 @@ impl ModulePrimitiveHandler {
                 .and_then(Value::as_str)
                 .unwrap_or("not_required")
         });
+        let signed_local = package_has_signature(manifest);
         let approval = if source_kind == BUILTIN_PROVENANCE {
             json!({"status": "not_required"})
+        } else if signed_local {
+            match signature_key_id(manifest).and_then(|key_id| {
+                self.active_trust_root(
+                    &key_id,
+                    manifest,
+                    package_resource_id,
+                    scope_token,
+                    child_request,
+                )
+            }) {
+                Ok(root) => json!({
+                    "status": "trusted_signature",
+                    "decisionResourceId": root.decision_resource_id,
+                    "decisionVersionId": root.decision_version_id,
+                    "keyId": root.key_id,
+                    "expiresAt": root.expires_at.to_rfc3339(),
+                }),
+                Err(error) => {
+                    reasons.push(format!("signature trust is missing, revoked, expired, or narrower than requested authority: {error}"));
+                    missing.push("signature_trust".to_owned());
+                    json!({"status": "missing"})
+                }
+            }
         } else {
             match self.active_source_approval(
                 manifest,
@@ -2683,11 +3353,22 @@ impl ModulePrimitiveHandler {
                 reasons.push("builtin package signatureStatus is not trusted_builtin".to_owned());
             }
         } else if source_kind == LOCAL_DIGEST_PINNED {
-            if manifest.get("sourceTrustStatus").and_then(Value::as_str)
-                != Some(SOURCE_STATUS_VERIFIED)
-            {
-                reasons.push("source verification is missing or stale".to_owned());
-                missing.push("source_verification".to_owned());
+            let expected_status = if signed_local {
+                SOURCE_STATUS_SIGNATURE_VERIFIED
+            } else {
+                SOURCE_STATUS_VERIFIED
+            };
+            if manifest.get("sourceTrustStatus").and_then(Value::as_str) != Some(expected_status) {
+                reasons.push(if signed_local {
+                    "signature verification is missing or stale".to_owned()
+                } else {
+                    "source verification is missing or stale".to_owned()
+                });
+                missing.push(if signed_local {
+                    "signature_verification".to_owned()
+                } else {
+                    "source_verification".to_owned()
+                });
             }
             if manifest
                 .get("sourceEvidenceRefs")
@@ -2822,6 +3503,155 @@ impl ModulePrimitiveHandler {
             })));
         }
         Ok(None)
+    }
+
+    fn active_trust_root(
+        &self,
+        key_id: &str,
+        manifest: &Value,
+        package_resource_id: &str,
+        scope_token: &str,
+        child_request: Option<&DeriveGrant>,
+    ) -> Result<ActiveTrustRoot> {
+        let decisions = self.list_resources(ListResources {
+            kind: Some("decision".to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        for decision in decisions {
+            if matches!(decision.lifecycle.as_str(), "archived") {
+                continue;
+            }
+            let Some(inspection) = self.inspect_resource(&decision.resource_id)? else {
+                continue;
+            };
+            let Some(payload) = current_payload(&inspection) else {
+                continue;
+            };
+            if payload.get("status").and_then(Value::as_str) != Some("active") {
+                continue;
+            }
+            let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
+                continue;
+            };
+            let matches_target = metadata.get("decisionType").and_then(Value::as_str)
+                == Some("module_trust_root")
+                && metadata.get("algorithm").and_then(Value::as_str) == Some("ed25519")
+                && metadata.get("keyId").and_then(Value::as_str) == Some(key_id)
+                && metadata.get("scope").and_then(Value::as_str) == Some(scope_token);
+            if !matches_target {
+                continue;
+            }
+            if self.trust_root_decision_revoked(&decision.resource_id)? {
+                return Err(EngineError::PolicyViolation(format!(
+                    "trust root decision {} has a matching revocation decision",
+                    decision.resource_id
+                )));
+            }
+            let expires_at = metadata
+                .get("expiresAt")
+                .and_then(Value::as_str)
+                .map(parse_datetime)
+                .transpose()?
+                .ok_or_else(|| {
+                    EngineError::PolicyViolation(
+                        "trust-root decision is missing expiresAt".to_owned(),
+                    )
+                })?;
+            if expires_at <= Utc::now() {
+                return Err(EngineError::PolicyViolation(format!(
+                    "trust root {key_id} is expired"
+                )));
+            }
+            let selectors = string_array_from(
+                metadata.get("allowedPackageSelectors"),
+                "allowedPackageSelectors",
+            )?;
+            if !package_selector_matches(&selectors, manifest, package_resource_id)? {
+                return Err(EngineError::PolicyViolation(format!(
+                    "trust root {key_id} does not cover package {package_resource_id}"
+                )));
+            }
+            if metadata
+                .get("trustTierCeiling")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                != SIGNED_LOCAL_TRUST
+            {
+                return Err(EngineError::PolicyViolation(format!(
+                    "trust root {key_id} does not allow {SIGNED_LOCAL_TRUST}"
+                )));
+            }
+            if let Some(child_request) = child_request {
+                let ceiling = metadata
+                    .get("grantCeiling")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| {
+                        EngineError::PolicyViolation(
+                            "trust-root decision missing grantCeiling".to_owned(),
+                        )
+                    })?;
+                ensure_grant_request_within_ceiling(child_request, ceiling)?;
+            }
+            let current = current_version(&inspection);
+            let public_key = metadata
+                .get("publicKey")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    EngineError::PolicyViolation("trust-root decision missing publicKey".to_owned())
+                })?
+                .to_owned();
+            return Ok(ActiveTrustRoot {
+                decision_resource_id: decision.resource_id,
+                decision_version_id: current.map(|version| version.version_id.clone()),
+                key_id: key_id.to_owned(),
+                public_key,
+                expires_at,
+            });
+        }
+        Err(EngineError::PolicyViolation(format!(
+            "active trust root {key_id} not found"
+        )))
+    }
+
+    fn trust_root_decision_revoked(&self, decision_resource_id: &str) -> Result<bool> {
+        let decisions = self.list_resources(ListResources {
+            kind: Some("decision".to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        for decision in decisions {
+            if self.revocation_targets_decision(&decision, decision_resource_id)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn revocation_targets_decision(
+        &self,
+        decision: &EngineResource,
+        decision_resource_id: &str,
+    ) -> Result<bool> {
+        let Some(inspection) = self.inspect_resource(&decision.resource_id)? else {
+            return Ok(false);
+        };
+        let Some(payload) = current_payload(&inspection) else {
+            return Ok(false);
+        };
+        let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
+            return Ok(false);
+        };
+        if metadata.get("decisionType").and_then(Value::as_str) != Some("module_source_revocation")
+        {
+            return Ok(false);
+        }
+        Ok(metadata
+            .get("revokedDecisionResourceId")
+            .and_then(Value::as_str)
+            == Some(decision_resource_id))
     }
 
     fn create_decision_resource(
@@ -3158,6 +3988,123 @@ fn source_kind(manifest: &Value) -> Result<String> {
         .ok_or_else(|| {
             EngineError::PolicyViolation("package sourceProvenance requires kind".to_owned())
         })
+}
+
+fn package_has_signature(manifest: &Value) -> bool {
+    manifest
+        .get("signature")
+        .is_some_and(|value| !value.is_null())
+        || manifest
+            .get("signatureKeyRef")
+            .is_some_and(|value| !value.is_null())
+}
+
+fn signature_key_id(manifest: &Value) -> Result<String> {
+    let key_ref = required_value_str(manifest, "signatureKeyRef")?;
+    key_ref
+        .strip_prefix(TRUST_ROOT_PREFIX)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "signatureKeyRef must start with {TRUST_ROOT_PREFIX}"
+            ))
+        })
+}
+
+fn validate_manifest_signature_inputs<F>(manifest: &Value, mut verify_ref: F) -> Result<()>
+where
+    F: FnMut(&ResourceVersionRef) -> Result<()>,
+{
+    validate_manifest(manifest)?;
+    if source_kind(manifest)? != LOCAL_DIGEST_PINNED {
+        return Err(EngineError::PolicyViolation(
+            "signed packages must use local_digest_pinned provenance".to_owned(),
+        ));
+    }
+    let package_digest = required_value_str(manifest, "packageDigest")?;
+    let computed = manifest_digest(manifest)?;
+    if package_digest != computed {
+        return Err(EngineError::PolicyViolation(format!(
+            "packageDigest mismatch: expected {computed}, got {package_digest}"
+        )));
+    }
+    if manifest
+        .get("sourceDigest")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value != package_digest)
+    {
+        return Err(EngineError::PolicyViolation(
+            "sourceDigest does not match packageDigest".to_owned(),
+        ));
+    }
+    for reference in resource_version_refs(manifest.get("declaredFiles"), "declaredFiles")? {
+        verify_ref(&reference)?;
+    }
+    let signature = required_object(manifest.get("signature"), "signature")?;
+    if required_map_str(signature, "algorithm")? != "ed25519" {
+        return Err(EngineError::PolicyViolation(
+            "only ed25519 package signatures are supported".to_owned(),
+        ));
+    }
+    let signature_bytes = signature_bytes_from_manifest(manifest)?;
+    if signature_bytes.len() != 64 {
+        return Err(EngineError::PolicyViolation(
+            "ed25519 signature must be 64 bytes".to_owned(),
+        ));
+    }
+    let _ = signature_key_id(manifest)?;
+    reject_raw_secrets(manifest)?;
+    Ok(())
+}
+
+fn signature_bytes_from_manifest(manifest: &Value) -> Result<Vec<u8>> {
+    let signature = required_object(manifest.get("signature"), "signature")?;
+    let value = required_map_str(signature, "value")?;
+    decode_base64_prefixed(value, "signature.value")
+}
+
+fn signed_package_message(package_digest: &str) -> String {
+    format!("{MANIFEST_SCHEMA_ID}\n{package_digest}")
+}
+
+fn decode_base64_prefixed(value: &str, field: &str) -> Result<Vec<u8>> {
+    let encoded = value.strip_prefix("base64:").unwrap_or(value);
+    BASE64_STANDARD.decode(encoded).map_err(|error| {
+        EngineError::PolicyViolation(format!("{field} must be base64 encoded: {error}"))
+    })
+}
+
+fn verifying_key_from_bytes(bytes: &[u8]) -> Result<VerifyingKey> {
+    let key_bytes: [u8; 32] = bytes.try_into().map_err(|_| {
+        EngineError::PolicyViolation("ed25519 publicKey must decode to 32 bytes".to_owned())
+    })?;
+    VerifyingKey::from_bytes(&key_bytes).map_err(|error| {
+        EngineError::PolicyViolation(format!("invalid ed25519 publicKey: {error}"))
+    })
+}
+
+fn key_id_for_public_key(bytes: &[u8]) -> String {
+    format!("ed25519:{:x}", Sha256::digest(bytes))
+}
+
+fn trust_root_ref(key_id: &str) -> String {
+    format!("{TRUST_ROOT_PREFIX}{key_id}")
+}
+
+fn package_selector_matches(
+    selectors: &[String],
+    manifest: &Value,
+    package_resource_id: &str,
+) -> Result<bool> {
+    let package_id = required_value_str(manifest, "packageId")?;
+    let namespace = required_value_str(manifest, "namespace")?;
+    Ok(selectors.iter().any(|selector| {
+        selector == "*"
+            || selector == package_id
+            || selector == package_resource_id
+            || selector == &format!("namespace:{namespace}")
+            || selector == &format!("{namespace}/*")
+    }))
 }
 
 fn source_verification<F>(manifest: &Value, mut verify_ref: F) -> Result<SourceVerification>
@@ -4055,6 +5002,93 @@ fn ensure_grant_request_narrows_caller(
     Ok(())
 }
 
+fn ensure_grant_ceiling_narrows_caller(
+    host: &ModulePrimitiveHandler,
+    invocation: &Invocation,
+    ceiling: &serde_json::Map<String, Value>,
+) -> Result<()> {
+    let parent = host
+        .inspect_grant(&invocation.causal_context.authority_grant_id)?
+        .ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "caller grant {} is not inspectable",
+                invocation.causal_context.authority_grant_id
+            ))
+        })?;
+    if parent.lifecycle != EngineGrantLifecycle::Active {
+        return Err(EngineError::PolicyViolation(format!(
+            "caller grant {} is not active",
+            parent.grant_id
+        )));
+    }
+    ensure_subset(
+        &string_array_from(ceiling.get("allowedCapabilities"), "allowedCapabilities")?,
+        &parent.allowed_capabilities,
+        "caller grant capabilities",
+    )?;
+    ensure_subset(
+        &string_array_from(ceiling.get("allowedNamespaces"), "allowedNamespaces")?,
+        &parent.allowed_namespaces,
+        "caller grant namespaces",
+    )?;
+    ensure_subset(
+        &string_array_from(
+            ceiling.get("allowedAuthorityScopes"),
+            "allowedAuthorityScopes",
+        )?,
+        &parent.allowed_authority_scopes,
+        "caller grant authority scopes",
+    )?;
+    ensure_subset(
+        &string_array_from(ceiling.get("allowedResourceKinds"), "allowedResourceKinds")?,
+        &parent.allowed_resource_kinds,
+        "caller grant resource kinds",
+    )?;
+    ensure_subset(
+        &string_array_from(ceiling.get("resourceSelectors"), "resourceSelectors")?,
+        &parent.resource_selectors,
+        "caller grant resource selectors",
+    )?;
+    ensure_subset(
+        &string_array_from(ceiling.get("fileRoots"), "fileRoots")?,
+        &parent.file_roots,
+        "caller grant file roots",
+    )?;
+    if network_rank(required_map_str(ceiling, "networkPolicy")?)?
+        > network_rank(&parent.network_policy)?
+    {
+        return Err(EngineError::PolicyViolation(
+            "trust grant ceiling exceeds caller network policy".to_owned(),
+        ));
+    }
+    if parse_risk(required_map_str(ceiling, "maxRisk")?)? > parent.max_risk {
+        return Err(EngineError::PolicyViolation(
+            "trust grant ceiling exceeds caller maxRisk".to_owned(),
+        ));
+    }
+    if ceiling
+        .get("canDelegate")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && !parent.can_delegate
+    {
+        return Err(EngineError::PolicyViolation(
+            "trust grant ceiling exceeds caller delegation".to_owned(),
+        ));
+    }
+    if parent.approval_required
+        && !ceiling
+            .get("approvalRequired")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return Err(EngineError::PolicyViolation(
+            "caller grant requires trust ceiling approval".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn ensure_grant_request_within_ceiling(
     request: &DeriveGrant,
     ceiling: &serde_json::Map<String, Value>,
@@ -4348,6 +5382,59 @@ fn policy_evaluation_value(evaluation: SourcePolicyEvaluation) -> Value {
     })
 }
 
+fn policy_child_request(invocation: &Invocation, manifest: &Value) -> Result<Option<DeriveGrant>> {
+    invocation
+        .payload
+        .get("childGrantRequest")
+        .and_then(Value::as_object)
+        .map(|request| {
+            let worker_id = manifest
+                .get("runtimeEntryPoint")
+                .and_then(|entry| entry.get("workerId"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    EngineError::PolicyViolation(
+                        "policy audit requires runtimeEntryPoint.workerId".to_owned(),
+                    )
+                })?;
+            child_grant_from_payload(
+                invocation,
+                manifest,
+                &WorkerId::new(worker_id.to_owned())?,
+                request,
+            )
+        })
+        .transpose()
+}
+
+fn recommended_actions_for_policy(decision: &str, affected_activations: &[Value]) -> Vec<Value> {
+    let mut actions = vec![json!({
+        "functionId": AUDIT_POLICY_FUNCTION,
+        "reason": "refresh policy audit",
+    })];
+    if decision != "allow" {
+        actions.push(json!({
+            "functionId": RECORD_POLICY_AUDIT_FUNCTION,
+            "reason": "persist audit evidence",
+        }));
+        actions.push(json!({
+            "functionId": RECONCILE_TRUST_FUNCTION,
+            "reason": "record affected package and activation state",
+        }));
+    }
+    if !affected_activations.is_empty() && decision != "allow" {
+        actions.push(json!({
+            "functionId": QUARANTINE_FUNCTION,
+            "reason": "operator may quarantine affected activation explicitly",
+        }));
+        actions.push(json!({
+            "functionId": DISABLE_FUNCTION,
+            "reason": "operator may disable affected activation explicitly",
+        }));
+    }
+    actions
+}
+
 fn extend_findings(target: &mut Vec<Value>, findings: &Value) {
     if let Some(items) = findings.as_array() {
         target.extend(items.iter().cloned());
@@ -4385,13 +5472,28 @@ fn reject_raw_secrets_at(value: &Value, path: &str, key_hint: Option<&str>) -> R
         }
         Value::String(text) => {
             let key = key_hint.unwrap_or_default().to_ascii_lowercase();
-            let secret_key = ["secret", "token", "password", "apikey", "api_key", "key"]
+            let normalized_key = key.replace(['-', '_'], "");
+            let public_key_identifier = matches!(
+                normalized_key.as_str(),
+                "publickey" | "signaturekeyref" | "keyid"
+            );
+            let secret_key = !public_key_identifier
+                && [
+                    "secret",
+                    "token",
+                    "password",
+                    "apikey",
+                    "privatekey",
+                    "credential",
+                ]
                 .iter()
-                .any(|marker| key.contains(marker));
+                .any(|marker| normalized_key.contains(marker));
             let secret_value = text.starts_with("sk-")
                 || text.starts_with("pk-")
                 || text.to_ascii_lowercase().contains("secret=");
-            let allowed_ref = text.starts_with("secret_ref:") || text.starts_with("vault:");
+            let allowed_ref = text.starts_with("secret_ref:")
+                || text.starts_with("vault:")
+                || text.starts_with(TRUST_ROOT_PREFIX);
             if (secret_key || secret_value) && !allowed_ref {
                 return Err(EngineError::PolicyViolation(format!(
                     "{path} contains secret-like value; store only secret_ref or vault handles"
@@ -4936,6 +6038,94 @@ fn run_conformance_schema() -> Value {
             "expectedCurrentVersionId": {"type": "string"},
             "mode": {"type": "string", "enum": ["static", "activation", "cleanup"]},
             "childGrantRequest": {"type": "object"}
+        }
+    })
+}
+
+fn register_source_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["sourceKind", "scope", "reason"],
+        "additionalProperties": false,
+        "properties": {
+            "sourceKind": {
+                "type": "string",
+                "enum": ["local_digest_source", "ed25519_trust_root", "source_revocation"]
+            },
+            "scope": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "sourceDigest": {"type": "string"},
+            "sourceRef": {"type": "object"},
+            "publicKey": {"type": "string"},
+            "publicKeyEncoding": {"type": "string", "enum": ["base64"]},
+            "keyId": {"type": "string"},
+            "algorithm": {"type": "string", "enum": ["ed25519"]},
+            "allowedPackageSelectors": {"type": "array", "items": {"type": "string"}},
+            "trustTierCeiling": {"type": "string"},
+            "grantCeiling": {"type": "object"},
+            "expiresAt": {"type": "string"},
+            "revokedDecisionResourceId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
+fn verify_signature_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["packageResourceId", "packageVersionId", "scope"],
+        "additionalProperties": false,
+        "properties": {
+            "packageResourceId": {"type": "string"},
+            "packageVersionId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "scope": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "sessionId": {"type": "string"}
+        }
+    })
+}
+
+fn audit_policy_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["packageResourceId", "packageVersionId", "scope"],
+        "additionalProperties": false,
+        "properties": {
+            "packageResourceId": {"type": "string"},
+            "packageVersionId": {"type": "string"},
+            "scope": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "childGrantRequest": {"type": "object"},
+            "includeActivations": {"type": "boolean"}
+        }
+    })
+}
+
+fn reconcile_trust_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "scope": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "packageResourceId": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
+fn policy_audit_response_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["audit"],
+        "additionalProperties": true,
+        "properties": {
+            "audit": {"type": "object"}
         }
     })
 }
