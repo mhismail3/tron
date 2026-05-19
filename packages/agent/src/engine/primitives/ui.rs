@@ -1231,6 +1231,105 @@ fn generated_actions(
                 }));
             }
         }
+        let resource_id = if request.target_id.starts_with("worker-package:") {
+            request.target_id.clone()
+        } else {
+            format!("worker-package:{}", request.target_id)
+        };
+        if let Some(inspection) = host.inspect_resource(&resource_id)?
+            && let Some(version_id) = inspection.resource.current_version_id.clone()
+        {
+            let manifest = current_payload(&inspection).unwrap_or_else(|| json!({}));
+            if let Some(verify_source) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::verify_source")
+            {
+                actions.push(json!({
+                    "actionId": "verify-package-source",
+                    "label": "Verify Source",
+                    "targetFunctionId": "module::verify_source",
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": {
+                        "packageResourceId": resource_id,
+                        "packageVersionId": version_id,
+                        "expectedCurrentVersionId": version_id,
+                        "mode": "on_demand"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&verify_source.risk_level),
+                    "approvalPolicy": {"required": verify_source.required_authority.approval_required},
+                    "targetRevision": verify_source.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if let Some(run_conformance) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::run_conformance")
+            {
+                actions.push(json!({
+                    "actionId": "run-package-conformance",
+                    "label": "Run Conformance",
+                    "targetFunctionId": "module::run_conformance",
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": {
+                        "targetType": "worker_package",
+                        "resourceId": resource_id,
+                        "resourceVersionId": version_id,
+                        "expectedCurrentVersionId": version_id,
+                        "mode": "static"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&run_conformance.risk_level),
+                    "approvalPolicy": {"required": run_conformance.required_authority.approval_required},
+                    "targetRevision": run_conformance.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if manifest
+                .get("sourceProvenance")
+                .and_then(|source| source.get("kind"))
+                .and_then(Value::as_str)
+                == Some("local_digest_pinned")
+                && manifest.get("sourceTrustStatus").and_then(Value::as_str) == Some("verified")
+                && let Some(approve_source) = functions
+                    .iter()
+                    .find(|function| function.id.as_str() == "module::approve_source")
+            {
+                actions.push(json!({
+                    "actionId": "approve-package-source",
+                    "label": "Approve Source",
+                    "targetFunctionId": "module::approve_source",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["reason", "expiresAt"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "reason": {"type": "string"},
+                            "expiresAt": {"type": "string"}
+                        }
+                    },
+                    "payloadTemplate": {
+                        "packageResourceId": resource_id,
+                        "packageVersionId": version_id,
+                        "packageDigest": manifest.get("packageDigest").cloned().unwrap_or(Value::Null),
+                        "packageId": manifest.get("packageId").cloned().unwrap_or(Value::Null),
+                        "scope": "system",
+                        "trustTierCeiling": "local_digest_pinned",
+                        "grantCeiling": manifest.get("requiredGrants").cloned().unwrap_or_else(|| json!({})),
+                        "expiresAt": "${input.expiresAt}",
+                        "reason": "${input.reason}"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&approve_source.risk_level),
+                    "approvalPolicy": {"required": approve_source.required_authority.approval_required},
+                    "targetRevision": approve_source.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+        }
     }
     if request.target_type == "activation" {
         let resource_id = if request.target_id.starts_with("activation:") {

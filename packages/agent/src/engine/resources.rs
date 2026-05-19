@@ -625,6 +625,17 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "packageDigest",
                     "trustTier",
                     "signatureStatus",
+                    "sourceRef",
+                    "sourceDigest",
+                    "sourceTrustStatus",
+                    "effectiveTrustTier",
+                    "signature",
+                    "signatureKeyRef",
+                    "signatureVerification",
+                    "sourceEvidenceRefs",
+                    "sourceApprovalRefs",
+                    "conformanceEvidenceRefs",
+                    "policyDiagnostics",
                     "declaredWorkerKind",
                     "namespace",
                     "declaredCapabilities",
@@ -644,6 +655,17 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "packageDigest": {"type": "string"},
                     "trustTier": {"type": "string"},
                     "signatureStatus": {"type": "string"},
+                    "sourceRef": {"type": "object"},
+                    "sourceDigest": {"type": "string"},
+                    "sourceTrustStatus": {"type": "string"},
+                    "effectiveTrustTier": {"type": "string"},
+                    "signature": {},
+                    "signatureKeyRef": {},
+                    "signatureVerification": {"type": "object"},
+                    "sourceEvidenceRefs": {"type": "array"},
+                    "sourceApprovalRefs": {"type": "array"},
+                    "conformanceEvidenceRefs": {"type": "array"},
+                    "policyDiagnostics": {"type": "object"},
                     "declaredWorkerKind": {"type": "string"},
                     "namespace": {"type": "string"},
                     "declaredCapabilities": {"type": "array"},
@@ -2682,8 +2704,13 @@ fn ui_structural_identifier_key(key: &str) -> bool {
             | "resourceId"
             | "versionId"
             | "resourceVersionId"
+            | "packageVersionId"
+            | "configVersionId"
             | "activationVersionId"
             | "expectedCurrentVersionId"
+            | "packageDigest"
+            | "sourceDigest"
+            | "contentHash"
             | "targetId"
             | "targetFunctionId"
             | "targetVersionId"

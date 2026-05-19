@@ -215,7 +215,22 @@ fn manifest_with_digest(mut manifest: Value) -> Value {
 fn manifest_digest(manifest: &Value) -> String {
     let mut canonical = manifest.clone();
     if let Some(object) = canonical.as_object_mut() {
-        object.remove("packageDigest");
+        for field in [
+            "packageDigest",
+            "sourceRef",
+            "sourceDigest",
+            "sourceTrustStatus",
+            "effectiveTrustTier",
+            "signature",
+            "signatureKeyRef",
+            "signatureVerification",
+            "sourceEvidenceRefs",
+            "sourceApprovalRefs",
+            "conformanceEvidenceRefs",
+            "policyDiagnostics",
+        ] {
+            object.remove(field);
+        }
     }
     let bytes = serde_json::to_vec(&canonical).unwrap();
     format!("sha256:{:x}", Sha256::digest(bytes))
@@ -307,6 +322,65 @@ async fn register_package(
         .invoke(host_invocation(
             "module::register_package",
             json!({"manifest": manifest}),
+            mutating_causal(key).with_scope("module.write"),
+        ))
+        .await
+}
+
+async fn verify_source(
+    handle: &EngineHostHandle,
+    package_resource_id: &str,
+    package_version_id: &str,
+    key: &str,
+) -> super::super::InvocationResult {
+    handle
+        .invoke(host_invocation(
+            "module::verify_source",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": package_version_id,
+                "expectedCurrentVersionId": package_version_id,
+                "mode": "on_demand"
+            }),
+            mutating_causal(key).with_scope("module.write"),
+        ))
+        .await
+}
+
+async fn approve_source(
+    handle: &EngineHostHandle,
+    package_resource_id: &str,
+    package_version_id: &str,
+    package_digest: &str,
+    package_id: &str,
+    key: &str,
+) -> super::super::InvocationResult {
+    handle
+        .invoke(host_invocation(
+            "module::approve_source",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": package_version_id,
+                "packageDigest": package_digest,
+                "packageId": package_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "trustTierCeiling": "local_digest_pinned",
+                "grantCeiling": {
+                    "allowedCapabilities": ["demo_local::inspect", "demo_local::write_artifact"],
+                    "allowedNamespaces": ["demo_local"],
+                    "allowedAuthorityScopes": ["demo_local.read", "demo_local.write"],
+                    "allowedResourceKinds": ["artifact"],
+                    "resourceSelectors": ["*"],
+                    "fileRoots": ["*"],
+                    "networkPolicy": "none",
+                    "maxRisk": "medium",
+                    "canDelegate": false,
+                    "approvalRequired": false
+                },
+                "expiresAt": "2100-01-01T00:00:00Z",
+                "reason": "test approves digest-pinned local worker"
+            }),
             mutating_causal(key).with_scope("module.write"),
         ))
         .await
@@ -444,6 +518,11 @@ async fn module_resource_types_and_capabilities_are_registered() {
         "module::check_health",
         "module::verify_integrity",
         "module::recover_activation",
+        "module::verify_source",
+        "module::approve_source",
+        "module::revoke_source_approval",
+        "module::policy_decide",
+        "module::run_conformance",
     ] {
         let function = value["capabilities"]
             .as_array()
@@ -451,7 +530,10 @@ async fn module_resource_types_and_capabilities_are_registered() {
             .iter()
             .find(|capability| capability["id"] == function_id)
             .unwrap_or_else(|| panic!("{function_id} must be discoverable"));
-        if function_id != "module::inspect_package" {
+        if !matches!(
+            function_id,
+            "module::inspect_package" | "module::policy_decide"
+        ) {
             assert!(
                 function["idempotency"].is_object(),
                 "{function_id} must be idempotent"
@@ -469,6 +551,360 @@ async fn module_resource_types_and_capabilities_are_registered() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn module_local_source_policy_requires_verification_and_approval_before_spawn() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn(&handle);
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("policy-local-worker.sh"),
+        "module-policy-local-executable",
+    )
+    .await;
+    let manifest = manifest_with_digest(local_process_manifest(
+        "policy-local-tools",
+        "demo_local",
+        "policy-local-worker",
+        executable,
+    ));
+    let package_digest = manifest["packageDigest"].as_str().unwrap().to_owned();
+    let registered = register_package(&handle, manifest, "module-policy-local-register").await;
+    assert_eq!(registered.error, None);
+    let package_resource_id = "worker-package:policy-local-tools";
+    let registered_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let configured = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": registered_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true, "apiKeyRef": "secret_ref:policy-local-key"}
+            }),
+            mutating_causal("module-policy-local-configure").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured.error, None);
+    let config_version_id = configured.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let activate_payload = json!({
+        "packageResourceId": package_resource_id,
+        "packageVersionId": registered_version_id,
+        "moduleConfigResourceId": "module-config:workspace-a:policy-local-tools",
+        "configVersionId": config_version_id,
+        "scope": "workspace",
+        "workspaceId": "workspace-a",
+        "childGrantRequest": {
+            "allowedCapabilities": ["demo_local::inspect", "demo_local::write_artifact"],
+            "allowedNamespaces": ["demo_local"],
+            "allowedAuthorityScopes": ["demo_local.read", "demo_local.write"],
+            "allowedResourceKinds": ["artifact"],
+            "resourceSelectors": ["*"],
+            "fileRoots": ["*"],
+            "networkPolicy": "none",
+            "maxRisk": "medium"
+        }
+    });
+    let denied = handle
+        .invoke(host_invocation(
+            "module::activate",
+            activate_payload.clone(),
+            mutating_causal("module-policy-local-denied").with_scope("module.write"),
+        ))
+        .await;
+    assert!(matches!(
+        denied.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("source policy")
+                || message.contains("source verification")
+                || message.contains("source approval")
+    ));
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 0);
+
+    let verified = verify_source(
+        &handle,
+        package_resource_id,
+        &registered_version_id,
+        "module-policy-local-verify",
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    let verified_package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        verified.value.as_ref().unwrap()["sourceVerification"]["status"],
+        "verified"
+    );
+
+    let approved = approve_source(
+        &handle,
+        package_resource_id,
+        &verified_package_version_id,
+        &package_digest,
+        "policy-local-tools",
+        "module-policy-local-approve",
+    )
+    .await;
+    assert_eq!(approved.error, None);
+    assert_eq!(
+        approved.value.as_ref().unwrap()["decision"]["status"],
+        "approved"
+    );
+
+    let policy = handle
+        .invoke(host_invocation(
+            "module::policy_decide",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": {
+                    "allowedCapabilities": ["demo_local::inspect", "demo_local::write_artifact"],
+                    "allowedNamespaces": ["demo_local"],
+                    "allowedAuthorityScopes": ["demo_local.read", "demo_local.write"],
+                    "allowedResourceKinds": ["artifact"],
+                    "resourceSelectors": ["*"],
+                    "fileRoots": ["*"],
+                    "networkPolicy": "none",
+                    "maxRisk": "medium"
+                }
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(policy.error, None);
+    assert_eq!(policy.value.as_ref().unwrap()["decision"], "allow");
+}
+
+#[tokio::test]
+async fn module_source_approval_revocation_and_conformance_are_resource_backed() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("conformance-local-worker.sh"),
+        "module-conformance-local-executable",
+    )
+    .await;
+    let manifest = manifest_with_digest(local_process_manifest(
+        "conformance-local-tools",
+        "demo_local",
+        "conformance-local-worker",
+        executable,
+    ));
+    let package_digest = manifest["packageDigest"].as_str().unwrap().to_owned();
+    let registered = register_package(&handle, manifest, "module-conformance-local-register").await;
+    assert_eq!(registered.error, None);
+    let package_resource_id = "worker-package:conformance-local-tools";
+    let package_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let verified = verify_source(
+        &handle,
+        package_resource_id,
+        &package_version_id,
+        "module-conformance-local-verify",
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    let verified_package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let conformance = handle
+        .invoke(host_invocation(
+            "module::run_conformance",
+            json!({
+                "targetType": "worker_package",
+                "resourceId": package_resource_id,
+                "resourceVersionId": verified_package_version_id,
+                "expectedCurrentVersionId": verified_package_version_id,
+                "mode": "static"
+            }),
+            mutating_causal("module-conformance-run").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(conformance.error, None);
+    assert_eq!(
+        conformance.value.as_ref().unwrap()["conformance"]["status"],
+        "valid"
+    );
+    assert!(
+        conformance.value.as_ref().unwrap()["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "evidence")
+    );
+    let conformed_package_version_id = conformance.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let approved = approve_source(
+        &handle,
+        package_resource_id,
+        &conformed_package_version_id,
+        &package_digest,
+        "conformance-local-tools",
+        "module-conformance-approve",
+    )
+    .await;
+    assert_eq!(approved.error, None);
+    let decision_resource_id = approved.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let revoked = handle
+        .invoke(host_invocation(
+            "module::revoke_source_approval",
+            json!({
+                "decisionResourceId": decision_resource_id,
+                "reason": "test revokes source approval"
+            }),
+            mutating_causal("module-conformance-revoke").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(revoked.error, None);
+    assert_eq!(
+        revoked.value.as_ref().unwrap()["decision"]["status"],
+        "revoked"
+    );
+
+    let policy = handle
+        .invoke(host_invocation(
+            "module::policy_decide",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": conformed_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": {
+                    "allowedCapabilities": ["demo_local::inspect", "demo_local::write_artifact"],
+                    "allowedNamespaces": ["demo_local"],
+                    "allowedAuthorityScopes": ["demo_local.read", "demo_local.write"],
+                    "allowedResourceKinds": ["artifact"],
+                    "resourceSelectors": ["*"],
+                    "fileRoots": ["*"],
+                    "networkPolicy": "none",
+                    "maxRisk": "medium"
+                }
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(policy.error, None);
+    assert_eq!(policy.value.as_ref().unwrap()["decision"], "deny");
+    assert!(
+        policy.value.as_ref().unwrap()["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason.as_str().unwrap_or_default().contains("approval"))
+    );
+    let snapshot = handle
+        .invoke(host_invocation(
+            "control::snapshot",
+            json!({}),
+            causal().with_scope("control.read"),
+        ))
+        .await;
+    assert_eq!(snapshot.error, None);
+    let source_trust = snapshot.value.as_ref().unwrap()["moduleSourceTrust"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["packageResourceId"] == package_resource_id)
+        .expect("package source trust projection");
+    assert!(
+        source_trust["sourceApprovalRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["resourceId"] == decision_resource_id)
+    );
+    assert!(
+        source_trust["approvalWarnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["code"] == "source_approval_revoked")
+    );
+}
+
+#[tokio::test]
+async fn module_verify_source_rejects_signature_material_without_trust_root() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("signed-local-worker.sh"),
+        "module-signed-local-executable",
+    )
+    .await;
+    let mut manifest = local_process_manifest(
+        "signed-local-tools",
+        "demo_local",
+        "signed-local-worker",
+        executable,
+    );
+    manifest["signature"] = json!({
+        "algorithm": "ed25519",
+        "value": "base64:unsigned-test-fixture"
+    });
+    manifest["signatureKeyRef"] = json!("secret_ref:test-signing-key");
+    manifest["packageDigest"] = json!(manifest_digest(&manifest));
+    let registered = register_package(&handle, manifest, "module-signed-local-register").await;
+    assert_eq!(registered.error, None);
+    let package_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let rejected = verify_source(
+        &handle,
+        "worker-package:signed-local-tools",
+        &package_version_id,
+        "module-signed-local-verify",
+    )
+    .await;
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("signature_verification_unsupported")
+    ));
 }
 
 #[tokio::test]
@@ -1026,22 +1462,47 @@ async fn module_activate_local_process_invokes_worker_spawn_and_records_integrit
         "module-local-activate-executable",
     )
     .await;
-    let registered = register_package(
+    let manifest = manifest_with_digest(local_process_manifest(
+        "demo-local-tools",
+        "demo_local",
+        "demo-local-worker",
+        executable.clone(),
+    ));
+    let package_digest = manifest["packageDigest"].as_str().unwrap().to_owned();
+    let registered = register_package(&handle, manifest, "module-local-activate-register").await;
+    assert_eq!(registered.error, None);
+    let registered_package_version_id =
+        registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let verified = verify_source(
         &handle,
-        manifest_with_digest(local_process_manifest(
-            "demo-local-tools",
-            "demo_local",
-            "demo-local-worker",
-            executable.clone(),
-        )),
-        "module-local-activate-register",
+        "worker-package:demo-local-tools",
+        &registered_package_version_id,
+        "module-local-activate-verify",
     )
     .await;
-    assert_eq!(registered.error, None);
-    let package_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+    assert_eq!(verified.error, None);
+    let package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
         .as_str()
         .unwrap()
         .to_owned();
+    let approved = approve_source(
+        &handle,
+        "worker-package:demo-local-tools",
+        &package_version_id,
+        &package_digest,
+        "demo-local-tools",
+        "module-local-activate-approve",
+    )
+    .await;
+    assert_eq!(approved.error, None);
     let configured = handle
         .invoke(host_invocation(
             "module::configure",
@@ -1431,5 +1892,21 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                 .iter()
                 .any(|action| action["targetFunctionId"] == "ui::refresh_surface")
         );
+        if target_type == "package" {
+            assert!(
+                surface.value.as_ref().unwrap()["surface"]["actions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|action| action["targetFunctionId"] == "module::verify_source")
+            );
+            assert!(
+                surface.value.as_ref().unwrap()["surface"]["actions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|action| action["targetFunctionId"] == "module::run_conformance")
+            );
+        }
     }
 }

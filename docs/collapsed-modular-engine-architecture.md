@@ -155,16 +155,30 @@ grants, and worker/capability catalog records.
 The first-party `module` primitive exposes:
 
 - `module::register_package` for digest/provenance/namespace/capability/config
-  validation before `worker_package` persistence;
+  validation and source-trust field normalization before `worker_package`
+  persistence;
 - `module::inspect_package` as the read projection over package/config/
-  activation resources;
+  activation/source-policy resources;
 - `module::configure` for config-schema validation and `secret_ref`-only
   secret handling before `module_config` persistence;
+- `module::verify_source` for resource-backed package source evidence over
+  package digest, provenance, materialized file refs/hashes, and redaction;
+  explicit signature material fails closed until local trust roots and signature
+  verification are added;
+- `module::approve_source` and `module::revoke_source_approval` for scoped
+  operator `decision` resources that approve or revoke local digest-pinned
+  package sources by package digest/version/scope, trust ceiling, grant ceiling,
+  file/network bounds, and expiry;
+- `module::policy_decide` as a pure read projection over package source
+  evidence, approval decisions, requested child grants, and conformance refs;
+- `module::run_conformance` for bounded package/config/activation conformance
+  evidence over manifest rules, grant simulation, registration bounds,
+  resource-output contracts, health policy, redaction, and cleanup behavior;
 - `module::activate` for validating package/config refs, deriving or obtaining
   the narrower activation grant, binding existing/built-in workers, launching
   `local_process` packages only through a child `worker::spawn` invocation,
-  validating registered worker capabilities against the package manifest and
-  grant ceiling, and creating an `activation_record`;
+  enforcing source policy, validating registered worker capabilities against the
+  package manifest and grant ceiling, and creating an `activation_record`;
 - `module::disable`, `module::upgrade`, `module::rollback`, and
   `module::quarantine` as explicit idempotent lifecycle capabilities. Upgrade
   is a replacement operation: it names the current activation, validates and
@@ -189,17 +203,22 @@ The first-party `module` primitive exposes:
 `local_process` package manifests are digest-pinned to `materialized_file`
 resource refs. The runtime entrypoint declares command and args templates,
 expected function ids, working-directory policy, environment policy, visibility,
-timeout, and executable refs. Activation verifies those refs and hashes before
-invoking `worker::spawn`; module code never starts or kills processes directly.
+timeout, and executable refs. Activation verifies those refs and hashes and
+requires valid source verification plus an unexpired scoped source approval
+before invoking `worker::spawn`; module code never starts or kills processes
+directly.
 The resulting `activation_record` stores `spawnInvocationId`, `spawnResult`,
 `healthResult`, `healthEvidenceRef`, `healthInvocationIds`,
 `integrityDiagnostics`, `workerLifecycle`, `supersedes`, `rollbackTarget`, and
 recovery metadata so operator projections can explain what ran, what authority
 it received, what evidence supports the current status, and what cleanup
-occurred. A runtime monitor derives due checks from active activation resources
-and their `healthPolicy.intervalSeconds`, then enqueues `module::check_health`
-through the existing queue/invocation substrate. There is no package table,
-health table, recovery table, or non-rebuildable module cache.
+occurred. Source verification, approval, conformance, health, integrity, and
+recovery outcomes are `evidence`/`decision` resources linked to package and
+activation records. A runtime monitor derives due checks from active activation
+resources and their `healthPolicy.intervalSeconds`, then enqueues
+`module::check_health` through the existing queue/invocation substrate. There
+is no package table, health table, policy table, conformance table, recovery
+table, or non-rebuildable module cache.
 
 No package table, module action multiplexer, client-side policy, or `control`
 mutation path exists. Control and generated UI surfaces expose module resources

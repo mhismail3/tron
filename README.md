@@ -462,8 +462,9 @@ Engine-owned primitive workers additionally expose the substrate control and
 generated UI surfaces. `control::snapshot` and `control::inspect` are read-only
 projections over catalog, invocation, grant, resource, queue, lease, approval,
 storage, module, and worker truth; they may include `uiSurfaceRefs`,
-`modulePackages`, `moduleConfigs`, and `activationRecords`, but do not inline
-large layouts or stored action templates. Generated UI is persisted as
+`modulePackages`, `moduleConfigs`, `activationRecords`, and
+`moduleSourceTrust`, but do not inline large layouts or stored action templates.
+Generated UI is persisted as
 `Resource(kind = "ui_surface")` and managed by `ui::catalog`,
 `ui::create_surface`, `ui::surface_for_target`, `ui::validate_surface`,
 `ui::refresh_surface`, `ui::expire_surface`, `ui::update_surface`,
@@ -475,34 +476,58 @@ reconstructs and authorizes the canonical target invocation.
 The module package lifecycle is also resource-native. `module::register_package`
 validates manifest digest, provenance, namespace ownership, declared capability
 effects/risks/idempotency/output contracts, config schema, and grant ceiling
-before creating `worker_package`. `module::configure` validates config and
-rejects raw secret-like values unless they are `secret_ref`/vault handles.
-`module::activate`, `module::disable`, `module::upgrade`, `module::rollback`,
-and `module::quarantine` produce `activation_record` versions, derive or revoke
-engine grants, and never rely on a package table, `control::act`, or client-side
-policy. Activation binds existing/built-in workers directly and launches
-`local_process` packages only by creating a child `worker::spawn` invocation
-with manifest-derived command, expected function ids, grant bounds, file roots,
-network policy, visibility, timeout, and idempotency. The activation record
-stores spawn lineage, spawn result, integrity diagnostics, worker lifecycle,
-health status, registered capability evidence, and the derived grant hash.
-Upgrade requires the activation being replaced, creates a replacement
-activation first, then revokes the superseded grant and disconnects superseded
-volatile workers only after the replacement succeeds.
+before creating a normalized `worker_package`. The normalized package payload
+stores engine-owned source trust fields such as `sourceTrustStatus`,
+`effectiveTrustTier`, `sourceEvidenceRefs`, `sourceApprovalRefs`,
+`conformanceEvidenceRefs`, and bounded `policyDiagnostics`; the manifest's
+declared `trustTier` is never permission truth. `module::configure` validates
+config and rejects raw secret-like values unless they are `secret_ref`/vault
+handles.
 
-Runtime package integrity is also capability-driven. `module::check_health`
-writes bounded `evidence` and updates the activation record through CAS using
-either catalog/heartbeat inspection or a manifest-declared read-only health
-function invoked under the activation grant. `module::verify_integrity`
-recomputes package digests, materialized file hashes, config validation hashes,
-grant state, worker registration bounds, visibility/risk/file/network policy,
-and redaction invariants without rewriting damaged bytes. `module::recover_activation`
-reconstructs incomplete or unsafe activations from invocation, grant, worker,
-and resource records, revokes leaked derived grants, disconnects volatile
-workers through canonical lifecycle APIs, and persists failed/quarantined
-activation evidence. Scheduled checks are derived from active
-`activation_record` resources and enqueued through the existing `module` queue;
-there is no package, health, or recovery table.
+Package source trust is explicit. `module::verify_source` verifies package
+digest, provenance, materialized file refs/hashes, and redaction, then writes
+bounded `evidence` and CAS-updates the package source trust fields. Explicit
+signature material fails closed until local trust roots and signature
+verification are added; unsigned local packages must stay digest-pinned.
+`module::approve_source` records a scoped operator `decision` for a local
+digest-pinned package digest/version/scope, trust ceiling, grant ceiling,
+file/network bounds, and expiry.
+`module::revoke_source_approval` archives that decision and writes evidence.
+`module::policy_decide` is a pure read projection over package source evidence,
+approval decisions, requested child grant, and conformance refs. Local unsigned
+`local_process` packages cannot activate until source verification and an
+unexpired scoped approval decision pass policy.
+
+`module::activate`, `module::disable`, `module::upgrade`,
+`module::rollback`, and `module::quarantine` produce `activation_record`
+versions, derive or revoke engine grants, and never rely on a package table,
+`control::act`, or client-side policy. Activation binds existing/built-in
+workers directly and launches `local_process` packages only by creating a child
+`worker::spawn` invocation with manifest-derived command, expected function ids,
+grant bounds, file roots, network policy, visibility, timeout, and idempotency.
+The activation record stores spawn lineage, spawn result, integrity diagnostics,
+worker lifecycle, health status, registered capability evidence, source-policy
+state, and the derived grant hash. Upgrade requires the activation being
+replaced, creates a replacement activation first, then revokes the superseded
+grant and disconnects superseded volatile workers only after the replacement
+succeeds.
+
+Runtime package integrity is also capability-driven. `module::run_conformance`
+writes bounded evidence for static manifest rules, grant simulation,
+registration bounds, health policy, resource-output contracts, redaction, and
+cleanup behavior. `module::check_health` writes bounded `evidence` and updates
+the activation record through CAS using either catalog/heartbeat inspection or a
+manifest-declared read-only health function invoked under the activation grant.
+`module::verify_integrity` recomputes package digests, materialized file hashes,
+config validation hashes, grant state, worker registration bounds,
+visibility/risk/file/network policy, and redaction invariants without rewriting
+damaged bytes. `module::recover_activation` reconstructs incomplete or unsafe
+activations from invocation, grant, worker, and resource records, revokes leaked
+derived grants, disconnects volatile workers through canonical lifecycle APIs,
+and persists failed/quarantined activation evidence. Scheduled checks are
+derived from active `activation_record` resources and enqueued through the
+existing `module` queue; there is no package, health, policy, conformance, or
+recovery table.
 
 ---
 

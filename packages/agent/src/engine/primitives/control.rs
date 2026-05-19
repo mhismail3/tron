@@ -3,6 +3,7 @@
 //! The control worker is a projection surface over existing substrate truth.
 //! It owns no durable state and exposes no mutation multiplexer.
 
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::runtime::{
@@ -32,7 +33,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             snapshot_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "modulePackages", "moduleConfigs", "activationRecords", "moduleHealth", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
+                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "modulePackages", "moduleConfigs", "activationRecords", "moduleHealth", "moduleSourceTrust", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
                 "additionalProperties": false,
                 "properties": {
                     "catalogRevision": {"type": "integer"},
@@ -44,6 +45,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                     "moduleConfigs": {"type": "array"},
                     "activationRecords": {"type": "array"},
                     "moduleHealth": {"type": "array"},
+                    "moduleSourceTrust": {"type": "array"},
                     "invocations": {"type": "array"},
                     "grants": {"type": "array"},
                     "queues": {"type": "array"},
@@ -178,6 +180,10 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         .iter()
         .filter_map(|resource| activation_health_summary(host, resource).transpose())
         .collect::<Result<Vec<_>>>()?;
+    let module_source_trust = module_packages
+        .iter()
+        .filter_map(|resource| module_source_trust_summary(host, resource).transpose())
+        .collect::<Result<Vec<_>>>()?;
     let invocations = latest_invocations(host.invocations(), limit)
         .iter()
         .map(|record| invocation_record_value(record, false))
@@ -201,6 +207,7 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "moduleConfigs": module_configs,
         "activationRecords": activation_records,
         "moduleHealth": module_health,
+        "moduleSourceTrust": module_source_trust,
         "invocations": invocations,
         "grants": grants,
         "queues": queues,
@@ -211,6 +218,131 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "availableActions": substrate_actions(),
         "uiSurfaceRefs": ui_surface_refs(host, limit)?,
     }))
+}
+
+fn module_source_trust_summary(
+    host: &dyn PrimitiveRuntimeHost,
+    resource: &EngineResource,
+) -> Result<Option<Value>> {
+    let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
+        return Ok(None);
+    };
+    let Some(payload) = current_payload(&inspection) else {
+        return Ok(None);
+    };
+    let package_digest = payload.get("packageDigest").and_then(Value::as_str);
+    let source_approval_refs = source_approval_refs(
+        host,
+        &resource.resource_id,
+        resource.current_version_id.as_deref(),
+        package_digest,
+    )?;
+    let approval_warnings = source_approval_refs
+        .iter()
+        .filter_map(source_approval_warning)
+        .collect::<Vec<_>>();
+    Ok(Some(json!({
+        "packageResourceId": resource.resource_id,
+        "packageVersionId": resource.current_version_id,
+        "packageId": payload.get("packageId").cloned().unwrap_or(Value::Null),
+        "packageDigest": payload.get("packageDigest").cloned().unwrap_or(Value::Null),
+        "sourceTrustStatus": payload.get("sourceTrustStatus").cloned().unwrap_or(Value::Null),
+        "effectiveTrustTier": payload.get("effectiveTrustTier").cloned().unwrap_or(Value::Null),
+        "sourceEvidenceRefs": payload.get("sourceEvidenceRefs").cloned().unwrap_or_else(|| json!([])),
+        "sourceApprovalRefs": source_approval_refs,
+        "approvalWarnings": approval_warnings,
+        "conformanceEvidenceRefs": payload.get("conformanceEvidenceRefs").cloned().unwrap_or_else(|| json!([])),
+        "policyDiagnostics": payload.get("policyDiagnostics").cloned().unwrap_or_else(|| json!({})),
+    })))
+}
+
+fn source_approval_refs(
+    host: &dyn PrimitiveRuntimeHost,
+    package_resource_id: &str,
+    package_version_id: Option<&str>,
+    package_digest: Option<&str>,
+) -> Result<Vec<Value>> {
+    let decisions = host.list_resources(ListResources {
+        kind: Some("decision".to_owned()),
+        scope: None,
+        lifecycle: None,
+        limit: 500,
+    })?;
+    decisions
+        .into_iter()
+        .filter_map(|resource| {
+            source_approval_ref_for_decision(
+                host,
+                resource,
+                package_resource_id,
+                package_version_id,
+                package_digest,
+            )
+            .transpose()
+        })
+        .collect()
+}
+
+fn source_approval_ref_for_decision(
+    host: &dyn PrimitiveRuntimeHost,
+    resource: EngineResource,
+    package_resource_id: &str,
+    package_version_id: Option<&str>,
+    package_digest: Option<&str>,
+) -> Result<Option<Value>> {
+    let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
+        return Ok(None);
+    };
+    let Some(payload) = current_payload(&inspection) else {
+        return Ok(None);
+    };
+    let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
+        return Ok(None);
+    };
+    let target_matches = metadata.get("decisionType").and_then(Value::as_str)
+        == Some("module_source_approval")
+        && metadata.get("packageResourceId").and_then(Value::as_str) == Some(package_resource_id)
+        && package_version_id.is_none_or(|version_id| {
+            metadata.get("packageVersionId").and_then(Value::as_str) == Some(version_id)
+        })
+        && package_digest.is_none_or(|digest| {
+            metadata.get("packageDigest").and_then(Value::as_str) == Some(digest)
+        });
+    if !target_matches {
+        return Ok(None);
+    }
+    Ok(Some(json!({
+        "resourceId": resource.resource_id,
+        "versionId": resource.current_version_id,
+        "status": payload.get("status").cloned().unwrap_or(Value::Null),
+        "lifecycle": resource.lifecycle,
+        "scope": metadata.get("scope").cloned().unwrap_or(Value::Null),
+        "expiresAt": metadata.get("expiresAt").cloned().unwrap_or(Value::Null),
+        "relation": "source_approval",
+    })))
+}
+
+fn source_approval_warning(reference: &Value) -> Option<Value> {
+    let status = reference.get("status").and_then(Value::as_str);
+    let lifecycle = reference.get("lifecycle").and_then(Value::as_str);
+    if status == Some("revoked") || lifecycle == Some("archived") {
+        return Some(json!({
+            "code": "source_approval_revoked",
+            "decisionResourceId": reference.get("resourceId").cloned().unwrap_or(Value::Null),
+        }));
+    }
+    let expires_at = reference
+        .get("expiresAt")
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc));
+    if expires_at.is_some_and(|value| value <= Utc::now()) {
+        return Some(json!({
+            "code": "source_approval_expired",
+            "decisionResourceId": reference.get("resourceId").cloned().unwrap_or(Value::Null),
+        }));
+    }
+    None
 }
 
 fn activation_health_summary(
@@ -619,6 +751,41 @@ fn substrate_actions() -> Vec<Value> {
             "activationResourceId",
             "high",
             true,
+        ),
+        action_summary(
+            "module::verify_source",
+            "package",
+            "packageResourceId",
+            "medium",
+            false,
+        ),
+        action_summary(
+            "module::approve_source",
+            "package",
+            "packageResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::revoke_source_approval",
+            "package",
+            "decisionResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::policy_decide",
+            "package",
+            "packageResourceId",
+            "low",
+            false,
+        ),
+        action_summary(
+            "module::run_conformance",
+            "package",
+            "resourceId",
+            "medium",
+            false,
         ),
     ]
 }

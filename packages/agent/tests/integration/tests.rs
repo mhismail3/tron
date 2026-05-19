@@ -99,6 +99,7 @@ async fn e2e_local_process_module_activation_health_and_disable_use_real_worker_
         &executable_ref,
         &file_root,
     ));
+    let package_digest = manifest["packageDigest"].as_str().unwrap().to_owned();
     let registered = direct_engine_invoke(
         &server,
         "module::register_package",
@@ -112,6 +113,68 @@ async fn e2e_local_process_module_activation_health_and_disable_use_real_worker_
         .unwrap()
         .to_owned();
     let package_resource_id = format!("worker-package:{package_id}");
+    let verified = direct_engine_invoke(
+        &server,
+        "module::verify_source",
+        json!({
+            "packageResourceId": package_resource_id,
+            "packageVersionId": package_version_id,
+            "expectedCurrentVersionId": package_version_id,
+            "mode": "on_demand"
+        }),
+        "runtime-local-verify-source",
+        &["module.write"],
+    )
+    .await;
+    let package_version_id = verified["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let child_grant_request = json!({
+        "allowedCapabilities": [function_id],
+        "allowedNamespaces": [namespace],
+        "allowedAuthorityScopes": [format!("{namespace}.read")],
+        "allowedResourceKinds": ["evidence", "activation_record"],
+        "resourceSelectors": ["*"],
+        "fileRoots": [file_root],
+        "networkPolicy": "loopback",
+        "maxRisk": "low"
+    });
+    let approved = direct_engine_invoke(
+        &server,
+        "module::approve_source",
+        json!({
+            "packageResourceId": package_resource_id,
+            "packageVersionId": package_version_id,
+            "packageDigest": package_digest,
+            "packageId": package_id,
+            "scope": "system",
+            "trustTierCeiling": "local_digest_pinned",
+            "grantCeiling": {
+                "allowedCapabilities": [function_id],
+                "allowedNamespaces": [namespace],
+                "allowedAuthorityScopes": [format!("{namespace}.read")],
+                "allowedResourceKinds": ["evidence", "activation_record"],
+                "resourceSelectors": ["*"],
+                "fileRoots": [file_root],
+                "networkPolicy": "loopback",
+                "maxRisk": "low",
+                "canDelegate": false,
+                "approvalRequired": false
+            },
+            "expiresAt": "2100-01-01T00:00:00Z",
+            "reason": "integration test approves digest-pinned local worker"
+        }),
+        "runtime-local-approve-source",
+        &["module.write"],
+    )
+    .await;
+    assert_eq!(approved["decision"]["status"], "approved");
     let configured = direct_engine_invoke(
         &server,
         "module::configure",
@@ -130,16 +193,6 @@ async fn e2e_local_process_module_activation_health_and_disable_use_real_worker_
         .unwrap()
         .to_owned();
     let config_resource_id = format!("module-config:system:{package_id}");
-    let child_grant_request = json!({
-        "allowedCapabilities": [function_id],
-        "allowedNamespaces": [namespace],
-        "allowedAuthorityScopes": [format!("{namespace}.read")],
-        "allowedResourceKinds": ["evidence", "activation_record"],
-        "resourceSelectors": ["*"],
-        "fileRoots": [file_root],
-        "networkPolicy": "loopback",
-        "maxRisk": "low"
-    });
     let activated = direct_engine_invoke(
         &server,
         "module::activate",

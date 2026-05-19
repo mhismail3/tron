@@ -1020,6 +1020,11 @@ fn module_package_activation_gates_stay_on() {
         "module::check_health",
         "module::verify_integrity",
         "module::recover_activation",
+        "module::verify_source",
+        "module::approve_source",
+        "module::revoke_source_approval",
+        "module::policy_decide",
+        "module::run_conformance",
         "DurableOutputContract::resource_backed",
         "derive_grant",
         "revoke_grant",
@@ -1028,6 +1033,10 @@ fn module_package_activation_gates_stay_on() {
         "spawnInvocationId",
         "healthEvidenceRef",
         "integrityDiagnostics",
+        "sourceTrustStatus",
+        "sourceEvidenceRefs",
+        "sourceApprovalRefs",
+        "conformanceEvidenceRefs",
         "packageDigest",
         "secret_ref",
     ] {
@@ -1048,6 +1057,9 @@ fn module_package_activation_gates_stay_on() {
         "tokio::process::Command",
         "Command::new",
         "health_report",
+        "module_source_table",
+        "module_policy_table",
+        "module_conformance_table",
     ] {
         assert!(
             !module.contains(forbidden),
@@ -1078,13 +1090,44 @@ fn module_package_activation_gates_stay_on() {
         control.contains("modulePackages")
             && control.contains("moduleConfigs")
             && control.contains("activationRecords")
+            && control.contains("moduleSourceTrust")
             && control.contains("module::inspect_package")
             && control.contains("module::check_health")
             && control.contains("module::verify_integrity")
             && control.contains("module::recover_activation")
+            && control.contains("module::verify_source")
+            && control.contains("module::approve_source")
+            && control.contains("module::run_conformance")
             && !control.contains("module::act\""),
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
+
+    let resources = std::fs::read_to_string(crate_root.join("src/engine/resources.rs"))
+        .expect("failed to read resources");
+    assert!(
+        resources.contains("sourceTrustStatus")
+            && resources.contains("sourceEvidenceRefs")
+            && resources.contains("conformanceEvidenceRefs"),
+        "worker_package resources must carry source trust and conformance refs"
+    );
+    for path in [
+        crate_root.join("src/engine/grants.rs"),
+        crate_root.join("src/engine/resources.rs"),
+        crate_root.join("src/engine/invocation.rs"),
+        crate_root.join("src/engine/primitives/module.rs"),
+    ] {
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        assert!(
+            !content.contains("CREATE TABLE module_")
+                && !content.contains("CREATE TABLE package_")
+                && !content.contains("CREATE TABLE source_")
+                && !content.contains("CREATE TABLE conformance_")
+                && !content.contains("CREATE TABLE policy_"),
+            "module source trust must stay resource-native, not table-backed: {}",
+            path.display()
+        );
+    }
 
     let ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
         .expect("failed to read generated UI primitive");
@@ -1095,7 +1138,9 @@ fn module_package_activation_gates_stay_on() {
             && ui.contains("module::inspect_package")
             && ui.contains("module::check_health")
             && ui.contains("module::verify_integrity")
-            && ui.contains("module::recover_activation"),
+            && ui.contains("module::recover_activation")
+            && ui.contains("module::verify_source")
+            && ui.contains("module::run_conformance"),
         "generated UI authoring must support module package targets through canonical actions"
     );
 

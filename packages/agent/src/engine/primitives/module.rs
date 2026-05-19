@@ -5,9 +5,10 @@
 //! derivation for activation. Local process packages launch only by composing a
 //! child `worker::spawn` invocation; module code validates package resources and
 //! records activation lineage but never owns a process runtime, package table,
-//! health table, recovery table, or action multiplexer. Health, integrity, and
-//! recovery outcomes are bounded `evidence` resources linked back to activation
-//! records.
+//! health table, policy table, recovery table, or action multiplexer. Source
+//! verification, source approvals, conformance, health, integrity, and recovery
+//! outcomes are bounded `evidence`/`decision` resources linked back to package
+//! and activation records.
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -46,10 +47,18 @@ pub(crate) const QUARANTINE_FUNCTION: &str = "module::quarantine";
 pub(crate) const CHECK_HEALTH_FUNCTION: &str = "module::check_health";
 pub(crate) const VERIFY_INTEGRITY_FUNCTION: &str = "module::verify_integrity";
 pub(crate) const RECOVER_ACTIVATION_FUNCTION: &str = "module::recover_activation";
+pub(crate) const VERIFY_SOURCE_FUNCTION: &str = "module::verify_source";
+pub(crate) const APPROVE_SOURCE_FUNCTION: &str = "module::approve_source";
+pub(crate) const REVOKE_SOURCE_APPROVAL_FUNCTION: &str = "module::revoke_source_approval";
+pub(crate) const POLICY_DECIDE_FUNCTION: &str = "module::policy_decide";
+pub(crate) const RUN_CONFORMANCE_FUNCTION: &str = "module::run_conformance";
 
 const MANIFEST_SCHEMA_ID: &str = "tron.module.package_manifest.v1";
 const LOCAL_DIGEST_PINNED: &str = "local_digest_pinned";
 const BUILTIN_PROVENANCE: &str = "builtin";
+const SOURCE_STATUS_TRUSTED_BUILTIN: &str = "trusted_builtin";
+const SOURCE_STATUS_UNVERIFIED: &str = "unverified";
+const SOURCE_STATUS_VERIFIED: &str = "verified";
 
 pub(super) fn registrations(
     stores: &PrimitiveStores,
@@ -177,6 +186,65 @@ pub(super) fn registrations(
             "evidence",
             ACTIVATION_RECORD_KIND,
         ])),
+        module_write(
+            VERIFY_SOURCE_FUNCTION,
+            "verify package source refs, digest, signature metadata, and trust evidence",
+            verify_source_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::Medium,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "evidence",
+            WORKER_PACKAGE_KIND,
+        ])),
+        module_write(
+            APPROVE_SOURCE_FUNCTION,
+            "record a scoped operator source approval decision",
+            approve_source_schema(),
+            module_resource_response_schema("decision"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed(["decision"])),
+        module_write(
+            REVOKE_SOURCE_APPROVAL_FUNCTION,
+            "revoke a scoped operator source approval decision",
+            revoke_source_approval_schema(),
+            module_resource_response_schema("decision"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "decision", "evidence",
+        ])),
+        module_read(
+            POLICY_DECIDE_FUNCTION,
+            "evaluate source and activation policy without mutating state",
+            policy_decide_schema(),
+            json!({
+                "type": "object",
+                "required": ["decision", "reasons", "missingPrerequisites", "sourceTrust", "approval", "conformance"],
+                "additionalProperties": true,
+                "properties": {
+                    "decision": {"type": "string", "enum": ["allow", "deny", "quarantine_required"]},
+                    "reasons": {"type": "array", "items": {"type": "string"}},
+                    "missingPrerequisites": {"type": "array", "items": {"type": "string"}},
+                    "sourceTrust": {"type": "object"},
+                    "approval": {"type": "object"},
+                    "conformance": {"type": "object"}
+                }
+            }),
+        ),
+        module_write(
+            RUN_CONFORMANCE_FUNCTION,
+            "record bounded package runtime conformance evidence",
+            run_conformance_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::Medium,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "evidence",
+            WORKER_PACKAGE_KIND,
+            ACTIVATION_RECORD_KIND,
+        ])),
     ]
     .into_iter()
     .map(|definition| handled_registration(definition, handler.clone()))
@@ -250,6 +318,11 @@ impl InProcessFunctionHandler for ModulePrimitiveHandler {
             CHECK_HEALTH_FUNCTION => self.check_health(&invocation).await,
             VERIFY_INTEGRITY_FUNCTION => self.verify_integrity(&invocation).await,
             RECOVER_ACTIVATION_FUNCTION => self.recover_activation(&invocation).await,
+            VERIFY_SOURCE_FUNCTION => self.verify_source(&invocation),
+            APPROVE_SOURCE_FUNCTION => self.approve_source(&invocation),
+            REVOKE_SOURCE_APPROVAL_FUNCTION => self.revoke_source_approval(&invocation),
+            POLICY_DECIDE_FUNCTION => self.policy_decide(&invocation),
+            RUN_CONFORMANCE_FUNCTION => self.run_conformance(&invocation).await,
             _ => Err(EngineError::NotFound {
                 kind: "function",
                 id: invocation.function_id.to_string(),
@@ -374,6 +447,7 @@ impl ModulePrimitiveHandler {
             EngineError::PolicyViolation("module::register_package requires manifest".to_owned())
         })?;
         validate_manifest(&manifest)?;
+        let manifest = normalize_package_manifest(manifest)?;
         let package_id = required_value_str(&manifest, "packageId")?;
         let resource_id = package_resource_id(package_id);
         let existing = self.inspect_resource(&resource_id)?;
@@ -1069,7 +1143,431 @@ struct IntegrityOutcome {
     checked_at: String,
 }
 
+struct SourcePolicyEvaluation {
+    decision: &'static str,
+    reasons: Vec<String>,
+    missing_prerequisites: Vec<String>,
+    source_trust: Value,
+    approval: Value,
+    conformance: Value,
+}
+
+struct SourceVerification {
+    source_kind: String,
+    package_digest: String,
+    effective_trust_tier: String,
+    signature_verification: Value,
+    findings: Vec<Value>,
+    checked_at: String,
+}
+
 impl ModulePrimitiveHandler {
+    fn verify_source(&self, invocation: &Invocation) -> Result<Value> {
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
+        let mode = optional_string(invocation.payload.get("mode"))?
+            .unwrap_or_else(|| "on_demand".to_owned());
+        if !matches!(mode.as_str(), "on_demand" | "scheduled" | "registration") {
+            return Err(EngineError::PolicyViolation(format!(
+                "unsupported module source verification mode {mode}"
+            )));
+        }
+        let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        if let Some(expected) = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+        {
+            ensure_expected_current_version(&package, &expected)?;
+        }
+        let current = current_version(&package).ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "worker_package {package_resource_id} has no current version"
+            ))
+        })?;
+        if current.version_id != package_version_id {
+            return Err(EngineError::PolicyViolation(format!(
+                "packageVersionId {package_version_id} is not current package version {}",
+                current.version_id
+            )));
+        }
+        let mut manifest = current.payload.clone();
+        let verification = source_verification(&manifest, |reference| {
+            self.verify_materialized_ref(reference)
+        })?;
+        if !verification.findings.is_empty() {
+            return Err(EngineError::PolicyViolation(format!(
+                "source verification failed: {}",
+                verification
+                    .findings
+                    .iter()
+                    .filter_map(|finding| finding.get("code").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        let evidence = self.create_evidence_resource(
+            invocation,
+            &format!("module package {package_resource_id} source verified"),
+            VERIFY_SOURCE_FUNCTION,
+            &package_resource_id,
+            json!({
+                "mode": mode,
+                "packageVersionId": package_version_id,
+                "packageDigest": verification.package_digest,
+                "sourceKind": verification.source_kind,
+                "effectiveTrustTier": verification.effective_trust_tier,
+                "signatureVerification": verification.signature_verification,
+                "verifiedAt": verification.checked_at,
+            }),
+        )?;
+        manifest["sourceDigest"] = json!(verification.package_digest);
+        manifest["sourceTrustStatus"] = json!(SOURCE_STATUS_VERIFIED);
+        manifest["effectiveTrustTier"] = json!(verification.effective_trust_tier);
+        manifest["signatureVerification"] = verification.signature_verification.clone();
+        manifest["sourceEvidenceRefs"] = append_value_array(
+            manifest.get("sourceEvidenceRefs"),
+            evidence.reference.clone(),
+        );
+        if !manifest
+            .get("policyDiagnostics")
+            .is_some_and(Value::is_object)
+        {
+            manifest["policyDiagnostics"] = json!({});
+        }
+        manifest["policyDiagnostics"]["source"] = json!({
+            "status": SOURCE_STATUS_VERIFIED,
+            "checkedAt": verification.checked_at,
+            "evidenceRef": evidence.reference,
+        });
+        let version = self.update_resource(UpdateResource {
+            resource_id: package_resource_id.clone(),
+            expected_current_version_id: Some(package_version_id),
+            lifecycle: Some(package.resource.lifecycle.clone()),
+            payload: manifest.clone(),
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        let package_ref =
+            resource_ref_from_version(&version, WORKER_PACKAGE_KIND, "source_verified");
+        Ok(json!({
+            "sourceVerification": {
+                "status": SOURCE_STATUS_VERIFIED,
+                "packageDigest": manifest["sourceDigest"],
+                "effectiveTrustTier": manifest["effectiveTrustTier"],
+                "evidenceRef": evidence.reference,
+            },
+            "resource": package.resource,
+            "version": version,
+            "evidence": evidence.resource,
+            "resourceRefs": [evidence.reference, package_ref],
+        }))
+    }
+
+    fn approve_source(&self, invocation: &Invocation) -> Result<Value> {
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
+        let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        let manifest = version_payload(&package, &package_version_id)?;
+        ensure_version_is_current(&package, &package_version_id)?;
+        let package_id = required_value_str(&manifest, "packageId")?;
+        if required_value_str(&invocation.payload, "packageId")? != package_id {
+            return Err(EngineError::PolicyViolation(
+                "source approval packageId does not match package resource".to_owned(),
+            ));
+        }
+        let package_digest = required_value_str(&manifest, "packageDigest")?;
+        if required_value_str(&invocation.payload, "packageDigest")? != package_digest {
+            return Err(EngineError::PolicyViolation(
+                "source approval packageDigest does not match package resource".to_owned(),
+            ));
+        }
+        if source_kind(&manifest)? != LOCAL_DIGEST_PINNED {
+            return Err(EngineError::PolicyViolation(
+                "module::approve_source only approves local_digest_pinned package sources"
+                    .to_owned(),
+            ));
+        }
+        if manifest.get("sourceTrustStatus").and_then(Value::as_str) != Some(SOURCE_STATUS_VERIFIED)
+        {
+            return Err(EngineError::PolicyViolation(
+                "source approval requires verified package source evidence".to_owned(),
+            ));
+        }
+        let trust_tier_ceiling = required_string_owned(&invocation.payload, "trustTierCeiling")?;
+        if trust_tier_ceiling != LOCAL_DIGEST_PINNED {
+            return Err(EngineError::PolicyViolation(format!(
+                "source approval trustTierCeiling {trust_tier_ceiling} exceeds local_digest_pinned source"
+            )));
+        }
+        let expires_at = parse_datetime(required_value_str(&invocation.payload, "expiresAt")?)?;
+        if expires_at <= Utc::now() {
+            return Err(EngineError::PolicyViolation(
+                "source approval expiresAt must be in the future".to_owned(),
+            ));
+        }
+        let grant_ceiling =
+            required_object(invocation.payload.get("grantCeiling"), "grantCeiling")?;
+        let worker_id = manifest
+            .get("runtimeEntryPoint")
+            .and_then(|entry| entry.get("workerId"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "source approval requires runtimeEntryPoint.workerId".to_owned(),
+                )
+            })?;
+        let ceiling_request = child_grant_from_payload(
+            invocation,
+            &manifest,
+            &WorkerId::new(worker_id.to_owned())?,
+            grant_ceiling,
+        )?;
+        ensure_grant_request_narrows_caller(self, invocation, &ceiling_request)?;
+        let (scope, scope_token) = resource_scope_and_token(invocation)?;
+        let reason = required_string_owned(&invocation.payload, "reason")?;
+        reject_raw_secrets(&json!({"reason": reason}))?;
+        let decision_payload = json!({
+            "status": "approved",
+            "summary": format!("Approved local package source {package_id} for scope {scope_token}"),
+            "metadata": {
+                "decisionType": "module_source_approval",
+                "packageResourceId": package_resource_id,
+                "packageVersionId": package_version_id,
+                "packageId": package_id,
+                "packageDigest": package_digest,
+                "scope": scope_token,
+                "trustTierCeiling": trust_tier_ceiling,
+                "grantCeiling": grant_ceiling,
+                "expiresAt": expires_at.to_rfc3339(),
+                "operatorActor": invocation.causal_context.actor_id.as_str(),
+                "reason": reason,
+                "approvedAt": Utc::now().to_rfc3339(),
+            }
+        });
+        let decision = self.create_decision_resource(
+            invocation,
+            decision_payload.clone(),
+            Some(scope),
+            &package_resource_id,
+            "supports",
+        )?;
+        Ok(json!({
+            "decision": decision_payload,
+            "resource": decision.resource,
+            "resourceRefs": [decision.reference],
+        }))
+    }
+
+    fn revoke_source_approval(&self, invocation: &Invocation) -> Result<Value> {
+        let decision_resource_id =
+            required_string_owned(&invocation.payload, "decisionResourceId")?;
+        let reason = required_string_owned(&invocation.payload, "reason")?;
+        reject_raw_secrets(&json!({"reason": reason}))?;
+        let inspection = require_inspection(self, &decision_resource_id, "decision")?;
+        let current = current_version(&inspection).ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "decision {decision_resource_id} has no current version"
+            ))
+        })?;
+        let mut payload = current.payload.clone();
+        if payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("decisionType"))
+            .and_then(Value::as_str)
+            != Some("module_source_approval")
+        {
+            return Err(EngineError::PolicyViolation(
+                "module::revoke_source_approval requires a module source approval decision"
+                    .to_owned(),
+            ));
+        }
+        payload["status"] = json!("revoked");
+        payload["summary"] = json!("Revoked module source approval");
+        payload["metadata"]["revokedAt"] = json!(Utc::now().to_rfc3339());
+        payload["metadata"]["revokedBy"] = json!(invocation.causal_context.actor_id.as_str());
+        payload["metadata"]["revocationReason"] = json!(reason);
+        let version = self.update_resource(UpdateResource {
+            resource_id: decision_resource_id.clone(),
+            expected_current_version_id: optional_string(
+                invocation.payload.get("expectedCurrentVersionId"),
+            )?
+            .or_else(|| inspection.resource.current_version_id.clone()),
+            lifecycle: Some("archived".to_owned()),
+            payload: payload.clone(),
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        let package_resource_id = payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("packageResourceId"))
+            .and_then(Value::as_str)
+            .unwrap_or(&decision_resource_id);
+        let evidence = self.create_evidence_resource(
+            invocation,
+            &format!("module source approval {decision_resource_id} revoked"),
+            REVOKE_SOURCE_APPROVAL_FUNCTION,
+            package_resource_id,
+            json!({
+                "decisionResourceId": decision_resource_id,
+                "reason": payload["metadata"]["revocationReason"],
+                "revokedAt": payload["metadata"]["revokedAt"],
+            }),
+        )?;
+        Ok(json!({
+            "decision": payload,
+            "version": version,
+            "evidence": evidence.resource,
+            "resourceRefs": [
+                resource_ref_from_version(&version, "decision", "revoked"),
+                evidence.reference
+            ],
+        }))
+    }
+
+    fn policy_decide(&self, invocation: &Invocation) -> Result<Value> {
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
+        let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        let manifest = version_payload(&package, &package_version_id)?;
+        let (_, scope_token) = resource_scope_and_token(invocation)?;
+        let child_request = invocation
+            .payload
+            .get("childGrantRequest")
+            .and_then(Value::as_object)
+            .map(|request| {
+                let worker_id = manifest
+                    .get("runtimeEntryPoint")
+                    .and_then(|entry| entry.get("workerId"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        EngineError::PolicyViolation(
+                            "policy decision requires runtimeEntryPoint.workerId".to_owned(),
+                        )
+                    })?;
+                child_grant_from_payload(
+                    invocation,
+                    &manifest,
+                    &WorkerId::new(worker_id.to_owned())?,
+                    request,
+                )
+            })
+            .transpose()?;
+        let evaluation = self.evaluate_source_policy(
+            &manifest,
+            &package_resource_id,
+            &package_version_id,
+            &scope_token,
+            child_request.as_ref(),
+        )?;
+        Ok(policy_evaluation_value(evaluation))
+    }
+
+    async fn run_conformance(&self, invocation: &Invocation) -> Result<Value> {
+        let target_type = required_string_owned(&invocation.payload, "targetType")?;
+        let resource_id = required_string_owned(&invocation.payload, "resourceId")?;
+        let resource_version_id = required_string_owned(&invocation.payload, "resourceVersionId")?;
+        let mode =
+            optional_string(invocation.payload.get("mode"))?.unwrap_or_else(|| "static".to_owned());
+        if !matches!(mode.as_str(), "static" | "activation" | "cleanup") {
+            return Err(EngineError::PolicyViolation(format!(
+                "unsupported module conformance mode {mode}"
+            )));
+        }
+        let inspection = require_inspection(self, &resource_id, &target_type)?;
+        if let Some(expected) = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+        {
+            ensure_expected_current_version(&inspection, &expected)?;
+        }
+        let target_payload = version_payload(&inspection, &resource_version_id)?;
+        let conformance = match target_type.as_str() {
+            WORKER_PACKAGE_KIND => self.conformance_for_package(invocation, &target_payload)?,
+            MODULE_CONFIG_KIND => self.verify_config_payload(&target_payload)?,
+            ACTIVATION_RECORD_KIND => {
+                self.verify_activation_payload(invocation, &target_payload)
+                    .await?
+            }
+            other => {
+                return Err(EngineError::PolicyViolation(format!(
+                    "module::run_conformance does not support resource kind {other}"
+                )));
+            }
+        };
+        let evidence = self.create_evidence_resource(
+            invocation,
+            &format!(
+                "module conformance for {resource_id} is {}",
+                conformance.status
+            ),
+            RUN_CONFORMANCE_FUNCTION,
+            &resource_id,
+            json!({
+                "targetType": target_type,
+                "resourceVersionId": resource_version_id,
+                "mode": mode,
+                "status": conformance.status,
+                "findings": conformance.findings,
+                "checkedAt": conformance.checked_at,
+            }),
+        )?;
+        let mut refs = vec![evidence.reference.clone()];
+        let mut updated = Value::Null;
+        if matches!(
+            target_type.as_str(),
+            WORKER_PACKAGE_KIND | ACTIVATION_RECORD_KIND
+        ) {
+            let expected = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+                .unwrap_or(resource_version_id.clone());
+            ensure_expected_current_version(&inspection, &expected)?;
+            let mut payload = target_payload.clone();
+            if target_type == WORKER_PACKAGE_KIND {
+                payload["conformanceEvidenceRefs"] = append_value_array(
+                    payload.get("conformanceEvidenceRefs"),
+                    evidence.reference.clone(),
+                );
+                payload["policyDiagnostics"]["conformance"] = json!({
+                    "status": conformance.status,
+                    "checkedAt": conformance.checked_at,
+                    "evidenceRef": evidence.reference,
+                });
+            } else {
+                payload["integrityDiagnostics"] = json!({
+                    "status": conformance.status,
+                    "checkedAt": conformance.checked_at,
+                    "findings": conformance.findings,
+                    "evidenceRef": evidence.reference,
+                });
+            }
+            let version = self.update_resource(UpdateResource {
+                resource_id: resource_id.clone(),
+                expected_current_version_id: Some(expected),
+                lifecycle: Some(inspection.resource.lifecycle.clone()),
+                payload: payload.clone(),
+                state: None,
+                locations: Vec::new(),
+                trace_id: invocation.causal_context.trace_id.clone(),
+                invocation_id: Some(invocation.id.clone()),
+            })?;
+            refs.push(resource_ref_from_version(
+                &version,
+                &target_type,
+                "conformance_checked",
+            ));
+            updated = json!({
+                "resourceId": resource_id,
+                "payload": payload,
+                "version": version,
+            });
+        }
+        Ok(json!({
+            "conformance": {"status": conformance.status, "findings": conformance.findings, "checkedAt": conformance.checked_at},
+            "evidence": evidence.resource,
+            "updated": updated,
+            "resourceRefs": refs,
+        }))
+    }
+
     async fn activate_inner(&self, invocation: &Invocation, mode: ActivationMode) -> Result<Value> {
         let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
         let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
@@ -1121,6 +1619,13 @@ impl ModulePrimitiveHandler {
                 invocation.payload.get("childGrantRequest"),
                 "childGrantRequest",
             )?,
+        )?;
+        self.ensure_activation_source_policy(
+            &manifest,
+            &package_resource_id,
+            &package_version_id,
+            &scope_token,
+            &child_request,
         )?;
         let mut spawned_local_process = false;
         let (worker, grant, spawn_invocation_id, spawn_result, worker_lifecycle) =
@@ -1563,7 +2068,10 @@ impl ModulePrimitiveHandler {
                 "grantStatus": "missing",
                 "workerStatus": "missing",
                 "registeredCapabilityStatus": "missing",
-                "healthStatus": "unknown"
+                "healthStatus": "unknown",
+                "sourceTrustStatus": "missing",
+                "sourceApprovalStatus": "missing",
+                "conformanceStatus": "missing"
             });
         };
         let manifest = current_payload(package).unwrap_or(Value::Null);
@@ -1648,6 +2156,31 @@ impl ModulePrimitiveHandler {
             .and_then(|health| health.get("status"))
             .and_then(Value::as_str)
             .unwrap_or("unknown");
+        let source_trust_status = manifest
+            .get("sourceTrustStatus")
+            .and_then(Value::as_str)
+            .unwrap_or("missing");
+        let package_version_id = package.resource.current_version_id.as_deref().unwrap_or("");
+        let source_approval_status = self
+            .source_approval_status_for_package(
+                &manifest,
+                &package.resource.resource_id,
+                package_version_id,
+            )
+            .unwrap_or("invalid");
+        let conformance_status = manifest
+            .get("policyDiagnostics")
+            .and_then(|diagnostics| diagnostics.get("conformance"))
+            .and_then(|conformance| conformance.get("status"))
+            .and_then(Value::as_str)
+            .or_else(|| {
+                manifest
+                    .get("conformanceEvidenceRefs")
+                    .and_then(Value::as_array)
+                    .filter(|refs| !refs.is_empty())
+                    .map(|_| "recorded")
+            })
+            .unwrap_or("missing");
         json!({
             "digestStatus": digest_status,
             "fileHashStatus": file_hash_status,
@@ -1657,6 +2190,66 @@ impl ModulePrimitiveHandler {
             "workerStatus": worker_status,
             "registeredCapabilityStatus": registered_capability_status,
             "healthStatus": health_status,
+            "sourceTrustStatus": source_trust_status,
+            "sourceApprovalStatus": source_approval_status,
+            "conformanceStatus": conformance_status,
+        })
+    }
+
+    fn source_approval_status_for_package(
+        &self,
+        manifest: &Value,
+        package_resource_id: &str,
+        package_version_id: &str,
+    ) -> Result<&'static str> {
+        if source_kind(manifest)? == BUILTIN_PROVENANCE {
+            return Ok("not_required");
+        }
+        let package_digest = required_value_str(manifest, "packageDigest")?;
+        let decisions = self.list_resources(ListResources {
+            kind: Some("decision".to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        let mut saw_revoked = false;
+        for decision in decisions {
+            let Some(inspection) = self.inspect_resource(&decision.resource_id)? else {
+                continue;
+            };
+            let Some(payload) = current_payload(&inspection) else {
+                continue;
+            };
+            let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
+                continue;
+            };
+            let matches_target = metadata.get("decisionType").and_then(Value::as_str)
+                == Some("module_source_approval")
+                && metadata.get("packageResourceId").and_then(Value::as_str)
+                    == Some(package_resource_id)
+                && metadata.get("packageVersionId").and_then(Value::as_str)
+                    == Some(package_version_id)
+                && metadata.get("packageDigest").and_then(Value::as_str) == Some(package_digest);
+            if !matches_target {
+                continue;
+            }
+            if payload.get("status").and_then(Value::as_str) == Some("approved")
+                && decision.lifecycle != "archived"
+                && metadata
+                    .get("expiresAt")
+                    .and_then(Value::as_str)
+                    .map(parse_datetime)
+                    .transpose()?
+                    .is_some_and(|expires_at| expires_at > Utc::now())
+            {
+                return Ok("approved");
+            }
+            saw_revoked = true;
+        }
+        Ok(if saw_revoked {
+            "revoked_or_expired"
+        } else {
+            "missing"
         })
     }
 
@@ -1968,6 +2561,305 @@ impl ModulePrimitiveHandler {
         Ok(integrity_outcome(findings))
     }
 
+    fn verify_materialized_ref(&self, reference: &ResourceVersionRef) -> Result<()> {
+        let inspection = require_inspection(self, &reference.resource_id, "materialized_file")?;
+        let version = inspection
+            .versions
+            .iter()
+            .find(|version| version.version_id == reference.version_id)
+            .ok_or_else(|| EngineError::NotFound {
+                kind: "resource_version",
+                id: reference.version_id.clone(),
+            })?;
+        if let Some(expected) = &reference.content_hash
+            && &version.content_hash != expected
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "materialized file {} hash mismatch: expected {expected}, got {}",
+                reference.resource_id, version.content_hash
+            )));
+        }
+        Ok(())
+    }
+
+    fn conformance_for_package(
+        &self,
+        invocation: &Invocation,
+        manifest: &Value,
+    ) -> Result<IntegrityOutcome> {
+        let mut findings = Vec::new();
+        let package_integrity = self.verify_package_payload(manifest)?;
+        extend_findings(&mut findings, &package_integrity.findings);
+        if source_kind(manifest)? == LOCAL_DIGEST_PINNED {
+            if manifest.get("sourceTrustStatus").and_then(Value::as_str)
+                != Some(SOURCE_STATUS_VERIFIED)
+            {
+                findings.push(json!({"code": "source_unverified"}));
+            }
+            if manifest
+                .get("sourceEvidenceRefs")
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty)
+            {
+                findings.push(json!({"code": "source_evidence_missing"}));
+            }
+        }
+        if let Some(request) = invocation
+            .payload
+            .get("childGrantRequest")
+            .and_then(Value::as_object)
+        {
+            let worker_id = manifest
+                .get("runtimeEntryPoint")
+                .and_then(|entry| entry.get("workerId"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    EngineError::PolicyViolation(
+                        "conformance grant simulation requires runtimeEntryPoint.workerId"
+                            .to_owned(),
+                    )
+                })?;
+            if let Err(error) = child_grant_from_payload(
+                invocation,
+                manifest,
+                &WorkerId::new(worker_id.to_owned())?,
+                request,
+            )
+            .and_then(|child| ensure_grant_request_narrows_caller(self, invocation, &child))
+            {
+                findings
+                    .push(json!({"code": "grant_simulation_failed", "message": error.to_string()}));
+            }
+        }
+        Ok(integrity_outcome(findings))
+    }
+
+    fn evaluate_source_policy(
+        &self,
+        manifest: &Value,
+        package_resource_id: &str,
+        package_version_id: &str,
+        scope_token: &str,
+        child_request: Option<&DeriveGrant>,
+    ) -> Result<SourcePolicyEvaluation> {
+        let source_kind = source_kind(manifest)?;
+        let mut reasons = Vec::new();
+        let mut missing = Vec::new();
+        let source_trust = json!({
+            "kind": source_kind,
+            "status": manifest.get("sourceTrustStatus").cloned().unwrap_or_else(|| json!(SOURCE_STATUS_UNVERIFIED)),
+            "effectiveTrustTier": manifest.get("effectiveTrustTier").cloned().unwrap_or_else(|| json!("untrusted")),
+            "evidenceRefs": manifest.get("sourceEvidenceRefs").cloned().unwrap_or_else(|| json!([])),
+        });
+        let conformance = json!({
+            "evidenceRefs": manifest.get("conformanceEvidenceRefs").cloned().unwrap_or_else(|| json!([])),
+            "status": manifest
+                .get("policyDiagnostics")
+                .and_then(|diagnostics| diagnostics.get("conformance"))
+                .and_then(|conformance| conformance.get("status"))
+                .and_then(Value::as_str)
+                .unwrap_or("not_required")
+        });
+        let approval = if source_kind == BUILTIN_PROVENANCE {
+            json!({"status": "not_required"})
+        } else {
+            match self.active_source_approval(
+                manifest,
+                package_resource_id,
+                package_version_id,
+                scope_token,
+                child_request,
+            )? {
+                Some(value) => value,
+                None => {
+                    reasons.push("source approval is missing, revoked, expired, or narrower than requested authority".to_owned());
+                    missing.push("source_approval".to_owned());
+                    json!({"status": "missing"})
+                }
+            }
+        };
+        if source_kind == BUILTIN_PROVENANCE {
+            if required_value_str(manifest, "signatureStatus")? != SOURCE_STATUS_TRUSTED_BUILTIN {
+                reasons.push("builtin package signatureStatus is not trusted_builtin".to_owned());
+            }
+        } else if source_kind == LOCAL_DIGEST_PINNED {
+            if manifest.get("sourceTrustStatus").and_then(Value::as_str)
+                != Some(SOURCE_STATUS_VERIFIED)
+            {
+                reasons.push("source verification is missing or stale".to_owned());
+                missing.push("source_verification".to_owned());
+            }
+            if manifest
+                .get("sourceEvidenceRefs")
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty)
+            {
+                reasons.push("source verification evidence is missing".to_owned());
+                missing.push("source_evidence".to_owned());
+            }
+        }
+        if let Some(policy) = manifest.get("packagePolicy")
+            && policy
+                .get("requiresConformanceBeforeActivation")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            && manifest
+                .get("conformanceEvidenceRefs")
+                .and_then(Value::as_array)
+                .is_none_or(Vec::is_empty)
+        {
+            reasons.push("package policy requires conformance evidence".to_owned());
+            missing.push("conformance_evidence".to_owned());
+        }
+        Ok(SourcePolicyEvaluation {
+            decision: if reasons.is_empty() { "allow" } else { "deny" },
+            reasons,
+            missing_prerequisites: missing,
+            source_trust,
+            approval,
+            conformance,
+        })
+    }
+
+    fn ensure_activation_source_policy(
+        &self,
+        manifest: &Value,
+        package_resource_id: &str,
+        package_version_id: &str,
+        scope_token: &str,
+        child_request: &DeriveGrant,
+    ) -> Result<()> {
+        let evaluation = self.evaluate_source_policy(
+            manifest,
+            package_resource_id,
+            package_version_id,
+            scope_token,
+            Some(child_request),
+        )?;
+        if evaluation.decision == "allow" {
+            Ok(())
+        } else {
+            Err(EngineError::PolicyViolation(format!(
+                "source policy denied activation: {}",
+                evaluation.reasons.join("; ")
+            )))
+        }
+    }
+
+    fn active_source_approval(
+        &self,
+        manifest: &Value,
+        package_resource_id: &str,
+        package_version_id: &str,
+        scope_token: &str,
+        child_request: Option<&DeriveGrant>,
+    ) -> Result<Option<Value>> {
+        let package_digest = required_value_str(manifest, "packageDigest")?;
+        let decisions = self.list_resources(ListResources {
+            kind: Some("decision".to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        for decision in decisions {
+            if matches!(decision.lifecycle.as_str(), "archived") {
+                continue;
+            }
+            let Some(inspection) = self.inspect_resource(&decision.resource_id)? else {
+                continue;
+            };
+            let Some(payload) = current_payload(&inspection) else {
+                continue;
+            };
+            if payload.get("status").and_then(Value::as_str) != Some("approved") {
+                continue;
+            }
+            let metadata = payload.get("metadata").and_then(Value::as_object);
+            let Some(metadata) = metadata else {
+                continue;
+            };
+            let matches_target = metadata.get("decisionType").and_then(Value::as_str)
+                == Some("module_source_approval")
+                && metadata.get("packageResourceId").and_then(Value::as_str)
+                    == Some(package_resource_id)
+                && metadata.get("packageVersionId").and_then(Value::as_str)
+                    == Some(package_version_id)
+                && metadata.get("packageDigest").and_then(Value::as_str) == Some(package_digest)
+                && metadata.get("scope").and_then(Value::as_str) == Some(scope_token);
+            if !matches_target {
+                continue;
+            }
+            let expires_at = metadata
+                .get("expiresAt")
+                .and_then(Value::as_str)
+                .map(parse_datetime)
+                .transpose()?
+                .ok_or_else(|| {
+                    EngineError::PolicyViolation(
+                        "source approval decision is missing expiresAt".to_owned(),
+                    )
+                })?;
+            if expires_at <= Utc::now() {
+                continue;
+            }
+            if let Some(child_request) = child_request {
+                let ceiling = metadata
+                    .get("grantCeiling")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| {
+                        EngineError::PolicyViolation(
+                            "source approval decision missing grantCeiling".to_owned(),
+                        )
+                    })?;
+                ensure_grant_request_within_ceiling(child_request, ceiling)?;
+            }
+            let current = current_version(&inspection);
+            return Ok(Some(json!({
+                "status": "approved",
+                "decisionResourceId": decision.resource_id,
+                "decisionVersionId": current.map(|version| version.version_id.clone()),
+                "expiresAt": expires_at.to_rfc3339(),
+            })));
+        }
+        Ok(None)
+    }
+
+    fn create_decision_resource(
+        &self,
+        invocation: &Invocation,
+        payload: Value,
+        scope: Option<EngineResourceScope>,
+        target_resource_id: &str,
+        relation: &str,
+    ) -> Result<EvidenceCreation> {
+        reject_raw_secrets(&payload)?;
+        let resource = self.create_resource(CreateResource {
+            resource_id: None,
+            kind: "decision".to_owned(),
+            schema_id: None,
+            scope: scope.unwrap_or(EngineResourceScope::System),
+            owner_worker_id: WorkerId::new(MODULE_WORKER_ID)?,
+            owner_actor_id: invocation.causal_context.actor_id.clone(),
+            lifecycle: Some("final".to_owned()),
+            policy: json!({"managedBy": "module"}),
+            initial_payload: Some(payload),
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        link_if_possible(
+            self,
+            &resource.resource_id,
+            target_resource_id,
+            relation,
+            invocation,
+        );
+        Ok(EvidenceCreation {
+            reference: resource_ref_from_resource(&resource, "decision"),
+            resource,
+        })
+    }
+
     fn create_evidence_resource(
         &self,
         invocation: &Invocation,
@@ -2215,6 +3107,143 @@ fn validate_manifest(manifest: &Value) -> Result<()> {
     reject_raw_secrets(manifest)?;
     reject_raw_secrets(manifest.get("redactionPolicy").unwrap())?;
     Ok(())
+}
+
+fn normalize_package_manifest(mut manifest: Value) -> Result<Value> {
+    let digest = required_value_str(&manifest, "packageDigest")?.to_owned();
+    let provenance = manifest
+        .get("sourceProvenance")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let kind = source_kind(&manifest)?;
+    let (source_status, effective_trust, signature_verification) = match kind.as_str() {
+        BUILTIN_PROVENANCE => (
+            SOURCE_STATUS_TRUSTED_BUILTIN,
+            BUILTIN_PROVENANCE,
+            json!({"status": SOURCE_STATUS_TRUSTED_BUILTIN}),
+        ),
+        LOCAL_DIGEST_PINNED => (
+            SOURCE_STATUS_UNVERIFIED,
+            "untrusted",
+            json!({"status": "not_verified"}),
+        ),
+        _ => unreachable!("validate_manifest rejects unsupported provenance"),
+    };
+    manifest["sourceRef"] = json!({"provenance": provenance});
+    manifest["sourceDigest"] = json!(digest);
+    manifest["sourceTrustStatus"] = json!(source_status);
+    manifest["effectiveTrustTier"] = json!(effective_trust);
+    if manifest.get("signature").is_none() {
+        manifest["signature"] = Value::Null;
+    }
+    if manifest.get("signatureKeyRef").is_none() {
+        manifest["signatureKeyRef"] = Value::Null;
+    }
+    manifest["signatureVerification"] = signature_verification;
+    manifest["sourceEvidenceRefs"] = json!([]);
+    manifest["sourceApprovalRefs"] = json!([]);
+    manifest["conformanceEvidenceRefs"] = json!([]);
+    manifest["policyDiagnostics"] = json!({
+        "source": {"status": source_status},
+        "conformance": {"status": "not_required"},
+    });
+    Ok(manifest)
+}
+
+fn source_kind(manifest: &Value) -> Result<String> {
+    required_object(manifest.get("sourceProvenance"), "sourceProvenance")?
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            EngineError::PolicyViolation("package sourceProvenance requires kind".to_owned())
+        })
+}
+
+fn source_verification<F>(manifest: &Value, mut verify_ref: F) -> Result<SourceVerification>
+where
+    F: FnMut(&ResourceVersionRef) -> Result<()>,
+{
+    let checked_at = Utc::now().to_rfc3339();
+    let mut findings = Vec::new();
+    if let Err(error) = validate_manifest(manifest) {
+        findings.push(json!({"code": "manifest_invalid", "message": error.to_string()}));
+    }
+    let package_digest = required_value_str(manifest, "packageDigest")?.to_owned();
+    let computed = manifest_digest(manifest)?;
+    if package_digest != computed {
+        findings.push(json!({
+            "code": "package_digest_mismatch",
+            "expected": computed,
+            "actual": package_digest,
+        }));
+    }
+    let kind = source_kind(manifest)?;
+    if manifest
+        .get("sourceDigest")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value != package_digest)
+    {
+        findings.push(json!({"code": "source_digest_mismatch"}));
+    }
+    match kind.as_str() {
+        BUILTIN_PROVENANCE => {
+            if required_value_str(manifest, "signatureStatus")? != SOURCE_STATUS_TRUSTED_BUILTIN {
+                findings.push(json!({"code": "builtin_signature_untrusted"}));
+            }
+        }
+        LOCAL_DIGEST_PINNED => {
+            match resource_version_refs(manifest.get("declaredFiles"), "declaredFiles") {
+                Ok(refs) => {
+                    for reference in refs {
+                        if let Err(error) = verify_ref(&reference) {
+                            findings.push(json!({
+                                "code": "declared_file_invalid",
+                                "resourceId": reference.resource_id,
+                                "versionId": reference.version_id,
+                                "message": error.to_string(),
+                            }));
+                        }
+                    }
+                }
+                Err(error) => {
+                    findings.push(
+                        json!({"code": "declared_files_invalid", "message": error.to_string()}),
+                    );
+                }
+            }
+        }
+        other => findings.push(json!({"code": "unsupported_source_kind", "kind": other})),
+    }
+    if manifest
+        .get("signature")
+        .is_some_and(|value| !value.is_null())
+        || manifest
+            .get("signatureKeyRef")
+            .is_some_and(|value| !value.is_null())
+    {
+        findings.push(json!({"code": "signature_verification_unsupported"}));
+    }
+    if let Err(error) = reject_raw_secrets(manifest) {
+        findings.push(json!({"code": "raw_secret", "message": error.to_string()}));
+    }
+    let effective_trust_tier = match kind.as_str() {
+        BUILTIN_PROVENANCE => BUILTIN_PROVENANCE,
+        LOCAL_DIGEST_PINNED => LOCAL_DIGEST_PINNED,
+        _ => "untrusted",
+    }
+    .to_owned();
+    Ok(SourceVerification {
+        source_kind: kind,
+        package_digest,
+        effective_trust_tier,
+        signature_verification: json!({
+            "status": if findings.is_empty() { "verified" } else { "invalid" },
+            "method": "local_digest",
+        }),
+        findings,
+        checked_at,
+    })
 }
 
 fn declared_capabilities(manifest: &Value) -> Result<Vec<DeclaredCapability>> {
@@ -2947,6 +3976,147 @@ fn ensure_subset(child: &[String], parent: &[String], label: &str) -> Result<()>
     Ok(())
 }
 
+fn ensure_grant_request_narrows_caller(
+    host: &ModulePrimitiveHandler,
+    invocation: &Invocation,
+    request: &DeriveGrant,
+) -> Result<()> {
+    let parent = host
+        .inspect_grant(&invocation.causal_context.authority_grant_id)?
+        .ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "caller grant {} is not inspectable",
+                invocation.causal_context.authority_grant_id
+            ))
+        })?;
+    if parent.lifecycle != EngineGrantLifecycle::Active {
+        return Err(EngineError::PolicyViolation(format!(
+            "caller grant {} is not active",
+            parent.grant_id
+        )));
+    }
+    ensure_subset(
+        &request.allowed_capabilities,
+        &parent.allowed_capabilities,
+        "caller grant capabilities",
+    )?;
+    ensure_subset(
+        &request.allowed_namespaces,
+        &parent.allowed_namespaces,
+        "caller grant namespaces",
+    )?;
+    ensure_subset(
+        &request.allowed_authority_scopes,
+        &parent.allowed_authority_scopes,
+        "caller grant authority scopes",
+    )?;
+    ensure_subset(
+        &request.allowed_resource_kinds,
+        &parent.allowed_resource_kinds,
+        "caller grant resource kinds",
+    )?;
+    ensure_subset(
+        &request.resource_selectors,
+        &parent.resource_selectors,
+        "caller grant resource selectors",
+    )?;
+    ensure_subset(
+        &request.file_roots,
+        &parent.file_roots,
+        "caller grant file roots",
+    )?;
+    if network_rank(&request.network_policy)? > network_rank(&parent.network_policy)? {
+        return Err(EngineError::PolicyViolation(
+            "requested network policy exceeds caller grant".to_owned(),
+        ));
+    }
+    if request.max_risk > parent.max_risk {
+        return Err(EngineError::PolicyViolation(
+            "requested maxRisk exceeds caller grant".to_owned(),
+        ));
+    }
+    if let (Some(child), Some(parent)) = (request.expires_at, parent.expires_at)
+        && child > parent
+    {
+        return Err(EngineError::PolicyViolation(
+            "requested expiry exceeds caller grant".to_owned(),
+        ));
+    }
+    if request.can_delegate && !parent.can_delegate {
+        return Err(EngineError::PolicyViolation(
+            "requested delegation exceeds caller grant".to_owned(),
+        ));
+    }
+    if parent.approval_required && !request.approval_required {
+        return Err(EngineError::PolicyViolation(
+            "caller grant requires child approval".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_grant_request_within_ceiling(
+    request: &DeriveGrant,
+    ceiling: &serde_json::Map<String, Value>,
+) -> Result<()> {
+    ensure_subset(
+        &request.allowed_capabilities,
+        &string_array_from(ceiling.get("allowedCapabilities"), "allowedCapabilities")?,
+        "approval grant capabilities",
+    )?;
+    ensure_subset(
+        &request.allowed_namespaces,
+        &string_array_from(ceiling.get("allowedNamespaces"), "allowedNamespaces")?,
+        "approval grant namespaces",
+    )?;
+    ensure_subset(
+        &request.allowed_authority_scopes,
+        &string_array_from(
+            ceiling.get("allowedAuthorityScopes"),
+            "allowedAuthorityScopes",
+        )?,
+        "approval grant authority scopes",
+    )?;
+    ensure_subset(
+        &request.allowed_resource_kinds,
+        &string_array_from(ceiling.get("allowedResourceKinds"), "allowedResourceKinds")?,
+        "approval grant resource kinds",
+    )?;
+    ensure_subset(
+        &request.resource_selectors,
+        &string_array_from(ceiling.get("resourceSelectors"), "resourceSelectors")?,
+        "approval grant resource selectors",
+    )?;
+    ensure_subset(
+        &request.file_roots,
+        &string_array_from(ceiling.get("fileRoots"), "fileRoots")?,
+        "approval grant file roots",
+    )?;
+    if network_rank(&request.network_policy)?
+        > network_rank(required_map_str(ceiling, "networkPolicy")?)?
+    {
+        return Err(EngineError::PolicyViolation(
+            "requested network policy exceeds source approval".to_owned(),
+        ));
+    }
+    if request.max_risk > parse_risk(required_map_str(ceiling, "maxRisk")?)? {
+        return Err(EngineError::PolicyViolation(
+            "requested maxRisk exceeds source approval".to_owned(),
+        ));
+    }
+    if request.can_delegate
+        && !ceiling
+            .get("canDelegate")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return Err(EngineError::PolicyViolation(
+            "requested delegation exceeds source approval".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn ensure_same_set(child: &[String], parent: &[String], label: &str) -> Result<()> {
     ensure_subset(child, parent, label)?;
     ensure_subset(parent, child, label)?;
@@ -3065,7 +4235,22 @@ fn validate_namespace(namespace: &str) -> Result<()> {
 fn manifest_digest(manifest: &Value) -> Result<String> {
     let mut canonical = manifest.clone();
     if let Some(object) = canonical.as_object_mut() {
-        object.remove("packageDigest");
+        for field in [
+            "packageDigest",
+            "sourceRef",
+            "sourceDigest",
+            "sourceTrustStatus",
+            "effectiveTrustTier",
+            "signature",
+            "signatureKeyRef",
+            "signatureVerification",
+            "sourceEvidenceRefs",
+            "sourceApprovalRefs",
+            "conformanceEvidenceRefs",
+            "policyDiagnostics",
+        ] {
+            object.remove(field);
+        }
     }
     let bytes = serde_json::to_vec(&canonical).map_err(|error| EngineError::LedgerFailure {
         operation: "module.manifest_digest",
@@ -3096,6 +4281,20 @@ fn ensure_expected_current_version(
     }
 }
 
+fn ensure_version_is_current(
+    inspection: &EngineResourceInspection,
+    version_id: &str,
+) -> Result<()> {
+    if inspection.resource.current_version_id.as_deref() == Some(version_id) {
+        Ok(())
+    } else {
+        Err(EngineError::PolicyViolation(format!(
+            "versionId {version_id} is not current version {:?}",
+            inspection.resource.current_version_id
+        )))
+    }
+}
+
 fn append_string_array(existing: Option<&Value>, additions: Vec<String>) -> Value {
     let mut values = existing
         .and_then(Value::as_array)
@@ -3115,6 +4314,17 @@ fn append_string_array(existing: Option<&Value>, additions: Vec<String>) -> Valu
     json!(values)
 }
 
+fn append_value_array(existing: Option<&Value>, addition: Value) -> Value {
+    let mut values = existing
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if !values.iter().any(|value| value == &addition) {
+        values.push(addition);
+    }
+    Value::Array(values)
+}
+
 fn integrity_outcome(findings: Vec<Value>) -> IntegrityOutcome {
     IntegrityOutcome {
         status: if findings.is_empty() {
@@ -3125,6 +4335,17 @@ fn integrity_outcome(findings: Vec<Value>) -> IntegrityOutcome {
         findings: Value::Array(findings),
         checked_at: Utc::now().to_rfc3339(),
     }
+}
+
+fn policy_evaluation_value(evaluation: SourcePolicyEvaluation) -> Value {
+    json!({
+        "decision": evaluation.decision,
+        "reasons": evaluation.reasons,
+        "missingPrerequisites": evaluation.missing_prerequisites,
+        "sourceTrust": evaluation.source_trust,
+        "approval": evaluation.approval,
+        "conformance": evaluation.conformance,
+    })
 }
 
 fn extend_findings(target: &mut Vec<Value>, findings: &Value) {
@@ -3407,6 +4628,46 @@ fn module_actions_for_package(package_id: Option<&str>) -> Vec<Value> {
     let target = package_id.map(package_resource_id);
     vec![
         json!({
+            "functionId": VERIFY_SOURCE_FUNCTION,
+            "targetType": "package",
+            "targetField": "packageResourceId",
+            "target": target,
+            "requiredRisk": "medium",
+            "approvalRequired": false,
+        }),
+        json!({
+            "functionId": APPROVE_SOURCE_FUNCTION,
+            "targetType": "package",
+            "targetField": "packageResourceId",
+            "target": target,
+            "requiredRisk": "high",
+            "approvalRequired": true,
+        }),
+        json!({
+            "functionId": REVOKE_SOURCE_APPROVAL_FUNCTION,
+            "targetType": "package",
+            "targetField": "decisionResourceId",
+            "target": Value::Null,
+            "requiredRisk": "high",
+            "approvalRequired": true,
+        }),
+        json!({
+            "functionId": POLICY_DECIDE_FUNCTION,
+            "targetType": "package",
+            "targetField": "packageResourceId",
+            "target": target,
+            "requiredRisk": "low",
+            "approvalRequired": false,
+        }),
+        json!({
+            "functionId": RUN_CONFORMANCE_FUNCTION,
+            "targetType": "package",
+            "targetField": "resourceId",
+            "target": target,
+            "requiredRisk": "medium",
+            "approvalRequired": false,
+        }),
+        json!({
             "functionId": CONFIGURE_FUNCTION,
             "targetType": "package",
             "targetField": "packageResourceId",
@@ -3585,6 +4846,96 @@ fn recover_activation_schema() -> Value {
             "activationInvocationId": {"type": "string"},
             "expectedCurrentVersionId": {"type": "string"},
             "reason": {"type": "string"}
+        }
+    })
+}
+
+fn verify_source_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["packageResourceId", "packageVersionId"],
+        "additionalProperties": false,
+        "properties": {
+            "packageResourceId": {"type": "string"},
+            "packageVersionId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "mode": {"type": "string", "enum": ["on_demand", "scheduled", "registration"]}
+        }
+    })
+}
+
+fn approve_source_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": [
+            "packageResourceId",
+            "packageVersionId",
+            "packageDigest",
+            "packageId",
+            "scope",
+            "trustTierCeiling",
+            "grantCeiling",
+            "expiresAt",
+            "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+            "packageResourceId": {"type": "string"},
+            "packageVersionId": {"type": "string"},
+            "packageDigest": {"type": "string"},
+            "packageId": {"type": "string"},
+            "scope": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "trustTierCeiling": {"type": "string"},
+            "grantCeiling": {"type": "object"},
+            "expiresAt": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
+fn revoke_source_approval_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["decisionResourceId", "reason"],
+        "additionalProperties": false,
+        "properties": {
+            "decisionResourceId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
+fn policy_decide_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["packageResourceId", "packageVersionId", "scope"],
+        "additionalProperties": false,
+        "properties": {
+            "packageResourceId": {"type": "string"},
+            "packageVersionId": {"type": "string"},
+            "scope": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "childGrantRequest": {"type": "object"}
+        }
+    })
+}
+
+fn run_conformance_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["targetType", "resourceId", "resourceVersionId"],
+        "additionalProperties": false,
+        "properties": {
+            "targetType": {"type": "string", "enum": ["worker_package", "module_config", "activation_record"]},
+            "resourceId": {"type": "string"},
+            "resourceVersionId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "mode": {"type": "string", "enum": ["static", "activation", "cleanup"]},
+            "childGrantRequest": {"type": "object"}
         }
     })
 }
