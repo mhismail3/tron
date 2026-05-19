@@ -132,6 +132,13 @@ The resource kernel provides:
 - `resource::inspect`
 - `resource::list`
 
+Implementation ownership is intentionally narrow: `engine/resources/mod.rs` is
+only the facade, with public substrate types, built-in type definitions,
+generic validation, version hashing, fixed-catalog `ui_surface` payload
+validation, and store implementations in separate submodules. The split does
+not change the substrate model; it makes the resource rules auditable without
+reading store code, UI payload validation, and type registration in one file.
+
 The engine registers first-party resource type definitions for `artifact`,
 `goal`, `claim`, `evidence`, `decision`, `worker_package`, `module_config`,
 and `activation_record` at primitive-store startup. Thin wrappers compose the
@@ -313,6 +320,9 @@ summaries; full layouts are inspected through the surface capability.
 `ui::submit_action` validates the stored surface version, expiry, target
 revision, required grant, idempotency key, and user input before creating the
 child target invocation.
+Stored-surface diagnostics and action-target/template validation live in the
+generated UI primitive validation boundary, while the parent UI primitive owns
+registration, dispatch, and deterministic surface authoring.
 
 ## Artifact And Goal Mapping
 

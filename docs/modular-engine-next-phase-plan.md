@@ -1,116 +1,147 @@
-# Resource Kernel Ownership And Validation Simplification Phase
+# Module Primitive Ownership And Policy Boundary Phase
 
 ## Current Checkpoint
 
-The activation runtime ownership slice is complete:
+The resource/UI ownership split is complete:
 
-- runtime cleanup helpers live in `engine/primitives/module/activation_runtime.rs`;
-- queue-backed local-process activation retries a transient spawn failure without
-  duplicate grants, workers, activation versions, evidence resources, or queue
-  completion state;
-- the real Unix local-process path runs two activate -> health -> disable cycles
-  through canonical `worker::spawn` and `sandbox::stop_spawned_worker`;
-- static gates prevent runtime helper bodies from drifting back into
-  `module.rs`;
-- the maturity scorecard baseline is now `86/100`.
+- `engine/resources/mod.rs` is now a small facade with stable re-exports;
+- resource substrate types, built-in definitions, generic validation, version
+  hashing, fixed-catalog `ui_surface` validation, and store implementations
+  each have focused files;
+- stored generated-UI validation and action-submission checks live in
+  `engine/primitives/ui/validation.rs`;
+- resource/materialization tests live in `engine/tests/resource_kernel.rs`;
+- static gates prevent resource definitions, UI-surface validation, and
+  generated-UI action validation from drifting back into mixed owners;
+- the maturity scorecard baseline is now `90/100`.
 
-The next highest-value blocker is no longer activation cleanup. It is the size
-and mixed ownership inside the generic resource kernel and generated-UI
-validation surface.
+The next highest-value blocker is the parent module primitive. `module.rs`
+still owns package lifecycle dispatch, source trust, source approvals,
+signature verification, policy decisions, conformance, health, integrity,
+recovery, activation orchestration, and shared helper glue. Runtime cleanup,
+trust review, and scheduled trust audits have already been split; the remaining
+goal is to reduce module policy ownership without adding behavior.
 
 ## Objective
 
-Simplify and harden the resource substrate without adding features or storage.
-The goal is to make the resource kernel easier to audit from first principles:
-type definitions, payload validation, version/blob integrity, links, lifecycle,
-and UI-surface validation should each have a clear owner and focused tests.
+Simplify and harden the module primitive by moving stabilized source-trust and
+health/integrity/recovery concerns into focused submodules while preserving all
+public capability ids, request/response schemas, output contracts, idempotency,
+generated UI actions, storage generation, resource kinds, and operator behavior.
 
-No public capability ids, schemas, storage generation, resource kinds, iOS
-surfaces, compatibility readers, fallback renderers, dynamic UI catalogs, or
-new tables change in this phase.
+This phase is a refactor/proof checkpoint. It must not add package tables,
+policy tables, trust tables, conformance tables, health tables, status caches,
+dynamic UI catalogs, marketplace flow, remote fetch, remote key discovery,
+`control::act`, iOS policy, compatibility aliases, or a second worker-spawn path.
 
-## Proposed Changes
+## Proposed Ownership Split
 
-### 1. Build The Resource Ownership Map
+### 1. Source Trust Boundary
 
-- Inventory `engine/resources.rs`, `engine/primitives/resource.rs`,
-  `engine/primitives/ui.rs`, resource tests, generated UI tests, docs, and
-  static gates.
-- Classify each responsibility as type definition, schema validation,
-  version/blob integrity, link management, lifecycle/retention, materialization,
-  UI-surface validation, control projection, or capability wrapper.
-- Record the map in `docs/modular-engine-cleanup-audit.md` before moving code.
+Create `engine/primitives/module/source_trust.rs` for source and trust-root
+policy that is already stable:
 
-### 2. Split Only Stabilized Resource Concerns
+- `module::verify_source`;
+- `module::approve_source`;
+- `module::revoke_source_approval`;
+- `module::policy_decide`;
+- `module::register_source`;
+- `module::verify_signature`;
+- `module::audit_policy`;
+- `module::record_policy_audit`;
+- `module::reconcile_trust`;
+- `module::inspect_trust`;
+- `module::renew_trust_root`;
+- `module::rotate_signature_key`;
+- `module::expire_trust_decision`;
+- `module::enforce_revocation`;
+- source/trust helper structs, digest/signature checks, trust graph traversal,
+  effective trust calculation, and policy diagnostics.
 
-Create focused resource-kernel modules only where ownership is clear and tests
-already protect behavior. Candidate boundaries:
+The parent `module.rs` should remain the registration/dispatch and package
+lifecycle coordinator. Source-trust code may compose existing resource, grant,
+invocation, and generated-UI helpers, but it must not create a policy state
+plane or action multiplexer.
 
-- `resources/types.rs`: built-in resource type definitions and allowed
-  lifecycle/link/versioning declarations.
-- `resources/validation.rs`: payload schema validation, lifecycle validation,
-  redaction checks, and resource-kind contract checks.
-- `resources/versions.rs`: version state, current-version rules, blob/hash
-  integrity, damaged/quarantined/discarded handling, and CAS helpers.
-- `resources/ui_surface.rs`: fixed-catalog `ui_surface` payload validation,
-  component/action bounds, secret checks, expiry checks, and stored-action
-  validation helpers.
+### 2. Health And Integrity Boundary
 
-The parent resource module should remain the store facade and durable substrate
-contract, not a second policy plane.
+Create `engine/primitives/module/health_integrity.rs` for package runtime
+evidence checks that are already represented as resources:
 
-### 3. Preserve Behavior With Characterization Tests
+- `module::check_health`;
+- `module::verify_integrity`;
+- `module::recover_activation` coordination that is not already runtime
+  cleanup-owned;
+- health policy parsing;
+- invoke-function health validation;
+- integrity diagnostics over package/config/activation/grant/worker state;
+- evidence payload shaping and redaction for health/integrity results.
 
-Before moving implementation bodies, add or strengthen tests that prove:
+Keep activation runtime cleanup helpers in `activation_runtime.rs`. The new
+health/integrity boundary may call those helpers for recovery cleanup, but it
+must not reimplement grant revocation, volatile worker disconnect, local process
+spawn/kill, or activation runtime diagnostics.
 
-- built-in resource type registrations are unchanged;
-- invalid payloads still fail before persistence;
-- current versions can only point to available verified versions;
-- damaged or missing bytes remain inspectable and are never silently rewritten;
-- UI surfaces reject unknown catalogs, unsupported components, oversized
-  payloads, raw secrets, stale actions, and client-authored target payloads;
-- materialized files and patch proposals still return top-level `resourceRefs`;
-- generated UI action submissions still execute only stored canonical actions.
+### 3. Parent Module Role
 
-### 4. Add Static Ownership Gates
+After the split, `module.rs` should own only:
 
-Extend existing threat-model/static tests:
+- public function registration and dispatch;
+- package/config/activation entrypoints;
+- activation/upgrade/rollback orchestration;
+- shared resource/grant/invocation helper glue that is genuinely cross-cutting;
+- submodule imports and re-exports needed by host/control/UI projections.
 
-- resource type definition constants live in the resource type owner;
-- UI-surface validation helpers live in the UI-surface validation owner, not in
-  a control or iOS path;
-- no new resource/control/UI tables exist;
-- no fallback renderer, dynamic catalog, compatibility alias, or old DTO reader
-  appears;
-- no durable output path bypasses `resourceRefs`;
-- no mutation lacks idempotency and an output contract.
+No behavior broadening is allowed. If a helper has unclear ownership, keep it in
+the parent and document why rather than creating a new abstraction.
 
-Use ownership and forbidden-symbol gates, not brittle line-count checks.
+## Tests And Static Gates
 
-### 5. Verification
+Write characterization/static tests first:
 
-- `cargo test resource_ --lib -- --nocapture`
-- `cargo test generated_ui --lib -- --nocapture`
-- targeted `cargo test --test threat_model_invariants -- --nocapture`
-- `git diff --check`
-- `scripts/tron ci fmt check clippy test`
+- source-trust capability ids, request schemas, response shapes, output
+  contracts, and generated UI action behavior remain unchanged;
+- health, integrity, and recovery capability ids and resource-backed evidence
+  behavior remain unchanged;
+- source-trust helper implementations live in `source_trust.rs`, not
+  `module.rs`;
+- health/integrity helper implementations live in `health_integrity.rs`, not
+  `module.rs`;
+- activation runtime helpers stay in `activation_runtime.rs`;
+- parent `module.rs` remains dispatch/orchestration, not a second policy plane;
+- no direct process spawn/kill appears in any module submodule except canonical
+  worker/sandbox lifecycle composition;
+- no package/source/policy/trust/audit/health/status tables appear;
+- no `control::act`, dynamic UI catalog, module action multiplexer, raw-scope
+  authorization, fallback manifest field, compatibility alias, or iOS policy
+  path appears.
 
-iOS tests are not expected unless Swift DTOs or project files change.
+Run focused tests after each split:
+
+- `cargo test module_ --lib -- --nocapture`;
+- `cargo test generated_ui --lib -- --nocapture`;
+- `cargo test --test threat_model_invariants -- --nocapture`;
+- any existing local-process activation integration test if touched helpers
+  affect recovery or health;
+- `git diff --check`;
+- `scripts/tron ci fmt check clippy test`.
 
 ## Acceptance Criteria
 
-- The resource kernel has fewer mixed-concern files and clearer ownership.
-- Public behavior and serialized wire/resource shapes remain stable.
-- Static gates prove forbidden state planes and fallback paths did not appear.
-- The maturity scorecard can move only when tests and docs prove the split.
-- Docs and `~/LEDGER.jsonl` are updated in the same checkpoint.
+- Public behavior is unchanged.
+- Module source-trust and health/integrity code has clear file ownership.
+- The parent module file becomes easier to scan and reason about.
+- Static gates prevent helper drift back into the parent module.
+- Resource/evidence/grant/invocation substrate remains the only durable truth.
+- Docs, scorecard, cleanup audit, and `~/LEDGER.jsonl` are updated in the same
+  checkpoint.
 
 ## Out Of Scope
 
-- New resource kinds.
-- Storage generation changes.
-- Generated UI catalog expansion.
-- iOS renderer changes.
+- New package trust features.
+- Signature algorithm expansion.
+- Remote marketplace, remote package fetch, or remote key discovery.
+- New resource kinds or storage generation changes.
+- iOS renderer or DTO changes.
 - Control-plane mutation shortcuts.
-- Marketplace, remote package fetch, remote key discovery, or compatibility
-  readers.
+- Retention deletion/archive execution.

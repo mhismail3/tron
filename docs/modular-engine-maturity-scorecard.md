@@ -51,11 +51,11 @@ Collapsed substrate rules:
 | Test/proof strength | 12 | Static gates, focused tests, integration tests, absence tests, and failure-mode tests |
 | Docs/operations | 7 | README, architecture docs, manual QA, and ledger match current behavior |
 
-Current score: **86/100**.
+Current score: **90/100**.
 
 ## Axis Scores
 
-### Architecture simplicity — 11/15
+### Architecture simplicity — 12/15
 
 Evidence:
 
@@ -68,13 +68,19 @@ Evidence:
 - Module trust review, scheduled trust audit, and activation runtime cleanup now
   have focused primitive submodules instead of living directly in the parent
   package-lifecycle file.
+- The resource kernel is split into focused owners for public substrate types,
+  built-in definitions, generic validation, version hashing, fixed-catalog
+  `ui_surface` validation, and store implementations.
+- Generated UI stored-surface/action validation now lives in
+  `engine/primitives/ui/validation.rs`; the parent UI primitive remains
+  registration, dispatch, and authoring coordination.
 
 Blockers:
 
-- `engine/resources.rs`, `engine/tests.rs`, `engine/primitives/module.rs`, and
-  `engine/primitives/ui.rs` still contain multiple concerns in large files,
-  though `module.rs` now has clearer runtime/trust-audit ownership boundaries.
-- Several older domain and iOS product-shell surfaces remain deferred pending
+- `engine/primitives/module.rs` still owns activation, source trust, health,
+  integrity, recovery, and shared helpers in one large file, though runtime,
+  trust-review, and trust-audit ownership boundaries are now split out.
+- Some older domain and iOS product-shell surfaces remain deferred pending
   proof-driven removal.
 
 Next action:
@@ -106,7 +112,7 @@ Next action:
 - Add targeted property/failure tests for grant narrowing, resource selectors,
   secret redaction, and stale UI action rejection.
 
-### Resource model — 10/12
+### Resource model — 11/12
 
 Evidence:
 
@@ -116,6 +122,10 @@ Evidence:
 - Module trust review, source trust, policy audit, conformance, recovery, and
   scheduled trust audits write `decision` and `evidence` resources instead of
   adding tables.
+- `engine/tests/resource_kernel.rs` now characterizes built-in resource kinds,
+  trust link relations, invalid-payload rejection, stale CAS rejection,
+  non-current damaged versions, unsupported links, materialized-file output
+  refs, and the absence of the retired output-audit trace projection.
 
 Blockers:
 
@@ -191,7 +201,7 @@ Next action:
 - Carry the new runtime diagnostics into any future Engine Console refinements
   without adding client-side policy.
 
-### Code comprehensibility — 9/12
+### Code comprehensibility — 11/12
 
 Evidence:
 
@@ -204,20 +214,25 @@ Evidence:
 - Activation runtime helper implementations and projection helpers now live in
   `engine/primitives/module/activation_runtime.rs`; the parent module remains a
   registration and lifecycle orchestration surface.
+- `engine/resources/mod.rs` is a small facade with stable re-exports; focused
+  resource submodules now make ownership visible before reading implementation
+  details.
+- `engine/primitives/ui/validation.rs` owns stored-surface diagnostics,
+  stale/expired/damaged checks, action target validation, and template checks.
+- Resource/materialization tests were moved out of the monolithic engine test
+  file into `engine/tests/resource_kernel.rs`.
 
 Blockers:
 
-- Several large files still require careful splitting by ownership boundary.
-- `engine/primitives/module.rs` still owns activation, source trust, health,
-  integrity, recovery, and shared helpers in one large file, but the runtime
-  cleanup helper bodies are no longer embedded there.
-- Some static tests are broad string scans and should gradually become more
-  ownership-specific.
+- `engine/primitives/module.rs` still requires a future source-trust/health
+  ownership split once behavior is stable enough to move safely.
+- Some older domain tests remain broad string scans and should gradually become
+  more ownership-specific.
 
 Next action:
 
-- Continue the same ownership-driven split pattern for resource-kernel and
-  generated-UI validation helpers once behavior is locked by tests.
+- Continue the same ownership-driven split pattern for module source-trust and
+  activation health/integrity helpers.
 
 ### Test/proof strength — 12/12
 
@@ -233,6 +248,12 @@ Evidence:
   helper implementations drifting back into `module.rs`.
 - Queue retry and real local-process soak tests cover transient runtime failure,
   retry, cleanup, and repeated activation/disable cycles.
+- Static gates now require the resource-kernel submodule split, fixed
+  UI-surface payload validation ownership, and generated UI action-validation
+  boundary.
+- Focused resource and generated-UI tests cover resource-kernel invariants,
+  UI payload bounds, raw secret/local-file rejection, stale/discarded surface
+  action rejection, and stable resource-backed output refs.
 
 Blockers:
 
@@ -242,8 +263,8 @@ Blockers:
 
 Next action:
 
-- Add subsystem-specific proof gates for resource-kernel validation and
-  generated-UI authoring once those large files are split.
+- Add subsystem-specific proof gates for the remaining large module source-trust
+  and health/integrity paths.
 
 ### Docs/operations — 7/7
 
@@ -261,6 +282,8 @@ Evidence:
   documented in the package trust operations guide and next-phase plan.
 - The activation-runtime ownership split, retry proof, and real local-process
   soak evidence are reflected in the cleanup audit and next-phase plan.
+- The resource-kernel split and generated-UI validation boundary are reflected
+  in the cleanup audit and next-phase plan.
 
 Blockers:
 

@@ -851,8 +851,18 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
     let crate_root = crate_root();
     let repo_root = repo_root();
 
-    let resources = std::fs::read_to_string(crate_root.join("src/engine/resources.rs"))
-        .expect("failed to read engine resources");
+    let resources = [
+        crate_root.join("src/engine/resources/types.rs"),
+        crate_root.join("src/engine/resources/definitions.rs"),
+        crate_root.join("src/engine/resources/ui_surface.rs"),
+    ]
+    .into_iter()
+    .map(|path| {
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    })
+    .collect::<Vec<_>>()
+    .join("\n");
     for required in [
         "UI_SURFACE_SCHEMA_ID",
         "tron.resource.ui_surface.v1",
@@ -870,6 +880,10 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
 
     let ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
         .expect("failed to read generated UI primitive");
+    let ui_validation =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/ui/validation.rs"))
+            .expect("failed to read generated UI validation boundary");
+    let ui_tree = [ui.as_str(), ui_validation.as_str()].join("\n");
     for required in [
         "ui::catalog",
         "ui::create_surface",
@@ -888,12 +902,12 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
         "idempotencyKey",
     ] {
         assert!(
-            ui.contains(required),
+            ui_tree.contains(required),
             "generated UI primitive must keep `{required}`"
         );
     }
     assert!(
-        !ui.contains("ui::render_contract"),
+        !ui_tree.contains("ui::render_contract"),
         "generated UI must expose ui::catalog, not a parallel render-contract API"
     );
 
@@ -1039,12 +1053,159 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
 }
 
 #[test]
+fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
+    let crate_root = crate_root();
+    let resources_dir = crate_root.join("src/engine/resources");
+    let resources_mod = std::fs::read_to_string(resources_dir.join("mod.rs"))
+        .expect("failed to read resource module facade");
+    let resource_types = std::fs::read_to_string(resources_dir.join("types.rs"))
+        .expect("failed to read resource types");
+    let resource_definitions = std::fs::read_to_string(resources_dir.join("definitions.rs"))
+        .expect("failed to read resource definitions");
+    let resource_validation = std::fs::read_to_string(resources_dir.join("validation.rs"))
+        .expect("failed to read resource validation");
+    let resource_versions = std::fs::read_to_string(resources_dir.join("versions.rs"))
+        .expect("failed to read resource versions");
+    let resource_ui_surface = std::fs::read_to_string(resources_dir.join("ui_surface.rs"))
+        .expect("failed to read resource UI-surface validation");
+    let resource_store = std::fs::read_to_string(resources_dir.join("store.rs"))
+        .expect("failed to read resource store");
+
+    for module_name in [
+        "mod definitions;",
+        "mod store;",
+        "mod types;",
+        "mod ui_surface;",
+        "mod validation;",
+        "mod versions;",
+    ] {
+        assert!(
+            resources_mod.contains(module_name),
+            "resource facade must keep ownership submodule `{module_name}`"
+        );
+    }
+    assert!(
+        resources_mod.contains("pub use definitions::builtin_resource_type_definitions")
+            && resources_mod.contains(
+                "pub use store::{InMemoryEngineResourceStore, SqliteEngineResourceStore}"
+            )
+            && resources_mod.contains("pub use types::*")
+            && resources_mod.contains("pub use ui_surface::ui_component_catalog")
+            && resources_mod.contains("pub(crate) use ui_surface::validate_ui_surface_payload"),
+        "resource facade must preserve the stable public import surface"
+    );
+    assert!(
+        resource_types.contains("pub struct EngineResource")
+            && resource_types.contains("pub struct EngineResourceTypeDefinition")
+            && resource_types.contains("pub enum EngineResourceVersionState")
+            && !resource_types.contains("CREATE TABLE")
+            && !resource_types.contains("validate_ui_surface_payload"),
+        "resource substrate types must stay separated from persistence and UI payload validation"
+    );
+    let resource_definition_tree =
+        [resource_definitions.as_str(), resource_types.as_str()].join("\n");
+    assert!(
+        resource_definition_tree.contains("pub fn builtin_resource_type_definitions")
+            && resource_definition_tree.contains("worker_package")
+            && resource_definition_tree.contains("activation_record")
+            && !resource_store.contains("fn builtin_resource_type_definitions"),
+        "built-in resource type definitions must not drift back into the store module"
+    );
+    assert!(
+        resource_validation.contains("validate_resource_payload")
+            && resource_validation.contains("ensure_lifecycle")
+            && resource_validation.contains("ensure_relation")
+            && !resource_validation.contains("CREATE TABLE"),
+        "generic resource validation must stay independent from store persistence"
+    );
+    assert!(
+        resource_versions.contains("payload_hash")
+            && !resource_store.contains("fn payload_hash")
+            && !resource_store.contains("Sha256"),
+        "version/hash helpers must stay outside store implementation details"
+    );
+    assert!(
+        resource_ui_surface.contains("pub(crate) fn validate_ui_surface_payload")
+            && resource_ui_surface.contains("pub fn ui_component_catalog")
+            && resource_ui_surface.contains("UI_CATALOG_ID")
+            && resource_ui_surface.contains("scan_ui_value_for_forbidden_content")
+            && !resource_store.contains("validate_ui_surface_payload"),
+        "UI surface payload validation must live in resources/ui_surface.rs"
+    );
+    for forbidden in [
+        "dynamic catalog",
+        "fallback renderer",
+        "compatibility alias",
+        "control::act",
+        "CREATE TABLE ui_",
+        "CREATE TABLE control_",
+    ] {
+        let resource_tree = [
+            resources_mod.as_str(),
+            resource_types.as_str(),
+            resource_definitions.as_str(),
+            resource_validation.as_str(),
+            resource_versions.as_str(),
+            resource_ui_surface.as_str(),
+            resource_store.as_str(),
+        ]
+        .join("\n");
+        assert!(
+            !resource_tree.contains(forbidden),
+            "resource kernel split must not introduce `{forbidden}`"
+        );
+    }
+
+    let ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
+        .expect("failed to read generated UI primitive");
+    let ui_validation =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/ui/validation.rs"))
+            .expect("failed to read generated UI validation boundary");
+    assert!(
+        ui.contains("mod validation;")
+            && ui.contains("use validation::{")
+            && ui_validation.contains("fn validate_action_target")
+            && ui_validation.contains("fn validate_action_payload_template_against_target_schema")
+            && ui_validation.contains("pub(super) fn validate_surface")
+            && ui_validation.contains("pub(super) fn validate_surface_targets")
+            && ui_validation.contains("pub(in crate::engine) fn action_child_invocation")
+            && !ui.contains("fn validate_action_target")
+            && !ui.contains("fn surface_validation_state")
+            && !ui.contains("fn validate_action_payload_template_against_target_schema"),
+        "generated UI stored-surface and action validation must live in ui/validation.rs"
+    );
+    for forbidden in [
+        "control::act",
+        "dynamic catalog",
+        "fallback renderer",
+        "clientTargetFunctionId",
+        "targetFunctionIdOverride",
+        "CREATE TABLE ui_",
+    ] {
+        let ui_tree = [ui.as_str(), ui_validation.as_str()].join("\n");
+        assert!(
+            !ui_tree.contains(forbidden),
+            "generated UI boundary must not introduce `{forbidden}`"
+        );
+    }
+}
+
+#[test]
 fn module_package_activation_gates_stay_on() {
     let crate_root = crate_root();
     let repo_root = repo_root();
 
-    let resources = std::fs::read_to_string(crate_root.join("src/engine/resources.rs"))
-        .expect("failed to read engine resources");
+    let resources = [
+        crate_root.join("src/engine/resources/types.rs"),
+        crate_root.join("src/engine/resources/definitions.rs"),
+    ]
+    .into_iter()
+    .map(|path| {
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    })
+    .collect::<Vec<_>>()
+    .join("\n");
     for required in [
         "worker_package",
         "module_config",
@@ -1280,8 +1441,17 @@ fn module_package_activation_gates_stay_on() {
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
 
-    let resources = std::fs::read_to_string(crate_root.join("src/engine/resources.rs"))
-        .expect("failed to read resources");
+    let resources = [
+        crate_root.join("src/engine/resources/types.rs"),
+        crate_root.join("src/engine/resources/definitions.rs"),
+    ]
+    .into_iter()
+    .map(|path| {
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    })
+    .collect::<Vec<_>>()
+    .join("\n");
     assert!(
         resources.contains("sourceTrustStatus")
             && resources.contains("sourceEvidenceRefs")
@@ -1300,7 +1470,9 @@ fn module_package_activation_gates_stay_on() {
     );
     for path in [
         crate_root.join("src/engine/grants.rs"),
-        crate_root.join("src/engine/resources.rs"),
+        crate_root.join("src/engine/resources/store.rs"),
+        crate_root.join("src/engine/resources/definitions.rs"),
+        crate_root.join("src/engine/resources/validation.rs"),
         crate_root.join("src/engine/invocation.rs"),
         crate_root.join("src/engine/primitives/module.rs"),
         crate_root.join("src/engine/primitives/module/trust_review.rs"),

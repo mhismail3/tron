@@ -162,6 +162,35 @@ Removal proof from this pass:
   packages still compose canonical `worker::spawn` and
   `sandbox::stop_spawned_worker`.
 
+## 2026-05-19 Resource Kernel And Generated UI Boundary Pass
+
+The resource kernel and generated-UI validation boundary were split without
+changing public capability ids, request/response schemas, resource kinds,
+storage generation, generated UI catalog behavior, or iOS surfaces.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Resource facade | `engine/resources/mod.rs` now contains only ownership docs, submodule declarations, and stable re-exports for `builtin_resource_type_definitions`, store types, public resource types, `ui_component_catalog`, and `validate_ui_surface_payload` | Keep as the stable import surface |
+| Public resource types | `engine/resources/types.rs` owns resource structs, enums, constants, and parse/string helpers needed by the store | Keep; no persistence or UI payload validation belongs here |
+| Built-in resource definitions | `engine/resources/definitions.rs` owns built-in resource type registration, schemas, lifecycle states, and link relations | Keep; static gates prevent definitions from drifting into the store |
+| Generic resource validation | `engine/resources/validation.rs` owns request validation, lifecycle/relation checks, schema validation, and dispatch to UI-surface payload validation | Keep; no table creation or persistence logic belongs here |
+| Version helpers | `engine/resources/versions.rs` owns payload hashing | Keep as the current small hash boundary; expand only when more version/integrity helpers stabilize |
+| UI-surface payload validation | `engine/resources/ui_surface.rs` owns the fixed catalog, component catalog, payload bounds, component/action payload validation, placeholder checks, and secret/local-file content rejection | Keep; this remains resource validation, not a generated-UI runtime action path |
+| Resource stores | `engine/resources/store.rs` owns in-memory and SQLite resource store implementations, row mapping, store events, and store unit tests | Keep; no built-in type definitions or UI-surface validation should live here |
+| Generated UI action validation | `engine/primitives/ui/validation.rs` owns stored-surface diagnostics, stale/expired/damaged checks, action-target validation, template checks, and `ui::submit_action` child invocation construction | Keep; parent `ui.rs` remains registration, dispatch, and authoring coordination |
+| Resource tests | `engine/tests/resource_kernel.rs` now owns resource/materialization characterization that had been embedded in the monolithic engine test file | Keep as the focused test module for resource-kernel behavior |
+| Static gates | `threat_model_invariants::resource_kernel_and_generated_ui_ownership_boundaries_stay_split` verifies the ownership split and forbids resource/control/UI tables, dynamic catalogs, fallback renderers, compatibility aliases, and client-authored target override paths | Keep as ownership proof |
+
+Removal proof from this pass:
+
+- No public resource import was removed; callers continue to import through
+  `crate::engine::resources`.
+- No serialized resource, generated UI, or capability shape was changed.
+- No new state plane was justified; all changes were file ownership, tests, and
+  documentation.
+- No iOS change was justified because the server-side DTO and generated UI
+  catalog remained stable.
+
 ## Deferred High-Scrutiny Areas
 
 These areas are not proven removable in this checkpoint and need separate

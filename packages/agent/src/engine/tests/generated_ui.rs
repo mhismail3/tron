@@ -106,6 +106,98 @@ async fn ui_surface_resource_type_is_registered_and_validated() {
 }
 
 #[tokio::test]
+async fn ui_surface_payload_bounds_and_secret_guards_fail_before_persistence() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+
+    let cases = [
+        (
+            "bad-component",
+            {
+                let mut surface = valid_ui_surface("demo::inspect", 1);
+                surface["layout"]["children"][0]["type"] = json!("UnsupportedComponent");
+                surface
+            },
+            "unsupported ui component",
+        ),
+        (
+            "bad-prop",
+            {
+                let mut surface = valid_ui_surface("demo::inspect", 1);
+                surface["layout"]["children"][0]["props"]["unexpected"] = json!("no");
+                surface
+            },
+            "does not allow prop",
+        ),
+        (
+            "too-many-rows",
+            {
+                let mut surface = valid_ui_surface("demo::inspect", 1);
+                surface["layout"] = json!({
+                    "type": "Table",
+                    "props": {
+                        "columns": ["value"],
+                        "rows": (0..201).map(|idx| json!({"value": idx})).collect::<Vec<_>>()
+                    }
+                });
+                surface
+            },
+            "Table rows exceed",
+        ),
+        (
+            "raw-secret",
+            {
+                let mut surface = valid_ui_surface("demo::inspect", 1);
+                surface["layout"]["children"][1]["props"]["text"] =
+                    json!("sk-abcdefghijklmnopqrstuvwxyz012345");
+                surface
+            },
+            "raw secret-like value",
+        ),
+        (
+            "local-file-url",
+            {
+                let mut surface = valid_ui_surface("demo::inspect", 1);
+                surface["layout"]["children"][1]["props"]["text"] = json!("file:///tmp/secret");
+                surface
+            },
+            "local-file content",
+        ),
+    ];
+
+    for (resource_id, surface, expected) in cases {
+        let rejected = handle
+            .invoke(host_invocation(
+                "resource::create",
+                json!({
+                    "kind": "ui_surface",
+                    "resourceId": resource_id,
+                    "payload": surface
+                }),
+                mutating_causal(resource_id).with_scope("resource.write"),
+            ))
+            .await;
+        assert!(
+            matches!(
+                rejected.error,
+                Some(EngineError::PolicyViolation(ref message)) if message.contains(expected)
+            ),
+            "expected `{expected}` rejection for {resource_id}, got {:?}",
+            rejected.error
+        );
+
+        let inspect = handle
+            .invoke(host_invocation(
+                "resource::inspect",
+                json!({"resourceId": resource_id}),
+                causal().with_scope("resource.read"),
+            ))
+            .await;
+        assert_eq!(inspect.error, None);
+        assert_eq!(inspect.value.as_ref().unwrap()["inspection"], Value::Null);
+    }
+}
+
+#[tokio::test]
 async fn ui_surface_for_target_creates_deterministic_worker_surface() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
@@ -721,6 +813,48 @@ async fn ui_submit_action_validates_stored_surface_and_creates_child_invocation(
         child.produced_resource_refs[0]["resourceId"],
         "artifact-from-ui"
     );
+
+    let discarded = handle
+        .invoke(host_invocation(
+            "ui::discard_surface",
+            json!({
+                "surfaceResourceId": "ui-surface-action",
+                "expectedCurrentVersionId": surface_version
+            }),
+            mutating_causal("ui-action-discard").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(discarded.error, None);
+    let inspect = handle
+        .invoke(host_invocation(
+            "ui::inspect_surface",
+            json!({"surfaceResourceId": "ui-surface-action"}),
+            causal().with_scope("ui.read"),
+        ))
+        .await;
+    assert_eq!(inspect.error, None);
+    assert_eq!(
+        inspect.value.as_ref().unwrap()["validationState"],
+        "damaged",
+        "discarded surfaces remain inspectable but not actionable"
+    );
+    let rejected = handle
+        .invoke(host_invocation(
+            "ui::submit_action",
+            json!({
+                "surfaceResourceId": "ui-surface-action",
+                "surfaceVersionId": discarded.value.as_ref().unwrap()["resourceRefs"][0]["versionId"],
+                "actionId": "submit-test",
+                "userInput": {"message": "hello"},
+                "idempotencyKey": "ui-action-discarded"
+            }),
+            mutating_causal("ui-action-discarded").with_scope("ui.write"),
+        ))
+        .await;
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("ui_surface ui-surface-action is discarded")
+    ));
 }
 
 #[tokio::test]

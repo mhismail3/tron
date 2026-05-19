@@ -10,7 +10,9 @@
 //! substrate. `ui::*` stores fixed-catalog generated UI as `ui_surface`
 //! resources, authors deterministic target surfaces from substrate projections,
 //! validates/refreshes/expires generated versions, and routes submitted actions
-//! back through canonical capability invocations. `module::*` registers,
+//! back through canonical capability invocations. Stored-surface/action
+//! validation is owned by the UI primitive's validation submodule so authoring
+//! and execution checks do not blur together. `module::*` registers,
 //! configures, activates, disables, upgrades, rolls back, and quarantines
 //! worker packages as typed resources under derived grants, with trust-root
 //! renewal, key-rotation evidence, expiry, explicit revocation enforcement,
