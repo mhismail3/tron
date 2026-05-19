@@ -531,6 +531,17 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "supported_by",
                 "contradicted_by",
                 "derived_from",
+                "trusts_source",
+                "verifies_signature",
+                "affects_package",
+                "affects_activation",
+                "revokes",
+                "supersedes",
+                "renewed_by",
+                "rotates_from",
+                "rotates_to",
+                "enforces_revocation",
+                "evidence_for",
             ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
@@ -578,6 +589,16 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "contradicted_by",
                 "derived_from",
                 "supports",
+                "trusts_source",
+                "verifies_signature",
+                "affects_package",
+                "affects_activation",
+                "revokes",
+                "supersedes",
+                "renewed_by",
+                "rotates_from",
+                "rotates_to",
+                "enforces_revocation",
             ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
@@ -2382,6 +2403,7 @@ fn validate_ui_bindings(value: Option<&Value>) -> Result<()> {
                     | "goal"
                     | "package"
                     | "module_config"
+                    | "decision"
                     | "activation"
                     | "resource"
                     | "invocation"
@@ -2712,8 +2734,19 @@ fn ui_structural_identifier_key(key: &str) -> bool {
             | "sourceDigest"
             | "contentHash"
             | "targetId"
+            | "targetResourceId"
             | "targetFunctionId"
             | "targetVersionId"
+            | "decisionResourceId"
+            | "decisionVersionId"
+            | "expectedDecisionVersionId"
+            | "trustDecisionResourceId"
+            | "trustRootDecisionResourceId"
+            | "trustRootDecisionVersionId"
+            | "oldTrustRootDecisionResourceId"
+            | "newTrustRootDecisionResourceId"
+            | "oldTrustRootDecisionVersionId"
+            | "newTrustRootDecisionVersionId"
             | "functionId"
             | "workerId"
             | "grantId"

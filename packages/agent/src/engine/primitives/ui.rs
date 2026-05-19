@@ -980,6 +980,26 @@ fn target_projection(
                 ),
             })
         }
+        "decision" => {
+            let inspection = host.inspect_resource(&request.target_id)?.ok_or_else(|| {
+                EngineError::NotFound {
+                    kind: "resource",
+                    id: request.target_id.clone(),
+                }
+            })?;
+            if inspection.resource.kind != "decision" {
+                return Err(EngineError::PolicyViolation(format!(
+                    "resource {} is {}, expected decision",
+                    request.target_id, inspection.resource.kind
+                )));
+            }
+            Ok(TargetProjection {
+                title: format!("Decision {}", request.target_id),
+                summary: inspection.resource.lifecycle.clone(),
+                revision: host.catalog_revision().0,
+                graph: bounded_json(json!({"decision": inspection}), request.max_preview_bytes),
+            })
+        }
         "activation" => {
             let resource_id = if request.target_id.starts_with("activation:") {
                 request.target_id.clone()
@@ -1441,6 +1461,29 @@ fn generated_actions(
                     "expiresAt": default_expires_at()
                 }));
             }
+            if let Some(inspect_trust) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::inspect_trust")
+            {
+                actions.push(json!({
+                    "actionId": "inspect-package-trust",
+                    "label": "Inspect Trust",
+                    "targetFunctionId": "module::inspect_trust",
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": {
+                        "targetType": "package",
+                        "targetResourceId": resource_id,
+                        "includeEvidence": true,
+                        "limit": 50
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&inspect_trust.risk_level),
+                    "approvalPolicy": {"required": inspect_trust.required_authority.approval_required},
+                    "targetRevision": inspect_trust.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
             if let Some(run_conformance) = functions
                 .iter()
                 .find(|function| function.id.as_str() == "module::run_conformance")
@@ -1504,6 +1547,163 @@ fn generated_actions(
                     "requiredRisk": risk_label(&approve_source.risk_level),
                     "approvalPolicy": {"required": approve_source.required_authority.approval_required},
                     "targetRevision": approve_source.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+        }
+    }
+    if request.target_type == "decision" {
+        let resource_id = request.target_id.clone();
+        let inspection =
+            host.inspect_resource(&resource_id)?
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "resource",
+                    id: resource_id.clone(),
+                })?;
+        let version_id = inspection
+            .resource
+            .current_version_id
+            .clone()
+            .ok_or_else(|| EngineError::NotFound {
+                kind: "resource_version",
+                id: resource_id.clone(),
+            })?;
+        let decision_payload = current_payload(&inspection).unwrap_or_else(|| json!({}));
+        let decision_metadata = decision_payload.get("metadata").and_then(Value::as_object);
+        let is_trust_root = decision_metadata
+            .and_then(|metadata| metadata.get("decisionType"))
+            .and_then(Value::as_str)
+            == Some("module_trust_root");
+        for (action_id, label, target_function, input_schema, payload) in [
+            (
+                "inspect-trust-decision",
+                "Inspect Trust",
+                "module::inspect_trust",
+                json!({"type": "object", "additionalProperties": false, "properties": {}}),
+                json!({
+                    "targetType": "decision",
+                    "targetResourceId": resource_id,
+                    "targetVersionId": version_id,
+                    "includeEvidence": true,
+                    "limit": 50
+                }),
+            ),
+            (
+                "renew-trust-root",
+                "Renew",
+                "module::renew_trust_root",
+                json!({
+                    "type": "object",
+                    "required": ["expiresAt", "reason"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "expiresAt": {"type": "string"},
+                        "reason": {"type": "string"}
+                    }
+                }),
+                json!({
+                    "trustRootDecisionResourceId": resource_id,
+                    "trustRootDecisionVersionId": version_id,
+                    "expectedCurrentVersionId": version_id,
+                    "expiresAt": "${input.expiresAt}",
+                    "allowedPackageSelectors": decision_metadata
+                        .and_then(|metadata| metadata.get("allowedPackageSelectors"))
+                        .cloned()
+                        .unwrap_or_else(|| json!([])),
+                    "grantCeiling": decision_metadata
+                        .and_then(|metadata| metadata.get("grantCeiling"))
+                        .cloned()
+                        .unwrap_or_else(|| json!({})),
+                    "trustTierCeiling": "signed_local",
+                    "reason": "${input.reason}"
+                }),
+            ),
+            (
+                "rotate-signature-key",
+                "Rotate",
+                "module::rotate_signature_key",
+                json!({
+                    "type": "object",
+                    "required": ["newTrustRootDecisionResourceId", "newTrustRootDecisionVersionId", "reason"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "newTrustRootDecisionResourceId": {"type": "string"},
+                        "newTrustRootDecisionVersionId": {"type": "string"},
+                        "reason": {"type": "string"}
+                    }
+                }),
+                json!({
+                    "oldTrustRootDecisionResourceId": resource_id,
+                    "oldTrustRootDecisionVersionId": version_id,
+                    "newTrustRootDecisionResourceId": "${input.newTrustRootDecisionResourceId}",
+                    "newTrustRootDecisionVersionId": "${input.newTrustRootDecisionVersionId}",
+                    "reason": "${input.reason}"
+                }),
+            ),
+            (
+                "expire-trust-decision",
+                "Expire",
+                "module::expire_trust_decision",
+                json!({
+                    "type": "object",
+                    "required": ["reason"],
+                    "additionalProperties": false,
+                    "properties": {"reason": {"type": "string"}}
+                }),
+                json!({
+                    "decisionResourceId": resource_id,
+                    "decisionVersionId": version_id,
+                    "expectedCurrentVersionId": version_id,
+                    "reason": "${input.reason}"
+                }),
+            ),
+            (
+                "enforce-revocation",
+                "Enforce",
+                "module::enforce_revocation",
+                json!({
+                    "type": "object",
+                    "required": ["mode", "activationResourceIds", "reason"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "mode": {"type": "string", "enum": ["disable", "quarantine"]},
+                        "activationResourceIds": {"type": "array", "items": {"type": "string"}},
+                        "reason": {"type": "string"}
+                    }
+                }),
+                json!({
+                    "trustDecisionResourceId": resource_id,
+                    "expectedDecisionVersionId": version_id,
+                    "mode": "${input.mode}",
+                    "activationResourceIds": "${input.activationResourceIds}",
+                    "reason": "${input.reason}"
+                }),
+            ),
+        ] {
+            if matches!(
+                target_function,
+                "module::renew_trust_root"
+                    | "module::rotate_signature_key"
+                    | "module::enforce_revocation"
+            ) && !is_trust_root
+            {
+                continue;
+            }
+            if let Some(function) = functions
+                .iter()
+                .find(|function| function.id.as_str() == target_function)
+            {
+                actions.push(json!({
+                    "actionId": action_id,
+                    "label": label,
+                    "targetFunctionId": target_function,
+                    "inputSchema": input_schema,
+                    "payloadTemplate": payload,
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&function.risk_level),
+                    "approvalPolicy": {"required": function.required_authority.approval_required},
+                    "targetRevision": function.revision.0,
                     "expiresAt": default_expires_at()
                 }));
             }
@@ -2235,6 +2435,7 @@ fn ensure_supported_target_type(target_type: &str) -> Result<()> {
             | "goal"
             | "package"
             | "module_config"
+            | "decision"
             | "activation"
             | "resource"
             | "invocation"
@@ -2381,7 +2582,7 @@ fn surface_for_target_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "goal", "package", "module_config", "activation", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
+                "enum": ["worker", "capability", "goal", "package", "module_config", "decision", "activation", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "purpose": {"type": "string"},

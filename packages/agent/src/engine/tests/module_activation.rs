@@ -109,6 +109,22 @@ impl InProcessFunctionHandler for RecordingWorkerSpawnHandler {
     }
 }
 
+struct RecordingValueHandler {
+    calls: Arc<std::sync::Mutex<Vec<Value>>>,
+    value: Value,
+}
+
+#[async_trait]
+impl InProcessFunctionHandler for RecordingValueHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value> {
+        self.calls
+            .lock()
+            .expect("recording value calls lock")
+            .push(invocation.payload.clone());
+        Ok(self.value.clone())
+    }
+}
+
 fn package_manifest(package_id: &str, namespace: &str, worker_id: &str) -> Value {
     json!({
         "packageId": package_id,
@@ -363,6 +379,18 @@ async fn materialized_executable_ref(
     created.value.as_ref().unwrap()["resourceRefs"][0].clone()
 }
 
+async fn inspect_resource(handle: &EngineHostHandle, resource_id: &str) -> Value {
+    let inspected = handle
+        .invoke(host_invocation(
+            "resource::inspect",
+            json!({"resourceId": resource_id}),
+            causal().with_scope("resource.read"),
+        ))
+        .await;
+    assert_eq!(inspected.error, None);
+    inspected.value.unwrap()["inspection"].clone()
+}
+
 fn register_recording_worker_spawn(handle: &EngineHostHandle) -> Arc<std::sync::Mutex<Vec<Value>>> {
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
     handle
@@ -374,6 +402,25 @@ fn register_recording_worker_spawn(handle: &EngineHostHandle) -> Arc<std::sync::
                 calls: calls.clone(),
             })),
             false,
+        )
+        .unwrap();
+    calls
+}
+
+fn register_recording_sandbox_stop(handle: &EngineHostHandle) -> Arc<std::sync::Mutex<Vec<Value>>> {
+    let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    handle
+        .register_worker_for_setup(worker("sandbox", "sandbox"), true)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            write_function("sandbox::stop_spawned_worker", "sandbox")
+                .with_required_authority(AuthorityRequirement::scope("sandbox.write")),
+            Some(Arc::new(RecordingValueHandler {
+                calls: calls.clone(),
+                value: json!({"status": "stopped"}),
+            })),
+            true,
         )
         .unwrap();
     calls
@@ -603,6 +650,37 @@ async fn module_resource_types_and_capabilities_are_registered() {
             "resource kind {kind} must be registered"
         );
     }
+    for (kind, relation) in [
+        ("decision", "trusts_source"),
+        ("decision", "verifies_signature"),
+        ("decision", "affects_package"),
+        ("decision", "affects_activation"),
+        ("decision", "revokes"),
+        ("decision", "supersedes"),
+        ("decision", "renewed_by"),
+        ("decision", "rotates_from"),
+        ("decision", "rotates_to"),
+        ("decision", "enforces_revocation"),
+        ("decision", "evidence_for"),
+        ("evidence", "affects_package"),
+        ("evidence", "affects_activation"),
+        ("evidence", "enforces_revocation"),
+    ] {
+        let resource_type = value["resourceTypes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|resource_type| resource_type["kind"] == kind)
+            .unwrap_or_else(|| panic!("resource kind {kind} must be registered"));
+        assert!(
+            resource_type["allowedLinkRelations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|candidate| candidate == relation),
+            "{kind} must allow relation {relation}"
+        );
+    }
     for function_id in [
         "module::register_package",
         "module::inspect_package",
@@ -625,6 +703,11 @@ async fn module_resource_types_and_capabilities_are_registered() {
         "module::audit_policy",
         "module::record_policy_audit",
         "module::reconcile_trust",
+        "module::inspect_trust",
+        "module::renew_trust_root",
+        "module::rotate_signature_key",
+        "module::expire_trust_decision",
+        "module::enforce_revocation",
     ] {
         let function = value["capabilities"]
             .as_array()
@@ -634,7 +717,10 @@ async fn module_resource_types_and_capabilities_are_registered() {
             .unwrap_or_else(|| panic!("{function_id} must be discoverable"));
         if !matches!(
             function_id,
-            "module::inspect_package" | "module::policy_decide" | "module::audit_policy"
+            "module::inspect_package"
+                | "module::policy_decide"
+                | "module::audit_policy"
+                | "module::inspect_trust"
         ) {
             assert!(
                 function["idempotency"].is_object(),
@@ -1427,6 +1513,465 @@ async fn module_policy_audit_and_reconcile_track_revoked_trust_roots() {
             .any(|activation| activation["activationResourceId"] == activation_resource_id)
     );
     assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+}
+
+#[tokio::test]
+async fn module_trust_operations_manage_renewal_expiry_and_rotation() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("trust-ops-worker.sh"),
+        "module-trust-ops-executable",
+    )
+    .await;
+    let (signing_key, public_key, key_id) = signing_fixture();
+    let manifest = signed_package_manifest(
+        local_process_manifest(
+            "trust-ops-tools",
+            "demo_local",
+            "trust-ops-worker",
+            executable,
+        ),
+        &signing_key,
+        &key_id,
+    );
+    let package_resource_id = "worker-package:trust-ops-tools";
+    let registered = register_package(&handle, manifest, "module-trust-ops-register").await;
+    assert_eq!(registered.error, None);
+    let registered_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let trust_root = register_trust_root(
+        &handle,
+        &public_key,
+        &key_id,
+        "trust-ops-tools",
+        "demo_local",
+        "module-trust-ops-root",
+    )
+    .await;
+    assert_eq!(trust_root.error, None);
+    let trust_root_decision_id =
+        trust_root.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let trust_root_version_id = trust_root.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let verified = verify_signature(
+        &handle,
+        package_resource_id,
+        &registered_version_id,
+        "module-trust-ops-verify",
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    let verified_package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let inspected = handle
+        .invoke(host_invocation(
+            "module::inspect_trust",
+            json!({
+                "targetType": "trust_root",
+                "targetResourceId": trust_root_decision_id,
+                "targetVersionId": trust_root_version_id,
+                "includeEvidence": true,
+                "limit": 20
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(inspected.error, None);
+    assert!(
+        inspected.value.as_ref().unwrap()["affectedPackages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|package| package["packageResourceId"] == package_resource_id)
+    );
+
+    let renewed = handle
+        .invoke(host_invocation(
+            "module::renew_trust_root",
+            json!({
+                "trustRootDecisionResourceId": trust_root_decision_id,
+                "trustRootDecisionVersionId": trust_root_version_id,
+                "expectedCurrentVersionId": trust_root_version_id,
+                "expiresAt": "2100-06-01T00:00:00Z",
+                "allowedPackageSelectors": ["trust-ops-tools"],
+                "grantCeiling": grant_ceiling_for_namespace("demo_local"),
+                "trustTierCeiling": "signed_local",
+                "reason": "test renews same-key trust root"
+            }),
+            mutating_causal("module-trust-ops-renew").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(renewed.error, None);
+    let renewed_decision_id = renewed.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "decision")
+        .unwrap()["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let renewed_inspection = inspect_resource(&handle, &renewed_decision_id).await;
+    assert!(
+        renewed_inspection["outgoingLinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["relation"] == "supersedes"
+                && link["targetResourceId"] == trust_root_decision_id),
+        "renewed trust root must require durable supersedes lineage"
+    );
+
+    let expired_old = handle
+        .invoke(host_invocation(
+            "module::expire_trust_decision",
+            json!({
+                "decisionResourceId": trust_root_decision_id,
+                "decisionVersionId": trust_root_version_id,
+                "expectedCurrentVersionId": trust_root_version_id,
+                "reason": "old trust root was renewed"
+            }),
+            mutating_causal("module-trust-ops-expire-old").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(expired_old.error, None);
+    let audit_with_renewal = handle
+        .invoke(host_invocation(
+            "module::audit_policy",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(audit_with_renewal.error, None);
+    assert_eq!(
+        audit_with_renewal.value.as_ref().unwrap()["audit"]["decision"],
+        "allow",
+        "same-key renewed trust root should satisfy an existing signed package"
+    );
+
+    let renewed_version_id = renewed.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "decision")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (_new_signing_key, new_public_key, new_key_id) = signing_fixture_with_seed(9);
+    let new_trust_root = register_trust_root(
+        &handle,
+        &new_public_key,
+        &new_key_id,
+        "trust-ops-tools",
+        "demo_local",
+        "module-trust-ops-new-root",
+    )
+    .await;
+    assert_eq!(new_trust_root.error, None);
+    let new_trust_root_decision_id =
+        new_trust_root.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let new_trust_root_version_id =
+        new_trust_root.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let rotated = handle
+        .invoke(host_invocation(
+            "module::rotate_signature_key",
+            json!({
+                "oldTrustRootDecisionResourceId": renewed_decision_id,
+                "oldTrustRootDecisionVersionId": renewed_version_id,
+                "newTrustRootDecisionResourceId": new_trust_root_decision_id,
+                "newTrustRootDecisionVersionId": new_trust_root_version_id,
+                "reason": "test records key rotation lineage"
+            }),
+            mutating_causal("module-trust-ops-rotate").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(rotated.error, None);
+    let rotation_evidence_id = rotated.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let rotation_inspection = inspect_resource(&handle, &rotation_evidence_id).await;
+    assert!(
+        rotation_inspection["outgoingLinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["relation"] == "rotates_from"
+                && link["targetResourceId"] == renewed_decision_id)
+    );
+    assert!(
+        rotation_inspection["outgoingLinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["relation"] == "rotates_to"
+                && link["targetResourceId"] == new_trust_root_decision_id)
+    );
+    let expired_renewal = handle
+        .invoke(host_invocation(
+            "module::expire_trust_decision",
+            json!({
+                "decisionResourceId": renewed_decision_id,
+                "decisionVersionId": renewed_version_id,
+                "expectedCurrentVersionId": renewed_version_id,
+                "reason": "test expires active renewal"
+            }),
+            mutating_causal("module-trust-ops-expire-renewal").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(expired_renewal.error, None);
+    let audit_without_trust = handle
+        .invoke(host_invocation(
+            "module::audit_policy",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(audit_without_trust.error, None);
+    assert_eq!(
+        audit_without_trust.value.as_ref().unwrap()["audit"]["decision"],
+        "deny"
+    );
+    let audit_after_rotation = handle
+        .invoke(host_invocation(
+            "module::audit_policy",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(audit_after_rotation.error, None);
+    assert_eq!(
+        audit_after_rotation.value.as_ref().unwrap()["audit"]["decision"],
+        "deny",
+        "rotation lineage must not satisfy packages signed by the old key"
+    );
+}
+
+#[tokio::test]
+async fn module_enforce_revocation_composes_canonical_activation_mutations() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn(&handle);
+    let stop_calls = register_recording_sandbox_stop(&handle);
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("enforce-revocation-worker.sh"),
+        "module-enforce-revocation-executable",
+    )
+    .await;
+    let (signing_key, public_key, key_id) = signing_fixture();
+    let manifest = signed_package_manifest(
+        local_process_manifest(
+            "enforce-revocation-tools",
+            "demo_local",
+            "enforce-revocation-worker",
+            executable,
+        ),
+        &signing_key,
+        &key_id,
+    );
+    let package_resource_id = "worker-package:enforce-revocation-tools";
+    let registered =
+        register_package(&handle, manifest, "module-enforce-revocation-register").await;
+    assert_eq!(registered.error, None);
+    let registered_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let trust_root = register_trust_root(
+        &handle,
+        &public_key,
+        &key_id,
+        "enforce-revocation-tools",
+        "demo_local",
+        "module-enforce-revocation-root",
+    )
+    .await;
+    assert_eq!(trust_root.error, None);
+    let trust_root_decision_id =
+        trust_root.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let verified = verify_signature(
+        &handle,
+        package_resource_id,
+        &registered_version_id,
+        "module-enforce-revocation-verify",
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    let package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let configured = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true, "apiKeyRef": "secret_ref:enforce-revocation"}
+            }),
+            mutating_causal("module-enforce-revocation-configure").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured.error, None);
+    let config_version_id = configured.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": package_version_id,
+                "moduleConfigResourceId": "module-config:workspace-a:enforce-revocation-tools",
+                "configVersionId": config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo_local")
+            }),
+            mutating_causal("module-enforce-revocation-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(activated.error, None);
+    assert_eq!(spawn_calls.lock().expect("spawn calls").len(), 1);
+    let activation_resource_id = activated.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let revoked = handle
+        .invoke(host_invocation(
+            "module::register_source",
+            json!({
+                "sourceKind": "source_revocation",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "revokedDecisionResourceId": trust_root_decision_id,
+                "reason": "test revokes trust before enforcement"
+            }),
+            mutating_causal("module-enforce-revocation-revoke").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(revoked.error, None);
+    let revocation_decision_id = revoked.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let revocation_version_id = revoked.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let rejected_unrelated = handle
+        .invoke(host_invocation(
+            "module::enforce_revocation",
+            json!({
+                "revocationDecisionResourceId": revocation_decision_id,
+                "expectedDecisionVersionId": revocation_version_id,
+                "mode": "quarantine",
+                "activationResourceIds": ["activation:workspace-a:not-affected"],
+                "reason": "test rejects unrelated activation"
+            }),
+            mutating_causal("module-enforce-revocation-unrelated").with_scope("module.write"),
+        ))
+        .await;
+    assert!(matches!(
+        rejected_unrelated.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("not affected")
+    ));
+
+    let enforced = handle
+        .invoke(host_invocation(
+            "module::enforce_revocation",
+            json!({
+                "revocationDecisionResourceId": revocation_decision_id,
+                "expectedDecisionVersionId": revocation_version_id,
+                "mode": "quarantine",
+                "activationResourceIds": [activation_resource_id],
+                "reason": "test explicitly quarantines affected activation"
+            }),
+            mutating_causal("module-enforce-revocation-good").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(enforced.error, None);
+    assert_eq!(stop_calls.lock().expect("stop calls").len(), 1);
+    let value = enforced.value.as_ref().unwrap();
+    assert!(
+        value["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "evidence")
+    );
+    assert!(
+        value["childInvocationIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|id| id.as_str().is_some_and(|id| !id.is_empty()))
+    );
+    let activation =
+        inspect_resource(&handle, "activation:workspace-a:enforce-revocation-tools").await;
+    assert_eq!(activation["resource"]["lifecycle"], "quarantined");
+    assert_eq!(
+        activation["versions"].as_array().unwrap().last().unwrap()["payload"]
+            .get("activationStatus")
+            .and_then(Value::as_str),
+        Some("quarantined")
+    );
 }
 
 #[tokio::test]
@@ -2433,10 +2978,27 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
     )
     .await;
     assert_eq!(registered.error, None);
+    let (_signing_key, public_key, key_id) = signing_fixture();
+    let trust_root = register_trust_root(
+        &handle,
+        &public_key,
+        &key_id,
+        "demo-tools",
+        "demo",
+        "module-ui-trust-root",
+    )
+    .await;
+    assert_eq!(trust_root.error, None);
+    let trust_root_decision_id =
+        trust_root.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
 
     for (target_type, target_id) in [
         ("package", "demo-tools"),
         ("resource", "worker-package:demo-tools"),
+        ("decision", trust_root_decision_id.as_str()),
     ] {
         let surface = handle
             .invoke(host_invocation(
@@ -2472,6 +3034,24 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                     .iter()
                     .any(|action| action["targetFunctionId"] == "module::run_conformance")
             );
+        }
+        if target_type == "decision" {
+            for function_id in [
+                "module::inspect_trust",
+                "module::renew_trust_root",
+                "module::rotate_signature_key",
+                "module::expire_trust_decision",
+                "module::enforce_revocation",
+            ] {
+                assert!(
+                    surface.value.as_ref().unwrap()["surface"]["actions"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|action| action["targetFunctionId"] == function_id),
+                    "decision trust surface must expose {function_id}"
+                );
+            }
         }
     }
 }

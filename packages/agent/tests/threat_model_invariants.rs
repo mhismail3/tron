@@ -1030,6 +1030,11 @@ fn module_package_activation_gates_stay_on() {
         "module::audit_policy",
         "module::record_policy_audit",
         "module::reconcile_trust",
+        "module::inspect_trust",
+        "module::renew_trust_root",
+        "module::rotate_signature_key",
+        "module::expire_trust_decision",
+        "module::enforce_revocation",
         "DurableOutputContract::resource_backed",
         "ed25519",
         "trust-root:",
@@ -1048,6 +1053,10 @@ fn module_package_activation_gates_stay_on() {
         "sourceEvidenceRefs",
         "sourceApprovalRefs",
         "conformanceEvidenceRefs",
+        "renewedFromDecisionResourceId",
+        "signature_key_rotation",
+        "trust_decision_expired",
+        "revocation_enforcement",
         "packageDigest",
         "secret_ref",
     ] {
@@ -1114,6 +1123,11 @@ fn module_package_activation_gates_stay_on() {
             && control.contains("module::audit_policy")
             && control.contains("module::record_policy_audit")
             && control.contains("module::reconcile_trust")
+            && control.contains("module::inspect_trust")
+            && control.contains("module::renew_trust_root")
+            && control.contains("module::rotate_signature_key")
+            && control.contains("module::expire_trust_decision")
+            && control.contains("module::enforce_revocation")
             && !control.contains("module::act\""),
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
@@ -1123,7 +1137,17 @@ fn module_package_activation_gates_stay_on() {
     assert!(
         resources.contains("sourceTrustStatus")
             && resources.contains("sourceEvidenceRefs")
-            && resources.contains("conformanceEvidenceRefs"),
+            && resources.contains("conformanceEvidenceRefs")
+            && resources.contains("trusts_source")
+            && resources.contains("verifies_signature")
+            && resources.contains("affects_package")
+            && resources.contains("affects_activation")
+            && resources.contains("revokes")
+            && resources.contains("supersedes")
+            && resources.contains("renewed_by")
+            && resources.contains("rotates_from")
+            && resources.contains("rotates_to")
+            && resources.contains("enforces_revocation"),
         "worker_package resources must carry source trust and conformance refs"
     );
     for path in [
@@ -1161,6 +1185,11 @@ fn module_package_activation_gates_stay_on() {
             && ui.contains("module::audit_policy")
             && ui.contains("module::record_policy_audit")
             && ui.contains("module::reconcile_trust")
+            && ui.contains("module::inspect_trust")
+            && ui.contains("module::renew_trust_root")
+            && ui.contains("module::rotate_signature_key")
+            && ui.contains("module::expire_trust_decision")
+            && ui.contains("module::enforce_revocation")
             && ui.contains("module::run_conformance"),
         "generated UI authoring must support module package targets through canonical actions"
     );

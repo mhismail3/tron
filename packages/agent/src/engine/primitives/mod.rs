@@ -12,7 +12,9 @@
 //! validates/refreshes/expires generated versions, and routes submitted actions
 //! back through canonical capability invocations. `module::*` registers,
 //! configures, activates, disables, upgrades, rolls back, and quarantines
-//! worker packages as typed resources under derived grants. `storage::*` is the
+//! worker packages as typed resources under derived grants, with trust-root
+//! renewal, key-rotation evidence, expiry, and explicit revocation enforcement
+//! represented as decision/evidence resources. `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
 //! export.

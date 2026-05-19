@@ -182,6 +182,22 @@ The first-party `module` primitive exposes:
 - `module::record_policy_audit` and `module::reconcile_trust` for bounded audit
   and stale-trust evidence. They recommend canonical operator actions but do not
   disable, quarantine, kill workers, revoke grants, or repair bytes;
+- `module::inspect_trust` for bounded dependency graphs over trust-root,
+  source-registration, source-approval, source-revocation, package, and
+  activation targets. It returns affected packages, affected activations,
+  decision/evidence/grant refs, warnings, and canonical available actions;
+- `module::renew_trust_root` for same-key trust-root renewal. Renewal creates a
+  new `decision`, requires equal-or-narrower selectors and grant ceilings, and
+  links the new decision to the old one with `supersedes`;
+- `module::rotate_signature_key` for rotation evidence between two active trust
+  roots. Rotation records lineage only; it never rewrites package manifests or
+  converts old-key signature verification into new-key trust;
+- `module::expire_trust_decision` for archiving module source/trust/approval
+  decisions and writing evidence without deleting bytes or stopping workers;
+- `module::enforce_revocation` as the explicit high-risk operator mutation for
+  live authority changes after trust revocation or expiry. It accepts explicit
+  affected activation ids and composes only canonical `module::disable` or
+  `module::quarantine` child invocations;
 - `module::run_conformance` for bounded package/config/activation conformance
   evidence over manifest rules, grant simulation, registration bounds,
   resource-output contracts, health policy, redaction, and cleanup behavior;
@@ -225,10 +241,12 @@ The resulting `activation_record` stores `spawnInvocationId`, `spawnResult`,
 `integrityDiagnostics`, `workerLifecycle`, `supersedes`, `rollbackTarget`, and
 recovery metadata so operator projections can explain what ran, what authority
 it received, what evidence supports the current status, and what cleanup
-occurred. Source registration, trust-root registration/revocation, signature
-verification, policy audit, trust reconciliation, approval, conformance, health,
-integrity, and recovery outcomes are `evidence`/`decision` resources linked to
-package and activation records. A runtime monitor derives due checks from active
+occurred. Source registration, trust-root registration/revocation, trust-root
+renewal, signature-key rotation, trust-decision expiry, revocation enforcement,
+signature verification, policy audit, trust reconciliation, approval,
+conformance, health, integrity, and recovery outcomes are `evidence`/`decision`
+resources linked to package and activation records. A runtime monitor derives
+due checks from active
 activation resources and their `healthPolicy.intervalSeconds`, then enqueues
 `module::check_health` through the existing queue/invocation substrate. There
 is no package table, source table, health table, policy table, conformance

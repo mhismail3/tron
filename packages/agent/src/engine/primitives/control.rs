@@ -992,6 +992,41 @@ fn substrate_actions() -> Vec<Value> {
             "medium",
             false,
         ),
+        action_summary(
+            "module::inspect_trust",
+            "package",
+            "targetResourceId",
+            "low",
+            false,
+        ),
+        action_summary(
+            "module::renew_trust_root",
+            "decision",
+            "trustRootDecisionResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::rotate_signature_key",
+            "decision",
+            "oldTrustRootDecisionResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::expire_trust_decision",
+            "decision",
+            "decisionResourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::enforce_revocation",
+            "decision",
+            "trustDecisionResourceId",
+            "high",
+            true,
+        ),
     ]
 }
 

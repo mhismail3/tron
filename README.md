@@ -108,7 +108,8 @@ and activation records, thin wrapper capabilities over the generic
 `resource::*` kernel, resource-backed output enforcement for converted
 durable-output paths, a fixed `tron.ui.catalog.core.v1` generated UI catalog,
 server-authored `ui::*` surface/action capabilities, `module::*` package
-lifecycle, health, integrity, and recovery capabilities, and control
+lifecycle, source trust, trust-root renewal, key-rotation evidence, revocation
+enforcement, health, integrity, and recovery capabilities, and control
 projections that expose `uiSurfaceRefs` plus module resource refs without
 adding durable control-plane state.
 
@@ -506,8 +507,17 @@ decisions, requested child grants, conformance refs, activations, health, and
 revocations. `module::record_policy_audit` persists the same bounded audit as
 `evidence`; `module::reconcile_trust` writes evidence and recommendations for
 packages/activations affected by revoked or expired trust without disabling,
-quarantining, killing workers, or revoking grants. Local unsigned
-`local_process` packages cannot activate until source verification and an
+quarantining, killing workers, or revoking grants. `module::inspect_trust`
+returns a bounded dependency graph for trust/source/approval/revocation
+decisions, packages, and activations. `module::renew_trust_root` creates a new
+same-key trust-root decision with required `supersedes` lineage;
+`module::rotate_signature_key` records rotation evidence only and never
+re-signs packages or fabricates signature verification;
+`module::expire_trust_decision` archives source/trust/approval decisions and
+writes evidence; and `module::enforce_revocation` is the explicit high-risk
+operator mutation that composes canonical `module::disable` or
+`module::quarantine` child invocations for proven affected activations. Local
+unsigned `local_process` packages cannot activate until source verification and an
 unexpired scoped source approval decision pass policy; signed local packages
 require current signature evidence from an active trust root that permits the
 requested activation authority.

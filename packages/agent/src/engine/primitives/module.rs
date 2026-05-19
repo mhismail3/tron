@@ -6,10 +6,12 @@
 //! child `worker::spawn` invocation; module code validates package resources and
 //! records activation lineage but never owns a process runtime, package table,
 //! health table, policy table, recovery table, or action multiplexer. Source
-//! registration, local Ed25519 trust roots, signature verification, policy
-//! audits, trust reconciliation, source approvals, conformance, health,
-//! integrity, and recovery outcomes are bounded `evidence`/`decision`
-//! resources linked back to package and activation records.
+//! registration, local Ed25519 trust roots, signature verification, trust-root
+//! renewal, key-rotation evidence, trust-decision expiry, revocation
+//! enforcement, policy audits, trust reconciliation, source approvals,
+//! conformance, health, integrity, and recovery outcomes are bounded
+//! `evidence`/`decision` resources linked back to package and activation
+//! records.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use chrono::{DateTime, Utc};
@@ -60,6 +62,11 @@ pub(crate) const VERIFY_SIGNATURE_FUNCTION: &str = "module::verify_signature";
 pub(crate) const AUDIT_POLICY_FUNCTION: &str = "module::audit_policy";
 pub(crate) const RECORD_POLICY_AUDIT_FUNCTION: &str = "module::record_policy_audit";
 pub(crate) const RECONCILE_TRUST_FUNCTION: &str = "module::reconcile_trust";
+pub(crate) const INSPECT_TRUST_FUNCTION: &str = "module::inspect_trust";
+pub(crate) const RENEW_TRUST_ROOT_FUNCTION: &str = "module::renew_trust_root";
+pub(crate) const ROTATE_SIGNATURE_KEY_FUNCTION: &str = "module::rotate_signature_key";
+pub(crate) const EXPIRE_TRUST_DECISION_FUNCTION: &str = "module::expire_trust_decision";
+pub(crate) const ENFORCE_REVOCATION_FUNCTION: &str = "module::enforce_revocation";
 
 const MANIFEST_SCHEMA_ID: &str = "tron.module.package_manifest.v1";
 const LOCAL_DIGEST_PINNED: &str = "local_digest_pinned";
@@ -299,6 +306,63 @@ pub(super) fn registrations(
             RiskLevel::Medium,
         )
         .with_output_contract(DurableOutputContract::resource_backed(["evidence"])),
+        module_read(
+            INSPECT_TRUST_FUNCTION,
+            "inspect package trust, source, approval, revocation, and activation dependencies",
+            inspect_trust_schema(),
+            json!({
+                "type": "object",
+                "required": ["target", "status", "dependencyGraph", "affectedPackages", "affectedActivations", "availableActions"],
+                "additionalProperties": true,
+                "properties": {
+                    "target": {"type": "object"},
+                    "status": {"type": "string"},
+                    "dependencyGraph": {"type": "object"},
+                    "affectedPackages": {"type": "array"},
+                    "affectedActivations": {"type": "array"},
+                    "availableActions": {"type": "array"}
+                }
+            }),
+        ),
+        module_write(
+            RENEW_TRUST_ROOT_FUNCTION,
+            "renew a same-key module trust-root decision with equal-or-narrower policy",
+            renew_trust_root_schema(),
+            module_resource_response_schema("decision"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "decision", "evidence",
+        ])),
+        module_write(
+            ROTATE_SIGNATURE_KEY_FUNCTION,
+            "record signature-key rotation lineage between two active trust roots",
+            rotate_signature_key_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed(["evidence"])),
+        module_write(
+            EXPIRE_TRUST_DECISION_FUNCTION,
+            "expire a module source, trust-root, or approval decision without deleting bytes",
+            expire_trust_decision_schema(),
+            module_resource_response_schema("decision"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "decision", "evidence",
+        ])),
+        module_write(
+            ENFORCE_REVOCATION_FUNCTION,
+            "enforce revoked trust by composing canonical module disable or quarantine invocations",
+            enforce_revocation_schema(),
+            module_resource_response_schema("evidence"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            "evidence",
+            ACTIVATION_RECORD_KIND,
+        ])),
     ]
     .into_iter()
     .map(|definition| handled_registration(definition, handler.clone()))
@@ -382,6 +446,11 @@ impl InProcessFunctionHandler for ModulePrimitiveHandler {
             AUDIT_POLICY_FUNCTION => self.audit_policy(&invocation),
             RECORD_POLICY_AUDIT_FUNCTION => self.record_policy_audit(&invocation),
             RECONCILE_TRUST_FUNCTION => self.reconcile_trust(&invocation),
+            INSPECT_TRUST_FUNCTION => self.inspect_trust(&invocation),
+            RENEW_TRUST_ROOT_FUNCTION => self.renew_trust_root(&invocation),
+            ROTATE_SIGNATURE_KEY_FUNCTION => self.rotate_signature_key(&invocation),
+            EXPIRE_TRUST_DECISION_FUNCTION => self.expire_trust_decision(&invocation),
+            ENFORCE_REVOCATION_FUNCTION => self.enforce_revocation(&invocation).await,
             _ => Err(EngineError::NotFound {
                 kind: "function",
                 id: invocation.function_id.to_string(),
@@ -431,6 +500,31 @@ impl ModulePrimitiveHandler {
             .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
             .link(request)?;
         Ok(())
+    }
+
+    fn link_required(
+        &self,
+        source: &str,
+        target: &str,
+        relation: &str,
+        invocation: &Invocation,
+    ) -> Result<()> {
+        if self.inspect_resource(source)?.is_some_and(|inspection| {
+            inspection
+                .outgoing_links
+                .iter()
+                .any(|link| link.target_resource_id == target && link.relation == relation)
+        }) {
+            return Ok(());
+        }
+        self.link_resources(LinkResources {
+            source_resource_id: source.to_owned(),
+            target_resource_id: target.to_owned(),
+            relation: relation.to_owned(),
+            metadata: json!({"source": "module", "required": true}),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })
     }
 
     fn derive_grant(&self, request: DeriveGrant) -> Result<crate::engine::grants::EngineGrant> {
@@ -1707,6 +1801,543 @@ impl ModulePrimitiveHandler {
             },
             "evidence": evidence.resource,
             "resourceRefs": [evidence.reference],
+        }))
+    }
+
+    fn inspect_trust(&self, invocation: &Invocation) -> Result<Value> {
+        let target_type = required_value_str(&invocation.payload, "targetType")?;
+        let target_resource_id = required_string_owned(&invocation.payload, "targetResourceId")?;
+        let include_evidence = invocation
+            .payload
+            .get("includeEvidence")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let limit = invocation
+            .payload
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(50)
+            .min(200) as usize;
+        let target = self.trust_target_summary(target_type, &target_resource_id)?;
+        let affected_packages =
+            self.affected_packages_for_trust_target(target_type, &target_resource_id, limit)?;
+        let affected_activations =
+            self.affected_activations_for_packages(&affected_packages, limit)?;
+        let decision_refs =
+            self.decision_refs_for_trust_target(target_type, &target_resource_id, limit)?;
+        let evidence_refs = if include_evidence {
+            self.evidence_refs_for_trust_target(&target_resource_id, limit)?
+        } else {
+            Vec::new()
+        };
+        let latest_policy_audit =
+            self.latest_policy_audit_for_trust_target(&target_resource_id, &affected_packages)?;
+        let grant_refs = affected_activations
+            .iter()
+            .filter_map(|activation| activation.get("derivedGrantId").and_then(Value::as_str))
+            .map(|grant_id| json!({"grantId": grant_id}))
+            .collect::<Vec<_>>();
+        let status = trust_target_status(target.get("payload").unwrap_or(&Value::Null));
+        Ok(json!({
+            "target": target,
+            "status": status,
+            "dependencyGraph": {
+                "targetType": target_type,
+                "targetResourceId": target_resource_id,
+                "decisionRefs": decision_refs,
+                "evidenceRefs": evidence_refs,
+                "packageRefs": affected_packages,
+                "activationRefs": affected_activations,
+                "grantRefs": grant_refs,
+            },
+            "affectedPackages": affected_packages,
+            "affectedActivations": affected_activations,
+            "evidenceRefs": evidence_refs,
+            "decisionRefs": decision_refs,
+            "grantRefs": grant_refs,
+            "latestPolicyAudit": latest_policy_audit,
+            "warnings": trust_warnings_for_status(status),
+            "availableActions": module_actions_for_trust_target(target_type, &target_resource_id),
+        }))
+    }
+
+    fn renew_trust_root(&self, invocation: &Invocation) -> Result<Value> {
+        let decision_resource_id =
+            required_string_owned(&invocation.payload, "trustRootDecisionResourceId")?;
+        let decision_version_id =
+            required_string_owned(&invocation.payload, "trustRootDecisionVersionId")?;
+        let expected_current_version_id =
+            required_string_owned(&invocation.payload, "expectedCurrentVersionId")?;
+        if decision_version_id != expected_current_version_id {
+            return Err(EngineError::PolicyViolation(
+                "trustRootDecisionVersionId must match expectedCurrentVersionId".to_owned(),
+            ));
+        }
+        let old = require_inspection(self, &decision_resource_id, "decision")?;
+        ensure_expected_current_version(&old, &expected_current_version_id)?;
+        let old_payload = version_payload(&old, &decision_version_id)?;
+        let old_metadata = trust_decision_metadata(&old_payload, "module_trust_root")?;
+        if old_payload.get("status").and_then(Value::as_str) != Some("active") {
+            return Err(EngineError::PolicyViolation(
+                "module::renew_trust_root requires an active trust-root decision".to_owned(),
+            ));
+        }
+        if self.trust_root_decision_revoked(&decision_resource_id)? {
+            return Err(EngineError::PolicyViolation(
+                "module::renew_trust_root cannot renew a revoked trust root".to_owned(),
+            ));
+        }
+        let old_expires_at = parse_datetime(required_map_str(old_metadata, "expiresAt")?)?;
+        if old_expires_at <= Utc::now() {
+            return Err(EngineError::PolicyViolation(
+                "module::renew_trust_root cannot renew an expired trust root".to_owned(),
+            ));
+        }
+        let new_expires_at = parse_datetime(required_value_str(&invocation.payload, "expiresAt")?)?;
+        if new_expires_at <= Utc::now() {
+            return Err(EngineError::PolicyViolation(
+                "module::renew_trust_root expiresAt must be in the future".to_owned(),
+            ));
+        }
+        let requested_selectors = string_array_from(
+            invocation.payload.get("allowedPackageSelectors"),
+            "allowedPackageSelectors",
+        )?;
+        let old_selectors = string_array_from(
+            old_metadata.get("allowedPackageSelectors"),
+            "allowedPackageSelectors",
+        )?;
+        ensure_subset(
+            &requested_selectors,
+            &old_selectors,
+            "renewed trust-root selectors",
+        )?;
+        let requested_ceiling = invocation
+            .payload
+            .get("grantCeiling")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation("renew_trust_root requires grantCeiling".to_owned())
+            })?;
+        let old_ceiling = old_metadata
+            .get("grantCeiling")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "old trust-root decision missing grantCeiling".to_owned(),
+                )
+            })?;
+        ensure_grant_ceiling_within_ceiling(
+            requested_ceiling,
+            old_ceiling,
+            "renewed trust root grant ceiling",
+        )?;
+        ensure_grant_ceiling_narrows_caller(self, invocation, requested_ceiling)?;
+        let trust_tier = required_value_str(&invocation.payload, "trustTierCeiling")?;
+        if trust_tier
+            != old_metadata
+                .get("trustTierCeiling")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+            || trust_tier != SIGNED_LOCAL_TRUST
+        {
+            return Err(EngineError::PolicyViolation(
+                "renewed trustTierCeiling must match the old signed_local trust root".to_owned(),
+            ));
+        }
+        let reason = required_value_str(&invocation.payload, "reason")?;
+        reject_raw_secrets(&json!({"reason": reason}))?;
+        let public_key = required_map_str(old_metadata, "publicKey")?;
+        let key_id = required_map_str(old_metadata, "keyId")?;
+        let scope = required_map_str(old_metadata, "scope")?;
+        let payload = json!({
+            "status": "active",
+            "summary": format!("Renewed module Ed25519 trust root {key_id}"),
+            "metadata": {
+                "decisionType": "module_trust_root",
+                "algorithm": "ed25519",
+                "publicKey": public_key,
+                "keyId": key_id,
+                "scope": scope,
+                "allowedPackageSelectors": requested_selectors,
+                "trustTierCeiling": trust_tier,
+                "grantCeiling": requested_ceiling,
+                "expiresAt": new_expires_at.to_rfc3339(),
+                "reason": reason,
+                "renewedFromDecisionResourceId": decision_resource_id,
+                "renewedFromDecisionVersionId": decision_version_id,
+            }
+        });
+        let decision = self.create_decision_resource(
+            invocation,
+            payload.clone(),
+            Some(old.resource.scope.clone()),
+            &decision_resource_id,
+            "supersedes",
+        )?;
+        self.link_required(
+            &decision.resource.resource_id,
+            &decision_resource_id,
+            "supersedes",
+            invocation,
+        )?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module trust root renewed",
+            RENEW_TRUST_ROOT_FUNCTION,
+            &decision.resource.resource_id,
+            json!({
+                "evidenceType": "trust_root_renewal",
+                "oldDecisionResourceId": decision_resource_id,
+                "oldDecisionVersionId": decision_version_id,
+                "newDecisionResourceId": decision.resource.resource_id,
+                "keyId": key_id,
+                "expiresAt": new_expires_at.to_rfc3339(),
+            }),
+        )?;
+        self.link_required(
+            &evidence.resource.resource_id,
+            &decision.resource.resource_id,
+            "renewed_by",
+            invocation,
+        )?;
+        Ok(json!({
+            "decision": payload,
+            "resource": decision.resource,
+            "evidence": evidence.resource,
+            "resourceRefs": [decision.reference, evidence.reference],
+        }))
+    }
+
+    fn rotate_signature_key(&self, invocation: &Invocation) -> Result<Value> {
+        let old_id = required_string_owned(&invocation.payload, "oldTrustRootDecisionResourceId")?;
+        let old_version_id =
+            required_string_owned(&invocation.payload, "oldTrustRootDecisionVersionId")?;
+        let new_id = required_string_owned(&invocation.payload, "newTrustRootDecisionResourceId")?;
+        let new_version_id =
+            required_string_owned(&invocation.payload, "newTrustRootDecisionVersionId")?;
+        let old = self.active_trust_root_decision(&old_id, &old_version_id)?;
+        let new = self.active_trust_root_decision(&new_id, &new_version_id)?;
+        let old_metadata = trust_decision_metadata(&old, "module_trust_root")?;
+        let new_metadata = trust_decision_metadata(&new, "module_trust_root")?;
+        if required_map_str(old_metadata, "scope")? != required_map_str(new_metadata, "scope")? {
+            return Err(EngineError::PolicyViolation(
+                "signature key rotation requires matching trust-root scopes".to_owned(),
+            ));
+        }
+        if required_map_str(old_metadata, "keyId")? == required_map_str(new_metadata, "keyId")? {
+            return Err(EngineError::PolicyViolation(
+                "signature key rotation requires a new key id".to_owned(),
+            ));
+        }
+        let new_selectors = string_array_from(
+            new_metadata.get("allowedPackageSelectors"),
+            "allowedPackageSelectors",
+        )?;
+        let old_selectors = string_array_from(
+            old_metadata.get("allowedPackageSelectors"),
+            "allowedPackageSelectors",
+        )?;
+        ensure_subset(
+            &new_selectors,
+            &old_selectors,
+            "rotated trust-root selectors",
+        )?;
+        let new_ceiling = new_metadata
+            .get("grantCeiling")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "new trust-root decision missing grantCeiling".to_owned(),
+                )
+            })?;
+        let old_ceiling = old_metadata
+            .get("grantCeiling")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "old trust-root decision missing grantCeiling".to_owned(),
+                )
+            })?;
+        ensure_grant_ceiling_within_ceiling(
+            new_ceiling,
+            old_ceiling,
+            "rotated trust root grant ceiling",
+        )?;
+        ensure_grant_ceiling_narrows_caller(self, invocation, new_ceiling)?;
+        let reason = required_value_str(&invocation.payload, "reason")?;
+        reject_raw_secrets(&json!({"reason": reason}))?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module signature key rotation recorded",
+            ROTATE_SIGNATURE_KEY_FUNCTION,
+            &old_id,
+            json!({
+                "evidenceType": "signature_key_rotation",
+                "oldTrustRootDecisionResourceId": old_id,
+                "oldTrustRootDecisionVersionId": old_version_id,
+                "oldKeyId": required_map_str(old_metadata, "keyId")?,
+                "newTrustRootDecisionResourceId": new_id,
+                "newTrustRootDecisionVersionId": new_version_id,
+                "newKeyId": required_map_str(new_metadata, "keyId")?,
+                "reason": reason,
+                "rotatedAt": Utc::now().to_rfc3339(),
+            }),
+        )?;
+        self.link_required(
+            &evidence.resource.resource_id,
+            &old_id,
+            "rotates_from",
+            invocation,
+        )?;
+        self.link_required(
+            &evidence.resource.resource_id,
+            &new_id,
+            "rotates_to",
+            invocation,
+        )?;
+        Ok(json!({
+            "rotation": {
+                "oldTrustRootDecisionResourceId": old_id,
+                "newTrustRootDecisionResourceId": new_id,
+            },
+            "evidence": evidence.resource,
+            "resourceRefs": [evidence.reference],
+        }))
+    }
+
+    fn expire_trust_decision(&self, invocation: &Invocation) -> Result<Value> {
+        let decision_resource_id =
+            required_string_owned(&invocation.payload, "decisionResourceId")?;
+        let decision_version_id = required_string_owned(&invocation.payload, "decisionVersionId")?;
+        let expected_current_version_id =
+            required_string_owned(&invocation.payload, "expectedCurrentVersionId")?;
+        if decision_version_id != expected_current_version_id {
+            return Err(EngineError::PolicyViolation(
+                "decisionVersionId must match expectedCurrentVersionId".to_owned(),
+            ));
+        }
+        let inspection = require_inspection(self, &decision_resource_id, "decision")?;
+        ensure_expected_current_version(&inspection, &expected_current_version_id)?;
+        let mut payload = version_payload(&inspection, &decision_version_id)?;
+        let decision_type = payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("decisionType"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "expire_trust_decision requires a module decision type".to_owned(),
+                )
+            })?;
+        if !matches!(
+            decision_type.as_str(),
+            "module_trust_root" | "module_source_registration" | "module_source_approval"
+        ) {
+            return Err(EngineError::PolicyViolation(format!(
+                "expire_trust_decision does not accept {decision_type}"
+            )));
+        }
+        let reason = required_value_str(&invocation.payload, "reason")?;
+        reject_raw_secrets(&json!({"reason": reason}))?;
+        payload["status"] = json!("expired");
+        payload["expiredAt"] = json!(Utc::now().to_rfc3339());
+        payload["expirationReason"] = json!(reason);
+        if let Some(metadata) = payload.get_mut("metadata").and_then(Value::as_object_mut) {
+            metadata.insert("expiredAt".to_owned(), json!(Utc::now().to_rfc3339()));
+            metadata.insert("expirationReason".to_owned(), json!(reason));
+        }
+        let version = self.update_resource(UpdateResource {
+            resource_id: decision_resource_id.clone(),
+            expected_current_version_id: Some(expected_current_version_id),
+            lifecycle: Some("archived".to_owned()),
+            payload: payload.clone(),
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })?;
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module trust decision expired",
+            EXPIRE_TRUST_DECISION_FUNCTION,
+            &decision_resource_id,
+            json!({
+                "evidenceType": "trust_decision_expired",
+                "decisionType": decision_type,
+                "decisionResourceId": decision_resource_id,
+                "decisionVersionId": decision_version_id,
+                "expiredVersionId": version.version_id,
+                "reason": reason,
+            }),
+        )?;
+        self.link_required(
+            &evidence.resource.resource_id,
+            &decision_resource_id,
+            "evidence_for",
+            invocation,
+        )?;
+        Ok(json!({
+            "decision": payload,
+            "version": version,
+            "evidence": evidence.resource,
+            "resourceRefs": [
+                resource_ref_from_version(&version, "decision", "expired"),
+                evidence.reference
+            ],
+        }))
+    }
+
+    async fn enforce_revocation(&self, invocation: &Invocation) -> Result<Value> {
+        let mode = required_value_str(&invocation.payload, "mode")?;
+        if !matches!(mode, "disable" | "quarantine") {
+            return Err(EngineError::PolicyViolation(
+                "enforce_revocation mode must be disable or quarantine".to_owned(),
+            ));
+        }
+        let activation_ids = string_array_from(
+            invocation.payload.get("activationResourceIds"),
+            "activationResourceIds",
+        )?;
+        if activation_ids.is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "enforce_revocation requires explicit affected activation ids".to_owned(),
+            ));
+        }
+        let reason = required_value_str(&invocation.payload, "reason")?;
+        reject_raw_secrets(&json!({"reason": reason}))?;
+        let (trust_decision_id, revocation_decision_id, expected_decision_version_id) =
+            self.revocation_enforcement_target(invocation)?;
+        let affected_packages =
+            self.affected_packages_for_trust_target("decision", &trust_decision_id, 500)?;
+        let affected_activations =
+            self.affected_activations_for_packages(&affected_packages, 500)?;
+        let affected_activation_ids = affected_activations
+            .iter()
+            .filter_map(|activation| {
+                activation
+                    .get("activationResourceId")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+            .collect::<Vec<_>>();
+        for activation_id in &activation_ids {
+            if !affected_activation_ids
+                .iter()
+                .any(|item| item == activation_id)
+            {
+                return Err(EngineError::PolicyViolation(format!(
+                    "activation {activation_id} is not affected by revoked trust {trust_decision_id}"
+                )));
+            }
+        }
+        let evidence = self.create_evidence_resource(
+            invocation,
+            "module trust revocation enforcement requested",
+            ENFORCE_REVOCATION_FUNCTION,
+            &trust_decision_id,
+            json!({
+                "evidenceType": "revocation_enforcement",
+                "trustDecisionResourceId": trust_decision_id,
+                "revocationDecisionResourceId": revocation_decision_id,
+                "expectedDecisionVersionId": expected_decision_version_id,
+                "mode": mode,
+                "activationResourceIds": activation_ids,
+                "reason": reason,
+                "requestedAt": Utc::now().to_rfc3339(),
+            }),
+        )?;
+        self.link_required(
+            &evidence.resource.resource_id,
+            &trust_decision_id,
+            "enforces_revocation",
+            invocation,
+        )?;
+        let mut refs = vec![evidence.reference.clone()];
+        let mut child_invocation_ids = Vec::new();
+        let mut per_activation = Vec::new();
+        for activation_id in activation_ids {
+            self.link_required(
+                &evidence.resource.resource_id,
+                &activation_id,
+                "affects_activation",
+                invocation,
+            )?;
+            let activation = require_inspection(self, &activation_id, ACTIVATION_RECORD_KIND)?;
+            let expected_current_version_id = activation
+                .resource
+                .current_version_id
+                .clone()
+                .ok_or_else(|| {
+                    EngineError::PolicyViolation(format!(
+                        "activation {activation_id} has no current version"
+                    ))
+                })?;
+            let (function_id, payload) = if mode == "disable" {
+                (
+                    DISABLE_FUNCTION,
+                    json!({
+                        "activationResourceId": activation_id,
+                        "expectedCurrentVersionId": expected_current_version_id,
+                    }),
+                )
+            } else {
+                (
+                    QUARANTINE_FUNCTION,
+                    json!({
+                        "resourceId": activation_id,
+                        "expectedCurrentVersionId": expected_current_version_id,
+                        "evidenceResourceIds": [evidence.resource.resource_id],
+                    }),
+                )
+            };
+            let mut context = invocation.causal_context.clone();
+            context.parent_invocation_id = Some(invocation.id.clone());
+            context.idempotency_key = Some(format!(
+                "module.enforce_revocation:{mode}:{activation_id}:{}",
+                invocation
+                    .causal_context
+                    .idempotency_key
+                    .as_deref()
+                    .unwrap_or(invocation.id.as_str())
+            ));
+            context.authority_scopes.push("module.write".to_owned());
+            let child = Invocation::new_sync(FunctionId::new(function_id)?, payload, context);
+            let result = self.stores.engine_host()?.invoke(child).await;
+            child_invocation_ids.push(json!(result.invocation_id.as_str()));
+            let status = if let Some(error) = result.error {
+                json!({
+                    "activationResourceId": activation_id,
+                    "status": "failed",
+                    "error": error.to_string(),
+                    "childInvocationId": result.invocation_id.as_str(),
+                })
+            } else {
+                if let Some(value) = &result.value
+                    && let Some(resource_refs) = value.get("resourceRefs").and_then(Value::as_array)
+                {
+                    refs.extend(resource_refs.iter().cloned());
+                }
+                json!({
+                    "activationResourceId": activation_id,
+                    "status": "completed",
+                    "childInvocationId": result.invocation_id.as_str(),
+                    "result": result.value.unwrap_or(Value::Null),
+                })
+            };
+            per_activation.push(status);
+        }
+        Ok(json!({
+            "enforcement": {
+                "mode": mode,
+                "trustDecisionResourceId": trust_decision_id,
+                "revocationDecisionResourceId": revocation_decision_id,
+                "results": per_activation,
+            },
+            "evidence": evidence.resource,
+            "childInvocationIds": child_invocation_ids,
+            "perActivationResults": per_activation,
+            "resourceRefs": refs,
         }))
     }
 
@@ -3652,6 +4283,402 @@ impl ModulePrimitiveHandler {
             .get("revokedDecisionResourceId")
             .and_then(Value::as_str)
             == Some(decision_resource_id))
+    }
+
+    fn active_trust_root_decision(
+        &self,
+        decision_resource_id: &str,
+        decision_version_id: &str,
+    ) -> Result<Value> {
+        let inspection = require_inspection(self, decision_resource_id, "decision")?;
+        ensure_version_is_current(&inspection, decision_version_id)?;
+        if inspection.resource.lifecycle == "archived" {
+            return Err(EngineError::PolicyViolation(format!(
+                "trust root decision {decision_resource_id} is archived"
+            )));
+        }
+        let payload = version_payload(&inspection, decision_version_id)?;
+        let metadata = trust_decision_metadata(&payload, "module_trust_root")?;
+        if payload.get("status").and_then(Value::as_str) != Some("active") {
+            return Err(EngineError::PolicyViolation(format!(
+                "trust root decision {decision_resource_id} is not active"
+            )));
+        }
+        if self.trust_root_decision_revoked(decision_resource_id)? {
+            return Err(EngineError::PolicyViolation(format!(
+                "trust root decision {decision_resource_id} is revoked"
+            )));
+        }
+        let expires_at = parse_datetime(required_map_str(metadata, "expiresAt")?)?;
+        if expires_at <= Utc::now() {
+            return Err(EngineError::PolicyViolation(format!(
+                "trust root decision {decision_resource_id} is expired"
+            )));
+        }
+        Ok(payload)
+    }
+
+    fn trust_target_summary(&self, target_type: &str, target_resource_id: &str) -> Result<Value> {
+        let expected_kind = match target_type {
+            "package" => WORKER_PACKAGE_KIND,
+            "activation" => ACTIVATION_RECORD_KIND,
+            "trust_root"
+            | "source_registration"
+            | "source_approval"
+            | "source_revocation"
+            | "decision" => "decision",
+            other => {
+                return Err(EngineError::PolicyViolation(format!(
+                    "unsupported trust inspect targetType {other}"
+                )));
+            }
+        };
+        let inspection = require_inspection(self, target_resource_id, expected_kind)?;
+        let payload = current_payload(&inspection).unwrap_or(Value::Null);
+        Ok(json!({
+            "targetType": target_type,
+            "resourceId": target_resource_id,
+            "kind": inspection.resource.kind,
+            "lifecycle": inspection.resource.lifecycle,
+            "currentVersionId": inspection.resource.current_version_id,
+            "payload": bounded_json(&payload, 4096),
+        }))
+    }
+
+    fn affected_packages_for_trust_target(
+        &self,
+        target_type: &str,
+        target_resource_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Value>> {
+        match target_type {
+            "package" => {
+                let inspection = require_inspection(self, target_resource_id, WORKER_PACKAGE_KIND)?;
+                return Ok(vec![package_trust_summary(&inspection)?]);
+            }
+            "activation" => {
+                let inspection =
+                    require_inspection(self, target_resource_id, ACTIVATION_RECORD_KIND)?;
+                let payload = current_payload(&inspection).ok_or_else(|| {
+                    EngineError::PolicyViolation(format!(
+                        "activation {target_resource_id} has no current payload"
+                    ))
+                })?;
+                let package_resource_id = required_value_str(&payload, "packageResourceId")?;
+                let package = require_inspection(self, package_resource_id, WORKER_PACKAGE_KIND)?;
+                return Ok(vec![package_trust_summary(&package)?]);
+            }
+            "source_revocation" => {
+                let inspection = require_inspection(self, target_resource_id, "decision")?;
+                let payload = current_payload(&inspection).ok_or_else(|| {
+                    EngineError::PolicyViolation(format!(
+                        "decision {target_resource_id} has no current payload"
+                    ))
+                })?;
+                let metadata = trust_decision_metadata(&payload, "module_source_revocation")?;
+                let revoked = required_map_str(metadata, "revokedDecisionResourceId")?;
+                return self.affected_packages_for_trust_target("decision", revoked, limit);
+            }
+            _ => {}
+        }
+        let decision = require_inspection(self, target_resource_id, "decision")?;
+        let payload = current_payload(&decision).ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "decision {target_resource_id} has no current payload"
+            ))
+        })?;
+        let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
+            return Ok(Vec::new());
+        };
+        let decision_type = metadata
+            .get("decisionType")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let packages = self.list_resources(ListResources {
+            kind: Some(WORKER_PACKAGE_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        let mut affected = Vec::new();
+        for package in packages {
+            if affected.len() >= limit {
+                break;
+            }
+            let Some(package_inspection) = self.inspect_resource(&package.resource_id)? else {
+                continue;
+            };
+            let Some(manifest) = current_payload(&package_inspection) else {
+                continue;
+            };
+            let matches = match decision_type {
+                "module_trust_root" => {
+                    let selectors = string_array_from(
+                        metadata.get("allowedPackageSelectors"),
+                        "allowedPackageSelectors",
+                    )?;
+                    package_selector_matches(&selectors, &manifest, &package.resource_id)?
+                }
+                "module_source_registration" => metadata
+                    .get("sourceDigest")
+                    .and_then(Value::as_str)
+                    .is_some_and(|digest| {
+                        manifest.get("packageDigest").and_then(Value::as_str) == Some(digest)
+                    }),
+                "module_source_approval" => {
+                    metadata.get("packageResourceId").and_then(Value::as_str)
+                        == Some(package.resource_id.as_str())
+                }
+                "module_source_revocation" => {
+                    let revoked = required_map_str(metadata, "revokedDecisionResourceId")?;
+                    return self.affected_packages_for_trust_target("decision", revoked, limit);
+                }
+                _ => false,
+            };
+            if matches {
+                affected.push(package_trust_summary(&package_inspection)?);
+            }
+        }
+        Ok(affected)
+    }
+
+    fn affected_activations_for_packages(
+        &self,
+        packages: &[Value],
+        limit: usize,
+    ) -> Result<Vec<Value>> {
+        let activations = self.list_resources(ListResources {
+            kind: Some(ACTIVATION_RECORD_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        let package_ids = packages
+            .iter()
+            .filter_map(|package| package.get("packageId").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        let package_resource_ids = packages
+            .iter()
+            .filter_map(|package| package.get("packageResourceId").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        let mut affected = Vec::new();
+        for activation in activations {
+            if affected.len() >= limit {
+                break;
+            }
+            let Some(inspection) = self.inspect_resource(&activation.resource_id)? else {
+                continue;
+            };
+            let Some(payload) = current_payload(&inspection) else {
+                continue;
+            };
+            if payload
+                .get("packageId")
+                .and_then(Value::as_str)
+                .is_some_and(|package_id| package_ids.contains(&package_id))
+                || payload
+                    .get("packageResourceId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|resource_id| package_resource_ids.contains(&resource_id))
+            {
+                affected.push(activation_trust_summary(&inspection)?);
+            }
+        }
+        Ok(affected)
+    }
+
+    fn decision_refs_for_trust_target(
+        &self,
+        target_type: &str,
+        target_resource_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Value>> {
+        let mut refs = Vec::new();
+        if matches!(
+            target_type,
+            "trust_root"
+                | "source_registration"
+                | "source_approval"
+                | "source_revocation"
+                | "decision"
+        ) {
+            if let Some(inspection) = self.inspect_resource(target_resource_id)? {
+                refs.push(decision_summary(&inspection)?);
+            }
+        }
+        let decisions = self.list_resources(ListResources {
+            kind: Some("decision".to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        for decision in decisions {
+            if refs.len() >= limit {
+                break;
+            }
+            let Some(inspection) = self.inspect_resource(&decision.resource_id)? else {
+                continue;
+            };
+            let Some(payload) = current_payload(&inspection) else {
+                continue;
+            };
+            let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
+                continue;
+            };
+            let references_target = metadata
+                .get("revokedDecisionResourceId")
+                .and_then(Value::as_str)
+                == Some(target_resource_id)
+                || metadata
+                    .get("renewedFromDecisionResourceId")
+                    .and_then(Value::as_str)
+                    == Some(target_resource_id);
+            if references_target
+                && !refs.iter().any(|item| {
+                    item.get("resourceId").and_then(Value::as_str)
+                        == Some(decision.resource_id.as_str())
+                })
+            {
+                refs.push(decision_summary(&inspection)?);
+            }
+        }
+        Ok(refs)
+    }
+
+    fn evidence_refs_for_trust_target(
+        &self,
+        target_resource_id: &str,
+        limit: usize,
+    ) -> Result<Vec<Value>> {
+        let evidences = self.list_resources(ListResources {
+            kind: Some("evidence".to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        let mut refs = Vec::new();
+        for evidence in evidences {
+            if refs.len() >= limit {
+                break;
+            }
+            let Some(inspection) = self.inspect_resource(&evidence.resource_id)? else {
+                continue;
+            };
+            let Some(payload) = current_payload(&inspection) else {
+                continue;
+            };
+            let text = payload.to_string();
+            if payload.get("resourceRef").and_then(Value::as_str) == Some(target_resource_id)
+                || text.contains(target_resource_id)
+            {
+                refs.push(json!({
+                    "resourceId": evidence.resource_id,
+                    "versionId": inspection.resource.current_version_id,
+                    "kind": "evidence",
+                    "summary": payload.get("summary").cloned().unwrap_or(Value::Null),
+                    "evidenceType": payload
+                        .get("metadata")
+                        .and_then(|metadata| metadata.get("evidenceType"))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                }));
+            }
+        }
+        Ok(refs)
+    }
+
+    fn latest_policy_audit_for_trust_target(
+        &self,
+        target_resource_id: &str,
+        affected_packages: &[Value],
+    ) -> Result<Value> {
+        let mut candidate_ids = vec![target_resource_id.to_owned()];
+        candidate_ids.extend(
+            affected_packages
+                .iter()
+                .filter_map(|package| package.get("packageResourceId").and_then(Value::as_str))
+                .map(ToOwned::to_owned),
+        );
+        let evidences = self.list_resources(ListResources {
+            kind: Some("evidence".to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        for evidence in evidences {
+            let Some(inspection) = self.inspect_resource(&evidence.resource_id)? else {
+                continue;
+            };
+            let Some(payload) = current_payload(&inspection) else {
+                continue;
+            };
+            let Some(metadata) = payload.get("metadata").and_then(Value::as_object) else {
+                continue;
+            };
+            if metadata.get("evidenceType").and_then(Value::as_str) != Some("policy_audit") {
+                continue;
+            }
+            let resource_ref = payload.get("resourceRef").and_then(Value::as_str);
+            if !resource_ref.is_some_and(|resource_ref| {
+                candidate_ids
+                    .iter()
+                    .any(|candidate| candidate == resource_ref)
+            }) {
+                continue;
+            }
+            return Ok(json!({
+                "evidenceResourceId": evidence.resource_id,
+                "evidenceVersionId": inspection.resource.current_version_id,
+                "audit": metadata.get("audit").cloned().unwrap_or(Value::Null),
+            }));
+        }
+        Ok(Value::Null)
+    }
+
+    fn revocation_enforcement_target(
+        &self,
+        invocation: &Invocation,
+    ) -> Result<(String, Option<String>, Option<String>)> {
+        let expected_version =
+            optional_string(invocation.payload.get("expectedDecisionVersionId"))?;
+        if let Some(revocation_id) =
+            optional_string(invocation.payload.get("revocationDecisionResourceId"))?
+        {
+            let inspection = require_inspection(self, &revocation_id, "decision")?;
+            if let Some(expected) = &expected_version {
+                ensure_expected_current_version(&inspection, expected)?;
+            }
+            let payload = current_payload(&inspection).ok_or_else(|| {
+                EngineError::PolicyViolation(format!(
+                    "revocation decision {revocation_id} has no current payload"
+                ))
+            })?;
+            let metadata = trust_decision_metadata(&payload, "module_source_revocation")?;
+            let revoked = required_map_str(metadata, "revokedDecisionResourceId")?.to_owned();
+            if !self.revocation_targets_decision(&inspection.resource, &revoked)? {
+                return Err(EngineError::PolicyViolation(format!(
+                    "decision {revocation_id} is not a valid revocation for {revoked}"
+                )));
+            }
+            return Ok((revoked, Some(revocation_id), expected_version));
+        }
+        let trust_id = required_string_owned(&invocation.payload, "trustDecisionResourceId")?;
+        let inspection = require_inspection(self, &trust_id, "decision")?;
+        if let Some(expected) = &expected_version {
+            ensure_expected_current_version(&inspection, expected)?;
+        }
+        let payload = current_payload(&inspection).ok_or_else(|| {
+            EngineError::PolicyViolation(format!(
+                "trust decision {trust_id} has no current payload"
+            ))
+        })?;
+        let status = payload.get("status").and_then(Value::as_str).unwrap_or("");
+        if status != "expired" && !self.trust_root_decision_revoked(&trust_id)? {
+            return Err(EngineError::PolicyViolation(format!(
+                "trust decision {trust_id} is not expired or revoked"
+            )));
+        }
+        Ok((trust_id, None, expected_version))
     }
 
     fn create_decision_resource(
@@ -5709,6 +6736,232 @@ fn filter_resources_by_package(
     Ok(filtered)
 }
 
+fn trust_decision_metadata<'a>(
+    payload: &'a Value,
+    expected_type: &str,
+) -> Result<&'a serde_json::Map<String, Value>> {
+    let metadata = payload
+        .get("metadata")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            EngineError::PolicyViolation(format!("{expected_type} decision is missing metadata"))
+        })?;
+    if metadata.get("decisionType").and_then(Value::as_str) != Some(expected_type) {
+        return Err(EngineError::PolicyViolation(format!(
+            "expected decisionType {expected_type}"
+        )));
+    }
+    Ok(metadata)
+}
+
+fn package_trust_summary(inspection: &EngineResourceInspection) -> Result<Value> {
+    let payload = current_payload(inspection).ok_or_else(|| {
+        EngineError::PolicyViolation(format!(
+            "package {} has no current payload",
+            inspection.resource.resource_id
+        ))
+    })?;
+    Ok(json!({
+        "packageResourceId": inspection.resource.resource_id,
+        "packageVersionId": inspection.resource.current_version_id,
+        "packageId": payload.get("packageId").cloned().unwrap_or(Value::Null),
+        "packageDigest": payload.get("packageDigest").cloned().unwrap_or(Value::Null),
+        "sourceTrustStatus": payload.get("sourceTrustStatus").cloned().unwrap_or(Value::Null),
+        "signatureKeyRef": payload.get("signatureKeyRef").cloned().unwrap_or(Value::Null),
+    }))
+}
+
+fn activation_trust_summary(inspection: &EngineResourceInspection) -> Result<Value> {
+    let payload = current_payload(inspection).ok_or_else(|| {
+        EngineError::PolicyViolation(format!(
+            "activation {} has no current payload",
+            inspection.resource.resource_id
+        ))
+    })?;
+    Ok(json!({
+        "activationResourceId": inspection.resource.resource_id,
+        "activationVersionId": inspection.resource.current_version_id,
+        "lifecycle": inspection.resource.lifecycle,
+        "packageId": payload.get("packageId").cloned().unwrap_or(Value::Null),
+        "packageResourceId": payload.get("packageResourceId").cloned().unwrap_or(Value::Null),
+        "activationStatus": payload.get("activationStatus").cloned().unwrap_or(Value::Null),
+        "derivedGrantId": payload.get("derivedGrantId").cloned().unwrap_or(Value::Null),
+        "workerId": payload.get("workerId").cloned().unwrap_or(Value::Null),
+    }))
+}
+
+fn decision_summary(inspection: &EngineResourceInspection) -> Result<Value> {
+    let payload = current_payload(inspection).ok_or_else(|| {
+        EngineError::PolicyViolation(format!(
+            "decision {} has no current payload",
+            inspection.resource.resource_id
+        ))
+    })?;
+    Ok(json!({
+        "resourceId": inspection.resource.resource_id,
+        "versionId": inspection.resource.current_version_id,
+        "lifecycle": inspection.resource.lifecycle,
+        "status": payload.get("status").cloned().unwrap_or(Value::Null),
+        "decisionType": payload
+            .get("metadata")
+            .and_then(|metadata| metadata.get("decisionType"))
+            .cloned()
+            .unwrap_or(Value::Null),
+    }))
+}
+
+fn trust_target_status(payload: &Value) -> &'static str {
+    match payload.get("status").and_then(Value::as_str) {
+        Some("active") | Some("approved") => "active",
+        Some("expired") | Some("revoked") => "stale",
+        Some("rejected") => "denied",
+        _ => "inspectable",
+    }
+}
+
+fn trust_warnings_for_status(status: &str) -> Vec<Value> {
+    if matches!(status, "stale" | "denied") {
+        vec![json!({
+            "code": "trust_not_current",
+            "message": "target trust decision is not active"
+        })]
+    } else {
+        Vec::new()
+    }
+}
+
+fn module_actions_for_trust_target(target_type: &str, target_resource_id: &str) -> Vec<Value> {
+    let mut actions = vec![json!({
+        "functionId": INSPECT_TRUST_FUNCTION,
+        "targetType": target_type,
+        "targetField": "targetResourceId",
+        "target": target_resource_id,
+        "requiredRisk": "low",
+        "approvalRequired": false,
+    })];
+    if matches!(target_type, "trust_root" | "decision") {
+        actions.extend([
+            json!({
+                "functionId": RENEW_TRUST_ROOT_FUNCTION,
+                "targetType": "trust_root",
+                "targetField": "trustRootDecisionResourceId",
+                "target": target_resource_id,
+                "requiredRisk": "high",
+                "approvalRequired": true,
+            }),
+            json!({
+                "functionId": ROTATE_SIGNATURE_KEY_FUNCTION,
+                "targetType": "trust_root",
+                "targetField": "oldTrustRootDecisionResourceId",
+                "target": target_resource_id,
+                "requiredRisk": "high",
+                "approvalRequired": true,
+            }),
+            json!({
+                "functionId": EXPIRE_TRUST_DECISION_FUNCTION,
+                "targetType": "decision",
+                "targetField": "decisionResourceId",
+                "target": target_resource_id,
+                "requiredRisk": "high",
+                "approvalRequired": true,
+            }),
+            json!({
+                "functionId": ENFORCE_REVOCATION_FUNCTION,
+                "targetType": "decision",
+                "targetField": "trustDecisionResourceId",
+                "target": target_resource_id,
+                "requiredRisk": "high",
+                "approvalRequired": true,
+            }),
+        ]);
+    }
+    actions
+}
+
+fn ensure_grant_ceiling_within_ceiling(
+    child: &serde_json::Map<String, Value>,
+    parent: &serde_json::Map<String, Value>,
+    label: &str,
+) -> Result<()> {
+    ensure_subset(
+        &string_array_from(child.get("allowedCapabilities"), "allowedCapabilities")?,
+        &string_array_from(parent.get("allowedCapabilities"), "allowedCapabilities")?,
+        &format!("{label} capabilities"),
+    )?;
+    ensure_subset(
+        &string_array_from(child.get("allowedNamespaces"), "allowedNamespaces")?,
+        &string_array_from(parent.get("allowedNamespaces"), "allowedNamespaces")?,
+        &format!("{label} namespaces"),
+    )?;
+    ensure_subset(
+        &string_array_from(
+            child.get("allowedAuthorityScopes"),
+            "allowedAuthorityScopes",
+        )?,
+        &string_array_from(
+            parent.get("allowedAuthorityScopes"),
+            "allowedAuthorityScopes",
+        )?,
+        &format!("{label} authority scopes"),
+    )?;
+    ensure_subset(
+        &string_array_from(child.get("allowedResourceKinds"), "allowedResourceKinds")?,
+        &string_array_from(parent.get("allowedResourceKinds"), "allowedResourceKinds")?,
+        &format!("{label} resource kinds"),
+    )?;
+    ensure_subset(
+        &string_array_from(child.get("resourceSelectors"), "resourceSelectors")?,
+        &string_array_from(parent.get("resourceSelectors"), "resourceSelectors")?,
+        &format!("{label} resource selectors"),
+    )?;
+    ensure_subset(
+        &string_array_from(child.get("fileRoots"), "fileRoots")?,
+        &string_array_from(parent.get("fileRoots"), "fileRoots")?,
+        &format!("{label} file roots"),
+    )?;
+    if network_rank(required_map_str(child, "networkPolicy")?)?
+        > network_rank(required_map_str(parent, "networkPolicy")?)?
+    {
+        return Err(EngineError::PolicyViolation(format!(
+            "{label} network policy exceeds parent"
+        )));
+    }
+    if parse_risk(required_map_str(child, "maxRisk")?)?
+        > parse_risk(required_map_str(parent, "maxRisk")?)?
+    {
+        return Err(EngineError::PolicyViolation(format!(
+            "{label} maxRisk exceeds parent"
+        )));
+    }
+    if child
+        .get("canDelegate")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && !parent
+            .get("canDelegate")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return Err(EngineError::PolicyViolation(format!(
+            "{label} delegation exceeds parent"
+        )));
+    }
+    if parent
+        .get("approvalRequired")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        && !child
+            .get("approvalRequired")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return Err(EngineError::PolicyViolation(format!(
+            "{label} approval policy exceeds parent"
+        )));
+    }
+    Ok(())
+}
+
 fn link_if_possible(
     host: &ModulePrimitiveHandler,
     source: &str,
@@ -5760,6 +7013,22 @@ fn module_actions_for_package(package_id: Option<&str>) -> Vec<Value> {
             "target": target,
             "requiredRisk": "low",
             "approvalRequired": false,
+        }),
+        json!({
+            "functionId": INSPECT_TRUST_FUNCTION,
+            "targetType": "package",
+            "targetField": "targetResourceId",
+            "target": target,
+            "requiredRisk": "low",
+            "approvalRequired": false,
+        }),
+        json!({
+            "functionId": ENFORCE_REVOCATION_FUNCTION,
+            "targetType": "decision",
+            "targetField": "trustDecisionResourceId",
+            "target": Value::Null,
+            "requiredRisk": "high",
+            "approvalRequired": true,
         }),
         json!({
             "functionId": RUN_CONFORMANCE_FUNCTION,
@@ -6114,6 +7383,113 @@ fn reconcile_trust_schema() -> Value {
             "workspaceId": {"type": "string"},
             "sessionId": {"type": "string"},
             "packageResourceId": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
+fn inspect_trust_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["targetType", "targetResourceId"],
+        "additionalProperties": false,
+        "properties": {
+            "targetType": {
+                "type": "string",
+                "enum": [
+                    "trust_root",
+                    "source_registration",
+                    "source_approval",
+                    "source_revocation",
+                    "decision",
+                    "package",
+                    "activation"
+                ]
+            },
+            "targetResourceId": {"type": "string"},
+            "targetVersionId": {"type": "string"},
+            "scope": {"type": "string"},
+            "workspaceId": {"type": "string"},
+            "sessionId": {"type": "string"},
+            "includeEvidence": {"type": "boolean"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 200}
+        }
+    })
+}
+
+fn renew_trust_root_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": [
+            "trustRootDecisionResourceId",
+            "trustRootDecisionVersionId",
+            "expectedCurrentVersionId",
+            "expiresAt",
+            "allowedPackageSelectors",
+            "grantCeiling",
+            "trustTierCeiling",
+            "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+            "trustRootDecisionResourceId": {"type": "string"},
+            "trustRootDecisionVersionId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "expiresAt": {"type": "string"},
+            "allowedPackageSelectors": {"type": "array", "items": {"type": "string"}},
+            "grantCeiling": {"type": "object"},
+            "trustTierCeiling": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
+fn rotate_signature_key_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": [
+            "oldTrustRootDecisionResourceId",
+            "oldTrustRootDecisionVersionId",
+            "newTrustRootDecisionResourceId",
+            "newTrustRootDecisionVersionId",
+            "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+            "oldTrustRootDecisionResourceId": {"type": "string"},
+            "oldTrustRootDecisionVersionId": {"type": "string"},
+            "newTrustRootDecisionResourceId": {"type": "string"},
+            "newTrustRootDecisionVersionId": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
+fn expire_trust_decision_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["decisionResourceId", "decisionVersionId", "expectedCurrentVersionId", "reason"],
+        "additionalProperties": false,
+        "properties": {
+            "decisionResourceId": {"type": "string"},
+            "decisionVersionId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
+fn enforce_revocation_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["mode", "activationResourceIds", "reason"],
+        "additionalProperties": false,
+        "properties": {
+            "trustDecisionResourceId": {"type": "string"},
+            "revocationDecisionResourceId": {"type": "string"},
+            "expectedDecisionVersionId": {"type": "string"},
+            "mode": {"type": "string", "enum": ["disable", "quarantine"]},
+            "activationResourceIds": {"type": "array", "items": {"type": "string"}},
             "reason": {"type": "string"}
         }
     })
