@@ -23,7 +23,8 @@ struct PromptLibraryManagementSurfaceSheet: View {
                     options: PromptLibraryManagementTab.allCases.map { tab in
                         (label: tab.title, value: tab)
                     },
-                    selection: $selectedTab
+                    selection: $selectedTab,
+                    animatesSelection: false
                 )
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -97,35 +98,40 @@ struct PromptLibraryManagementSurfaceSheet: View {
     }
 
     private var generatedSurfaceEmptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "rectangle.stack.badge.gearshape")
-                .font(TronTypography.sans(size: 36))
-                .foregroundStyle(.tronEmerald.opacity(0.5))
-            Text("No management surface")
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronTextPrimary)
-            Text("Refresh to request a server-authored prompt management surface.")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM))
-                .foregroundStyle(.tronTextMuted)
-                .multilineTextAlignment(.center)
+        SettingsCard(accent: .tronEmerald, interactive: false) {
+            VStack(spacing: 12) {
+                Image(systemName: "rectangle.stack.badge.gearshape")
+                    .font(TronTypography.sans(size: 36))
+                    .foregroundStyle(.tronEmerald.opacity(0.5))
+                Text("No management surface")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                Text("Refresh to request a server-authored prompt management surface.")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextMuted)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, minHeight: 180)
+            .padding(16)
         }
-        .frame(maxWidth: .infinity, minHeight: 180)
     }
 
     private func actionResultView(_ result: UiActionResultDTO) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(result.actionId ?? "Generated action", systemImage: "checkmark.circle")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            if let childInvocationId = result.childInvocationId {
-                Text(childInvocationId)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+        SettingsCard(accent: .tronSuccess, interactive: false) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(result.actionId ?? "Generated action", systemImage: "checkmark.circle")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronSuccess)
+                if let childInvocationId = result.childInvocationId {
+                    Text(childInvocationId)
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextSecondary)
+                        .lineLimit(1)
+                }
             }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.tronEmerald.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     @MainActor

@@ -483,6 +483,77 @@ async fn ui_surface_for_target_authors_prompt_library_resource_collections() {
 }
 
 #[tokio::test]
+async fn ui_prompt_collection_empty_states_do_not_expose_inapp_refresh_or_destructive_actions() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+
+    let snippets = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_prompt_collection_request(
+                "prompt_library.snippets.v1",
+                "artifact:prompt-snippet",
+            ),
+            prompt_ui_context("generated-ui-empty-snippet-collection"),
+        ))
+        .await;
+    assert_eq!(snippets.error, None);
+    let snippet_surface = &snippets.value.as_ref().unwrap()["surface"];
+    let snippet_layout = snippet_surface["layout"].to_string();
+    assert!(
+        !snippet_layout.contains("Refresh"),
+        "resource_collection management refresh belongs to the sheet toolbar/action list, not the body"
+    );
+    assert_eq!(
+        snippet_layout.matches("Prompt Snippets").count(),
+        1,
+        "prompt collection layouts should not duplicate their title as a heading"
+    );
+    assert!(
+        snippet_surface["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action["actionId"] == "create-snippet")
+    );
+
+    let histories = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_prompt_collection_request(
+                "prompt_library.history.v1",
+                "artifact:prompt-history",
+            ),
+            prompt_ui_context("generated-ui-empty-history-collection"),
+        ))
+        .await;
+    assert_eq!(histories.error, None);
+    let history_surface = &histories.value.as_ref().unwrap()["surface"];
+    let history_layout = history_surface["layout"].to_string();
+    assert!(
+        !history_layout.contains("Clear history"),
+        "empty history surfaces should not present a destructive clear affordance"
+    );
+    assert!(
+        !history_layout.contains("Refresh"),
+        "resource_collection management refresh belongs to the sheet toolbar/action list, not the body"
+    );
+    assert_eq!(
+        history_layout.matches("Prompt History").count(),
+        1,
+        "prompt collection layouts should not duplicate their title as a heading"
+    );
+    assert!(
+        !history_surface["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action["actionId"] == "clear-history"),
+        "clear-history is only a valid stored action when history rows exist"
+    );
+}
+
+#[tokio::test]
 async fn ui_prompt_collection_bounds_and_redacts_prompt_previews() {
     let ctx = crate::shared::server::test_support::make_test_context();
     let handle = ctx.engine_host.clone();
@@ -612,6 +683,81 @@ async fn ui_prompt_collection_actions_submit_through_stored_surface_coordinates(
         }),
         "generated prompt action must execute as a child invocation"
     );
+}
+
+#[tokio::test]
+async fn ui_prompt_collection_actions_submit_through_public_engine_invoke_transport_path() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let created = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_prompt_collection_request(
+                "prompt_library.snippets.v1",
+                "artifact:prompt-snippet",
+            ),
+            prompt_ui_context("generated-ui-transport-surface"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let value = created.value.as_ref().unwrap();
+    let resource_ref = &value["resourceRefs"][0];
+    let resource_id = resource_ref["resourceId"].as_str().unwrap();
+    let surface_version_id = resource_ref["versionId"].as_str().unwrap();
+
+    let submitted = handle
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({
+                "functionId": "ui::submit_action",
+                "payload": {
+                    "surfaceResourceId": resource_id,
+                    "surfaceVersionId": surface_version_id,
+                    "actionId": "create-snippet",
+                    "userInput": {
+                        "name": "Transport action",
+                        "text": "Created through the public engine invoke transport path"
+                    },
+                    "idempotencyKey": "generated-ui-transport-create-snippet"
+                },
+                "idempotencyKey": "generated-ui-transport-create-snippet"
+            }),
+            prompt_ui_context("generated-ui-transport-submit"),
+        ))
+        .await;
+    assert_eq!(submitted.error, None);
+    let child = &submitted.value.as_ref().unwrap()["child"];
+    assert_eq!(child["functionId"], "ui::submit_action");
+    assert_eq!(child["error"], Value::Null);
+    assert_eq!(
+        child["value"]["targetFunctionId"],
+        "prompt_library::snippet_create"
+    );
+    assert!(
+        child["value"]["result"]["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "artifact")
+    );
+
+    let ui_submit_invocation_id = child["invocationId"].as_str().unwrap();
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    assert!(records.iter().any(|record| {
+        record.function_id.as_str() == "ui::submit_action"
+            && record.invocation_id.as_str() == ui_submit_invocation_id
+            && record
+                .parent_invocation_id
+                .as_ref()
+                .is_some_and(|parent| parent == &submitted.invocation_id)
+    }));
+    assert!(records.iter().any(|record| {
+        record.function_id.as_str() == "prompt_library::snippet_create"
+            && record
+                .parent_invocation_id
+                .as_ref()
+                .is_some_and(|parent| parent.as_str() == ui_submit_invocation_id)
+    }));
 }
 
 #[tokio::test]

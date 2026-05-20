@@ -55,6 +55,36 @@ enum GeneratedUIRenderer {
         return .init(status: .renderable, actionsEnabled: !isOfflineCached)
     }
 
+    static func userInput(from formValues: [String: AnyCodable], for action: UiActionDTO) -> [String: AnyCodable] {
+        let allowedKeys = Set(inputPropertyKeys(for: action))
+        guard !allowedKeys.isEmpty else { return [:] }
+        return formValues.filter { allowedKeys.contains($0.key) }
+    }
+
+    static func inputIsSatisfied(_ formValues: [String: AnyCodable], for action: UiActionDTO) -> Bool {
+        requiredInputKeys(for: action).allSatisfy { key in
+            guard let value = formValues[key], !value.isNull else { return false }
+            if let string = value.stringValue {
+                return !string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            return true
+        }
+    }
+
+    static func requiredInputKeys(for action: UiActionDTO) -> [String] {
+        if let required = action.inputSchema.dictionaryValue?["required"] as? [String] {
+            return required
+        }
+        return (action.inputSchema.dictionaryValue?["required"] as? [Any])?.compactMap { $0 as? String } ?? []
+    }
+
+    static func inputPropertyKeys(for action: UiActionDTO) -> [String] {
+        guard let properties = action.inputSchema.dictionaryValue?["properties"] as? [String: Any] else {
+            return []
+        }
+        return properties.keys.sorted()
+    }
+
     private static func firstUnsupportedComponent(_ component: UiComponentDTO) -> String? {
         guard supportedComponents.contains(component.type) else { return component.type }
         for child in component.children ?? [] {
@@ -80,6 +110,85 @@ enum GeneratedUIRenderer {
     }
 }
 
+private struct GeneratedUIConfirmation: Identifiable {
+    let id = UUID()
+    let actionId: String
+    let title: String
+    let message: String
+    let confirmLabel: String
+}
+
+private let generatedUIRowExpansionAnimation = Animation.smooth(duration: 0.22, extraBounce: 0)
+
+private enum GeneratedUIActionButtonRole {
+    case primary
+    case destructive
+}
+
+private struct GeneratedUIActionButtonStyle: ButtonStyle {
+    let role: GeneratedUIActionButtonRole
+    let isEnabled: Bool
+    let compact: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(TronTypography.buttonSM)
+            .foregroundStyle(foregroundColor)
+            .padding(.horizontal, compact ? 14 : 18)
+            .padding(.vertical, compact ? 9 : 11)
+            .frame(minHeight: compact ? 36 : 44)
+            .background(
+                RoundedRectangle(cornerRadius: compact ? 10 : 12, style: .continuous)
+                    .fill(backgroundColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: compact ? 10 : 12, style: .continuous)
+                    .stroke(borderColor, lineWidth: 1)
+            )
+            .opacity(configuration.isPressed && isEnabled ? 0.84 : 1)
+    }
+
+    private var foregroundColor: Color {
+        guard isEnabled else { return .tronTextDisabled }
+        switch role {
+        case .primary:
+            return .tronBackground
+        case .destructive:
+            return .tronError
+        }
+    }
+
+    private var backgroundColor: Color {
+        guard isEnabled else { return .tronSurfaceElevated.opacity(0.75) }
+        switch role {
+        case .primary:
+            return .tronEmerald
+        case .destructive:
+            return .tronError.opacity(0.08)
+        }
+    }
+
+    private var borderColor: Color {
+        guard isEnabled else { return .tronBorder.opacity(0.55) }
+        switch role {
+        case .primary:
+            return .tronEmerald.opacity(0.95)
+        case .destructive:
+            return .tronError.opacity(0.35)
+        }
+    }
+}
+
+private extension ButtonStyle where Self == GeneratedUIActionButtonStyle {
+    static func generatedUIAction(
+        role: GeneratedUIActionButtonRole = .primary,
+        isEnabled: Bool,
+        compact: Bool = false
+    ) -> GeneratedUIActionButtonStyle {
+        GeneratedUIActionButtonStyle(role: role, isEnabled: isEnabled, compact: compact)
+    }
+}
+
 struct GeneratedUISurfaceView: View {
     let surface: UiSurfaceDTO
     var resourceRef: UiSurfaceRefDTO?
@@ -89,12 +198,32 @@ struct GeneratedUISurfaceView: View {
 
     @State private var formValues: [String: AnyCodable] = [:]
     @State private var seededSurfaceKey: String?
+    @State private var expandedComponentIDs: Set<String> = []
+    @State private var pendingConfirmation: GeneratedUIConfirmation?
 
     var body: some View {
         renderedBody
             .onAppear { seedFormDefaultsIfNeeded() }
             .onChange(of: surfaceSeedKey) { _, _ in
                 seedFormDefaultsIfNeeded(reset: true)
+            }
+            .confirmationDialog(
+                pendingConfirmation?.title ?? "Confirm Action",
+                isPresented: confirmationDialogPresented,
+                titleVisibility: .visible
+            ) {
+                if let pendingConfirmation {
+                    Button(pendingConfirmation.confirmLabel, role: .destructive) {
+                        let actionId = pendingConfirmation.actionId
+                        self.pendingConfirmation = nil
+                        submit(actionId: actionId)
+                    }
+                    Button("Cancel", role: .cancel) {
+                        self.pendingConfirmation = nil
+                    }
+                }
+            } message: {
+                Text(pendingConfirmation?.message ?? "")
             }
     }
 
@@ -107,11 +236,14 @@ struct GeneratedUISurfaceView: View {
         )
         switch state.status {
         case .renderable:
-            return AnyView(VStack(alignment: .leading, spacing: 12) {
-                renderComponent(surface.layout, actionsEnabled: state.actionsEnabled)
+            let content = renderComponent(surface.layout, actionsEnabled: state.actionsEnabled, isRoot: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if isResourceCollectionSurface {
+                return AnyView(content)
             }
-            .padding(12)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous)))
+            return AnyView(content
+                .padding(12)
+                .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true, compact: false, interactive: false))
         case .closedError(let message):
             return AnyView(GeneratedUIClosedState(symbol: "exclamationmark.triangle", title: "Unsupported Surface", message: message))
         case .stale:
@@ -123,46 +255,62 @@ struct GeneratedUISurfaceView: View {
         }
     }
 
-    private func renderComponent(_ component: UiComponentDTO, actionsEnabled: Bool) -> AnyView {
+    private func renderComponent(_ component: UiComponentDTO, actionsEnabled: Bool, isRoot: Bool = false) -> AnyView {
         switch component.type {
         case "Text":
-            return AnyView(Text(component.props?.string("text") ?? ""))
+            return AnyView(Text(component.props?.string("text") ?? "")
+                .font(TronTypography.body)
+                .foregroundStyle(.tronTextPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading))
         case "Heading":
-            return AnyView(Text(component.props?.string("text") ?? "").font(.headline))
+            return AnyView(Text(component.props?.string("text") ?? "")
+                .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
+                .foregroundStyle(.tronTextPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading))
         case "Monospace":
             return AnyView(Text(component.props?.string("text") ?? "")
-                .font(.system(.callout, design: .monospaced))
-                .textSelection(.enabled))
+                .font(TronTypography.codeContent)
+                .foregroundStyle(.tronTextPrimary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading))
         case "Badge":
             return AnyView(Text(component.props?.string("text") ?? "")
-                .font(.caption.weight(.semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(.tronEmerald)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.secondary.opacity(0.14), in: Capsule()))
+                .sectionFill(.tronEmerald, cornerRadius: 999, subtle: true, compact: true, interactive: false))
         case "Section":
             return AnyView(VStack(alignment: .leading, spacing: 8) {
-                if let title = component.props?.string("title") {
-                    Text(title).font(.subheadline.weight(.semibold))
+                if let title = component.props?.string("title"),
+                   !(isRoot && isResourceCollectionSurface) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
                 }
                 renderChildren(component, actionsEnabled: actionsEnabled)
-            })
+            }
+            .frame(maxWidth: .infinity, alignment: .leading))
         case "List":
             return AnyView(VStack(alignment: .leading, spacing: 6) {
                 ForEach(arrayStrings(component.props?["items"]), id: \.self) { item in
-                    Label(item, systemImage: "smallcircle.filled.circle")
+                    Label(item, systemImage: "circle.fill")
+                        .font(TronTypography.body)
+                        .foregroundStyle(.tronTextPrimary)
                 }
-            })
+            }
+            .frame(maxWidth: .infinity, alignment: .leading))
         case "Table":
             return AnyView(VStack(alignment: .leading, spacing: 6) {
                 ForEach(arrayDictionaries(component.props?["rows"]).indices, id: \.self) { index in
                     Text(rowPreview(arrayDictionaries(component.props?["rows"])[index]))
-                        .font(.caption.monospaced())
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextPrimary)
                 }
-            })
+            }
+            .frame(maxWidth: .infinity, alignment: .leading))
         case "Tabs", "Disclosure":
-            return AnyView(DisclosureGroup(component.props?.string("title") ?? component.type) {
-                renderChildren(component, actionsEnabled: actionsEnabled)
-            })
+            return AnyView(disclosurePanel(component, actionsEnabled: actionsEnabled))
         case "ResourceRef":
             return AnyView(referenceRow("Resource", value: component.props?.string("resourceId")))
         case "InvocationRef":
@@ -174,89 +322,388 @@ struct GeneratedUISurfaceView: View {
         case "Metric":
             return AnyView(HStack {
                 Text(component.props?.string("label") ?? "Metric")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                    .foregroundStyle(.tronTextSecondary)
                 Spacer()
-                Text(component.props?["value"]?.stringValue ?? "\(component.props?["value"]?.value ?? "")")
-                    .font(.headline.monospacedDigit())
-            })
+                Text(formattedValue(component.props?["value"]))
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.tronSurfaceElevated.opacity(0.34))
+            ))
         case "TextField":
-            return AnyView(TextField(
-                component.props?.string("label") ?? "",
+            return AnyView(tronTextField(
+                label: component.props?.string("label"),
+                placeholder: component.props?.string("label") ?? "",
                 text: binding(for: component.props?.string("name") ?? component.id ?? "field")
-            )
-            .textFieldStyle(.roundedBorder))
+            ))
         case "TextArea":
-            return AnyView(TextEditor(text: binding(for: component.props?.string("name") ?? component.id ?? "text"))
-                .frame(minHeight: 88)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2))))
+            return AnyView(tronTextArea(
+                label: component.props?.string("label"),
+                text: binding(for: component.props?.string("name") ?? component.id ?? "text")
+            ))
         case "Select":
-            return AnyView(Picker(component.props?.string("label") ?? "", selection: binding(for: component.props?.string("name") ?? component.id ?? "select")) {
-                ForEach(arrayStrings(component.props?["options"]), id: \.self) { option in
-                    Text(option).tag(option)
+            return AnyView(SettingsCard(accent: .tronEmerald, interactive: false) {
+                SettingsRow(icon: "line.3.horizontal.decrease.circle", label: component.props?.string("label") ?? "Select") {
+                    Picker("", selection: binding(for: component.props?.string("name") ?? component.id ?? "select")) {
+                        ForEach(arrayStrings(component.props?["options"]), id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                    .labelsHidden()
+                    .tint(.tronEmerald)
                 }
             })
         case "Toggle":
-            return AnyView(Toggle(
-                component.props?.string("label") ?? "",
-                isOn: boolBinding(for: component.props?.string("name") ?? component.id ?? "toggle")
-            ))
-        case "Stepper":
-            return AnyView(Stepper(component.props?.string("label") ?? "", value: intBinding(for: component.props?.string("name") ?? component.id ?? "stepper")))
-        case "DateTime":
-            return AnyView(TextField(
-                component.props?.string("label") ?? "Date",
-                text: binding(for: component.props?.string("name") ?? component.id ?? "datetime")
-            )
-            .textFieldStyle(.roundedBorder))
-        case "Button":
-            return AnyView(Button(component.props?.string("label") ?? "Action") {
-                submit(actionId: component.props?.string("actionId"))
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!actionsEnabled))
-        case "ButtonGroup":
-            return AnyView(HStack {
-                ForEach(arrayStrings(component.props?["actions"]), id: \.self) { actionId in
-                    Button(actionId) { submit(actionId: actionId) }
-                        .buttonStyle(.bordered)
-                        .disabled(!actionsEnabled)
+            return AnyView(SettingsCard(accent: .tronEmerald, interactive: false) {
+                SettingsRow(icon: "switch.2", label: component.props?.string("label") ?? "Toggle") {
+                    Toggle("", isOn: boolBinding(for: component.props?.string("name") ?? component.id ?? "toggle"))
+                        .labelsHidden()
+                        .tint(.tronEmerald)
                 }
             })
-        case "Confirmation":
-            return AnyView(Button(component.props?.string("title") ?? "Confirm") {
-                submit(actionId: component.props?.string("confirmActionId"))
+        case "Stepper":
+            let key = component.props?.string("name") ?? component.id ?? "stepper"
+            return AnyView(SettingsCard(accent: .tronEmerald, interactive: false) {
+                SettingsRow(icon: "number", label: component.props?.string("label") ?? "Value") {
+                    Stepper(value: intBinding(for: key)) {
+                        Text("\(formValues[key]?.intValue ?? 0)")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                            .foregroundStyle(.tronTextPrimary)
+                    }
+                }
+            })
+        case "DateTime":
+            return AnyView(tronTextField(
+                label: component.props?.string("label") ?? "Date",
+                placeholder: component.props?.string("label") ?? "Date",
+                text: binding(for: component.props?.string("name") ?? component.id ?? "datetime")
+            ))
+        case "Button":
+            return generatedActionButton(
+                actionId: component.props?.string("actionId"),
+                fallbackLabel: component.props?.string("label"),
+                actionsEnabled: actionsEnabled
+            )
+        case "ButtonGroup":
+            return AnyView(HStack(spacing: 8) {
+                ForEach(arrayStrings(component.props?["actions"]), id: \.self) { actionId in
+                    generatedActionButton(
+                        actionId: actionId,
+                        fallbackLabel: nil,
+                        actionsEnabled: actionsEnabled,
+                        compact: true
+                    )
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!actionsEnabled))
+            .frame(maxWidth: .infinity, alignment: .leading))
+        case "Confirmation":
+            return confirmationButton(
+                actionId: component.props?.string("confirmActionId"),
+                title: component.props?.string("title") ?? "Confirm",
+                message: component.props?.string("message") ?? "This action cannot be undone.",
+                actionsEnabled: actionsEnabled
+            )
         case "Progress":
             return AnyView(ProgressView(value: component.props?["value"]?.doubleValue, total: component.props?["total"]?.doubleValue ?? 1))
         case "Health":
-            return AnyView(Label(component.props?.string("label") ?? component.props?.string("status") ?? "Health", systemImage: "heart.text.square"))
+            return AnyView(Label(component.props?.string("label") ?? component.props?.string("status") ?? "Health", systemImage: "heart.text.square")
+                .font(TronTypography.body)
+                .foregroundStyle(.tronSuccess))
         case "Warning":
-            return AnyView(Label(component.props?.string("text") ?? "Warning", systemImage: "exclamationmark.triangle").foregroundStyle(.orange))
+            return AnyView(Label(component.props?.string("text") ?? "Warning", systemImage: "exclamationmark.triangle")
+                .font(TronTypography.body)
+                .foregroundStyle(.tronWarning))
         case "Error":
-            return AnyView(Label(component.props?.string("text") ?? "Error", systemImage: "xmark.octagon").foregroundStyle(.red))
+            return AnyView(Label(component.props?.string("text") ?? "Error", systemImage: "xmark.octagon")
+                .font(TronTypography.body)
+                .foregroundStyle(.tronError))
         case "EmptyState":
-            return AnyView(VStack(alignment: .leading, spacing: 4) {
-                Text(component.props?.string("title") ?? "Empty").font(.subheadline.weight(.semibold))
-                Text(component.props?.string("message") ?? "").font(.caption).foregroundStyle(.secondary)
-            })
+            return AnyView(VStack(spacing: 8) {
+                Image(systemName: "text.quote")
+                    .font(TronTypography.sans(size: TronTypography.sizeLargeTitle, weight: .semibold))
+                    .foregroundStyle(.tronTextMuted)
+                Text(component.props?.string("title") ?? "Empty")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                Text(component.props?.string("message") ?? "")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.vertical, 22)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.tronSurfaceElevated.opacity(0.28))
+            ))
         default:
             return AnyView(GeneratedUIClosedState(symbol: "exclamationmark.triangle", title: "Unsupported Surface", message: component.type))
         }
     }
 
+    private func disclosurePanel(_ component: UiComponentDTO, actionsEnabled: Bool) -> some View {
+        let expansion = expansionBinding(for: component.stableID)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(generatedUIRowExpansionAnimation) {
+                    expansion.wrappedValue.toggle()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: disclosureIcon(for: component))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                        .frame(width: 18)
+                    Text(component.props?.string("title") ?? component.type)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 10)
+                    Image(systemName: "chevron.down")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(.tronTextMuted)
+                        .rotationEffect(.degrees(expansion.wrappedValue ? 180 : 0))
+                        .animation(generatedUIRowExpansionAnimation, value: expansion.wrappedValue)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.noFeedback)
+
+            if expansion.wrappedValue {
+                Rectangle()
+                    .fill(Color.tronBorder.opacity(0.45))
+                    .frame(height: 1)
+                    .padding(.horizontal, 12)
+                renderChildren(component, actionsEnabled: actionsEnabled)
+                    .padding(12)
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronSurfaceElevated.opacity(0.46))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.tronBorder.opacity(0.72), lineWidth: 1)
+        )
+    }
+
     private func renderChildren(_ component: UiComponentDTO, actionsEnabled: Bool) -> AnyView {
-        return AnyView(ForEach(Array((component.children ?? []).enumerated()), id: \.offset) { _, child in
-            renderComponent(child, actionsEnabled: actionsEnabled)
-        })
+        return AnyView(VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array((component.children ?? []).enumerated()), id: \.offset) { _, child in
+                renderComponent(child, actionsEnabled: actionsEnabled)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading))
     }
 
     private func referenceRow(_ label: String, value: String?) -> some View {
         HStack {
-            Text(label).foregroundStyle(.secondary)
+            Text(label)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextMuted)
             Spacer()
-            Text(value ?? "unknown").font(.caption.monospaced()).lineLimit(1)
+            Text(value ?? "unknown")
+                .font(TronTypography.codeCaption)
+                .foregroundStyle(.tronTextSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 4)
+    }
+
+    private func tronTextField(label: String?, placeholder: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            fieldLabel(label)
+            TextField(placeholder, text: text)
+                .textFieldStyle(.plain)
+                .font(TronTypography.input)
+                .foregroundStyle(.tronTextPrimary)
+                .tint(.tronEmerald)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.tronSurface.opacity(0.88))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.tronBorder.opacity(0.78), lineWidth: 1)
+                )
+        }
+    }
+
+    private func tronTextArea(label: String?, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            fieldLabel(label)
+            TextEditor(text: text)
+                .font(TronTypography.input)
+                .foregroundStyle(.tronTextPrimary)
+                .tint(.tronEmerald)
+                .frame(minHeight: 104)
+                .padding(10)
+                .scrollContentBackground(.hidden)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.tronSurface.opacity(0.84))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.tronBorder.opacity(0.78), lineWidth: 1)
+                )
+        }
+    }
+
+    private func fieldLabel(_ label: String?) -> some View {
+        Text(label ?? "")
+            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            .foregroundStyle(.tronTextSecondary)
+            .opacity((label ?? "").isEmpty ? 0 : 1)
+    }
+
+    private func generatedActionButton(
+        actionId: String?,
+        fallbackLabel: String?,
+        actionsEnabled: Bool,
+        compact: Bool = false
+    ) -> AnyView {
+        let action = action(for: actionId)
+        let label = action?.label ?? fallbackLabel ?? humanizedActionLabel(actionId)
+        let destructive = isDestructive(action: action, label: label)
+        let enabled = actionsEnabled && canSubmit(actionId: actionId)
+        let button = Button {
+            submit(actionId: actionId)
+        } label: {
+            Label(label, systemImage: actionSymbol(action: action, label: label))
+                .font(TronTypography.buttonSM)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .frame(maxWidth: compact ? nil : .infinity)
+        }
+        .disabled(!enabled)
+        if destructive {
+            return AnyView(button.buttonStyle(.generatedUIAction(role: .destructive, isEnabled: enabled, compact: compact)))
+        }
+        return AnyView(button.buttonStyle(.generatedUIAction(isEnabled: enabled, compact: compact)))
+    }
+
+    private func confirmationButton(
+        actionId: String?,
+        title: String,
+        message: String,
+        actionsEnabled: Bool
+    ) -> AnyView {
+        let action = action(for: actionId)
+        let label = action?.label ?? title
+        let enabled = actionsEnabled && canSubmit(actionId: actionId)
+        return AnyView(Button {
+            guard let actionId, enabled else { return }
+            pendingConfirmation = GeneratedUIConfirmation(
+                actionId: actionId,
+                title: title,
+                message: message,
+                confirmLabel: label
+            )
+        } label: {
+            Label(title, systemImage: "trash")
+                .font(TronTypography.buttonSM)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.generatedUIAction(role: .destructive, isEnabled: enabled))
+        .disabled(!enabled))
+    }
+
+    private func action(for actionId: String?) -> UiActionDTO? {
+        guard let actionId else { return nil }
+        return surface.actions.first { $0.actionId == actionId }
+    }
+
+    private func canSubmit(actionId: String?) -> Bool {
+        guard let action = action(for: actionId) else { return false }
+        return GeneratedUIRenderer.inputIsSatisfied(formValues, for: action)
+    }
+
+    private func isDestructive(action: UiActionDTO?, label: String) -> Bool {
+        let text = "\(label) \(action?.actionId ?? "")".lowercased()
+        return text.contains("delete")
+            || text.contains("clear")
+            || text.contains("discard")
+            || text.contains("quarantine")
+    }
+
+    private func actionSymbol(action: UiActionDTO?, label: String) -> String {
+        let text = "\(label) \(action?.actionId ?? "")".lowercased()
+        if text.contains("refresh") { return "arrow.clockwise" }
+        if text.contains("create") || text.contains("add") { return "plus" }
+        if text.contains("update") || text.contains("save") { return "checkmark" }
+        if text.contains("delete") || text.contains("clear") || text.contains("discard") { return "trash" }
+        return "arrow.right"
+    }
+
+    private func humanizedActionLabel(_ actionId: String?) -> String {
+        guard let actionId else { return "Action" }
+        return actionId
+            .split(separator: "-")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+
+    private func disclosureIcon(for component: UiComponentDTO) -> String {
+        let title = (component.props?.string("title") ?? component.type).lowercased()
+        if title.contains("create") { return "plus.circle" }
+        if title.contains("history") { return "clock.arrow.circlepath" }
+        if title.contains("snippet") { return "text.quote" }
+        return "rectangle.expand.vertical"
+    }
+
+    private func formattedValue(_ value: AnyCodable?) -> String {
+        if let string = value?.stringValue { return string }
+        if let int = value?.intValue { return "\(int)" }
+        if let double = value?.doubleValue { return "\(double)" }
+        if let bool = value?.boolValue { return bool ? "true" : "false" }
+        return "\(value?.value ?? "")"
+    }
+
+    private var isResourceCollectionSurface: Bool {
+        surface.authoring?.targetType == "resource_collection"
+    }
+
+    private var confirmationDialogPresented: Binding<Bool> {
+        Binding(
+            get: { pendingConfirmation != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingConfirmation = nil
+                }
+            }
+        )
+    }
+
+    private func expansionBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedComponentIDs.contains(key) },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedComponentIDs.insert(key)
+                } else {
+                    expandedComponentIDs.remove(key)
+                }
+            }
+        )
     }
 
     private func binding(for key: String) -> Binding<String> {
@@ -291,11 +738,16 @@ struct GeneratedUISurfaceView: View {
     private func seedFormDefaultsIfNeeded(reset: Bool = false) {
         guard reset || seededSurfaceKey != surfaceSeedKey else { return }
         formValues = [:]
+        expandedComponentIDs = []
         seedFormDefaults(from: surface.layout)
         seededSurfaceKey = surfaceSeedKey
     }
 
     private func seedFormDefaults(from component: UiComponentDTO) {
+        if ["Disclosure", "Tabs"].contains(component.type),
+           component.props?.bool("open") == true {
+            expandedComponentIDs.insert(component.stableID)
+        }
         if ["TextField", "TextArea", "Select", "Toggle", "Stepper", "DateTime"].contains(component.type),
            let key = component.props?.string("name") ?? component.id,
            let value = component.props?["value"],
@@ -309,6 +761,8 @@ struct GeneratedUISurfaceView: View {
 
     private func submit(actionId: String?) {
         guard let actionId,
+              let action = action(for: actionId),
+              GeneratedUIRenderer.inputIsSatisfied(formValues, for: action),
               let resourceId = resourceRef?.resourceId,
               let versionId = resourceRef?.versionId
         else { return }
@@ -317,7 +771,7 @@ struct GeneratedUISurfaceView: View {
                 surfaceResourceId: resourceId,
                 surfaceVersionId: versionId,
                 actionId: actionId,
-                userInput: formValues,
+                userInput: GeneratedUIRenderer.userInput(from: formValues, for: action),
                 idempotencyKey: UUID().uuidString
             )
         )
@@ -344,14 +798,19 @@ private struct GeneratedUIClosedState: View {
     var body: some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(message).font(.caption).foregroundStyle(.secondary)
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                Text(message)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.tronTextSecondary)
             }
         } icon: {
             Image(systemName: symbol)
+                .foregroundStyle(.tronWarning)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .sectionFill(.tronWarning, cornerRadius: 8, subtle: true, compact: true, interactive: false)
     }
 }

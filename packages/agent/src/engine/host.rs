@@ -71,7 +71,12 @@ const WATCH_MAX_LIMIT: usize = 500;
 struct PreparedDelegatedInvocation {
     meta_invocation: Invocation,
     meta_function: FunctionDefinition,
-    child: PreparedSyncInvocationDecision,
+    child: PreparedDelegatedChild,
+}
+
+enum PreparedDelegatedChild {
+    Sync(PreparedSyncInvocationDecision),
+    UiSubmit(Box<Invocation>),
 }
 
 enum PreparedDelegatedInvocationDecision {
@@ -1174,14 +1179,19 @@ impl EngineHostHandle {
         };
 
         let child_result = match prepared.child {
-            PreparedSyncInvocationDecision::Execute(child) => {
+            PreparedDelegatedChild::UiSubmit(child) => {
+                self.invoke_ui_submit_action_unlocked(*child).await
+            }
+            PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Execute(child)) => {
                 if child.invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
                     self.execute_prepared_approval_resolve(*child).await
                 } else {
                     self.execute_prepared_regular(*child).await
                 }
             }
-            PreparedSyncInvocationDecision::Finished(result) => *result,
+            PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Finished(result)) => {
+                *result
+            }
         };
 
         let mut host = self.inner.lock().await;
@@ -2006,14 +2016,16 @@ impl EngineHost {
                 ));
             }
         };
-        let child = if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
-            self.catalog.prepare_sync_invocation(child)
+        let child = if child.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION {
+            PreparedDelegatedChild::UiSubmit(Box::new(child))
+        } else if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
+            PreparedDelegatedChild::Sync(self.catalog.prepare_sync_invocation(child))
         } else if is_host_dispatched_primitive_function(&child.function_id) {
-            PreparedSyncInvocationDecision::Finished(Box::new(
+            PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Finished(Box::new(
                 self.invoke_sync_host_dispatched_primitive(child),
-            ))
+            )))
         } else {
-            self.catalog.prepare_sync_invocation(child)
+            PreparedDelegatedChild::Sync(self.catalog.prepare_sync_invocation(child))
         };
         PreparedDelegatedInvocationDecision::Execute(Box::new(PreparedDelegatedInvocation {
             meta_invocation: invocation,

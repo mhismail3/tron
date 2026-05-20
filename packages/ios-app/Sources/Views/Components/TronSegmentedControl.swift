@@ -6,15 +6,14 @@ struct TronSegmentedControl<T: Hashable>: View {
     let options: [(label: String, value: T)]
     @Binding var selection: T
     var accent: Color = .tronEmerald
+    var animatesSelection: Bool = true
 
     var body: some View {
         HStack(spacing: 4) {
             ForEach(Array(options.enumerated()), id: \.offset) { _, option in
                 let isSelected = selection == option.value
                 Button {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                        selection = option.value
-                    }
+                    select(option.value)
                 } label: {
                     Text(option.label)
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
@@ -27,6 +26,21 @@ struct TronSegmentedControl<T: Hashable>: View {
                         )
                 }
                 .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func select(_ value: T) {
+        guard selection != value else { return }
+        if animatesSelection {
+            withAnimation(.easeOut(duration: 0.12)) {
+                selection = value
+            }
+        } else {
+            var transaction = Transaction()
+            transaction.animation = nil
+            withTransaction(transaction) {
+                selection = value
             }
         }
     }

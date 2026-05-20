@@ -104,6 +104,48 @@ struct GeneratedUIRendererTests {
         #expect(state.actionsEnabled)
     }
 
+    @Test("stored action input schemas scope submitted form values")
+    func actionInputIsScopedToStoredSchema() {
+        let action = UiActionDTO(
+            actionId: "create-snippet",
+            label: "Create",
+            targetFunctionId: "prompt_library::snippet_create",
+            inputSchema: AnyCodable([
+                "type": "object",
+                "required": ["name", "text"],
+                "additionalProperties": false,
+                "properties": [
+                    "name": ["type": "string"],
+                    "text": ["type": "string"]
+                ]
+            ]),
+            payloadTemplate: AnyCodable(["name": "${input.name}", "text": "${input.text}"]),
+            idempotencyKeyTemplate: "${submission.idempotencyKey}",
+            requiredGrant: "prompt_library.write",
+            requiredRisk: "medium",
+            approvalPolicy: AnyCodable(["required": false]),
+            targetRevision: 1,
+            expiresAt: "2100-01-01T00:00:00Z"
+        )
+        let values: [String: AnyCodable] = [
+            "name": AnyCodable("Explain"),
+            "text": AnyCodable("Explain this selection"),
+            "name_existing": AnyCodable("Existing"),
+            "text_existing": AnyCodable("Existing body")
+        ]
+
+        #expect(GeneratedUIRenderer.inputIsSatisfied(values, for: action))
+        #expect(GeneratedUIRenderer.userInput(from: values, for: action) == [
+            "name": AnyCodable("Explain"),
+            "text": AnyCodable("Explain this selection")
+        ])
+
+        #expect(!GeneratedUIRenderer.inputIsSatisfied([
+            "name": AnyCodable("   "),
+            "text": AnyCodable("Explain this selection")
+        ], for: action))
+    }
+
     private func baseSurface(componentType: String) -> UiSurfaceDTO {
         UiSurfaceDTO(
             surfaceId: "surface",

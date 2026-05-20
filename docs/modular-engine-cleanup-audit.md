@@ -422,6 +422,49 @@ with fractional seconds and explicit offset, for example
 | iOS renderer parsing | `GeneratedUIRendererTests.serverFractionalOffsetTimestampsRender` covers the server timestamp shape for both surface and action expiry | Keep the server's RFC3339 resource timestamps; the renderer accepts standard and fractional ISO8601 forms |
 | Fail-closed state | Existing renderer tests still prove genuinely expired, stale, damaged, and offline surfaces disable actions | Parse failures remain closed; valid server timestamps no longer look expired |
 
+## 2026-05-19 Manual Test 2 Prompt Management UX Hardening
+
+Manual device testing then showed the generated Prompt Library management
+surface was technically functional but not operator-grade: duplicated headings,
+body-level refresh controls, destructive history controls in empty states, raw
+disclosure rows, immediate destructive buttons, and unscoped form submissions
+made the sheet feel non-native and brittle.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Server-authored layout | `ui_prompt_collection_empty_states_do_not_expose_inapp_refresh_or_destructive_actions` proves prompt collection layouts no longer duplicate titles, no longer put refresh inside the body, and omit `clear-history` when no history artifacts exist | Keep refresh at the sheet/action boundary; empty states must not expose destructive stored actions |
+| Stored action shape | Prompt snippet rows now author update as a normal button and delete as a `Confirmation`; history clear/delete actions remain confirmation-only | Keep destructive mutations explicit and confirmable without adding a client policy plane |
+| iOS rendering | `GeneratedUIRendererTests.actionInputIsScopedToStoredSchema` and source guards prove renderer form submission is filtered through the stored action input schema and destructive actions use confirmation dialogs | iOS remains a strict renderer/action submitter; it may style controls and scope user input, but never constructs target payloads or grants |
+| Native affordance | `GeneratedUISurfaceView` renders resource-collection surfaces full-width with grouped disclosures, labeled inputs, empty states, and action labels from stored actions | Keep first-party generated management surfaces native-feeling while preserving fixed catalog and fail-closed behavior |
+
+## 2026-05-19 Manual Test 2 Submit Transport And Tron Identity Fix
+
+Manual device testing then found a create-snippet failure that unit tests had
+missed because they submitted `ui::submit_action` directly through the host
+handle. The real iOS transport calls public `engine::invoke`, which prepares a
+delegated child invocation; that delegated path treated `ui::submit_action` as a
+sync host-dispatched primitive and hit the gateway's protective error:
+`ui::submit_action must execute through the async host action gateway`.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Public transport path | `ui_prompt_collection_actions_submit_through_public_engine_invoke_transport_path` covers `engine::invoke -> ui::submit_action -> prompt_library::snippet_create`, including child invocation lineage and produced `artifact` resource refs | The public transport path is the regression boundary for generated UI actions; direct host tests are not sufficient proof |
+| Host dispatch | `EngineHost::prepare_delegated_invocation` now preserves `ui::submit_action` as an async delegated child instead of executing it through the sync host primitive path | Keep `ui::submit_action` as the only action gateway while supporting the same gateway through public engine transport |
+| Renderer identity | iOS source guards require generated management surfaces to use `SettingsCard`, `TronTypography`, `.sectionFill`, low-motion generated action buttons, native smooth row expansion, and `.buttonStyle(.noFeedback)` while forbidding `DisclosureGroup`, `.thinMaterial`, rounded-border text fields, spring animations, and press-scale effects | Generated UI may be declarative, but its first-party renderer must still present Tron-native components and restrained high-utility affordances |
+
+## 2026-05-19 Manual Test 2 Renderer Elegance And Motion Tightening
+
+Follow-up device screenshots showed the generated Prompt Library management
+surface had the right architecture but too much visual weight: every disclosure
+was a saturated green card, metadata competed with editable content, and
+expansion/button animations drew attention away from the task.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Generated UI panel styling | `GeneratedUISurfaceView` now renders disclosures as neutral Tron-token panels with compact headers, subtle borders, demoted resource refs, smaller text areas, and low-emphasis empty states | Keep generated management useful and native without turning resource metadata into primary UI |
+| Motion policy | Source guards require row expansion to use one native `Animation.smooth` path with an opacity transition and rotating chevron, while still forbidding springs, press-scale effects, and animated segmented-control tab switching | Generated UI management should feel immediate and stable; motion is reserved for places where it communicates state |
+| Action controls | Generated actions use a renderer-local Tron action button style with flat emerald/destructive treatments and disabled states, while preserving schema-scoped `ui::submit_action` submission | Styling can improve affordance clarity, but action routing and authority remain server-owned |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:

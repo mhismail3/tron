@@ -1296,19 +1296,15 @@ fn prompt_collection_layout(
 }
 
 fn prompt_snippet_collection_layout(projection: &TargetProjection, rows: &[Value]) -> Value {
-    let mut children = vec![
-        json!({"type": "Heading", "props": {"text": projection.title}}),
-        json!({"type": "Text", "props": {"text": projection.summary}}),
-        json!({
-            "type": "Disclosure",
-            "props": {"title": "Create snippet", "open": false},
-            "children": [
-                {"type": "TextField", "props": {"name": "name", "label": "Name", "required": true}},
-                {"type": "TextArea", "props": {"name": "text", "label": "Text", "required": true}},
-                {"type": "Button", "props": {"label": "Create", "actionId": "create-snippet"}}
-            ]
-        }),
-    ];
+    let mut children = vec![json!({
+        "type": "Disclosure",
+        "props": {"title": "Create snippet", "open": rows.is_empty()},
+        "children": [
+            {"type": "TextField", "props": {"name": "name", "label": "Name", "required": true}},
+            {"type": "TextArea", "props": {"name": "text", "label": "Text", "required": true}},
+            {"type": "Button", "props": {"label": "Create", "actionId": "create-snippet"}}
+        ]
+    })];
     if rows.is_empty() {
         children.push(json!({
             "type": "EmptyState",
@@ -1348,36 +1344,34 @@ fn prompt_snippet_collection_layout(projection: &TargetProjection, rows: &[Value
                         "value": row.get("text").cloned().unwrap_or(Value::Null),
                         "required": true
                     }},
-                    {"type": "ButtonGroup", "props": {
-                        "actions": [
-                            format!("update-snippet-{row_key}"),
-                            format!("delete-snippet-{row_key}")
-                        ]
+                    {"type": "Button", "props": {
+                        "label": "Update",
+                        "actionId": format!("update-snippet-{row_key}")
+                    }},
+                    {"type": "Confirmation", "props": {
+                        "title": "Delete snippet",
+                        "message": "Discard this prompt snippet artifact.",
+                        "confirmActionId": format!("delete-snippet-{row_key}")
                     }}
                 ]
             }));
         }
     }
-    children.push(json!({
-        "type": "Button",
-        "props": {"label": "Refresh", "actionId": "refresh-surface"}
-    }));
     json!({"type": "Section", "props": {"title": projection.title}, "children": children})
 }
 
 fn prompt_history_collection_layout(projection: &TargetProjection, rows: &[Value]) -> Value {
-    let mut children = vec![
-        json!({"type": "Heading", "props": {"text": projection.title}}),
-        json!({"type": "Text", "props": {"text": projection.summary}}),
-        json!({
+    let mut children = Vec::new();
+    if !rows.is_empty() {
+        children.push(json!({
             "type": "Confirmation",
             "props": {
                 "title": "Clear history",
                 "message": "Discard all prompt history artifacts.",
                 "confirmActionId": "clear-history"
             }
-        }),
-    ];
+        }));
+    }
     if rows.is_empty() {
         children.push(json!({
             "type": "EmptyState",
@@ -1421,10 +1415,6 @@ fn prompt_history_collection_layout(projection: &TargetProjection, rows: &[Value
             }));
         }
     }
-    children.push(json!({
-        "type": "Button",
-        "props": {"label": "Refresh", "actionId": "refresh-surface"}
-    }));
     json!({"type": "Section", "props": {"title": projection.title}, "children": children})
 }
 
@@ -2319,16 +2309,19 @@ fn prompt_history_collection_actions(
     functions: &[FunctionDefinition],
 ) -> Result<Vec<Value>> {
     let mut actions = Vec::new();
-    actions.push(prompt_collection_action(
-        invocation,
-        functions,
-        "clear-history",
-        "Clear History",
-        "prompt_library::history_clear",
-        json!({"type": "object", "additionalProperties": false, "properties": {}}),
-        json!({}),
-    )?);
-    for row in prompt_collection_rows(host, PROMPT_HISTORY_RESOURCE_PREFIX)? {
+    let rows = prompt_collection_rows(host, PROMPT_HISTORY_RESOURCE_PREFIX)?;
+    if !rows.is_empty() {
+        actions.push(prompt_collection_action(
+            invocation,
+            functions,
+            "clear-history",
+            "Clear History",
+            "prompt_library::history_clear",
+            json!({"type": "object", "additionalProperties": false, "properties": {}}),
+            json!({}),
+        )?);
+    }
+    for row in rows {
         let resource_id = row["resourceId"].as_str().unwrap_or_default();
         let row_key = collection_row_key(resource_id);
         let id = row["id"].as_str().unwrap_or_default();
