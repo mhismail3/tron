@@ -73,7 +73,8 @@ struct EngineConsoleView: View {
             .padding(.top, 16)
             .padding(.bottom, 44)
         }
-        .navigationTitle("Engine")
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             DashboardToolbarContent(
                 title: "Engine",
@@ -91,7 +92,7 @@ struct EngineConsoleView: View {
             if let inspection = state.selectedInspection {
                 CapabilityInspectionSheet(inspection: inspection)
                     .adaptivePresentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
+                    .presentationDragIndicator(.hidden)
             }
         }
     }
@@ -617,6 +618,15 @@ struct EngineConsoleView: View {
 
     private var programRuns: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if state.registry != nil, !programRuntimeReady {
+                EngineConsoleBanner(
+                    symbol: "curlybraces.square",
+                    title: "Program runtime unavailable",
+                    message: "Program execution stays disabled until the first-party worker reports healthy conformance.",
+                    tint: .tronAmber
+                )
+            }
+
             programRunForm
 
             let runs = state.programRuns?.programRuns ?? state.cachedSnapshot?.recentProgramRuns ?? []
@@ -853,6 +863,14 @@ struct EngineConsoleView: View {
         readinessIssues.isEmpty ? .tronSuccess : .tronAmber
     }
 
+    private var programRuntimeReady: Bool {
+        state.registry?.implementations?.contains { implementation in
+            implementation.functionId == "program::run_javascript"
+                && implementation.health == "healthy"
+                && implementation.conformanceState == "healthy"
+        } ?? false
+    }
+
     private var readinessIssues: [EngineConsoleReadinessItem] {
         var items: [EngineConsoleReadinessItem] = []
         if !engineClient.connectionState.isConnected {
@@ -873,21 +891,6 @@ struct EngineConsoleView: View {
                     symbol: "magnifyingglass",
                     title: "Semantic index not ready",
                     message: index.degradedReason ?? "Search can run lexical while local vectors finish building.",
-                    tint: .tronAmber
-                )
-            )
-        }
-        let programReady = state.registry?.implementations?.contains { implementation in
-            implementation.functionId == "program::run_javascript"
-                && implementation.health == "healthy"
-                && implementation.conformanceState == "healthy"
-        } ?? false
-        if state.registry != nil, !programReady {
-            items.append(
-                EngineConsoleReadinessItem(
-                    symbol: "curlybraces.square",
-                    title: "Program runtime unavailable",
-                    message: "Program mode will stay disabled until the first-party worker is healthy.",
                     tint: .tronAmber
                 )
             )
@@ -1177,12 +1180,13 @@ private struct EngineConsoleCardHeader: View {
     let symbol: String
     let title: String
     let subtitle: String
+    var tint: Color = .tronEmerald
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: symbol)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(.tronEmerald)
+                .foregroundStyle(tint)
                 .frame(width: 24, height: 24)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -1393,14 +1397,16 @@ private struct CapabilityHitCard: View {
                     .foregroundStyle(tint)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 7) {
-                    Text(hit.contractId ?? hit.functionId ?? hit.capabilityId ?? "capability")
+                    Text(primaryTitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
                         .lineLimit(2)
-                    Text(hit.functionId ?? hit.implementationId ?? "unknown implementation")
-                        .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .regular))
-                        .foregroundStyle(.tronTextMuted)
-                        .lineLimit(2)
+                    if let secondaryTitle {
+                        Text(secondaryTitle)
+                            .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .regular))
+                            .foregroundStyle(.tronTextMuted)
+                            .lineLimit(2)
+                    }
                     if let snippet = hit.snippet, !snippet.isEmpty {
                         Text(snippet)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .regular))
@@ -1425,6 +1431,18 @@ private struct CapabilityHitCard: View {
 
     private var tint: Color {
         CapabilityPresentation.color(for: identity)
+    }
+
+    private var primaryTitle: String {
+        hit.contractId ?? hit.functionId ?? hit.capabilityId ?? "capability"
+    }
+
+    private var secondaryTitle: String? {
+        let candidate = hit.functionId ?? hit.implementationId
+        guard let candidate, !candidate.isEmpty, candidate != primaryTitle else {
+            return nil
+        }
+        return candidate
     }
 
     private var identity: CapabilityIdentity {
@@ -1747,22 +1765,24 @@ private struct CapabilityInspectionSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    EngineConsoleCard {
+                    EngineConsoleCard(tint: tint) {
                         EngineConsoleCardHeader(
                             symbol: "doc.text.magnifyingglass",
                             title: inspection.contract?.displayName ?? inspection.contract?.contractId ?? "Inspection",
-                            subtitle: inspection.implementation?.implementationId ?? "No implementation selected"
+                            subtitle: inspection.implementation?.implementationId ?? "No implementation selected",
+                            tint: tint
                         )
                         EngineConsoleKeyValueRow("Contract", inspection.contract?.contractId ?? "unknown")
                         EngineConsoleKeyValueRow("Effect", inspection.contract?.effectClass ?? "unknown")
                         EngineConsoleKeyValueRow("Risk", inspection.contract?.riskLevel ?? "unknown")
                     }
 
-                    EngineConsoleCard {
+                    EngineConsoleCard(tint: tint) {
                         EngineConsoleCardHeader(
                             symbol: "shippingbox",
                             title: "Implementation",
-                            subtitle: inspection.implementation?.functionId ?? "unknown function"
+                            subtitle: inspection.implementation?.functionId ?? "unknown function",
+                            tint: tint
                         )
                         EngineConsoleKeyValueRow("ID", inspection.implementation?.implementationId ?? "unknown")
                         EngineConsoleKeyValueRow("Plugin", inspection.implementation?.pluginId ?? "unknown")
@@ -1771,11 +1791,12 @@ private struct CapabilityInspectionSheet: View {
                         EngineConsoleKeyValueRow("Schema", inspection.implementation?.schemaDigest ?? "unknown")
                     }
 
-                    EngineConsoleCard {
+                    EngineConsoleCard(tint: tint) {
                         EngineConsoleCardHeader(
                             symbol: "key",
                             title: "Execution Handle",
-                            subtitle: "Fresh handles are required for mutating or elevated-risk execution."
+                            subtitle: "Fresh handles are required for mutating or elevated-risk execution.",
+                            tint: tint
                         )
                         EngineConsoleKeyValueRow("Handle", inspection.inspectionHandle?.handle ?? "missing")
                         EngineConsoleKeyValueRow("Revision", inspection.inspectionHandle?.functionRevision.map(String.init) ?? "missing")
@@ -1784,8 +1805,38 @@ private struct CapabilityInspectionSheet: View {
                 }
                 .padding(20)
             }
-            .navigationTitle("Inspection")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Inspection", color: tint)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: tint)
+                }
+            }
         }
+        .tint(tint)
+    }
+
+    private var tint: Color {
+        CapabilityPresentation.color(for: identity)
+    }
+
+    private var identity: CapabilityIdentity {
+        CapabilityIdentity(
+            modelPrimitiveName: "inspect",
+            contractId: inspection.contract?.contractId ?? inspection.implementation?.contractId,
+            implementationId: inspection.implementation?.implementationId,
+            functionId: inspection.implementation?.functionId ?? inspection.bindingDecision?.selectedFunctionId,
+            pluginId: inspection.implementation?.pluginId,
+            workerId: inspection.implementation?.workerId,
+            schemaDigest: inspection.inspectionHandle?.schemaDigest ?? inspection.implementation?.schemaDigest,
+            catalogRevision: inspection.inspectionHandle?.catalogRevision ?? inspection.implementation?.catalogRevision,
+            trustTier: inspection.implementation?.trustTier,
+            riskLevel: inspection.contract?.riskLevel,
+            effectClass: inspection.contract?.effectClass
+        )
     }
 }

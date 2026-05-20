@@ -209,14 +209,21 @@ selection.
 
 The Engine Console uses sheet-native Tron components: section chips, compact
 metric grids, capability cards, status banners, generated action rows, and
-inspection sheets. Capability search has its own loading/error/empty/results
-state, so a failed search does not replace the overview or cached registry
-state. Capability mutations also have local action state, so conformance,
-plugin, binding, and implementation updates report success/failure without
-collapsing the whole console into a failed load state. Operator search sends
-explicit runtime metadata requesting degraded lexical search only when vectors
-are unavailable; that policy is visible in the search result status and is not
-applied to model turns.
+inspection sheets. The toolbar owns the Engine title; the content body starts
+with the current section rather than repeating the title. Overview readiness is
+reserved for connection, index, and active mutation state. Optional runtime
+features such as Program Runs surface their unavailable state inside their own
+section so a connected, inspectable substrate does not appear globally broken.
+Capability search has its own loading/error/empty/results state, so a failed
+search does not replace the overview or cached registry state. Capability
+cards avoid duplicate titles when a contract id and function id are identical,
+and inspection sheets reuse the same capability color, sheet title, and hidden
+drag-handle conventions as the rest of the app. Capability mutations also have
+local action state, so conformance, plugin, binding, and implementation updates
+report success/failure without collapsing the whole console into a failed load
+state. Operator search sends explicit runtime metadata requesting degraded
+lexical search only when vectors are unavailable; that policy is visible in the
+search result status and is not applied to model turns.
 
 The console cache is intentionally read-only. On disconnect, the UI shows stale
 catalog/registry/index/module summaries and disables mutations. Reconnect
@@ -362,6 +369,14 @@ sticky because the stored credential must be repaired.
 All connection banners clear as soon as the active server reconnects or no
 active server remains, and reconnecting countdown ticks keep the same semantic
 banner so they do not reset the auto-dismiss timer.
+
+Generated management surfaces use the same `ToastCenter` path for transient
+success feedback. Prompt Library generated actions, for example, show bounded
+success toasts after `ui::submit_action` completes and keep raw child
+invocation ids in server logs/Engine Console instead of rendering them inline
+as product content. Sheets that sit above the app root may attach the same
+central toast banner modifier locally; they still share `ToastCenter.shared`
+and do not introduce a second notification mechanism.
 
 `SessionRefreshService` is the gatekeeper for `session::list` refreshes. It
 debounces foreground refreshes, re-checks connectivity after the debounce, and

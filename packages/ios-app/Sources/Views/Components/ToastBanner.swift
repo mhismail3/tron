@@ -102,6 +102,7 @@ private struct SingleToastBanner: View {
 
     private func colorFor(severity: ToastCenter.Severity) -> Color {
         switch severity {
+        case .success: return .tronSuccess
         case .info: return .tronInfo
         case .warning: return .tronWarning
         case .error: return .tronError
@@ -112,6 +113,9 @@ private struct SingleToastBanner: View {
     private func iconFor(severity: ToastCenter.Severity) -> some View {
         let size = ToastBannerLayout.contentFontSize
         switch severity {
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .font(TronTypography.sans(size: size, weight: .medium))
         case .info:
             Image(systemName: "info.circle.fill")
                 .font(TronTypography.sans(size: size, weight: .medium))

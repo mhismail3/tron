@@ -4,7 +4,7 @@ import Foundation
 /// errors. Modal alerts remain for fatal/actionable errors (see `ErrorHandler.handleFatal`).
 ///
 /// Features:
-/// - Severity levels (`info`/`warning`/`error`) with default auto-dismiss durations.
+/// - Severity levels (`success`/`info`/`warning`/`error`) with default auto-dismiss durations.
 /// - `dedupKey`-based suppression or replacement for app-level state banners.
 /// - Overflow trimming with preference for retry toasts (to keep actionable signals visible).
 /// - Optional retry handler → toast shows a Retry button and is sticky by default.
@@ -18,10 +18,11 @@ final class ToastCenter {
     // MARK: - Types
 
     enum Severity: Sendable, Equatable {
-        case info, warning, error
+        case success, info, warning, error
 
         fileprivate var defaultAutoDismiss: Duration {
             switch self {
+            case .success: return .seconds(2)
             case .info: return .seconds(2)
             case .warning: return .seconds(3)
             case .error: return .seconds(4)
@@ -31,7 +32,7 @@ final class ToastCenter {
 
     /// Toast dismissal timing policy.
     enum AutoDismiss: Sendable, Equatable {
-        /// Use severity defaults (info 2s / warning 3s / error 4s). Retry toasts are sticky.
+        /// Use severity defaults (success/info 2s / warning 3s / error 4s). Retry toasts are sticky.
         case standard
         /// Never auto-dismiss; user must tap / swipe / dismiss via Retry.
         case sticky
@@ -105,7 +106,7 @@ final class ToastCenter {
     ///   - dedupKey: Optional key used to suppress duplicates.
     ///   - duplicatePolicy: Whether duplicate-key pushes suppress or replace a visible toast.
     ///   - autoDismiss: Dismissal timing policy. `.standard` uses severity defaults
-    ///     (info 2s / warning 3s / error 4s) unless `retryHandler` is non-nil (→ sticky).
+    ///     (success/info 2s / warning 3s / error 4s) unless `retryHandler` is non-nil (→ sticky).
     ///   - retryHandler: Optional callback for a Retry button. Makes `.standard` mean sticky.
     func push(
         _ message: String,

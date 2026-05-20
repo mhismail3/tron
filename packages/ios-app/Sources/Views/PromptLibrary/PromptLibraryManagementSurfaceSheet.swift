@@ -14,7 +14,6 @@ struct PromptLibraryManagementSurfaceSheet: View {
     @State private var historySurface: LoadedPromptManagementSurface?
     @State private var loadingTabs: Set<PromptLibraryManagementTab> = []
     @State private var errorMessage: String?
-    @State private var lastActionResult: UiActionResultDTO?
 
     var body: some View {
         NavigationStack {
@@ -47,10 +46,6 @@ struct PromptLibraryManagementSurfaceSheet: View {
                         } else {
                             generatedSurfaceEmptyState
                         }
-
-                        if let lastActionResult {
-                            actionResultView(lastActionResult)
-                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
@@ -78,6 +73,7 @@ struct PromptLibraryManagementSurfaceSheet: View {
                 }
             }
             .tronErrorAlert(message: $errorMessage)
+            .withToastBanner()
         }
         .adaptivePresentationDetents([.large])
         .presentationDragIndicator(.hidden)
@@ -116,24 +112,6 @@ struct PromptLibraryManagementSurfaceSheet: View {
         }
     }
 
-    private func actionResultView(_ result: UiActionResultDTO) -> some View {
-        SettingsCard(accent: .tronSuccess, interactive: false) {
-            VStack(alignment: .leading, spacing: 4) {
-                Label(result.actionId ?? "Generated action", systemImage: "checkmark.circle")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronSuccess)
-                if let childInvocationId = result.childInvocationId {
-                    Text(childInvocationId)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextSecondary)
-                        .lineLimit(1)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
     @MainActor
     private func load(_ tab: PromptLibraryManagementTab, force: Bool = false) async {
         if !force, surface(for: tab) != nil { return }
@@ -165,14 +143,60 @@ struct PromptLibraryManagementSurfaceSheet: View {
     @MainActor
     private func submit(_ submission: UiActionSubmissionDTO, for tab: PromptLibraryManagementTab) async {
         do {
-            lastActionResult = try await engineClient.capability.submitUiAction(
+            let result = try await engineClient.capability.submitUiAction(
                 submission,
                 idempotencyKey: .userAction("promptLibrary.manage.\(tab.rawValue).\(submission.actionId)")
+            )
+            ToastCenter.shared.push(
+                successMessage(for: result, fallbackActionId: submission.actionId),
+                severity: .success,
+                dedupKey: toastDedupKey(for: submission.actionId),
+                duplicatePolicy: .replace
             )
             await load(tab, force: true)
         } catch {
             errorMessage = "Generated action failed: \(error.localizedDescription)"
         }
+    }
+
+    private func successMessage(for result: UiActionResultDTO, fallbackActionId: String) -> String {
+        let actionId = (result.actionId ?? fallbackActionId).lowercased()
+        if actionId.contains("create-snippet") {
+            return "Snippet created"
+        }
+        if actionId.contains("update-snippet") {
+            return "Snippet updated"
+        }
+        if actionId.contains("delete-snippet") {
+            return "Snippet deleted"
+        }
+        if actionId.contains("clear-history") {
+            return "History cleared"
+        }
+        if actionId.contains("delete-history") {
+            return "History entry deleted"
+        }
+        return "Prompt action complete"
+    }
+
+    private func toastDedupKey(for actionId: String) -> String {
+        let actionId = actionId.lowercased()
+        if actionId.contains("create-snippet") {
+            return "promptLibrary.manage.createSnippet"
+        }
+        if actionId.contains("update-snippet") {
+            return "promptLibrary.manage.updateSnippet"
+        }
+        if actionId.contains("delete-snippet") {
+            return "promptLibrary.manage.deleteSnippet"
+        }
+        if actionId.contains("clear-history") {
+            return "promptLibrary.manage.clearHistory"
+        }
+        if actionId.contains("delete-history") {
+            return "promptLibrary.manage.deleteHistory"
+        }
+        return "promptLibrary.manage.action"
     }
 
     private func surface(for tab: PromptLibraryManagementTab) -> LoadedPromptManagementSurface? {

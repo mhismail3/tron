@@ -429,6 +429,13 @@ struct SourceGuardTests {
         #expect(managementSheet.contains(#"prompt_library.history.v1"#))
         #expect(managementSheet.contains("GeneratedUISurfaceView"))
         #expect(managementSheet.contains("submitUiAction"))
+        #expect(managementSheet.contains("ToastCenter.shared.push"))
+        #expect(managementSheet.contains("successMessage"))
+        #expect(managementSheet.contains("toastDedupKey"))
+        #expect(managementSheet.contains(".withToastBanner()"))
+        #expect(!managementSheet.contains("lastActionResult"))
+        #expect(!managementSheet.contains("actionResultView"))
+        #expect(!managementSheet.contains("childInvocationId"))
         #expect(!managementSheet.contains("targetFunctionId"))
         #expect(!managementSheet.contains("payloadTemplate"))
         #expect(!managementSheet.contains("requiredGrant"))
@@ -458,6 +465,36 @@ struct SourceGuardTests {
         #expect(!generatedRenderer.contains("DisclosureGroup"))
         #expect(managementSheet.contains("SettingsCard"))
         #expect(managementSheet.contains("animatesSelection: false"))
+    }
+
+    @Test("Engine Console overview and inspection sheet stay native and scoped")
+    func testEngineConsoleOverviewAndInspectionBoundary() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let engineConsole = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(!engineConsole.contains(#".navigationTitle("Engine")"#))
+        #expect(engineConsole.contains("DashboardToolbarContent("))
+        #expect(engineConsole.contains(#"title: "Engine","#))
+        #expect(engineConsole.contains(".presentationDragIndicator(.hidden)"))
+        #expect(engineConsole.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
+        #expect(engineConsole.contains("SheetDismissButton(color: tint)"))
+        #expect(engineConsole.contains("EngineConsoleCard(tint: tint)"))
+        #expect(engineConsole.contains("private var secondaryTitle: String?"))
+        #expect(engineConsole.contains("candidate != primaryTitle"))
+
+        let readinessStart = try #require(engineConsole.range(of: "private var readinessIssues"))
+        let readinessEnd = try #require(engineConsole.range(of: "private var mutationIssue"))
+        let readinessBlock = String(engineConsole[readinessStart.lowerBound..<readinessEnd.lowerBound])
+        #expect(!readinessBlock.contains("Program runtime unavailable"))
+        #expect(!readinessBlock.contains("programRuntimeReady"))
+        #expect(engineConsole.contains("private var programRuntimeReady: Bool"))
+        #expect(engineConsole.contains("Program execution stays disabled until the first-party worker reports healthy conformance."))
     }
 
     @Test("feedback recipient has tracked non-placeholder default")

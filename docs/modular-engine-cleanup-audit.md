@@ -465,6 +465,40 @@ expansion/button animations drew attention away from the task.
 | Motion policy | Source guards require row expansion to use one native `Animation.smooth` path with an opacity transition and rotating chevron, while still forbidding springs, press-scale effects, and animated segmented-control tab switching | Generated UI management should feel immediate and stable; motion is reserved for places where it communicates state |
 | Action controls | Generated actions use a renderer-local Tron action button style with flat emerald/destructive treatments and disabled states, while preserving schema-scoped `ui::submit_action` submission | Styling can improve affordance clarity, but action routing and authority remain server-owned |
 
+## 2026-05-20 Manual Test 3 Prompt Management Action Feedback
+
+Device testing of Prompt Library create/update confirmed the server substrate
+path was healthy: public `engine::invoke -> ui::submit_action ->
+prompt_library::*` invocations completed, prompt snippets stayed on
+append-only `artifact:prompt-snippet:*` resource versions, and no duplicate
+resources or failed invocations were observed. The remaining defect was a UI
+presentation issue: the management sheet rendered raw action-result metadata as
+content after successful mutations.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Action feedback | `PromptLibraryManagementSurfaceSheet` now routes successful generated-management submissions through the central `ToastCenter` and no longer renders `UiActionResultDTO` cards inline | Keep child invocation ids inspectable through Engine Console/logs, not as primary sheet content |
+| Toast identity | `ToastCenter` has a first-class `.success` severity rendered by `ToastBanner` with Tron success tokens | Use one app-wide transient feedback mechanism instead of ad hoc sheet-local result containers |
+| Guardrail | iOS source guards require generated prompt management to call `ToastCenter.shared.push` and forbid `lastActionResult`, `actionResultView`, and raw `childInvocationId` rendering in the management sheet | Mutation feedback remains user-facing and bounded; substrate lineage remains server-owned and inspectable |
+
+## 2026-05-20 Manual Test 4 Engine Console Baseline Cleanup
+
+Device testing of the Engine Console baseline showed successful
+`control::snapshot`, `capability::search`, and `capability::inspect` substrate
+calls with no recent failed invocations. The observed issues were client
+projection and presentation problems: the body repeated the Engine title, the
+overview readiness card treated optional Program runtime availability as a
+global warning, capability cards duplicated the same id twice, and inspection
+sheets used generic sheet chrome instead of Tron sheet conventions.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Substrate health | `engine_invocations` and ingested iOS logs for the test window show successful `capability::search` / `capability::inspect` responses and normal WebSocket heartbeats | Keep this checkpoint client-side; no server substrate behavior changed |
+| Overview readiness | Engine Console overview readiness now covers connection, index, and active mutation state; Program runtime availability is scoped to the Program Runs section | Optional advanced runtime state should not make a connected, inspectable substrate appear globally broken |
+| Capability cards | Capability result cards now suppress the secondary id when it equals the primary id | Cards show one canonical title plus distinct implementation metadata only when it adds information |
+| Inspection sheet | Capability inspection hides the drag handle, uses `SheetTitle`, adds the standard dismiss button, and tints cards/icons from `CapabilityPresentation.color` | Detail sheets should follow the same Tron-native conventions as the rest of the app |
+| Guardrail | `SourceGuardTests` now assert the Engine Console title, readiness, card, and inspection-sheet boundaries | Future UI cleanup cannot drift back into duplicated titles or optional-runtime global warnings silently |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:

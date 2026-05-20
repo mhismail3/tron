@@ -35,10 +35,12 @@ struct ToastCenterTests {
     @Test("push with explicit severity stores severity")
     func pushSeverity() async {
         let (sut, _) = makeSUT()
+        sut.push("done", severity: .success)
         sut.push("warn", severity: .warning)
         sut.push("info", severity: .info)
-        #expect(sut.toasts[0].severity == .warning)
-        #expect(sut.toasts[1].severity == .info)
+        #expect(sut.toasts[0].severity == .success)
+        #expect(sut.toasts[1].severity == .warning)
+        #expect(sut.toasts[2].severity == .info)
     }
 
     @Test("dismiss removes specific toast")
@@ -181,9 +183,10 @@ struct ToastCenterTests {
         #expect(sut.toasts.count == 1)
     }
 
-    @Test("default auto-dismiss: info 2s, warning 3s, error 4s")
+    @Test("default auto-dismiss: success/info 2s, warning 3s, error 4s")
     func defaultAutoDismissDurationsBySeverity() async {
-        let (sut, clock) = makeSUT()
+        let (sut, clock) = makeSUT(maxVisible: 4)
+        sut.push("success", severity: .success)
         sut.push("info", severity: .info)
         sut.push("warn", severity: .warning)
         sut.push("err", severity: .error)
@@ -191,6 +194,7 @@ struct ToastCenterTests {
 
         clock.advance(by: .seconds(2))
         await yieldForAsync()
+        #expect(sut.toasts.contains(where: { $0.message == "success" }) == false)
         #expect(sut.toasts.contains(where: { $0.message == "info" }) == false)
         #expect(sut.toasts.contains(where: { $0.message == "warn" }))
         #expect(sut.toasts.contains(where: { $0.message == "err" }))
