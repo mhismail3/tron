@@ -370,14 +370,36 @@ Important parity anchors are:
 | prompt history/snippets | `prompt_library::history_*`, `prompt_library::snippet_*` |
 | capability discovery/execution | `capability::search`, `capability::inspect`, `capability::execute` |
 
+When filesystem capabilities are invoked through the model-facing capability
+primitive, relative paths resolve against the active session working
+directory/worktree carried as engine runtime metadata. Absolute paths retain the
+trusted-local host filesystem behavior described by the filesystem domain docs.
+When a session acquires an isolated git worktree, Tron seeds that worktree from
+the operator-visible working copy: tracked edits/deletions and untracked
+non-ignored files are overlaid on top of `HEAD`, while ignored files and
+internal worktree directories stay out of the session snapshot.
+
 `process::run` and `notifications::send` both have direct, low-overhead paths
 for safe/default use. `process::run` requires `executionMode`: classifier-
-approved read-only checks such as `date`, `git status`, and `git log` run
-directly with `executionMode = "read_only"`, while write-like commands must use
+approved read-only checks such as `date`, `pwd`, `test -f`, bounded `sed -n`
+printing, `git status`, and `git log` run directly with
+`executionMode = "read_only"`, while write-like commands must use
 `executionMode = "sandbox_materialized"` with declared `expectedOutputs` that
 are materialized back through resource refs. It defaults to the active session
 worktree/workspace when `cwd` is omitted and accepts bounded timeout fields in
-milliseconds. `notifications::send` sends through the first-party notification
+milliseconds. The model-facing `capability::execute` primitive is already
+the execution wrapper: callers set `contractId`/`capabilityId`/`functionId` to
+the selected target capability, put that target's complete required parameters
+under `payload`, and copy the execute recipe from `capability::search` or
+`capability::inspect` instead of wrapping another `capability::execute` call.
+Recipe examples are templates only: agents must not run warm-up/probe/example
+commands such as `date` or `git status` unless that is the requested action, and
+an exact user-supplied target payload should be invoked exactly once. Target
+schema, policy, and idempotency preflight rejections return structured
+`isError=true` capability results with no child invocation, approval, or
+resource refs, so expected contract failures stay inspectable without becoming
+engine-level execution failures.
+`notifications::send` sends through the first-party notification
 delegate with an idempotency key and normal audit/event records.
 `voice_notes::save` transcribes audio into resource-backed `artifact` and
 `materialized_file` outputs; `voice_notes::list` and `voice_notes::delete` read
@@ -467,7 +489,7 @@ logs, compensation attempts, trace id, and final status. Loose program
 `artifacts` are rejected; durable outputs must be created by child resource or
 materialization capabilities.
 
-Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats `cd <dir> && git status/log/diff/show` as read-only when every segment is otherwise safe. Mutating or publishing git commands still require inspection and approval, and write-like process commands must run in sandbox materialization mode with declared outputs.
+Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe. Mutating or publishing git commands still require inspection and approval, and write-like process commands must run in sandbox materialization mode with declared outputs.
 
 The same capability worker also registers operator/admin functions for native
 clients and the Engine Console. These are normal engine catalog functions, not
@@ -796,12 +818,16 @@ entry, and `approval.resolved` stream event all remain engine-owned. Agents can
 not see or invoke `approval::*` functions in their live catalog. Approval-required
 capability invocations keep the originating turn open until the approval record
 is resolved, denied, failed, or timed out, then return that outcome to the model
-as the original `execute` result. Broad first-party capabilities may declare a
+as the original `execute` result; executed approvals include explicit
+`approvalRequired`/`approvalExecuted` details and the resumed child invocation id
+so the agent can report lineage without consulting a separate approval surface.
+Broad first-party capabilities may declare a
 conditional approval contract: for example, `process::run` allows read-only
-checks such as `date`, `pwd`, `git status`, `git log`, and test/build commands
-without a prompt, while privileged, destructive, package-installing, source-control
-mutating, or file-redirection shell commands require the sandbox materialization
-request shape and may pause for user approval before execution.
+checks such as `date`, `pwd`, `test -f`, `sed -n` printing, `git status`,
+`git log`, and test/build commands without a prompt, while privileged,
+destructive, package-installing, source-control mutating, `sed -i`/write-script,
+or file-redirection shell commands require the sandbox materialization request
+shape and may pause for user approval before execution.
 
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` capability frames when iOS clients are subscribed.
 

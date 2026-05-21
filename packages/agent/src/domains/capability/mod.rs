@@ -40,6 +40,17 @@
 //! `notifications::send` is still idempotent and audited, but it is primed and
 //! executable without a separate inspect round trip so notification parity does
 //! not depend on shelling out to OS notification commands.
+//! Target-owned payload schema, policy, and idempotency preflight rejections
+//! are surfaced as structured `CapabilityResult { is_error: true }` values with
+//! no child invocation, approval, or durable output. Capability execution should
+//! fail the engine invocation only for wrapper-level authority/availability
+//! problems or unexpected child execution failures, not for normal target
+//! contract rejections that the model must report back to the operator.
+//! Approval-required executions resume through `approval::resolve`, but the
+//! original `capability::execute` result must still project the executed
+//! approval state and resumed child invocation id. The model should not need to
+//! query approval internals to answer whether approval happened or which target
+//! invocation produced the output.
 //! Interactive and async capabilities are represented by durable pause/run
 //! records, not by special runner branches. A capability that needs approval,
 //! user input, streaming, or background execution returns lifecycle metadata;

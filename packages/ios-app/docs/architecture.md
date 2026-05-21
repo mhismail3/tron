@@ -261,6 +261,8 @@ UnifiedEventTransformer.reconstructSessionState(from: events)
     ↓
 ReconstructedState (messages, activeTools, pendingQuestion, ...)
     ↓
+Merge separately returned approvalItems by approval createdAt
+    ↓
 ChatViewModel.messages (batched for pagination)
     ↓
 ChatView renders
@@ -269,6 +271,13 @@ ChatView renders
 Pagination: older history is loaded on demand via `beforeSequence`, passing the
 `oldestSequence` from the previous page. `hasMoreEvents` controls whether the
 "load more" UI is shown.
+
+`session::reconstruct` returns approval records separately from the persisted
+session event rows because the approval primitive owns approval lifecycle. The
+client merges those approval chips into the reconstructed message timeline by
+approval creation timestamp before selecting the visible page; it must not append
+historical approvals after the visible slice, because that misorders approved
+capability runs after their final assistant result when a session is resumed.
 
 ### Session Creation
 

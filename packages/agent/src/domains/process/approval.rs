@@ -8,6 +8,8 @@
 
 use serde_json::Value;
 
+const READ_ONLY_LOW_RISK_MESSAGE: &str = "process::run read_only commands must be proven low-risk by the classifier; use executionMode=sandbox_materialized with expectedOutputs for mutating or unknown commands";
+
 /// Return true when a `process::run` payload should pause for user approval.
 pub(crate) fn run_requires_approval(payload: &Value) -> bool {
     let Some(command) = payload.get("command").and_then(Value::as_str) else {
@@ -15,6 +17,23 @@ pub(crate) fn run_requires_approval(payload: &Value) -> bool {
         return false;
     };
     command_requires_approval(command)
+}
+
+/// Reject impossible process payloads before creating an approval request.
+pub(crate) fn validate_run_payload_before_approval(payload: &Value) -> Result<(), &'static str> {
+    if payload.get("executionMode").and_then(Value::as_str) == Some("read_only")
+        && run_requires_approval(payload)
+    {
+        return Err(READ_ONLY_LOW_RISK_MESSAGE);
+    }
+    Ok(())
+}
+
+/// Return true when a validated `process::run` payload should pause for approval.
+pub(crate) fn run_execution_requires_approval(payload: &Value) -> bool {
+    validate_run_payload_before_approval(payload).is_ok()
+        && payload.get("executionMode").and_then(Value::as_str) == Some("sandbox_materialized")
+        && run_requires_approval(payload)
 }
 
 fn command_requires_approval(command: &str) -> bool {
@@ -100,6 +119,7 @@ fn segment_is_low_risk(segment: &str) -> bool {
     match command {
         "cd" => cd_invocation_is_low_risk(&tokens),
         "find" => find_invocation_is_read_only(&tokens),
+        "sed" => sed_invocation_is_read_only(&tokens),
         "git" => git_effective_subcommand(&tokens)
             .is_some_and(|subcommand| git_subcommand_is_read_only(subcommand, &tokens)),
         "cargo" => tokens
@@ -134,6 +154,107 @@ fn find_invocation_is_read_only(tokens: &[String]) -> bool {
             "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fdelete"
         )
     })
+}
+
+fn sed_invocation_is_read_only(tokens: &[String]) -> bool {
+    let mut scripts = Vec::new();
+    let mut index = 1;
+    let mut script_seen = false;
+    while index < tokens.len() {
+        let token = tokens[index].as_str();
+        if token == "-i" || token.starts_with("-i.") || token == "--in-place" {
+            return false;
+        }
+        if token == "-f" || token == "--file" || token.starts_with("--file=") {
+            return false;
+        }
+        if token == "-e" || token == "--expression" {
+            let Some(script) = tokens.get(index + 1) else {
+                return false;
+            };
+            scripts.push(script.as_str());
+            script_seen = true;
+            index += 2;
+            continue;
+        }
+        if let Some(script) = token.strip_prefix("-e") {
+            if script.is_empty() {
+                return false;
+            }
+            scripts.push(script);
+            script_seen = true;
+            index += 1;
+            continue;
+        }
+        if let Some(script) = token.strip_prefix("--expression=") {
+            if script.is_empty() {
+                return false;
+            }
+            scripts.push(script);
+            script_seen = true;
+            index += 1;
+            continue;
+        }
+        if token.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        if !script_seen {
+            scripts.push(token);
+            script_seen = true;
+        }
+        index += 1;
+    }
+
+    !scripts.is_empty() && scripts.iter().all(|script| sed_script_is_read_only(script))
+}
+
+fn sed_script_is_read_only(script: &str) -> bool {
+    script
+        .split([';', '\n'])
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+        .all(|command| {
+            let command = command.trim_start_matches(|ch: char| {
+                ch.is_ascii_digit() || matches!(ch, '$' | ',' | '!' | '+' | '-' | '~')
+            });
+            let Some(command_char) = command.chars().find(|ch| ch.is_ascii_alphabetic()) else {
+                return true;
+            };
+            command_char != 'w' && !sed_substitution_writes(command)
+        })
+}
+
+fn sed_substitution_writes(command: &str) -> bool {
+    let mut chars = command.chars();
+    if chars.next() != Some('s') {
+        return false;
+    }
+    let Some(delimiter) = chars.next() else {
+        return false;
+    };
+    let mut escaped = false;
+    let mut delimiters_seen = 0;
+    for ch in chars {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == delimiter {
+            delimiters_seen += 1;
+            if delimiters_seen == 2 {
+                continue;
+            }
+        }
+        if delimiters_seen >= 2 && ch == 'w' {
+            return true;
+        }
+    }
+    false
 }
 
 fn git_effective_subcommand(tokens: &[String]) -> Option<&str> {
@@ -241,7 +362,7 @@ const HIGH_RISK_PACKAGE_SUBCOMMANDS: &[&str] =
 const LOW_RISK_PURE_COMMANDS: &[&str] = &[
     "date", "pwd", "ls", "rg", "grep", "egrep", "fgrep", "cat", "head", "tail", "wc", "stat",
     "file", "du", "df", "echo", "printf", "true", "false", "sleep", "uname", "whoami", "id",
-    "hostname", "which", "whereis",
+    "hostname", "which", "whereis", "test",
 ];
 
 const LOW_RISK_GIT_SUBCOMMANDS: &[&str] = &[
@@ -288,6 +409,10 @@ mod tests {
             "npm list",
             "xcodebuild build-for-testing -scheme Tron",
             "echo hello",
+            "test ! -e should_not_exist.txt",
+            "test -f README.md",
+            "sed -n '1,3p' README.md",
+            "pwd && printf 'hi\n' && test ! -e should_not_exist.txt && test -f README.md && sed -n '1,3p' README.md",
             "cd /tmp && git status --short && git log --oneline -3",
             "cd ~/Downloads && pwd",
         ] {
@@ -318,6 +443,9 @@ mod tests {
             "find . -exec rm {} ;",
             "cargo fmt",
             "touch file.txt",
+            "sed -i '' 's/a/b/' README.md",
+            "sed --in-place 's/a/b/' README.md",
+            "sed -n '1,3w out.txt' README.md",
             "mkdir output",
             "cp a b",
             "python -c 'open(\"x\", \"w\").write(\"no\")'",
@@ -332,5 +460,37 @@ mod tests {
     #[test]
     fn missing_command_is_left_to_schema_validation() {
         assert!(!run_requires_approval(&json!({})));
+    }
+
+    #[test]
+    fn missing_execution_mode_is_left_to_schema_validation() {
+        let payload = json!({"command": "rm -rf target"});
+
+        assert!(run_requires_approval(&payload));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn read_only_mutating_payload_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "echo hi > should_not_exist.txt",
+            "executionMode": "read_only"
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("sandbox_materialized"));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_mutating_payload_still_requires_approval() {
+        let payload = json!({
+            "command": "echo hi > result.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "result.txt"}]
+        });
+
+        assert_eq!(validate_run_payload_before_approval(&payload), Ok(()));
+        assert!(run_execution_requires_approval(&payload));
     }
 }

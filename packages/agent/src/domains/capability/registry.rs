@@ -4382,6 +4382,89 @@ mod tests {
     }
 
     #[test]
+    fn first_party_recipes_include_every_required_payload_field() {
+        let spec_sets = vec![
+            crate::domains::agent::contract::capabilities().expect("agent specs"),
+            crate::domains::auth::contract::capabilities().expect("auth specs"),
+            crate::domains::blob::contract::capabilities().expect("blob specs"),
+            crate::domains::browser::contract::capabilities().expect("browser specs"),
+            crate::domains::context::contract::capabilities().expect("context specs"),
+            crate::domains::cron::contract::capabilities().expect("cron specs"),
+            crate::domains::device::contract::capabilities().expect("device specs"),
+            crate::domains::display::contract::capabilities().expect("display specs"),
+            crate::domains::events::contract::capabilities().expect("events specs"),
+            crate::domains::filesystem::contract::capabilities().expect("filesystem specs"),
+            crate::domains::git::contract::capabilities().expect("git specs"),
+            crate::domains::import::contract::capabilities().expect("import specs"),
+            crate::domains::job::contract::capabilities().expect("job specs"),
+            crate::domains::logs::contract::capabilities().expect("logs specs"),
+            crate::domains::mcp::contract::capabilities().expect("mcp specs"),
+            crate::domains::memory::contract::capabilities().expect("memory specs"),
+            crate::domains::message::contract::capabilities().expect("message specs"),
+            crate::domains::model::contract::capabilities().expect("model specs"),
+            crate::domains::notifications::contract::capabilities().expect("notification specs"),
+            crate::domains::plan::contract::capabilities().expect("plan specs"),
+            crate::domains::process::contract::capabilities().expect("process specs"),
+            crate::domains::program::contract::capabilities().expect("program specs"),
+            crate::domains::prompt_library::contract::capabilities().expect("prompt library specs"),
+            crate::domains::repo::contract::capabilities().expect("repo specs"),
+            crate::domains::sandbox::contract::capabilities().expect("sandbox specs"),
+            crate::domains::session::contract::capabilities().expect("session specs"),
+            crate::domains::settings::contract::capabilities().expect("settings specs"),
+            crate::domains::skills::contract::capabilities().expect("skills specs"),
+            crate::domains::system::contract::capabilities().expect("system specs"),
+            crate::domains::transcription::contract::capabilities().expect("transcription specs"),
+            crate::domains::tree::contract::capabilities().expect("tree specs"),
+            crate::domains::voice_notes::contract::capabilities().expect("voice notes specs"),
+            crate::domains::web::contract::capabilities().expect("web specs"),
+            crate::domains::worktree::contract::capabilities().expect("worktree specs"),
+        ];
+        let mut checked = 0;
+
+        for spec in spec_sets.into_iter().flatten() {
+            let function = crate::domains::contract::function_definition_for_capability(&spec);
+            if function.id.namespace() == "capability" {
+                continue;
+            }
+            let Some(schema) = function.request_schema.as_ref() else {
+                continue;
+            };
+            let Some(required) = schema.get("required").and_then(Value::as_array) else {
+                continue;
+            };
+            let required = required
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            if required.is_empty() {
+                continue;
+            }
+
+            let entry = CapabilityRegistryEntry::from_function(function, 17);
+            let recipe = entry.agent_recipe();
+            for field in required {
+                assert!(
+                    recipe
+                        .required_payload
+                        .iter()
+                        .any(|summary| summary.starts_with(&format!("{field}:"))),
+                    "{} missing required payload summary for {field}",
+                    recipe.contract_id
+                );
+                assert!(
+                    recipe.execute_template["payload"].get(&field).is_some(),
+                    "{} execute template missing required payload field {field}",
+                    recipe.contract_id
+                );
+            }
+            checked += 1;
+        }
+
+        assert!(checked > 50, "expected broad first-party recipe coverage");
+    }
+
+    #[test]
     fn search_hits_persist_agent_recipe_in_index_documents() {
         let notification_spec = crate::domains::notifications::contract::capabilities()
             .expect("notification specs")

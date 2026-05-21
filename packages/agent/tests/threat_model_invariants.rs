@@ -1132,6 +1132,34 @@ fn resource_materialization_enforcement_gates_stay_on() {
         process_contract.contains("\"executionMode\": \"read_only\""),
         "process::run examples must not teach the retired no-executionMode request shape"
     );
+    let capability_contract =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/contract.rs"))
+            .expect("failed to read capability contract");
+    assert!(
+        capability_contract.contains(r#"{\"command\":\"date\",\"executionMode\":\"read_only\"}"#)
+            && !capability_contract.contains(r#"{\"command\":\"date\"} for process::run"#),
+        "capability::execute model schema must teach complete target payload requirements"
+    );
+    assert!(
+        capability_contract.contains("This primitive is already capability::execute")
+            && capability_contract.contains("do not set contractId")
+            && capability_contract.contains("every required target parameter")
+            && capability_contract.contains("Do not run example/probe calls")
+            && capability_contract.contains("invoke that payload exactly"),
+        "capability::execute must explain target id placement and forbid recursive execute calls"
+    );
+    let openai_message_converter = std::fs::read_to_string(
+        crate_root.join("src/domains/model/providers/openai/message_converter.rs"),
+    )
+    .expect("failed to read OpenAI message converter");
+    assert!(
+        openai_message_converter.contains("exact contract id and payload")
+            && openai_message_converter.contains("call that exact target once")
+            && openai_message_converter
+                .contains("do not run warm-up, probe, date, status, or example commands first")
+            && openai_message_converter.contains("examples are templates only"),
+        "model provider capability clarification must forbid exploratory example/probe calls"
+    );
     assert!(
         process_contract.contains("process_resource_output_required")
             && process_contract.contains("materialized_file")
@@ -1140,10 +1168,29 @@ fn resource_materialization_enforcement_gates_stay_on() {
     );
     let process_worker = std::fs::read_to_string(crate_root.join("src/domains/process/mod.rs"))
         .expect("failed to read process worker");
+    let process_approval =
+        std::fs::read_to_string(crate_root.join("src/domains/process/approval.rs"))
+            .expect("failed to read process approval policy");
     assert!(
-        process_worker.contains("approval::run_requires_approval(&invocation.payload)")
-            && process_worker.contains("proven low-risk"),
+        process_worker
+            .contains("approval::validate_run_payload_before_approval(&invocation.payload)")
+            && process_approval.contains("validate_run_payload_before_approval")
+            && process_approval.contains("run_requires_approval(payload)")
+            && process_approval.contains("proven low-risk"),
         "process::run read_only execution must use the strict low-risk classifier, not a write-like blacklist"
+    );
+    let capability_operations =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/operations.rs"))
+            .expect("failed to read capability operations");
+    assert!(
+        capability_operations.contains("preflight_rejection_result")
+            && capability_operations.contains("\"childInvocationCreated\": false")
+            && capability_operations.contains("\"approvalCreated\": false")
+            && capability_operations.contains("\"resourceRefs\": []")
+            && capability_operations
+                .contains("validate_target_policy_before_approval(&function, &payload)")
+            && capability_operations.contains("validate_target_payload(&target.entry, &payload)"),
+        "capability::execute target preflight rejections must return structured isError results without child invocations, approvals, or resource refs"
     );
 
     let filesystem_contract =

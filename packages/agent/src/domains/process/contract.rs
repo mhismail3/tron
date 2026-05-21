@@ -22,7 +22,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some("process.run"),
         )
-        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. Read-only commands run directly with executionMode=read_only; write-like commands must run with executionMode=sandbox_materialized and declared expected outputs. If cwd is omitted, Tron uses the active session worktree when available, then the session workspace.")
+        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. Read-only commands run directly with executionMode=read_only, including composed inspection checks such as pwd && test -f README.md && sed -n '1,3p' README.md. Write-like commands must run with executionMode=sandbox_materialized and declared expected outputs. If cwd is omitted, Tron uses the active session worktree when available, then the session workspace.")
         .tags(vec!["shell", "bash", "zsh", "command", "terminal", "date", "git status", "test", "build", "process"])
         .request_schema(json!({
             "additionalProperties": false,
@@ -98,7 +98,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "shell redirection that writes files"
                 ],
                 "approvalNotRequiredFor": [
-                    "read-only inspection commands",
+                    "read-only inspection commands, including test predicates and bounded sed -n printing",
                     "date/time checks",
                     "read-only git status/log/diff checks, including commands that use cd only to select a directory",
                     "build and test commands without privileged or mutating shell operators"
@@ -128,6 +128,12 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             "payload": {"command": "git status --short --branch && git log --oneline -3", "executionMode": "read_only"},
             "idempotencyKey": "git-status-<turn>",
             "reason": "Check git state in the active session worktree."
+        }), json!({
+            "mode": "invoke",
+            "contractId": "process::run",
+            "payload": {"command": "pwd && test -f README.md && sed -n '1,3p' README.md", "executionMode": "read_only"},
+            "idempotencyKey": "readme-check-<turn>",
+            "reason": "Check the active session worktree and print a bounded README preview."
         })])
         .build()?,
     ])

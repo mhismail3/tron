@@ -150,6 +150,28 @@ impl GitExecutor {
         Ok(!output.is_empty())
     }
 
+    /// Paths whose working-copy state differs from `HEAD`.
+    ///
+    /// Includes tracked modifications/deletions plus untracked, non-ignored
+    /// files. Callers use this to seed a newly isolated session worktree with
+    /// the operator-visible workspace state instead of bare `HEAD` alone.
+    pub async fn working_copy_overlay_paths(&self, dir: &Path) -> Result<Vec<String>> {
+        let mut paths = Vec::new();
+        let tracked = self
+            .run_stdout_bytes(dir, &["diff", "--name-only", "-z", "HEAD", "--"])
+            .await?;
+        paths.extend(parse_nul_paths(&tracked));
+
+        let untracked = self
+            .run_stdout_bytes(dir, &["ls-files", "--others", "--exclude-standard", "-z"])
+            .await?;
+        paths.extend(parse_nul_paths(&untracked));
+
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+
     /// Get diff stat.
     pub async fn diff_stat(&self, dir: &Path) -> Result<String> {
         self.run(dir, &["diff", "--stat"]).await
@@ -952,6 +974,27 @@ impl GitExecutor {
         }
     }
 
+    async fn run_stdout_bytes(&self, dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
+        debug!(dir = %dir.display(), args = ?args, "git (stdout bytes)");
+        let output = tokio::time::timeout(
+            self.timeout,
+            tokio::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output(),
+        )
+        .await
+        .map_err(|_| WorktreeError::Timeout(self.timeout.as_millis() as u64))?
+        .map_err(|e| WorktreeError::Git(format!("failed to execute git: {e}")))?;
+        if output.status.success() {
+            Ok(output.stdout)
+        } else {
+            Err(WorktreeError::Git(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ))
+        }
+    }
+
     /// Like `run` but preserves stdout/stderr/status separately. Used by
     /// commands where stderr content is meaningful even on success.
     async fn run_capture(&self, dir: &Path, args: &[&str]) -> Result<(String, String, bool)> {
@@ -1171,6 +1214,15 @@ fn parse_worktree_porcelain(output: &str) -> Vec<WorktreeListEntry> {
     }
 
     entries
+}
+
+fn parse_nul_paths(output: &[u8]) -> Vec<String> {
+    output
+        .split(|byte| *byte == 0)
+        .filter(|part| !part.is_empty())
+        .map(|part| String::from_utf8_lossy(part).to_string())
+        .filter(|path| !path.is_empty())
+        .collect()
 }
 
 #[cfg(test)]

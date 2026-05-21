@@ -1,6 +1,6 @@
 //! Worktree CRUD — create, remove, list.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use tracing::debug;
 
@@ -53,6 +53,8 @@ pub async fn create(
             }
         })?;
 
+    hydrate_working_copy_overlay(&repo_root, &worktree_path, &config.base_dir_name, git).await?;
+
     let info = WorktreeInfo {
         session_id: session_id.to_string(),
         worktree_path,
@@ -71,6 +73,95 @@ pub async fn create(
     );
 
     Ok(info)
+}
+
+async fn hydrate_working_copy_overlay(
+    repo_root: &Path,
+    worktree_path: &Path,
+    worktree_base_dir_name: &str,
+    git: &GitExecutor,
+) -> Result<()> {
+    let paths = git.working_copy_overlay_paths(repo_root).await?;
+    for path in paths {
+        let Some(relative_path) = safe_repo_relative_path(&path, worktree_base_dir_name) else {
+            continue;
+        };
+        let source = repo_root.join(&relative_path);
+        let target = worktree_path.join(&relative_path);
+        if !source.exists() {
+            remove_overlay_target(&target).await?;
+            continue;
+        }
+        copy_overlay_entry(&source, &target).await?;
+    }
+    Ok(())
+}
+
+fn safe_repo_relative_path(path: &str, worktree_base_dir_name: &str) -> Option<PathBuf> {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        return None;
+    }
+
+    let mut out = PathBuf::new();
+    let mut components = path.components();
+    let first = components.next()?;
+    let Component::Normal(first_os) = first else {
+        return None;
+    };
+    if first_os == ".git" || first_os == worktree_base_dir_name {
+        return None;
+    }
+    out.push(first_os);
+
+    for component in components {
+        let Component::Normal(part) = component else {
+            return None;
+        };
+        out.push(part);
+    }
+    Some(out)
+}
+
+async fn remove_overlay_target(target: &Path) -> Result<()> {
+    match tokio::fs::symlink_metadata(target).await {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            tokio::fs::remove_dir_all(target).await?;
+        }
+        Ok(_) => {
+            tokio::fs::remove_file(target).await?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
+}
+
+async fn copy_overlay_entry(source: &Path, target: &Path) -> Result<()> {
+    if let Some(parent) = target.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let metadata = tokio::fs::symlink_metadata(source).await?;
+    if metadata.file_type().is_symlink() {
+        #[cfg(unix)]
+        {
+            let link_target = tokio::fs::read_link(source).await?;
+            let _ = tokio::fs::remove_file(target).await;
+            std::os::unix::fs::symlink(link_target, target)?;
+            return Ok(());
+        }
+        #[cfg(not(unix))]
+        {
+            return Ok(());
+        }
+    }
+    if metadata.is_dir() {
+        tokio::fs::create_dir_all(target).await?;
+        return Ok(());
+    }
+    let _ = tokio::fs::copy(source, target).await?;
+    tokio::fs::set_permissions(target, metadata.permissions()).await?;
+    Ok(())
 }
 
 /// Remove a worktree for a session.
@@ -216,6 +307,61 @@ mod tests {
         assert_eq!(info.branch, "session/test-session-abc");
         assert_eq!(info.session_id, "test-session-abc");
         assert!(!info.base_commit.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_hydrates_untracked_non_ignored_workspace_files() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig::default();
+
+        std::fs::write(dir.path().join("scratch.md"), "operator-visible").unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "ignored.log\n").unwrap();
+        std::fs::write(dir.path().join("ignored.log"), "do not copy").unwrap();
+
+        let info = create("sess-untracked", dir.path(), &config, &git)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(info.worktree_path.join("scratch.md")).unwrap(),
+            "operator-visible"
+        );
+        assert!(!info.worktree_path.join("ignored.log").exists());
+        assert!(!info.worktree_path.join(".worktrees").exists());
+    }
+
+    #[tokio::test]
+    async fn create_hydrates_modified_tracked_workspace_files() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig::default();
+
+        std::fs::write(dir.path().join("README.md"), "# modified\n").unwrap();
+
+        let info = create("sess-modified", dir.path(), &config, &git)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(info.worktree_path.join("README.md")).unwrap(),
+            "# modified\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_hydrates_tracked_deletions() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let config = WorktreeConfig::default();
+
+        std::fs::remove_file(dir.path().join("README.md")).unwrap();
+
+        let info = create("sess-deleted", dir.path(), &config, &git)
+            .await
+            .unwrap();
+
+        assert!(!info.worktree_path.join("README.md").exists());
     }
 
     #[tokio::test]

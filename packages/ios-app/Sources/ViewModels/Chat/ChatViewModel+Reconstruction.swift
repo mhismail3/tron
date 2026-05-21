@@ -2,6 +2,20 @@ import Foundation
 
 // MARK: - Session Reconstruction
 
+enum EngineApprovalTimeline {
+    static func timestamp(for approval: EngineApprovalRecordDTO) -> Date {
+        DateParser.parse(approval.createdAt ?? approval.updatedAt ?? approval.decidedAt ?? DateParser.now) ?? Date()
+    }
+
+    static func insertionIndex(for timestamp: Date, in messages: [ChatMessage]) -> Int {
+        messages.firstIndex { $0.timestamp > timestamp } ?? messages.count
+    }
+
+    static func insert(_ message: ChatMessage, into messages: inout [ChatMessage]) {
+        messages.insert(message, at: insertionIndex(for: message.timestamp, in: messages))
+    }
+}
+
 extension ChatViewModel {
 
     /// Process the reconstruction result from `session::reconstruct`.
@@ -16,11 +30,16 @@ extension ChatViewModel {
         let state = UnifiedEventTransformer.reconstructSessionState(from: result.events)
         applyReconstructedConfig(state)
 
-        // 2. Replace displayed messages, then convert subagent capabilities using lifecycle events.
+        // 2. Rebuild the full timeline before selecting the visible slice.
+        //    Server-owned approval records are returned separately from event
+        //    rows, so they must be merged by timestamp here; appending them
+        //    after display slicing would put historical approvals after later
+        //    assistant results when resuming a session.
         //    Order matters: restoreSubagentState modifies allReconstructedMessages in-place,
         //    so it must run AFTER the array is set.
         allReconstructedMessages = state.messages
         restoreSubagentState(from: state)
+        mergeEngineApprovalItemsIntoReconstructedMessages(result.approvalItems ?? [])
         let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
         displayedMessageCount = batchSize
         hasMoreMessages = result.hasMoreEvents || allReconstructedMessages.count > batchSize
@@ -47,12 +66,7 @@ extension ChatViewModel {
         default: agentPhase = .idle
         }
 
-        // 4b. Restore durable engine approval chips from the server-owned
-        // approval projection. Live approval stream events update the same
-        // chip ids, so reconstruction and realtime delivery converge.
-        restoreEngineApprovalItems(result.approvalItems ?? [])
-
-        // 4c. Process in-flight state (if agent is running)
+        // 4b. Process in-flight state (if agent is running)
         if let inFlight = result.inFlight {
             await processInFlightState(inFlight)
         }
@@ -125,19 +139,23 @@ extension ChatViewModel {
         logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil), pendingQueue=\(result.pendingQueue?.count ?? 0), approvals=\(result.approvalItems?.count ?? 0)", category: .session)
     }
 
-    private func restoreEngineApprovalItems(_ items: [EngineApprovalItem]) {
+    private func mergeEngineApprovalItemsIntoReconstructedMessages(_ items: [EngineApprovalItem]) {
         guard !items.isEmpty else { return }
         var restored = 0
         for item in items {
             let data = engineApprovalCapabilityData(from: item.approval)
-            if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: data.invocationId, in: messages) {
-                messages[index].content = .engineApproval(data)
+            if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: data.invocationId, in: allReconstructedMessages) {
+                allReconstructedMessages[index].content = .engineApproval(data)
             } else {
-                messages.append(ChatMessage(role: .assistant, content: .engineApproval(data)))
+                let message = ChatMessage(
+                    role: .assistant,
+                    content: .engineApproval(data),
+                    timestamp: EngineApprovalTimeline.timestamp(for: item.approval)
+                )
+                EngineApprovalTimeline.insert(message, into: &allReconstructedMessages)
             }
             restored += 1
         }
-        messageIndex.rebuild(from: messages)
         logger.info("[RECONSTRUCT] Restored \(restored) engine approval chip(s)", category: .session)
     }
 

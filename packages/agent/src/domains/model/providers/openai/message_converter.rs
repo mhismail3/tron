@@ -166,14 +166,18 @@ pub fn generate_capability_clarification_message(
         then call `execute` with the selected contract or implementation id.\n\
         Common contracts include filesystem capabilities for file operations, `process::run` for \
         command execution, and web capabilities for network retrieval when they are visible to the session.\n\
+        If the user gives an exact contract id and payload, call that exact target once; do not run \
+        warm-up, probe, date, status, or example commands first.\n\
         \n\
         ## Important Rules\n\
         1. You MUST provide ALL required parameters when calling capabilities - never call with empty arguments\n\
-        2. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
-        3. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
-        4. Be helpful, accurate, and efficient when working with code\n\
-        5. Inspect/read existing files through capabilities before changing them\n\
-        6. Make targeted, minimal edits rather than rewriting entire files",
+        2. Never execute sample/example capability payloads as exploratory calls; examples are templates only\n\
+        3. When a capability call fails due to missing parameters, retry only the same intended target with the missing required parameters, not an unrelated probe\n\
+        4. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
+        5. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
+        6. Be helpful, accurate, and efficient when working with code\n\
+        7. Inspect/read existing files through capabilities before changing them\n\
+        8. Make targeted, minimal edits rather than rewriting entire files",
         tool_list = tool_descriptions.join("\n")
     )
 }
@@ -815,6 +819,19 @@ mod tests {
         assert!(result.contains("Capability Execution"));
         assert!(result.contains("process::run"));
         assert!(result.contains("search"));
+    }
+
+    #[test]
+    fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
+        let result = generate_capability_clarification_message(&[], None);
+
+        assert!(result.contains("exact contract id and payload"));
+        assert!(result.contains("call that exact target once"));
+        assert!(
+            result.contains("do not run warm-up, probe, date, status, or example commands first")
+        );
+        assert!(result.contains("examples are templates only"));
+        assert!(result.contains("retry only the same intended target"));
     }
 
     // ── normalize_schema_for_openai ──────────────────────────────────

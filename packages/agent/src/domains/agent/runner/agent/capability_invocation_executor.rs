@@ -13,6 +13,7 @@ use crate::domains::capability_support::implementations::primitive_surface::{
     EngineCapabilityTarget, PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
     capability_execution_policy_scopes,
 };
+use crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
     InvocationId, TraceId,
@@ -824,6 +825,16 @@ fn primitive_runtime_metadata(
     Ok(metadata)
 }
 
+fn with_agent_working_directory_metadata(
+    context: CausalContext,
+    working_directory: &str,
+) -> CausalContext {
+    context.with_runtime_metadata(
+        RUNTIME_METADATA_WORKING_DIRECTORY,
+        working_directory.to_owned(),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn execute_capability_primitive_via_engine(
     engine_host: &EngineHostHandle,
@@ -865,12 +876,15 @@ async fn execute_capability_primitive_via_engine(
     let trace_id = inherited_trace_id
         .cloned()
         .unwrap_or_else(TraceId::generate);
-    let mut causal_context = CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
-        .with_scope("capability.search")
-        .with_scope("capability.inspect")
-        .with_scope("capability.execute")
-        .with_session_id(session_id.to_owned())
-        .with_idempotency_key(idempotency_key);
+    let mut causal_context = with_agent_working_directory_metadata(
+        CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id),
+        working_directory,
+    )
+    .with_scope("capability.search")
+    .with_scope("capability.inspect")
+    .with_scope("capability.execute")
+    .with_session_id(session_id.to_owned())
+    .with_idempotency_key(idempotency_key);
     for scope in execution_policy_scopes {
         if !causal_context.has_scope(scope) {
             causal_context = causal_context.with_scope(scope.clone());
@@ -985,6 +999,23 @@ mod tests {
             all_model_capability_ids: Vec::new(),
             turn_stopping_capabilities: HashSet::new(),
         }
+    }
+
+    #[test]
+    fn model_primitive_context_carries_trusted_working_directory_metadata() {
+        let context = CausalContext::new(
+            ActorId::new("agent:s1").expect("actor id"),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
+            TraceId::new("trace").expect("trace id"),
+        );
+
+        let context = with_agent_working_directory_metadata(context, "/tmp/session-worktree");
+
+        assert_eq!(
+            context.runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY),
+            Some("/tmp/session-worktree")
+        );
     }
 
     fn surface_with_echo() -> ResolvedCapabilitySurface {

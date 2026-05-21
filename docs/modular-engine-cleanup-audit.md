@@ -499,6 +499,136 @@ sheets used generic sheet chrome instead of Tron sheet conventions.
 | Inspection sheet | Capability inspection hides the drag handle, uses `SheetTitle`, adds the standard dismiss button, and tints cards/icons from `CapabilityPresentation.color` | Detail sheets should follow the same Tron-native conventions as the rest of the app |
 | Guardrail | `SourceGuardTests` now assert the Engine Console title, readiness, card, and inspection-sheet boundaries | Future UI cleanup cannot drift back into duplicated titles or optional-runtime global warnings silently |
 
+## 2026-05-20 Manual Test 5 Read-Only Capability Execution
+
+Device testing of a chat request to read `README.md` through
+`filesystem::read_file` showed the intended inspect/execute lineage and no
+durable resource refs from the pure-read child invocation. The audit also
+found a real substrate defect before proceeding to denial cases: the session
+was created under `/Users/moose/Downloads/projects/testspace`, but a relative
+`README.md` read returned the Tron repo README because filesystem handlers
+were resolving relative paths against the server process directory.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Successful read lineage | `capability::inspect -> capability::execute -> filesystem::read_file` completed with child invocation `019e4765-4517-7091-acb2-0158e5a4ed61` and `produced_resource_refs_json = []` | Pure-read filesystem outputs remain payload refs only; prompt-history and agent-result resources are separate chat durability |
+| Rejected misuse | An attempted `capability::execute` for `process::run` without `executionMode` failed with `INVALID_PARAMS` before target execution | Keep target schema validation ahead of child handler execution |
+| Working-directory fix | Model-facing capability execution now stamps `agent.workingDirectory` runtime metadata, `capability::execute` propagates runtime metadata to child invocations, and filesystem handlers resolve relative paths against that trusted metadata | Relative paths should mean the active session/worktree, while absolute paths and direct non-agent calls retain the documented trusted-local behavior |
+| Worktree snapshot fix | Retesting showed `README.md` existed only as an untracked root-workspace file, so `git worktree add` omitted it from the isolated session. Worktree creation now overlays tracked edits/deletions and untracked non-ignored files from the operator-visible working copy into the session worktree, while skipping ignored files and `.worktrees` internals | Isolated sessions should protect the root workspace without hiding files the operator can see in the selected workspace |
+| Inspect chip presentation | `CapabilityInvocationDisplayModel` now separates the chip title from the inspected capability name, so inspect calls render as `Inspect` followed by the target, while execute calls keep the capability name as the primary chip label | UI labels should make the primitive/action clear without hiding or rewriting the underlying canonical capability identity |
+| Regression coverage | Added focused tests for runtime metadata stamping, child metadata propagation, filesystem relative/absolute/direct path resolution, and worktree working-copy hydration | The next manual retest must verify allowed read, missing-file failure, absolute trusted-local behavior, and foreground/reconnect behavior before moving on |
+
+## 2026-05-20 Manual Test 6 Read-Only Process Denial
+
+Device testing of a deliberately mutating `process::run` payload in
+`executionMode = "read_only"` proved the sandbox boundary held: no
+`should_not_exist.txt` file appeared in either the root workspace or the active
+session worktree. The approval and invocation timeline exposed a workflow bug,
+though. `capability::execute` created an operator approval for a payload that
+the process worker could deterministically reject after approval because
+read-only process commands must be classifier-proven low risk.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Root cause | DB records show approval `019e47e6-a4b8-7461-9176-3fb0da786a7b` was approved, then the child `process::run` failed with `INVALID_PARAMS` for `{"command":"echo hi > should_not_exist.txt","executionMode":"read_only"}` | The approval path was too early for process payloads that are impossible under the selected execution mode |
+| Fix | `process::approval` now exposes `validate_run_payload_before_approval` and `run_execution_requires_approval`; `capability::execute` validates the process payload policy before idempotency, approval creation, or child invocation | Invalid read-only process payloads fail as normal parameter errors, while valid sandbox-materialized risky commands still require fresh inspection, idempotency, and approval |
+| Boundary | `process::run` still performs the same handler-side validation for direct invocation, so capability preflight is not the only enforcement point | The same process-owned classifier owns both pre-approval policy and final execution validation |
+| Regression coverage | Added process classifier tests for invalid read-only payloads and sandbox-materialized approval, plus capability execution tests proving invalid read-only payloads do not require fresh approval/freshness and sandboxed risky payloads still do | The next manual retest should see a direct rejection with no approval prompt and no child `process::run` invocation |
+
+## 2026-05-20 Manual Test 7 Capability Call Shape Ergonomics
+
+The next read-only process retest showed an ergonomics defect rather than a
+substrate safety defect. DB records showed no approvals, no child
+`process::run` invocation, and no `should_not_exist.txt` file leak, but the
+agent first attempted `process::run` with an incomplete payload and then tried
+to recursively invoke `capability::execute` as the target.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Root cause | `capability::execute` model metadata still taught a stale `process::run` example with only `{"command":"date"}` even though `process::run` requires `executionMode`, and the provider clarification did not forbid warm-up/example calls when the user supplied an exact payload | Required target parameters must be discoverable from every model-facing call-shape surface, and examples must be unambiguously templates rather than exploratory calls |
+| Fix | `capability::execute` schema descriptions now state that the primitive is already the execute wrapper, target ids belong in `contractId`/`capabilityId`/`functionId`, target arguments belong under `payload`, the `process::run` example includes `executionMode`, and exact user-supplied payloads should be invoked exactly once with no `date`/`status` probe first | Avoid adding another wrapper or compatibility path; make the canonical path unambiguous |
+| Regression coverage | Added capability contract tests, search/inspect summary assertions, OpenAI clarification tests, a broad first-party recipe test proving required fields appear in execute templates, and a static threat gate against stale no-`executionMode` examples or exploratory probe guidance | Future capability additions must expose complete required payload shape through search/inspect recipes |
+
+## 2026-05-20 Manual Test 8 Capability Preflight Failure Semantics
+
+The follow-up device test proved the call-shape fix worked: session
+`sess_019e48cf-eb67-7812-8bf4-933416831a2b` invoked exactly one
+`capability::execute` call targeting `process::run` with
+`{"command":"echo hi > should_not_exist.txt","executionMode":"read_only"}`.
+No approval was created, no child `process::run` invocation was recorded, and
+no `should_not_exist.txt` file appeared in either the session workspace or Tron
+repo. The remaining defect was failure semantics: the expected target policy
+rejection was still recorded as a failed `capability::execute` engine
+invocation, which makes a basic model capability call look like infrastructure
+failure instead of a normal contract rejection.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Root cause | `validate_target_payload`, `validate_target_policy_before_approval`, and missing idempotency errors bubbled out of `execute_invoke_value` as `CapabilityError` before a child invocation existed | Target-owned preflight failures are expected contract outcomes and should not mark the wrapper invocation as failed engine infrastructure |
+| Fix | `capability::execute` now converts target schema, policy, and idempotency preflight rejections into structured `CapabilityResult` values with `isError=true`, `childInvocationCreated=false`, `approvalCreated=false`, and empty `resourceRefs` | The model gets an actionable result to report, while the substrate still proves no target execution, approval, or durable output occurred |
+| Boundary | Wrapper-level target resolution, capability policy/authority denial, stale/invalid inspection handles, and unexpected child execution failures still fail the engine invocation | Security and availability failures remain hard failures; normal target contract rejections stay inside the model-facing result channel |
+| Regression coverage | Added capability operation tests for structured policy and payload preflight rejection results | Future basic capability-call tests should see a completed `capability::execute` invocation with `isError=true` for invalid target payloads, not an engine-level failure |
+
+### 2026-05-20 Manual Test 9: Read-Only Process Classifier Ergonomics
+
+The next device retest used an intentionally read-only composed process command:
+
+```json
+{"command":"pwd && printf 'hi\n' && test ! -e should_not_exist.txt && test -f README.md && sed -n '1,3p' README.md","executionMode":"read_only"}
+```
+
+The capability wrapper selected `process::run` correctly and no approval or
+child command was created, but the process-owned classifier still rejected the
+payload as unknown. The persisted session and filesystem records proved this was
+not a working-directory bug: the session worktree was
+`/Users/moose/Downloads/projects/testspace`, and `README.md` existed there.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Root cause | `process::approval` only treated a narrow set of segment heads as low-risk. `test` predicates and bounded `sed -n` printing are read-only but were not recognized, so safe composed checks failed before execution | This was an over-strict classifier, not a model call-shape or filesystem-resolution failure |
+| Fix | The classifier now treats `test` as a pure read-only predicate and permits `sed` only when it is not in-place, does not load an external sed script, and does not contain a sed write command/substitution write flag | Keep the read-only path useful for common inspection while preserving fail-closed behavior for write-like sed and unknown snippets |
+| Boundary | `sed -i`, `sed --in-place`, sed `w` scripts, shell redirection, and unknown write-like commands still require sandbox materialization or fail before execution | The security invariant remains that `executionMode=read_only` cannot write host files |
+| Regression coverage | Added process classifier tests for `test`, bounded `sed -n`, the exact composed device-test command, and unsafe sed writes; added a process handler test proving the composed command executes in the session worktree and does not create `should_not_exist.txt` | Future manual testing should see this read-only command succeed without approval and without durable output resources |
+
+### 2026-05-21 Manual Test 10: Sandbox-Materialized Approval Lineage
+
+The next device test used a sandbox-materialized write with an explicit
+`expectedOutputs` materialization target. The substrate path succeeded:
+`capability::execute` selected `process::run`, approval
+`019e4980-c5be-7723-9898-457618e7aad0` was executed, child invocation
+`019e4980-f70b-7a82-a5cf-bafc3a0af51a` returned exit code `0`, stdout
+`stdout-ok`, stderr `stderr-ok`, and the result produced both
+`materialized_file:8270ccde043c4d3b9e91a61eb1400bd2862b33b7eb2419a623efdb12e07cfd75`
+and `res_019e4980-f725-7703-9ad6-919a120bd268` resource refs. The
+materialized host file existed at the requested target path with content
+`materialized-ok`.
+
+| Area | Evidence | Decision |
+|------|----------|----------|
+| Root cause | The engine ledger and approval store proved the approved child invocation existed, but the original `capability::execute` result projected `childInvocations: []` and only an implicit `approvalState.status = executed`; the agent answered “approval required: no” and “child invocation id: not returned” | Approval-required execution was correct, but the model-facing lineage projection was too weak |
+| Fix | `capability::execute` now reconstructs resumed approval child invocations from the engine invocation ledger and returns `approvalRequired`, `approvalCreated`, `approvalExecuted`, `childInvocationCreated`, `childInvocations`, and `approvalState.childInvocationId/childInvocationIds` in the original execute result | Agents and thin clients get enough lineage to report approvals and child invocations without querying approval internals |
+| Boundary | The approval store still owns approval lifecycle and `approval::resolve` still owns decision execution; this is projection-only metadata on the originating wrapper result | No compatibility path, client policy, or second action gateway is added |
+| Regression coverage | Added `approved_execute_result_reports_approval_and_child_invocation` plus the existing capability operation suite | Future approval-required capability tests must fail if executed approvals hide their resumed child invocation from `capability::execute` |
+
+### Manual Test 11: Resumed Approval Timeline Ordering
+
+Resuming the same approval-required process test exposed an iOS reconstruction
+ordering defect. The server event order was correct: the assistant emitted the
+`capability::execute` request, the approval record was created and resolved, the
+child `process::run` finished, and the final assistant response was persisted.
+However, `session::reconstruct` returns approval records separately from the
+session event rows because the approval primitive owns approval lifecycle. iOS
+was appending those reconstructed `approvalItems` after it selected the visible
+message slice, so a historical approval chip could appear below the final
+assistant result after a session resume.
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Root cause | `ChatViewModel+Reconstruction` restored event-derived messages first and appended separate approval records afterward | This was a client projection bug, not a server ledger/event-order bug |
+| Fix | Approval items are now merged into `allReconstructedMessages` by approval `createdAt` before pagination/display slicing | Approval chips resume between the originating execute chip and later assistant text |
+| Boundary | Approval lifecycle remains server-owned; iOS only places the server-owned approval projection in chronological message order | No local approval policy, compatibility reader, or synthetic server event is added |
+| Regression coverage | Added `EngineApprovalTimelineTests.testApprovalInsertedBetweenExecuteAndResultByCreatedAt` | Future reconstruction changes must preserve approval chip ordering across resume |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:
@@ -512,6 +642,10 @@ The cleanup is protected by static tests that require:
 - no fixed iOS Automations/Voice Notes dashboard names or retired navigation
   cases;
 - no local iOS generated-UI fallback renderer.
+- no stale `capability::execute` examples that omit required target payload
+  fields such as `process::run.executionMode`.
+- no provider clarification that allows warm-up/probe/example capability calls
+  before an exact user-requested target payload.
 
 ## Verification Targets
 

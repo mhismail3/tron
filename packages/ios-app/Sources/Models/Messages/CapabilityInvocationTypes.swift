@@ -186,6 +186,7 @@ struct CapabilityDisplayRow: Equatable, Identifiable {
 
 struct CapabilityInvocationDisplayModel: Equatable {
     let primitiveTitle: String
+    let chipTitle: String
     let capabilityName: String
     let commandText: String
     let statusText: String
@@ -213,6 +214,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         let outputObject = Self.outputObject(from: data)
 
         self.primitiveTitle = Self.primitiveTitle(primitive)
+        self.chipTitle = Self.chipTitle(primitive: primitive, capabilityName: capabilityName)
         self.capabilityName = capabilityName
         self.targetId = target
         self.payloadSummary = payloadSummary
@@ -264,6 +266,15 @@ struct CapabilityInvocationDisplayModel: Equatable {
         case "search": return "Search"
         case "inspect": return "Inspect"
         default: return "Execute"
+        }
+    }
+
+    private static func chipTitle(primitive: String, capabilityName: String) -> String {
+        switch primitive {
+        case "inspect":
+            return "Inspect"
+        default:
+            return capabilityName
         }
     }
 

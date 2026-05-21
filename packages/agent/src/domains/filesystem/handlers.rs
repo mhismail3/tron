@@ -13,13 +13,13 @@ operation_bindings! {
     hidden = [];
     bindings = [
         "list_dir" => |invocation, deps| {
-            filesystem_list_dir_value(Some(&invocation.payload), deps).await
+            filesystem_list_dir_value(invocation, deps).await
         },
         "get_home" => |_invocation, deps| {
             filesystem_get_home_value(deps).await
         },
         "read_file" => |invocation, deps| {
-            file_read_value(Some(&invocation.payload), deps).await
+            file_read_value(invocation, deps).await
         },
         "write_file" => |invocation, deps| {
             filesystem_write_file_value(invocation, deps).await
@@ -28,16 +28,16 @@ operation_bindings! {
             filesystem_edit_file_value(invocation, deps, "edit").await
         },
         "find" => |invocation, deps| {
-            filesystem_find_value(Some(&invocation.payload), deps).await
+            filesystem_find_value(invocation, deps).await
         },
         "glob" => |invocation, deps| {
-            filesystem_find_value(Some(&invocation.payload), deps).await
+            filesystem_find_value(invocation, deps).await
         },
         "search_text" => |invocation, deps| {
-            filesystem_search_text_value(Some(&invocation.payload), deps).await
+            filesystem_search_text_value(invocation, deps).await
         },
         "diff" => |invocation, deps| {
-            filesystem_diff_value(Some(&invocation.payload), deps).await
+            filesystem_diff_value(invocation, deps).await
         },
         "apply_patch" => |invocation, deps| {
             filesystem_apply_patch_value(invocation, deps).await

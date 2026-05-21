@@ -24,7 +24,7 @@ struct CapabilityInvocationChip: View {
             HStack(spacing: 7) {
                 leadingAccessory
 
-                Text(display.capabilityName)
+                Text(display.chipTitle)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                     .foregroundStyle(textColor)
                     .lineLimit(1)
@@ -137,7 +137,7 @@ struct CapabilityInvocationChip: View {
     private var accessibilityLabel: String {
         [
             display.primitiveTitle,
-            display.capabilityName,
+            display.chipTitle,
             display.commandText.nilIfEmpty,
             display.statusWithDuration
         ]

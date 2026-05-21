@@ -6,15 +6,20 @@
 //!
 //! The broad `process::run` contract has conditional approval instead of a
 //! blanket approval bit. Payload-sensitive approval classification lives in
-//! [`approval`], while schema validation, idempotency, lease, audit, and actual
-//! execution remain on the normal engine/capability path. The same classifier
-//! also lets low-risk first-party read/check commands such as `date`, `pwd`,
-//! `git status`, and test/build checks skip an extra inspect turn; commands
-//! outside the low-risk set must use `executionMode = "sandbox_materialized"`
-//! with declared expected outputs, then materialize those outputs through
-//! resource capabilities. If a request omits `cwd`, direct read-only execution
-//! uses the active session worktree when available, then the session workspace,
-//! so common shell checks stay fast without leaving the capability architecture.
+//! [`approval`], including the pre-approval check that rejects write-like
+//! commands submitted as `executionMode = "read_only"`. Schema validation,
+//! idempotency, lease, audit, and actual execution remain on the normal
+//! engine/capability path. The same classifier also lets low-risk first-party
+//! read/check commands such as `date`, `pwd`, `git status`, and test/build
+//! checks skip an extra inspect turn. It also permits composed read-only file
+//! checks such as `test -f README.md` and bounded `sed -n` printing while still
+//! rejecting `sed -i`, sed write scripts, redirection, and unknown snippets.
+//! Commands outside the low-risk set must use
+//! `executionMode = "sandbox_materialized"` with declared expected outputs, then
+//! materialize those outputs through resource capabilities. If a request omits
+//! `cwd`, direct read-only execution uses the active session worktree when
+//! available, then the session workspace, so common shell checks stay fast
+//! without leaving the capability architecture.
 
 pub(crate) mod approval;
 pub(crate) mod contract;
@@ -60,11 +65,9 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
         opt_string(params, "executionMode").ok_or_else(|| CapabilityError::InvalidParams {
             message: "process::run requires executionMode".to_owned(),
         })?;
-    if execution_mode == "read_only" && approval::run_requires_approval(&invocation.payload) {
+    if let Err(message) = approval::validate_run_payload_before_approval(&invocation.payload) {
         return Err(CapabilityError::InvalidParams {
-            message:
-                "process::run read_only commands must be proven low-risk by the classifier; use executionMode=sandbox_materialized with expectedOutputs for mutating or unknown commands"
-                    .to_owned(),
+            message: message.to_owned(),
         });
     }
     if execution_mode != "read_only" && execution_mode != "sandbox_materialized" {
@@ -480,6 +483,38 @@ mod tests {
         assert!(
             matches!(err, CapabilityError::InvalidParams { message } if message.contains("sandbox_materialized"))
         );
+    }
+
+    #[tokio::test]
+    async fn composed_read_only_file_checks_execute_in_session_worktree() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("README.md"), "alpha\nbeta\ngamma\n").unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({
+                "command": "pwd && printf 'hi\n' && test ! -e should_not_exist.txt && test -f README.md && sed -n '1,3p' README.md",
+                "executionMode": "read_only"
+            }),
+            Some(&created.session.id),
+        );
+
+        let value = process_run_value(&invocation, &deps).await.unwrap();
+        assert_eq!(value.get("exitCode").and_then(Value::as_i64), Some(0));
+        let stdout = value.get("stdout").and_then(Value::as_str).unwrap();
+        assert!(stdout.contains(&tmp.path().to_string_lossy().to_string()));
+        assert!(stdout.contains("hi\nalpha\nbeta\ngamma"));
+        assert!(!tmp.path().join("should_not_exist.txt").exists());
     }
 
     #[tokio::test]

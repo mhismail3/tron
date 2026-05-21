@@ -34,8 +34,27 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         )
 
         XCTAssertEqual(invocation.display.primitiveTitle, "Inspect")
+        XCTAssertEqual(invocation.display.chipTitle, "Inspect")
+        XCTAssertEqual(invocation.display.capabilityName, "Run Command")
         XCTAssertEqual(invocation.display.commandText, "Run Command")
         XCTAssertEqual(invocation.display.targetId, "process::run")
+    }
+
+    func testInspectChipTitleNamesPrimitiveBeforeTarget() {
+        let invocation = testCapabilityInvocation(
+            status: .success,
+            arguments: #"{"contractId":"filesystem::read_file"}"#,
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "inspect",
+                contractId: "filesystem::read_file",
+                implementationId: "first_party.filesystem.v1.read_file",
+                functionId: "filesystem::read_file"
+            )
+        )
+
+        XCTAssertEqual(invocation.display.chipTitle, "Inspect")
+        XCTAssertEqual(invocation.display.commandText, "Read File")
+        XCTAssertEqual(invocation.display.capabilityName, "Read File")
     }
 
     func testExecuteDisplaysTargetAndCommandInsteadOfPrimitiveImplementation() {
@@ -51,6 +70,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         )
 
         XCTAssertEqual(invocation.display.primitiveTitle, "Execute")
+        XCTAssertEqual(invocation.display.chipTitle, "Run Command")
         XCTAssertEqual(invocation.display.targetId, "process::run")
         XCTAssertEqual(invocation.display.payloadSummary, "date +%s")
         XCTAssertEqual(invocation.display.capabilityName, "Run Command")

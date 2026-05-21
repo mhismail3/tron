@@ -259,7 +259,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
             "capabilitySchema": {
                 "name": "execute",
-                "description": "Execute a live capability by contract, implementation, capability, or function id. Put the selected capability arguments in payload. Safe process::run checks such as date/git status and low-risk notifications::send may run directly with idempotency; mutating or elevated-risk work requires the inspectionHandle, expectedRevision, and expectedSchemaDigest returned by inspect.",
+                "description": "Execute one selected target capability. This primitive is already capability::execute: do not set contractId, capabilityId, or functionId to capability::execute. For mode='invoke', set contractId/capabilityId/functionId to the target capability, put that target's arguments inside payload, and copy the complete execute recipe from search or inspect so every required target parameter is present. Do not run example/probe calls such as date or git status unless the user requested that exact action. If the user supplies an exact target payload, invoke that payload exactly. Safe process::run checks such as date/git status and low-risk notifications::send may run directly with idempotency; mutating or elevated-risk work requires the inspectionHandle, expectedRevision, and expectedSchemaDigest returned by inspect.",
                 "parameters": execute_request_schema()
             }
         }),
@@ -337,11 +337,11 @@ fn execute_request_schema() -> serde_json::Value {
         "additionalProperties": false,
         "properties": {
             "mode": {"type": "string", "enum": ["invoke", "program"], "description": "Use 'invoke' for one selected capability and put that capability's arguments inside payload. Use 'program' only for JavaScript composition."},
-            "capabilityId": {"type": "string", "description": "Target contract/capability id for mode='invoke', such as process::run."},
-            "contractId": {"type": "string", "description": "Target contract id for mode='invoke'."},
-            "implementationId": {"type": "string", "description": "Target concrete implementation id for mode='invoke'."},
-            "functionId": {"type": "string", "description": "Target engine function id for mode='invoke'."},
-            "payload": {"type": "object", "description": "Arguments for the selected capability when mode='invoke'. Example: {\"command\":\"date\"} for process::run. Do not put target capability arguments at the top level."},
+            "capabilityId": {"type": "string", "description": "Target contract/capability id for mode='invoke', such as process::run. Never set this to capability::execute; this call is already the execute primitive."},
+            "contractId": {"type": "string", "description": "Target contract id for mode='invoke', such as process::run. Never set this to capability::execute; use search or inspect for the complete target payload requirements."},
+            "implementationId": {"type": "string", "description": "Target concrete implementation id for mode='invoke'. Never set this to the capability primitive itself."},
+            "functionId": {"type": "string", "description": "Target engine function id for mode='invoke'. Never set this to capability::execute; use the selected target function id."},
+            "payload": {"type": "object", "description": "Arguments for the selected target capability when mode='invoke'. Example: {\"command\":\"date\",\"executionMode\":\"read_only\"} for process::run. Do not put target capability arguments at the top level; copy required fields from search/inspect executeTemplate. Examples are templates, not warm-up calls; never execute an example/probe payload unless it is the user's requested action."},
             "language": {"type": "string", "enum": ["javascript"]},
             "code": {"type": "string", "description": "JavaScript function body used only with mode='program'. Leave unset for mode='invoke'."},
             "args": {"type": "object", "description": "Program arguments used only with mode='program'."},
@@ -561,6 +561,35 @@ mod tests {
         assert!(model_metadata(STATUS_FUNCTION_ID).is_null());
         assert!(model_metadata(PLUGIN_INSTALL_FUNCTION_ID).is_null());
         assert!(model_metadata(POLICY_UPDATE_FUNCTION_ID).is_null());
+    }
+
+    #[test]
+    fn execute_schema_teaches_target_call_shape_and_complete_payloads() {
+        let metadata = model_metadata(EXECUTE_FUNCTION_ID);
+        let description = metadata["capabilitySchema"]["description"]
+            .as_str()
+            .expect("execute description");
+        assert!(description.contains("already capability::execute"));
+        assert!(description.contains("do not set contractId"));
+        assert!(description.contains("target capability"));
+        assert!(description.contains("every required target parameter"));
+        assert!(description.contains("Do not run example/probe calls"));
+        assert!(description.contains("invoke that payload exactly"));
+
+        let schema = execute_request_schema();
+        let contract_description = schema["properties"]["contractId"]["description"]
+            .as_str()
+            .expect("contractId description");
+        assert!(contract_description.contains("Target contract id"));
+        assert!(contract_description.contains("Never set this to capability::execute"));
+
+        let payload_description = schema["properties"]["payload"]["description"]
+            .as_str()
+            .expect("payload description");
+        assert!(payload_description.contains(r#""executionMode":"read_only""#));
+        assert!(payload_description.contains("copy required fields"));
+        assert!(payload_description.contains("not warm-up calls"));
+        assert!(!payload_description.contains(r#"{"command":"date"} for process::run"#));
     }
 
     #[test]

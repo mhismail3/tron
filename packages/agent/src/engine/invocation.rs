@@ -14,6 +14,12 @@ use super::ids::{
 };
 use super::types::{CatalogRevision, DeliveryMode, FunctionRevision, IdempotencyScope};
 
+/// Runtime metadata key carrying the trusted session working directory.
+///
+/// This is engine-owned context, not model-supplied payload. Domain workers use it
+/// when a relative path needs to resolve against the active session/worktree.
+pub const RUNTIME_METADATA_WORKING_DIRECTORY: &str = "agent.workingDirectory";
+
 /// Causal context carried by every invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CausalContext {

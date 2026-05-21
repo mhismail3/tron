@@ -31,7 +31,7 @@ use crate::domains::capability_support::implementations::primitive_surface::{
 use crate::engine::{
     ActorContext, ActorKind, ApprovalStatus, AuthorityGrantId, CausalContext, DeliveryMode,
     EffectClass, EngineApprovalRecord, EngineApprovalRequest, FunctionDefinition, FunctionHealth,
-    FunctionQuery, FunctionRevision, Invocation, RiskLevel,
+    FunctionQuery, FunctionRevision, Invocation, InvocationRecord, RiskLevel,
 };
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -1044,7 +1044,7 @@ async fn execute_invoke_value(
     let function = target.entry.function.clone();
     if is_capability_primitive(&function) {
         return Err(CapabilityError::InvalidParams {
-            message: "execute cannot recursively invoke capability primitives; call search or inspect directly".to_owned(),
+            message: "execute cannot recursively invoke capability primitives. This call is already the execute primitive; set contractId/capabilityId/functionId to the target capability, for example process::run, and put only that target's arguments inside payload. Use search or inspect to copy the complete required payload shape before calling.".to_owned(),
         });
     }
     enforce_execution_policy(invocation, &target.binding_decision, &function)?;
@@ -1129,39 +1129,24 @@ async fn execute_invoke_value(
         .get("payload")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    validate_target_payload(&target.entry, &payload)?;
-    let idempotency_key = child_idempotency_key(
+    if let Err(error) = validate_target_payload(&target.entry, &payload) {
+        return preflight_rejection_result(&function, &target, error, "target_payload_invalid");
+    }
+    if let Err(error) = validate_target_policy_before_approval(&function, &payload) {
+        return preflight_rejection_result(&function, &target, error, "target_policy_rejected");
+    }
+    let idempotency_key = match child_idempotency_key(
         invocation,
         &function,
         &payload,
         child_idempotency_required(&function, &payload),
-    )?;
-    let mut causal_context = CausalContext::new(
-        invocation.causal_context.actor_id.clone(),
-        invocation.causal_context.actor_kind.clone(),
-        invocation.causal_context.authority_grant_id.clone(),
-        invocation.causal_context.trace_id.clone(),
-    )
-    .with_parent_invocation(invocation.id.clone());
-    if let Some(session_id) = &invocation.causal_context.session_id {
-        causal_context = causal_context.with_session_id(session_id.clone());
-    }
-    if let Some(workspace_id) = &invocation.causal_context.workspace_id {
-        causal_context = causal_context.with_workspace_id(workspace_id.clone());
-    }
-    for scope in invocation
-        .causal_context
-        .authority_scopes
-        .iter()
-        .chain(function.required_authority.scopes.iter())
-    {
-        if !causal_context.has_scope(scope) {
-            causal_context = causal_context.with_scope(scope.clone());
+    ) {
+        Ok(key) => key,
+        Err(error) => {
+            return preflight_rejection_result(&function, &target, error, "idempotency_required");
         }
-    }
-    if let Some(key) = idempotency_key {
-        causal_context = causal_context.with_idempotency_key(key);
-    }
+    };
+    let causal_context = child_execute_causal_context(invocation, &function, idempotency_key);
 
     let mut child = Invocation::new_sync(function.id.clone(), payload.clone(), causal_context);
     if let Some(expected) = expected_revision {
@@ -1252,6 +1237,81 @@ async fn execute_invoke_value(
     })
 }
 
+fn preflight_rejection_result(
+    function: &FunctionDefinition,
+    target: &ResolvedCapabilityTarget,
+    error: CapabilityError,
+    status: &str,
+) -> Result<Value, CapabilityError> {
+    let code = error.code().to_owned();
+    let details = error.details();
+    let message = error.to_string();
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
+            "{} rejected before child execution: {message}",
+            function.id.as_str()
+        ))]),
+        details: Some(json!({
+            "status": status,
+            "error": {
+                "code": code,
+                "message": message,
+                "details": details
+            },
+            "contractId": target.entry.contract_id,
+            "implementationId": target.entry.implementation_id,
+            "functionId": function.id.as_str(),
+            "catalogRevision": target.entry.catalog_revision,
+            "functionRevision": function.revision.0,
+            "schemaDigest": target.entry.schema_digest,
+            "selectedImplementation": target.binding_decision.selected_implementation,
+            "bindingDecision": target.binding_decision,
+            "childInvocationCreated": false,
+            "approvalCreated": false,
+            "resourceRefs": []
+        })),
+        is_error: Some(true),
+        stop_turn: None,
+    })
+}
+
+fn child_execute_causal_context(
+    invocation: &Invocation,
+    function: &FunctionDefinition,
+    idempotency_key: Option<String>,
+) -> CausalContext {
+    let mut causal_context = CausalContext::new(
+        invocation.causal_context.actor_id.clone(),
+        invocation.causal_context.actor_kind.clone(),
+        invocation.causal_context.authority_grant_id.clone(),
+        invocation.causal_context.trace_id.clone(),
+    )
+    .with_parent_invocation(invocation.id.clone());
+    if let Some(session_id) = &invocation.causal_context.session_id {
+        causal_context = causal_context.with_session_id(session_id.clone());
+    }
+    if let Some(workspace_id) = &invocation.causal_context.workspace_id {
+        causal_context = causal_context.with_workspace_id(workspace_id.clone());
+    }
+    for (key, value) in &invocation.causal_context.runtime_metadata {
+        causal_context = causal_context.with_runtime_metadata(key.clone(), value.clone());
+    }
+    for scope in invocation
+        .causal_context
+        .authority_scopes
+        .iter()
+        .chain(function.required_authority.scopes.iter())
+    {
+        if !causal_context.has_scope(scope) {
+            causal_context = causal_context.with_scope(scope.clone());
+        }
+    }
+    if let Some(key) = idempotency_key {
+        causal_context = causal_context.with_idempotency_key(key);
+    }
+    causal_context
+}
+
 async fn await_approval_result(
     invocation: &Invocation,
     deps: &Deps,
@@ -1267,7 +1327,16 @@ async fn await_approval_result(
         match latest.status {
             ApprovalStatus::Executed => {
                 let output = latest.result.clone().unwrap_or(Value::Null);
-                return approved_execution_result(invocation, function, target, &latest, output);
+                let child_invocations =
+                    approval_child_invocation_ids(deps, &latest, function).await;
+                return approved_execution_result(
+                    invocation,
+                    function,
+                    target,
+                    &latest,
+                    output,
+                    child_invocations,
+                );
             }
             ApprovalStatus::Failed => {
                 let message = latest
@@ -1332,12 +1401,14 @@ fn approved_execution_result(
     target: &ResolvedCapabilityTarget,
     approval: &EngineApprovalRecord,
     output: Value,
+    child_invocations: Vec<String>,
 ) -> Result<Value, CapabilityError> {
+    let child_invocation_id = child_invocations.first().cloned();
     let record = CapabilityExecutionRecord {
         status: "ok".to_owned(),
         trace_id: approval.trace_id.as_str().to_owned(),
         root_invocation_id: invocation.id.as_str().to_owned(),
-        child_invocations: Vec::new(),
+        child_invocations: child_invocations.clone(),
         selected_implementation: target.binding_decision.selected_implementation.clone(),
         function_id: function.id.as_str().to_owned(),
         catalog_revision: target.entry.catalog_revision,
@@ -1345,9 +1416,14 @@ fn approved_execution_result(
         output: output.clone(),
         approval_state: Some(json!({
             "approvalId": approval.approval_id,
+            "approvalRequired": true,
+            "approvalCreated": true,
+            "approvalExecuted": approval.status == ApprovalStatus::Executed,
             "status": approval.status,
             "functionId": function.id.as_str(),
-            "traceId": approval.trace_id.as_str()
+            "traceId": approval.trace_id.as_str(),
+            "childInvocationId": child_invocation_id,
+            "childInvocationIds": child_invocations
         })),
         plugin_versions: vec![target.entry.plugin_id.clone()],
         presentation_hints: target
@@ -1359,9 +1435,13 @@ fn approved_execution_result(
         binding_decision: target.binding_decision.clone(),
         schema_digest: target.entry.schema_digest.clone(),
     };
-    let details = serde_json::to_value(&record).map_err(|error| CapabilityError::Internal {
+    let mut details = serde_json::to_value(&record).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
     })?;
+    details["approvalRequired"] = json!(true);
+    details["approvalCreated"] = json!(true);
+    details["approvalExecuted"] = json!(approval.status == ApprovalStatus::Executed);
+    details["childInvocationCreated"] = json!(!record.child_invocations.is_empty());
     if let Ok(mut nested) = serde_json::from_value::<CapabilityResult>(output.clone()) {
         nested.details = Some(merge_optional_details(nested.details, details));
         return capability_result_value(nested);
@@ -1392,6 +1472,38 @@ fn approval_details(
         "selectedImplementation": target.binding_decision.selected_implementation,
         "bindingDecision": target.binding_decision
     })
+}
+
+async fn approval_child_invocation_ids(
+    deps: &Deps,
+    approval: &EngineApprovalRecord,
+    function: &FunctionDefinition,
+) -> Vec<String> {
+    approval_child_invocation_ids_from_records(
+        &deps.engine_host.invocation_records().await,
+        approval,
+        function,
+    )
+}
+
+fn approval_child_invocation_ids_from_records(
+    records: &[InvocationRecord],
+    approval: &EngineApprovalRecord,
+    function: &FunctionDefinition,
+) -> Vec<String> {
+    let Some(parent_invocation_id) = approval.parent_invocation_id.as_ref() else {
+        return Vec::new();
+    };
+    records
+        .iter()
+        .filter(|record| {
+            record.parent_invocation_id.as_ref() == Some(parent_invocation_id)
+                && record.trace_id == approval.trace_id
+                && record.function_id == function.id
+                && record.idempotency_key == approval.idempotency_key
+        })
+        .map(|record| record.invocation_id.as_str().to_owned())
+        .collect()
 }
 
 async fn execute_program_value(
@@ -2583,7 +2695,7 @@ fn requires_fresh_revision_for_payload(
         let target_payload = invocation_payload
             .get("payload")
             .unwrap_or(invocation_payload);
-        if !crate::domains::process::approval::run_requires_approval(target_payload) {
+        if !crate::domains::process::approval::run_execution_requires_approval(target_payload) {
             return false;
         }
     }
@@ -2596,7 +2708,22 @@ fn requires_fresh_revision_for_payload(
 fn execution_requires_approval(function: &FunctionDefinition, payload: &Value) -> bool {
     function.required_authority.approval_required
         || (function.id.as_str() == "process::run"
-            && crate::domains::process::approval::run_requires_approval(payload))
+            && crate::domains::process::approval::run_execution_requires_approval(payload))
+}
+
+fn validate_target_policy_before_approval(
+    function: &FunctionDefinition,
+    payload: &Value,
+) -> Result<(), CapabilityError> {
+    if function.id.as_str() == "process::run"
+        && let Err(message) =
+            crate::domains::process::approval::validate_run_payload_before_approval(payload)
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: message.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn policy_scope_matches(scopes: &[String], prefix: &str, candidates: &[&str]) -> bool {
@@ -2644,7 +2771,7 @@ fn child_idempotency_key(
 
 fn child_idempotency_required(function: &FunctionDefinition, payload: &Value) -> bool {
     if function.id.as_str() == "process::run"
-        && !crate::domains::process::approval::run_requires_approval(payload)
+        && !crate::domains::process::approval::run_execution_requires_approval(payload)
     {
         return false;
     }
@@ -2660,7 +2787,7 @@ fn render_search_summary(query: &str, results: &[CapabilityIndexHit]) -> String 
         };
     }
     let mut lines = vec![format!(
-        "Found {} visible capabilities. Use the execute recipes below; inspect only when a recipe says it is required or you need full contract detail.",
+        "Found {} visible capabilities. Use the execute recipes below; call the `execute` primitive with the listed target id at the top level and the listed target arguments inside `payload`. Do not wrap another `capability::execute` call, and do not run example/probe calls unless the user requested that exact action. Inspect only when a recipe says it is required or you need full contract detail.",
         results.len()
     )];
     let full_recipe_count = results.len().min(5);
@@ -2746,6 +2873,9 @@ fn render_inspection_summary(details: &Value) -> String {
         && template != "null"
     {
         summary.push_str(&format!("\nExecute:\n```json\n{template}\n```"));
+        summary.push_str(
+            "\nCall the `execute` primitive with this target id and payload shape; do not set contractId/capabilityId/functionId to `capability::execute`, and do not run example/probe calls unless they are the requested action.",
+        );
     }
 
     if requirements["freshInspectionRequired"]
@@ -2931,7 +3061,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::domains::capability::types::CapabilityIndexHit;
-    use crate::engine::{FunctionId, VisibilityScope, WorkerId};
+    use crate::engine::{
+        ActorId, AuthorityGrantId, AuthorityRequirement, CatalogRevision, FunctionId,
+        FunctionRevision, InvocationId, TraceId, VisibilityScope, WorkerId,
+    };
 
     fn test_function(id: &str) -> FunctionDefinition {
         FunctionDefinition::new(
@@ -2941,6 +3074,75 @@ mod tests {
             VisibilityScope::System,
             EffectClass::PureRead,
         )
+    }
+
+    fn test_approval_record(
+        function_id: FunctionId,
+        parent_invocation_id: InvocationId,
+        trace_id: TraceId,
+        idempotency_key: &str,
+    ) -> EngineApprovalRecord {
+        let now = chrono::Utc::now();
+        EngineApprovalRecord {
+            approval_id: "approval-test".to_owned(),
+            function_id,
+            payload: json!({ "ok": true }),
+            payload_fingerprint: "fingerprint".to_owned(),
+            actor_id: ActorId::new("agent:test").expect("actor id"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: AuthorityGrantId::new("grant:test").expect("grant id"),
+            authority_scopes: vec!["process.run".to_owned()],
+            trace_id,
+            parent_invocation_id: Some(parent_invocation_id),
+            trigger_id: None,
+            session_id: Some("session-test".to_owned()),
+            workspace_id: None,
+            idempotency_key: Some(idempotency_key.to_owned()),
+            delivery_mode: DeliveryMode::Sync,
+            status: ApprovalStatus::Executed,
+            decision_actor_id: Some(ActorId::new("engine-user").expect("actor id")),
+            decided_at: Some(now),
+            result: Some(json!({ "exitCode": 0, "stdout": "ok\n", "resourceRefs": [] })),
+            error: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn test_invocation_record(
+        invocation_id: InvocationId,
+        function: &FunctionDefinition,
+        parent_invocation_id: InvocationId,
+        trace_id: TraceId,
+        idempotency_key: &str,
+    ) -> InvocationRecord {
+        InvocationRecord {
+            invocation_id,
+            function_id: function.id.clone(),
+            worker_id: function.owner_worker.clone(),
+            function_revision: FunctionRevision(1),
+            catalog_revision: CatalogRevision(77),
+            actor_id: ActorId::new("agent:test").expect("actor id"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: AuthorityGrantId::new("grant:test").expect("grant id"),
+            authority_scopes: vec!["process.run".to_owned()],
+            trace_id,
+            parent_invocation_id: Some(parent_invocation_id),
+            trigger_id: None,
+            session_id: Some("session-test".to_owned()),
+            workspace_id: None,
+            delivery_mode: DeliveryMode::Sync,
+            idempotency_key: Some(idempotency_key.to_owned()),
+            idempotency_scope: None,
+            resource_lease_ids: Vec::new(),
+            compensation_status: None,
+            produced_resource_refs: Vec::new(),
+            replayed_from: None,
+            succeeded: true,
+            result_value: Some(json!({ "exitCode": 0, "stdout": "ok\n" })),
+            error: None,
+            timestamp: chrono::Utc::now(),
+        }
     }
 
     #[test]
@@ -3137,6 +3339,9 @@ mod tests {
         let content = value["content"][0]["text"].as_str().expect("text content");
 
         assert!(content.contains("process::run"));
+        assert!(content.contains("target id at the top level"));
+        assert!(content.contains("Do not wrap another `capability::execute` call"));
+        assert!(content.contains("do not run example/probe calls"));
         assert!(
             content.contains("\"payload\":{\"command\":\"date\",\"executionMode\":\"read_only\"}")
         );
@@ -3196,20 +3401,190 @@ mod tests {
         let function = crate::domains::contract::function_definition_for_capability(&process_spec);
         assert!(!execution_requires_approval(
             &function,
-            &json!({ "command": "date +%Y-%m-%d" })
+            &json!({ "command": "date +%Y-%m-%d", "executionMode": "read_only" })
         ));
         assert!(!child_idempotency_required(
             &function,
-            &json!({ "command": "date +%Y-%m-%d" })
+            &json!({ "command": "date +%Y-%m-%d", "executionMode": "read_only" })
         ));
+        assert!(
+            validate_target_policy_before_approval(
+                &function,
+                &json!({
+                    "command": "echo hi > should_not_exist.txt",
+                    "executionMode": "read_only"
+                })
+            )
+            .is_err()
+        );
         assert!(execution_requires_approval(
             &function,
-            &json!({ "command": "rm -rf target" })
+            &json!({
+                "command": "echo hi > result.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "result.txt"}]
+            })
         ));
         assert!(child_idempotency_required(
             &function,
-            &json!({ "command": "rm -rf target" })
+            &json!({
+                "command": "echo hi > result.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "result.txt"}]
+            })
         ));
+    }
+
+    #[test]
+    fn execute_preflight_policy_rejection_is_structured_capability_result() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry,
+        };
+        let payload = json!({
+            "command": "echo hi > should_not_exist.txt",
+            "executionMode": "read_only"
+        });
+        let error =
+            validate_target_policy_before_approval(&function, &payload).expect_err("policy error");
+
+        let value = preflight_rejection_result(&function, &target, error, "target_policy_rejected")
+            .expect("structured result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        let CapabilityResultBody::Blocks(blocks) = result.content else {
+            panic!("expected block content");
+        };
+
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.stop_turn, None);
+        let CapabilityResultContent::Text { text } = &blocks[0] else {
+            panic!("expected text content");
+        };
+        assert!(text.contains("process::run rejected before child execution"));
+        let details = result.details.expect("details");
+        assert_eq!(details["status"], json!("target_policy_rejected"));
+        assert_eq!(details["error"]["code"], json!("INVALID_PARAMS"));
+        assert_eq!(details["functionId"], json!("process::run"));
+        assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["approvalCreated"], json!(false));
+        assert_eq!(details["resourceRefs"], json!([]));
+    }
+
+    #[test]
+    fn execute_preflight_payload_rejection_is_structured_capability_result() {
+        let mut function = test_function("process::run");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command"],
+            "properties": {
+                "command": {"type": "string"}
+            }
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry: entry.clone(),
+        };
+        let error = validate_target_payload(&entry, &json!({})).expect_err("payload error");
+
+        let value = preflight_rejection_result(&function, &target, error, "target_payload_invalid")
+            .expect("structured result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+
+        assert_eq!(result.is_error, Some(true));
+        let details = result.details.expect("details");
+        assert_eq!(details["status"], json!("target_payload_invalid"));
+        assert_eq!(details["error"]["code"], json!("INVALID_PARAMS"));
+        assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["approvalCreated"], json!(false));
+        assert_eq!(details["resourceRefs"], json!([]));
+        assert!(
+            details["error"]["message"]
+                .as_str()
+                .expect("message")
+                .contains("Required payload: command")
+        );
+    }
+
+    #[test]
+    fn approved_execute_result_reports_approval_and_child_invocation() {
+        let function = test_function("process::run");
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry,
+        };
+        let trace_id = TraceId::generate();
+        let causal = CausalContext::new(
+            ActorId::new("agent:test").expect("actor id"),
+            ActorKind::Agent,
+            AuthorityGrantId::new("grant:test").expect("grant id"),
+            trace_id.clone(),
+        )
+        .with_idempotency_key("wrapper-key");
+        let invocation = Invocation::new_sync(
+            FunctionId::new("capability::execute").expect("function id"),
+            json!({ "contractId": "process::run" }),
+            causal,
+        );
+        let approval = test_approval_record(
+            function.id.clone(),
+            invocation.id.clone(),
+            trace_id.clone(),
+            "approved-child-key",
+        );
+        let child_invocation_id = InvocationId::generate();
+        let records = vec![test_invocation_record(
+            child_invocation_id.clone(),
+            &function,
+            invocation.id.clone(),
+            trace_id,
+            "approved-child-key",
+        )];
+        let child_invocations =
+            approval_child_invocation_ids_from_records(&records, &approval, &function);
+
+        assert_eq!(
+            child_invocations,
+            vec![child_invocation_id.as_str().to_owned()]
+        );
+
+        let value = approved_execution_result(
+            &invocation,
+            &function,
+            &target,
+            &approval,
+            json!({ "exitCode": 0, "stdout": "ok\n", "resourceRefs": [] }),
+            child_invocations,
+        )
+        .expect("approved execution result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        let details = result.details.expect("details");
+
+        assert_eq!(details["approvalRequired"], json!(true));
+        assert_eq!(details["approvalCreated"], json!(true));
+        assert_eq!(details["approvalExecuted"], json!(true));
+        assert_eq!(details["childInvocationCreated"], json!(true));
+        assert_eq!(
+            details["childInvocations"],
+            json!([child_invocation_id.as_str()])
+        );
+        assert_eq!(
+            details["approvalState"]["childInvocationId"],
+            json!(child_invocation_id.as_str())
+        );
+        assert_eq!(
+            details["approvalState"]["childInvocationIds"],
+            json!([child_invocation_id.as_str()])
+        );
     }
 
     #[test]
@@ -3284,6 +3659,20 @@ mod tests {
             "implementation": {
                 "functionId": "process::run"
             },
+            "recipe": {
+                "executeTemplate": {
+                    "mode": "invoke",
+                    "contractId": "process::run",
+                    "payload": {
+                        "command": "date",
+                        "executionMode": "read_only"
+                    }
+                },
+                "requiredPayload": [
+                    "command: string",
+                    "executionMode: string [read_only|sandbox_materialized]"
+                ]
+            },
             "executionRequirements": {
                 "approvalRequired": true,
                 "expectedRevision": 1,
@@ -3297,9 +3686,16 @@ mod tests {
         let summary = render_inspection_summary(&details);
 
         assert!(summary.contains("inspectionHandle=capability-inspection:v1:test"));
+        assert!(summary.contains("\"contractId\":\"process::run\""));
+        assert!(summary.contains("\"executionMode\":\"read_only\""));
+        assert!(
+            summary
+                .contains("do not set contractId/capabilityId/functionId to `capability::execute`")
+        );
+        assert!(summary.contains("do not run example/probe calls"));
         assert!(summary.contains("expectedRevision=1"));
         assert!(summary.contains("expectedSchemaDigest=digest-123"));
-        assert!(summary.contains("Execute payload must include: command."));
+        assert!(summary.contains("Execute payload must include: command: string, executionMode: string [read_only|sandbox_materialized]."));
         assert!(summary.contains("idempotencyKey is required"));
         assert!(summary.contains("approvalRequired=true"));
     }
@@ -3377,15 +3773,19 @@ mod tests {
 
         assert!(!requires_fresh_revision_for_payload(
             &function,
-            &json!({"payload": {"command": "date"}})
+            &json!({"payload": {"command": "date", "executionMode": "read_only"}})
         ));
         assert!(!requires_fresh_revision_for_payload(
             &function,
-            &json!({"payload": {"command": "git status --short"}})
+            &json!({"payload": {"command": "git status --short", "executionMode": "read_only"}})
         ));
         assert!(!requires_fresh_revision_for_payload(
             &function,
-            &json!({"payload": {"command": "cd /tmp && git status --short && git log --oneline -3"}})
+            &json!({"payload": {"command": "cd /tmp && git status --short && git log --oneline -3", "executionMode": "read_only"}})
+        ));
+        assert!(!requires_fresh_revision_for_payload(
+            &function,
+            &json!({"payload": {"command": "echo hello > should_not_exist.txt", "executionMode": "read_only"}})
         ));
     }
 
@@ -3397,11 +3797,11 @@ mod tests {
 
         assert!(requires_fresh_revision_for_payload(
             &function,
-            &json!({"payload": {"command": "rm -rf target"}})
+            &json!({"payload": {"command": "rm -rf target", "executionMode": "sandbox_materialized", "expectedOutputs": [{"path": "result.txt"}]}})
         ));
         assert!(requires_fresh_revision_for_payload(
             &function,
-            &json!({"payload": {"command": "echo hello > file.txt"}})
+            &json!({"payload": {"command": "echo hello > file.txt", "executionMode": "sandbox_materialized", "expectedOutputs": [{"path": "file.txt"}]}})
         ));
     }
 
@@ -3504,6 +3904,45 @@ mod tests {
         let parsed = search_policy_from_runtime(&invocation).expect("policy");
         assert!(!parsed.require_local_vector);
         assert!(parsed.allow_lexical_only_when_degraded);
+    }
+
+    #[test]
+    fn capability_execute_child_invocations_preserve_runtime_metadata() {
+        let function = test_function("filesystem::read_file")
+            .with_required_authority(AuthorityRequirement::scope("filesystem.read"));
+        let parent = Invocation::new_sync(
+            FunctionId::new("capability::execute").expect("function id"),
+            json!({
+                "contractId": "filesystem::read_file",
+                "mode": "invoke",
+                "payload": {"path": "README.md"}
+            }),
+            CausalContext::new(
+                crate::engine::ActorId::new("agent:s1").expect("actor id"),
+                ActorKind::Agent,
+                AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
+                crate::engine::TraceId::new("trace").expect("trace id"),
+            )
+            .with_session_id("sess-1")
+            .with_workspace_id("workspace-1")
+            .with_scope("capability.execute")
+            .with_runtime_metadata(
+                crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
+                "/tmp/session-worktree",
+            ),
+        );
+
+        let child = child_execute_causal_context(&parent, &function, Some("child-key".to_owned()));
+
+        assert_eq!(
+            child.runtime_metadata(crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY),
+            Some("/tmp/session-worktree")
+        );
+        assert_eq!(child.session_id.as_deref(), Some("sess-1"));
+        assert_eq!(child.workspace_id.as_deref(), Some("workspace-1"));
+        assert!(child.has_scope("capability.execute"));
+        assert!(child.has_scope("filesystem.read"));
+        assert_eq!(child.idempotency_key.as_deref(), Some("child-key"));
     }
 
     #[test]
