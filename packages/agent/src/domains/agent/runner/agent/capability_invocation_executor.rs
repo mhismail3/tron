@@ -78,6 +78,14 @@ fn presentation_theme_color(function: &crate::engine::FunctionDefinition) -> Opt
         .map(ToOwned::to_owned)
 }
 
+fn presentation_hints(function: &crate::engine::FunctionDefinition) -> Option<Value> {
+    function.metadata.get("presentationHints").cloned()
+}
+
+fn details_presentation_hints(details: &Value) -> Option<Value> {
+    details.get("presentationHints").cloned()
+}
+
 fn details_theme_color(details: &Value) -> Option<String> {
     details
         .get("presentationHints")
@@ -115,6 +123,7 @@ fn primitive_capability_identity(
         root_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
         binding_decision_id: None,
         theme_color: presentation_theme_color(function),
+        presentation_hints: presentation_hints(function),
     }
 }
 
@@ -203,6 +212,8 @@ fn capability_identity_from_result(
             .map(ToOwned::to_owned)
             .or_else(|| base_identity.binding_decision_id.clone()),
         theme_color: details_theme_color(details).or_else(|| base_identity.theme_color.clone()),
+        presentation_hints: details_presentation_hints(details)
+            .or_else(|| base_identity.presentation_hints.clone()),
     }
 }
 
@@ -1129,10 +1140,7 @@ mod tests {
         )
         .await
         .expect("provider capability surface");
-        assert_eq!(
-            surface.all_model_capability_ids,
-            vec!["search", "inspect", "execute"]
-        );
+        assert_eq!(surface.all_model_capability_ids, vec!["execute"]);
         assert!(surface.targets_by_name.contains_key("execute"));
 
         let tempdir = tempfile::tempdir().expect("capability tempdir");
@@ -1145,13 +1153,16 @@ mod tests {
         ctx.engine_host = Some(&server.engine_host);
 
         let mut args = serde_json::Map::new();
-        args.insert("mode".to_owned(), Value::String("invoke".to_owned()));
         args.insert(
-            "functionId".to_owned(),
+            "intent".to_owned(),
+            Value::String("Read the fixture file through the capability system".to_owned()),
+        );
+        args.insert(
+            "target".to_owned(),
             Value::String("filesystem::read_file".to_owned()),
         );
         args.insert(
-            "payload".to_owned(),
+            "arguments".to_owned(),
             json!({"path": file_path.to_string_lossy()}),
         );
         let call = CapabilityInvocationDraft::new("tc1", "execute", args);
@@ -1165,6 +1176,41 @@ mod tests {
 
         assert_eq!(result.result.is_error, None);
         match result.result.content {
+            CapabilityResultBody::Text(text) => assert!(text.contains("hello from engine")),
+            CapabilityResultBody::Blocks(blocks) => {
+                let rendered = blocks
+                    .iter()
+                    .map(|block| format!("{block:?}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                assert!(rendered.contains("hello from engine"));
+            }
+        }
+
+        let mut intent_only_args = serde_json::Map::new();
+        intent_only_args.insert(
+            "intent".to_owned(),
+            Value::String("Use the filesystem read file capability to read a file".to_owned()),
+        );
+        intent_only_args.insert(
+            "arguments".to_owned(),
+            json!({"path": file_path.to_string_lossy()}),
+        );
+        let intent_only_call = CapabilityInvocationDraft::new("tc2", "execute", intent_only_args);
+        let intent_only_result = execute_capability_invocation(
+            &intent_only_call,
+            "s1",
+            tempdir.path().to_str().expect("utf8 tempdir"),
+            &ctx,
+        )
+        .await;
+
+        assert_eq!(
+            intent_only_result.result.is_error, None,
+            "{:?}",
+            intent_only_result.result
+        );
+        match intent_only_result.result.content {
             CapabilityResultBody::Text(text) => assert!(text.contains("hello from engine")),
             CapabilityResultBody::Blocks(blocks) => {
                 let rendered = blocks

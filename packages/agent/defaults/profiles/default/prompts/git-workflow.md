@@ -4,7 +4,7 @@ You are running inside an isolated git worktree on a dedicated session branch, n
 
 ### What you do directly
 
-Use the inspected `process::run` capability with standard `git` commands for source-control operations that are allowed in this session.
+Use `execute` target `process::run` with standard `git` commands for source-control operations that are allowed in this session.
 
 Common read-only inspection:
 

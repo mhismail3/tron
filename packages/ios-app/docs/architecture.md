@@ -10,7 +10,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Event-sourced state reconstruction
 - Push notifications for background alerts
 - Voice transcription input
-- Capability-native invocation/result rendering for the live `search` / `inspect` / `execute` harness
+- Capability-native invocation/result rendering for the single model-facing `execute` harness and server-owned generated UI actions
 - A staged input composer where pending skills and attachments share one wrapping chip row before send
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 - A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, module package/config/activation refs, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
@@ -120,9 +120,12 @@ and `capability.invocation.completed` names are capability lifecycle labels.
 Active chat, dashboard, detail sheets, and history reconstruction render
 capability invocations from `CapabilityIdentity`
 metadata (`contractId`, `implementationId`, `pluginId`, schema digest, catalog
-revision, trust/risk/effect, trace, and binding decision). Clean-slate local
-storage means unsupported or malformed events are treated as diagnostics rather
-than normalized through retired names.
+revision, trust/risk/effect, trace, and binding decision). Optional
+`presentationHints` such as `displayName`, `chipTitle`, `icon`, and
+`themeColor` are capability-owned server metadata that the app maps into native
+Tron components; they never replace identity, lineage, approval, or policy
+fields. Clean-slate local storage means unsupported or malformed events are
+treated as diagnostics rather than normalized through retired names.
 
 ### @Observable State Objects
 

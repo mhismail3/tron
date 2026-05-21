@@ -40,8 +40,6 @@ const TRUST_ORDER: &[&str] = &[
 ];
 
 const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
-    "capability::search",
-    "capability::inspect",
     "capability::execute",
     "filesystem::list_dir",
     "filesystem::read_file",
@@ -3129,7 +3127,7 @@ pub(crate) fn render_capability_primer(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision
     ));
-    out.push_str("The model-facing primitives are `search`, `inspect`, and `execute`. Core first-party capabilities below are already known; call them with `execute` directly. Use `search` for dynamic plugins, MCP/OpenAPI/session workers, unfamiliar domains, or missing recipes. Use `inspect` only when a recipe says inspect is required, when execute asks for freshness fields, or when full contract detail is needed.\n\n");
+    out.push_str("The model-facing primitive is `execute`. Core first-party capabilities below are already known; call `execute` with intent, optional target, and target arguments. Dynamic plugins, MCP/OpenAPI/session workers, unfamiliar domains, freshness, approval, and full contract detail are resolved inside execute or through operator-only capability views.\n\n");
     for entry in entries.drain(..) {
         let recipe = entry.agent_recipe();
         let mut line = format!(
@@ -3139,7 +3137,7 @@ pub(crate) fn render_capability_primer(
         if policy.include_compact_schemas {
             if !recipe.required_payload.is_empty() {
                 line.push_str(&format!(
-                    " Required payload: {}",
+                    " Required arguments: {}",
                     recipe.required_payload.join("; ")
                 ));
             }
@@ -3159,7 +3157,7 @@ pub(crate) fn render_capability_primer(
             line.push_str(&format!(" Execute: {example}"));
         }
         if recipe.inspect_required {
-            line.push_str(" Inspect before execute for freshness/elevated-risk fields.");
+            line.push_str(" Execute prepares freshness before elevated-risk work.");
         } else if recipe.approval_behavior != "none" {
             line.push_str(&format!(" Approval: {}.", recipe.approval_behavior));
         } else if recipe.direct_execution == "conditional_safe_direct" {
@@ -3168,7 +3166,7 @@ pub(crate) fn render_capability_primer(
         line.push('\n');
         if estimated_tokens(out.len() + line.len()) > policy.max_tokens {
             out.push_str(
-                "- Additional capabilities are available through `search`, which returns the same execute recipes.\n",
+                "- Additional capabilities are available through the same `execute` primitive; provide intent or a target hint and the engine resolves the catalog entry.\n",
             );
             break;
         }
@@ -4018,7 +4016,7 @@ fn recipe_examples(entry: &CapabilityRegistryEntry) -> Vec<Value> {
     let existing = examples(&entry.function)
         .into_iter()
         .filter_map(|example| normalize_recipe_example(entry, example))
-        .take(3)
+        .take(4)
         .collect::<Vec<_>>();
     if existing.is_empty() {
         vec![recipe_execute_template(
@@ -4033,25 +4031,24 @@ fn recipe_examples(entry: &CapabilityRegistryEntry) -> Vec<Value> {
 fn normalize_recipe_example(entry: &CapabilityRegistryEntry, example: Value) -> Option<Value> {
     if example.get("mode").is_some() || example.get("payload").is_some() {
         let mut object = example.as_object()?.clone();
-        object.insert("mode".to_owned(), Value::String("invoke".to_owned()));
-        object.remove("capabilityId");
-        object.insert(
-            "contractId".to_owned(),
-            Value::String(entry.contract_id.clone()),
-        );
-        object
-            .entry("reason".to_owned())
-            .or_insert_with(|| Value::String(default_recipe_reason(entry)));
-        return Some(Value::Object(object));
+        let payload = object.remove("payload").unwrap_or_else(|| json!({}));
+        let mut template = recipe_execute_template(entry, payload);
+        if let Some(reason) = object.remove("reason") {
+            template["reason"] = reason;
+        }
+        if let Some(idempotency_key) = object.remove("idempotencyKey") {
+            template["idempotencyKey"] = idempotency_key;
+        }
+        return Some(template);
     }
     Some(recipe_execute_template(entry, example))
 }
 
 fn recipe_execute_template(entry: &CapabilityRegistryEntry, payload: Value) -> Value {
     json!({
-        "mode": "invoke",
-        "contractId": entry.contract_id.clone(),
-        "payload": payload,
+        "intent": default_recipe_reason(entry),
+        "target": entry.contract_id.clone(),
+        "arguments": payload,
         "reason": default_recipe_reason(entry)
     })
 }
@@ -4374,8 +4371,11 @@ mod tests {
                 .iter()
                 .any(|field| field.starts_with("command:"))
         );
-        assert_eq!(recipe.execute_template["contractId"], json!("process::run"));
-        assert_eq!(recipe.execute_template["payload"]["command"], json!("date"));
+        assert_eq!(recipe.execute_template["target"], json!("process::run"));
+        assert_eq!(
+            recipe.execute_template["arguments"]["command"],
+            json!("date")
+        );
         assert_eq!(recipe.direct_execution, "conditional_safe_direct");
         assert!(!recipe.inspect_required);
         assert!(recipe.approval_behavior.contains("conditional"));
@@ -4453,7 +4453,7 @@ mod tests {
                     recipe.contract_id
                 );
                 assert!(
-                    recipe.execute_template["payload"].get(&field).is_some(),
+                    recipe.execute_template["arguments"].get(&field).is_some(),
                     "{} execute template missing required payload field {field}",
                     recipe.contract_id
                 );
@@ -4491,7 +4491,7 @@ mod tests {
                 .any(|field| field.starts_with("body:"))
         );
         assert_eq!(
-            recipe.execute_template["payload"]["title"],
+            recipe.execute_template["arguments"]["title"],
             json!("Tron test")
         );
     }
@@ -5150,6 +5150,18 @@ mod tests {
             .find(|spec| spec.function_id.as_str() == "process::run")
             .expect("process::run spec");
         let process = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let entry = CapabilityRegistryEntry::from_function(process.clone(), 1);
+        let recipe = entry.agent_recipe();
+        assert!(recipe.examples.iter().any(|example| {
+            example["target"] == json!("process::run")
+                && example["arguments"]["executionMode"] == json!("read_only")
+        }));
+        assert!(recipe.examples.iter().any(|example| {
+            example["target"] == json!("process::run")
+                && example["arguments"]["executionMode"] == json!("sandbox_materialized")
+                && example["arguments"]["expectedOutputs"].is_array()
+        }));
+
         let snapshot = CapabilityRegistrySnapshot::new(vec![process], 1);
 
         let text = render_capability_primer(
@@ -5164,7 +5176,7 @@ mod tests {
 
         assert!(text.contains("process::run"));
         assert!(text.contains("conditional; payloads classified as risky"));
-        assert!(text.contains("\"contractId\":\"process::run\""));
+        assert!(text.contains("\"target\":\"process::run\""));
         assert!(!text.contains("\"capabilityId\""));
         assert!(!text.contains("inspectRevision=1"));
     }
@@ -5204,7 +5216,7 @@ mod tests {
         )
         .expect("primer");
         assert!(text.contains("notifications::send"));
-        assert!(text.contains("\"contractId\":\"notifications::send\""));
+        assert!(text.contains("\"target\":\"notifications::send\""));
         assert!(!text.contains("\"capabilityId\""));
         assert!(!text.contains("inspectRevision=1"));
     }
@@ -5236,10 +5248,7 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
 
         let process = by_contract.get("process::run").expect("process recipe");
-        assert_eq!(
-            process.execute_template["contractId"],
-            json!("process::run")
-        );
+        assert_eq!(process.execute_template["target"], json!("process::run"));
         assert!(
             process
                 .required_payload
@@ -5252,7 +5261,7 @@ mod tests {
             .get("notifications::send")
             .expect("notification recipe");
         assert_eq!(
-            notify.execute_template["contractId"],
+            notify.execute_template["target"],
             json!("notifications::send")
         );
         assert!(
@@ -5272,7 +5281,7 @@ mod tests {
             .get("filesystem::read_file")
             .expect("read file recipe");
         assert_eq!(
-            read.execute_template["contractId"],
+            read.execute_template["target"],
             json!("filesystem::read_file")
         );
         assert!(
@@ -5332,7 +5341,7 @@ mod tests {
                 .any(|field| field.starts_with("command:"))
         );
         assert_eq!(
-            process_recipe.execute_template["payload"]["command"],
+            process_recipe.execute_template["arguments"]["command"],
             json!("date")
         );
 

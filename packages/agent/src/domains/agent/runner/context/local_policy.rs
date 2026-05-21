@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn local_profile_allows_capability_primitives() {
         let allowed = local_policy().primitive_filter().unwrap();
-        for name in ["search", "inspect", "execute"] {
+        for name in ["execute"] {
             assert!(
                 allowed.iter().any(|capability| capability == name),
                 "{name} should be local-allowed"
@@ -428,14 +428,7 @@ mod tests {
         assert!(!p.strip_skill_index());
         assert!(!p.strip_job_results());
         assert!(!p.skip_pending_jobs_bootstrap());
-        assert_eq!(
-            p.primitive_filter(),
-            Some(vec![
-                "search".to_string(),
-                "inspect".to_string(),
-                "execute".to_string()
-            ])
-        );
+        assert_eq!(p.primitive_filter(), Some(vec!["execute".to_string()]));
         assert_eq!(p.rules_truncation(), None);
     }
 

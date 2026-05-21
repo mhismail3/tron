@@ -38,11 +38,11 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
         CapabilityContract::new("filesystem::read_file", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
-            .description("Read a file from the workspace or allowed filesystem roots.")
-            .tags(vec!["read", "file", "open", "cat", "content", "filesystem"])
-            .request_schema(json!({"additionalProperties":false,"properties":{"path":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"content":{"type":"string"},"path":{"type":"string"}},"required":["content","path"],"type":"object"}))
-            .examples(vec![json!({"mode":"invoke","contractId":"filesystem::read_file","payload":{"path":"README.md"},"reason":"Read the project README."})])
+            .description("Read a file from the workspace or allowed filesystem roots, optionally bounded by 1-based line numbers.")
+            .tags(vec!["read", "file", "open", "cat", "content", "line", "lines", "filesystem"])
+            .request_schema(json!({"additionalProperties":false,"properties":{"endLine":{"minimum":1,"type":"integer"},"path":{"type":"string"},"sessionId":{"type":"string"},"startLine":{"minimum":1,"type":"integer"},"workspaceId":{"type":"string"}},"required":["path"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"content":{"type":"string"},"endLine":{"type":"integer"},"path":{"type":"string"},"startLine":{"type":"integer"}},"required":["content","path"],"type":"object"}))
+            .examples(vec![json!({"mode":"invoke","contractId":"filesystem::read_file","payload":{"path":"README.md","startLine":1,"endLine":20},"reason":"Read the first 20 lines of the project README."})])
             .build()?,
         CapabilityContract::new("filesystem::write_file", "filesystem", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("filesystem.write"))
             .description("Create or overwrite a file with exact content.")

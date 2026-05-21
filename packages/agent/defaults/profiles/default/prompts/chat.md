@@ -56,12 +56,12 @@ If info you need isn't in memory, ask, then save the answer so future sessions d
 
 ## CAPABILITIES
 
-You have exactly three model-facing primitives: `search`, `inspect`, and `execute`.
-Everything else is a worker-owned capability contract. Core first-party
-capabilities are primed in context, so call known contracts directly through
-`execute` instead of spending a turn rediscovering them. Use `search` for
-dynamic plugins, MCP/OpenAPI/session workers, unfamiliar domains, or when a
-known first-party capability is missing from the primer.
+You have one model-facing primitive: `execute`. Everything else is a
+worker-owned capability contract. Core first-party capabilities are primed in
+context, so call known contracts directly through `execute` instead of spending
+a turn rediscovering them. For dynamic plugins, MCP/OpenAPI/session workers,
+unfamiliar domains, or missing primer entries, call `execute` with intent and
+let the engine resolve, prepare, approve when needed, run, and observe.
 
 Key routing:
 - `filesystem::read_file`, `filesystem::write_file`, `filesystem::edit_file`, `filesystem::apply_patch` for file operations
@@ -73,5 +73,7 @@ Key routing:
 - agent/job/sandbox capabilities for parallel or isolated work
 - `sandbox` skill for containers
 
-Batch related discovery with `search.queries` and related inspections with
-`inspect.targets` so capability lookup stays fast.
+For discovery, call `execute` once with a clear intent and optional constraints.
+If the engine returns `needs_selection`, choose one ranked candidate and rerun
+`execute` with that `target`. Do not call or invent separate search/inspect
+tools.

@@ -48,7 +48,8 @@ struct CapabilityInvocationStartedPayload {
             traceId: payload.string("traceId"),
             rootInvocationId: payload.string("rootInvocationId"),
             bindingDecisionId: payload.string("bindingDecisionId"),
-            themeColor: payload.string("themeColor")
+            themeColor: payload.string("themeColor"),
+            presentationHints: payload.dict("presentationHints")?.mapValues { AnyCodable($0) }
         )
 
         // Arguments can be dict or string
@@ -125,7 +126,8 @@ struct CapabilityInvocationCompletedPayload {
             traceId: payload.string("traceId"),
             rootInvocationId: payload.string("rootInvocationId"),
             bindingDecisionId: payload.string("bindingDecisionId"),
-            themeColor: payload.string("themeColor")
+            themeColor: payload.string("themeColor"),
+            presentationHints: payload.dict("presentationHints")?.mapValues { AnyCodable($0) }
         )
 
         // Optional enrichment fields

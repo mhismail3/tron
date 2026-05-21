@@ -60,7 +60,7 @@ pub struct ProfileDocument {
     pub model_policies: HashMap<String, ModelPolicySpec>,
     /// Context assembly policies.
     pub context_policies: HashMap<String, ContextPolicySpec>,
-    /// Provider-facing primitive surface policies (`search`, `inspect`, `execute`).
+    /// Provider-facing primitive surface policies (`execute`).
     pub primitive_surface_policies: HashMap<String, PrimitiveSurfacePolicySpec>,
     /// Real worker capability execution policies.
     pub capability_execution_policies: HashMap<String, CapabilityExecutionPolicySpec>,
@@ -1338,7 +1338,7 @@ fn validate_primitive_overlap(
     allowed: Option<&[String]>,
     denied: &[String],
 ) -> io::Result<()> {
-    const PRIMITIVES: &[&str] = &["search", "inspect", "execute"];
+    const PRIMITIVES: &[&str] = &["execute"];
     for primitive in allowed.into_iter().flatten().chain(denied.iter()) {
         if !PRIMITIVES.contains(&primitive.as_str()) {
             return Err(io::Error::new(

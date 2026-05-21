@@ -30,7 +30,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
                 case invocationId, modelPrimitiveName, content, isError, duration, details
                 case contractId, implementationId, functionId, pluginId, workerId
                 case schemaDigest, catalogRevision, trustTier, riskLevel, effectClass, traceId
-                case rootInvocationId, bindingDecisionId, themeColor
+                case rootInvocationId, bindingDecisionId, themeColor, presentationHints
             }
 
             init(from decoder: Decoder) throws {
@@ -57,7 +57,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
                     traceId: try container.decodeIfPresent(String.self, forKey: .traceId),
                     rootInvocationId: try container.decodeIfPresent(String.self, forKey: .rootInvocationId),
                     bindingDecisionId: try container.decodeIfPresent(String.self, forKey: .bindingDecisionId),
-                    themeColor: try container.decodeIfPresent(String.self, forKey: .themeColor)
+                    themeColor: try container.decodeIfPresent(String.self, forKey: .themeColor),
+                    presentationHints: try container.decodeIfPresent([String: AnyCodable].self, forKey: .presentationHints)
                 )
             }
         }

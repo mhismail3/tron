@@ -49,9 +49,9 @@ This README is the single, canonical reference for the project and is expected t
 |                                                                             |
 |  +-------------+  +------------+  +------------+  +------------------------+ |
 |  |  Providers  |  | Capability |  |  Context   |  |     Orchestrator       | |
-|  |  Anthropic  |  | search     |  |  loader    |  |  Session lifecycle     | |
-|  |  OpenAI     |  | inspect    |  |  compaction|  |  Turn management       | |
-|  |  Google     |  | execute    |  |  skills    |  |  Event routing         | |
+|  |  Anthropic  |  | execute    |  |  loader    |  |  Session lifecycle     | |
+|  |  OpenAI     |  | registry   |  |  compaction|  |  Turn management       | |
+|  |  Google     |  | recipes    |  |  skills    |  |  Event routing         | |
 |  |  MiniMax    |  | workers    |  |  rules     |  |  Subagent coordination | |
 |  +-------------+  +------------+  +------------+  +------------------------+ |
 +------------------------------------+----------------------------------------+
@@ -338,26 +338,30 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 ## Capabilities
 
-The model-facing harness is intentionally collapsed to three live capability
-primitives registered by the `domains::capability` worker:
+The model-facing harness is intentionally collapsed to one provider-visible
+capability primitive registered by the `domains::capability` worker:
 
 | Primitive | Description |
 |-----------|-------------|
-| `search` | Search the live catalog for contracts, implementations, workers, plugins, examples, and docs visible to the current actor/session/workspace. |
-| `inspect` | Inspect one capability contract and selected implementation, including schemas, risk, authority, idempotency, approval, leases, compensation, provenance, schema digest, and expected revision. |
-| `execute` | Invoke a selected capability through the engine ledger, or run a bounded JavaScript program that composes capabilities through the same primitive surface. |
+| `execute` | Resolve an intent or target hint, prepare the selected capability, pause for freshness/approval when needed, run through the engine ledger, and observe child invocation/resource results. |
+
+`capability::search` and `capability::inspect` remain canonical
+operator/internal catalog functions for Engine Console, diagnostics, and program
+composition. Provider models do not receive them as separate tools.
 
 Filesystem, code search, shell/process, web, plugin source, iOS/app interaction, display,
 notifications, subagents, and sandbox workers are not provider-facing built-ins.
-They are worker-owned capabilities discovered and invoked through the three
-primitives. Provider integrations do not expose their implementation names directly.
+They are worker-owned capabilities discovered and invoked through the single
+`execute` orchestrator. Provider integrations do not expose their implementation
+names directly.
 
 The default `coreFirstParty` primer is generated from registry metadata and
 includes the high-use first-party capabilities the agent should know without a
-search round trip. The same registry projection also generates
-`AgentCapabilityRecipe` records for search and inspect results, so capability
-discovery returns copyable `execute` templates, required payload fields,
-approval behavior, lifecycle notes, and result expectations instead of bare ids.
+separate discovery turn. The same registry projection also generates
+`AgentCapabilityRecipe` records for operator search/inspect and execute
+resolution, so capability discovery returns copyable `execute` templates,
+required argument fields, approval behavior, lifecycle notes, and result
+expectations instead of bare ids.
 Important parity anchors are:
 
 | Previous surface | Capability contract |
@@ -368,7 +372,7 @@ Important parity anchors are:
 | app notification | `notifications::send` |
 | voice note save/list/delete | `voice_notes::save`, `voice_notes::list`, `voice_notes::delete` |
 | prompt history/snippets | `prompt_library::history_*`, `prompt_library::snippet_*` |
-| capability discovery/execution | `capability::search`, `capability::inspect`, `capability::execute` |
+| capability orchestration | model-facing `capability::execute`; operator/internal catalog views remain `capability::search` and `capability::inspect` |
 
 When filesystem capabilities are invoked through the model-facing capability
 primitive, relative paths resolve against the active session working
@@ -378,6 +382,9 @@ When a session acquires an isolated git worktree, Tron seeds that worktree from
 the operator-visible working copy: tracked edits/deletions and untracked
 non-ignored files are overlaid on top of `HEAD`, while ignored files and
 internal worktree directories stay out of the session snapshot.
+`filesystem::read_file` accepts optional 1-based `startLine` and `endLine`
+bounds so requests like “read the first 20 lines of README.md” do not require a
+shell command or schema guess.
 
 `process::run` and `notifications::send` both have direct, low-overhead paths
 for safe/default use. `process::run` requires `executionMode`: classifier-
@@ -387,18 +394,22 @@ printing, `git status`, and `git log` run directly with
 `executionMode = "sandbox_materialized"` with declared `expectedOutputs` that
 are materialized back through resource refs. It defaults to the active session
 worktree/workspace when `cwd` is omitted and accepts bounded timeout fields in
-milliseconds. The model-facing `capability::execute` primitive is already
-the execution wrapper: callers set `contractId`/`capabilityId`/`functionId` to
-the selected target capability, put that target's complete required parameters
-under `payload`, and copy the execute recipe from `capability::search` or
-`capability::inspect` instead of wrapping another `capability::execute` call.
-Recipe examples are templates only: agents must not run warm-up/probe/example
-commands such as `date` or `git status` unless that is the requested action, and
-an exact user-supplied target payload should be invoked exactly once. Target
-schema, policy, and idempotency preflight rejections return structured
-`isError=true` capability results with no child invocation, approval, or
-resource refs, so expected contract failures stay inspectable without becoming
-engine-level execution failures.
+milliseconds. The model-facing `capability::execute` primitive is the only
+provider-visible capability tool: callers provide a natural-language `intent`,
+an optional `target` such as `process::run`, target-only `arguments`, optional
+constraints, and `idempotencyKey` for mutating work. The engine resolves the
+catalog entry, prepares freshness when required, corrects harmless shape
+mistakes, and routes through the same approval/child-invocation/resource-output
+path. Recipe examples are templates only: agents must not run
+warm-up/probe/example commands such as `date` or `git status` unless that is the
+requested action, and an exact user-supplied target argument payload should be
+invoked exactly once. For portability across providers, the exported schema is
+plain object-shaped while still accepting direct target aliases such as
+`contractId`, `capabilityId`, `functionId`, and `implementationId` when the
+caller already knows them. Target schema, policy, and idempotency preflight
+rejections return structured `isError=true` capability results with no child
+invocation, approval, or resource refs, so expected contract failures stay
+inspectable without becoming engine-level execution failures.
 `notifications::send` sends through the first-party notification
 delegate with an idempotency key and normal audit/event records.
 `voice_notes::save` transcribes audio into resource-backed `artifact` and
@@ -449,27 +460,33 @@ agents can ask for worker functions without knowing the registry document name.
 The search request path never re-embeds the whole catalog: registry document
 rows carry text hashes and vector rows are refreshed only when a document is new
 or changed. Warm searches embed the query once, read the persistent
-`sqlite-vec` rows, fuse lexical/vector hits, and return. `search` also accepts a
-bounded `queries` array for related lookups against one registry snapshot, and
-`inspect` accepts bounded `targets` so the agent can inspect several candidate
-capabilities without serial round trips.
+`sqlite-vec` rows, fuse lexical/vector hits, and return. Operator search still
+accepts a bounded `queries` array for related lookups against one registry
+snapshot, and operator inspection accepts bounded `targets` so the Engine
+Console can compare candidate capabilities without serial round trips.
 Engine Console mutations such as plugin state changes, conformance runs,
 binding edits, and policy updates are system-idempotent operator actions. They
 do not require a chat session id, but they still go through normal capability
 schema validation, approval, audit, trace, and compensation records.
 
-Mutating or medium/high-risk execution requires a fresh `inspect` result and
-the returned `inspectionHandle`, `expectedRevision`, and
-`expectedSchemaDigest`; `inspect` surfaces these both in structured
-`executionRequirements` and in the text result so provider models can copy them
-directly into the next `execute` call. The same inspect summary calls out the
-required payload fields from the selected contract schema, so agents do not have
-to infer the nested `execute.payload` shape from raw JSON alone. Mutating calls also require stable idempotency; model
-capability invocations derive a child key from the parent call when one is not passed
-explicitly. External/session workers connect with a scoped `workerToken` that
-bounds plugin id, namespace claims, authority grant id/revision/hash, resource
-selectors, visibility ceiling, trust tier, scope binding, expiry, and signature
-status before their functions can enter the capability registry.
+Provider models see one capability primitive: `execute`. The request is
+intent-shaped: `intent`, optional `target` or direct target alias, target-only
+`arguments`, optional `constraints`, plus wrapper fields such as
+`idempotencyKey` and `reason`. The
+capability worker owns the internal resolve, prepare, approval, run, and observe
+phases. It searches/ranks candidates, records fresh inspection handles when a
+mutating or elevated-risk target needs one, validates target arguments, corrects
+safe wrapper-shape mistakes such as `payload` versus `arguments`, and only then
+routes through the same approval and child-invocation substrate. Mutating calls
+still require stable idempotency; model capability invocations derive a child
+key from the parent call when one is not passed explicitly. Every orchestration
+attempt records bounded audit diagnostics with candidate scores, selected
+target, rejected candidates, corrections, freshness/approval decisions, child
+invocation ids, resource refs, replay source, and result classification.
+External/session workers connect with a scoped `workerToken` that bounds plugin
+id, namespace claims, authority grant id/revision/hash, resource selectors,
+visibility ceiling, trust tier, scope binding, expiry, and signature status
+before their functions can enter the capability registry.
 
 `execute` program mode is implemented by the first-party
 `program::run_javascript` worker. The parent engine spawns the
@@ -489,7 +506,7 @@ logs, compensation attempts, trace id, and final status. Loose program
 `artifacts` are rejected; durable outputs must be created by child resource or
 materialization capabilities.
 
-Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe. Mutating or publishing git commands still require inspection and approval, and write-like process commands must run in sandbox materialization mode with declared outputs.
+Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe. Mutating or publishing git commands still require execute preparation/freshness and approval, and write-like process commands must run in sandbox materialization mode with declared outputs.
 
 The same capability worker also registers operator/admin functions for native
 clients and the Engine Console. These are normal engine catalog functions, not
@@ -693,11 +710,13 @@ but still returns the current Python template so the agent receives executable
 guidance instead of searching source after a schema rejection.
 `worker::spawn` injects `TRON_ENGINE_WORKER_ENDPOINT` as a complete
 `ws://` or `wss://` URL ending in `/engine/workers`, so generated workers do not
-derive socket paths from client URLs. The intended loop is: `search`/`inspect`
-`worker::protocol_guide`, write the worker script from that template, `execute`
-`worker::spawn` with expected function ids and a stable idempotency key,
-search or inspect the new catalog entry, execute the new `namespace::function`,
-then disconnect it with `worker::disconnect`.
+derive socket paths from client URLs. The intended loop is: use `execute` with
+intent or target `worker::protocol_guide`, write the worker script from that
+template, use `execute` with target `worker::spawn` plus expected function ids
+and a stable idempotency key, then invoke the new `namespace::function` through
+`execute` and disconnect it with `worker::disconnect` when finished. Operator
+catalog search/inspect views remain available for debugging, but they are not
+separate model tools.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, `resource::*`, `grant::*`, and `approval::*` preserve the runtime
@@ -781,9 +800,10 @@ sessions.
 Active runtime/UI identity is capability-native: payloads carry `modelPrimitiveName`, `contractId`,
 `implementationId`, `functionId`, `pluginId`, `workerId`, `schemaDigest`,
 `catalogRevision`, `trustTier`, `riskLevel`, `effectClass`, `traceId`,
-`rootInvocationId`, and `bindingDecisionId` when available. iOS renders active
-work from those capability fields and does not map retired built-in names to
-capability identity.
+`rootInvocationId`, and `bindingDecisionId` when available. Payloads may also
+carry capability-owned `presentationHints` for native display name, chip title,
+icon token, and theme color. iOS renders active work from those capability
+fields and does not map retired built-in names to capability identity.
 
 ### Event Streaming
 
@@ -1101,7 +1121,7 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 | `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for artifacts, goals, claims, evidence, decisions, generated UI surfaces, worker packages, module configs, activation records, secret refs, materialized files, patch proposals, execution outputs, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `capability_plugins`, `capability_implementations`, `capability_bindings` | Durable capability registry layer over the live catalog: plugin manifests, concrete implementations, conformance state, signature status, and policy-selected bindings |
 | `capability_index_documents`, `capability_vector_metadata` | Search documents and persistent local vector-index metadata for hybrid capability search |
-| `capability_inspection_handles`, `capability_binding_decisions`, `capability_audit_events`, `capability_pause_records`, `capability_run_records`, `capability_program_runs` | Fresh inspect handles plus auditable records for binding resolution, pauses, async runs, program runs, and search/inspect/execute lifecycle decisions |
+| `capability_inspection_handles`, `capability_binding_decisions`, `capability_audit_events`, `capability_pause_records`, `capability_run_records`, `capability_program_runs` | Fresh inspection handles plus auditable records for binding resolution, pauses, async runs, program runs, and capability resolve/prepare/run/observe lifecycle decisions |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 | `device_tokens` | iOS push notification tokens — identity is `(device_token, platform, workspace_id, bundle_id)` (COALESCE-nullable unique index collapses NULL workspace/bundle to a single canonical row; `bundle_id` lets the relay send Beta-scheme tokens to the correct APNs topic) |
@@ -1463,10 +1483,10 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 ### Manual Readiness
 
 Use [docs/manual-testing-readiness.md](docs/manual-testing-readiness.md) before
-broad manual QA. It covers clean local state, helper packaging, capability
-search/inspect/execute, program runs, provider-switch history reconstruction,
-Engine Console checks, offline behavior, Mac wrapper smoke, and relay/APNs
-smoke checks.
+broad manual QA. It covers clean local state, helper packaging, single
+`execute` capability orchestration, program runs, provider-switch history
+reconstruction, Engine Console checks, offline behavior, Mac wrapper smoke, and
+relay/APNs smoke checks.
 
 ### CI
 

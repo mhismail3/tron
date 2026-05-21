@@ -232,6 +232,12 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
                 "rootInvocationId": "019e25cb-6ab0-7782-8110-684e36bc6218",
                 "bindingDecisionId": "binding_decision_019e25cb",
                 "themeColor": "#10B981",
+                "presentationHints": {
+                    "displayName": "List Directory",
+                    "chipTitle": "List",
+                    "icon": "folder",
+                    "themeColor": "#10B981"
+                },
                 "content": "Listed session worktree.",
                 "isError": false,
                 "duration": 69,
@@ -255,6 +261,8 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
         XCTAssertEqual(result?.duration, 69)
         XCTAssertEqual(result?.identity.contractId, "filesystem::list_dir")
         XCTAssertEqual(result?.identity.themeColor, "#10B981")
+        XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "List Directory")
+        XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "List")
         XCTAssertEqual(result?.rawDetails?["status"]?.stringValue, "ok")
     }
 }

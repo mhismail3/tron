@@ -162,11 +162,12 @@ pub fn generate_capability_clarification_message(
         {tool_list}\n\
         \n\
         ## Capability Execution\n\
-        Discover concrete abilities with `search`, inspect schemas and risk with `inspect`, \
-        then call `execute` with the selected contract or implementation id.\n\
+        Use `execute` for every capability task. Provide a natural-language intent, optional target \
+        hint, target arguments, constraints, idempotencyKey when mutating, and a short reason; \
+        the engine resolves, prepares, checks freshness, requests approval when needed, runs, and observes.\n\
         Common contracts include filesystem capabilities for file operations, `process::run` for \
         command execution, and web capabilities for network retrieval when they are visible to the session.\n\
-        If the user gives an exact contract id and payload, call that exact target once; do not run \
+        If the user gives an exact contract id and arguments, call that exact target once; do not run \
         warm-up, probe, date, status, or example commands first.\n\
         \n\
         ## Important Rules\n\
@@ -818,14 +819,15 @@ mod tests {
         let result = generate_capability_clarification_message(&[], None);
         assert!(result.contains("Capability Execution"));
         assert!(result.contains("process::run"));
-        assert!(result.contains("search"));
+        assert!(result.contains("Use `execute` for every capability task"));
+        assert!(result.contains("the engine resolves, prepares"));
     }
 
     #[test]
     fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
         let result = generate_capability_clarification_message(&[], None);
 
-        assert!(result.contains("exact contract id and payload"));
+        assert!(result.contains("exact contract id and arguments"));
         assert!(result.contains("call that exact target once"));
         assert!(
             result.contains("do not run warm-up, probe, date, status, or example commands first")

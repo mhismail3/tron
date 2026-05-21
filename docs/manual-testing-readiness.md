@@ -37,13 +37,14 @@ and iOS caches are disposable for this cutover.
 ## Capability Runtime Smoke
 
 1. Pair iOS to the running server.
-2. In chat, verify the provider surface is still exactly `search`, `inspect`,
-   and `execute`.
-3. Search for core first-party contracts such as `filesystem::read_file`,
-   `process::run`, `web::search`, and `program::run_javascript`.
-4. Inspect a mutating or high-risk capability and verify the response includes
-   an inspection handle, expected revision, and schema digest.
-5. Execute a safe first-party capability through `execute(mode: "invoke")`.
+2. In chat, verify the provider surface is exactly one primitive: `execute`.
+3. Use intent-only `execute` to resolve a core first-party contract such as
+   `filesystem::read_file`, then use explicit-target `execute` for
+   `process::run`.
+4. Run a mutating or high-risk capability and verify the engine prepares
+   freshness/approval before child execution.
+5. Execute a safe first-party capability through the intent-shaped execute
+   request: `intent`, optional `target`, and target-only `arguments`.
 6. Run a simple JavaScript program through the Engine Console program form:
    `return args;` with args `{ "ok": true }`.
 7. Confirm the program run has a durable run id, code hash, args hash, trace id,

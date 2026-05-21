@@ -184,6 +184,13 @@ struct CapabilityDisplayRow: Equatable, Identifiable {
     var id: String { "\(label)|\(value)" }
 }
 
+struct CapabilityDisplayGroup: Equatable, Identifiable {
+    let title: String
+    let rows: [CapabilityDisplayRow]
+
+    var id: String { title }
+}
+
 struct CapabilityInvocationDisplayModel: Equatable {
     let primitiveTitle: String
     let chipTitle: String
@@ -195,6 +202,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
     let payloadSummary: String?
     let capabilityRows: [CapabilityDisplayRow]
     let requestRows: [CapabilityDisplayRow]
+    let executionGroups: [CapabilityDisplayGroup]
     let resultRows: [CapabilityDisplayRow]
     let resultPreview: String?
     let technicalRows: [CapabilityDisplayRow]
@@ -205,8 +213,8 @@ struct CapabilityInvocationDisplayModel: Equatable {
         let argumentObject = Self.argumentObject(from: data)
         let primitive = CapabilityPresentation.primitiveName(for: data.identity)
         let target = Self.targetId(for: primitive, identity: data.identity, arguments: argumentObject)
-        let payload = argumentObject["payload"] as? [String: Any]
-        let payloadSummary = Self.payloadSummary(target: target, from: payload ?? argumentObject)
+        let targetArguments = Self.targetArguments(from: argumentObject)
+        let payloadSummary = Self.payloadSummary(target: target, from: targetArguments ?? argumentObject)
         let capabilityName = CapabilityPresentation.title(for: data.identity, targetId: target)
         let query = Self.firstString(["query", "q", "searchQuery"], in: argumentObject)
             ?? Self.firstString(["query"], in: data.details?.rawValues ?? [:])
@@ -214,7 +222,11 @@ struct CapabilityInvocationDisplayModel: Equatable {
         let outputObject = Self.outputObject(from: data)
 
         self.primitiveTitle = Self.primitiveTitle(primitive)
-        self.chipTitle = Self.chipTitle(primitive: primitive, capabilityName: capabilityName)
+        self.chipTitle = Self.chipTitle(
+            primitive: primitive,
+            capabilityName: capabilityName,
+            identity: data.identity
+        )
         self.capabilityName = capabilityName
         self.targetId = target
         self.payloadSummary = payloadSummary
@@ -246,6 +258,13 @@ struct CapabilityInvocationDisplayModel: Equatable {
             payloadSummary: payloadSummary,
             arguments: argumentObject
         )
+        self.executionGroups = Self.executionGroups(
+            primitive: primitive,
+            data: data,
+            details: details,
+            arguments: argumentObject,
+            output: outputObject
+        )
         self.resultRows = Self.resultRows(
             data: data,
             details: details,
@@ -269,7 +288,14 @@ struct CapabilityInvocationDisplayModel: Equatable {
         }
     }
 
-    private static func chipTitle(primitive: String, capabilityName: String) -> String {
+    private static func chipTitle(
+        primitive: String,
+        capabilityName: String,
+        identity: CapabilityIdentity
+    ) -> String {
+        if let chipTitle = CapabilityPresentation.presentationString("chipTitle", for: identity) {
+            return chipTitle
+        }
         switch primitive {
         case "inspect":
             return "Inspect"
@@ -326,6 +352,10 @@ struct CapabilityInvocationDisplayModel: Equatable {
         identity: CapabilityIdentity,
         arguments: [String: Any]
     ) -> String? {
+        if let target = targetHint(from: arguments)?.nilIfEmpty {
+            return target
+        }
+
         let argumentTarget = firstString(
             ["capabilityId", "contractId", "implementationId", "functionId", "capability", "contract", "function"],
             in: arguments
@@ -348,6 +378,29 @@ struct CapabilityInvocationDisplayModel: Equatable {
             }
             return identity.implementationId
         }
+    }
+
+    private static func targetHint(from object: [String: Any]) -> String? {
+        if let target = object["target"] as? String {
+            return target
+        }
+        if let target = object["target"] as? [String: Any] {
+            return firstString(
+                ["capabilityId", "contractId", "implementationId", "functionId", "capability", "contract", "function"],
+                in: target
+            )
+        }
+        return nil
+    }
+
+    private static func targetArguments(from object: [String: Any]) -> [String: Any]? {
+        if let arguments = object["arguments"] as? [String: Any] {
+            return arguments
+        }
+        if let payload = object["payload"] as? [String: Any] {
+            return payload
+        }
+        return nil
     }
 
     private static func payloadSummary(target: String?, from object: [String: Any]) -> String? {
@@ -436,11 +489,12 @@ struct CapabilityInvocationDisplayModel: Equatable {
             append("Implementation", firstString(["implementationId"], in: arguments))
             append("Function", firstString(["functionId"], in: arguments))
         default:
-            if let payload = arguments["payload"] as? [String: Any] {
-                appendPayloadRows(payload, into: &rows)
+            if let targetArguments = targetArguments(from: arguments) {
+                appendPayloadRows(targetArguments, into: &rows)
             } else {
                 append("Payload", payloadSummary)
             }
+            append("Intent", firstString(["intent"], in: arguments))
             append("Reason", firstString(["reason"], in: arguments))
         }
 
@@ -456,6 +510,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
             rows.append(CapabilityDisplayRow(label: label, value: value))
         }
         append("Command", firstString(["command", "cmd", "shellCommand"], in: payload))
+        append("Execution mode", firstString(["executionMode", "mode"], in: payload))
         append("Query", firstString(["query", "q", "searchQuery", "pattern", "glob", "name"], in: payload))
         append("URL", firstString(["url", "apiUrl", "endpoint"], in: payload))
         if let path = firstString(["path", "filePath"], in: payload) {
@@ -469,7 +524,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         }
 
         let alreadyShown = Set([
-            "command", "cmd", "shellCommand", "query", "q", "searchQuery", "pattern", "glob",
+            "command", "cmd", "shellCommand", "executionMode", "mode", "query", "q", "searchQuery", "pattern", "glob",
             "name", "url", "apiUrl", "endpoint", "path", "filePath", "cwd", "code"
         ])
         let extraRows = payload
@@ -484,12 +539,108 @@ struct CapabilityInvocationDisplayModel: Equatable {
         rows.append(contentsOf: extraRows)
     }
 
+    private static func executionGroups(
+        primitive: String,
+        data: CapabilityInvocationData,
+        details: [String: Any],
+        arguments: [String: Any],
+        output: [String: Any]
+    ) -> [CapabilityDisplayGroup] {
+        guard primitive == "execute" else { return [] }
+
+        let orchestration = dictionary(details["orchestration"])
+        let phaseDetails = dictionary(orchestration?["phaseDetails"])
+        let selectedTarget = dictionary(phaseDetails?["selectedTarget"])
+        let preparedRequest = dictionary(phaseDetails?["preparedRequest"])
+        let binding = dictionary(details["bindingDecision"])
+        let correctedRequest = dictionary(details["correctedRequest"]) ?? dictionary(orchestration?["correctedRequest"])
+        let childInvocations = stringArray(details["childInvocations"])
+            ?? stringArray(orchestration?["childInvocationIds"])
+            ?? []
+        let corrections = array(details["correctionsApplied"])
+            ?? array(orchestration?["correctionsApplied"])
+            ?? []
+
+        var groups: [CapabilityDisplayGroup] = []
+
+        var resolution: [CapabilityDisplayRow] = []
+        appendRow("Mode", humanizeToken(string(phaseDetails?["resolveMode"])), to: &resolution)
+        appendRow("Target", string(selectedTarget?["contractId"]) ?? string(selectedTarget?["functionId"]) ?? targetHint(from: arguments), to: &resolution, technical: true)
+        appendRow("Implementation", string(selectedTarget?["implementationId"]) ?? string(binding?["selectedImplementation"]), to: &resolution, technical: true)
+        appendRow("Selection", humanizeToken(string(binding?["selectionPolicy"])), to: &resolution)
+        appendRow("Catalog", string(selectedTarget?["catalogRevision"]) ?? string(details["catalogRevision"]), to: &resolution, technical: true)
+        if let rejected = array(phaseDetails?["rejectedCandidates"]), !rejected.isEmpty {
+            appendRow("Rejected candidates", String(rejected.count), to: &resolution)
+        }
+        if !resolution.isEmpty {
+            groups.append(CapabilityDisplayGroup(title: "Resolution", rows: resolution))
+        }
+
+        var preparation: [CapabilityDisplayRow] = []
+        appendRow("Capability risk", humanizeToken(string(selectedTarget?["riskLevel"]) ?? data.identity.riskLevel), to: &preparation)
+        appendRow("Effect class", humanizeToken(string(selectedTarget?["effectClass"]) ?? data.identity.effectClass), to: &preparation)
+        appendRow("Schema", string(selectedTarget?["schemaDigest"]) ?? data.identity.schemaDigest, to: &preparation, technical: true)
+        appendRow("Payload", bool(preparedRequest?["hasPayload"]).map { $0 ? "Validated" : "Not provided" }, to: &preparation)
+        appendRow("Fresh handle", bool(preparedRequest?["hasInspectionHandle"]).map { $0 ? "Prepared" : "Not required" }, to: &preparation)
+        appendRow("Approval", data.approvalState?.isEmpty == false ? "Required" : "Not required", to: &preparation)
+        appendRow("Corrections", correctionSummary(corrections), to: &preparation)
+        if !preparation.isEmpty {
+            groups.append(CapabilityDisplayGroup(title: "Preparation", rows: preparation))
+        }
+
+        var run: [CapabilityDisplayRow] = []
+        appendRow("Child invocation", childInvocations.first.map(compactIdentifier), to: &run, technical: true)
+        if childInvocations.count > 1 {
+            appendRow("Child count", String(childInvocations.count), to: &run)
+        }
+        appendRow("Function", string(selectedTarget?["functionId"]) ?? data.identity.functionId, to: &run, technical: true)
+        appendRow("Worker", data.identity.workerId, to: &run, technical: true)
+        appendRow("Status", statusText(data.status), to: &run)
+        appendRow("Duration", data.formattedDuration, to: &run)
+        if !run.isEmpty {
+            groups.append(CapabilityDisplayGroup(title: "Run", rows: run))
+        }
+
+        var guardrails: [CapabilityDisplayRow] = []
+        if let searchStatus = dictionary(phaseDetails?["searchStatus"]) {
+            appendRow("Search", humanizeToken(string(searchStatus["state"])), to: &guardrails)
+            appendRow("Vector index", bool(searchStatus["localVector"]).map { $0 ? "Ready" : "Unavailable" }, to: &guardrails)
+            appendRow("Lexical", bool(searchStatus["lexical"]).map { $0 ? "Enabled" : "Disabled" }, to: &guardrails)
+            appendRow("Degraded reason", string(searchStatus["degradedReason"]), to: &guardrails)
+        }
+        if !guardrails.isEmpty {
+            groups.append(CapabilityDisplayGroup(title: "Discovery", rows: guardrails))
+        }
+
+        if correctedRequest != nil, !corrections.isEmpty {
+            var corrected: [CapabilityDisplayRow] = []
+            appendRow("Confidence", string(details["correctionConfidence"]) ?? string(orchestration?["correctionConfidence"]), to: &corrected)
+            appendRow("Applied", correctionSummary(corrections), to: &corrected)
+            if !corrected.isEmpty {
+                groups.append(CapabilityDisplayGroup(title: "Corrections", rows: corrected))
+            }
+        }
+
+        return groups
+    }
+
     private static func resultRows(
-        data _: CapabilityInvocationData,
+        data: CapabilityInvocationData,
         details _: [String: Any],
-        output _: [String: Any]
+        output: [String: Any]
     ) -> [CapabilityDisplayRow] {
-        []
+        guard CapabilityPresentation.primitiveName(for: data.identity) == "execute" else { return [] }
+        let hasProcessOutput = firstString(["exitCode"], in: output) != nil
+            || firstString(["timedOut"], in: output) != nil
+            || firstString(["stdout"], in: output) != nil
+            || firstString(["stderr"], in: output) != nil
+        guard hasProcessOutput else { return [] }
+
+        var rows: [CapabilityDisplayRow] = []
+        appendRow("Exit code", firstString(["exitCode"], in: output), to: &rows)
+        appendRow("Timed out", readableBool(["timedOut"], in: output), to: &rows)
+        appendRow("Output truncated", readableBool(["outputTruncated", "truncated"], in: output), to: &rows)
+        return rows
     }
 
     private static func resultPreview(
@@ -580,6 +731,16 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return rows
     }
 
+    private static func appendRow(
+        _ label: String,
+        _ value: String?,
+        to rows: inout [CapabilityDisplayRow],
+        technical: Bool = false
+    ) {
+        guard let value = value?.nilIfEmpty else { return }
+        rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
+    }
+
     private static func argumentObject(from data: CapabilityInvocationData) -> [String: Any] {
         if let payloadJSON = data.payloadJSON {
             return payloadJSON.rawValues
@@ -624,6 +785,58 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return nil
     }
 
+    private static func dictionary(_ value: Any?) -> [String: Any]? {
+        if let dictionary = value as? [String: Any] {
+            return dictionary
+        }
+        if let dictionary = value as? [String: AnyCodable] {
+            return dictionary.rawValues
+        }
+        if let value = value as? AnyCodable {
+            return value.dictionaryValue
+        }
+        return nil
+    }
+
+    private static func array(_ value: Any?) -> [Any]? {
+        if let array = value as? [Any] {
+            return array
+        }
+        if let value = value as? AnyCodable {
+            return value.arrayValue
+        }
+        return nil
+    }
+
+    private static func stringArray(_ value: Any?) -> [String]? {
+        array(value)?.compactMap { item in
+            if let string = item as? String {
+                return string
+            }
+            return simpleDisplayValue(item)
+        }
+    }
+
+    private static func string(_ value: Any?) -> String? {
+        if let value {
+            return simpleDisplayValue(value)
+        }
+        return nil
+    }
+
+    private static func bool(_ value: Any?) -> Bool? {
+        if let bool = value as? Bool {
+            return bool
+        }
+        if let value = value as? AnyCodable {
+            return value.boolValue
+        }
+        if let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() {
+            return number.boolValue
+        }
+        return nil
+    }
+
     private static func simpleDisplayValue(_ value: Any) -> String? {
         switch value {
         case let string as String:
@@ -639,6 +852,72 @@ struct CapabilityInvocationDisplayModel: Equatable {
         default:
             return nil
         }
+    }
+
+    private static func humanizeToken(_ token: String?) -> String? {
+        guard let token = token?.nilIfEmpty else { return nil }
+        let withWordBreaks = token
+            .replacingOccurrences(
+                of: #"([a-z0-9])([A-Z])"#,
+                with: "$1 $2",
+                options: .regularExpression
+            )
+        return withWordBreaks
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { word in
+                guard let first = word.first else { return "" }
+                return first.uppercased() + word.dropFirst()
+            }
+            .joined(separator: " ")
+    }
+
+    private static func readableBool(_ keys: [String], in object: [String: Any]) -> String? {
+        for key in keys {
+            if let bool = object[key] as? Bool {
+                return bool ? "Yes" : "No"
+            }
+            if let number = object[key] as? NSNumber {
+                return number.boolValue ? "Yes" : "No"
+            }
+            if let string = (object[key] as? String)?.trimmed.lowercased() {
+                switch string {
+                case "true", "yes", "1":
+                    return "Yes"
+                case "false", "no", "0":
+                    return "No"
+                default:
+                    continue
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func correctionSummary(_ corrections: [Any]) -> String {
+        guard !corrections.isEmpty else { return "None" }
+        let labels = corrections.prefix(3).compactMap { item -> String? in
+            if let item = item as? [String: Any] {
+                return firstString(["message", "kind"], in: item)
+            }
+            if let item = item as? [String: AnyCodable] {
+                return firstString(["message", "kind"], in: item.rawValues)
+            }
+            return simpleDisplayValue(item)
+        }
+        if labels.isEmpty {
+            return "\(corrections.count) applied"
+        }
+        let more = corrections.count > labels.count ? " +\(corrections.count - labels.count) more" : ""
+        return labels.joined(separator: "; ") + more
+    }
+
+    private static func compactIdentifier(_ id: String) -> String {
+        guard id.count > 28 else { return id }
+        let prefix = id.prefix(12)
+        let suffix = id.suffix(10)
+        return "\(prefix)…\(suffix)"
     }
 
     private static func simplePayloadExtraValue(_ value: Any) -> String? {
@@ -693,6 +972,10 @@ enum CapabilityPresentation {
     }
 
     static func title(for identity: CapabilityIdentity, targetId: String? = nil) -> String {
+        if let displayName = presentationString("displayName", for: identity)
+            ?? presentationString("title", for: identity) {
+            return displayName
+        }
         if let targetId, !targetId.hasPrefix("capability::") {
             return humanizeCapabilityId(targetId)
         }
@@ -714,6 +997,12 @@ enum CapabilityPresentation {
     }
 
     static func symbol(for identity: CapabilityIdentity) -> String {
+        if let icon = presentationString("sfSymbol", for: identity)
+            ?? presentationString("symbol", for: identity)
+            ?? presentationString("icon", for: identity),
+           let symbol = nativeSymbolName(for: icon) {
+            return symbol
+        }
         let id = identity.contractId ?? identity.functionId ?? identity.modelPrimitiveName ?? ""
         if id.hasPrefix("filesystem::") { return "doc.text.magnifyingglass" }
         if id.hasPrefix("process::") { return "terminal" }
@@ -828,8 +1117,13 @@ enum CapabilityPresentation {
 
     static func themeColorHex(for identity: CapabilityIdentity, targetId: String? = nil) -> String? {
         identity.themeColor?.nilIfEmpty
+            ?? presentationString("themeColor", for: identity)
             ?? targetId.flatMap(themeColorForCapabilityId)
             ?? themeColorForCapabilityNamespace(identity)
+    }
+
+    static func presentationString(_ key: String, for identity: CapabilityIdentity) -> String? {
+        identity.presentationHints?[key]?.stringValue?.nilIfEmpty
     }
 
     static func humanizeCapabilityId(_ id: String) -> String {
@@ -927,6 +1221,36 @@ enum CapabilityPresentation {
             return nil
         }
         return Color(hex: themeColor)
+    }
+
+    private static func nativeSymbolName(for token: String) -> String? {
+        let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        if normalized.contains(".") || normalized == "terminal" || normalized == "globe" {
+            return normalized
+        }
+        switch normalized {
+        case "question":
+            return "questionmark.circle"
+        case "subagent":
+            return "person.2"
+        case "clock", "wait":
+            return "clock"
+        case "output":
+            return "text.alignleft"
+        case "search":
+            return "magnifyingglass"
+        case "inspect":
+            return "info.circle"
+        case "execute", "run":
+            return "play.circle"
+        case "file", "document":
+            return "doc.text"
+        case "terminal", "process":
+            return "terminal"
+        default:
+            return normalized.contains(" ") ? nil : normalized
+        }
     }
 
     private static func themeColorForCapabilityNamespace(_ identity: CapabilityIdentity) -> String? {
@@ -1027,7 +1351,8 @@ extension CapabilityIdentity {
             traceId: payload["traceId"] as? String,
             rootInvocationId: payload["rootInvocationId"] as? String,
             bindingDecisionId: payload["bindingDecisionId"] as? String,
-            themeColor: payload["themeColor"] as? String
+            themeColor: payload["themeColor"] as? String,
+            presentationHints: (payload["presentationHints"] as? [String: Any])?.mapValues { AnyCodable($0) }
         )
     }
 
@@ -1050,11 +1375,12 @@ extension CapabilityIdentity {
         catalogRevision == nil &&
         trustTier == nil &&
         riskLevel == nil &&
-        effectClass == nil &&
-        traceId == nil &&
-        rootInvocationId == nil &&
+            effectClass == nil &&
+            traceId == nil &&
+            rootInvocationId == nil &&
             bindingDecisionId == nil &&
-            themeColor == nil
+            themeColor == nil &&
+            presentationHints == nil
     }
 
     private static func uint64Value(_ value: Any?) -> UInt64? {

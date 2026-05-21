@@ -5,8 +5,7 @@
 //! discover/inspect/watch/invoke/promote messages are translated into
 //! [`EngineTransportRequest`] and then dispatched through the canonical engine
 //! transport path. Model providers do not receive this transport surface; they
-//! receive only the capability-domain `search`, `inspect`, and `execute`
-//! primitives.
+//! receive only the capability-domain `execute` orchestrator.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

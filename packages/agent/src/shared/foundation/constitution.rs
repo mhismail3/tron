@@ -614,8 +614,9 @@ mod tests {
             "source-owned default prompt should refresh when bundled content changes"
         );
         let refreshed = fs::read_to_string(core_prompt).unwrap();
-        assert!(refreshed.contains("search` returns actionable execute recipes"));
-        assert!(refreshed.contains("\"contractId\":\"process::run\""));
+        assert!(refreshed.contains("You have one model-facing primitive: `execute`"));
+        assert!(refreshed.contains("\"target\":\"process::run\""));
+        assert!(refreshed.contains("\"arguments\":{\"command\":\"date\""));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! `packages/agent/docs/engine-redesign/`. The public `/engine` protocol is
 //! worker/client transport over canonical capabilities; model providers do not
 //! see that transport surface directly. Agents receive the capability-domain
-//! primitives (`search`, `inspect`, and `execute`) over this same live catalog.
+//! `execute` orchestrator over this same live catalog.
 //! The core invariants are:
 //!
 //! - the catalog is live, revisioned, and discoverable;

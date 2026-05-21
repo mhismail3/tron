@@ -10,7 +10,7 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `catalog` | Aggregated discovery, diagnostics, and guardrail view over domain-owned contracts |
-//! | `capability` | Collapsed model-facing `search`/`inspect`/`execute` harness over the live catalog |
+//! | `capability` | Single model-facing `execute` orchestrator over the live catalog |
 //! | `contract` | Method-agnostic builders for domain-owned `contract.rs` records |
 //! | `registration` | Startup loop that registers worker modules returned by domains |
 //! | `worker` | Shared setup-only domain worker module and function registration types |

@@ -629,6 +629,25 @@ assistant result after a session resume.
 | Boundary | Approval lifecycle remains server-owned; iOS only places the server-owned approval projection in chronological message order | No local approval policy, compatibility reader, or synthetic server event is added |
 | Regression coverage | Added `EngineApprovalTimelineTests.testApprovalInsertedBetweenExecuteAndResultByCreatedAt` | Future reconstruction changes must preserve approval chip ordering across resume |
 
+## 2026-05-21 Single Execute Orchestrator Cleanup
+
+The capability testing loop showed that the provider-facing
+search/inspect/execute choreography still made simple calls too easy to
+mis-shape. The engine already had the necessary substrate phases, so the
+cleanup was to collapse the model-visible surface without adding another state
+plane.
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Model surface | `capability::contract::model_metadata` now returns provider metadata only for `execute`; `capability::search` and `capability::inspect` remain operator/internal catalog functions | Make the model mental model one call: intent plus optional target and target-only arguments |
+| Orchestration | `capability::execute` now runs resolve, prepare, freshness, approval, child execution, replay, and observe behind the wrapper | Preserve canonical child invocation, approval, idempotency, and resource paths instead of adding a second executor |
+| Corrections | Safe shape mistakes such as `payload` versus `arguments`, nested wrapper fields, and process `expectedOutputs.kind/role` are corrected with `correctionsApplied` records | Auto-correction cannot broaden authority; mutating/elevated-risk calls still pause for freshness/approval |
+| Auditability | Every orchestration attempt records a bounded `capability.orchestration` audit event; `capability::audit_query` can filter by orchestration status, correction kind, and phase | Manual testing can improve recipes/ranking from database evidence rather than screenshots |
+| Post-audit hardening | Follow-up audit made the provider schema portable by removing schema-composition keywords while preserving flexible direct target aliases, removed stale prompt/doc references to model-visible search/inspect, made malformed constraints fail closed, applied constraints during intent resolution, and records parse/prepare/run failures in orchestration audit before returning | The one-tool contract must be intuitive and truthful in schema, prompts, docs, runtime behavior, and database evidence |
+| Manual QA fix | Intent-only “read README.md” initially resolved to `sandbox::stop_spawned_worker` because degraded local search over-weighted unrelated sandbox docs; the resolver now promotes deterministic path-read intents to `filesystem::read_file`, and `filesystem::read_file` accepts optional `startLine`/`endLine` bounds | Core read-file use must be a first-call success, not a self-corrected second attempt |
+| Regression coverage | Added contract, operations, registry, primitive-surface, provider-runner, and threat-model tests for single exported primitive, new schema shape, correction records, and orchestration audit filtering | Future providers must not re-export search/inspect as model primitives |
+| Documentation | Added [capability-orchestration-audit.md](capability-orchestration-audit.md) with manual test matrix, SQL queries, known confusion classes, and iteration rules | Capability ergonomics now has a durable testing and improvement loop |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:
@@ -646,6 +665,7 @@ The cleanup is protected by static tests that require:
   fields such as `process::run.executionMode`.
 - no provider clarification that allows warm-up/probe/example capability calls
   before an exact user-requested target payload.
+- no provider-visible capability primitive except `execute`.
 
 ## Verification Targets
 

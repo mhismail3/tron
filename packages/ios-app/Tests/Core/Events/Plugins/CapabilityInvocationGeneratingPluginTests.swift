@@ -78,4 +78,32 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
         XCTAssertEqual(capabilityResult.modelPrimitiveName, "execute")
         XCTAssertEqual(capabilityResult.invocationId, "tc3")
     }
+
+    func testTransformCarriesServerOwnedPresentationHints() throws {
+        let json = """
+        {
+            "type": "capability.invocation.generating",
+            "data": {
+                "modelPrimitiveName": "execute",
+                "invocationId": "tc4",
+                "contractId": "process::run",
+                "presentationHints": {
+                    "displayName": "Shell Command",
+                    "chipTitle": "Shell",
+                    "icon": "terminal",
+                    "themeColor": "#38BDF8"
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let event = try CapabilityInvocationGeneratingPlugin.parse(from: json)
+        let result = CapabilityInvocationGeneratingPlugin.transform(event) as? CapabilityInvocationGeneratingPlugin.Result
+
+        XCTAssertEqual(result?.identity.contractId, "process::run")
+        XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "Shell Command")
+        XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "Shell")
+        XCTAssertEqual(result?.identity.presentationHints?["icon"]?.stringValue, "terminal")
+        XCTAssertEqual(result?.identity.presentationHints?["themeColor"]?.stringValue, "#38BDF8")
+    }
 }

@@ -1041,12 +1041,49 @@ fn capability_registry_authority_stays_deleted() {
         crate_root.join("src/domains/agent/runner/agent/capability_invocation_executor.rs"),
     )
     .expect("failed to read agent capability executor");
+    let capability_contract_source =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/contract.rs"))
+            .expect("failed to read capability contract");
     assert!(
-        capability_executor_source.contains("\"search\"")
-            && capability_executor_source.contains("\"inspect\"")
-            && capability_executor_source.contains("\"execute\""),
-        "agent capability executor must route only the three capability primitives"
+        capability_contract_source.contains("\"modelPrimitiveName\": \"execute\"")
+            && !capability_contract_source.contains("\"modelPrimitiveName\": \"search\"")
+            && !capability_contract_source.contains("\"modelPrimitiveName\": \"inspect\""),
+        "provider metadata must expose only the single model-facing execute primitive"
     );
+    for prompt_path in [
+        "defaults/profiles/default/prompts/core.md",
+        "defaults/profiles/default/prompts/chat.md",
+        "defaults/profiles/default/prompts/local.md",
+        "defaults/profiles/default/prompts/git-workflow.md",
+        "defaults/profiles/default/prompts/processes/conflict-resolver.md",
+    ] {
+        let prompt = std::fs::read_to_string(crate_root.join(prompt_path))
+            .unwrap_or_else(|e| panic!("failed to read {prompt_path}: {e}"));
+        let has_retired_primitive_text = prompt.contains("exactly three model-facing primitives")
+            || prompt.contains("search`, `inspect`, and `execute")
+            || prompt.contains("search`, `inspect`, and\n`execute");
+        let has_single_execute_text = prompt.contains("one model-facing primitive")
+            || prompt.contains("model-facing primitive is `execute`")
+            || prompt.contains("`execute` target `process::run`");
+        assert!(
+            !has_retired_primitive_text && has_single_execute_text,
+            "{prompt_path} must teach the single execute primitive"
+        );
+        for retired_prompt_shape in [
+            "search.queries",
+            "inspect.targets",
+            "Discover filesystem read/write/edit implementations with `search`",
+            "inspect first",
+            "Search capabilities search file contents",
+            "Search for process/job capabilities",
+            "Use the inspected `process::run` capability",
+        ] {
+            assert!(
+                !prompt.contains(retired_prompt_shape),
+                "{prompt_path} must not teach retired model-facing capability choreography: {retired_prompt_shape}"
+            );
+        }
+    }
     for retired_runtime_term in [
         concat!("Tool", "Context"),
         concat!("capability", "_runtime"),
@@ -1124,6 +1161,9 @@ fn resource_materialization_enforcement_gates_stay_on() {
     let process_contract =
         std::fs::read_to_string(crate_root.join("src/domains/process/contract.rs"))
             .expect("failed to read process contract");
+    let capability_contract_source =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/contract.rs"))
+            .expect("failed to read capability contract");
     assert!(
         process_contract.contains("\"required\": [\"command\", \"executionMode\"]"),
         "process::run must require executionMode so write-like commands cannot default to direct execution"
@@ -1132,28 +1172,26 @@ fn resource_materialization_enforcement_gates_stay_on() {
         process_contract.contains("\"executionMode\": \"read_only\""),
         "process::run examples must not teach the retired no-executionMode request shape"
     );
-    let capability_contract =
-        std::fs::read_to_string(crate_root.join("src/domains/capability/contract.rs"))
-            .expect("failed to read capability contract");
     assert!(
-        capability_contract.contains(r#"{\"command\":\"date\",\"executionMode\":\"read_only\"}"#)
-            && !capability_contract.contains(r#"{\"command\":\"date\"} for process::run"#),
-        "capability::execute model schema must teach complete target payload requirements"
+        capability_contract_source
+            .contains(r#"{\"command\":\"date\",\"executionMode\":\"read_only\"}"#)
+            && capability_contract_source.contains("arguments")
+            && !capability_contract_source.contains(r#"{\"command\":\"date\"} for process::run"#),
+        "capability::execute model schema must teach complete target argument requirements"
     );
     assert!(
-        capability_contract.contains("This primitive is already capability::execute")
-            && capability_contract.contains("do not set contractId")
-            && capability_contract.contains("every required target parameter")
-            && capability_contract.contains("Do not run example/probe calls")
-            && capability_contract.contains("invoke that payload exactly"),
-        "capability::execute must explain target id placement and forbid recursive execute calls"
+        capability_contract_source.contains("Do not call separate search or inspect tools")
+            && capability_contract_source.contains("optional target hint")
+            && capability_contract_source.contains("mutating or elevated-risk work still pauses")
+            && capability_contract_source.contains("payload_to_arguments"),
+        "capability::execute must define one-tool orchestration, correction, and approval semantics"
     );
     let openai_message_converter = std::fs::read_to_string(
         crate_root.join("src/domains/model/providers/openai/message_converter.rs"),
     )
     .expect("failed to read OpenAI message converter");
     assert!(
-        openai_message_converter.contains("exact contract id and payload")
+        openai_message_converter.contains("exact contract id and arguments")
             && openai_message_converter.contains("call that exact target once")
             && openai_message_converter
                 .contains("do not run warm-up, probe, date, status, or example commands first")

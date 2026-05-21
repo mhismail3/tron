@@ -32,6 +32,7 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
             let rootInvocationId: String?
             let bindingDecisionId: String?
             let themeColor: String?
+            let presentationHints: [String: AnyCodable]?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -49,7 +50,8 @@ enum CapabilityInvocationGeneratingPlugin: DispatchableEventPlugin {
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
                     bindingDecisionId: bindingDecisionId,
-                    themeColor: themeColor
+                    themeColor: themeColor,
+                    presentationHints: presentationHints
                 )
             }
         }

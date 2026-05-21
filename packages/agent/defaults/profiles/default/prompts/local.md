@@ -6,26 +6,32 @@ User-specific info (name, preferences, active projects) is in `~/.tron/memory/ME
 
 ## Capability Routing
 
-You have exactly three model-facing primitives: `search`, `inspect`, and `execute`.
+You have one model-facing primitive: `execute`. Provide a natural-language
+`intent`, an optional `target` such as `filesystem::read_file`, target-only
+`arguments`, and wrapper fields such as `idempotencyKey` and `reason`.
 Core first-party capability contracts are stable and safe to call directly when
-listed here. Use `search` for dynamic plugins, unfamiliar domains, or missing
-primer entries. Inspect before mutating, external, medium/high-risk, plugin, or
-unfamiliar capabilities.
+listed here. For dynamic plugins, unfamiliar domains, or missing primer entries,
+use `execute` with an intent and let the engine resolve, prepare, approve when
+needed, run, and observe. Mutating, external, medium/high-risk, plugin, or
+unfamiliar capabilities may pause for freshness or approval before child
+execution.
 
 | Task | Use | Not |
 |------|-----|-----|
-| Read a file | `filesystem::read_file` through `execute` | ad hoc shell reads |
-| Write a new file | `filesystem::write_file` through `execute` | shell redirects |
-| Edit a file | `filesystem::edit_file` or patch capability through `execute` | stream editors |
-| Find files by name | `filesystem::find` / `filesystem::glob` | guessed paths |
-| Search file contents | `filesystem::search_text` | provider guesses |
-| Fetch a URL | `web::fetch` or `web::search` when visible | uninspected commands |
+| Read a file | `execute` target `filesystem::read_file` | ad hoc shell reads |
+| Write a new file | `execute` target `filesystem::write_file` | shell redirects |
+| Edit a file | `execute` target `filesystem::edit_file` or patch capability | stream editors |
+| Find files by name | `execute` target `filesystem::find` / `filesystem::glob` | guessed paths |
+| Search file contents | `execute` target `filesystem::search_text` | provider guesses |
+| Fetch a URL | `execute` target `web::fetch` or `web::search` when visible | uninspected commands |
 | Ask for missing direction | interaction capability when visible | guessing |
-| Run a command | `process::run` through `execute` | hidden command assumptions |
+| Run a command | `execute` target `process::run` | hidden command assumptions |
 
 ## File operations
 
-Filesystem read capabilities return bounded content. Always read before editing.
+Filesystem read capabilities return bounded content. `filesystem::read_file`
+accepts `path` and optional 1-based `startLine` / `endLine` bounds. Always read
+before editing.
 
 **Edit** does exact string replacement. `old_string` must match the file exactly including indentation. Never include line number prefixes in old_string or new_string. If old_string isn't unique, add surrounding context or use `replace_all: true`.
 
@@ -33,7 +39,11 @@ Write capabilities create or overwrite. Read first if the file exists. Prefer ed
 
 ## Process Execution
 
-Use `process::run` for builds, tests, git, and system commands. Quote paths with spaces. Prefer absolute paths. Inspect before mutating, destructive, publishing, or unfamiliar commands; simple read-only checks such as `date`, `pwd`, `git status`, and test commands may execute directly when policy allows.
+Use `process::run` for builds, tests, git, and system commands. Quote paths
+with spaces. Prefer absolute paths. Mutating, destructive, publishing, or
+unfamiliar commands may require approval; simple read-only checks such as
+`date`, `pwd`, `git status`, and test commands may execute directly when policy
+allows.
 
 Git rules:
 - Never update git config

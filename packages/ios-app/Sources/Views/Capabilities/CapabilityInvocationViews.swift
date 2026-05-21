@@ -160,9 +160,7 @@ struct CapabilityInvocationDetailSheet: View {
             targetId: display.targetId
         )
     }
-    private var sourceAccent: Color { CapabilityPresentation.sourceColor(for: data.identity) }
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
-    private var sourceTint: TintedColors { TintedColors(accent: sourceAccent, colorScheme: colorScheme) }
     private var primitive: String { CapabilityPresentation.primitiveName(for: data.identity) }
 
     var body: some View {
@@ -178,6 +176,7 @@ struct CapabilityInvocationDetailSheet: View {
 
                     progressSection
                     requestSection
+                    executionSection
                     approvalSection
                     resultSection
                     artifactsSection
@@ -219,9 +218,23 @@ struct CapabilityInvocationDetailSheet: View {
     @ViewBuilder
     private var requestSection: some View {
         if !display.requestRows.isEmpty {
-            CapabilityDetailSection(title: "Request", accent: sourceAccent, tint: sourceTint) {
+            CapabilityDetailSection(title: "Request", accent: accent, tint: tint) {
                 VStack(alignment: .leading, spacing: 12) {
-                    CapabilityReadableRows(rows: display.requestRows, tint: sourceTint)
+                    CapabilityReadableRows(rows: display.requestRows, tint: tint)
+                }
+            }
+            .sheetSection()
+        }
+    }
+
+    @ViewBuilder
+    private var executionSection: some View {
+        if !display.executionGroups.isEmpty {
+            CapabilityDetailSection(title: "Execution Path", accent: accent, tint: tint) {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(display.executionGroups) { group in
+                        CapabilityExecutionGroupView(group: group, tint: tint)
+                    }
                 }
             }
             .sheetSection()
@@ -241,18 +254,18 @@ struct CapabilityInvocationDetailSheet: View {
     @ViewBuilder
     private var resultSection: some View {
         if display.resultPreview?.nilIfEmpty != nil || data.result?.nilIfEmpty != nil || !display.resultRows.isEmpty {
-            CapabilityDetailSection(title: data.status == .error ? "Failure" : "Result", accent: resultAccent, tint: resultTint) {
+            CapabilityDetailSection(title: data.status == .error ? "Failure" : "Result", accent: accent, tint: tint) {
                 VStack(alignment: .leading, spacing: 12) {
                     if primitive == "execute" {
                         if !display.resultRows.isEmpty {
-                            CapabilityReadableRows(rows: display.resultRows, tint: resultTint)
+                            CapabilityReadableRows(rows: display.resultRows, tint: tint)
                         }
                         if let preview = display.resultPreview?.nilIfEmpty {
                             CapabilityInvocationCodeBlock(text: preview)
                         } else if data.result?.nilIfEmpty != nil {
                             CapabilityResultNote(
                                 text: "Structured output is available in Metadata.",
-                                tint: resultTint
+                                tint: tint
                             )
                         }
                     } else if let result = data.result, !result.isEmpty {
@@ -331,14 +344,6 @@ struct CapabilityInvocationDetailSheet: View {
             }
             .sheetSection()
         }
-    }
-
-    private var resultAccent: Color {
-        data.status == .error ? .tronError : .tronSuccess
-    }
-
-    private var resultTint: TintedColors {
-        TintedColors(accent: resultAccent, colorScheme: colorScheme)
     }
 
     private var shouldShowProgressSection: Bool {
@@ -468,6 +473,130 @@ private struct CapabilityDetailHeader: View {
             parts.append(target)
         }
         return parts.joined(separator: " via ")
+    }
+}
+
+@available(iOS 26.0, *)
+private struct CapabilityExecutionGroupView: View {
+    let group: CapabilityDisplayGroup
+    let tint: TintedColors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: iconName)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                    .foregroundStyle(tint.accent)
+                    .frame(width: 24, height: 24)
+                    .background {
+                        Circle()
+                            .fill(tint.accent.opacity(0.14))
+                    }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(group.title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                        .foregroundStyle(.tronTextPrimary)
+
+                    if let summary {
+                        Text(summary)
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                            .foregroundStyle(tint.secondary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+
+            if !detailRows.isEmpty {
+                Divider()
+                    .overlay(tint.accent.opacity(0.16))
+
+                CapabilityReadableRows(rows: detailRows, tint: tint)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.tronSurface.opacity(0.45))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(tint.accent.opacity(0.16), lineWidth: 1)
+                }
+        }
+    }
+
+    private var iconName: String {
+        switch group.title {
+        case "Resolution":
+            return "point.topleft.down.curvedto.point.bottomright.up"
+        case "Preparation":
+            return "checklist.checked"
+        case "Run":
+            return "play.circle"
+        case "Discovery":
+            return "magnifyingglass"
+        case "Corrections":
+            return "wand.and.sparkles"
+        default:
+            return "circle.grid.cross"
+        }
+    }
+
+    private var summary: String? {
+        switch group.title {
+        case "Resolution":
+            return [value("Mode"), value("Target").map(humanizeCapability)].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+        case "Preparation":
+            return [value("Payload"), value("Approval"), value("Corrections")].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+        case "Run":
+            return [value("Status"), value("Duration")].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+        case "Discovery":
+            return [value("Search"), value("Vector index")].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+        case "Corrections":
+            return value("Applied")
+        default:
+            return nil
+        }
+    }
+
+    private var detailRows: [CapabilityDisplayRow] {
+        let summarized = Set(summaryLabels)
+        return group.rows.filter { !summarized.contains($0.label) }
+    }
+
+    private var summaryLabels: [String] {
+        switch group.title {
+        case "Resolution":
+            return ["Mode", "Target"]
+        case "Preparation":
+            return ["Payload", "Approval", "Corrections"]
+        case "Run":
+            return ["Status", "Duration"]
+        case "Discovery":
+            return ["Search", "Vector index"]
+        case "Corrections":
+            return ["Applied"]
+        default:
+            return []
+        }
+    }
+
+    private func value(_ label: String) -> String? {
+        group.rows.first { $0.label == label }?.value.nilIfEmpty
+    }
+
+    private func humanizeCapability(_ id: String) -> String {
+        id.split(separator: "::").last?
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { word in
+                guard let first = word.first else { return "" }
+                return first.uppercased() + word.dropFirst()
+            }
+            .joined(separator: " ") ?? id
     }
 }
 

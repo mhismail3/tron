@@ -501,7 +501,7 @@ stripSkillIndex = true
 stripJobResults = true
 skipPendingJobsBootstrap = true
 rulesTruncationChars = 500
-rulesTruncationSuffix = "\n\n[Truncated - full rules are available through search, inspect, and execute]"
+rulesTruncationSuffix = "\n\n[Truncated - full rules are available through execute]"
 
 [contextPolicies.minimalTransform]
 primitiveSurfacePolicy = "none"
@@ -513,12 +513,12 @@ skipPendingJobsBootstrap = true
 
 # Primitive surface policies control only the provider-facing primitives.
 [primitiveSurfacePolicies.default]
-allowedPrimitives = ["search", "inspect", "execute"]
+allowedPrimitives = ["execute"]
 exposeInteractiveCapabilities = true
 removeSpawnAtMaxDepth = true
 
 [primitiveSurfacePolicies.localModel]
-allowedPrimitives = ["search", "inspect", "execute"]
+allowedPrimitives = ["execute"]
 exposeInteractiveCapabilities = true
 removeSpawnAtMaxDepth = true
 
@@ -528,17 +528,17 @@ exposeInteractiveCapabilities = false
 removeSpawnAtMaxDepth = true
 
 [primitiveSurfacePolicies.subagentInherited]
-allowedPrimitives = ["search", "inspect", "execute"]
+allowedPrimitives = ["execute"]
 exposeInteractiveCapabilities = false
 removeSpawnAtMaxDepth = true
 
 [primitiveSurfacePolicies.unattended]
-allowedPrimitives = ["search", "inspect", "execute"]
+allowedPrimitives = ["execute"]
 exposeInteractiveCapabilities = false
 removeSpawnAtMaxDepth = true
 
 [primitiveSurfacePolicies.conflictResolver]
-allowedPrimitives = ["search", "inspect", "execute"]
+allowedPrimitives = ["execute"]
 exposeInteractiveCapabilities = false
 removeSpawnAtMaxDepth = true
 

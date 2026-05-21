@@ -2,10 +2,9 @@
 //!
 //! The provider-facing capability list is resolved from the live engine catalog at
 //! each model-call boundary. The visible model harness is intentionally tiny:
-//! only the `capability` worker's `search`, `inspect`, and `execute`
-//! primitives are exposed. Every concrete filesystem, web, MCP, shell, UI, or
+//! only the `capability` worker's `execute` orchestrator is exposed. Every concrete filesystem, web, MCP, shell, UI, or
 //! agent action remains a worker-owned capability that the model discovers and
-//! invokes through those primitives.
+//! invokes through that orchestrator.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -563,9 +562,6 @@ mod tests {
         )
         .await
         .expect("surface");
-        assert_eq!(
-            surface.all_model_capability_ids,
-            ["search", "inspect", "execute"]
-        );
+        assert_eq!(surface.all_model_capability_ids, ["execute"]);
     }
 }

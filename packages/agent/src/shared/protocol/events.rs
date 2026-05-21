@@ -31,7 +31,9 @@ use crate::shared::model_capabilities::CapabilityResult;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityEventIdentity {
-    /// Provider-visible primitive name (`search`, `inspect`, or `execute`).
+    /// Provider-visible primitive name. The model-facing surface is the single
+    /// `execute` orchestrator; this field remains a projection label for
+    /// immutable event records rather than an execution policy source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_primitive_name: Option<String>,
     /// Stable abstract capability contract id.
@@ -76,6 +78,13 @@ pub struct CapabilityEventIdentity {
     /// Optional presentation theme color declared by capability metadata.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme_color: Option<String>,
+    /// Optional capability-owned presentation metadata for native clients.
+    ///
+    /// This is a bounded hint projection, not authority. Clients may render
+    /// `displayName`, `chipTitle`, `icon`, and `themeColor`, while execution
+    /// identity and policy remain in the typed identity fields above.
+    #[serde(rename = "presentationHints", skip_serializing_if = "Option::is_none")]
+    pub presentation_hints: Option<Value>,
 }
 
 impl CapabilityEventIdentity {
@@ -1871,6 +1880,12 @@ mod tests {
                 root_invocation_id: Some("root-test".into()),
                 binding_decision_id: Some("binding-test".into()),
                 theme_color: Some("#10B981".into()),
+                presentation_hints: Some(serde_json::json!({
+                    "displayName": "Read File",
+                    "chipTitle": "Read",
+                    "icon": "doc.text.magnifyingglass",
+                    "themeColor": "#10B981"
+                })),
             },
         };
         assert!(e.is_capability_invocation());
@@ -1885,6 +1900,11 @@ mod tests {
         assert_eq!(json["catalogRevision"], 7);
         assert_eq!(json["bindingDecisionId"], "binding-test");
         assert_eq!(json["themeColor"], "#10B981");
+        assert_eq!(json["presentationHints"]["displayName"], "Read File");
+        assert_eq!(
+            json["presentationHints"]["icon"],
+            "doc.text.magnifyingglass"
+        );
     }
 
     #[test]

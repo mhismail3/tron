@@ -86,11 +86,30 @@ async fn filesystem_get_home_value(_deps: &Deps) -> Result<Value, CapabilityErro
 async fn file_read_value(invocation: &Invocation, _deps: &Deps) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
+    let start_line = optional_line_bound(params, "startLine")?;
+    let end_line = optional_line_bound(params, "endLine")?;
     let path = resolve_invocation_path(invocation, &path);
     run_blocking_task("filesystem::read_file", move || {
-        filesystem_service::read_file(&path)
+        filesystem_service::read_file_bounded(&path, start_line, end_line)
     })
     .await
+}
+
+fn optional_line_bound(params: Option<&Value>, key: &str) -> Result<Option<u64>, CapabilityError> {
+    let Some(value) = params.and_then(|params| params.get(key)) else {
+        return Ok(None);
+    };
+    let Some(number) = value.as_u64() else {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("{key} must be a positive integer"),
+        });
+    };
+    if number == 0 {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("{key} must be 1 or greater"),
+        });
+    }
+    Ok(Some(number))
 }
 
 async fn filesystem_write_file_value(

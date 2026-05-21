@@ -134,6 +134,16 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             "payload": {"command": "pwd && test -f README.md && sed -n '1,3p' README.md", "executionMode": "read_only"},
             "idempotencyKey": "readme-check-<turn>",
             "reason": "Check the active session worktree and print a bounded README preview."
+        }), json!({
+            "mode": "invoke",
+            "contractId": "process::run",
+            "payload": {
+                "command": "printf 'ok\\n' > result.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "result.txt"}]
+            },
+            "idempotencyKey": "process-materialized-<turn>",
+            "reason": "Create one declared sandbox output and materialize it through resource refs."
         })])
         .build()?,
     ])

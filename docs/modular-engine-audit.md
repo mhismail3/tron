@@ -128,7 +128,7 @@ made less product-shaped.
 
 | Family | Current function | Disposition |
 | --- | --- | --- |
-| `capability` | Model-facing `search`, `inspect`, `execute`; registry snapshot; plugin/binding/policy/audit/admin functions; vector-backed search and primer rendering. | Keep and sharpen. This is the agent's gateway into the live catalog. Admin surfaces should become operator capabilities, not fixed app pages. |
+| `capability` | Model-facing `execute` orchestrator; operator search/inspect; registry snapshot; plugin/binding/policy/audit/admin functions; vector-backed search and primer rendering. | Keep and sharpen. This is the agent's gateway into the live catalog. Admin surfaces should become operator capabilities, not fixed app pages. |
 | `program` | `program::run_javascript`, QuickJS sidecar process, bounded `tools.search/inspect/execute` composition. | Keep. This is a strong modular-composition primitive and should become a canonical way to build higher-order workflows. |
 | `model` and `config` | Provider catalog/list/switch and reasoning level. Providers include Anthropic, OpenAI, Google, MiniMax, Kimi, and Ollama. | Keep, but separate model-provider plumbing from chat-product assumptions. Local providers and profile policy are strategically important. |
 | `auth` | Provider credentials, OAuth/API keys, account selection, bearer token. | Keep minimal. It is infrastructure, not a UX feature. iOS auth pages can be rebuilt generically from capability/UI metadata. |
@@ -245,7 +245,7 @@ flowchart LR
   Kernel --> Ledger["Ledger / idempotency / trace"]
   Kernel --> Streams["Streams / state / queue / resources / approvals"]
   Kernel --> Registry["Capability registry + policies"]
-  Registry --> Agent["Agent runtime: search / inspect / execute"]
+  Registry --> Agent["Agent runtime: execute"]
   Agent --> Modules["Capability modules"]
   Agent --> UI["Declarative UI primitive"]
   UI --> IOS
@@ -256,8 +256,8 @@ Target properties:
 - The engine kernel is independent of the iOS product shell.
 - Every executable unit is a canonical `namespace::function` owned by one
   worker.
-- Agent-facing behavior goes through `capability::search`,
-  `capability::inspect`, and `capability::execute`.
+- Agent-facing behavior goes through one model-visible `capability::execute`
+  primitive. Search and inspect remain operator/internal catalog views.
 - Product-specific workflows become optional worker packages or generated UI
   surfaces, not hardcoded client navigation.
 - Chat exists to test model turns, capability calls, approvals, streaming, and
@@ -423,7 +423,7 @@ Tests/docs:
 ## Immediate Decisions
 
 1. The engine kernel stays.
-2. The capability registry/search/inspect/execute path stays.
+2. The capability registry plus single model-facing execute path stays.
 3. Program execution stays.
 4. Sandbox-created workers stay.
 5. iOS chat stays only as a modular engine harness.

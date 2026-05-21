@@ -172,7 +172,11 @@ pub(crate) fn create_dir(path: &str) -> Result<Value, CapabilityError> {
     Ok(serde_json::json!({ "created": true, "path": path }))
 }
 
-pub(crate) fn read_file(path: &str) -> Result<Value, CapabilityError> {
+pub(crate) fn read_file_bounded(
+    path: &str,
+    start_line: Option<u64>,
+    end_line: Option<u64>,
+) -> Result<Value, CapabilityError> {
     trace_out_of_home(path, "read_file");
     let content = std::fs::read_to_string(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -189,7 +193,48 @@ pub(crate) fn read_file(path: &str) -> Result<Value, CapabilityError> {
         }
     })?;
 
-    Ok(serde_json::json!({ "content": content, "path": path }))
+    let mut value = serde_json::json!({ "content": content, "path": path });
+    if start_line.is_some() || end_line.is_some() {
+        let content = value["content"].as_str().unwrap_or_default();
+        let bounded = bounded_line_content(content, start_line, end_line)?;
+        value["content"] = serde_json::json!(bounded);
+        if let Some(start_line) = start_line {
+            value["startLine"] = serde_json::json!(start_line);
+        }
+        if let Some(end_line) = end_line {
+            value["endLine"] = serde_json::json!(end_line);
+        }
+    }
+    Ok(value)
+}
+
+fn bounded_line_content(
+    content: &str,
+    start_line: Option<u64>,
+    end_line: Option<u64>,
+) -> Result<String, CapabilityError> {
+    let start = start_line.unwrap_or(1);
+    let end = end_line.unwrap_or(u64::MAX);
+    if end < start {
+        return Err(CapabilityError::InvalidParams {
+            message: "endLine must be greater than or equal to startLine".to_owned(),
+        });
+    }
+
+    let mut selected = String::new();
+    for (index, line) in content.split_inclusive('\n').enumerate() {
+        let line_number = u64::try_from(index)
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .unwrap_or(u64::MAX);
+        if line_number > end {
+            break;
+        }
+        if line_number >= start {
+            selected.push_str(line);
+        }
+    }
+    Ok(selected)
 }
 
 pub(crate) fn write_file(path: &str, content: &str) -> Result<Value, CapabilityError> {
@@ -487,8 +532,8 @@ mod tests {
         // Traversal path: <tmp>/inner/../secret.txt — path containment
         // would reject this. Trusted-local allows it.
         let traversal = format!("{}/../secret.txt", inner.to_string_lossy());
-        let result =
-            read_file(&traversal).expect("trusted-local filesystem MUST allow traversal reads");
+        let result = read_file_bounded(&traversal, None, None)
+            .expect("trusted-local filesystem MUST allow traversal reads");
         assert_eq!(result["content"].as_str().unwrap(), "trusted-local");
 
         // list_dir also accepts traversal (picker-browse use case).
@@ -497,6 +542,34 @@ mod tests {
             .expect("trusted-local list_dir MUST allow traversal");
         let entries = listing["entries"].as_array().unwrap();
         assert!(entries.iter().any(|e| e["name"] == "secret.txt"));
+    }
+
+    #[test]
+    fn read_file_supports_1_based_line_bounds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("readme.md");
+        std::fs::write(&target, "one\ntwo\nthree\nfour\n").unwrap();
+
+        let result =
+            read_file_bounded(target.to_str().unwrap(), Some(2), Some(3)).expect("bounded read");
+        assert_eq!(result["content"], "two\nthree\n");
+        assert_eq!(result["startLine"], 2);
+        assert_eq!(result["endLine"], 3);
+    }
+
+    #[test]
+    fn read_file_rejects_inverted_line_bounds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("readme.md");
+        std::fs::write(&target, "one\ntwo\n").unwrap();
+
+        let error = read_file_bounded(target.to_str().unwrap(), Some(3), Some(2))
+            .expect_err("inverted bounds rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("endLine must be greater than or equal to startLine")
+        );
     }
 
     /// `trace_out_of_home` is logging-only and must never panic or

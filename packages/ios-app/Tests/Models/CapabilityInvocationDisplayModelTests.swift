@@ -145,6 +145,96 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(invocation.display.commandText, "pwd")
     }
 
+    func testExecuteDisplaysTargetArgumentsAndExecutionPath() {
+        let invocation = testCapabilityInvocation(
+            status: .success,
+            arguments: #"{"target":"process::run","intent":"Run a safe read-only process command.","arguments":{"command":"pwd && sed -n '1,3p' README.md","executionMode":"read_only"},"reason":"User requested an exact read-only process command."}"#,
+            result: #"{"durationMs":10,"exitCode":0,"outputTruncated":false,"stderr":"","stdout":"/tmp/worktree\nREADME\n","timedOut":false}"#,
+            details: [
+                "status": "ok",
+                "catalogRevision": 389,
+                "childInvocations": ["019e4be0-28d5-71a1-a8c9-c70640ecd6b4"],
+                "bindingDecision": [
+                    "selectionPolicy": "first_party_healthy",
+                    "selectedImplementation": "first_party.process.v1.run"
+                ],
+                "correctedRequest": [
+                    "target": ["capabilityId": "process::run"],
+                    "arguments": [
+                        "command": "pwd && sed -n '1,3p' README.md",
+                        "executionMode": "read_only"
+                    ]
+                ],
+                "correctionConfidence": 1.0,
+                "correctionsApplied": [],
+                "orchestration": [
+                    "phaseDetails": [
+                        "resolveMode": "explicit_target",
+                        "preparedRequest": [
+                            "hasPayload": true,
+                            "hasInspectionHandle": false
+                        ],
+                        "selectedTarget": [
+                            "catalogRevision": 389,
+                            "contractId": "process::run",
+                            "effectClass": "ExternalSideEffect",
+                            "functionId": "process::run",
+                            "implementationId": "first_party.process.v1.run",
+                            "riskLevel": "High",
+                            "schemaDigest": "sha256:process-schema"
+                        ]
+                    ]
+                ],
+                "output": [
+                    "durationMs": 10,
+                    "exitCode": 0,
+                    "outputTruncated": false,
+                    "stderr": "",
+                    "stdout": "/tmp/worktree\nREADME\n",
+                    "timedOut": false
+                ]
+            ],
+            durationMs: 192,
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "execute",
+                contractId: "process::run",
+                implementationId: "first_party.process.v1.run",
+                functionId: "process::run",
+                pluginId: "first_party.process",
+                workerId: "process",
+                schemaDigest: "sha256:process-schema",
+                catalogRevision: 389,
+                trustTier: "first_party_signed",
+                riskLevel: "High",
+                effectClass: "ExternalSideEffect",
+                traceId: "trace-process",
+                rootInvocationId: "root-process",
+                bindingDecisionId: "binding-process"
+            )
+        )
+
+        XCTAssertEqual(invocation.display.commandText, "pwd && sed -n '1,3p' README.md")
+        XCTAssertEqual(
+            invocation.display.requestRows.map(\.label),
+            ["Command", "Execution mode", "Intent", "Reason"]
+        )
+        XCTAssertFalse(invocation.display.requestRows.contains { $0.label == "Payload" })
+        XCTAssertEqual(invocation.display.executionGroups.map(\.title), ["Resolution", "Preparation", "Run"])
+        XCTAssertTrue(invocation.display.executionGroups[0].rows.contains(CapabilityDisplayRow(label: "Mode", value: "Explicit Target")))
+        XCTAssertTrue(invocation.display.executionGroups[0].rows.contains(CapabilityDisplayRow(label: "Target", value: "process::run", isTechnical: true)))
+        XCTAssertTrue(invocation.display.executionGroups[0].rows.contains(CapabilityDisplayRow(label: "Selection", value: "First Party Healthy")))
+        XCTAssertTrue(invocation.display.executionGroups[1].rows.contains(CapabilityDisplayRow(label: "Capability risk", value: "High")))
+        XCTAssertTrue(invocation.display.executionGroups[1].rows.contains(CapabilityDisplayRow(label: "Effect class", value: "External Side Effect")))
+        XCTAssertTrue(invocation.display.executionGroups[1].rows.contains(CapabilityDisplayRow(label: "Approval", value: "Not required")))
+        XCTAssertTrue(invocation.display.executionGroups[1].rows.contains(CapabilityDisplayRow(label: "Corrections", value: "None")))
+        XCTAssertTrue(invocation.display.executionGroups[2].rows.contains(CapabilityDisplayRow(label: "Status", value: "Completed")))
+        XCTAssertFalse(invocation.display.executionGroups[2].rows.contains { $0.label == "Exit code" })
+        XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Exit code", value: "0")))
+        XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Timed out", value: "No")))
+        XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Output truncated", value: "No")))
+        XCTAssertEqual(invocation.display.resultPreview, "/tmp/worktree\nREADME")
+    }
+
     func testDurationPrefersObservedInvocationSpanWhenLongerThanServerDuration() {
         let started = Date(timeIntervalSince1970: 1_000)
         let completed = started.addingTimeInterval(2.4)
@@ -226,6 +316,34 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
 
         XCTAssertEqual(CapabilityPresentation.pluginLabel(for: identity), "Notifications (First-party)")
         XCTAssertEqual(identity.themeColor, "#EC4899")
+    }
+
+    func testPresentationUsesServerOwnedHintsWhenProvided() {
+        let identity = CapabilityIdentity(
+            modelPrimitiveName: "execute",
+            contractId: "process::run",
+            implementationId: "first_party.process.v1.run",
+            functionId: "process::run",
+            pluginId: "first_party.process",
+            trustTier: "first_party_signed",
+            presentationHints: [
+                "displayName": "Shell Command",
+                "chipTitle": "Shell",
+                "icon": "terminal",
+                "themeColor": "#38BDF8"
+            ]
+        )
+        let invocation = CapabilityInvocationData(
+            id: "cap-1",
+            status: .success,
+            arguments: #"{"intent":"run a command","target":"process::run","arguments":{"command":"pwd","executionMode":"read_only"}}"#,
+            identity: identity
+        )
+
+        XCTAssertEqual(invocation.display.capabilityName, "Shell Command")
+        XCTAssertEqual(invocation.display.chipTitle, "Shell")
+        XCTAssertEqual(CapabilityPresentation.symbol(for: identity), "terminal")
+        XCTAssertEqual(CapabilityPresentation.themeColorHex(for: identity), "#38BDF8")
     }
 
     func testPresentationDerivesThemeColorFromResolvedCapabilityWhenEventOmitsHint() {

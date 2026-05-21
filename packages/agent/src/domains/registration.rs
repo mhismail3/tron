@@ -14,8 +14,8 @@
 //! external capabilities are all surfaced through the same agent-facing
 //! capability fabric.
 //! `capability` is the collapsed model-facing harness worker: providers see
-//! only `search`, `inspect`, and `execute`, and those primitives route back
-//! into live worker-owned catalog entries. `engine_ws` trigger records capture public engine protocol messages.
+//! only `execute`, and that orchestrator routes back into live worker-owned
+//! catalog entries. `engine_ws` trigger records capture public engine protocol messages.
 //! `cron_schedule` trigger records capture scheduled automation fires.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface

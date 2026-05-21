@@ -1,12 +1,12 @@
 //! Program executor domain worker.
 //!
 //! This domain owns Tron's first-party JavaScript program execution capability.
-//! The model still invokes it only through `capability::execute` with
-//! `mode = "program"`; the parent-side domain owns the concrete
-//! `program::run_javascript` capability while a separate first-party process
-//! owns the QuickJS runtime. Child capability calls return to the parent over
-//! the program protocol, so the engine remains the sole authority for search,
-//! inspect, execute, policy, trace, and audit.
+//! The model invokes it through the single `capability::execute` primitive by
+//! selecting the `program::run_javascript` target; the parent-side domain owns
+//! the concrete capability while a separate first-party process owns the
+//! QuickJS runtime. Child capability calls return to the parent over the program
+//! protocol, so the engine remains the sole authority for capability
+//! resolution, preparation, execution, policy, trace, and audit.
 //! Packaged and dev flows must stage `tron-program-worker` beside the running
 //! `tron` executable; production code does not rely on `TRON_PROGRAM_WORKER_BIN`
 //! except as a focused test override.
@@ -25,7 +25,8 @@
 //! # INVARIANT: no host APIs in JavaScript
 //!
 //! JavaScript programs receive only immutable `args`, `console.log`, and the
-//! frozen `tools.search`/`tools.inspect`/`tools.execute` host-call surface. There is no
+//! frozen `tools.search`/`tools.inspect`/`tools.execute` host-call surface for
+//! bounded program composition. There is no
 //! filesystem, network, process, import loader, environment, secret, mutable
 //! clock, native module, or host object surface.
 

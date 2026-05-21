@@ -4,9 +4,9 @@
 //! than creating a second capability catalog. A catalog function is projected as a
 //! stable contract plus one concrete implementation. Future plugin manifests
 //! can add richer contract/binding rows without changing the model-facing
-//! `search`/`inspect`/`execute` surface.
+//! single `execute` surface.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -408,6 +408,9 @@ pub(crate) async fn execute_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    if is_orchestrated_execute_payload(&invocation.payload) {
+        return execute_orchestrated_value(invocation, deps).await;
+    }
     let mode = string_field(&invocation.payload, "mode").unwrap_or_else(|| "invoke".to_owned());
     match mode.as_str() {
         "invoke" => execute_invoke_value(invocation, deps).await,
@@ -416,6 +419,1273 @@ pub(crate) async fn execute_value(
             message: format!("Unsupported capability execute mode '{other}'"),
         }),
     }
+}
+
+#[derive(Debug)]
+struct OrchestratedExecuteInput {
+    intent: Option<String>,
+    target_params: Option<Value>,
+    arguments: Value,
+    constraints: Value,
+    idempotency_key: Option<String>,
+    reason: Option<String>,
+    corrections: Vec<Value>,
+}
+
+fn is_orchestrated_execute_payload(params: &Value) -> bool {
+    params.get("intent").is_some()
+        || params.get("target").is_some()
+        || params.get("arguments").is_some()
+        || params.get("constraints").is_some()
+        || (params.get("mode").is_none() && params.get("payload").is_some())
+}
+
+async fn execute_orchestrated_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let orchestration_id = format!("capability-orchestration:{}", uuid::Uuid::now_v7());
+    let actor = actor_from_invocation(invocation)?;
+    let mut input = match parse_orchestrated_execute_input(&invocation.payload) {
+        Ok(input) => input,
+        Err(error) => {
+            let diagnostics =
+                orchestration_request_error_details(&orchestration_id, "request_invalid", &error);
+            record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+            return orchestration_result(
+                "request_invalid",
+                &format!("execute request is invalid: {error}"),
+                diagnostics,
+                true,
+            );
+        }
+    };
+    if let Err(error) = validate_orchestration_constraint_keys(&input.constraints) {
+        let diagnostics = orchestration_details(
+            &orchestration_id,
+            "constraints_rejected",
+            input.intent.as_deref(),
+            None,
+            &input,
+            json!({
+                "phase": "resolve",
+                "error": capability_error_details(&error),
+            }),
+            Vec::new(),
+        );
+        record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+        return orchestration_result(
+            "constraints_rejected",
+            &format!("execute constraints are invalid: {error}"),
+            diagnostics,
+            true,
+        );
+    }
+    let resolve = match input.target_params.clone() {
+        Some(target_params) => OrchestrationResolve {
+            target_params,
+            mode: "explicit_target".to_owned(),
+            candidates: Vec::new(),
+            rejected_candidates: Vec::new(),
+            search_status: Value::Null,
+        },
+        None => {
+            let Some(intent) = input.intent.as_deref() else {
+                let diagnostics = orchestration_details(
+                    &orchestration_id,
+                    "needs_input",
+                    input.intent.as_deref(),
+                    None,
+                    &input,
+                    json!({
+                        "phase": "resolve",
+                        "missingFields": ["intent", "target"]
+                    }),
+                    Vec::new(),
+                );
+                record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+                return orchestration_result(
+                    "needs_input",
+                    "Tell execute either the natural-language intent or an explicit target capability.",
+                    diagnostics,
+                    true,
+                );
+            };
+            match resolve_intent_target(intent, &input.arguments, &actor, deps, &input.constraints)
+                .await?
+            {
+                IntentResolveOutcome::Resolved(resolve) => resolve,
+                IntentResolveOutcome::NeedsCapability {
+                    candidates,
+                    search_status,
+                } => {
+                    let diagnostics = orchestration_details(
+                        &orchestration_id,
+                        "needs_capability",
+                        input.intent.as_deref(),
+                        None,
+                        &input,
+                        json!({
+                            "phase": "resolve",
+                            "candidates": candidates,
+                            "searchStatus": search_status,
+                            "proposedCapabilityShape": {
+                                "contractId": "<namespace>::<function>",
+                                "argumentsSchema": {},
+                                "effect": "pure_read|idempotent_write|external_side_effect",
+                                "risk": "low|medium|high|critical"
+                            }
+                        }),
+                        Vec::new(),
+                    );
+                    record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+                    return orchestration_result(
+                        "needs_capability",
+                        "No visible healthy capability clearly matches that intent.",
+                        diagnostics,
+                        true,
+                    );
+                }
+                IntentResolveOutcome::NeedsSelection {
+                    candidates,
+                    search_status,
+                } => {
+                    let diagnostics = orchestration_details(
+                        &orchestration_id,
+                        "needs_selection",
+                        input.intent.as_deref(),
+                        None,
+                        &input,
+                        json!({
+                            "phase": "resolve",
+                            "candidates": candidates,
+                            "searchStatus": search_status,
+                        }),
+                        Vec::new(),
+                    );
+                    record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+                    return orchestration_result(
+                        "needs_selection",
+                        "Multiple visible capabilities match that intent. Re-run execute with target set to the intended capability.",
+                        diagnostics,
+                        true,
+                    );
+                }
+            }
+        }
+    };
+
+    input.target_params = Some(resolve.target_params.clone());
+    let target = match resolve_target(&resolve.target_params, deps, &actor).await {
+        Ok(target) => target,
+        Err(error @ CapabilityError::NotFound { .. }) => {
+            let diagnostics = orchestration_details(
+                &orchestration_id,
+                "needs_capability",
+                input.intent.as_deref(),
+                None,
+                &input,
+                json!({
+                    "phase": "resolve",
+                    "resolveMode": resolve.mode,
+                    "selectedTarget": resolve.target_params,
+                    "error": capability_error_details(&error),
+                    "proposedCapabilityShape": {
+                        "contractId": "<namespace>::<function>",
+                        "argumentsSchema": {},
+                        "effect": "pure_read|idempotent_write|external_side_effect",
+                        "risk": "low|medium|high|critical"
+                    }
+                }),
+                Vec::new(),
+            );
+            record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+            return orchestration_result(
+                "needs_capability",
+                "No visible healthy capability matches the requested target.",
+                diagnostics,
+                true,
+            );
+        }
+        Err(error) => {
+            let diagnostics = orchestration_details(
+                &orchestration_id,
+                "prepare_failed",
+                input.intent.as_deref(),
+                None,
+                &input,
+                json!({
+                    "phase": "prepare",
+                    "resolveMode": resolve.mode,
+                    "selectedTarget": resolve.target_params,
+                    "error": capability_error_details(&error),
+                }),
+                Vec::new(),
+            );
+            record_orchestration_audit(deps, invocation, diagnostics).await?;
+            return Err(error);
+        }
+    };
+    let function = target.entry.function.clone();
+    if let Err(error) = validate_orchestration_constraints(&input.constraints, &target.entry) {
+        let diagnostics = orchestration_details(
+            &orchestration_id,
+            "constraints_rejected",
+            input.intent.as_deref(),
+            None,
+            &input,
+            json!({
+                "phase": "prepare",
+                "resolveMode": resolve.mode,
+                "selectedTarget": {
+                    "contractId": target.entry.contract_id.as_str(),
+                    "implementationId": target.entry.implementation_id.as_str(),
+                    "functionId": function.id.as_str(),
+                },
+                "error": capability_error_details(&error),
+            }),
+            Vec::new(),
+        );
+        record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+        return orchestration_result(
+            "constraints_rejected",
+            &format!("execute constraints rejected the selected target: {error}"),
+            diagnostics,
+            true,
+        );
+    }
+    normalize_target_specific_arguments(&function, &mut input.arguments, &mut input.corrections);
+    let mut prepared_payload = prepared_execute_payload(&resolve.target_params, &input);
+    if requires_fresh_revision_for_payload(&function, &prepared_payload) {
+        let freshness = record_orchestration_inspection(invocation, deps, &target).await?;
+        prepared_payload["inspectionHandle"] = freshness["inspectionHandle"].clone();
+        prepared_payload["expectedRevision"] = freshness["expectedRevision"].clone();
+        prepared_payload["expectedSchemaDigest"] = freshness["expectedSchemaDigest"].clone();
+        input.corrections.push(correction_record(
+            "freshness_prepared",
+            "execute acquired a fresh inspection handle for mutating or elevated-risk work",
+            1.0,
+        ));
+    }
+
+    let corrected_request = corrected_orchestrated_request(&input);
+    let prepare_diagnostics = json!({
+        "phase": "prepare",
+        "resolveMode": resolve.mode,
+        "candidates": resolve.candidates,
+        "rejectedCandidates": resolve.rejected_candidates,
+        "searchStatus": resolve.search_status,
+        "selectedTarget": {
+            "contractId": target.entry.contract_id.as_str(),
+            "implementationId": target.entry.implementation_id.as_str(),
+            "functionId": function.id.as_str(),
+            "catalogRevision": target.entry.catalog_revision,
+            "schemaDigest": target.entry.schema_digest.as_str(),
+            "effectClass": format!("{:?}", function.effect_class),
+            "riskLevel": format!("{:?}", function.risk_level),
+        },
+        "preparedRequest": redacted_prepared_request_preview(&prepared_payload),
+    });
+
+    let mut prepared_invocation = invocation.clone();
+    prepared_invocation.payload = prepared_payload;
+    let mut result = match execute_invoke_value(&prepared_invocation, deps).await {
+        Ok(result) => result,
+        Err(error) => {
+            let diagnostics = orchestration_details(
+                &orchestration_id,
+                "run_failed",
+                input.intent.as_deref(),
+                Some(corrected_request),
+                &input,
+                json!({
+                    "phase": "run",
+                    "prepare": prepare_diagnostics,
+                    "error": capability_error_details(&error),
+                }),
+                Vec::new(),
+            );
+            record_orchestration_audit(deps, invocation, diagnostics).await?;
+            return Err(error);
+        }
+    };
+    let result_status = serde_json::from_value::<CapabilityResult>(result.clone())
+        .ok()
+        .and_then(|capability_result| capability_result.details)
+        .and_then(|details| {
+            details
+                .get("status")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| "executed".to_owned());
+    let diagnostics = orchestration_details(
+        &orchestration_id,
+        &result_status,
+        input.intent.as_deref(),
+        Some(corrected_request),
+        &input,
+        prepare_diagnostics,
+        orchestration_child_invocations(&result),
+    );
+    record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+    result = attach_orchestration_details(result, diagnostics)?;
+    Ok(result)
+}
+
+#[derive(Debug)]
+struct OrchestrationResolve {
+    target_params: Value,
+    mode: String,
+    candidates: Vec<Value>,
+    rejected_candidates: Vec<Value>,
+    search_status: Value,
+}
+
+enum IntentResolveOutcome {
+    Resolved(OrchestrationResolve),
+    NeedsSelection {
+        candidates: Vec<Value>,
+        search_status: Value,
+    },
+    NeedsCapability {
+        candidates: Vec<Value>,
+        search_status: Value,
+    },
+}
+
+fn parse_orchestrated_execute_input(
+    params: &Value,
+) -> Result<OrchestratedExecuteInput, CapabilityError> {
+    let mut corrections = Vec::new();
+    let intent = string_field(params, "intent");
+    let mut target_params = target_params_from_hint(params.get("target"))?;
+    if target_params.is_none() {
+        let mut direct_target = Map::new();
+        for key in [
+            "functionId",
+            "implementationId",
+            "contractId",
+            "capabilityId",
+        ] {
+            if let Some(value) = params.get(key).cloned() {
+                direct_target.insert(key.to_owned(), value);
+            }
+        }
+        if !direct_target.is_empty() {
+            let target = Value::Object(direct_target);
+            if parse_target(&target).is_none() {
+                return Err(CapabilityError::InvalidParams {
+                    message: "top-level target fields must include a non-empty functionId, implementationId, capabilityId, or contractId".to_owned(),
+                });
+            }
+            target_params = Some(target);
+            corrections.push(correction_record(
+                "top_level_target_to_target",
+                "moved top-level target fields into target",
+                1.0,
+            ));
+        }
+    }
+    let mut idempotency_key =
+        string_field(params, "idempotencyKey").or_else(|| string_field(params, "idempotency_key"));
+    let mut reason = string_field(params, "reason");
+    let constraints = params
+        .get("constraints")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if !constraints.is_object() {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute.constraints must be an object when provided".to_owned(),
+        });
+    }
+
+    let mut arguments = match (params.get("arguments"), params.get("payload")) {
+        (Some(arguments), Some(payload)) if arguments != payload => {
+            return Err(CapabilityError::InvalidParams {
+                message: "execute received both arguments and payload with different values; use arguments only".to_owned(),
+            });
+        }
+        (Some(arguments), _) => object_value(arguments, "execute.arguments")?,
+        (None, Some(payload)) => {
+            corrections.push(correction_record(
+                "payload_to_arguments",
+                "moved top-level payload into arguments",
+                1.0,
+            ));
+            object_value(payload, "execute payload alias")?
+        }
+        (None, None) => json!({}),
+    };
+
+    normalize_nested_wrapper_shape(
+        &mut arguments,
+        &mut target_params,
+        &mut idempotency_key,
+        &mut reason,
+        &mut corrections,
+    )?;
+
+    Ok(OrchestratedExecuteInput {
+        intent,
+        target_params,
+        arguments,
+        constraints,
+        idempotency_key,
+        reason,
+        corrections,
+    })
+}
+
+fn object_value(value: &Value, label: &str) -> Result<Value, CapabilityError> {
+    if value.is_object() {
+        Ok(value.clone())
+    } else {
+        Err(CapabilityError::InvalidParams {
+            message: format!("{label} must be an object"),
+        })
+    }
+}
+
+fn target_params_from_hint(value: Option<&Value>) -> Result<Option<Value>, CapabilityError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let Some(target) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+    {
+        return Ok(Some(json!({ "capabilityId": target })));
+    }
+    if value.is_object() {
+        if parse_target(value).is_none() {
+            return Err(CapabilityError::InvalidParams {
+                message: "execute.target object must include one of functionId, implementationId, capabilityId, or contractId".to_owned(),
+            });
+        }
+        return Ok(Some(value.clone()));
+    }
+    Err(CapabilityError::InvalidParams {
+        message: "execute.target must be a capability id string or target object".to_owned(),
+    })
+}
+
+fn normalize_nested_wrapper_shape(
+    arguments: &mut Value,
+    target_params: &mut Option<Value>,
+    idempotency_key: &mut Option<String>,
+    reason: &mut Option<String>,
+    corrections: &mut Vec<Value>,
+) -> Result<(), CapabilityError> {
+    let Some(object) = arguments.as_object_mut() else {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute.arguments must be an object".to_owned(),
+        });
+    };
+
+    if target_params.is_none() {
+        let mut nested_target = Map::new();
+        for key in [
+            "functionId",
+            "implementationId",
+            "contractId",
+            "capabilityId",
+        ] {
+            if let Some(value) = object.remove(key) {
+                nested_target.insert(key.to_owned(), value);
+            }
+        }
+        if !nested_target.is_empty() {
+            let target = Value::Object(nested_target);
+            if parse_target(&target).is_none() {
+                return Err(CapabilityError::InvalidParams {
+                    message: "wrapper target fields inside arguments were not valid strings"
+                        .to_owned(),
+                });
+            }
+            *target_params = Some(target);
+            corrections.push(correction_record(
+                "nested_target_to_target",
+                "moved target fields out of arguments into target",
+                1.0,
+            ));
+        }
+    }
+
+    if idempotency_key.is_none()
+        && let Some(value) = object
+            .remove("idempotencyKey")
+            .or_else(|| object.remove("idempotency_key"))
+        && let Some(value) = value
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    {
+        *idempotency_key = Some(value.to_owned());
+        corrections.push(correction_record(
+            "nested_idempotency_key_to_wrapper",
+            "moved idempotencyKey out of arguments",
+            1.0,
+        ));
+    }
+    if reason.is_none()
+        && let Some(value) = object.remove("reason")
+        && let Some(value) = value
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    {
+        *reason = Some(value.to_owned());
+        corrections.push(correction_record(
+            "nested_reason_to_wrapper",
+            "moved reason out of arguments",
+            1.0,
+        ));
+    }
+
+    for key in [
+        "mode",
+        "inspectionHandle",
+        "inspection_handle",
+        "expectedRevision",
+        "expectedSchemaDigest",
+        "expected_schema_digest",
+    ] {
+        if object.remove(key).is_some() {
+            corrections.push(correction_record(
+                "nested_wrapper_field_removed",
+                format!("removed wrapper field {key} from arguments"),
+                1.0,
+            ));
+        }
+    }
+
+    if let Some(payload) = object.remove("payload") {
+        if !payload.is_object() {
+            return Err(CapabilityError::InvalidParams {
+                message: "nested arguments.payload must be an object when supplied".to_owned(),
+            });
+        }
+        if object.is_empty() {
+            *arguments = payload;
+            corrections.push(correction_record(
+                "nested_payload_to_arguments",
+                "moved nested payload into arguments",
+                1.0,
+            ));
+        } else {
+            object.insert("payload".to_owned(), payload);
+        }
+    }
+
+    Ok(())
+}
+
+fn normalize_target_specific_arguments(
+    function: &FunctionDefinition,
+    arguments: &mut Value,
+    corrections: &mut Vec<Value>,
+) {
+    if function.id.as_str() != "process::run" {
+        return;
+    }
+    let Some(outputs) = arguments
+        .get_mut("expectedOutputs")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    let mut removed = false;
+    for output in outputs {
+        let Some(object) = output.as_object_mut() else {
+            continue;
+        };
+        removed |= object.remove("kind").is_some();
+        removed |= object.remove("role").is_some();
+    }
+    if removed {
+        corrections.push(correction_record(
+            "process_expected_outputs_shape",
+            "removed unsupported expectedOutputs kind/role fields; process::run expects path/targetPath only",
+            1.0,
+        ));
+    }
+}
+
+async fn resolve_intent_target(
+    intent: &str,
+    arguments: &Value,
+    actor: &ActorContext,
+    deps: &Deps,
+    constraints: &Value,
+) -> Result<IntentResolveOutcome, CapabilityError> {
+    let functions = deps
+        .engine_host
+        .discover(&FunctionQuery {
+            actor: Some(actor.clone()),
+            health: Some(FunctionHealth::Healthy),
+            ..FunctionQuery::default()
+        })
+        .await;
+    let catalog_revision = deps.engine_host.catalog_revision().await;
+    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
+    let store = deps.registry_store.clone();
+    let embedding_provider = deps.embedding_provider.clone();
+    let policy = CapabilitySearchPolicy::default();
+    let query = intent.to_owned();
+    let snapshot_for_search = snapshot.clone();
+    let search = run_blocking_task("capability.execute.resolve", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        let sync_policy = registry_metadata_sync_policy();
+        store
+            .sync_snapshot(
+                &snapshot_for_search,
+                embedding_provider.as_ref(),
+                &sync_policy,
+            )
+            .map_err(registry_store_error)?;
+        store
+            .search(
+                &query,
+                &CapabilitySearchFilters {
+                    include_unavailable: false,
+                    ..CapabilitySearchFilters::default()
+                },
+                &policy,
+                8,
+                embedding_provider.as_ref(),
+            )
+            .map_err(registry_store_error)
+    })
+    .await?;
+    let all_executable_hits = search
+        .hits
+        .iter()
+        .filter(|hit| hit.kind == "implementation" && !hit.function_id.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut executable_hits = all_executable_hits
+        .into_iter()
+        .filter_map(
+            |hit| match orchestration_constraints_allow_hit(constraints, &hit) {
+                Ok(true) => Some(Ok(hit)),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            },
+        )
+        .collect::<Result<Vec<_>, _>>()?;
+    apply_deterministic_intent_route(
+        intent,
+        arguments,
+        &snapshot,
+        constraints,
+        &mut executable_hits,
+    )?;
+    let candidates = executable_hits
+        .iter()
+        .map(orchestration_candidate_summary)
+        .collect::<Vec<_>>();
+    let search_status = serde_json::to_value(&search.status).unwrap_or(Value::Null);
+    let Some(selected) = executable_hits.first() else {
+        return Ok(IntentResolveOutcome::NeedsCapability {
+            candidates,
+            search_status,
+        });
+    };
+    if selected.fused_score <= 0.0 {
+        return Ok(IntentResolveOutcome::NeedsCapability {
+            candidates,
+            search_status,
+        });
+    }
+    let selected_has_strong_name_match = intent_strongly_matches_hit(intent, selected);
+    let ambiguous = executable_hits.iter().skip(1).any(|candidate| {
+        candidate.contract_id != selected.contract_id
+            && (selected.fused_score - candidate.fused_score).abs() <= 0.05
+            && (!selected_has_strong_name_match || intent_strongly_matches_hit(intent, candidate))
+    });
+    if ambiguous {
+        return Ok(IntentResolveOutcome::NeedsSelection {
+            candidates,
+            search_status,
+        });
+    }
+    let rejected_candidates = executable_hits
+        .iter()
+        .skip(1)
+        .map(orchestration_candidate_summary)
+        .collect::<Vec<_>>();
+    Ok(IntentResolveOutcome::Resolved(OrchestrationResolve {
+        target_params: json!({ "functionId": selected.function_id }),
+        mode: "intent_resolution".to_owned(),
+        candidates,
+        rejected_candidates,
+        search_status,
+    }))
+}
+
+fn intent_strongly_matches_hit(intent: &str, hit: &CapabilityIndexHit) -> bool {
+    let normalized_intent = normalized_intent_words(intent);
+    let Some((namespace, function_name)) = hit.contract_id.split_once("::") else {
+        return false;
+    };
+    let mut tokens = normalized_identifier_words(function_name);
+    if tokens.is_empty() {
+        return false;
+    }
+    let namespace_tokens = normalized_identifier_words(namespace);
+    if namespace_tokens
+        .iter()
+        .any(|token| normalized_intent.contains(token))
+    {
+        tokens.extend(namespace_tokens);
+    }
+    tokens
+        .iter()
+        .filter(|token| token.len() > 1)
+        .all(|token| normalized_intent.contains(token))
+}
+
+fn validate_orchestration_constraint_keys(constraints: &Value) -> Result<(), CapabilityError> {
+    let Some(object) = constraints.as_object() else {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute.constraints must be an object".to_owned(),
+        });
+    };
+    for key in object.keys() {
+        if !matches!(
+            key.as_str(),
+            "riskMax" | "effect" | "allowedContracts" | "allowedNamespaces"
+        ) {
+            return Err(CapabilityError::InvalidParams {
+                message: format!(
+                    "Unsupported execute.constraints field '{key}'. Supported fields: riskMax, effect, allowedContracts, allowedNamespaces"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn validate_orchestration_constraints(
+    constraints: &Value,
+    entry: &CapabilityRegistryEntry,
+) -> Result<(), CapabilityError> {
+    validate_orchestration_constraint_keys(constraints)?;
+    if let Some(max_risk) = risk_field(constraints, "riskMax")?
+        && entry.function.risk_level > max_risk
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "selected target {} has risk {:?}, above constraint riskMax {:?}",
+                entry.contract_id, entry.function.risk_level, max_risk
+            ),
+        });
+    }
+    if let Some(effect) = effect_field(constraints, "effect")?
+        && entry.function.effect_class != effect
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "selected target {} has effect {:?}, not requested effect {:?}",
+                entry.contract_id, entry.function.effect_class, effect
+            ),
+        });
+    }
+    let allowed_contracts = optional_string_array_field(constraints, "allowedContracts")?;
+    if let Some(contracts) = allowed_contracts
+        && !contracts
+            .iter()
+            .any(|contract| contract == &entry.contract_id)
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "selected target {} is outside execute.constraints.allowedContracts",
+                entry.contract_id
+            ),
+        });
+    }
+    let allowed_namespaces = optional_string_array_field(constraints, "allowedNamespaces")?;
+    if let Some(namespaces) = allowed_namespaces {
+        let namespace = entry
+            .contract_id
+            .split_once("::")
+            .map(|(namespace, _)| namespace)
+            .unwrap_or(entry.contract_id.as_str());
+        if !namespaces.iter().any(|allowed| allowed == namespace) {
+            return Err(CapabilityError::InvalidParams {
+                message: format!(
+                    "selected target {} is outside execute.constraints.allowedNamespaces",
+                    entry.contract_id
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn orchestration_constraints_allow_hit(
+    constraints: &Value,
+    hit: &CapabilityIndexHit,
+) -> Result<bool, CapabilityError> {
+    validate_orchestration_constraint_keys(constraints)?;
+    if let Some(max_risk) = risk_field(constraints, "riskMax")? {
+        let hit_risk = risk_level_from_str(&hit.risk_level, "candidate riskLevel")?;
+        if hit_risk > max_risk {
+            return Ok(false);
+        }
+    }
+    if let Some(effect) = effect_field(constraints, "effect")? {
+        let hit_effect = effect_class_from_str(&hit.effect_class, "candidate effectClass")?;
+        if hit_effect != effect {
+            return Ok(false);
+        }
+    }
+    if let Some(contracts) = optional_string_array_field(constraints, "allowedContracts")?
+        && !contracts
+            .iter()
+            .any(|contract| contract == &hit.contract_id)
+    {
+        return Ok(false);
+    }
+    if let Some(namespaces) = optional_string_array_field(constraints, "allowedNamespaces")? {
+        let namespace = hit
+            .contract_id
+            .split_once("::")
+            .map(|(namespace, _)| namespace)
+            .unwrap_or(hit.contract_id.as_str());
+        if !namespaces.iter().any(|allowed| allowed == namespace) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn optional_string_array_field(
+    value: &Value,
+    key: &str,
+) -> Result<Option<Vec<String>>, CapabilityError> {
+    let Some(raw) = value.get(key) else {
+        return Ok(None);
+    };
+    let Some(values) = raw.as_array() else {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("execute.constraints.{key} must be an array of strings"),
+        });
+    };
+    let mut strings = Vec::new();
+    for item in values {
+        let Some(item) = item.as_str().map(str::trim).filter(|item| !item.is_empty()) else {
+            return Err(CapabilityError::InvalidParams {
+                message: format!("execute.constraints.{key} must contain only non-empty strings"),
+            });
+        };
+        strings.push(item.to_owned());
+    }
+    Ok(Some(strings))
+}
+
+fn normalized_identifier_words(value: &str) -> Vec<String> {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter_map(|token| {
+            let token = token.trim().to_ascii_lowercase();
+            (!token.is_empty()).then_some(token)
+        })
+        .collect()
+}
+
+fn normalized_intent_words(value: &str) -> std::collections::BTreeSet<String> {
+    normalized_identifier_words(value).into_iter().collect()
+}
+
+fn prepared_execute_payload(target_params: &Value, input: &OrchestratedExecuteInput) -> Value {
+    let mut object = Map::new();
+    object.insert("mode".to_owned(), json!("invoke"));
+    if let Some(target) = target_params.as_object() {
+        for key in [
+            "functionId",
+            "implementationId",
+            "contractId",
+            "capabilityId",
+        ] {
+            if let Some(value) = target.get(key) {
+                object.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    object.insert("payload".to_owned(), input.arguments.clone());
+    if let Some(idempotency_key) = &input.idempotency_key {
+        object.insert("idempotencyKey".to_owned(), json!(idempotency_key));
+    }
+    if let Some(reason) = &input.reason {
+        object.insert("reason".to_owned(), json!(reason));
+    }
+    Value::Object(object)
+}
+
+async fn record_orchestration_inspection(
+    invocation: &Invocation,
+    deps: &Deps,
+    target: &ResolvedCapabilityTarget,
+) -> Result<Value, CapabilityError> {
+    let inspection = target.entry.inspection(target.binding_decision.clone());
+    let handle = inspection.inspection_handle.clone();
+    let entry = target.entry.clone();
+    let decision = target.binding_decision.clone();
+    let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+    let expected_revision = target.entry.function.revision.0;
+    let expected_schema_digest = target.entry.schema_digest.clone();
+    let store = deps.registry_store.clone();
+    run_blocking_task("capability.execute.prepare.record_inspection", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .record_inspection(&handle, &entry, &decision)
+            .map_err(registry_store_error)?;
+        store
+            .record_audit_event(
+                "capability.execute.prepare",
+                Some(&trace_id),
+                json!({
+                    "status": "freshness_prepared",
+                    "contractId": decision.contract_id,
+                    "implementationId": decision.selected_implementation,
+                    "functionId": decision.selected_function_id,
+                    "catalogRevision": decision.catalog_revision,
+                    "schemaDigest": decision.schema_digest,
+                    "inspectionHandle": handle.handle,
+                }),
+            )
+            .map_err(registry_store_error)?;
+        Ok(())
+    })
+    .await?;
+    Ok(json!({
+        "inspectionHandle": inspection.inspection_handle.handle,
+        "expectedRevision": expected_revision,
+        "expectedSchemaDigest": expected_schema_digest
+    }))
+}
+
+fn corrected_orchestrated_request(input: &OrchestratedExecuteInput) -> Value {
+    let mut object = Map::new();
+    if let Some(intent) = &input.intent {
+        object.insert("intent".to_owned(), json!(intent));
+    }
+    if let Some(target) = &input.target_params {
+        object.insert("target".to_owned(), target.clone());
+    }
+    object.insert("arguments".to_owned(), input.arguments.clone());
+    if !input.constraints.as_object().map_or(true, Map::is_empty) {
+        object.insert("constraints".to_owned(), input.constraints.clone());
+    }
+    if let Some(idempotency_key) = &input.idempotency_key {
+        object.insert("idempotencyKey".to_owned(), json!(idempotency_key));
+    }
+    if let Some(reason) = &input.reason {
+        object.insert("reason".to_owned(), json!(reason));
+    }
+    Value::Object(object)
+}
+
+fn orchestration_details(
+    orchestration_id: &str,
+    status: &str,
+    intent: Option<&str>,
+    corrected_request: Option<Value>,
+    input: &OrchestratedExecuteInput,
+    phase_details: Value,
+    child_invocations: Vec<String>,
+) -> Value {
+    let confidence = if input.corrections.is_empty() {
+        1.0
+    } else {
+        0.95
+    };
+    json!({
+        "orchestrationId": orchestration_id,
+        "status": status,
+        "intent": intent,
+        "correctedRequest": corrected_request.unwrap_or_else(|| corrected_orchestrated_request(input)),
+        "correctionsApplied": input.corrections.clone(),
+        "correctionConfidence": confidence,
+        "phaseDetails": phase_details,
+        "childInvocationIds": child_invocations,
+    })
+}
+
+fn orchestration_request_error_details(
+    orchestration_id: &str,
+    status: &str,
+    error: &CapabilityError,
+) -> Value {
+    json!({
+        "orchestrationId": orchestration_id,
+        "status": status,
+        "intent": Value::Null,
+        "correctedRequest": Value::Null,
+        "correctionsApplied": [],
+        "correctionConfidence": 0.0,
+        "phaseDetails": {
+            "phase": "parse",
+            "error": capability_error_details(error),
+        },
+        "childInvocationIds": [],
+    })
+}
+
+fn correction_record(
+    kind: impl Into<String>,
+    message: impl Into<String>,
+    confidence: f64,
+) -> Value {
+    json!({
+        "kind": kind.into(),
+        "message": message.into(),
+        "confidence": confidence,
+    })
+}
+
+fn deterministic_intent_route(
+    intent: &str,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+) -> Result<Option<CapabilityIndexHit>, CapabilityError> {
+    if intent_requests_filesystem_read(intent, arguments) {
+        return deterministic_hit_for_function(
+            "filesystem::read_file",
+            snapshot,
+            constraints,
+            "deterministic_path_read",
+        );
+    }
+    Ok(None)
+}
+
+fn apply_deterministic_intent_route(
+    intent: &str,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+    executable_hits: &mut Vec<CapabilityIndexHit>,
+) -> Result<(), CapabilityError> {
+    if let Some(routed) = deterministic_intent_route(intent, arguments, snapshot, constraints)? {
+        executable_hits.retain(|hit| hit.function_id != routed.function_id);
+        executable_hits.insert(0, routed);
+    }
+    Ok(())
+}
+
+fn intent_requests_filesystem_read(intent: &str, arguments: &Value) -> bool {
+    let Some(path) = arguments.get("path").and_then(Value::as_str) else {
+        return false;
+    };
+    if path.trim().is_empty() {
+        return false;
+    }
+    let words = normalized_intent_words(intent);
+    let asks_for_read = ["read", "open", "cat", "content", "line", "lines"]
+        .iter()
+        .any(|word| words.contains(*word));
+    let asks_for_write = [
+        "write",
+        "edit",
+        "modify",
+        "delete",
+        "remove",
+        "create",
+        "overwrite",
+        "patch",
+    ]
+    .iter()
+    .any(|word| words.contains(*word));
+    asks_for_read && !asks_for_write
+}
+
+fn deterministic_hit_for_function(
+    function_id: &str,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+    matched_by: &str,
+) -> Result<Option<CapabilityIndexHit>, CapabilityError> {
+    let Some(entry) = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.function_id == function_id)
+    else {
+        return Ok(None);
+    };
+    let hit = orchestration_hit_from_entry(entry, matched_by, 100.0);
+    if !orchestration_constraints_allow_hit(constraints, &hit)? {
+        return Ok(None);
+    }
+    Ok(Some(hit))
+}
+
+fn orchestration_hit_from_entry(
+    entry: &CapabilityRegistryEntry,
+    matched_by: &str,
+    score: f32,
+) -> CapabilityIndexHit {
+    let document = entry.search_document();
+    CapabilityIndexHit {
+        kind: document.kind,
+        capability_id: document.capability_id,
+        contract_id: document.contract_id,
+        implementation_id: document.implementation_id,
+        plugin_id: document.plugin_id,
+        worker_id: document.worker_id,
+        function_id: document.function_id,
+        catalog_revision: document.catalog_revision,
+        schema_digest: document.schema_digest,
+        trust_tier: document.trust_tier,
+        health: document.health,
+        visibility: document.visibility,
+        effect_class: document.effect_class,
+        risk_level: document.risk_level,
+        lexical_score: score,
+        vector_score: None,
+        fused_score: score,
+        matched_by: matched_by.to_owned(),
+        snippet: bounded_snippet(&document.text),
+        requires_inspect: requires_fresh_revision(&entry.function),
+        recipe: document.recipe,
+    }
+}
+
+fn bounded_snippet(value: &str) -> String {
+    const MAX: usize = 240;
+    let mut snippet = value.chars().take(MAX).collect::<String>();
+    if value.chars().count() > MAX {
+        snippet.push_str("...");
+    }
+    snippet
+}
+
+fn orchestration_candidate_summary(hit: &CapabilityIndexHit) -> Value {
+    json!({
+        "kind": hit.kind.as_str(),
+        "contractId": hit.contract_id.as_str(),
+        "implementationId": hit.implementation_id.as_str(),
+        "functionId": hit.function_id.as_str(),
+        "score": hit.fused_score,
+        "matchedBy": hit.matched_by.as_str(),
+        "riskLevel": hit.risk_level.as_str(),
+        "effectClass": hit.effect_class.as_str(),
+        "snippet": hit.snippet.as_str(),
+    })
+}
+
+fn redacted_prepared_request_preview(prepared_payload: &Value) -> Value {
+    json!({
+        "mode": prepared_payload.get("mode").cloned().unwrap_or(Value::Null),
+        "contractId": prepared_payload.get("contractId").cloned(),
+        "capabilityId": prepared_payload.get("capabilityId").cloned(),
+        "functionId": prepared_payload.get("functionId").cloned(),
+        "implementationId": prepared_payload.get("implementationId").cloned(),
+        "hasPayload": prepared_payload.get("payload").is_some(),
+        "hasInspectionHandle": prepared_payload.get("inspectionHandle").is_some(),
+        "hasIdempotencyKey": prepared_payload.get("idempotencyKey").is_some(),
+    })
+}
+
+fn orchestration_child_invocations(value: &Value) -> Vec<String> {
+    value
+        .get("details")
+        .and_then(|details| details.get("childInvocations"))
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn attach_orchestration_details(
+    value: Value,
+    orchestration: Value,
+) -> Result<Value, CapabilityError> {
+    let mut result: CapabilityResult =
+        serde_json::from_value(value).map_err(|error| CapabilityError::Internal {
+            message: error.to_string(),
+        })?;
+    let mut details = match result.details.take() {
+        Some(Value::Object(object)) => Value::Object(object),
+        Some(value) => json!({ "toolDetails": value }),
+        None => json!({}),
+    };
+    if let Value::Object(object) = &mut details {
+        object.insert("orchestration".to_owned(), orchestration.clone());
+        for key in [
+            "correctedRequest",
+            "correctionsApplied",
+            "correctionConfidence",
+        ] {
+            if let Some(value) = orchestration.get(key) {
+                object.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    result.details = Some(details);
+    capability_result_value(result)
+}
+
+fn orchestration_result(
+    status: &str,
+    message: &str,
+    diagnostics: Value,
+    is_error: bool,
+) -> Result<Value, CapabilityError> {
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            message.to_owned(),
+        )]),
+        details: Some(json!({
+            "status": status,
+            "orchestration": diagnostics,
+            "childInvocationCreated": false,
+            "approvalCreated": false,
+            "resourceRefs": [],
+        })),
+        is_error: is_error.then_some(true),
+        stop_turn: None,
+    })
+}
+
+fn capability_error_details(error: &CapabilityError) -> Value {
+    json!({
+        "code": error.code(),
+        "message": error.to_string(),
+        "details": error.details(),
+    })
+}
+
+async fn record_orchestration_audit(
+    deps: &Deps,
+    invocation: &Invocation,
+    diagnostics: Value,
+) -> Result<(), CapabilityError> {
+    let store = deps.registry_store.clone();
+    let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+    run_blocking_task("capability.execute.orchestration_audit", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .record_audit_event("capability.orchestration", Some(&trace_id), diagnostics)
+            .map_err(registry_store_error)?;
+        Ok(())
+    })
+    .await
 }
 
 pub(crate) async fn status_value(
@@ -481,13 +1751,26 @@ pub(crate) async fn audit_query_value(
 ) -> Result<Value, CapabilityError> {
     let event_type = string_field(&invocation.payload, "eventType");
     let trace_id = string_field(&invocation.payload, "traceId");
+    let orchestration_status = string_field(&invocation.payload, "orchestrationStatus");
+    let correction_kind = string_field(&invocation.payload, "correctionKind");
+    let phase = string_field(&invocation.payload, "phase");
+    let orchestration_filters_present =
+        orchestration_status.is_some() || correction_kind.is_some() || phase.is_some();
     let limit = u64_field(&invocation.payload, "limit")
         .map(|value| value.clamp(1, 200) as usize)
         .unwrap_or(50);
     let reveal_payloads = bool_field(&invocation.payload, "revealPayloads").unwrap_or(false);
     let store = deps.registry_store.clone();
-    let event_type_for_query = event_type.clone();
+    let event_type_for_query = event_type
+        .clone()
+        .or_else(|| orchestration_filters_present.then(|| "capability.orchestration".to_owned()));
     let trace_id_for_query = trace_id.clone();
+    let query_limit = if orchestration_filters_present {
+        200
+    } else {
+        limit
+    };
+    let reveal_for_query = reveal_payloads || orchestration_filters_present;
     let result = run_blocking_task("capability.audit_query", move || {
         let store = store.lock().map_err(|_| CapabilityError::Internal {
             message: "capability registry store mutex poisoned".to_owned(),
@@ -496,12 +1779,24 @@ pub(crate) async fn audit_query_value(
             .audit_query(
                 event_type_for_query.as_deref(),
                 trace_id_for_query.as_deref(),
-                limit,
-                reveal_payloads,
+                query_limit,
+                reveal_for_query,
             )
             .map_err(registry_store_error)
     })
     .await?;
+    let result = if orchestration_filters_present {
+        filter_orchestration_audit_result(
+            result,
+            orchestration_status.as_deref(),
+            correction_kind.as_deref(),
+            phase.as_deref(),
+            limit,
+            reveal_payloads,
+        )?
+    } else {
+        result
+    };
     record_admin_audit(
         deps,
         invocation,
@@ -509,12 +1804,164 @@ pub(crate) async fn audit_query_value(
         json!({
             "eventType": event_type,
             "traceId": trace_id,
+            "orchestrationStatus": orchestration_status,
+            "correctionKind": correction_kind,
+            "phase": phase,
             "limit": limit,
             "revealPayloads": reveal_payloads,
         }),
     )
     .await?;
     Ok(result)
+}
+
+fn filter_orchestration_audit_result(
+    result: Value,
+    orchestration_status: Option<&str>,
+    correction_kind: Option<&str>,
+    phase: Option<&str>,
+    limit: usize,
+    reveal_payloads: bool,
+) -> Result<Value, CapabilityError> {
+    let events = result
+        .get("events")
+        .and_then(Value::as_array)
+        .ok_or_else(|| CapabilityError::Internal {
+            message: "capability audit query returned invalid events".to_owned(),
+        })?;
+    let mut filtered = Vec::new();
+    for event in events {
+        if !audit_event_matches_orchestration_filters(
+            event,
+            orchestration_status,
+            correction_kind,
+            phase,
+        ) {
+            continue;
+        }
+        let event = if reveal_payloads {
+            let mut event = event.clone();
+            event["redacted"] = json!(false);
+            event
+        } else {
+            redact_orchestration_audit_event(event.clone())
+        };
+        filtered.push(event);
+        if filtered.len() >= limit {
+            break;
+        }
+    }
+    Ok(json!({
+        "events": filtered,
+        "redacted": !reveal_payloads,
+        "filters": {
+            "orchestrationStatus": orchestration_status,
+            "correctionKind": correction_kind,
+            "phase": phase,
+        }
+    }))
+}
+
+fn audit_event_matches_orchestration_filters(
+    event: &Value,
+    orchestration_status: Option<&str>,
+    correction_kind: Option<&str>,
+    phase: Option<&str>,
+) -> bool {
+    let payload = event.get("payload").unwrap_or(&Value::Null);
+    if let Some(expected) = orchestration_status
+        && payload.get("status").and_then(Value::as_str) != Some(expected)
+    {
+        return false;
+    }
+    if let Some(expected) = phase
+        && payload
+            .get("phaseDetails")
+            .and_then(|details| details.get("phase"))
+            .and_then(Value::as_str)
+            != Some(expected)
+    {
+        return false;
+    }
+    if let Some(expected) = correction_kind {
+        let has_correction = payload
+            .get("correctionsApplied")
+            .and_then(Value::as_array)
+            .is_some_and(|corrections| {
+                corrections.iter().any(|correction| {
+                    correction.get("kind").and_then(Value::as_str) == Some(expected)
+                })
+            });
+        if !has_correction {
+            return false;
+        }
+    }
+    true
+}
+
+fn redact_orchestration_audit_event(mut event: Value) -> Value {
+    let payload = event.get("payload").cloned().unwrap_or(Value::Null);
+    let keys = payload
+        .as_object()
+        .map(|object| object.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    event["payloadSummary"] = orchestration_audit_payload_summary(&payload);
+    event["payload"] = json!({
+        "redacted": true,
+        "keys": keys,
+    });
+    event["redacted"] = json!(true);
+    event
+}
+
+fn orchestration_audit_payload_summary(payload: &Value) -> Value {
+    let Some(object) = payload.as_object() else {
+        return json!({ "type": audit_payload_type(payload) });
+    };
+    let mut summary = Map::new();
+    for key in [
+        "orchestrationId",
+        "status",
+        "intent",
+        "correctionConfidence",
+    ] {
+        if let Some(value) = object.get(key) {
+            summary.insert(key.to_owned(), value.clone());
+        }
+    }
+    if let Some(phase) = object
+        .get("phaseDetails")
+        .and_then(|details| details.get("phase"))
+        .cloned()
+    {
+        summary.insert("phase".to_owned(), phase);
+    }
+    let correction_kinds = object
+        .get("correctionsApplied")
+        .and_then(Value::as_array)
+        .map(|corrections| {
+            corrections
+                .iter()
+                .filter_map(|correction| correction.get("kind").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !correction_kinds.is_empty() {
+        summary.insert("correctionKinds".to_owned(), json!(correction_kinds));
+    }
+    summary.insert("keyCount".to_owned(), json!(object.len()));
+    Value::Object(summary)
+}
+
+fn audit_payload_type(payload: &Value) -> &'static str {
+    match payload {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }
 
 pub(crate) async fn program_run_list_value(
@@ -1044,7 +2491,7 @@ async fn execute_invoke_value(
     let function = target.entry.function.clone();
     if is_capability_primitive(&function) {
         return Err(CapabilityError::InvalidParams {
-            message: "execute cannot recursively invoke capability primitives. This call is already the execute primitive; set contractId/capabilityId/functionId to the target capability, for example process::run, and put only that target's arguments inside payload. Use search or inspect to copy the complete required payload shape before calling.".to_owned(),
+            message: "execute cannot recursively invoke capability primitives. This call is already the execute primitive; set target to the real capability, for example process::run, and put only that target's arguments inside arguments.".to_owned(),
         });
     }
     enforce_execution_policy(invocation, &target.binding_decision, &function)?;
@@ -2661,7 +4108,7 @@ fn recipe_validation_error(
         )
     });
     let guidance = format!(
-        "Invalid payload for {}. Put target arguments inside execute.payload. Required payload: {}. Example: {}",
+        "Invalid arguments for {}. Put target arguments inside execute.arguments. Required arguments: {}. Example: {}",
         entry.contract_id,
         if recipe.required_payload.is_empty() {
             "none".to_owned()
@@ -2787,7 +4234,7 @@ fn render_search_summary(query: &str, results: &[CapabilityIndexHit]) -> String 
         };
     }
     let mut lines = vec![format!(
-        "Found {} visible capabilities. Use the execute recipes below; call the `execute` primitive with the listed target id at the top level and the listed target arguments inside `payload`. Do not wrap another `capability::execute` call, and do not run example/probe calls unless the user requested that exact action. Inspect only when a recipe says it is required or you need full contract detail.",
+        "Found {} visible capabilities. Use one `execute` call with intent, optional target, and target arguments inside `arguments`. Do not wrap another `capability::execute` call, and do not run example/probe calls unless the user requested that exact action. Inspect is an operator detail view; model-facing execution prepares freshness internally.",
         results.len()
     )];
     let full_recipe_count = results.len().min(5);
@@ -2824,7 +4271,7 @@ fn render_search_hit_recipe(hit: &CapabilityIndexHit) -> String {
     }
     if !recipe.required_payload.is_empty() {
         lines.push(format!(
-            "Required payload: {}.",
+            "Required arguments: {}.",
             recipe.required_payload.join("; ")
         ));
     }
@@ -2839,7 +4286,7 @@ fn render_search_hit_recipe(hit: &CapabilityIndexHit) -> String {
     }
     if recipe.inspect_required {
         lines
-            .push("Inspect required before execute for freshness/elevated-risk fields.".to_owned());
+            .push("Freshness is required for elevated-risk work; model-facing execute prepares it before approval.".to_owned());
     } else {
         lines.push(format!("Direct execution: {}.", recipe.direct_execution));
     }
@@ -2874,7 +4321,7 @@ fn render_inspection_summary(details: &Value) -> String {
     {
         summary.push_str(&format!("\nExecute:\n```json\n{template}\n```"));
         summary.push_str(
-            "\nCall the `execute` primitive with this target id and payload shape; do not set contractId/capabilityId/functionId to `capability::execute`, and do not run example/probe calls unless they are the requested action.",
+            "\nCall the `execute` primitive with this target and arguments shape; do not set target to `capability::execute`, and do not run example/probe calls unless they are the requested action.",
         );
     }
 
@@ -2888,7 +4335,7 @@ fn render_inspection_summary(details: &Value) -> String {
         let expected_schema_digest = requirements["expectedSchemaDigest"]
             .as_str()
             .unwrap_or("<missing>");
-        summary.push_str("\nBefore execute, copy these freshness fields exactly:");
+        summary.push_str("\nFreshness material prepared by model-facing execute:");
         summary.push_str(&format!("\n- inspectionHandle={inspection_handle}"));
         summary.push_str(&format!("\n- expectedRevision={expected_revision}"));
         summary.push_str(&format!(
@@ -2909,7 +4356,7 @@ fn render_inspection_summary(details: &Value) -> String {
         .unwrap_or_else(|| required_payload_fields(contract));
     if !required_payload_fields.is_empty() {
         summary.push_str(&format!(
-            "\nExecute payload must include: {}.",
+            "\nExecute arguments must include: {}.",
             required_payload_fields.join(", ")
         ));
     }
@@ -3013,40 +4460,66 @@ fn merge_optional_details(existing: Option<Value>, extra: Value) -> Value {
 }
 
 fn risk_field(params: &Value, key: &str) -> Result<Option<RiskLevel>, CapabilityError> {
-    let Some(value) = string_field(params, key) else {
+    let Some(raw) = params.get(key) else {
         return Ok(None);
     };
+    let Some(value) = raw
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("{key} must be a non-empty string"),
+        });
+    };
+    risk_level_from_str(value, key).map(Some)
+}
+
+fn risk_level_from_str(value: &str, label: &str) -> Result<RiskLevel, CapabilityError> {
     match value.to_ascii_lowercase().as_str() {
-        "low" => Ok(Some(RiskLevel::Low)),
-        "medium" => Ok(Some(RiskLevel::Medium)),
-        "high" => Ok(Some(RiskLevel::High)),
-        "critical" => Ok(Some(RiskLevel::Critical)),
+        "low" => Ok(RiskLevel::Low),
+        "medium" => Ok(RiskLevel::Medium),
+        "high" => Ok(RiskLevel::High),
+        "critical" => Ok(RiskLevel::Critical),
         _ => Err(CapabilityError::InvalidParams {
-            message: format!("Unsupported riskMax '{value}'"),
+            message: format!("Unsupported {label} '{value}'"),
         }),
     }
 }
 
 fn effect_field(params: &Value, key: &str) -> Result<Option<EffectClass>, CapabilityError> {
-    let Some(value) = string_field(params, key) else {
+    let Some(raw) = params.get(key) else {
         return Ok(None);
     };
+    let Some(value) = raw
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("{key} must be a non-empty string"),
+        });
+    };
+    effect_class_from_str(value, key).map(Some)
+}
+
+fn effect_class_from_str(value: &str, label: &str) -> Result<EffectClass, CapabilityError> {
     let normalized = value
         .chars()
         .filter(|ch| ch.is_ascii_alphanumeric())
         .collect::<String>()
         .to_ascii_lowercase();
     match normalized.as_str() {
-        "pureread" => Ok(Some(EffectClass::PureRead)),
-        "deterministiccompute" => Ok(Some(EffectClass::DeterministicCompute)),
-        "delegatedinvocation" => Ok(Some(EffectClass::DelegatedInvocation)),
-        "idempotentwrite" => Ok(Some(EffectClass::IdempotentWrite)),
-        "appendonlyevent" => Ok(Some(EffectClass::AppendOnlyEvent)),
-        "reversiblesideeffect" => Ok(Some(EffectClass::ReversibleSideEffect)),
-        "externalsideeffect" => Ok(Some(EffectClass::ExternalSideEffect)),
-        "irreversiblesideeffect" => Ok(Some(EffectClass::IrreversibleSideEffect)),
+        "pureread" => Ok(EffectClass::PureRead),
+        "deterministiccompute" => Ok(EffectClass::DeterministicCompute),
+        "delegatedinvocation" => Ok(EffectClass::DelegatedInvocation),
+        "idempotentwrite" => Ok(EffectClass::IdempotentWrite),
+        "appendonlyevent" => Ok(EffectClass::AppendOnlyEvent),
+        "reversiblesideeffect" => Ok(EffectClass::ReversibleSideEffect),
+        "externalsideeffect" => Ok(EffectClass::ExternalSideEffect),
+        "irreversiblesideeffect" => Ok(EffectClass::IrreversibleSideEffect),
         _ => Err(CapabilityError::InvalidParams {
-            message: format!("Unsupported effect '{value}'"),
+            message: format!("Unsupported {label} '{value}'"),
         }),
     }
 }
@@ -3339,13 +4812,14 @@ mod tests {
         let content = value["content"][0]["text"].as_str().expect("text content");
 
         assert!(content.contains("process::run"));
-        assert!(content.contains("target id at the top level"));
+        assert!(content.contains("intent, optional target"));
         assert!(content.contains("Do not wrap another `capability::execute` call"));
         assert!(content.contains("do not run example/probe calls"));
         assert!(
-            content.contains("\"payload\":{\"command\":\"date\",\"executionMode\":\"read_only\"}")
+            content
+                .contains("\"arguments\":{\"command\":\"date\",\"executionMode\":\"read_only\"}")
         );
-        assert!(content.contains("Required payload: command: string"));
+        assert!(content.contains("Required arguments: command: string"));
         assert!(content.contains("executionMode: string"));
         assert!(!content.contains("process::run -> process::run"));
         assert_eq!(
@@ -3436,6 +4910,355 @@ mod tests {
     }
 
     #[test]
+    fn orchestrated_execute_normalizes_common_shape_mistakes() {
+        let input = parse_orchestrated_execute_input(&json!({
+            "intent": "write a sandboxed output file",
+            "payload": {
+                "contractId": "process::run",
+                "command": "printf hi > out.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [
+                    {"path": "out.txt", "kind": "materialized_file", "role": "updated"}
+                ],
+                "idempotencyKey": "write-out",
+                "reason": "Create a declared output"
+            }
+        }))
+        .expect("normalized input");
+        assert_eq!(
+            input.target_params,
+            Some(json!({"contractId": "process::run"}))
+        );
+        assert_eq!(input.idempotency_key.as_deref(), Some("write-out"));
+        assert_eq!(input.reason.as_deref(), Some("Create a declared output"));
+        assert_eq!(input.arguments["command"], json!("printf hi > out.txt"));
+        let kinds = input
+            .corrections
+            .iter()
+            .filter_map(|correction| correction["kind"].as_str())
+            .collect::<Vec<_>>();
+        assert!(kinds.contains(&"payload_to_arguments"));
+        assert!(kinds.contains(&"nested_target_to_target"));
+        assert!(kinds.contains(&"nested_idempotency_key_to_wrapper"));
+        assert!(kinds.contains(&"nested_reason_to_wrapper"));
+
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let mut arguments = input.arguments;
+        let mut corrections = input.corrections;
+        normalize_target_specific_arguments(&function, &mut arguments, &mut corrections);
+        assert!(arguments["expectedOutputs"][0].get("kind").is_none());
+        assert!(arguments["expectedOutputs"][0].get("role").is_none());
+        assert!(
+            corrections
+                .iter()
+                .any(|correction| correction["kind"] == json!("process_expected_outputs_shape"))
+        );
+    }
+
+    #[test]
+    fn orchestrated_execute_prepared_payload_preserves_target_arguments_only() {
+        let input = parse_orchestrated_execute_input(&json!({
+            "intent": "read the readme",
+            "target": "filesystem::read_file",
+            "arguments": {"path": "README.md"},
+            "reason": "Read the project README"
+        }))
+        .expect("input");
+        let prepared = prepared_execute_payload(input.target_params.as_ref().unwrap(), &input);
+
+        assert_eq!(prepared["mode"], json!("invoke"));
+        assert_eq!(prepared["capabilityId"], json!("filesystem::read_file"));
+        assert_eq!(prepared["payload"], json!({"path": "README.md"}));
+        assert_eq!(prepared["reason"], json!("Read the project README"));
+        assert!(prepared.get("arguments").is_none());
+        assert!(prepared.get("target").is_none());
+    }
+
+    #[test]
+    fn orchestration_audit_filters_match_status_phase_and_correction() {
+        let matching = json!({
+            "eventType": "capability.orchestration",
+            "traceId": "trace-a",
+            "payload": {
+                "orchestrationId": "capability-orchestration:test",
+                "status": "executed",
+                "intent": "run a command",
+                "correctionsApplied": [
+                    {"kind": "payload_to_arguments", "confidence": 1.0}
+                ],
+                "phaseDetails": {"phase": "prepare"}
+            }
+        });
+        let different = json!({
+            "eventType": "capability.orchestration",
+            "traceId": "trace-a",
+            "payload": {
+                "status": "needs_selection",
+                "correctionsApplied": [],
+                "phaseDetails": {"phase": "resolve"}
+            }
+        });
+
+        assert!(audit_event_matches_orchestration_filters(
+            &matching,
+            Some("executed"),
+            Some("payload_to_arguments"),
+            Some("prepare")
+        ));
+        assert!(!audit_event_matches_orchestration_filters(
+            &different,
+            Some("executed"),
+            Some("payload_to_arguments"),
+            Some("prepare")
+        ));
+
+        let filtered = filter_orchestration_audit_result(
+            json!({"events": [different, matching], "redacted": false}),
+            Some("executed"),
+            Some("payload_to_arguments"),
+            Some("prepare"),
+            10,
+            false,
+        )
+        .expect("filtered");
+        assert_eq!(filtered["events"].as_array().expect("events").len(), 1);
+        assert_eq!(filtered["redacted"], json!(true));
+        assert_eq!(filtered["events"][0]["payload"]["redacted"], json!(true));
+        assert_eq!(
+            filtered["events"][0]["payloadSummary"]["status"],
+            json!("executed")
+        );
+        assert_eq!(
+            filtered["events"][0]["payloadSummary"]["phase"],
+            json!("prepare")
+        );
+        assert_eq!(
+            filtered["events"][0]["payloadSummary"]["correctionKinds"],
+            json!(["payload_to_arguments"])
+        );
+    }
+
+    #[test]
+    fn intent_strong_name_match_breaks_near_score_filesystem_ties() {
+        let read = CapabilityIndexHit {
+            kind: "implementation".to_owned(),
+            capability_id: "filesystem::read_file".to_owned(),
+            contract_id: "filesystem::read_file".to_owned(),
+            implementation_id: "first_party.filesystem.v1.read_file".to_owned(),
+            plugin_id: "first_party.filesystem".to_owned(),
+            worker_id: "filesystem".to_owned(),
+            function_id: "filesystem::read_file".to_owned(),
+            catalog_revision: 1,
+            schema_digest: "digest-read".to_owned(),
+            trust_tier: "first_party_signed".to_owned(),
+            health: "Healthy".to_owned(),
+            visibility: "system".to_owned(),
+            effect_class: "pure_read".to_owned(),
+            risk_level: "low".to_owned(),
+            lexical_score: 1.0,
+            vector_score: Some(0.1),
+            fused_score: 0.09,
+            matched_by: "hybrid_local".to_owned(),
+            snippet: "read a file".to_owned(),
+            requires_inspect: false,
+            recipe: None,
+        };
+        let list = CapabilityIndexHit {
+            contract_id: "filesystem::list_dir".to_owned(),
+            function_id: "filesystem::list_dir".to_owned(),
+            implementation_id: "first_party.filesystem.v1.list_dir".to_owned(),
+            capability_id: "filesystem::list_dir".to_owned(),
+            schema_digest: "digest-list".to_owned(),
+            snippet: "list a directory".to_owned(),
+            ..read.clone()
+        };
+
+        assert!(intent_strongly_matches_hit(
+            "Use the filesystem read file capability to read a file",
+            &read
+        ));
+        assert!(!intent_strongly_matches_hit(
+            "Use the filesystem read file capability to read a file",
+            &list
+        ));
+    }
+
+    #[test]
+    fn deterministic_intent_route_prefers_filesystem_read_for_path_arguments() {
+        let read = test_function("filesystem::read_file");
+        let mut stop = test_function("sandbox::stop_spawned_worker");
+        stop.effect_class = EffectClass::ExternalSideEffect;
+        stop.risk_level = RiskLevel::High;
+        let snapshot = CapabilityRegistrySnapshot::new(vec![stop, read], 7);
+
+        let hit = deterministic_intent_route(
+            "Read the first 3 lines of README.md from the current workspace.",
+            &json!({"path": "README.md", "startLine": 1, "endLine": 3}),
+            &snapshot,
+            &json!({}),
+        )
+        .expect("route check")
+        .expect("filesystem read route");
+
+        assert_eq!(hit.function_id, "filesystem::read_file");
+        assert_eq!(hit.matched_by, "deterministic_path_read");
+        assert!(hit.fused_score > 10.0);
+    }
+
+    #[test]
+    fn deterministic_intent_route_preempts_bad_search_ranking() {
+        let read = test_function("filesystem::read_file");
+        let mut stop = test_function("sandbox::stop_spawned_worker");
+        stop.effect_class = EffectClass::ExternalSideEffect;
+        stop.risk_level = RiskLevel::High;
+        let snapshot = CapabilityRegistrySnapshot::new(vec![stop.clone(), read], 7);
+        let mut hits = vec![orchestration_hit_from_entry(
+            &CapabilityRegistryEntry::from_function(stop, 7),
+            "local_lexical",
+            7.8,
+        )];
+
+        apply_deterministic_intent_route(
+            "Read the first 3 lines of README.md from the current workspace.",
+            &json!({"path": "README.md", "startLine": 1, "endLine": 3}),
+            &snapshot,
+            &json!({}),
+            &mut hits,
+        )
+        .expect("route applied");
+
+        assert_eq!(hits[0].function_id, "filesystem::read_file");
+        assert_eq!(hits[1].function_id, "sandbox::stop_spawned_worker");
+    }
+
+    #[test]
+    fn deterministic_intent_route_respects_constraints_and_write_intents() {
+        let read = test_function("filesystem::read_file");
+        let snapshot = CapabilityRegistrySnapshot::new(vec![read], 7);
+
+        let write_intent = deterministic_intent_route(
+            "Write the first 3 lines to README.md.",
+            &json!({"path": "README.md"}),
+            &snapshot,
+            &json!({}),
+        )
+        .expect("route check");
+        assert!(write_intent.is_none());
+
+        let constrained_out = deterministic_intent_route(
+            "Read the first 3 lines of README.md.",
+            &json!({"path": "README.md"}),
+            &snapshot,
+            &json!({"allowedNamespaces": ["sandbox"]}),
+        )
+        .expect("route check");
+        assert!(constrained_out.is_none());
+    }
+
+    #[test]
+    fn orchestration_constraints_reject_broader_or_unsupported_targets() {
+        let mut function = test_function("process::run");
+        function.effect_class = EffectClass::ExternalSideEffect;
+        function.risk_level = RiskLevel::High;
+        let entry = CapabilityRegistryEntry::from_function(function, 4);
+
+        validate_orchestration_constraints(
+            &json!({
+                "riskMax": "high",
+                "effect": "external_side_effect",
+                "allowedContracts": ["process::run"],
+                "allowedNamespaces": ["process"]
+            }),
+            &entry,
+        )
+        .expect("covered constraints");
+
+        let risk_error = validate_orchestration_constraints(&json!({"riskMax": "medium"}), &entry)
+            .expect_err("risk rejected");
+        assert!(risk_error.to_string().contains("above constraint riskMax"));
+
+        let contract_error = validate_orchestration_constraints(
+            &json!({"allowedContracts": ["filesystem::read_file"]}),
+            &entry,
+        )
+        .expect_err("contract rejected");
+        assert!(
+            contract_error
+                .to_string()
+                .contains("outside execute.constraints.allowedContracts")
+        );
+
+        let unsupported_error =
+            validate_orchestration_constraints(&json!({"networkPolicy": "none"}), &entry)
+                .expect_err("unsupported rejected");
+        assert!(
+            unsupported_error
+                .to_string()
+                .contains("Unsupported execute.constraints field")
+        );
+
+        let typed_error = validate_orchestration_constraints(&json!({"riskMax": 1}), &entry)
+            .expect_err("typed risk rejected");
+        assert!(typed_error.to_string().contains("riskMax must be"));
+    }
+
+    #[test]
+    fn orchestration_constraints_filter_resolution_candidates() {
+        let read_hit = CapabilityIndexHit {
+            kind: "implementation".to_owned(),
+            capability_id: "filesystem::read_file".to_owned(),
+            contract_id: "filesystem::read_file".to_owned(),
+            implementation_id: "first_party.filesystem.v1.read_file".to_owned(),
+            plugin_id: "first_party.filesystem".to_owned(),
+            worker_id: "filesystem".to_owned(),
+            function_id: "filesystem::read_file".to_owned(),
+            catalog_revision: 1,
+            schema_digest: "digest-read".to_owned(),
+            trust_tier: "first_party_signed".to_owned(),
+            health: "Healthy".to_owned(),
+            visibility: "system".to_owned(),
+            effect_class: "pure_read".to_owned(),
+            risk_level: "low".to_owned(),
+            lexical_score: 1.0,
+            vector_score: Some(0.1),
+            fused_score: 0.9,
+            matched_by: "hybrid_local".to_owned(),
+            snippet: "read a file".to_owned(),
+            requires_inspect: false,
+            recipe: None,
+        };
+        let process_hit = CapabilityIndexHit {
+            contract_id: "process::run".to_owned(),
+            function_id: "process::run".to_owned(),
+            implementation_id: "first_party.process.v1.run".to_owned(),
+            capability_id: "process::run".to_owned(),
+            schema_digest: "digest-process".to_owned(),
+            effect_class: "external_side_effect".to_owned(),
+            risk_level: "high".to_owned(),
+            snippet: "run a process".to_owned(),
+            ..read_hit.clone()
+        };
+
+        let constraints = json!({
+            "riskMax": "low",
+            "effect": "pure_read",
+            "allowedNamespaces": ["filesystem"]
+        });
+        assert!(
+            orchestration_constraints_allow_hit(&constraints, &read_hit).expect("read constraints")
+        );
+        assert!(
+            !orchestration_constraints_allow_hit(&constraints, &process_hit)
+                .expect("process constraints")
+        );
+    }
+
+    #[test]
     fn execute_preflight_policy_rejection_is_structured_capability_result() {
         let process_spec = crate::domains::process::contract::capabilities()
             .expect("process specs")
@@ -3510,7 +5333,7 @@ mod tests {
             details["error"]["message"]
                 .as_str()
                 .expect("message")
-                .contains("Required payload: command")
+                .contains("Required arguments: command")
         );
     }
 
@@ -3605,12 +5428,12 @@ mod tests {
         match error {
             CapabilityError::InvalidParams { message } => {
                 assert!(message.contains("required field is missing"));
-                assert!(message.contains("Required payload"));
+                assert!(message.contains("Required arguments"));
                 assert!(message.contains("command"));
             }
             CapabilityError::Custom { message, .. } => {
                 assert!(message.contains("required field is missing"));
-                assert!(message.contains("Required payload"));
+                assert!(message.contains("Required arguments"));
                 assert!(message.contains("command"));
             }
             other => panic!("unexpected error: {other:?}"),
@@ -3661,9 +5484,9 @@ mod tests {
             },
             "recipe": {
                 "executeTemplate": {
-                    "mode": "invoke",
-                    "contractId": "process::run",
-                    "payload": {
+                    "intent": "Run a read-only process command.",
+                    "target": "process::run",
+                    "arguments": {
                         "command": "date",
                         "executionMode": "read_only"
                     }
@@ -3686,16 +5509,13 @@ mod tests {
         let summary = render_inspection_summary(&details);
 
         assert!(summary.contains("inspectionHandle=capability-inspection:v1:test"));
-        assert!(summary.contains("\"contractId\":\"process::run\""));
+        assert!(summary.contains("\"target\":\"process::run\""));
         assert!(summary.contains("\"executionMode\":\"read_only\""));
-        assert!(
-            summary
-                .contains("do not set contractId/capabilityId/functionId to `capability::execute`")
-        );
+        assert!(summary.contains("do not set target to `capability::execute`"));
         assert!(summary.contains("do not run example/probe calls"));
         assert!(summary.contains("expectedRevision=1"));
         assert!(summary.contains("expectedSchemaDigest=digest-123"));
-        assert!(summary.contains("Execute payload must include: command: string, executionMode: string [read_only|sandbox_materialized]."));
+        assert!(summary.contains("Execute arguments must include: command: string, executionMode: string [read_only|sandbox_materialized]."));
         assert!(summary.contains("idempotencyKey is required"));
         assert!(summary.contains("approvalRequired=true"));
     }

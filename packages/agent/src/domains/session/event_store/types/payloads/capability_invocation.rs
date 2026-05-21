@@ -182,6 +182,12 @@ mod tests {
             root_invocation_id: Some("root-test".into()),
             binding_decision_id: Some("binding-test".into()),
             theme_color: Some("#10B981".into()),
+            presentation_hints: Some(serde_json::json!({
+                "displayName": "Read File",
+                "chipTitle": "Read",
+                "icon": "doc.text.magnifyingglass",
+                "themeColor": "#10B981"
+            })),
         }
     }
 
@@ -202,6 +208,7 @@ mod tests {
         assert_eq!(v["schemaDigest"], "sha256:test");
         assert_eq!(v["catalogRevision"], 7);
         assert_eq!(v["bindingDecisionId"], "binding-test");
+        assert_eq!(v["presentationHints"]["displayName"], "Read File");
     }
 
     #[test]
@@ -222,6 +229,7 @@ mod tests {
         assert_eq!(v["modelPrimitiveName"], "execute");
         assert_eq!(v["contractId"], "filesystem::read_file");
         assert_eq!(v["bindingDecisionId"], "binding-test");
+        assert_eq!(v["presentationHints"]["icon"], "doc.text.magnifyingglass");
     }
 
     #[test]

@@ -237,9 +237,8 @@ impl MisfirePolicy {
 
 /// Per-job capability restrictions for cron automations (allowlist-only).
 ///
-/// For `AgentTurn` payloads, capability ids map to LLM capability ids
-/// (`search`, `inspect`, `execute`) and executable contract ids such as
-/// `process::run`.
+/// For `AgentTurn` payloads, capability ids map to the provider-visible
+/// `execute` primitive and executable contract ids such as `process::run`.
 /// For other payloads, the payload type name (`ShellCommand`, `Webhook`, `SystemEvent`)
 /// is the capability that gets checked.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

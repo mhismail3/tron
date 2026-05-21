@@ -35,6 +35,7 @@ enum CapabilityPauseRequestedPlugin: DispatchableEventPlugin {
             let rootInvocationId: String?
             let bindingDecisionId: String?
             let themeColor: String?
+            let presentationHints: [String: AnyCodable]?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -52,7 +53,8 @@ enum CapabilityPauseRequestedPlugin: DispatchableEventPlugin {
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
                     bindingDecisionId: bindingDecisionId,
-                    themeColor: themeColor
+                    themeColor: themeColor,
+                    presentationHints: presentationHints
                 )
             }
         }
@@ -121,6 +123,7 @@ enum CapabilityPauseResolvedPlugin: DispatchableEventPlugin {
             let rootInvocationId: String?
             let bindingDecisionId: String?
             let themeColor: String?
+            let presentationHints: [String: AnyCodable]?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -138,7 +141,8 @@ enum CapabilityPauseResolvedPlugin: DispatchableEventPlugin {
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
                     bindingDecisionId: bindingDecisionId,
-                    themeColor: themeColor
+                    themeColor: themeColor,
+                    presentationHints: presentationHints
                 )
             }
         }
@@ -201,6 +205,7 @@ enum CapabilityRunStatusPlugin: DispatchableEventPlugin {
             let rootInvocationId: String?
             let bindingDecisionId: String?
             let themeColor: String?
+            let presentationHints: [String: AnyCodable]?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
@@ -218,7 +223,8 @@ enum CapabilityRunStatusPlugin: DispatchableEventPlugin {
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
                     bindingDecisionId: bindingDecisionId,
-                    themeColor: themeColor
+                    themeColor: themeColor,
+                    presentationHints: presentationHints
                 )
             }
         }

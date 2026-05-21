@@ -1,6 +1,6 @@
 # Capability UI And Engine Console
 
-> Last verified: 2026-05-15
+> Last verified: 2026-05-21
 
 The iOS capability UI is a thin client over server-owned capability records. It
 does not maintain a local tool catalog and does not choose capability bindings
@@ -11,7 +11,8 @@ approval, audit redaction, plugin lifecycle, and execution.
 
 `CapabilityClient` calls canonical engine functions:
 
-- Model primitives: `capability::search`, `capability::inspect`, and `capability::execute`
+- Model primitive: `capability::execute`
+- Operator catalog reads: `capability::search` and `capability::inspect`
 - Console reads: `capability::status`, `capability::registry_snapshot`,
   `capability::audit_query`, `capability::binding_list`,
   `capability::plugin_list`, `capability::plugin_inspect`, and
@@ -69,8 +70,8 @@ objects and shared catalog/index status.
 The operator console asks the server for an explicit lexical-allowed capability
 search policy when the local vector index is unavailable. This is a visible
 degraded operator mode: search results show the degraded status and reason.
-Agent/model capability search still follows the active profile policy and does
-not inherit the console's degraded search allowance.
+Agent/model `execute` resolution still follows the active profile policy and
+does not inherit the console's degraded search allowance.
 Server status refreshes keep metadata responsive and trigger vector warm-up
 without requiring the console to wait for the embedding model on first use.
 
@@ -114,11 +115,15 @@ smaller code-styled detail string, an elapsed/duration label that stays visible
 at the trailing edge while the detail truncates, and a chevron to the detail
 sheet. Chips take only the width they need until the request detail is too long,
 then the detail truncates inside the available row width. Capability metadata
-may include `presentationHints.themeColor`; iOS carries that color through
-generating, started, progress, pause/run, and completed events for chips and
-sheets. When an early `execute` event has not resolved the binding yet, the chip
-derives a stable color from the requested contract id in the submitted arguments
-so running process, filesystem, notification, and other first-party capability
+may include `presentationHints.displayName`, `presentationHints.chipTitle`,
+`presentationHints.icon`, and `presentationHints.themeColor`; iOS treats those
+as server-owned presentation hints and only maps them into native Tron
+components. Execution identity, authority, approval, and lineage still come
+from the typed capability identity and audit fields, not from presentation
+hints. When an early `execute` event has not resolved the binding yet, the chip
+uses the server-provided hint when available and otherwise derives a stable
+generic color from the requested contract id in the submitted arguments so
+running process, filesystem, notification, and other first-party capability
 chips do not all collapse to the generic execute color.
 `capability.invocation.generating` creates the chip immediately, before worker
 dispatch completes; `started`, `progress`, and `completed` update that same
@@ -133,18 +138,30 @@ Invocation detail sheets use the same display model. The toolbar carries the
 primitive icon and title, while the first card focuses on operator-readable
 capability identity: friendly capability name, status and observed duration
 pills, and a user-facing plugin/source label such as `File System
-(First-party)` or `GitHub (MCP)`. Request, result, approval, artifacts, logs,
-and error classification are separated into sheet-native sections. Request
-cards show only high-signal submitted fields such as command, query, URL,
-compact path, reason, and notable booleans/counts; duplicated target/mode data
-stays in metadata. Result cards show only the operator-relevant output itself:
-stdout/stderr, file content, diff text, entry names, match previews, or another
-domain output preview. Exit code, timeout state, truncation flags, counts,
-paths, raw request JSON, raw result JSON/text, schema digest, trace id, binding
-decision, child invocation count, server duration, observed duration, and other
-debug identifiers live in a collapsed Metadata section by default. Search
-results summarize query, catalog revision, index/vector status, result count,
-cursor state, and ranked hits. Inspect results summarize contract,
+(First-party)` or `GitHub (MCP)`. Request, execution path, result, approval,
+artifacts, logs, and error classification are separated into sheet-native
+sections. Request, execution path, and result sections use the same
+capability-owned sheet accent so a single invocation reads as one coherent
+native surface; success and failure still appear in status/error badges rather
+than changing the structural container color. Request cards show target
+capability arguments such as command,
+execution mode, query, URL, compact path, reason, and notable booleans/counts;
+wrapper fields like `intent`, `target`, and `reason` remain visible only when
+they help explain how the single `execute` primitive was used.
+
+For `capability::execute`, orchestration diagnostics are first-class operator
+signal, not raw debug trivia. The detail sheet renders a native `Execution Path`
+section over the server-owned details: resolution mode, selected target,
+selected implementation, binding policy, catalog/schema revision, risk/effect,
+payload/freshness/approval state, corrections, child invocation lineage, status,
+duration, exit code, timeout state, and truncation. Result cards show the
+operator-relevant output itself: stdout/stderr, file content, diff text, entry
+names, match previews, or another domain output preview. Raw request JSON, raw
+result JSON/text, trace id, binding ids, full schema hashes, and other forensic
+identifiers remain available in the collapsed Metadata section.
+
+Search results summarize query, catalog revision, index/vector status, result
+count, cursor state, and ranked hits. Inspect results summarize contract,
 implementation, worker/plugin provenance, trust/health, binding decision,
 execution requirements, schema digest, inspection handle, approval requirements,
 and examples when available. Unknown result shapes still render through a
@@ -160,7 +177,7 @@ feeds the model primer.
 
 The current Engine Console is a sheet-native operator surface built from
 capability cards, metric grids, status banners, section chips, generated action
-rows, and detail sheets. It renders overview, capability search/inspect, a
+rows, and detail sheets. It renders overview, operator capability search/inspect, a
 program-run form backed by a fresh inspection handle, plugin lifecycle
 summaries, worker health, binding summaries, profile policies, redacted audit
 rows, trace summaries, primer inputs, and redacted program-run records.
@@ -176,6 +193,13 @@ use contract and implementation metadata, not retired built-in-name dispatch.
 First-party and external capabilities may provide presentation hints, but those
 hints are advisory metadata attached to capability records; the generic sheet
 must remain useful without them.
+
+Generated UI surfaces are not used for chat execution forensics in this phase.
+The generated UI system remains server-authored and fixed-catalog for operator
+actions and resource surfaces. A future server-authored execution surface may
+reuse the same `ui_surface` substrate, but an agent must never custom-author
+which execution evidence is shown after a run; the native detail renderer keeps
+the audit path consistent across providers and capability kinds.
 
 Long contract, implementation, plugin, worker, trace, and schema identifiers
 must wrap or truncate inside cards without overlapping neighboring controls.

@@ -1,8 +1,8 @@
 //! Capability contracts owned by the capability domain worker.
 //!
-//! This worker is the model-facing harness collapse point: providers see only
-//! `search`, `inspect`, and `execute`, while actual behavior remains owned by
-//! live domain/plugin workers in the engine catalog.
+//! This worker is the model-facing harness collapse point: providers see one
+//! `execute` primitive, while search, inspection, preparation, approval, and
+//! target execution remain engine-owned phases over live domain/plugin workers.
 
 use serde_json::json;
 
@@ -230,37 +230,15 @@ fn admin_write_contract(
 
 pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
     match function_id {
-        SEARCH_FUNCTION_ID => json!({
-            "capabilityPrimitive": true,
-            "modelPrimitiveName": "search",
-            "capabilityOrder": 10,
-            "capabilityExecutionMode": {"kind": "serialized", "group": "capability-read"},
-            "capabilitySchema": {
-                "name": "search",
-                "description": "Search the live Tron capability catalog for contracts, implementations, workers, plugins, examples, and docs visible to this session.",
-                "parameters": search_request_schema()
-            }
-        }),
-        INSPECT_FUNCTION_ID => json!({
-            "capabilityPrimitive": true,
-            "modelPrimitiveName": "inspect",
-            "capabilityOrder": 20,
-            "capabilityExecutionMode": {"kind": "serialized", "group": "capability-read"},
-            "capabilitySchema": {
-                "name": "inspect",
-                "description": "Inspect one capability contract or implementation, including schemas, authority, risk, provenance, idempotency, and copyable execute freshness fields.",
-                "parameters": inspect_request_schema()
-            }
-        }),
         EXECUTE_FUNCTION_ID => json!({
             "capabilityPrimitive": true,
             "modelPrimitiveName": "execute",
-            "capabilityOrder": 30,
+            "capabilityOrder": 10,
             "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
             "capabilitySchema": {
                 "name": "execute",
-                "description": "Execute one selected target capability. This primitive is already capability::execute: do not set contractId, capabilityId, or functionId to capability::execute. For mode='invoke', set contractId/capabilityId/functionId to the target capability, put that target's arguments inside payload, and copy the complete execute recipe from search or inspect so every required target parameter is present. Do not run example/probe calls such as date or git status unless the user requested that exact action. If the user supplies an exact target payload, invoke that payload exactly. Safe process::run checks such as date/git status and low-risk notifications::send may run directly with idempotency; mutating or elevated-risk work requires the inspectionHandle, expectedRevision, and expectedSchemaDigest returned by inspect.",
-                "parameters": execute_request_schema()
+                "description": "Resolve, prepare, approve when needed, run, and observe one Tron capability from a natural-language intent. Provide intent plus an optional target hint such as process::run, put only the target capability arguments inside arguments, and use idempotencyKey for mutating work. Do not call separate search or inspect tools; this execute primitive owns discovery, freshness, approval, correction, and child execution. Harmless shape mistakes may be corrected, but mutating or elevated-risk work still pauses for freshness and approval before child execution.",
+                "parameters": execute_model_request_schema()
             }
         }),
         _ => serde_json::Value::Null,
@@ -331,29 +309,100 @@ fn inspect_request_schema() -> serde_json::Value {
 }
 
 fn execute_request_schema() -> serde_json::Value {
+    let mut schema = execute_model_request_schema();
+    if let Some(object) = schema.as_object_mut() {
+        object.remove("anyOf");
+    }
+    let properties = schema
+        .get_mut("properties")
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("execute schema properties");
+    properties.insert(
+        "mode".to_owned(),
+        json!({"type": "string", "enum": ["invoke", "program"], "description": "Internal/operator direct shape. Model callers should omit this and use intent/target/arguments."}),
+    );
+    properties.insert(
+        "capabilityId".to_owned(),
+        json!({"type": "string", "description": "Internal/operator target capability id. Model callers should use target instead."}),
+    );
+    properties.insert(
+        "contractId".to_owned(),
+        json!({"type": "string", "description": "Internal/operator target contract id. Model callers should use target instead."}),
+    );
+    properties.insert(
+        "implementationId".to_owned(),
+        json!({"type": "string", "description": "Internal/operator target implementation id. Model callers should use target instead."}),
+    );
+    properties.insert(
+        "functionId".to_owned(),
+        json!({"type": "string", "description": "Internal/operator target function id. Model callers should use target instead."}),
+    );
+    properties.insert(
+        "language".to_owned(),
+        json!({"type": "string", "enum": ["javascript"], "description": "Internal/operator program mode only."}),
+    );
+    properties.insert(
+        "code".to_owned(),
+        json!({"type": "string", "description": "Internal/operator JavaScript program body used only with mode='program'."}),
+    );
+    properties.insert(
+        "args".to_owned(),
+        json!({"type": "object", "description": "Internal/operator program arguments used only with mode='program'."}),
+    );
+    properties.insert(
+        "allowedContracts".to_owned(),
+        json!({"type": "array", "items": {"type": "string"}}),
+    );
+    properties.insert(
+        "allowedImplementations".to_owned(),
+        json!({"type": "array", "items": {"type": "string"}}),
+    );
+    properties.insert(
+        "timeoutMs".to_owned(),
+        json!({"type": "integer", "minimum": 10, "maximum": 30000}),
+    );
+    properties.insert("budget".to_owned(), json!({"type": "object"}));
+    properties.insert(
+        "expectedRevision".to_owned(),
+        json!({"type": "integer", "minimum": 1, "description": "Internal/operator freshness revision. Model callers should let execute prepare freshness."}),
+    );
+    properties.insert(
+        "expectedSchemaDigest".to_owned(),
+        json!({"type": "string", "description": "Internal/operator schema digest. Model callers should let execute prepare freshness."}),
+    );
+    properties.insert(
+        "inspectionHandle".to_owned(),
+        json!({"type": "string", "description": "Internal/operator inspection handle. Model callers should let execute prepare freshness."}),
+    );
+    schema
+}
+
+fn execute_model_request_schema() -> serde_json::Value {
     json!({
         "type": "object",
-        "required": ["mode"],
         "additionalProperties": false,
         "properties": {
-            "mode": {"type": "string", "enum": ["invoke", "program"], "description": "Use 'invoke' for one selected capability and put that capability's arguments inside payload. Use 'program' only for JavaScript composition."},
-            "capabilityId": {"type": "string", "description": "Target contract/capability id for mode='invoke', such as process::run. Never set this to capability::execute; this call is already the execute primitive."},
-            "contractId": {"type": "string", "description": "Target contract id for mode='invoke', such as process::run. Never set this to capability::execute; use search or inspect for the complete target payload requirements."},
-            "implementationId": {"type": "string", "description": "Target concrete implementation id for mode='invoke'. Never set this to the capability primitive itself."},
-            "functionId": {"type": "string", "description": "Target engine function id for mode='invoke'. Never set this to capability::execute; use the selected target function id."},
-            "payload": {"type": "object", "description": "Arguments for the selected target capability when mode='invoke'. Example: {\"command\":\"date\",\"executionMode\":\"read_only\"} for process::run. Do not put target capability arguments at the top level; copy required fields from search/inspect executeTemplate. Examples are templates, not warm-up calls; never execute an example/probe payload unless it is the user's requested action."},
-            "language": {"type": "string", "enum": ["javascript"]},
-            "code": {"type": "string", "description": "JavaScript function body used only with mode='program'. Leave unset for mode='invoke'."},
-            "args": {"type": "object", "description": "Program arguments used only with mode='program'."},
-            "allowedContracts": {"type": "array", "items": {"type": "string"}},
-            "allowedImplementations": {"type": "array", "items": {"type": "string"}},
-            "timeoutMs": {"type": "integer", "minimum": 10, "maximum": 30000},
-            "budget": {"type": "object"},
-            "expectedRevision": {"type": "integer", "minimum": 1, "description": "Freshness revision copied from inspect.executionRequirements for mutating or elevated-risk work."},
-            "expectedSchemaDigest": {"type": "string", "description": "Schema digest copied from inspect.executionRequirements for mutating or elevated-risk work."},
-            "inspectionHandle": {"type": "string", "description": "Fresh inspection handle copied from inspect.executionRequirements for mutating or elevated-risk work."},
-            "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key required for mutating child work."},
-            "reason": {"type": "string"}
+            "intent": {"type": "string", "description": "Natural-language goal. The engine uses it to resolve and rank visible capabilities when target is omitted or ambiguous."},
+            "target": {"type": "string", "description": "Optional target hint such as process::run, filesystem::read_file, or a concrete implementation/function id."},
+            "contractId": {"type": "string", "description": "Correctable target alias for callers that already know the contract id. Prefer target when possible."},
+            "capabilityId": {"type": "string", "description": "Correctable target alias for callers that already know the capability id. Prefer target when possible."},
+            "functionId": {"type": "string", "description": "Correctable target alias for callers that already know the registered function id. Prefer target when possible."},
+            "implementationId": {"type": "string", "description": "Correctable target alias for callers that already know the implementation id. Prefer target when possible."},
+            "arguments": {"type": "object", "description": "Arguments for the resolved target capability only. Example for process::run: {\"command\":\"date\",\"executionMode\":\"read_only\"}. Do not include wrapper fields such as target, contractId, capabilityId, functionId, implementationId, payload, mode, inspectionHandle, or expectedRevision here."},
+            "constraints": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "riskMax": {"type": "string", "description": "Optional maximum risk: low, medium, high, or critical."},
+                    "effect": {"type": "string", "description": "Optional exact effect-class constraint, such as pure_read or external_side_effect."},
+                    "allowedContracts": {"type": "array", "items": {"type": "string"}},
+                    "allowedNamespaces": {"type": "array", "items": {"type": "string"}}
+                },
+                "description": "Optional v1 bounds for resolution and preparation. Supported fields are riskMax, effect, allowedContracts, and allowedNamespaces. Constraints never broaden authority; unsupported constraint fields are rejected instead of ignored."
+            },
+            "payload": {"type": "object", "description": "Accepted only as a correctable alias for arguments. Prefer arguments; if supplied, the engine records a payload_to_arguments correction."},
+            "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key for mutating or resource-producing work. Safe read-only calls may omit it."},
+            "reason": {"type": "string", "description": "Short reason for the requested action, used in audit records and approval prompts."}
         }
     })
 }
@@ -394,6 +443,9 @@ fn audit_query_request_schema() -> serde_json::Value {
         "properties": {
             "eventType": {"type": "string"},
             "traceId": {"type": "string"},
+            "orchestrationStatus": {"type": "string", "description": "Optional capability::execute orchestration status filter, such as needs_selection, needs_capability, target_payload_invalid, or executed."},
+            "correctionKind": {"type": "string", "description": "Optional correction kind filter, such as payload_to_arguments or process_expected_outputs_shape."},
+            "phase": {"type": "string", "description": "Optional orchestration phase filter, such as resolve, prepare, run, or observe."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 200},
             "revealPayloads": {"type": "boolean"}
         }
@@ -554,9 +606,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_search_inspect_execute_have_model_metadata() {
-        assert!(!model_metadata(SEARCH_FUNCTION_ID).is_null());
-        assert!(!model_metadata(INSPECT_FUNCTION_ID).is_null());
+    fn only_execute_has_model_metadata() {
+        assert!(model_metadata(SEARCH_FUNCTION_ID).is_null());
+        assert!(model_metadata(INSPECT_FUNCTION_ID).is_null());
         assert!(!model_metadata(EXECUTE_FUNCTION_ID).is_null());
         assert!(model_metadata(STATUS_FUNCTION_ID).is_null());
         assert!(model_metadata(PLUGIN_INSTALL_FUNCTION_ID).is_null());
@@ -569,27 +621,62 @@ mod tests {
         let description = metadata["capabilitySchema"]["description"]
             .as_str()
             .expect("execute description");
-        assert!(description.contains("already capability::execute"));
-        assert!(description.contains("do not set contractId"));
-        assert!(description.contains("target capability"));
-        assert!(description.contains("every required target parameter"));
-        assert!(description.contains("Do not run example/probe calls"));
-        assert!(description.contains("invoke that payload exactly"));
+        assert!(description.contains("natural-language intent"));
+        assert!(description.contains("Do not call separate search or inspect tools"));
+        assert!(description.contains("mutating or elevated-risk work still pauses"));
 
-        let schema = execute_request_schema();
-        let contract_description = schema["properties"]["contractId"]["description"]
+        let schema = execute_model_request_schema();
+        assert!(schema["required"].is_null());
+        assert_eq!(schema["properties"]["target"]["type"], json!("string"));
+        assert_eq!(schema["properties"]["contractId"]["type"], json!("string"));
+        assert_eq!(schema["properties"]["functionId"]["type"], json!("string"));
+
+        let arguments_description = schema["properties"]["arguments"]["description"]
             .as_str()
-            .expect("contractId description");
-        assert!(contract_description.contains("Target contract id"));
-        assert!(contract_description.contains("Never set this to capability::execute"));
+            .expect("arguments description");
+        assert!(arguments_description.contains(r#""executionMode":"read_only""#));
+        assert!(arguments_description.contains("Do not include wrapper fields"));
 
         let payload_description = schema["properties"]["payload"]["description"]
             .as_str()
-            .expect("payload description");
-        assert!(payload_description.contains(r#""executionMode":"read_only""#));
-        assert!(payload_description.contains("copy required fields"));
-        assert!(payload_description.contains("not warm-up calls"));
-        assert!(!payload_description.contains(r#"{"command":"date"} for process::run"#));
+            .expect("payload alias description");
+        assert!(payload_description.contains("correctable alias"));
+    }
+
+    #[test]
+    fn execute_model_schema_stays_provider_portable() {
+        let metadata = model_metadata(EXECUTE_FUNCTION_ID);
+        let schema = &metadata["capabilitySchema"]["parameters"];
+        assert_eq!(schema["type"], json!("object"));
+        assert_provider_schema_has_no_unsupported_keywords(schema, "$");
+    }
+
+    fn assert_provider_schema_has_no_unsupported_keywords(value: &serde_json::Value, path: &str) {
+        match value {
+            serde_json::Value::Object(object) => {
+                for key in ["oneOf", "anyOf", "allOf", "enum", "not"] {
+                    assert!(
+                        !object.contains_key(key),
+                        "provider schema contains unsupported {key} at {path}"
+                    );
+                }
+                for (key, child) in object {
+                    assert_provider_schema_has_no_unsupported_keywords(
+                        child,
+                        &format!("{path}.{key}"),
+                    );
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for (index, child) in values.iter().enumerate() {
+                    assert_provider_schema_has_no_unsupported_keywords(
+                        child,
+                        &format!("{path}[{index}]"),
+                    );
+                }
+            }
+            _ => {}
+        }
     }
 
     #[test]

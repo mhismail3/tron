@@ -2,10 +2,9 @@
 //!
 //! This module owns the collapsed model-facing harness. It does not implement
 //! filesystem, web, MCP, shell, UI, or app behavior itself; it exposes stable
-//! discovery, inspection, and execution primitives over the live engine catalog.
-//! The runnable catalog remains the execution source of truth, while this
-//! domain maintains the durable capability registry/index/audit layer in the
-//! engine ledger database.
+//! an `execute` primitive over the live engine catalog. The runnable catalog
+//! remains the execution source of truth, while this domain maintains the
+//! durable capability registry/index/audit layer in the engine ledger database.
 //!
 //! ## Submodules
 //!
@@ -21,21 +20,22 @@
 //!
 //! # INVARIANT: the model-facing surface is tiny
 //!
-//! Provider integrations should only expose the three capability primitives. All
-//! other behavior must remain discoverable/executable as worker-owned catalog
-//! entries rather than prompt-expanded hardcoded capabilities. Admin functions such as
-//! `capability::status`, `capability::plugin_list`, and
-//! `capability::policy_validate` are normal catalog functions for operator
-//! clients and are never marked with model-facing capability metadata. Admin
-//! mutations are system-idempotent because the Engine Console is an operator
-//! surface, not a session transcript participant.
-//! `inspect` is the source of freshness material for mutating or elevated-risk
-//! execution; its model-facing summary and structured `executionRequirements`
-//! must both expose the same `inspectionHandle`, `expectedRevision`, and
-//! `expectedSchemaDigest` values. Payload-sensitive first-party contracts may
-//! lower the effective risk before this check, as `process::run` does for
-//! classifier-approved read/check commands, but the same payload classifier
-//! must also drive approval so the fast path cannot bypass safety.
+//! Provider integrations should only expose the `execute` primitive. All other
+//! behavior must remain discoverable/executable as worker-owned catalog entries
+//! rather than prompt-expanded hardcoded capabilities. Admin functions such as
+//! `capability::search`, `capability::inspect`, `capability::status`,
+//! `capability::plugin_list`, and `capability::policy_validate` are normal
+//! catalog functions for operator clients and are never marked with
+//! model-facing capability metadata. Admin mutations are system-idempotent
+//! because the Engine Console is an operator surface, not a session transcript
+//! participant.
+//! `execute` owns freshness preparation for mutating or elevated-risk
+//! execution: it resolves the target, records a fresh inspection handle when
+//! needed, validates target schema/policy/idempotency, and then routes through
+//! the same approval and child invocation path. Payload-sensitive first-party
+//! contracts may lower the effective risk before this check, as `process::run`
+//! does for classifier-approved read/check commands, but the same payload
+//! classifier must also drive approval so the fast path cannot bypass safety.
 //! Low-risk user-visible notifications are another explicit direct path:
 //! `notifications::send` is still idempotent and audited, but it is primed and
 //! executable without a separate inspect round trip so notification parity does
@@ -68,8 +68,8 @@
 //! hashes, unchanged catalog revisions skip metadata resync, changed documents
 //! are warmed incrementally, and a search request embeds only the query text
 //! before fusing lexical and vector hits. Bounded batch search/inspect requests
-//! share one registry snapshot so agents can compare related capabilities
-//! without multiplying catalog sync work.
+//! share one registry snapshot for operator clients; provider models use the
+//! single `execute` orchestrator, which performs resolve/prepare internally.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

@@ -21,7 +21,13 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
                 "contractId": "agent::ask_user",
                 "implementationId": "first_party.agent.v1.ask_user",
                 "functionId": "agent::ask_user",
-                "modelPrimitiveName": "execute"
+                "modelPrimitiveName": "execute",
+                "presentationHints": {
+                    "displayName": "Ask User",
+                    "chipTitle": "Ask",
+                    "icon": "question",
+                    "themeColor": "#F59E0B"
+                }
             }
         }
         """.data(using: .utf8)!
@@ -32,6 +38,8 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
         XCTAssertEqual(result?.pauseId, "pause-1")
         XCTAssertEqual(result?.kind, "user_input")
         XCTAssertEqual(result?.identity.contractId, "agent::ask_user")
+        XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "Ask User")
+        XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "Ask")
         XCTAssertNotNil(result?.promptPayload?["questions"])
     }
 
@@ -51,7 +59,13 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
                 "contractId": "agent::spawn_subagent",
                 "implementationId": "first_party.agent.v1.spawn_subagent",
                 "functionId": "agent::spawn_subagent",
-                "modelPrimitiveName": "execute"
+                "modelPrimitiveName": "execute",
+                "presentationHints": {
+                    "displayName": "Spawn Subagent",
+                    "chipTitle": "Subagent",
+                    "icon": "subagent",
+                    "themeColor": "#8B5CF6"
+                }
             }
         }
         """.data(using: .utf8)!
@@ -63,5 +77,7 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
         XCTAssertEqual(result?.status, "running")
         XCTAssertEqual(result?.childInvocations, ["child-1"])
         XCTAssertEqual(result?.identity.contractId, "agent::spawn_subagent")
+        XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "Spawn Subagent")
+        XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "Subagent")
     }
 }

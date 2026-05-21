@@ -403,7 +403,7 @@ struct McpState {
 ///
 /// The router is present even when the server list is empty. Settings updates
 /// can add servers without requiring a daemon restart, and MCP functions are
-/// projected through `search`, `inspect`, and `execute`.
+/// projected through the capability registry and single `execute` orchestrator.
 async fn init_mcp(
     settings: &tron::domains::settings::TronSettings,
     settings_path: &std::path::Path,
