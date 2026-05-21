@@ -648,6 +648,27 @@ plane.
 | Regression coverage | Added contract, operations, registry, primitive-surface, provider-runner, and threat-model tests for single exported primitive, new schema shape, correction records, and orchestration audit filtering | Future providers must not re-export search/inspect as model primitives |
 | Documentation | Added [capability-orchestration-audit.md](capability-orchestration-audit.md) with manual test matrix, SQL queries, known confusion classes, and iteration rules | Capability ergonomics now has a durable testing and improvement loop |
 
+### 2026-05-21 Manual Test 12: Sandbox Output Verification Ergonomics
+
+The device smoke test proved the initial sandboxed `process::run` blocker was
+fixed: `capability::execute` selected `process::run`, paused for approval, ran
+child invocation `019e4c80-9ca9-70f3-8041-ef7b8d71d72b`, returned exit code
+`0`, and produced `materialized_file` plus `execution_output` refs. The
+follow-up verification attempts then exposed a more important foundation bug:
+the declared output was materialized at the server process cwd
+`/Users/moose/Downloads/projects/tron/execute-orchestrator-smoke.txt`, while
+the session filesystem capability correctly looked in the active session
+worktree. The model also tried ad hoc Python hash checks, which the read-only
+classifier correctly rejected as unproven.
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Root cause | `process::run` collected sandbox bytes correctly, but forwarded a relative `materialized_file::update` path without resolving it against engine-owned working-directory context; the resource primitive then fell back to `std::env::current_dir()` | Relative materialized outputs must never depend on the server process cwd |
+| Fix | `process::run` now resolves relative output `targetPath` values against the active session worktree, rejects relative target escapes, and forwards runtime metadata to child resource invocations; `materialized_file::update` also honors trusted `agent.workingDirectory` runtime metadata for direct resource calls | Durable output materialization stays resource-backed while matching the user's session workspace mental model |
+| Ergonomics | `process::run` now returns bounded `materializedOutputs` entries with output path, materialized target path, resource/version ids, file content hash, byte size, content preview, and truncation state | Agents can verify exact sandbox output from the original result instead of guessing a filesystem path or running Python/hash helpers |
+| Boundary | Unknown interpreters remain rejected in `executionMode=read_only`; content verification should use `materializedOutputs`, `materialized_file::read`, or the returned materialized path/resource | The fix improves usability without weakening the read-only process classifier |
+| Regression coverage | Added process tests for relative session-worktree materialization, target-path escape rejection, and materialized output summaries; added resource-kernel tests proving relative materialized paths honor runtime working-directory metadata and cannot escape it | Future process/resource changes must fail if relative materialized outputs leak into the server cwd |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:

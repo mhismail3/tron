@@ -990,6 +990,7 @@ fn normalize_target_specific_arguments(
     if function.id.as_str() != "process::run" {
         return;
     }
+    normalize_process_expected_output_aliases(arguments, corrections);
     let Some(outputs) = arguments
         .get_mut("expectedOutputs")
         .and_then(Value::as_array_mut)
@@ -997,20 +998,75 @@ fn normalize_target_specific_arguments(
         return;
     };
     let mut removed = false;
-    for output in outputs {
-        let Some(object) = output.as_object_mut() else {
+    for output in outputs.iter_mut() {
+        if let Some(path) = output
+            .as_str()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            *output = json!({ "path": path });
+            removed = true;
             continue;
-        };
-        removed |= object.remove("kind").is_some();
-        removed |= object.remove("role").is_some();
+        }
+        if let Some(object) = output.as_object_mut() {
+            removed |= object.remove("kind").is_some();
+            removed |= object.remove("role").is_some();
+            removed |= object.remove("type").is_some();
+        }
     }
     if removed {
         corrections.push(correction_record(
             "process_expected_outputs_shape",
-            "removed unsupported expectedOutputs kind/role fields; process::run expects path/targetPath only",
+            "normalized expectedOutputs entries; process::run expects objects with path and optional targetPath only",
             1.0,
         ));
     }
+}
+
+fn normalize_process_expected_output_aliases(arguments: &mut Value, corrections: &mut Vec<Value>) {
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+    if object.get("expectedOutputs").is_some() {
+        return;
+    }
+    let Some(alias) = object
+        .remove("expectedOutputPaths")
+        .or_else(|| object.remove("expectedOutputPath"))
+        .or_else(|| object.remove("outputPaths"))
+        .or_else(|| object.remove("outputPath"))
+    else {
+        return;
+    };
+    let outputs = match alias {
+        Value::String(path) => vec![json!({ "path": path })],
+        Value::Array(values) => values
+            .into_iter()
+            .filter_map(|value| match value {
+                Value::String(path) => Some(json!({ "path": path })),
+                Value::Object(mut object) => {
+                    if !object.contains_key("path")
+                        && let Some(path) = object.remove("targetPath")
+                    {
+                        object.insert("path".to_owned(), path);
+                    }
+                    Some(Value::Object(object))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        Value::Object(object) => vec![Value::Object(object)],
+        _ => Vec::new(),
+    };
+    if outputs.is_empty() {
+        return;
+    }
+    object.insert("expectedOutputs".to_owned(), Value::Array(outputs));
+    corrections.push(correction_record(
+        "process_expected_outputs_alias",
+        "converted expected output path alias into expectedOutputs",
+        1.0,
+    ));
 }
 
 async fn resolve_intent_target(
@@ -4108,13 +4164,19 @@ fn recipe_validation_error(
         )
     });
     let guidance = format!(
-        "Invalid arguments for {}. Put target arguments inside execute.arguments. Required arguments: {}. Example: {}",
+        "Invalid arguments for {}. Put target arguments inside execute.arguments. Required arguments: {}. Optional arguments: {}.{} Example: {}",
         entry.contract_id,
         if recipe.required_payload.is_empty() {
             "none".to_owned()
         } else {
             recipe.required_payload.join("; ")
         },
+        if recipe.optional_payload.is_empty() {
+            "none".to_owned()
+        } else {
+            recipe.optional_payload.join("; ")
+        },
+        conditional_argument_guidance(entry),
         example
     );
     match mapped {
@@ -4131,6 +4193,14 @@ fn recipe_validation_error(
             details,
         },
         other => other,
+    }
+}
+
+fn conditional_argument_guidance(entry: &CapabilityRegistryEntry) -> &'static str {
+    if entry.contract_id.as_str() == "process::run" {
+        " For sandbox_materialized process::run, include expectedOutputs: [{\"path\":\"<relative-output-path>\"}] and verify the returned materializedOutputs summary before guessing follow-up commands."
+    } else {
+        ""
     }
 }
 
@@ -4359,6 +4429,32 @@ fn render_inspection_summary(details: &Value) -> String {
             "\nExecute arguments must include: {}.",
             required_payload_fields.join(", ")
         ));
+    }
+    let optional_payload_fields = recipe["optionalPayload"]
+        .as_array()
+        .map(|fields| {
+            fields
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !optional_payload_fields.is_empty() {
+        summary.push_str(&format!(
+            "\nOptional arguments include: {}.",
+            optional_payload_fields
+                .iter()
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if contract_id == "process::run" {
+        summary.push_str(
+            "\nFor sandbox_materialized process::run, include expectedOutputs exactly as an array of objects like [{\"path\":\"result.txt\"}]. The result includes materializedOutputs with targetPath, resourceId, versionId, file content hash, and bounded contentPreview for verification.",
+        );
     }
 
     if requirements["idempotencyKeyRequired"]
@@ -4910,6 +5006,27 @@ mod tests {
     }
 
     #[test]
+    fn process_run_sandbox_requires_declared_outputs_before_approval() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let error = validate_target_policy_before_approval(
+            &function,
+            &json!({
+                "command": "printf hi > out.txt",
+                "executionMode": "sandbox_materialized"
+            }),
+        )
+        .expect_err("missing expected outputs rejected before approval");
+
+        assert!(error.to_string().contains("expectedOutputs"));
+        assert!(error.to_string().contains("\"path\""));
+    }
+
+    #[test]
     fn orchestrated_execute_normalizes_common_shape_mistakes() {
         let input = parse_orchestrated_execute_input(&json!({
             "intent": "write a sandboxed output file",
@@ -4918,7 +5035,7 @@ mod tests {
                 "command": "printf hi > out.txt",
                 "executionMode": "sandbox_materialized",
                 "expectedOutputs": [
-                    {"path": "out.txt", "kind": "materialized_file", "role": "updated"}
+                    {"path": "out.txt", "kind": "materialized_file", "role": "updated", "type": "file"}
                 ],
                 "idempotencyKey": "write-out",
                 "reason": "Create a declared output"
@@ -4953,11 +5070,40 @@ mod tests {
         normalize_target_specific_arguments(&function, &mut arguments, &mut corrections);
         assert!(arguments["expectedOutputs"][0].get("kind").is_none());
         assert!(arguments["expectedOutputs"][0].get("role").is_none());
+        assert!(arguments["expectedOutputs"][0].get("type").is_none());
         assert!(
             corrections
                 .iter()
                 .any(|correction| correction["kind"] == json!("process_expected_outputs_shape"))
         );
+    }
+
+    #[test]
+    fn orchestrated_execute_normalizes_process_output_aliases_before_schema_validation() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let mut arguments = json!({
+            "command": "printf hi > out.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputPaths": ["out.txt"]
+        });
+        let mut corrections = Vec::new();
+
+        normalize_target_specific_arguments(&function, &mut arguments, &mut corrections);
+
+        assert_eq!(arguments["expectedOutputs"], json!([{ "path": "out.txt" }]));
+        assert!(arguments.get("expectedOutputPaths").is_none());
+        assert!(
+            corrections.iter().any(|correction| {
+                correction["kind"] == json!("process_expected_outputs_alias")
+            })
+        );
+        validate_target_payload(&entry, &arguments).expect("normalized payload schema-valid");
     }
 
     #[test]
@@ -5494,6 +5640,10 @@ mod tests {
                 "requiredPayload": [
                     "command: string",
                     "executionMode: string [read_only|sandbox_materialized]"
+                ],
+                "optionalPayload": [
+                    "expectedOutputs: array<object>",
+                    "cwd: string"
                 ]
             },
             "executionRequirements": {
@@ -5516,6 +5666,13 @@ mod tests {
         assert!(summary.contains("expectedRevision=1"));
         assert!(summary.contains("expectedSchemaDigest=digest-123"));
         assert!(summary.contains("Execute arguments must include: command: string, executionMode: string [read_only|sandbox_materialized]."));
+        assert!(
+            summary.contains(
+                "Optional arguments include: expectedOutputs: array<object>, cwd: string."
+            )
+        );
+        assert!(summary.contains("For sandbox_materialized process::run, include expectedOutputs exactly as an array of objects"));
+        assert!(summary.contains("materializedOutputs"));
         assert!(summary.contains("idempotencyKey is required"));
         assert!(summary.contains("approvalRequired=true"));
     }

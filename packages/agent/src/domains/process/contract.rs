@@ -22,7 +22,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some("process.run"),
         )
-        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. Read-only commands run directly with executionMode=read_only, including composed inspection checks such as pwd && test -f README.md && sed -n '1,3p' README.md. Write-like commands must run with executionMode=sandbox_materialized and declared expected outputs. If cwd is omitted, Tron uses the active session worktree when available, then the session workspace.")
+        .description("Run a bounded shell command in the session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. Read-only commands run directly with executionMode=read_only, including composed inspection checks such as pwd && test -f README.md && sed -n '1,3p' README.md. Write-like commands must run with executionMode=sandbox_materialized and declared expected outputs. Sandbox output paths are collected from the isolated process sandbox; omitted or relative targetPath values materialize into the active session worktree by default and are summarized in materializedOutputs for exact verification. If cwd is omitted, Tron uses the active session worktree when available, then the session workspace.")
         .tags(vec!["shell", "bash", "zsh", "command", "terminal", "date", "git status", "test", "build", "process"])
         .request_schema(json!({
             "additionalProperties": false,
@@ -63,6 +63,24 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "durationMs": {"type": "integer"},
                 "timedOut": {"type": "boolean"},
                 "outputTruncated": {"type": "boolean"},
+                "materializedOutputs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["path", "targetPath", "resourceId", "versionId", "contentHash", "sizeBytes", "contentPreview", "previewTruncated"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "path": {"type": "string"},
+                            "targetPath": {"type": "string"},
+                            "resourceId": {"type": "string"},
+                            "versionId": {"type": "string"},
+                            "contentHash": {"type": "string"},
+                            "sizeBytes": {"type": "integer"},
+                            "contentPreview": {"type": "string"},
+                            "previewTruncated": {"type": "boolean"}
+                        }
+                    }
+                },
                 "resourceRefs": resource_refs_schema()
             },
             "required": ["stdout", "stderr", "exitCode", "durationMs", "timedOut", "outputTruncated"],
@@ -162,6 +180,8 @@ fn resource_refs_schema() -> serde_json::Value {
                 "versionId": {"type": "string"},
                 "role": {"type": "string"},
                 "contentHash": {"type": "string"},
+                "fileContentHash": {"type": "string"},
+                "materializedPath": {"type": "string"},
                 "relation": {"type": "string"}
             }
         }

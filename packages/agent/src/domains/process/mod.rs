@@ -16,7 +16,9 @@
 //! rejecting `sed -i`, sed write scripts, redirection, and unknown snippets.
 //! Commands outside the low-risk set must use
 //! `executionMode = "sandbox_materialized"` with declared expected outputs, then
-//! materialize those outputs through resource capabilities. If a request omits
+//! materialize those outputs through resource capabilities. Relative
+//! materialization targets resolve to the active session worktree so approved
+//! sandbox output never leaks into the server process cwd. If a request omits
 //! `cwd`, direct read-only execution uses the active session worktree when
 //! available, then the session workspace, so common shell checks stay fast
 //! without leaving the capability architecture.
@@ -28,7 +30,7 @@ pub(crate) mod handlers;
 pub(crate) use deps::Deps;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::time::Instant;
 
@@ -185,11 +187,13 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
         "outputTruncated": stdout_truncated || stderr_truncated,
     });
     let mut refs = Vec::new();
+    let mut materialized_outputs = Vec::new();
     if execution_mode == "sandbox_materialized" {
-        refs.extend(
+        let materialized =
             materialize_expected_outputs(deps, invocation, sandbox.as_ref().unwrap().path())
-                .await?,
-        );
+                .await?;
+        refs.extend(materialized.resource_refs);
+        materialized_outputs.extend(materialized.outputs);
     }
     if invocation
         .payload
@@ -203,14 +207,22 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
     if !refs.is_empty() {
         result["resourceRefs"] = Value::Array(refs);
     }
+    if !materialized_outputs.is_empty() {
+        result["materializedOutputs"] = Value::Array(materialized_outputs);
+    }
     Ok(result)
+}
+
+struct MaterializedProcessOutputs {
+    resource_refs: Vec<Value>,
+    outputs: Vec<Value>,
 }
 
 async fn materialize_expected_outputs(
     deps: &Deps,
     invocation: &Invocation,
     sandbox_root: &Path,
-) -> Result<Vec<Value>, CapabilityError> {
+) -> Result<MaterializedProcessOutputs, CapabilityError> {
     let expected = invocation
         .payload
         .get("expectedOutputs")
@@ -219,6 +231,7 @@ async fn materialize_expected_outputs(
             message: "sandbox_materialized process::run requires expectedOutputs".to_owned(),
         })?;
     let mut refs = Vec::new();
+    let mut outputs = Vec::new();
     for item in expected {
         let relative = item.get("path").and_then(Value::as_str).ok_or_else(|| {
             CapabilityError::InvalidParams {
@@ -236,25 +249,124 @@ async fn materialize_expected_outputs(
             .get("targetPath")
             .and_then(Value::as_str)
             .unwrap_or(relative);
+        let target_path = materialized_target_path(invocation, deps, target_path)?;
+        let content_hash = sha256_hex(content.as_bytes());
         let result = invoke_resource_capability(
             deps,
             invocation,
             "materialized_file::update",
             json!({
-                "path": target_path,
+                "path": target_path.to_string_lossy(),
                 "content": content,
             }),
         )
         .await?;
-        refs.extend(
+        let mut resource_refs = result
+            .get("resourceRefs")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for resource_ref in &mut resource_refs {
+            if resource_ref.get("kind").and_then(Value::as_str) == Some("materialized_file") {
+                resource_ref["fileContentHash"] = json!(content_hash);
+                resource_ref["materializedPath"] = json!(target_path.to_string_lossy());
+            }
+        }
+        let preview = bounded_preview(
             result
-                .get("resourceRefs")
-                .and_then(Value::as_array)
-                .cloned()
+                .get("version")
+                .and_then(|version| version.get("payload"))
+                .and_then(|payload| payload.get("content"))
+                .and_then(Value::as_str)
                 .unwrap_or_default(),
         );
+        outputs.push(json!({
+            "path": relative,
+            "targetPath": target_path.to_string_lossy(),
+            "resourceId": resource_refs
+                .first()
+                .and_then(|resource_ref| resource_ref.get("resourceId"))
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            "versionId": resource_refs
+                .first()
+                .and_then(|resource_ref| resource_ref.get("versionId"))
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            "contentHash": content_hash,
+            "sizeBytes": preview.size_bytes,
+            "contentPreview": preview.text,
+            "previewTruncated": preview.truncated,
+        }));
+        refs.extend(resource_refs);
     }
-    Ok(refs)
+    Ok(MaterializedProcessOutputs {
+        resource_refs: refs,
+        outputs,
+    })
+}
+
+struct BoundedPreview {
+    text: String,
+    size_bytes: usize,
+    truncated: bool,
+}
+
+fn bounded_preview(content: &str) -> BoundedPreview {
+    const MAX_PREVIEW_BYTES: usize = 4096;
+    let bytes = content.as_bytes();
+    if bytes.len() <= MAX_PREVIEW_BYTES {
+        return BoundedPreview {
+            text: content.to_owned(),
+            size_bytes: bytes.len(),
+            truncated: false,
+        };
+    }
+    let mut boundary = MAX_PREVIEW_BYTES;
+    while !content.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    BoundedPreview {
+        text: format!("{}…", &content[..boundary]),
+        size_bytes: bytes.len(),
+        truncated: true,
+    }
+}
+
+fn materialized_target_path(
+    invocation: &Invocation,
+    deps: &Deps,
+    target_path: &str,
+) -> Result<PathBuf, CapabilityError> {
+    let path = Path::new(target_path);
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                return Err(CapabilityError::InvalidParams {
+                    message: format!(
+                        "expected output targetPath {target_path} must stay inside the active session worktree"
+                    ),
+                });
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(CapabilityError::InvalidParams {
+                    message: format!("invalid expected output targetPath: {target_path}"),
+                });
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "expected output targetPath cannot be empty".to_owned(),
+        });
+    }
+    Ok(PathBuf::from(default_cwd(invocation, deps)).join(normalized))
 }
 
 async fn create_execution_output_resource(
@@ -317,6 +429,9 @@ async fn invoke_resource_capability(
     if let Some(workspace_id) = &parent.causal_context.workspace_id {
         causal = causal.with_workspace_id(workspace_id.clone());
     }
+    for (key, value) in &parent.causal_context.runtime_metadata {
+        causal = causal.with_runtime_metadata(key.clone(), value.clone());
+    }
     let result = deps
         .engine_host
         .invoke(Invocation::new_sync(
@@ -375,6 +490,12 @@ fn decode_capped(bytes: &[u8]) -> (String, bool) {
         text.push_str("\n[output truncated]");
     }
     (text, truncated)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hex::encode(hasher.finalize())
 }
 
 fn command_timeout_ms(params: Option<&Value>) -> u64 {
@@ -469,6 +590,48 @@ mod tests {
         );
         assert_eq!(command_timeout_ms(Some(&json!({"timeout": 1000}))), 1000);
         assert_eq!(command_timeout_ms(Some(&json!({}))), DEFAULT_TIMEOUT_MS);
+    }
+
+    #[test]
+    fn process_response_schema_accepts_materialized_output_summaries() {
+        let spec = contract::capabilities()
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .unwrap();
+        crate::engine::schema::validate_payload(
+            &spec.function_id,
+            "response",
+            spec.response_schema.as_ref().unwrap(),
+            &json!({
+                "stdout": "wrote result.txt\n",
+                "stderr": "",
+                "exitCode": 0,
+                "durationMs": 12,
+                "timedOut": false,
+                "outputTruncated": false,
+                "resourceRefs": [{
+                    "resourceId": "materialized_file:test",
+                    "kind": "materialized_file",
+                    "role": "updated",
+                    "versionId": "ver_test",
+                    "contentHash": "version-hash",
+                    "fileContentHash": "file-hash",
+                    "materializedPath": "/tmp/result.txt"
+                }],
+                "materializedOutputs": [{
+                    "path": "result.txt",
+                    "targetPath": "/tmp/result.txt",
+                    "resourceId": "materialized_file:test",
+                    "versionId": "ver_test",
+                    "contentHash": "file-hash",
+                    "sizeBytes": 7,
+                    "contentPreview": "result\n",
+                    "previewTruncated": false
+                }]
+            }),
+        )
+        .unwrap();
     }
 
     #[tokio::test]
@@ -577,5 +740,87 @@ mod tests {
             refs.iter()
                 .any(|resource_ref| resource_ref["kind"] == "execution_output")
         );
+    }
+
+    #[tokio::test]
+    async fn sandbox_materialized_relative_outputs_materialize_in_session_worktree() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({
+                "command": "printf 'session materialized\n' > result.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "result.txt"}],
+                "retainOutput": true
+            }),
+            Some(&created.session.id),
+        );
+
+        let value = process_run_value(&invocation, &deps).await.unwrap();
+        assert_eq!(value["exitCode"], 0);
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("result.txt")).unwrap(),
+            "session materialized\n"
+        );
+        let materialized = value["materializedOutputs"].as_array().unwrap();
+        assert_eq!(materialized[0]["path"], "result.txt");
+        let expected_target = tmp.path().join("result.txt");
+        assert_eq!(
+            materialized[0]["targetPath"].as_str(),
+            Some(expected_target.to_string_lossy().as_ref())
+        );
+        assert_eq!(materialized[0]["contentPreview"], "session materialized\n");
+        let refs = value["resourceRefs"].as_array().unwrap();
+        let file_ref = refs
+            .iter()
+            .find(|resource_ref| resource_ref["kind"] == "materialized_file")
+            .unwrap();
+        assert_eq!(
+            file_ref["materializedPath"].as_str(),
+            Some(expected_target.to_string_lossy().as_ref())
+        );
+        assert_eq!(file_ref["fileContentHash"], materialized[0]["contentHash"]);
+    }
+
+    #[tokio::test]
+    async fn sandbox_materialized_relative_target_path_cannot_escape_session_worktree() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({
+                "command": "printf 'escape\n' > result.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "result.txt", "targetPath": "../escape.txt"}]
+            }),
+            Some(&created.session.id),
+        );
+
+        let err = process_run_value(&invocation, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("must stay inside"))
+        );
+        assert!(!tmp.path().parent().unwrap().join("escape.txt").exists());
     }
 }

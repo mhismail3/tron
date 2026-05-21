@@ -178,6 +178,67 @@ async fn materialized_file_update_writes_file_and_returns_resource_refs() {
 }
 
 #[tokio::test]
+async fn materialized_file_update_resolves_relative_paths_with_runtime_working_directory() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let relative = format!("tron-runtime-cwd-test-{}/result.txt", uuid::Uuid::now_v7());
+    let causal = mutating_causal("materialized-file-runtime-cwd")
+        .with_scope("resource.write")
+        .with_runtime_metadata(
+            crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
+            tmp.path().to_string_lossy(),
+        );
+
+    let result = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "path": relative,
+                "content": "runtime-owned bytes"
+            }),
+            causal,
+        ))
+        .await;
+    assert_eq!(result.error, None);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join(&relative)).unwrap(),
+        "runtime-owned bytes"
+    );
+    assert!(
+        !std::path::Path::new(&relative).exists(),
+        "relative materialized paths must not fall back to the server cwd when runtime working directory is present"
+    );
+}
+
+#[tokio::test]
+async fn materialized_file_update_rejects_relative_runtime_path_escape() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let causal = mutating_causal("materialized-file-runtime-cwd-escape")
+        .with_scope("resource.write")
+        .with_runtime_metadata(
+            crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
+            tmp.path().to_string_lossy(),
+        );
+
+    let rejected = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "path": "../escape.txt",
+                "content": "should not be written"
+            }),
+            causal,
+        ))
+        .await;
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("must stay inside")
+    ));
+    assert!(!tmp.path().parent().unwrap().join("escape.txt").exists());
+}
+
+#[tokio::test]
 async fn materialized_file_version_conflict_does_not_touch_target_file() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let tmp = tempfile::tempdir().unwrap();

@@ -8,7 +8,8 @@
 
 use serde_json::Value;
 
-const READ_ONLY_LOW_RISK_MESSAGE: &str = "process::run read_only commands must be proven low-risk by the classifier; use executionMode=sandbox_materialized with expectedOutputs for mutating or unknown commands";
+const READ_ONLY_LOW_RISK_MESSAGE: &str = "process::run read_only commands must be proven low-risk by the classifier; use executionMode=sandbox_materialized with expectedOutputs for mutating or unknown commands. To verify sandbox materialized output, use the returned materializedOutputs summary or read the returned materialized file path/resource instead of running an unknown interpreter";
+const SANDBOX_OUTPUTS_REQUIRED_MESSAGE: &str = "process::run sandbox_materialized commands require expectedOutputs: [{\"path\":\"<relative-output-path>\"}] before approval";
 
 /// Return true when a `process::run` payload should pause for user approval.
 pub(crate) fn run_requires_approval(payload: &Value) -> bool {
@@ -25,6 +26,14 @@ pub(crate) fn validate_run_payload_before_approval(payload: &Value) -> Result<()
         && run_requires_approval(payload)
     {
         return Err(READ_ONLY_LOW_RISK_MESSAGE);
+    }
+    if payload.get("executionMode").and_then(Value::as_str) == Some("sandbox_materialized")
+        && payload
+            .get("expectedOutputs")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    {
+        return Err(SANDBOX_OUTPUTS_REQUIRED_MESSAGE);
     }
     Ok(())
 }
@@ -479,6 +488,18 @@ mod tests {
 
         let err = validate_run_payload_before_approval(&payload).unwrap_err();
         assert!(err.contains("sandbox_materialized"));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_missing_outputs_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "echo hi > result.txt",
+            "executionMode": "sandbox_materialized"
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("expectedOutputs"));
         assert!(!run_execution_requires_approval(&payload));
     }
 

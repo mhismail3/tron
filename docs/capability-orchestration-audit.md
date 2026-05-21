@@ -57,7 +57,11 @@ candidate capabilities before the engine picks a target.
 | `payload` used instead of `arguments` | Safe top-level alias becomes `arguments` with `payload_to_arguments` correction | `correctionKind=payload_to_arguments` |
 | Target fields nested under arguments | Moved to `target` when they do not conflict with an explicit target | `correctionKind=nested_target_to_target` |
 | Wrapper fields nested under arguments | `idempotencyKey` and `reason` move out; stale freshness fields are removed | `correctionKind=nested_idempotency_key_to_wrapper` |
-| `expectedOutputs.kind` / `role` for `process::run` | Removed because process outputs are path-driven | `correctionKind=process_expected_outputs_shape` |
+| `expectedOutputs.kind` / `role` / `type` for `process::run` | Removed because process outputs are path-driven | `correctionKind=process_expected_outputs_shape` |
+| `expectedOutputPath(s)` aliases for `process::run` | Converted to `expectedOutputs: [{"path":"..."}]` before schema validation | `correctionKind=process_expected_outputs_alias` |
+| `sandbox_materialized` without `expectedOutputs` | Rejected during prepare before approval or child execution with the exact required shape | `orchestrationStatus=target_policy_rejected` |
+| Sandbox output verification after approval | `process::run` returns bounded `materializedOutputs` with target path, resource/version refs, file content hash, byte size, and content preview; relative materialization targets resolve to the active session worktree | `result.materializedOutputs[*]` |
+| Attempting unknown interpreters for verification | Rejected as unproven read-only; use `materializedOutputs`, `materialized_file::read`, or the returned materialized path instead of ad hoc Python/hash commands | `orchestrationStatus=target_policy_rejected` |
 | Missing required target fields | Returns `isError=true` with exact missing fields and no child invocation | `orchestrationStatus=target_payload_invalid` |
 | Ambiguous natural-language intent | Returns `needs_selection` with ranked candidates | `orchestrationStatus=needs_selection` |
 | No matching capability | Returns `needs_capability` and a proposed capability shape | `orchestrationStatus=needs_capability` |
@@ -117,14 +121,17 @@ and query the server database before moving on.
    `executionMode=sandbox_materialized`, declared `expectedOutputs`, and a
    stable `idempotencyKey`.
    Expected: freshness/approval pause before child execution, then resource refs
-   after approval.
+   after approval, plus `materializedOutputs` showing the exact bounded content
+   preview and file content hash. Relative outputs should materialize into the
+   active session worktree, not the server process cwd.
 6. **Duplicate idempotency:** repeat the exact sandbox call.
    Expected: replay, no duplicate approval, child invocation, materialized file,
    or resource version.
 7. **Ambiguous intent:** use a broad intent such as “search”.
    Expected: `needs_selection` with candidates, no child invocation.
 8. **Shape correction:** place `payload`, `contractId`, and `idempotencyKey` in
-   the old nested shape.
+   the old nested shape, and try `expectedOutputPaths` or
+   `expectedOutputs` entries with harmless `kind`/`role`/`type` metadata.
    Expected: corrected request and correction records; mutating calls still
    pause before execution.
 9. **Constraint filtering:** ask for an intent that could match multiple

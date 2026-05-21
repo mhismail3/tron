@@ -5,7 +5,7 @@
 //! decisions, and generated UI should compose these functions instead of
 //! creating separate persistence planes.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -16,6 +16,7 @@ use super::{
     PrimitiveFunctionRegistration, PrimitiveStores, RESOURCE_WORKER_ID, handled_registration,
     optional_string, optional_u64, primitive_function, required_str, required_string_owned,
 };
+use crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY;
 use crate::engine::{
     CreateResource, DurableOutputContract, EffectClass, EngineError, EngineResourceLocation,
     EngineResourceScope, EngineResourceVersioningMode, IdempotencyContract,
@@ -1552,7 +1553,7 @@ fn create_materialized_file(
 ) -> Result<(EngineResource, EngineResourceVersion)> {
     let path = required_str(&invocation.payload, "path")?;
     let content = optional_string(invocation.payload.get("content"))?.unwrap_or_default();
-    let canonical = canonical_materialized_path(path)?;
+    let canonical = canonical_materialized_path(invocation, path)?;
     let content_hash = sha256_hex(content.as_bytes());
     if let Some(declared) = optional_string(invocation.payload.get("contentHash"))?
         && declared != content_hash
@@ -1904,7 +1905,7 @@ fn materialized_file_resource_id(path: &Path) -> String {
     format!("materialized_file:{hash}")
 }
 
-fn canonical_materialized_path(path: &str) -> Result<PathBuf> {
+fn canonical_materialized_path(invocation: &Invocation, path: &str) -> Result<PathBuf> {
     let candidate = PathBuf::from(path);
     if candidate.exists() {
         return candidate.canonicalize().map_err(|error| {
@@ -1913,6 +1914,33 @@ fn canonical_materialized_path(path: &str) -> Result<PathBuf> {
     }
     let absolute = if candidate.is_absolute() {
         candidate
+    } else if let Some(base) = invocation
+        .causal_context
+        .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
+    {
+        let mut relative = PathBuf::new();
+        for component in candidate.components() {
+            match component {
+                Component::Normal(part) => relative.push(part),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "relative materialized path {path} must stay inside the active working directory"
+                    )));
+                }
+                Component::RootDir | Component::Prefix(_) => {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "invalid relative materialized path {path}"
+                    )));
+                }
+            }
+        }
+        if relative.as_os_str().is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "materialized path cannot be empty".to_owned(),
+            ));
+        }
+        PathBuf::from(base).join(relative)
     } else {
         std::env::current_dir()
             .map_err(|error| EngineError::HandlerFailed(format!("read current dir: {error}")))?

@@ -4371,6 +4371,12 @@ mod tests {
                 .iter()
                 .any(|field| field.starts_with("command:"))
         );
+        assert!(
+            recipe
+                .optional_payload
+                .iter()
+                .any(|field| field.starts_with("expectedOutputs:"))
+        );
         assert_eq!(recipe.execute_template["target"], json!("process::run"));
         assert_eq!(
             recipe.execute_template["arguments"]["command"],
@@ -5254,6 +5260,12 @@ mod tests {
                 .required_payload
                 .iter()
                 .any(|field| field.starts_with("command:"))
+        );
+        assert!(
+            process
+                .optional_payload
+                .iter()
+                .any(|field| field.starts_with("expectedOutputs:"))
         );
         assert!(process.direct_execution.contains("conditional_safe_direct"));
 
