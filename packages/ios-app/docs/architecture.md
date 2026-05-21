@@ -474,7 +474,10 @@ no listable detail to return.
 
 Uses XcodeGen with `project.yml`:
 
-- **Configs**: Beta (debug), Prod (release)
+- **Configs**: Beta (debug, beta bundle ID), ProdDebug (debug, production
+  bundle ID), Prod (release, production bundle ID)
+- **Schemes**: Tron (optimized production), Tron Fast (debug-speed production),
+  Tron Beta (debug beta)
 - **Minimum iOS**: 26.0
 - **Swift**: 6.0
 - **Versioning**: `VERSION.env` is the only hand-edited release identity file.

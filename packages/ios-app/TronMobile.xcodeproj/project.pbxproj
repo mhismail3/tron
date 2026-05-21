@@ -1478,6 +1478,7 @@
 		C1B4C27A1C4A37C9884CEC2C /* SyncRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SyncRepositoryTests.swift; sourceTree = "<group>"; };
 		C20228C500F0257F0C529777 /* TextDeltaPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextDeltaPlugin.swift; sourceTree = "<group>"; };
 		C28833A97764DBF8F355302C /* PromptLibraryManagementSurfaceSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptLibraryManagementSurfaceSheet.swift; sourceTree = "<group>"; };
+		C2D8244668E0A5F26AB14034 /* ProdDebug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = ProdDebug.xcconfig; sourceTree = "<group>"; };
 		C3016F1B688D0D7FCAF508D6 /* TronLoggerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TronLoggerTests.swift; sourceTree = "<group>"; };
 		C350DA5334745B14AF956711 /* QueuedMessageSentPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedMessageSentPlugin.swift; sourceTree = "<group>"; };
 		C3E74F5B4D2F86774E025F2D /* AsyncSemaphoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncSemaphoreTests.swift; sourceTree = "<group>"; };
@@ -2014,6 +2015,7 @@
 			children = (
 				AA3ACC18C8503FD53ADAF075 /* Beta.xcconfig */,
 				87370A5D814F48375236F358 /* Prod.xcconfig */,
+				C2D8244668E0A5F26AB14034 /* ProdDebug.xcconfig */,
 			);
 			path = Configuration;
 			sourceTree = "<group>";
@@ -4517,6 +4519,72 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		04E3EF85BD6999B818358DFD /* ProdDebug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = C2D8244668E0A5F26AB14034 /* ProdDebug.xcconfig */;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEVELOPMENT_TEAM = MYGKXH6TY4;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = ProdDebug;
+		};
 		0EC56FE0FCCCDED951E71256 /* Beta */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -4600,6 +4668,46 @@
 				TEST_RUNNER_WAIT_FOR_DEBUGGER = NO;
 			};
 			name = Prod;
+		};
+		5273DC9718E263382E25B7DF /* ProdDebug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtensionProd.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 7;
+				DEVELOPMENT_TEAM = MYGKXH6TY4;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile.ShareExtension;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TRON_CANONICAL_VERSION = "0.1.0-beta.7";
+			};
+			name = ProdDebug;
+		};
+		54A946B27E7AEE85328D041A /* ProdDebug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TronMobile.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/TronMobile";
+				TEST_RUNNER_WAIT_FOR_DEBUGGER = NO;
+			};
+			name = ProdDebug;
 		};
 		5EA01628B568D9875D8C2397 /* Beta */ = {
 			isa = XCBuildConfiguration;
@@ -4765,6 +4873,27 @@
 			};
 			name = Beta;
 		};
+		FC3F77A16D573B8901660B5C /* ProdDebug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = TronMobileProd.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 7;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TRON_CANONICAL_VERSION = "0.1.0-beta.7";
+			};
+			name = ProdDebug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -4773,6 +4902,7 @@
 			buildConfigurations = (
 				C1E91992A48A10B5DC6126DB /* Beta */,
 				1CEDADBC6B85CF61D7E8AA61 /* Prod */,
+				FC3F77A16D573B8901660B5C /* ProdDebug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Beta;
@@ -4782,6 +4912,7 @@
 			buildConfigurations = (
 				0EC56FE0FCCCDED951E71256 /* Beta */,
 				44143C8FD6722C3A75689379 /* Prod */,
+				5273DC9718E263382E25B7DF /* ProdDebug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Beta;
@@ -4791,6 +4922,7 @@
 			buildConfigurations = (
 				C444D78DE090D93E724600E3 /* Beta */,
 				A13F15EBD7EB7EEE12984066 /* Prod */,
+				04E3EF85BD6999B818358DFD /* ProdDebug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Beta;
@@ -4800,6 +4932,7 @@
 			buildConfigurations = (
 				5EA01628B568D9875D8C2397 /* Beta */,
 				4AADF2E0F2DD5B2A70211C66 /* Prod */,
+				54A946B27E7AEE85328D041A /* ProdDebug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Beta;

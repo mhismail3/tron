@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Build, install, launch, and stop the local Tron Beta iOS app on a physical device.
+# Build, install, launch, and stop a local Tron iOS app variant on a physical device.
 
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 IOS_DIR="$ROOT_DIR/packages/ios-app"
 DERIVED_DATA="build/DerivedData"
-SCHEME="Tron Beta"
-CONFIG="Beta"
+SCHEME="${TRON_IOS_SCHEME:-Tron Beta}"
+CONFIG="${TRON_IOS_CONFIGURATION:-Beta}"
 DEVICE_ID="${TRON_IOS_DEVICE_ID:-}"
 DEVICE_NAME="${TRON_IOS_DEVICE_NAME:-}"
 DESTINATION="${TRON_IOS_DESTINATION:-}"
@@ -29,6 +29,8 @@ Environment overrides:
   TRON_IOS_DEVICE_ID       Physical iOS device identifier
   TRON_IOS_DEVICE_NAME     Physical iOS device name
   TRON_IOS_DESTINATION     Full xcodebuild destination, e.g. platform=iOS,id=<id>
+  TRON_IOS_SCHEME          Xcode scheme to build/launch, defaults to Tron Beta
+  TRON_IOS_CONFIGURATION   Xcode configuration, defaults to Beta
   TRON_IOS_LAUNCH_TIMEOUT_SECONDS
                            devicectl process launch timeout, defaults to 20
 
@@ -259,7 +261,7 @@ build_install_launch() {
     xcrun devicectl device install app --device "$device_id" "$app"
 
     if [ "$LAUNCH_AFTER_INSTALL" = "1" ] && [ -n "$bundle_id" ]; then
-        launch_beta_for_device "$device_id" "$bundle_id"
+        launch_app_for_device "$device_id" "$bundle_id"
     fi
 
     echo
@@ -269,7 +271,7 @@ build_install_launch() {
     echo "xcresult: $xcresult"
 }
 
-launch_beta_for_device() {
+launch_app_for_device() {
     local device_id="$1"
     local bundle_id="$2"
     if ! xcrun devicectl device process launch \
@@ -281,7 +283,7 @@ launch_beta_for_device() {
     fi
 }
 
-launch_beta() {
+launch_installed_app() {
     local device_id
     device_id="$(resolve_device_id)"
     [ -n "$device_id" ] || die "could not resolve a physical iOS device"
@@ -297,7 +299,7 @@ launch_beta() {
     local bundle_id
     bundle_id="$(bundle_id_for_project "$project_flag" "$project_path")"
     [ -n "$bundle_id" ] || die "could not resolve bundle ID"
-    launch_beta_for_device "$device_id" "$bundle_id"
+    launch_app_for_device "$device_id" "$bundle_id"
 }
 
 tronmobile_pids() {
@@ -306,7 +308,7 @@ tronmobile_pids() {
         | awk '$0 ~ /TronMobile\.app\/TronMobile$/ { print $1 }'
 }
 
-stop_beta() {
+stop_installed_app() {
     local device_id
     device_id="$(resolve_device_id)"
     [ -n "$device_id" ] || die "could not resolve a physical iOS device"
@@ -335,7 +337,7 @@ stop_beta() {
     echo "Stopped TronMobile on $device_id."
 }
 
-status_beta() {
+status_installed_app() {
     local device_id
     device_id="$(resolve_device_id)"
     [ -n "$device_id" ] || die "could not resolve a physical iOS device"
@@ -361,15 +363,15 @@ main() {
             ;;
         launch)
             parse_common_args "$@"
-            launch_beta
+            launch_installed_app
             ;;
         stop)
             parse_common_args "$@"
-            stop_beta
+            stop_installed_app
             ;;
         status)
             parse_common_args "$@"
-            status_beta
+            status_installed_app
             ;;
         help|-h|--help)
             usage

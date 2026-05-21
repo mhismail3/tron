@@ -1,6 +1,6 @@
 ---
 name: xcode
-description: Build, install, launch, stop, or check the local Tron Beta iOS app on a physical iOS device from this workspace.
+description: Build, install, launch, stop, or check a local Tron iOS app variant on a physical iOS device from this workspace.
 autoInject: false
 version: "1.0.0"
 tools:
@@ -11,7 +11,8 @@ tags:
   - tron
 ---
 
-Use this skill for local physical-device Tron iOS Beta workflows.
+Use this skill for local physical-device Tron iOS workflows. The default variant
+is the side-by-side beta app.
 
 ## Commands
 
@@ -25,14 +26,15 @@ scripts/tron-ios-beta status
 ```
 
 `install` regenerates the Xcode project, builds the `Tron Beta` scheme with the
-`Beta` configuration for a physical iOS destination, installs the app with
-`xcrun devicectl`, and launches the resolved bundle ID unless `--no-launch` is
-provided.
+`Beta` configuration by default for a physical iOS destination, installs the app
+with `xcrun devicectl`, and launches the resolved bundle ID unless `--no-launch`
+is provided. Set `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` to build a local
+variant such as `Tron Fast` / `ProdDebug`.
 
-`launch` launches the already-installed beta app without rebuilding. Use it
-after unlocking the device if install succeeded but launch was denied because
-the device was locked. Launch is bounded by `TRON_IOS_LAUNCH_TIMEOUT_SECONDS`,
-defaulting to 20 seconds.
+`launch` launches the already-installed app for the selected scheme/configuration
+without rebuilding. Use it after unlocking the device if install succeeded but
+launch was denied because the device was locked. Launch is bounded by
+`TRON_IOS_LAUNCH_TIMEOUT_SECONDS`, defaulting to 20 seconds.
 
 `stop` finds running `TronMobile.app/TronMobile` processes on the target device
 and terminates their PIDs with `xcrun devicectl device process terminate`.
@@ -41,6 +43,7 @@ The Codex app toolbar actions are split by generic device class:
 
 ```bash
 env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install
+env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-beta install
 env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta install
 env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta launch
 env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta launch
@@ -61,6 +64,13 @@ For a custom Xcode destination, set:
 
 ```bash
 export TRON_IOS_DESTINATION='platform=iOS,id=<device-identifier>'
+```
+
+For intentional local variants, set:
+
+```bash
+export TRON_IOS_SCHEME='Tron Fast'
+export TRON_IOS_CONFIGURATION=ProdDebug
 ```
 
 Do not hardcode personal device names or identifiers in tracked code or skill

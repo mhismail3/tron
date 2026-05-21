@@ -24,6 +24,12 @@ command = "env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install"
 platform = "darwin"
 
 [[actions]]
+name = "Rebuild + Launch iOS Prod Fast on iPhone"
+icon = "debug"
+command = "env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-beta install"
+platform = "darwin"
+
+[[actions]]
 name = "Rebuild + Install iOS Beta on iPad"
 icon = "debug"
 command = "env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta install"

@@ -51,6 +51,9 @@ regenerates the Xcode project, preflights the active Xcode toolchain, builds the
 `Tron Beta` scheme for a physical iOS destination, writes a full log plus
 `.xcresult` bundle, installs the resulting app bundle with `xcrun devicectl`,
 and launches the resolved bundle ID with a bounded `devicectl` launch timeout.
+`Rebuild + Launch iOS Prod Fast on iPhone` uses the same helper with
+`TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so it
+builds the fast production-bundle app and launches it on the selected iPhone.
 The matching launch actions run `scripts/tron-ios-beta launch` for the
 already-installed app without rebuilding.
 
@@ -70,12 +73,23 @@ export TRON_IOS_DEVICE_NAME=<device-name>
 If Xcode needs a custom destination string, set `TRON_IOS_DESTINATION`
 directly, for example `platform=iOS,id=<device-identifier>`.
 
+The helper also accepts `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` for local
+variants. Defaults remain `Tron Beta` and `Beta`; the fast production action sets
+them to `Tron Fast` and `ProdDebug`.
+
 ## Build Configurations
 
-| Config | Server | Use Case |
+| Config | Scheme | Use Case |
 |--------|--------|----------|
-| Beta | localhost:8082 | Development (debug, beta bundle ID) |
-| Prod | localhost:8080 | App Store (release, production bundle ID) |
+| Beta | Tron Beta | Development (debug, beta bundle ID) |
+| ProdDebug | Tron Fast | Local production-app iteration (debug, production bundle ID) |
+| Prod | Tron | App Store/TestFlight (release, production bundle ID) |
+
+Use `Tron Fast` when you want Xcode's debug-speed rebuilds to install over the
+production app (`com.tron.mobile`) instead of the side-by-side beta app. It uses
+the production app icon, production bundle IDs, and production entitlements, but
+keeps `-Onone`, `ENABLE_TESTABILITY=YES`, and `ONLY_ACTIVE_ARCH=YES` like the
+beta debug build.
 
 ## Running Tests
 

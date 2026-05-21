@@ -524,6 +524,101 @@ struct SourceGuardTests {
         #expect(value?.contains("$(") == false)
     }
 
+    @Test("fast production scheme keeps prod identity with debug build settings")
+    func testFastProductionSchemeUsesProdIdentityAndDebugSettings() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let projectYML = try String(
+            contentsOf: iosRoot.appendingPathComponent("project.yml"),
+            encoding: .utf8
+        )
+        let prodDebugConfig = try String(
+            contentsOf: iosRoot.appendingPathComponent("Configuration/ProdDebug.xcconfig"),
+            encoding: .utf8
+        )
+        let developmentDoc = try String(
+            contentsOf: iosRoot.appendingPathComponent("docs/development.md"),
+            encoding: .utf8
+        )
+        let architectureDoc = try String(
+            contentsOf: iosRoot.appendingPathComponent("docs/architecture.md"),
+            encoding: .utf8
+        )
+        let rootReadme = try String(
+            contentsOf: iosRoot
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("README.md"),
+            encoding: .utf8
+        )
+
+        #expect(projectYML.contains("ProdDebug: Configuration/ProdDebug.xcconfig"))
+        #expect(projectYML.contains("ProdDebug: debug"))
+        #expect(projectYML.contains("Tron Fast:"))
+        #expect(projectYML.contains("config: ProdDebug"))
+        #expect(projectYML.contains("CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements"))
+        #expect(projectYML.contains("CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements"))
+
+        #expect(prodDebugConfig.contains("SWIFT_OPTIMIZATION_LEVEL = -Onone"))
+        #expect(prodDebugConfig.contains("ENABLE_TESTABILITY = YES"))
+        #expect(prodDebugConfig.contains("ONLY_ACTIVE_ARCH = YES"))
+        #expect(prodDebugConfig.contains("SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG"))
+        #expect(!prodDebugConfig.contains("BETA"))
+        #expect(prodDebugConfig.contains("PRODUCT_BUNDLE_IDENTIFIER = com.tron.mobile"))
+        #expect(prodDebugConfig.contains("ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon"))
+
+        #expect(developmentDoc.contains("Tron Fast"))
+        #expect(architectureDoc.contains("ProdDebug"))
+        #expect(rootReadme.contains("Tron Fast"))
+    }
+
+    @Test("Codex iPhone action builds and launches fast production scheme")
+    func testCodexIPhoneActionBuildsAndLaunchesFastProductionScheme() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let repoRoot = iosRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let environment = try String(
+            contentsOf: repoRoot.appendingPathComponent(".codex/environments/environment.toml"),
+            encoding: .utf8
+        )
+        let installScript = try String(
+            contentsOf: repoRoot.appendingPathComponent("scripts/tron-ios-beta"),
+            encoding: .utf8
+        )
+        let developmentDoc = try String(
+            contentsOf: iosRoot.appendingPathComponent("docs/development.md"),
+            encoding: .utf8
+        )
+        let rootReadme = try String(
+            contentsOf: repoRoot.appendingPathComponent("README.md"),
+            encoding: .utf8
+        )
+
+        #expect(environment.contains(#"name = "Rebuild + Launch iOS Prod Fast on iPhone""#))
+        #expect(environment.contains("TRON_IOS_DEVICE_NAME=iPhone"))
+        #expect(environment.contains(#"TRON_IOS_SCHEME='Tron Fast'"#))
+        #expect(environment.contains("TRON_IOS_CONFIGURATION=ProdDebug"))
+        #expect(environment.contains("scripts/tron-ios-beta install"))
+
+        #expect(installScript.contains(#"SCHEME="${TRON_IOS_SCHEME:-Tron Beta}""#))
+        #expect(installScript.contains(#"CONFIG="${TRON_IOS_CONFIGURATION:-Beta}""#))
+        #expect(installScript.contains("TRON_IOS_SCHEME"))
+        #expect(installScript.contains("TRON_IOS_CONFIGURATION"))
+
+        #expect(developmentDoc.contains("Rebuild + Launch iOS Prod Fast on iPhone"))
+        #expect(rootReadme.contains("Rebuild + Launch iOS Prod Fast on iPhone"))
+    }
+
     @Test("iOS 26 cleanup hooks stay removed")
     func testIOS26CleanupHooksStayRemoved() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

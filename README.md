@@ -141,7 +141,7 @@ tron/
 |   +-- tron-release-notes  Deterministic tagged-release changelog generator
 |   +-- tron-lib.sh         Shared bash helpers used by scripts/tron
 |   +-- tron-cli            Contributor CLI helper for local service management
-|   +-- tron-ios-beta       Local physical-device build/install/stop helper for the iOS beta
+|   +-- tron-ios-beta       Local physical-device build/install/stop helper for iOS app variants
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
 +-- docs/
 |   +-- collapsed-modular-engine-architecture.md Collapsed worker/capability/resource target
@@ -266,14 +266,19 @@ xcodegen generate
 open TronMac.xcodeproj
 ```
 
-Build with the `Tron` scheme (or `Tron Beta` for the beta variant). The app starts without a server until the user pairs a Mac through onboarding.
+Build with the `Tron` scheme for optimized production builds, `Tron Fast` for
+debug-speed builds that install over the production app, or `Tron Beta` for the
+side-by-side beta variant. The app starts without a server until the user pairs
+a Mac through onboarding.
 
 Codex app local actions are checked in under
 `.codex/environments/environment.toml`. Open this project root in the Codex app
 to get toolbar actions for starting `scripts/tron dev -bdt`, stopping the dev
 server with `scripts/tron dev --stop`, rebuilding/installing/launching the local
-iOS beta on iPhone or iPad with `scripts/tron-ios-beta install`, and launching
-the already-installed beta on iPhone or iPad with `scripts/tron-ios-beta launch`.
+iOS beta on iPhone or iPad with `scripts/tron-ios-beta install`, rebuilding and
+launching the production-bundle debug build on iPhone with the
+`Rebuild + Launch iOS Prod Fast on iPhone` action, and launching the
+already-installed beta on iPhone or iPad with `scripts/tron-ios-beta launch`.
 The iOS actions pass generic `TRON_IOS_DEVICE_NAME=iPhone` or
 `TRON_IOS_DEVICE_NAME=iPad` selectors so the repo does not store personal device
 details. Post-install launch is bounded by the helper's launch timeout so a
@@ -1196,6 +1201,7 @@ Console: /engine invoke(capability::*) -> CapabilityClient -> EngineConsoleState
 | Config | Use |
 |--------|-----|
 | Beta | Debug build, side-by-side bundle ID |
+| ProdDebug | Debug build, production bundle ID |
 | Prod | Release build, production bundle ID |
 
 ### Documentation

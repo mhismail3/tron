@@ -10,10 +10,12 @@ options:
 
 configFiles:
   Beta: Configuration/Beta.xcconfig
+  ProdDebug: Configuration/ProdDebug.xcconfig
   Prod: Configuration/Prod.xcconfig
 
 configs:
   Beta: debug
+  ProdDebug: debug
   Prod: release
 
 settings:
@@ -57,6 +59,8 @@ targets:
       configs:
         Beta:
           CODE_SIGN_ENTITLEMENTS: TronMobileBeta.entitlements
+        ProdDebug:
+          CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
         Prod:
           CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
 
@@ -81,6 +85,9 @@ targets:
       configs:
         Beta:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.beta.ShareExtension
+        ProdDebug:
+          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
+          CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
         Prod:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
           CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
@@ -145,3 +152,22 @@ schemes:
       config: Beta
     archive:
       config: Beta
+
+  Tron Fast:
+    build:
+      targets:
+        TronMobile: all
+        TronShareExtension: all
+        TronMobileTests: [test]
+    run:
+      config: ProdDebug
+    test:
+      config: ProdDebug
+      targets:
+        - TronMobileTests
+    profile:
+      config: ProdDebug
+    analyze:
+      config: ProdDebug
+    archive:
+      config: Prod
