@@ -524,6 +524,55 @@ struct SourceGuardTests {
         #expect(value?.contains("$(") == false)
     }
 
+    @Test("settings log viewer remains available in production builds")
+    func testSettingsLogViewerAvailableInProductionBuilds() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        let settingsView = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/Settings/SettingsView.swift"),
+            encoding: .utf8
+        )
+        let logViewer = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/System/LogViewer.swift"),
+            encoding: .utf8
+        )
+        let miscClient = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/MiscClient.swift"),
+            encoding: .utf8
+        )
+        let architectureDoc = try String(
+            contentsOf: iosRoot.appendingPathComponent("docs/architecture.md"),
+            encoding: .utf8
+        )
+        let rootReadme = try String(
+            contentsOf: iosRoot
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("README.md"),
+            encoding: .utf8
+        )
+
+        #expect(settingsView.contains("@State private var showLogViewer = false"))
+        #expect(settingsView.contains("Button { showLogViewer = true }"))
+        #expect(settingsView.contains("LogViewer()"))
+        #expect(!settingsView.contains("#if DEBUG || BETA"))
+        #expect(!logViewer.hasPrefix("#if DEBUG || BETA"))
+        #expect(!logViewer.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"))
+        #expect(miscClient.contains("func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult"))
+
+        let ingestStart = try #require(miscClient.range(of: "func ingestLogs(entries: [ClientLogEntry]"))
+        let diagnosticsStart = try #require(miscClient.range(of: "// MARK: - Diagnostics (debug / beta only)"))
+        let ingestBlock = miscClient[ingestStart.lowerBound..<diagnosticsStart.lowerBound]
+        #expect(!ingestBlock.contains("#if DEBUG || BETA"))
+
+        #expect(architectureDoc.contains("The settings toolbar exposes Logs in every build configuration."))
+        #expect(rootReadme.contains("Settings also exposes the Logs sheet in every iOS build configuration"))
+    }
+
     @Test("fast production scheme keeps prod identity with debug build settings")
     func testFastProductionSchemeUsesProdIdentityAndDebugSettings() throws {
         let fileURL = URL(fileURLWithPath: #filePath)
@@ -614,9 +663,13 @@ struct SourceGuardTests {
         #expect(installScript.contains(#"CONFIG="${TRON_IOS_CONFIGURATION:-Beta}""#))
         #expect(installScript.contains("TRON_IOS_SCHEME"))
         #expect(installScript.contains("TRON_IOS_CONFIGURATION"))
+        #expect(installScript.contains(#"app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app""#))
+        #expect(!installScript.contains(#"find "$DERIVED_DATA/Build/Products" -name "TronMobile.app" -path "*iphoneos*" -type d | head -1"#))
 
         #expect(developmentDoc.contains("Rebuild + Launch iOS Prod Fast on iPhone"))
+        #expect(developmentDoc.contains("installs the requested configuration's `iphoneos` product"))
         #expect(rootReadme.contains("Rebuild + Launch iOS Prod Fast on iPhone"))
+        #expect(rootReadme.contains("installs the requested configuration's `iphoneos` product"))
     }
 
     @Test("iOS 26 cleanup hooks stay removed")

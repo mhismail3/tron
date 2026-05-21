@@ -170,7 +170,6 @@ final class MiscClient: EngineDomainClient {
         )
     }
 
-    #if DEBUG || BETA
     /// Ingest structured client logs into the server database.
     func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult {
         _ = try requireTransport().requireConnection()
@@ -188,6 +187,7 @@ final class MiscClient: EngineDomainClient {
 
     // MARK: - Diagnostics (debug / beta only)
 
+    #if DEBUG || BETA
     /// Fetch a structured snapshot of server identity, session counts,
     /// and the full engine protocol method surface. Debug-only — the production
     /// binary has no UI that consumes it.

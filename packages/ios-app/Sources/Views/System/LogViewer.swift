@@ -1,4 +1,3 @@
-#if DEBUG || BETA
 import SwiftUI
 
 // MARK: - Log Viewer
@@ -324,4 +323,3 @@ private extension LogCategory {
 #Preview {
     LogViewer()
 }
-#endif

@@ -13,9 +13,7 @@ struct SettingsView: View {
     private var defaultModelValue: String { dependencies.defaultModel }
 
     @State private var showingResetAlert = false
-    #if DEBUG || BETA
     @State private var showLogViewer = false
-    #endif
     @State private var showArchiveAllConfirmation = false
     @State private var isArchivingAll = false
     @State private var showClearPromptHistoryConfirmation = false
@@ -99,13 +97,11 @@ struct SettingsView: View {
 
     private var settingsBaseView: some View {
         SettingsPageContainer(title: "Settings") {
-            #if DEBUG || BETA
             Button { showLogViewer = true } label: {
                 Image(systemName: "doc.text.magnifyingglass")
                     .font(TronTypography.buttonSM)
                     .foregroundStyle(.tronEmerald)
             }
-            #endif
         } content: {
             mainSettingsSection
                 .cardEntrance(visible: cardsVisible, index: 0)
@@ -117,13 +113,11 @@ struct SettingsView: View {
 
     private var settingsWithSheets: some View {
         settingsBaseView
-        #if DEBUG || BETA
             .sheet(isPresented: $showLogViewer) {
                 LogViewer()
                     .adaptivePresentationDetents([.large])
                     .presentationDragIndicator(.hidden)
             }
-        #endif
             .sheet(item: $activePage) { page in
                 settingsPageSheet(for: page)
                     .adaptivePresentationDetents([.medium, .large])

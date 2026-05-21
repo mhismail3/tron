@@ -255,8 +255,8 @@ build_install_launch() {
     fi
 
     local app
-    app="$(find "$DERIVED_DATA/Build/Products" -name "TronMobile.app" -path "*iphoneos*" -type d | head -1)"
-    [ -d "$app" ] || die "expected app bundle not found under $DERIVED_DATA/Build/Products"
+    app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app"
+    [ -d "$app" ] || die "expected app bundle not found at $app"
 
     xcrun devicectl device install app --device "$device_id" "$app"
 

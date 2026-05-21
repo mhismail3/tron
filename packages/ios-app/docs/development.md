@@ -54,6 +54,9 @@ and launches the resolved bundle ID with a bounded `devicectl` launch timeout.
 `Rebuild + Launch iOS Prod Fast on iPhone` uses the same helper with
 `TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so it
 builds the fast production-bundle app and launches it on the selected iPhone.
+After each build, the helper installs the requested configuration's `iphoneos` product
+so stale Beta or Prod app bundles left in DerivedData cannot be launched by a
+different action.
 The matching launch actions run `scripts/tron-ios-beta launch` for the
 already-installed app without rebuilding.
 
