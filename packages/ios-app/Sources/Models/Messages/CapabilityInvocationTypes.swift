@@ -582,7 +582,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         appendRow("Schema", string(selectedTarget?["schemaDigest"]) ?? data.identity.schemaDigest, to: &preparation, technical: true)
         appendRow("Payload", bool(preparedRequest?["hasPayload"]).map { $0 ? "Validated" : "Not provided" }, to: &preparation)
         appendRow("Fresh handle", bool(preparedRequest?["hasInspectionHandle"]).map { $0 ? "Prepared" : "Not required" }, to: &preparation)
-        appendRow("Approval", data.approvalState?.isEmpty == false ? "Required" : "Not required", to: &preparation)
+        appendRow("Approval", approvalSummary(details: details, approvalState: data.approvalState), to: &preparation)
         appendRow("Corrections", correctionSummary(corrections), to: &preparation)
         if !preparation.isEmpty {
             groups.append(CapabilityDisplayGroup(title: "Preparation", rows: preparation))
@@ -622,6 +622,19 @@ struct CapabilityInvocationDisplayModel: Equatable {
         }
 
         return groups
+    }
+
+    private static func approvalSummary(
+        details: [String: Any],
+        approvalState: [String: AnyCodable]?
+    ) -> String {
+        if bool(details["approvalReplayed"]) == true {
+            return "Replayed previous approval"
+        }
+        if bool(details["approvalRequired"]) == true || approvalState?.isEmpty == false {
+            return "Required"
+        }
+        return "Not required"
     }
 
     private static func resultRows(

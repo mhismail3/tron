@@ -480,6 +480,10 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleSubagentFailedCalledWith: SubagentFailedPlugin.Result?
     var handleSubagentEventCalledWith: SubagentEventPlugin.Result?
 
+    // MARK: - Approvals
+    var handleApprovalPendingCalledWith: ApprovalPendingPlugin.Result?
+    var handleApprovalResolvedCalledWith: ApprovalResolvedPlugin.Result?
+
     // MARK: - Logging
     var logWarningCalled = false
     var logDebugCalled = false
@@ -679,6 +683,14 @@ final class MockEventDispatchContext: EventDispatchTarget {
     func handleMessageQueued(_ result: MessageQueuedPlugin.Result) {}
     func handleMessageDequeued(_ result: MessageDequeuedPlugin.Result) {}
     func handleQueuedMessageSent(_ result: QueuedMessageSentPlugin.Result) {}
+
+    func handleApprovalPending(_ result: ApprovalPendingPlugin.Result) {
+        handleApprovalPendingCalledWith = result
+    }
+
+    func handleApprovalResolved(_ result: ApprovalResolvedPlugin.Result) {
+        handleApprovalResolvedCalledWith = result
+    }
 
     func logWarning(_ message: String) {
         logWarningCalled = true

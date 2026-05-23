@@ -235,6 +235,38 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(invocation.display.resultPreview, "/tmp/worktree\nREADME")
     }
 
+    func testExecuteDisplaysApprovalReplayAsProvenanceNotFreshApproval() {
+        let invocation = testCapabilityInvocation(
+            status: .success,
+            arguments: #"{"target":"process::run","intent":"Replay a materialized process command.","arguments":{"command":"printf hi > replay.txt","executionMode":"sandbox_materialized","expectedOutputs":[{"path":"replay.txt"}]},"idempotencyKey":"manual-replay"}"#,
+            details: [
+                "approvalRequired": false,
+                "approvalCreated": false,
+                "approvalExecuted": false,
+                "approvalReplayed": true,
+                "approvalReplay": [
+                    "approvalId": "approval-original",
+                    "status": "executed",
+                    "functionId": "process::run",
+                    "childInvocationIds": ["child-original"]
+                ],
+                "childInvocationCreated": false,
+                "childInvocations": ["child-original"]
+            ],
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "execute",
+                contractId: "process::run",
+                implementationId: "first_party.process.v1.run",
+                functionId: "process::run"
+            )
+        )
+
+        let preparation = invocation.display.executionGroups.first { $0.title == "Preparation" }
+        XCTAssertTrue(
+            preparation?.rows.contains(CapabilityDisplayRow(label: "Approval", value: "Replayed previous approval")) == true
+        )
+    }
+
     func testDurationPrefersObservedInvocationSpanWhenLongerThanServerDuration() {
         let started = Date(timeIntervalSince1970: 1_000)
         let completed = started.addingTimeInterval(2.4)

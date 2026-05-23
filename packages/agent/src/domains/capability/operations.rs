@@ -2906,7 +2906,20 @@ fn approved_execution_result(
     output: Value,
     child_invocations: Vec<String>,
 ) -> Result<Value, CapabilityError> {
+    let replayed_approval = approval_was_replayed_for_invocation(invocation, approval);
     let child_invocation_id = child_invocations.first().cloned();
+    let approval_state = json!({
+        "approvalId": approval.approval_id,
+        "approvalRequired": !replayed_approval,
+        "approvalCreated": !replayed_approval,
+        "approvalExecuted": !replayed_approval && approval.status == ApprovalStatus::Executed,
+        "approvalReplayed": replayed_approval,
+        "status": approval.status,
+        "functionId": function.id.as_str(),
+        "traceId": approval.trace_id.as_str(),
+        "childInvocationId": child_invocation_id,
+        "childInvocationIds": child_invocations.clone()
+    });
     let record = CapabilityExecutionRecord {
         status: "ok".to_owned(),
         trace_id: approval.trace_id.as_str().to_owned(),
@@ -2917,17 +2930,7 @@ fn approved_execution_result(
         catalog_revision: target.entry.catalog_revision,
         function_revision: function.revision.0,
         output: output.clone(),
-        approval_state: Some(json!({
-            "approvalId": approval.approval_id,
-            "approvalRequired": true,
-            "approvalCreated": true,
-            "approvalExecuted": approval.status == ApprovalStatus::Executed,
-            "status": approval.status,
-            "functionId": function.id.as_str(),
-            "traceId": approval.trace_id.as_str(),
-            "childInvocationId": child_invocation_id,
-            "childInvocationIds": child_invocations
-        })),
+        approval_state: (!replayed_approval).then_some(approval_state.clone()),
         plugin_versions: vec![target.entry.plugin_id.clone()],
         presentation_hints: target
             .entry
@@ -2941,10 +2944,17 @@ fn approved_execution_result(
     let mut details = serde_json::to_value(&record).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
     })?;
-    details["approvalRequired"] = json!(true);
-    details["approvalCreated"] = json!(true);
-    details["approvalExecuted"] = json!(approval.status == ApprovalStatus::Executed);
-    details["childInvocationCreated"] = json!(!record.child_invocations.is_empty());
+    details["approvalRequired"] = json!(!replayed_approval);
+    details["approvalCreated"] = json!(!replayed_approval);
+    details["approvalExecuted"] =
+        json!(!replayed_approval && approval.status == ApprovalStatus::Executed);
+    details["approvalReplayed"] = json!(replayed_approval);
+    details["childInvocationCreated"] =
+        json!(!replayed_approval && !record.child_invocations.is_empty());
+    if replayed_approval {
+        details["approvalReplay"] = approval_state;
+        details["replayedFromTraceId"] = json!(approval.trace_id.as_str());
+    }
     if let Ok(mut nested) = serde_json::from_value::<CapabilityResult>(output.clone()) {
         nested.details = Some(merge_optional_details(nested.details, details));
         return capability_result_value(nested);
@@ -2956,6 +2966,14 @@ fn approved_execution_result(
         is_error: None,
         stop_turn: None,
     })
+}
+
+fn approval_was_replayed_for_invocation(
+    invocation: &Invocation,
+    approval: &EngineApprovalRecord,
+) -> bool {
+    approval.trace_id != invocation.causal_context.trace_id
+        || approval.parent_invocation_id.as_ref() != Some(&invocation.id)
 }
 
 fn approval_details(
@@ -5553,6 +5571,74 @@ mod tests {
         assert_eq!(
             details["approvalState"]["childInvocationIds"],
             json!([child_invocation_id.as_str()])
+        );
+    }
+
+    #[test]
+    fn replayed_approval_execute_result_does_not_report_fresh_approval_or_child() {
+        let function = test_function("process::run");
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry,
+        };
+        let original_trace_id = TraceId::generate();
+        let original_parent_invocation_id = InvocationId::generate();
+        let approval = test_approval_record(
+            function.id.clone(),
+            original_parent_invocation_id.clone(),
+            original_trace_id.clone(),
+            "approved-child-key",
+        );
+        let replay_trace_id = TraceId::generate();
+        let replay_causal = CausalContext::new(
+            ActorId::new("agent:test").expect("actor id"),
+            ActorKind::Agent,
+            AuthorityGrantId::new("grant:test").expect("grant id"),
+            replay_trace_id,
+        )
+        .with_idempotency_key("wrapper-key-replay");
+        let replay_invocation = Invocation::new_sync(
+            FunctionId::new("capability::execute").expect("function id"),
+            json!({ "contractId": "process::run" }),
+            replay_causal,
+        );
+        let child_invocation_id = InvocationId::generate();
+
+        assert!(approval_was_replayed_for_invocation(
+            &replay_invocation,
+            &approval
+        ));
+
+        let value = approved_execution_result(
+            &replay_invocation,
+            &function,
+            &target,
+            &approval,
+            json!({ "exitCode": 0, "stdout": "ok\n", "resourceRefs": [] }),
+            vec![child_invocation_id.as_str().to_owned()],
+        )
+        .expect("replayed approval execution result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        let details = result.details.expect("details");
+
+        assert_eq!(details["approvalRequired"], json!(false));
+        assert_eq!(details["approvalCreated"], json!(false));
+        assert_eq!(details["approvalExecuted"], json!(false));
+        assert_eq!(details["approvalReplayed"], json!(true));
+        assert_eq!(details["childInvocationCreated"], json!(false));
+        assert!(details["approvalState"].is_null());
+        assert_eq!(
+            details["approvalReplay"]["approvalId"],
+            json!(approval.approval_id)
+        );
+        assert_eq!(
+            details["approvalReplay"]["childInvocationIds"],
+            json!([child_invocation_id.as_str()])
+        );
+        assert_eq!(
+            details["replayedFromTraceId"],
+            json!(original_trace_id.as_str())
         );
     }
 

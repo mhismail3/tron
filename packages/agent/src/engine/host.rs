@@ -844,34 +844,37 @@ impl EngineHostHandle {
     }
 
     /// Create or replay an approval request and publish a pending approval
-    /// stream event.
+    /// stream event only for a newly created pending approval.
     pub async fn request_approval(
         &self,
         request: EngineApprovalRequest,
     ) -> Result<EngineApprovalRecord> {
         let store = self.inner.lock().await.primitives.approvals.clone();
-        let record = store
+        let outcome = store
             .lock()
             .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
             .request(request)?;
-        let _ = self
-            .publish_stream_event(PublishStreamEvent {
-                topic: "approvals".to_owned(),
-                payload: json!({
-                    "type": "approval.pending",
-                    "approval": record,
-                }),
-                visibility: record
-                    .session_id
-                    .as_ref()
-                    .map_or(VisibilityScope::System, |_| VisibilityScope::Session),
-                session_id: record.session_id.clone(),
-                workspace_id: record.workspace_id.clone(),
-                producer: APPROVAL_REQUEST_FUNCTION.to_owned(),
-                trace_id: Some(record.trace_id.clone()),
-                parent_invocation_id: record.parent_invocation_id.clone(),
-            })
-            .await;
+        let record = outcome.record;
+        if outcome.created {
+            let _ = self
+                .publish_stream_event(PublishStreamEvent {
+                    topic: "approvals".to_owned(),
+                    payload: json!({
+                        "type": "approval.pending",
+                        "approval": record,
+                    }),
+                    visibility: record
+                        .session_id
+                        .as_ref()
+                        .map_or(VisibilityScope::System, |_| VisibilityScope::Session),
+                    session_id: record.session_id.clone(),
+                    workspace_id: record.workspace_id.clone(),
+                    producer: APPROVAL_REQUEST_FUNCTION.to_owned(),
+                    trace_id: Some(record.trace_id.clone()),
+                    parent_invocation_id: record.parent_invocation_id.clone(),
+                })
+                .await;
+        }
         Ok(record)
     }
 

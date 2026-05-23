@@ -123,7 +123,8 @@ impl InProcessFunctionHandler for ApprovalPrimitiveHandler {
             .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?;
         match invocation.function_id.as_str() {
             APPROVAL_REQUEST_FUNCTION => {
-                let record = store.request(approval_request_from_invocation(&invocation)?)?;
+                let outcome = store.request(approval_request_from_invocation(&invocation)?)?;
+                let record = outcome.record;
                 Ok(json!({ "approval": record }))
             }
             APPROVAL_GET_FUNCTION => {

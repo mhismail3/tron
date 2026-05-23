@@ -57,6 +57,10 @@ extension ChatViewModel {
     }
 
     func handleApprovalPending(_ result: ApprovalPendingPlugin.Result) {
+        guard result.approval.status == .pending else {
+            handleApprovalResolved(ApprovalResolvedPlugin.Result(approval: result.approval, child: nil))
+            return
+        }
         let data = engineApprovalCapabilityData(from: result.approval)
 
         if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: data.invocationId, in: messages) {

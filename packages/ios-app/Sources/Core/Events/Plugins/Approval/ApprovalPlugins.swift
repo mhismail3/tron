@@ -59,7 +59,11 @@ enum ApprovalPendingPlugin: DispatchableEventPlugin {
     @MainActor
     static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
         guard let r = result as? Result else { return }
-        context.handleApprovalPending(r)
+        if r.approval.status == .pending {
+            context.handleApprovalPending(r)
+        } else {
+            context.handleApprovalResolved(ApprovalResolvedPlugin.Result(approval: r.approval, child: nil))
+        }
     }
 }
 

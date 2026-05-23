@@ -38,7 +38,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use super::approval::{
     ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
-    InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
+    EngineApprovalRequestOutcome, InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
 };
 use super::compensation::{
     EngineCompensationRecord, InMemoryEngineCompensationStore, SqliteEngineCompensationStore,
@@ -379,7 +379,7 @@ impl ApprovalStoreBackend {
     pub(in crate::engine) fn request(
         &mut self,
         request: EngineApprovalRequest,
-    ) -> Result<EngineApprovalRecord> {
+    ) -> Result<EngineApprovalRequestOutcome> {
         match self {
             Self::InMemory(store) => store.request(request),
             Self::Sqlite(store) => store.request(request),

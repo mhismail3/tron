@@ -190,6 +190,31 @@ final class EventPluginTests: XCTestCase {
         XCTAssertNotNil(result?.getResult())
     }
 
+    @MainActor
+    func testApprovalPendingPluginDispatchesPendingRecordsAsPending() {
+        let context = MockEventDispatchContext()
+        let approval = makeApprovalRecord(status: .pending)
+        let result = ApprovalPendingPlugin.Result(approval: approval)
+
+        ApprovalPendingPlugin.dispatch(result: result, context: context)
+
+        XCTAssertEqual(context.handleApprovalPendingCalledWith?.approval.approvalId, "approval-1")
+        XCTAssertNil(context.handleApprovalResolvedCalledWith)
+    }
+
+    @MainActor
+    func testApprovalPendingPluginDispatchesTerminalRecordsAsResolved() {
+        let context = MockEventDispatchContext()
+        let approval = makeApprovalRecord(status: .executed)
+        let result = ApprovalPendingPlugin.Result(approval: approval)
+
+        ApprovalPendingPlugin.dispatch(result: result, context: context)
+
+        XCTAssertNil(context.handleApprovalPendingCalledWith)
+        XCTAssertEqual(context.handleApprovalResolvedCalledWith?.approval.status, .executed)
+        XCTAssertNil(context.handleApprovalResolvedCalledWith?.child)
+    }
+
     // MARK: - Session Archive/Unarchive Plugin Tests
 
     func testSessionArchivedPlugin_parsesFromTopLevelSessionId() {
@@ -258,4 +283,25 @@ final class EventPluginTests: XCTestCase {
             XCTFail("Expected .plugin case")
         }
     }
+}
+
+private func makeApprovalRecord(status: EngineApprovalStatus) -> EngineApprovalRecordDTO {
+    EngineApprovalRecordDTO(
+        approvalId: "approval-1",
+        functionId: "process::run",
+        payload: nil,
+        actorId: "agent",
+        actorKind: "Agent",
+        authorityScopes: ["process.run"],
+        traceId: "trace-1",
+        parentInvocationId: "parent-1",
+        sessionId: "session-1",
+        workspaceId: nil,
+        idempotencyKey: "approval-key",
+        status: status,
+        decisionActorId: status == .pending ? nil : "engine-user",
+        decidedAt: status == .pending ? nil : "2026-05-10T00:00:00Z",
+        createdAt: "2026-05-10T00:00:00Z",
+        updatedAt: "2026-05-10T00:00:01Z"
+    )
 }

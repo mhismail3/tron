@@ -158,6 +158,98 @@ async fn approval_request_function_publishes_once_and_replays_by_idempotency() {
 }
 
 #[tokio::test]
+async fn terminal_approval_replay_does_not_publish_fresh_pending_event() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("danger", "danger"), false)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let function = FunctionDefinition::new(
+        fid("danger::write"),
+        wid("danger"),
+        "approval-gated write",
+        VisibilityScope::Agent,
+        EffectClass::IrreversibleSideEffect,
+    )
+    .with_required_authority(AuthorityRequirement::scope("danger.write").with_approval_required())
+    .with_risk(RiskLevel::High)
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_compensation(CompensationContract::new(
+        CompensationKind::ManualOnly,
+        "approval replay test write is manually compensated",
+    ));
+    handle
+        .register_function_for_setup(
+            function,
+            Some(Arc::new(CountingHandler {
+                calls: Arc::clone(&calls),
+            })),
+            false,
+        )
+        .unwrap();
+    handle
+        .subscribe_stream(
+            "approval-terminal-replay-test".to_owned(),
+            "approvals".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some("session-a".to_owned()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let request = crate::engine::EngineApprovalRequest {
+        function_id: fid("danger::write"),
+        payload: json!({"value": 1}),
+        causal_context: mutating_causal("terminal-approval-key").with_scope("danger.write"),
+        delivery_mode: DeliveryMode::Sync,
+    };
+    let pending = handle.request_approval(request.clone()).await.unwrap();
+    assert_eq!(pending.status, ApprovalStatus::Pending);
+
+    let resolved = handle
+        .invoke(host_invocation(
+            "approval::resolve",
+            json!({"approvalId": pending.approval_id, "decision": "approve"}),
+            CausalContext::new(
+                actor("admin"),
+                ActorKind::Admin,
+                grant("approval-admin"),
+                trace("approval-terminal-replay-trace"),
+            )
+            .with_scope("approval.resolve")
+            .with_idempotency_key("terminal-approval-resolve-key"),
+        ))
+        .await;
+    assert_eq!(resolved.error, None);
+    assert_eq!(
+        resolved.value.as_ref().unwrap()["approval"]["status"],
+        "executed"
+    );
+
+    let replayed = handle.request_approval(request).await.unwrap();
+    assert_eq!(replayed.status, ApprovalStatus::Executed);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let page = handle
+        .poll_stream(
+            "approval-terminal-replay-test",
+            Some(StreamCursor(0)),
+            10,
+            &StreamActorScope::scoped(Some("session-a".to_owned()), None),
+        )
+        .await
+        .unwrap();
+    let pending_events = page
+        .events
+        .iter()
+        .filter(|event| event.payload["type"] == "approval.pending")
+        .count();
+    assert_eq!(pending_events, 1);
+}
+
+#[tokio::test]
 async fn approval_resolution_rejects_agent_even_with_resolve_scope() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let request_context = mutating_causal("approval-agent-deny-key").with_scope("approval.request");

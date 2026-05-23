@@ -61,6 +61,7 @@ candidate capabilities before the engine picks a target.
 | `expectedOutputPath(s)` aliases for `process::run` | Converted to `expectedOutputs: [{"path":"..."}]` before schema validation | `correctionKind=process_expected_outputs_alias` |
 | `sandbox_materialized` without `expectedOutputs` | Rejected during prepare before approval or child execution with the exact required shape | `orchestrationStatus=target_policy_rejected` |
 | Sandbox output verification after approval | `process::run` returns bounded `materializedOutputs` with target path, resource/version refs, file content hash, byte size, and content preview; relative materialization targets resolve to the active session worktree | `result.materializedOutputs[*]` |
+| Duplicate approved sandbox execution | Replays the prior approval/result as provenance with `approvalReplayed=true`; it must not expose a fresh `approvalState`, publish a new `approval.pending` stream event, create a new approval chip, or report a new child invocation | `details.approvalReplay`; `engine_stream_events.topic=approvals` |
 | Attempting unknown interpreters for verification | Rejected as unproven read-only; use `materializedOutputs`, `materialized_file::read`, or the returned materialized path instead of ad hoc Python/hash commands | `orchestrationStatus=target_policy_rejected` |
 | Missing required target fields | Returns `isError=true` with exact missing fields and no child invocation | `orchestrationStatus=target_payload_invalid` |
 | Ambiguous natural-language intent | Returns `needs_selection` with ranked candidates | `orchestrationStatus=needs_selection` |
@@ -126,7 +127,9 @@ and query the server database before moving on.
    active session worktree, not the server process cwd.
 6. **Duplicate idempotency:** repeat the exact sandbox call.
    Expected: replay, no duplicate approval, child invocation, materialized file,
-   or resource version.
+   or resource version. The execute result should report the prior approval as
+   replay provenance (`approvalReplayed=true`), not as a fresh approval
+   requirement, and no fresh `approval.pending` event should be published.
 7. **Ambiguous intent:** use a broad intent such as “search”.
    Expected: `needs_selection` with candidates, no child invocation.
 8. **Shape correction:** place `payload`, `contractId`, and `idempotencyKey` in

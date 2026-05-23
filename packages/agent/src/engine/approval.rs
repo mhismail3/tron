@@ -158,6 +158,31 @@ pub struct EngineApprovalRequest {
     pub delivery_mode: DeliveryMode,
 }
 
+/// Result of creating or replaying an approval request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EngineApprovalRequestOutcome {
+    /// Approval record returned for the request.
+    pub record: EngineApprovalRecord,
+    /// Whether this request created a fresh pending approval.
+    pub created: bool,
+}
+
+impl EngineApprovalRequestOutcome {
+    fn created(record: EngineApprovalRecord) -> Self {
+        Self {
+            record,
+            created: true,
+        }
+    }
+
+    fn replayed(record: EngineApprovalRecord) -> Self {
+        Self {
+            record,
+            created: false,
+        }
+    }
+}
+
 /// In-memory approval store.
 #[derive(Default)]
 pub struct InMemoryEngineApprovalStore {
@@ -173,7 +198,10 @@ impl InMemoryEngineApprovalStore {
     }
 
     /// Create or replay an approval request.
-    pub fn request(&mut self, request: EngineApprovalRequest) -> Result<EngineApprovalRecord> {
+    pub fn request(
+        &mut self,
+        request: EngineApprovalRequest,
+    ) -> Result<EngineApprovalRequestOutcome> {
         let fingerprint = approval_fingerprint(&request.function_id, &request.payload);
         if let Some(key) = request.causal_context.idempotency_key.as_deref() {
             if let Some(existing_id) = self.by_idempotency.get(key) {
@@ -190,7 +218,7 @@ impl InMemoryEngineApprovalStore {
                         reason: "approval request payload fingerprint differs".to_owned(),
                     });
                 }
-                return Ok(existing);
+                return Ok(EngineApprovalRequestOutcome::replayed(existing));
             }
         }
 
@@ -224,7 +252,7 @@ impl InMemoryEngineApprovalStore {
             self.by_idempotency.insert(key.clone(), approval_id.clone());
         }
         self.records.insert(approval_id, record.clone());
-        Ok(record)
+        Ok(EngineApprovalRequestOutcome::created(record))
     }
 
     /// Get one approval.
@@ -366,7 +394,10 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
     }
 
     /// Create or replay an approval request.
-    pub fn request(&mut self, request: EngineApprovalRequest) -> Result<EngineApprovalRecord> {
+    pub fn request(
+        &mut self,
+        request: EngineApprovalRequest,
+    ) -> Result<EngineApprovalRequestOutcome> {
         let fingerprint = approval_fingerprint(&request.function_id, &request.payload);
         if let Some(key) = request.causal_context.idempotency_key.as_deref()
             && let Some(existing) = self.get_by_idempotency_key(key)?
@@ -378,7 +409,7 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
                     reason: "approval request payload fingerprint differs".to_owned(),
                 });
             }
-            return Ok(existing);
+            return Ok(EngineApprovalRequestOutcome::replayed(existing));
         }
         let now = Utc::now();
         let record = EngineApprovalRecord {
@@ -406,7 +437,7 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
             updated_at: now,
         };
         self.insert_or_replace(&record)?;
-        Ok(record)
+        Ok(EngineApprovalRequestOutcome::created(record))
     }
 
     /// Get one approval.
