@@ -22,6 +22,14 @@ model-visible schema for `execute` is intent-shaped:
   `allowedContracts`, `allowedNamespaces`);
 - `idempotencyKey` and `reason`: wrapper-level orchestration fields.
 
+The model contract is explicitly intent-first. A model should omit `target`
+when it is discovering, comparing, or resolving unfamiliar capability work. It
+should add `target` only when the user supplied an exact id, a prior `execute`
+result selected it, or a primed recipe makes it unambiguous. The `arguments`
+object belongs to the selected target only; wrapper fields stay top-level. A
+`needs_input` result is not a failure path that should trigger probing. It is a
+guided retry path: retry the same selected target with the exact missing fields.
+
 The exported provider schema intentionally stays plain JSON Schema: one object
 with scalar target fields, no `oneOf`, `anyOf`, `allOf`, top-level `enum`, or
 `not`. That is the portability boundary for OpenAI, Anthropic, Gemini, Kimi,
@@ -63,7 +71,9 @@ candidate capabilities before the engine picks a target.
 | Sandbox output verification after approval | `process::run` returns bounded `materializedOutputs` with target path, resource/version refs, file content hash, byte size, and content preview; relative materialization targets resolve to the active session worktree | `result.materializedOutputs[*]` |
 | Duplicate approved sandbox execution | Replays the prior approval/result as provenance with `approvalReplayed=true`; it must not expose a fresh `approvalState`, publish a new `approval.pending` stream event, create a new approval chip, or report a new child invocation | `details.approvalReplay`; `engine_stream_events.topic=approvals` |
 | Attempting unknown interpreters for verification | Rejected as unproven read-only; use `materializedOutputs`, `materialized_file::read`, or the returned materialized path instead of ad hoc Python/hash commands | `orchestrationStatus=target_policy_rejected` |
-| Missing required target fields | Returns `isError=true` with exact missing fields and no child invocation | `orchestrationStatus=target_payload_invalid` |
+| Missing required target fields | Returns `needs_input` with exact missing fields, corrected argument paths, and no child invocation | `orchestrationStatus=needs_input` |
+| Model invents a target during discovery | Provider metadata and prompts require intent-only discovery unless the exact target came from the user, a prior `execute`, or a primed recipe | `resolveMode=intent_resolution`; `targetHint=null` |
+| Capability vector index is still warming | Intent resolution degrades to lexical/deterministic routes, records the indexing status, and schedules vector warmup from the `execute` path as well as operator search | `phaseDetails.searchStatus.state=indexing`; `degradedReason=CAPABILITY_INDEX_INDEXING...` |
 | Ambiguous natural-language intent | Returns `needs_selection` with ranked candidates | `orchestrationStatus=needs_selection` |
 | No matching capability | Returns `needs_capability` and a proposed capability shape | `orchestrationStatus=needs_capability` |
 | Unsupported or malformed constraints | Returns `constraints_rejected` before child invocation | `orchestrationStatus=constraints_rejected` |
@@ -196,6 +206,7 @@ outcomes:
 - a `needs_capability` follow-up if no existing capability actually fits.
 
 Do not add another model-visible primitive to fix ergonomics. The model mental
-model stays `execute(intent, target?, arguments, constraints?)`; improvements
-belong in registry recipes, ranking, preflight diagnostics, and audit-driven
-iteration.
+model stays `execute(intent, target?, arguments, constraints?)`, with
+intent-only discovery as the default whenever the target is not already known.
+Improvements belong in provider metadata, default prompts, registry recipes,
+ranking, preflight diagnostics, and audit-driven iteration.

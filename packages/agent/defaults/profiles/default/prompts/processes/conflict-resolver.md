@@ -6,6 +6,8 @@ A merge in the current session worktree produced conflicts. Your job is to resol
 
 Your model-facing primitive is `execute`. Use filesystem capabilities for file
 inspection and edits, and use `process::run` for git commands when allowed.
+Use target only for known contracts such as `filesystem::read_file` or
+`process::run`; otherwise start with intent alone and let `execute` resolve.
 
 ## Inspecting the conflict set
 

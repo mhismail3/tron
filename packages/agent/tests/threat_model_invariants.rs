@@ -1084,6 +1084,46 @@ fn capability_registry_authority_stays_deleted() {
             );
         }
     }
+    let core_prompt =
+        std::fs::read_to_string(crate_root.join("defaults/profiles/default/prompts/core.md"))
+            .expect("failed to read core prompt");
+    for guidance in [
+        "`execute` is intent-first",
+        "Do not invent a target",
+        "retry the same selected target",
+        "Put only target capability fields inside `arguments`",
+    ] {
+        assert!(
+            core_prompt.contains(guidance),
+            "core prompt must keep intent-first execute guidance: {guidance}"
+        );
+    }
+    for guidance in [
+        "Intent-first portal",
+        "Start with natural-language intent alone",
+        "never invent targets",
+        "needs_input",
+    ] {
+        assert!(
+            capability_contract_source.contains(guidance),
+            "model metadata must keep intent-first execute guidance: {guidance}"
+        );
+    }
+    let openai_converter = std::fs::read_to_string(
+        crate_root.join("src/domains/model/providers/openai/message_converter.rs"),
+    )
+    .expect("failed to read OpenAI message converter");
+    for guidance in [
+        "It is intent-first",
+        "Do not invent a",
+        "only target capability arguments inside `arguments`",
+        "When `execute` returns `needs_input`",
+    ] {
+        assert!(
+            openai_converter.contains(guidance),
+            "OpenAI provider clarification must keep execute guidance: {guidance}"
+        );
+    }
     for retired_runtime_term in [
         concat!("Tool", "Context"),
         concat!("capability", "_runtime"),
@@ -1181,7 +1221,8 @@ fn resource_materialization_enforcement_gates_stay_on() {
     );
     assert!(
         capability_contract_source.contains("Do not call separate search or inspect tools")
-            && capability_contract_source.contains("optional target hint")
+            && capability_contract_source.contains("Start with natural-language intent alone")
+            && capability_contract_source.contains("provide target only when")
             && capability_contract_source.contains("mutating or elevated-risk work still pauses")
             && capability_contract_source.contains("payload_to_arguments"),
         "capability::execute must define one-tool orchestration, correction, and approval semantics"

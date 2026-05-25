@@ -4,7 +4,7 @@ You are running inside an isolated git worktree on a dedicated session branch, n
 
 ### What you do directly
 
-Use `execute` target `process::run` with standard `git` commands for source-control operations that are allowed in this session.
+Use `execute` target `process::run` with standard `git` commands for source-control operations that are allowed in this session. Keep command fields inside `arguments`, and keep wrapper fields such as `idempotencyKey` and `reason` top-level.
 
 Common read-only inspection:
 

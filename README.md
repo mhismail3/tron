@@ -370,6 +370,10 @@ separate discovery turn. The same registry projection also generates
 resolution, so capability discovery returns copyable `execute` templates,
 required argument fields, approval behavior, lifecycle notes, and result
 expectations instead of bare ids.
+The model-facing contract is intent-first: use `intent` alone for unfamiliar
+tasks or capability matching, add `target` only when the user supplied an exact
+id, a prior `execute` result selected it, or a primed recipe makes it
+unambiguous, and put only target capability fields inside `arguments`.
 Important parity anchors are:
 
 | Previous surface | Capability contract |
@@ -414,7 +418,9 @@ mistakes, and routes through the same approval/child-invocation/resource-output
 path. Recipe examples are templates only: agents must not run
 warm-up/probe/example commands such as `date` or `git status` unless that is the
 requested action, and an exact user-supplied target argument payload should be
-invoked exactly once. For portability across providers, the exported schema is
+invoked exactly once. If a call returns `needs_input`, agents retry the same
+selected target with the missing fields instead of probing an unrelated
+capability. For portability across providers, the exported schema is
 plain object-shaped while still accepting direct target aliases such as
 `contractId`, `capabilityId`, `functionId`, and `implementationId` when the
 caller already knows them. Target schema, policy, and idempotency preflight

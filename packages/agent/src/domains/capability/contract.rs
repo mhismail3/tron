@@ -237,7 +237,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
             "capabilitySchema": {
                 "name": "execute",
-                "description": "Resolve, prepare, approve when needed, run, and observe one Tron capability from a natural-language intent. Provide intent plus an optional target hint such as process::run, put only the target capability arguments inside arguments, and use idempotencyKey for mutating work. Do not call separate search or inspect tools; this execute primitive owns discovery, freshness, approval, correction, and child execution. Harmless shape mistakes may be corrected, but mutating or elevated-risk work still pauses for freshness and approval before child execution.",
+                "description": "Intent-first portal for all Tron capabilities: resolve, prepare, approve when needed, run, and observe one capability. Start with natural-language intent alone when the target is not already known; provide target only when the user supplied an exact capability id, a prior execute result selected it, or a primed recipe makes it unambiguous. Put only target capability arguments inside arguments, keep wrapper fields top-level, and never invent targets to satisfy a discovery or shape test. Do not call separate search or inspect tools; this execute primitive owns discovery, freshness, approval, correction, and child execution. A needs_input result means retry the same selected target with the missing arguments. Harmless shape mistakes may be corrected, but mutating or elevated-risk work still pauses for freshness and approval before child execution.",
                 "parameters": execute_model_request_schema()
             }
         }),
@@ -382,13 +382,13 @@ fn execute_model_request_schema() -> serde_json::Value {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-            "intent": {"type": "string", "description": "Natural-language goal. The engine uses it to resolve and rank visible capabilities when target is omitted or ambiguous."},
-            "target": {"type": "string", "description": "Optional target hint such as process::run, filesystem::read_file, or a concrete implementation/function id."},
-            "contractId": {"type": "string", "description": "Correctable target alias for callers that already know the contract id. Prefer target when possible."},
-            "capabilityId": {"type": "string", "description": "Correctable target alias for callers that already know the capability id. Prefer target when possible."},
-            "functionId": {"type": "string", "description": "Correctable target alias for callers that already know the registered function id. Prefer target when possible."},
-            "implementationId": {"type": "string", "description": "Correctable target alias for callers that already know the implementation id. Prefer target when possible."},
-            "arguments": {"type": "object", "description": "Arguments for the resolved target capability only. Example for process::run: {\"command\":\"date\",\"executionMode\":\"read_only\"}. Do not include wrapper fields such as target, contractId, capabilityId, functionId, implementationId, payload, mode, inspectionHandle, or expectedRevision here."},
+            "intent": {"type": "string", "description": "Natural-language goal. Use intent by itself for discovery, unfamiliar tasks, or capability matching; the engine resolves and ranks visible capabilities when target is omitted or ambiguous."},
+            "target": {"type": "string", "description": "Optional target hint such as process::run or filesystem::read_file. Omit when discovering or comparing capabilities; use only when the user supplied an exact id, a prior execute result selected it, or a primed recipe makes it unambiguous."},
+            "contractId": {"type": "string", "description": "Correctable target alias only for callers that already know the contract id from the user, a prior execute result, or a primed recipe. Prefer target when possible."},
+            "capabilityId": {"type": "string", "description": "Correctable target alias only for callers that already know the capability id from the user, a prior execute result, or a primed recipe. Prefer target when possible."},
+            "functionId": {"type": "string", "description": "Correctable target alias only for callers that already know the registered function id from the user, a prior execute result, or a primed recipe. Prefer target when possible."},
+            "implementationId": {"type": "string", "description": "Correctable target alias only for callers that already know the implementation id from the user, a prior execute result, or a primed recipe. Prefer target when possible."},
+            "arguments": {"type": "object", "description": "Arguments for the resolved target capability only. Example for process::run: {\"command\":\"date\",\"executionMode\":\"read_only\"}. Omit arguments for pure discovery if required fields are not known yet. If execute returns needs_input, retry the same selected target with the missing fields. Do not include wrapper fields such as target, contractId, capabilityId, functionId, implementationId, payload, mode, inspectionHandle, idempotencyKey, reason, or expectedRevision here."},
             "constraints": {
                 "type": "object",
                 "additionalProperties": false,
@@ -401,7 +401,7 @@ fn execute_model_request_schema() -> serde_json::Value {
                 "description": "Optional v1 bounds for resolution and preparation. Supported fields are riskMax, effect, allowedContracts, and allowedNamespaces. Constraints never broaden authority; unsupported constraint fields are rejected instead of ignored."
             },
             "payload": {"type": "object", "description": "Accepted only as a correctable alias for arguments. Prefer arguments; if supplied, the engine records a payload_to_arguments correction."},
-            "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key for mutating or resource-producing work. Safe read-only calls may omit it."},
+            "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key for mutating or resource-producing work. Safe read-only calls may omit it. Keep this top-level; do not put it inside arguments."},
             "reason": {"type": "string", "description": "Short reason for the requested action, used in audit records and approval prompts."}
         }
     })
@@ -443,7 +443,7 @@ fn audit_query_request_schema() -> serde_json::Value {
         "properties": {
             "eventType": {"type": "string"},
             "traceId": {"type": "string"},
-            "orchestrationStatus": {"type": "string", "description": "Optional capability::execute orchestration status filter, such as needs_selection, needs_capability, target_payload_invalid, or executed."},
+            "orchestrationStatus": {"type": "string", "description": "Optional capability::execute orchestration status filter, such as needs_input, needs_selection, needs_capability, target_payload_invalid, or executed."},
             "correctionKind": {"type": "string", "description": "Optional correction kind filter, such as payload_to_arguments or process_expected_outputs_shape."},
             "phase": {"type": "string", "description": "Optional orchestration phase filter, such as resolve, prepare, run, or observe."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 200},
@@ -622,7 +622,11 @@ mod tests {
             .as_str()
             .expect("execute description");
         assert!(description.contains("natural-language intent"));
+        assert!(description.contains("Intent-first portal"));
+        assert!(description.contains("Start with natural-language intent alone"));
+        assert!(description.contains("never invent targets"));
         assert!(description.contains("Do not call separate search or inspect tools"));
+        assert!(description.contains("needs_input"));
         assert!(description.contains("mutating or elevated-risk work still pauses"));
 
         let schema = execute_model_request_schema();
@@ -631,16 +635,29 @@ mod tests {
         assert_eq!(schema["properties"]["contractId"]["type"], json!("string"));
         assert_eq!(schema["properties"]["functionId"]["type"], json!("string"));
 
+        let target_description = schema["properties"]["target"]["description"]
+            .as_str()
+            .expect("target description");
+        assert!(target_description.contains("Omit when discovering"));
+        assert!(target_description.contains("prior execute result selected it"));
+
         let arguments_description = schema["properties"]["arguments"]["description"]
             .as_str()
             .expect("arguments description");
         assert!(arguments_description.contains(r#""executionMode":"read_only""#));
+        assert!(arguments_description.contains("retry the same selected target"));
         assert!(arguments_description.contains("Do not include wrapper fields"));
+        assert!(arguments_description.contains("idempotencyKey"));
 
         let payload_description = schema["properties"]["payload"]["description"]
             .as_str()
             .expect("payload alias description");
         assert!(payload_description.contains("correctable alias"));
+
+        let idempotency_description = schema["properties"]["idempotencyKey"]["description"]
+            .as_str()
+            .expect("idempotency description");
+        assert!(idempotency_description.contains("do not put it inside arguments"));
     }
 
     #[test]

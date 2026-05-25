@@ -39,11 +39,11 @@ use crate::shared::paths::files;
 use crate::shared::profile::CapabilityExecutionPolicySpec;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
-use crate::shared::server::errors::CapabilityError;
+use crate::shared::server::errors::{self as capability_error_codes, CapabilityError};
 
 const DEFAULT_LIMIT: usize = 12;
 const MAX_LIMIT: usize = 50;
-static LAST_VECTOR_WARMUP_REVISION: AtomicU64 = AtomicU64::new(0);
+static IN_FLIGHT_VECTOR_WARMUP_SIGNATURE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) async fn search_value(
     invocation: &Invocation,
@@ -166,10 +166,12 @@ pub(crate) async fn search_value(
         Ok(results)
     })
     .await;
-    if let Some(snapshot) = warmup_snapshot {
-        schedule_vector_warmup(snapshot, deps, catalog_revision.0);
-    }
     let search_results = search_result?;
+    if let Some(snapshot) = warmup_snapshot
+        && search_results_need_vector_warmup(&search_results)
+    {
+        schedule_vector_warmup(snapshot, deps);
+    }
     render_search_result_value(search_results, catalog_revision.0, cursor_offset, limit)
 }
 
@@ -1117,6 +1119,9 @@ async fn resolve_intent_target(
             .map_err(registry_store_error)
     })
     .await?;
+    if index_status_needs_vector_warmup(&search.status) {
+        schedule_vector_warmup(snapshot.clone(), deps);
+    }
     let all_executable_hits = search
         .hits
         .iter()
@@ -2633,7 +2638,8 @@ async fn execute_invoke_value(
         .cloned()
         .unwrap_or_else(|| json!({}));
     if let Err(error) = validate_target_payload(&target.entry, &payload) {
-        return preflight_rejection_result(&function, &target, error, "target_payload_invalid");
+        let status = payload_preflight_status(&error);
+        return preflight_rejection_result(&function, &target, error, status);
     }
     if let Err(error) = validate_target_policy_before_approval(&function, &payload) {
         return preflight_rejection_result(&function, &target, error, "target_policy_rejected");
@@ -2749,11 +2755,11 @@ fn preflight_rejection_result(
     let code = error.code().to_owned();
     let details = error.details();
     let message = error.to_string();
+    let guidance = preflight_guidance(status, details.as_ref());
     capability_result_value(CapabilityResult {
-        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
-            "{} rejected before child execution: {message}",
-            function.id.as_str()
-        ))]),
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            preflight_message(function, status, &message),
+        )]),
         details: Some(json!({
             "status": status,
             "error": {
@@ -2761,6 +2767,7 @@ fn preflight_rejection_result(
                 "message": message,
                 "details": details
             },
+            "guidance": guidance,
             "contractId": target.entry.contract_id,
             "implementationId": target.entry.implementation_id,
             "functionId": function.id.as_str(),
@@ -2775,6 +2782,57 @@ fn preflight_rejection_result(
         })),
         is_error: Some(true),
         stop_turn: None,
+    })
+}
+
+fn payload_preflight_status(error: &CapabilityError) -> &'static str {
+    if is_missing_required_argument_error(error) {
+        "needs_input"
+    } else {
+        "target_payload_invalid"
+    }
+}
+
+fn is_missing_required_argument_error(error: &CapabilityError) -> bool {
+    error.details().is_some_and(|details| {
+        details
+            .get("validationKind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == "missing_required_argument")
+    })
+}
+
+fn preflight_message(function: &FunctionDefinition, status: &str, message: &str) -> String {
+    if status == "needs_input" {
+        format!(
+            "{} needs input before child execution: {message}",
+            function.id.as_str()
+        )
+    } else {
+        format!(
+            "{} rejected before child execution: {message}",
+            function.id.as_str()
+        )
+    }
+}
+
+fn preflight_guidance(status: &str, details: Option<&Value>) -> Value {
+    if status != "needs_input" {
+        return Value::Null;
+    }
+    let missing_fields = details
+        .and_then(|details| details.get("missingFields"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let argument_paths = details
+        .and_then(|details| details.get("missingArgumentPaths"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    json!({
+        "kind": "provide_missing_arguments",
+        "message": "Re-run execute with the same selected target and provide the missing fields inside execute.arguments.",
+        "missingFields": missing_fields,
+        "missingArgumentPaths": argument_paths,
     })
 }
 
@@ -3645,16 +3703,16 @@ async fn sync_registry_for_admin(
         Ok(())
     })
     .await?;
-    schedule_vector_warmup(warmup_snapshot, deps, catalog_revision);
+    schedule_vector_warmup(warmup_snapshot, deps);
     Ok(catalog_revision)
 }
 
-fn schedule_vector_warmup(
-    snapshot: CapabilityRegistrySnapshot,
-    deps: &Deps,
-    catalog_revision: u64,
-) {
-    if LAST_VECTOR_WARMUP_REVISION.swap(catalog_revision, Ordering::SeqCst) == catalog_revision {
+fn schedule_vector_warmup(snapshot: CapabilityRegistrySnapshot, deps: &Deps) {
+    let signature = vector_warmup_signature(&snapshot);
+    if IN_FLIGHT_VECTOR_WARMUP_SIGNATURE
+        .compare_exchange(0, signature, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
         return;
     }
     let store = deps.registry_store.clone();
@@ -3674,11 +3732,53 @@ fn schedule_vector_warmup(
             Ok(())
         })
         .await;
+        IN_FLIGHT_VECTOR_WARMUP_SIGNATURE.store(0, Ordering::SeqCst);
         if let Err(error) = result {
-            LAST_VECTOR_WARMUP_REVISION.store(0, Ordering::SeqCst);
             tracing::warn!(%error, "capability vector warm-up failed");
         }
     });
+}
+
+fn search_results_need_vector_warmup(
+    search_results: &[(String, super::registry::CapabilityIndexSearchResult)],
+) -> bool {
+    search_results
+        .iter()
+        .any(|(_, result)| index_status_needs_vector_warmup(&result.status))
+}
+
+fn index_status_needs_vector_warmup(status: &CapabilityIndexStatus) -> bool {
+    status.local_vector
+        && (status.state != "ready"
+            || status
+                .degraded_reason
+                .as_deref()
+                .is_some_and(is_vector_indexing_error))
+}
+
+fn is_vector_indexing_error(error: &str) -> bool {
+    error.starts_with("CAPABILITY_INDEX_INDEXING:")
+}
+
+fn vector_warmup_signature(snapshot: &CapabilityRegistrySnapshot) -> u64 {
+    let mut hasher = Sha256::new();
+    hasher.update(snapshot.catalog_revision.to_le_bytes());
+    for document in snapshot.index_documents() {
+        hasher.update(document.kind.as_bytes());
+        hasher.update([0]);
+        hasher.update(document.contract_id.as_bytes());
+        hasher.update([0]);
+        hasher.update(document.implementation_id.as_bytes());
+        hasher.update([0]);
+        hasher.update(document.function_id.as_bytes());
+        hasher.update([0]);
+        hasher.update(document.text.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    let mut bytes = [0u8; 8];
+    bytes.copy_from_slice(&digest[..8]);
+    u64::from_le_bytes(bytes).max(1)
 }
 
 async fn registry_snapshot_from_store(deps: &Deps) -> Result<Value, CapabilityError> {
@@ -4173,6 +4273,7 @@ fn recipe_validation_error(
     entry: &CapabilityRegistryEntry,
     error: crate::engine::EngineError,
 ) -> CapabilityError {
+    let schema_details = schema_violation_details(&error);
     let mapped = engine_error_to_capability_error(error);
     let recipe = entry.agent_recipe();
     let example = serde_json::to_string(&recipe.execute_template).unwrap_or_else(|_| {
@@ -4198,9 +4299,18 @@ fn recipe_validation_error(
         example
     );
     match mapped {
-        CapabilityError::InvalidParams { message } => CapabilityError::InvalidParams {
-            message: format!("{message}. {guidance}"),
-        },
+        CapabilityError::InvalidParams { message } => {
+            let message = format!("{message}. {guidance}");
+            if let Some(details) = schema_details {
+                CapabilityError::Custom {
+                    code: capability_error_codes::INVALID_PARAMS.to_owned(),
+                    message,
+                    details: Some(details),
+                }
+            } else {
+                CapabilityError::InvalidParams { message }
+            }
+        }
         CapabilityError::Custom {
             code,
             message,
@@ -4208,10 +4318,76 @@ fn recipe_validation_error(
         } => CapabilityError::Custom {
             code,
             message: format!("{message}. {guidance}"),
-            details,
+            details: merge_validation_details(details, schema_details),
         },
         other => other,
     }
+}
+
+fn schema_violation_details(error: &crate::engine::EngineError) -> Option<Value> {
+    let crate::engine::EngineError::SchemaViolation {
+        path,
+        message,
+        direction,
+        ..
+    } = error
+    else {
+        return None;
+    };
+    let argument_path = schema_path_to_argument_path(path);
+    let mut details = json!({
+        "schemaPath": path,
+        "schemaDirection": direction,
+        "schemaMessage": message,
+        "argumentPath": argument_path,
+    });
+    if message == "required field is missing" {
+        let missing = schema_path_leaf(path);
+        details["validationKind"] = json!("missing_required_argument");
+        details["missingFields"] = json!([missing]);
+        details["missingArgumentPaths"] = json!([argument_path]);
+    }
+    Some(details)
+}
+
+fn merge_validation_details(
+    details: Option<Value>,
+    schema_details: Option<Value>,
+) -> Option<Value> {
+    match (details, schema_details) {
+        (Some(Value::Object(mut base)), Some(Value::Object(extra))) => {
+            for (key, value) in extra {
+                base.insert(key, value);
+            }
+            Some(Value::Object(base))
+        }
+        (Some(details), None) => Some(details),
+        (None, Some(schema_details)) => Some(schema_details),
+        (Some(details), Some(schema_details)) => Some(json!({
+            "original": details,
+            "schema": schema_details,
+        })),
+        (None, None) => None,
+    }
+}
+
+fn schema_path_to_argument_path(path: &str) -> String {
+    let trimmed = path.strip_prefix("$.").unwrap_or(path);
+    if trimmed == "$" || trimmed.is_empty() {
+        "arguments".to_owned()
+    } else {
+        format!("arguments.{trimmed}")
+    }
+}
+
+fn schema_path_leaf(path: &str) -> String {
+    let trimmed = path.strip_prefix("$.").unwrap_or(path);
+    trimmed
+        .rsplit('.')
+        .next()
+        .filter(|leaf| !leaf.is_empty() && *leaf != "$")
+        .unwrap_or(trimmed)
+        .to_owned()
 }
 
 fn conditional_argument_guidance(entry: &CapabilityRegistryEntry) -> &'static str {
@@ -5465,7 +5641,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_preflight_payload_rejection_is_structured_capability_result() {
+    fn execute_missing_required_argument_is_needs_input_result() {
         let mut function = test_function("process::run");
         function.request_schema = Some(json!({
             "type": "object",
@@ -5481,15 +5657,36 @@ mod tests {
             entry: entry.clone(),
         };
         let error = validate_target_payload(&entry, &json!({})).expect_err("payload error");
+        assert_eq!(payload_preflight_status(&error), "needs_input");
 
-        let value = preflight_rejection_result(&function, &target, error, "target_payload_invalid")
+        let value = preflight_rejection_result(&function, &target, error, "needs_input")
             .expect("structured result");
         let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        let CapabilityResultBody::Blocks(blocks) = result.content else {
+            panic!("expected block content");
+        };
+        let CapabilityResultContent::Text { text } = &blocks[0] else {
+            panic!("expected text content");
+        };
+        assert!(text.contains("process::run needs input before child execution"));
+        assert!(!text.contains("process::run rejected before child execution"));
 
         assert_eq!(result.is_error, Some(true));
         let details = result.details.expect("details");
-        assert_eq!(details["status"], json!("target_payload_invalid"));
+        assert_eq!(details["status"], json!("needs_input"));
         assert_eq!(details["error"]["code"], json!("INVALID_PARAMS"));
+        assert_eq!(
+            details["error"]["details"]["validationKind"],
+            json!("missing_required_argument")
+        );
+        assert_eq!(
+            details["error"]["details"]["missingFields"],
+            json!(["command"])
+        );
+        assert_eq!(
+            details["guidance"]["missingArgumentPaths"],
+            json!(["arguments.command"])
+        );
         assert_eq!(details["childInvocationCreated"], json!(false));
         assert_eq!(details["approvalCreated"], json!(false));
         assert_eq!(details["resourceRefs"], json!([]));
@@ -5499,6 +5696,50 @@ mod tests {
                 .expect("message")
                 .contains("Required arguments: command")
         );
+    }
+
+    #[test]
+    fn execute_invalid_target_payload_remains_target_payload_invalid() {
+        let mut function = test_function("process::run");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command"],
+            "properties": {
+                "command": {"type": "string"}
+            }
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry: entry.clone(),
+        };
+        let error = validate_target_payload(
+            &entry,
+            &json!({
+                "command": "echo ok",
+                "unexpected": true
+            }),
+        )
+        .expect_err("payload error");
+        assert_eq!(payload_preflight_status(&error), "target_payload_invalid");
+
+        let value = preflight_rejection_result(&function, &target, error, "target_payload_invalid")
+            .expect("structured result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        let CapabilityResultBody::Blocks(blocks) = result.content else {
+            panic!("expected block content");
+        };
+        let CapabilityResultContent::Text { text } = &blocks[0] else {
+            panic!("expected text content");
+        };
+        assert!(text.contains("process::run rejected before child execution"));
+        let details = result.details.expect("details");
+        assert_eq!(details["status"], json!("target_payload_invalid"));
+        assert_eq!(details["error"]["code"], json!("INVALID_PARAMS"));
+        assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["approvalCreated"], json!(false));
+        assert_eq!(details["resourceRefs"], json!([]));
     }
 
     #[test]
@@ -6016,6 +6257,57 @@ mod tests {
         assert!(!policy.require_local_vector);
         assert!(policy.allow_lexical_only_when_degraded);
         assert!(allows_degraded_vector_search(&policy));
+    }
+
+    #[test]
+    fn vector_warmup_status_detects_incomplete_indexes() {
+        let ready = CapabilityIndexStatus {
+            lexical: true,
+            local_vector: true,
+            cloud_embeddings: false,
+            vector_store: "sqlite-vec".to_owned(),
+            embedding_model: "test".to_owned(),
+            state: "ready".to_owned(),
+            degraded_reason: None,
+        };
+        assert!(!index_status_needs_vector_warmup(&ready));
+
+        let indexing = CapabilityIndexStatus {
+            state: "indexing".to_owned(),
+            degraded_reason: Some(
+                "CAPABILITY_INDEX_INDEXING: local vector index has 606/716 current documents"
+                    .to_owned(),
+            ),
+            ..ready.clone()
+        };
+        assert!(index_status_needs_vector_warmup(&indexing));
+
+        let stale_ready_metadata = CapabilityIndexStatus {
+            degraded_reason: Some(
+                "CAPABILITY_INDEX_INDEXING: local vector index has 606/716 current documents"
+                    .to_owned(),
+            ),
+            ..ready
+        };
+        assert!(index_status_needs_vector_warmup(&stale_ready_metadata));
+    }
+
+    #[test]
+    fn vector_warmup_signature_changes_when_documents_change_without_catalog_revision() {
+        let first =
+            CapabilityRegistrySnapshot::new(vec![test_function("filesystem::read_file")], 7);
+        let second = CapabilityRegistrySnapshot::new(
+            vec![
+                test_function("filesystem::read_file"),
+                test_function("filesystem::search_text"),
+            ],
+            7,
+        );
+
+        assert_ne!(
+            vector_warmup_signature(&first),
+            vector_warmup_signature(&second)
+        );
     }
 
     #[test]

@@ -236,6 +236,9 @@ run, and observe.
 ### Engine capabilities
 
 Tron is an engine of canonical worker functions. For any task about Tron engine capabilities, workers, streams, queues, sandbox workers, observability, or live discovery:
+- `execute` is intent-first. Use intent alone when the target is not already known, when you are comparing possible capabilities, or when a test is specifically checking discovery/resolution. Do not invent a target for discovery or shape tests.
+- Add `target` only when the user supplied an exact contract/function id, a previous `execute` result selected it, or a primed recipe/context makes it unambiguous.
+- Put only target capability fields inside `arguments`. Keep wrapper fields such as `target`, `idempotencyKey`, `reason`, and `constraints` top-level. If `execute` returns `needs_input`, retry the same selected target with the missing fields.
 - Use `execute` with intent to find visible contracts and implementations when the contract is not already primed. Query terms are enough: for example `sandbox spawn worker`.
 - The engine returns actionable recipes for resolved or candidate capabilities: when to use the capability, required argument fields, a copyable `execute` template, approval/lifecycle behavior, and result expectations. Use that recipe directly instead of guessing argument keys.
 - `execute` prepares mutating, external, medium/high-risk, plugin, MCP/OpenAPI, or unfamiliar capabilities before child execution. It resolves the current contract, required fields, authority, idempotency, approval, leases, compensation, streams, response schema, selected implementation, and expected revision.
@@ -254,7 +257,9 @@ Common direct `execute` patterns:
 
 When comparing several possible targets, call `execute` with a clear intent and
 let the engine return ranked candidates or a `needs_selection` result. Do not
-call separate provider-visible discovery tools.
+call separate provider-visible discovery tools, and do not prefill `target`
+unless you already know the target from the user, a prior `execute` result, or a
+primed recipe.
 
 Do not discover or execute Tron engine capabilities through `/api/*`, `/ws`, ad hoc HTTP probes, MCP search, or guessed method names. If an engine capability is not found, use a more specific `execute.intent` or `execute.target` hint. The engine catalog is the source of truth.
 

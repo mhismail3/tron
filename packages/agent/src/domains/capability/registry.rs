@@ -3127,7 +3127,7 @@ pub(crate) fn render_capability_primer(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision
     ));
-    out.push_str("The model-facing primitive is `execute`. Core first-party capabilities below are already known; call `execute` with intent, optional target, and target arguments. Dynamic plugins, MCP/OpenAPI/session workers, unfamiliar domains, freshness, approval, and full contract detail are resolved inside execute or through operator-only capability views.\n\n");
+    out.push_str("The model-facing primitive is `execute`. Known entries below may use target directly. For unknown work, start with intent alone; add target only from the user, prior execute, or a recipe. Put target-only fields in arguments; wrapper fields stay top-level. Freshness and approval happen inside execute.\n\n");
     for entry in entries.drain(..) {
         let recipe = entry.agent_recipe();
         let mut line = format!(

@@ -648,6 +648,21 @@ plane.
 | Regression coverage | Added contract, operations, registry, primitive-surface, provider-runner, and threat-model tests for single exported primitive, new schema shape, correction records, and orchestration audit filtering | Future providers must not re-export search/inspect as model primitives |
 | Documentation | Added [capability-orchestration-audit.md](capability-orchestration-audit.md) with manual test matrix, SQL queries, known confusion classes, and iteration rules | Capability ergonomics now has a durable testing and improvement loop |
 
+### 2026-05-25 Execute Guidance Hardening
+
+Early manual retesting showed the server substrate was behaving safely, but the
+model could still over-specify `target` during discovery and then need a second
+guided call. The fix belongs in the model-facing contract surfaces, not in a
+special-case runtime shortcut.
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Model metadata | `capability::execute` provider metadata now describes `execute` as an intent-first portal and explicitly says to start with natural-language intent alone when the target is unknown | The LLM should not have to infer when discovery is targetless |
+| Provider guidance | OpenAI clarification now says target is only for exact user ids, prior `execute` selections, or primed recipes, and that `needs_input` retries the same selected target | Provider-specific prompt glue must match the provider-portable schema contract |
+| Default prompts | Core/chat/local/process prompts now keep wrapper fields top-level, target arguments inside `arguments`, and intent-only discovery as the default | Session prompts, registry primer, README, and audit docs all teach the same one-tool shape |
+| Vector warmup | Manual QA showed `execute` could resolve correctly while the capability vector index was still partially populated; intent resolution now schedules the same background vector warmup path as operator search when it observes indexing/degraded vector status, and the warmup guard keys on a document signature rather than catalog revision alone | The model-facing path must be able to heal its own discovery substrate without requiring an operator `capability::search` call |
+| Static gates | `threat_model_invariants` now checks intent-first guidance in core prompts, model metadata, and the OpenAI clarification | Future wording changes cannot silently reintroduce target guessing or retired search/inspect choreography |
+
 ### 2026-05-21 Manual Test 12: Sandbox Output Verification Ergonomics
 
 The device smoke test proved the initial sandboxed `process::run` blocker was

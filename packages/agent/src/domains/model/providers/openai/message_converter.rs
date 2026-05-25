@@ -162,23 +162,28 @@ pub fn generate_capability_clarification_message(
         {tool_list}\n\
         \n\
         ## Capability Execution\n\
-        Use `execute` for every capability task. Provide a natural-language intent, optional target \
-        hint, target arguments, constraints, idempotencyKey when mutating, and a short reason; \
-        the engine resolves, prepares, checks freshness, requests approval when needed, runs, and observes.\n\
+        Use `execute` for every capability task. It is intent-first: if you do not already know the \
+        exact capability, call `execute` with intent only (and optional constraints). Do not invent a \
+        target for discovery, matching, or shape tests. Use `target` only when the user supplied an \
+        exact id, a prior `execute` result selected it, or a primed recipe makes it unambiguous. Put \
+        only target capability arguments inside `arguments`; wrapper fields such as `target`, \
+        `idempotencyKey`, `reason`, and `constraints` stay top-level. The engine resolves, prepares, \
+        checks freshness, requests approval when needed, runs, and observes.\n\
         Common contracts include filesystem capabilities for file operations, `process::run` for \
         command execution, and web capabilities for network retrieval when they are visible to the session.\n\
         If the user gives an exact contract id and arguments, call that exact target once; do not run \
         warm-up, probe, date, status, or example commands first.\n\
         \n\
         ## Important Rules\n\
-        1. You MUST provide ALL required parameters when calling capabilities - never call with empty arguments\n\
-        2. Never execute sample/example capability payloads as exploratory calls; examples are templates only\n\
-        3. When a capability call fails due to missing parameters, retry only the same intended target with the missing required parameters, not an unrelated probe\n\
-        4. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
-        5. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
-        6. Be helpful, accurate, and efficient when working with code\n\
-        7. Inspect/read existing files through capabilities before changing them\n\
-        8. Make targeted, minimal edits rather than rewriting entire files",
+        1. If the target or required fields are uncertain, call `execute` with a clear intent first; do not guess a target or fabricate arguments\n\
+        2. You MUST provide ALL known required target parameters when invoking a selected capability - never call with empty arguments after a target is selected\n\
+        3. Never execute sample/example capability payloads as exploratory calls; examples are templates only\n\
+        4. When `execute` returns `needs_input`, retry only the same selected target with the missing required parameters, not an unrelated probe\n\
+        5. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
+        6. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
+        7. Be helpful, accurate, and efficient when working with code\n\
+        8. Inspect/read existing files through capabilities before changing them\n\
+        9. Make targeted, minimal edits rather than rewriting entire files",
         tool_list = tool_descriptions.join("\n")
     )
 }
@@ -820,7 +825,11 @@ mod tests {
         assert!(result.contains("Capability Execution"));
         assert!(result.contains("process::run"));
         assert!(result.contains("Use `execute` for every capability task"));
-        assert!(result.contains("the engine resolves, prepares"));
+        assert!(result.contains("It is intent-first"));
+        assert!(result.contains("Do not invent a"));
+        assert!(result.contains("target for discovery"));
+        assert!(result.contains("only target capability arguments inside `arguments`"));
+        assert!(result.contains("The engine resolves, prepares"));
     }
 
     #[test]
@@ -833,7 +842,8 @@ mod tests {
             result.contains("do not run warm-up, probe, date, status, or example commands first")
         );
         assert!(result.contains("examples are templates only"));
-        assert!(result.contains("retry only the same intended target"));
+        assert!(result.contains("When `execute` returns `needs_input`"));
+        assert!(result.contains("retry only the same selected target"));
     }
 
     // ── normalize_schema_for_openai ──────────────────────────────────
