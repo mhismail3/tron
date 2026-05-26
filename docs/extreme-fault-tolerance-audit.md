@@ -435,7 +435,15 @@ Closure:
   registration/coordination surface for capability operations.
 - `packages/agent/src/domains/capability/operations/execute.rs` owns the
   model-facing execute orchestration path: schema intake, safe corrections,
-  resolve, prepare, run, observe, and audit diagnostics.
+  resolve, prepare, and observe diagnostics.
+- `packages/agent/src/domains/capability/operations/run.rs` owns child
+  invocation execution, approval pause/resume projection, preflight rejection
+  results, and program execution handoff.
+- `packages/agent/src/domains/capability/operations/search.rs`,
+  `packages/agent/src/domains/capability/operations/inspect.rs`, and
+  `packages/agent/src/domains/capability/operations/audit.rs` own operator
+  discovery, inspection/status, and bounded audit-query projection instead of
+  growing the parent coordination file.
 - `packages/agent/src/domains/capability/registry.rs` is removed.
 - `packages/agent/src/domains/capability/registry/mod.rs` owns registry store,
   snapshots, search index, and audit storage.

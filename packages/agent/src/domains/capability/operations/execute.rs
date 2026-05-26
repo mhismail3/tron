@@ -4,10 +4,9 @@ use serde_json::{Map, Value, json};
 
 use super::{
     ResolvedCapabilityTarget, actor_from_invocation, capability_result_value,
-    effect_class_from_str, effect_field, execute_invoke_value, execute_program_value,
-    index_status_needs_vector_warmup, is_missing_required_argument_error,
+    effect_class_from_str, effect_field, index_status_needs_vector_warmup,
     registry_metadata_sync_policy, registry_store_error, requires_fresh_revision_for_payload,
-    resolve_target, risk_field, risk_level_from_str, schedule_vector_warmup,
+    resolve_target, risk_field, risk_level_from_str, run, schedule_vector_warmup,
     validate_target_payload,
 };
 use crate::domains::capability::Deps;
@@ -31,8 +30,8 @@ pub(crate) async fn execute_value(
     }
     let mode = string_field(&invocation.payload, "mode").unwrap_or_else(|| "invoke".to_owned());
     match mode.as_str() {
-        "invoke" => execute_invoke_value(invocation, deps).await,
-        "program" => execute_program_value(invocation, deps).await,
+        "invoke" => run::execute_invoke_value(invocation, deps).await,
+        "program" => run::execute_program_value(invocation, deps).await,
         other => Err(CapabilityError::InvalidParams {
             message: format!("Unsupported capability execute mode '{other}'"),
         }),
@@ -307,7 +306,7 @@ async fn execute_orchestrated_value(
 
     let mut prepared_invocation = invocation.clone();
     prepared_invocation.payload = prepared_payload;
-    let mut result = match execute_invoke_value(&prepared_invocation, deps).await {
+    let mut result = match run::execute_invoke_value(&prepared_invocation, deps).await {
         Ok(result) => result,
         Err(error) => {
             let diagnostics = orchestration_details(
@@ -1257,7 +1256,7 @@ fn argument_schema_fit_for_hit(
     );
     match validate_target_payload(entry, &normalized_arguments) {
         Ok(()) => ArgumentSchemaFit::Compatible,
-        Err(error) if is_missing_required_argument_error(&error) => {
+        Err(error) if run::is_missing_required_argument_error(&error) => {
             ArgumentSchemaFit::MissingRequired
         }
         Err(error) => ArgumentSchemaFit::Incompatible(error.to_string()),

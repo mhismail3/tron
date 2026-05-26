@@ -675,6 +675,10 @@ fn extreme_fault_tolerance_audit_stays_current() {
     for fault_domain in [
         "`packages/agent/src/domains/capability/operations/mod.rs`",
         "`packages/agent/src/domains/capability/operations/execute.rs`",
+        "`packages/agent/src/domains/capability/operations/run.rs`",
+        "`packages/agent/src/domains/capability/operations/search.rs`",
+        "`packages/agent/src/domains/capability/operations/inspect.rs`",
+        "`packages/agent/src/domains/capability/operations/audit.rs`",
         "`packages/agent/src/domains/capability/registry/mod.rs`",
         "`packages/agent/src/domains/capability/registry/recipes.rs`",
         "`packages/agent/src/engine/primitives/ui.rs`",
@@ -699,6 +703,10 @@ fn extreme_fault_tolerance_audit_stays_current() {
     for required_file in [
         "src/domains/capability/operations/mod.rs",
         "src/domains/capability/operations/execute.rs",
+        "src/domains/capability/operations/run.rs",
+        "src/domains/capability/operations/search.rs",
+        "src/domains/capability/operations/inspect.rs",
+        "src/domains/capability/operations/audit.rs",
         "src/domains/capability/registry/mod.rs",
         "src/domains/capability/registry/recipes.rs",
         "src/engine/primitives/ui/authoring/mod.rs",
@@ -2039,8 +2047,15 @@ fn resource_materialization_enforcement_gates_stay_on() {
     let capability_execute =
         std::fs::read_to_string(crate_root.join("src/domains/capability/operations/execute.rs"))
             .expect("failed to read capability execute operations");
-    let capability_execute_tree =
-        [capability_operations.as_str(), capability_execute.as_str()].join("\n");
+    let capability_run =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/operations/run.rs"))
+            .expect("failed to read capability run operations");
+    let capability_execute_tree = [
+        capability_operations.as_str(),
+        capability_execute.as_str(),
+        capability_run.as_str(),
+    ]
+    .join("\n");
     assert!(
         capability_execute_tree.contains("preflight_rejection_result")
             && capability_execute_tree.contains("\"childInvocationCreated\": false")
@@ -2050,6 +2065,12 @@ fn resource_materialization_enforcement_gates_stay_on() {
                 .contains("validate_target_policy_before_approval(&function, &payload)")
             && capability_execute_tree.contains("validate_target_payload(&target.entry, &payload)"),
         "capability::execute target preflight rejections must return structured isError results without child invocations, approvals, or resource refs"
+    );
+    assert!(
+        !capability_operations.contains("async fn execute_invoke_value")
+            && !capability_operations.contains("async fn execute_program_value")
+            && !capability_operations.contains("fn preflight_rejection_result"),
+        "capability operations parent must not regain child execution, program execution, or preflight projection bodies"
     );
 
     let filesystem_contract =
