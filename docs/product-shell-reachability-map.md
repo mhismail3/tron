@@ -1,6 +1,6 @@
 # Product-Shell Reachability Map
 
-Last verified: 2026-05-19 on `next/modular-capability-engine`.
+Last verified: 2026-05-25 on `next/modular-capability-engine`.
 
 This document is the proof artifact for the remaining fixed iOS/product-shell
 surfaces. A surface stays only when it has a live entrypoint, runtime caller,
@@ -53,6 +53,7 @@ static gates:
 |---|---|---|
 | `prompt_library` | History and snippets are `artifact:prompt-history:*` and `artifact:prompt-snippet:*` resources. Fresh modular-engine-v3 databases do not create retired prompt-library tables. Prompt management uses generated `ui_surface` resource-collection surfaces; the fixed sheet is only a selection-only local composer insertion affordance. | Complete with gated local composer insertion; no fixed create/edit/delete/clear management path remains. |
 | `voice_notes` | Saved notes produce `artifact` and `materialized_file` refs; list/delete use resource truth. | Converted; no file-scan compatibility reader. |
+| `memory retain` | Retained journal, core memory, and argument outputs still materialize directly to markdown files that future prompts can read. | Conversion blocker; move to artifact/materialized-file truth in the capability-backed-truth migration before treating memory as complete. |
 | `notifications` | APNs/inbox read state still uses notification event/read-state tables and iOS notification views. | Defer with reason; convert only after notification delivery, read receipts, and APNs operator UX have a resource-backed contract. |
 | `display` | Display frames are stream/projection data for active sessions. | Keep as ephemeral capability output; materialize only if display captures become durable artifacts. |
 | `browser` | Browser status and event DTOs support local browser/computer-use flows. | Keep as capability module; remove only with route/DTO/event proof. |

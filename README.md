@@ -95,6 +95,10 @@ The repo-wide package/submodule hygiene audit lives in
 [`docs/production-grade-codebase-audit.md`](docs/production-grade-codebase-audit.md),
 with the 100-point production-grade rubric in
 [`docs/production-grade-rubric.md`](docs/production-grade-rubric.md).
+The stricter capability-backed-truth migration tracker lives in
+[`docs/capability-backed-truth-migration-plan.md`](docs/capability-backed-truth-migration-plan.md);
+it starts from a 90/100 baseline and tracks the remaining work to make every
+agent- or operator-affecting durable fact capability-owned substrate truth.
 The current operator checklist for local package trust, audits, revocation, and
 cleanup lives in
 [`docs/module-package-trust-operations.md`](docs/module-package-trust-operations.md).
@@ -144,6 +148,7 @@ tron/
 |   +-- tron-ios-beta       Local physical-device build/install/stop helper for iOS app variants
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
 +-- docs/
+|   +-- capability-backed-truth-migration-plan.md 100-point capability-backed truth tracker
 |   +-- collapsed-modular-engine-architecture.md Collapsed worker/capability/resource target
 |   +-- manual-testing-readiness.md Clean manual-QA checklist for the capability runtime
 |   +-- modular-engine-audit.md     Audit and target direction for the modular engine pivot
@@ -492,8 +497,9 @@ intent-shaped: `intent`, optional `target` or direct target alias, target-only
 `idempotencyKey` and `reason`. The
 capability worker owns the internal resolve, prepare, approval, run, and observe
 phases. It searches/ranks candidates, records fresh inspection handles when a
-mutating or elevated-risk target needs one, validates target arguments, corrects
-safe wrapper-shape mistakes such as `payload` versus `arguments`, and only then
+mutating or elevated-risk target needs one, uses supplied `arguments` to prefer
+schema-compatible candidates, validates target arguments, corrects safe
+wrapper-shape mistakes such as `payload` versus `arguments`, and only then
 routes through the same approval and child-invocation substrate. Mutating calls
 still require stable idempotency; model capability invocations derive a child
 key from the parent call when one is not passed explicitly. Every orchestration

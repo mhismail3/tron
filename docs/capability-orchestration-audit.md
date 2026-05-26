@@ -37,6 +37,10 @@ and Ollama. Flexibility lives in the runtime normalizer: target aliases, the
 `payload` alias, nested wrapper-field correction, freshness, idempotency, and
 constraint handling are accepted when safe and recorded in orchestration audit
 diagnostics.
+Target arguments also participate in intent resolution: when constraints leave
+multiple plausible candidates, the resolver prefers candidates whose request
+schema accepts the supplied `arguments` and records schema-mismatched candidates
+as rejected.
 
 The direct invoke/program shape remains internal/operator API for existing
 engine clients and program execution. It is not exported as provider tool

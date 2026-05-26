@@ -598,6 +598,155 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
 }
 
 #[test]
+fn capability_backed_truth_migration_tracker_stays_current() {
+    let repo_root = repo_root();
+    let tracker_path = repo_root
+        .join("docs")
+        .join("capability-backed-truth-migration-plan.md");
+    let tracker = std::fs::read_to_string(&tracker_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", tracker_path.display()));
+    let production_rubric_path = repo_root.join("docs").join("production-grade-rubric.md");
+    let production_rubric =
+        std::fs::read_to_string(&production_rubric_path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read {}: {error}",
+                production_rubric_path.display()
+            )
+        });
+    let cleanup_audit_path = repo_root
+        .join("docs")
+        .join("modular-engine-cleanup-audit.md");
+    let cleanup_audit = std::fs::read_to_string(&cleanup_audit_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", cleanup_audit_path.display()));
+    let reachability_map_path = repo_root
+        .join("docs")
+        .join("product-shell-reachability-map.md");
+    let reachability_map =
+        std::fs::read_to_string(&reachability_map_path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read {}: {error}",
+                reachability_map_path.display()
+            )
+        });
+    let readme_path = repo_root.join("README.md");
+    let readme = std::fs::read_to_string(&readme_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
+
+    let axes = [
+        ("Capability-owned durable truth", 20_u32),
+        ("Agent orchestration path", 15),
+        ("Resource/output contracts", 15),
+        ("Authority and security", 15),
+        ("Background/autonomous work", 10),
+        ("Client thinness", 8),
+        ("Observability and recovery", 7),
+        ("Test/static proof", 7),
+        ("Deletion discipline", 3),
+    ];
+    let mut total = 0_u32;
+    for (axis, expected_points) in axes {
+        let table_line = tracker
+            .lines()
+            .find(|line| line.starts_with('|') && line.contains(axis))
+            .unwrap_or_else(|| panic!("capability-backed truth tracker missing axis {axis}"));
+        let columns = table_line.split('|').map(str::trim).collect::<Vec<_>>();
+        let points = columns
+            .get(2)
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("tracker axis {axis} must include point value"));
+        assert_eq!(
+            points, expected_points,
+            "capability-backed truth point value changed for {axis}"
+        );
+        total += points;
+    }
+    assert_eq!(total, 100, "capability-backed truth rubric must total 100");
+
+    assert!(
+        tracker.contains("Current capability-backed-truth score: **90/100**")
+            && tracker.contains("Total: **90/100**")
+            && tracker.contains("Known Blockers")
+            && tracker.contains("Conversion Candidate Register")
+            && tracker.contains("Verification Standard For Every Phase")
+            && tracker.contains("No unclassified durable state owner remains"),
+        "capability-backed truth tracker must include score, blockers, candidates, verification, and final acceptance"
+    );
+
+    for candidate in [
+        "Memory retain",
+        "Notifications",
+        "Subagent",
+        "Source-control",
+        "AgentControl",
+        "Cron",
+        "scheduled work",
+        "Whole-engine audit",
+    ] {
+        assert!(
+            tracker.contains(candidate),
+            "capability-backed truth tracker must classify conversion candidate `{candidate}`"
+        );
+    }
+
+    for phase in [
+        "Phase 0: Plan, Audit, And Score Reset",
+        "Phase 1: Memory Retain Resource Conversion",
+        "Phase 2: Notification Resource Contract And Generated Inbox",
+        "Phase 3: Subagent, Invocation, And Result Lineage Surfaces",
+        "Phase 4: Source-Control And AgentControl Generated Surfaces",
+        "Phase 5: Cron And Scheduled Work Truth Decision",
+        "Phase 6: Final Whole-Engine Capability-Backed Audit",
+    ] {
+        assert!(
+            tracker.contains(phase),
+            "capability-backed truth tracker must include `{phase}`"
+        );
+    }
+
+    for invariant in [
+        "no compatibility readers",
+        "no direct hidden durable write",
+        "raw file/table truth",
+        "resource truth",
+        "generated UI",
+        "canonical invocation/capability paths",
+        "full CI",
+    ] {
+        assert!(
+            tracker.contains(invariant),
+            "capability-backed truth tracker must encode invariant `{invariant}`"
+        );
+    }
+
+    assert!(
+        production_rubric.contains("Current repo-wide score: **100/100**")
+            && production_rubric.contains("Current capability-backed-truth score: **90/100**")
+            && production_rubric.contains("docs/capability-backed-truth-migration-plan.md")
+            && production_rubric.contains("memory retain")
+            && production_rubric.contains("cron/scheduled work truth"),
+        "production-grade rubric must distinguish classification score from capability-backed truth migration"
+    );
+    assert!(
+        cleanup_audit.contains("Capability-Backed Truth Audit Reset")
+            && cleanup_audit.contains("memory retain")
+            && cleanup_audit.contains("conversion blocker")
+            && cleanup_audit.contains("docs/capability-backed-truth-migration-plan.md"),
+        "cleanup audit must keep memory retain and the new tracker visible"
+    );
+    assert!(
+        reachability_map.contains("memory retain")
+            && reachability_map.contains("Conversion blocker")
+            && reachability_map.contains("capability-backed-truth migration"),
+        "product-shell reachability map must classify memory retain in deferred domain outputs"
+    );
+    assert!(
+        readme.contains("docs/capability-backed-truth-migration-plan.md")
+            && readme.contains("90/100 baseline"),
+        "README must link the capability-backed-truth migration tracker and baseline"
+    );
+}
+
+#[test]
 fn grant_manifest_resource_and_ui_hardening_tests_stay_in_owning_boundaries() {
     let crate_root = crate_root();
     let engine_tests = std::fs::read_to_string(crate_root.join("src/engine/tests/mod.rs"))

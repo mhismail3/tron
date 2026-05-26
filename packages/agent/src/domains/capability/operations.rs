@@ -462,7 +462,7 @@ async fn execute_orchestrated_value(
             );
         }
     };
-    if let Err(error) = validate_orchestration_constraint_keys(&input.constraints) {
+    if let Err(error) = validate_orchestration_constraint_shape(&input.constraints) {
         let diagnostics = orchestration_details(
             &orchestration_id,
             "constraints_rejected",
@@ -1145,6 +1145,8 @@ async fn resolve_intent_target(
         constraints,
         &mut executable_hits,
     )?;
+    let argument_rejected_candidates =
+        apply_argument_schema_fit_filter(arguments, &snapshot, &mut executable_hits);
     let candidates = executable_hits
         .iter()
         .map(orchestration_candidate_summary)
@@ -1174,10 +1176,14 @@ async fn resolve_intent_target(
             search_status,
         });
     }
-    let rejected_candidates = executable_hits
-        .iter()
-        .skip(1)
-        .map(orchestration_candidate_summary)
+    let rejected_candidates = argument_rejected_candidates
+        .into_iter()
+        .chain(
+            executable_hits
+                .iter()
+                .skip(1)
+                .map(orchestration_candidate_summary),
+        )
         .collect::<Vec<_>>();
     Ok(IntentResolveOutcome::Resolved(OrchestrationResolve {
         target_params: json!({ "functionId": selected.function_id }),
@@ -1231,11 +1237,20 @@ fn validate_orchestration_constraint_keys(constraints: &Value) -> Result<(), Cap
     Ok(())
 }
 
+fn validate_orchestration_constraint_shape(constraints: &Value) -> Result<(), CapabilityError> {
+    validate_orchestration_constraint_keys(constraints)?;
+    let _ = risk_field(constraints, "riskMax")?;
+    let _ = effect_field(constraints, "effect")?;
+    let _ = optional_string_array_field(constraints, "allowedContracts")?;
+    let _ = optional_string_array_field(constraints, "allowedNamespaces")?;
+    Ok(())
+}
+
 fn validate_orchestration_constraints(
     constraints: &Value,
     entry: &CapabilityRegistryEntry,
 ) -> Result<(), CapabilityError> {
-    validate_orchestration_constraint_keys(constraints)?;
+    validate_orchestration_constraint_shape(constraints)?;
     if let Some(max_risk) = risk_field(constraints, "riskMax")?
         && entry.function.risk_level > max_risk
     {
@@ -1292,7 +1307,7 @@ fn orchestration_constraints_allow_hit(
     constraints: &Value,
     hit: &CapabilityIndexHit,
 ) -> Result<bool, CapabilityError> {
-    validate_orchestration_constraint_keys(constraints)?;
+    validate_orchestration_constraint_shape(constraints)?;
     if let Some(max_risk) = risk_field(constraints, "riskMax")? {
         let hit_risk = risk_level_from_str(&hit.risk_level, "candidate riskLevel")?;
         if hit_risk > max_risk {
@@ -1541,6 +1556,104 @@ fn apply_deterministic_intent_route(
         executable_hits.insert(0, routed);
     }
     Ok(())
+}
+
+fn apply_argument_schema_fit_filter(
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+    executable_hits: &mut Vec<CapabilityIndexHit>,
+) -> Vec<Value> {
+    if arguments.as_object().is_none_or(Map::is_empty) {
+        return Vec::new();
+    }
+
+    let original_hits = std::mem::take(executable_hits);
+    let mut compatible = Vec::new();
+    let mut missing_required = Vec::new();
+    let mut rejected = Vec::new();
+
+    for hit in &original_hits {
+        match argument_schema_fit_for_hit(hit, arguments, snapshot) {
+            ArgumentSchemaFit::Compatible => compatible.push(hit.clone()),
+            ArgumentSchemaFit::MissingRequired => missing_required.push(hit.clone()),
+            ArgumentSchemaFit::Incompatible(reason) => {
+                rejected.push(rejected_candidate_summary(
+                    hit,
+                    "argument_schema_mismatch",
+                    reason,
+                ));
+            }
+        }
+    }
+
+    if !compatible.is_empty() {
+        for hit in &missing_required {
+            rejected.push(rejected_candidate_summary(
+                hit,
+                "argument_missing_required",
+                "candidate is missing required arguments while another candidate accepts the supplied arguments",
+            ));
+        }
+        *executable_hits = compatible;
+        return rejected;
+    }
+
+    if !missing_required.is_empty() {
+        *executable_hits = missing_required;
+        return rejected;
+    }
+
+    *executable_hits = original_hits;
+    Vec::new()
+}
+
+enum ArgumentSchemaFit {
+    Compatible,
+    MissingRequired,
+    Incompatible(String),
+}
+
+fn argument_schema_fit_for_hit(
+    hit: &CapabilityIndexHit,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+) -> ArgumentSchemaFit {
+    let Some(entry) = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.function_id == hit.function_id)
+    else {
+        return ArgumentSchemaFit::Incompatible(
+            "candidate is not present in the live registry snapshot".to_owned(),
+        );
+    };
+    let mut normalized_arguments = arguments.clone();
+    let mut ignored_corrections = Vec::new();
+    normalize_target_specific_arguments(
+        &entry.function,
+        &mut normalized_arguments,
+        &mut ignored_corrections,
+    );
+    match validate_target_payload(entry, &normalized_arguments) {
+        Ok(()) => ArgumentSchemaFit::Compatible,
+        Err(error) if is_missing_required_argument_error(&error) => {
+            ArgumentSchemaFit::MissingRequired
+        }
+        Err(error) => ArgumentSchemaFit::Incompatible(error.to_string()),
+    }
+}
+
+fn rejected_candidate_summary(
+    hit: &CapabilityIndexHit,
+    reason: &str,
+    message: impl Into<String>,
+) -> Value {
+    let mut summary = orchestration_candidate_summary(hit);
+    if let Some(object) = summary.as_object_mut() {
+        object.insert("rejectionReason".to_owned(), json!(reason));
+        object.insert("rejectionMessage".to_owned(), json!(message.into()));
+    }
+    summary
 }
 
 fn intent_requests_filesystem_read(intent: &str, arguments: &Value) -> bool {
@@ -5548,6 +5661,32 @@ mod tests {
     }
 
     #[test]
+    fn orchestration_constraint_shape_rejects_malformed_values_before_resolution() {
+        let unsupported =
+            validate_orchestration_constraint_shape(&json!({"networkPolicy": "none"}))
+                .expect_err("unsupported rejected");
+        assert!(
+            unsupported
+                .to_string()
+                .contains("Unsupported execute.constraints field")
+        );
+
+        let bad_risk = validate_orchestration_constraint_shape(&json!({"riskMax": "impossible"}))
+            .expect_err("risk rejected");
+        assert!(bad_risk.to_string().contains("Unsupported riskMax"));
+
+        let bad_namespaces = validate_orchestration_constraint_shape(
+            &json!({"allowedNamespaces": ["filesystem", 1]}),
+        )
+        .expect_err("namespace rejected");
+        assert!(
+            bad_namespaces
+                .to_string()
+                .contains("allowedNamespaces must contain only non-empty strings")
+        );
+    }
+
+    #[test]
     fn orchestration_constraints_filter_resolution_candidates() {
         let read_hit = CapabilityIndexHit {
             kind: "implementation".to_owned(),
@@ -5595,6 +5734,96 @@ mod tests {
         assert!(
             !orchestration_constraints_allow_hit(&constraints, &process_hit)
                 .expect("process constraints")
+        );
+    }
+
+    #[test]
+    fn orchestration_argument_filter_prefers_candidate_that_accepts_supplied_arguments() {
+        let functions = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
+            .into_iter()
+            .filter(|spec| {
+                matches!(
+                    spec.function_id.as_str(),
+                    "filesystem::search_text" | "filesystem::glob"
+                )
+            })
+            .map(|spec| crate::domains::contract::function_definition_for_capability(&spec))
+            .collect::<Vec<_>>();
+        let snapshot = CapabilityRegistrySnapshot::new(functions, 42);
+        let mut hits = snapshot
+            .entries
+            .iter()
+            .map(|entry| orchestration_hit_from_entry(entry, "hybrid_local", 0.09))
+            .collect::<Vec<_>>();
+        hits.sort_by(|left, right| left.function_id.cmp(&right.function_id));
+
+        let rejected = apply_argument_schema_fit_filter(
+            &json!({
+                "pattern": "Testing out",
+                "path": ".",
+                "filePattern": "README.md",
+                "maxResults": 5
+            }),
+            &snapshot,
+            &mut hits,
+        );
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].function_id, "filesystem::search_text");
+        assert!(
+            rejected.iter().any(|candidate| {
+                candidate["functionId"] == json!("filesystem::glob")
+                    && candidate["rejectionReason"] == json!("argument_schema_mismatch")
+            }),
+            "glob should not remain ambiguous when filePattern proves search_text"
+        );
+    }
+
+    #[test]
+    fn orchestration_argument_filter_uses_target_specific_normalization() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let read_spec = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "filesystem::read_file")
+            .expect("filesystem::read_file spec");
+        let snapshot = CapabilityRegistrySnapshot::new(
+            vec![
+                crate::domains::contract::function_definition_for_capability(&process_spec),
+                crate::domains::contract::function_definition_for_capability(&read_spec),
+            ],
+            43,
+        );
+        let mut hits = snapshot
+            .entries
+            .iter()
+            .map(|entry| orchestration_hit_from_entry(entry, "hybrid_local", 0.09))
+            .collect::<Vec<_>>();
+        hits.sort_by(|left, right| left.function_id.cmp(&right.function_id));
+
+        let rejected = apply_argument_schema_fit_filter(
+            &json!({
+                "command": "printf hi > out.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputPaths": ["out.txt"]
+            }),
+            &snapshot,
+            &mut hits,
+        );
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].function_id, "process::run");
+        assert!(
+            rejected.iter().any(|candidate| {
+                candidate["functionId"] == json!("filesystem::read_file")
+                    && candidate["rejectionReason"] == json!("argument_missing_required")
+            }),
+            "read_file should not remain ambiguous when process aliases normalize cleanly"
         );
     }
 
