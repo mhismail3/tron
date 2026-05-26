@@ -23,10 +23,23 @@
 //!    service calls.
 //! 7. `/engine` subscriptions deliver those stream records to clients; the
 //!    transport never owns agent behavior.
+//!
+//! ## Submodules
+//!
+//! - `contract`: public and hidden `agent::*` capability contracts.
+//! - `handlers` / `operations`: worker entrypoints and capability
+//!   implementations.
+//! - `lineage`: deterministic child-agent result resource ids used to make
+//!   completed subagent output reconstructable from substrate truth.
+//! - `runner`: turn execution, capability orchestration, subagent management,
+//!   and context assembly.
+//! - `runtime`, `stream`, and `prompt_queue`: run lifecycle coordination and
+//!   client stream projection.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
+pub(crate) mod lineage;
 pub(crate) mod operations;
 pub mod runner;
 pub(crate) use deps::Deps;

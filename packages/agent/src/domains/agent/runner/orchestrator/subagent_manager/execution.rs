@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, info, info_span};
 
 use super::{SubagentManager, SubagentResult, TrackedSubagent, elapsed_ms, truncate};
+use crate::domains::agent::lineage::subagent_result_resource_id;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
@@ -640,8 +641,10 @@ async fn create_subagent_agent_result_resource(
     .with_idempotency_key(format!("subagent-agent-result:{child_session_id}"));
     let payload = json!({
         "kind": "agent_result",
+        "resourceId": subagent_result_resource_id(child_session_id),
         "scope": "session",
         "sessionId": session_id,
+        "lifecycle": "final",
         "payload": {
             "message": truncate(output, 4000),
             "promotedRefs": [],

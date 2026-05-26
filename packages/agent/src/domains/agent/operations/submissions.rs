@@ -6,11 +6,13 @@ use super::{
     start_or_queue_prompt, string_param_or_context,
 };
 use crate::domains::agent::Deps;
+use crate::domains::agent::lineage::subagent_result_resource_id;
 use crate::domains::capability::types::{CapabilityPauseRecord, CapabilityRunRecord};
 use crate::domains::capability_support::implementations::traits::{
     SubagentConfig, SubagentMode, SubagentOps, SubagentSpawner,
 };
-use crate::engine::{ActorKind, Invocation};
+use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+use crate::engine::{ActorKind, FunctionId, Invocation};
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::context::run_blocking_task;
@@ -458,20 +460,30 @@ pub(crate) async fn spawn_subagent_value(
     Ok(payload)
 }
 
-pub(crate) fn subagent_status_value(
+pub(crate) async fn subagent_status_value(
     params: Option<&Value>,
+    invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let subagent_session_id = require_string_param(params, "subagentSessionId")?;
-    let manager = deps
-        .subagent_manager
-        .as_ref()
-        .ok_or_else(|| CapabilityError::Internal {
-            message: "Subagent manager is not available".to_owned(),
-        })?;
-    let jobs = manager.list_active_jobs(&session_id);
-    let job = jobs.into_iter().find(|job| job.id == subagent_session_id);
+    if let Some(resource) =
+        subagent_result_resource(invocation, deps, &session_id, &subagent_session_id).await?
+    {
+        return Ok(json!({
+            "subagentSessionId": subagent_session_id,
+            "job": Value::Null,
+            "status": resource["result"]["status"].clone(),
+            "resourceRefs": resource["resourceRefs"].clone(),
+            "resultResource": resource["resource"].clone()
+        }));
+    }
+    let job = deps.subagent_manager.as_ref().and_then(|manager| {
+        manager
+            .list_active_jobs(&session_id)
+            .into_iter()
+            .find(|job| job.id == subagent_session_id)
+    });
     Ok(json!({
         "subagentSessionId": subagent_session_id,
         "job": job,
@@ -479,23 +491,145 @@ pub(crate) fn subagent_status_value(
     }))
 }
 
-pub(crate) fn subagent_result_value(
+pub(crate) async fn subagent_result_value(
     params: Option<&Value>,
+    invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    let session_id = require_string_param(params, "sessionId")?;
     let subagent_session_id = require_string_param(params, "subagentSessionId")?;
-    let manager = deps
+    if let Some(resource) =
+        subagent_result_resource(invocation, deps, &session_id, &subagent_session_id).await?
+    {
+        return Ok(resource);
+    }
+    match deps
         .subagent_manager
         .as_ref()
-        .ok_or_else(|| CapabilityError::Internal {
-            message: "Subagent manager is not available".to_owned(),
-        })?;
-    match manager.get_subagent_result(&subagent_session_id) {
+        .and_then(|manager| manager.get_subagent_result(&subagent_session_id))
+    {
         Some(result) => Ok(json!({ "subagentSessionId": subagent_session_id, "result": result })),
         None => Err(CapabilityError::NotFound {
             code: "SUBAGENT_RESULT_NOT_READY".to_owned(),
             message: format!("No completed result found for subagent {subagent_session_id}"),
         }),
+    }
+}
+
+async fn subagent_result_resource(
+    invocation: &Invocation,
+    deps: &Deps,
+    parent_session_id: &str,
+    subagent_session_id: &str,
+) -> Result<Option<Value>, CapabilityError> {
+    let resource_id = subagent_result_resource_id(subagent_session_id);
+    let function_id =
+        FunctionId::new("resource::inspect").map_err(|error| CapabilityError::Internal {
+            message: error.to_string(),
+        })?;
+    let mut context = invocation.causal_context.clone();
+    context.parent_invocation_id = Some(invocation.id.clone());
+    context.delivery_mode = crate::engine::DeliveryMode::Sync;
+    add_scope_once(&mut context.authority_scopes, ENGINE_INTERNAL_INVOKE_SCOPE);
+    add_scope_once(&mut context.authority_scopes, "resource.read");
+    let result = deps
+        .engine_host
+        .invoke(Invocation::new_sync(
+            function_id,
+            json!({"resourceId": resource_id}),
+            context,
+        ))
+        .await;
+    let value = crate::shared::server::error_mapping::result_to_capability_value(result)?;
+    let Some(inspection) = value.get("inspection").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let Some(resource) = inspection.get("resource") else {
+        return Ok(None);
+    };
+    if resource.get("kind").and_then(Value::as_str) != Some("agent_result")
+        || resource.get("resourceId").and_then(Value::as_str) != Some(resource_id.as_str())
+        || matches!(
+            resource.get("lifecycle").and_then(Value::as_str),
+            Some("discarded" | "archived")
+        )
+        || resource.pointer("/scope/session").and_then(Value::as_str) != Some(parent_session_id)
+    {
+        return Ok(None);
+    }
+    let Some(payload) = current_resource_payload(inspection) else {
+        return Ok(None);
+    };
+    let Some(metadata) = payload
+        .get("metadata")
+        .filter(|value| value.is_object())
+        .cloned()
+    else {
+        return Ok(None);
+    };
+    if metadata.get("parentSessionId").and_then(Value::as_str) != Some(parent_session_id)
+        || metadata.get("subagentSessionId").and_then(Value::as_str) != Some(subagent_session_id)
+    {
+        return Ok(None);
+    }
+    let version_id = resource
+        .get("currentVersionId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let resource_ref = {
+        let mut value = json!({
+            "resourceId": resource_id,
+            "kind": "agent_result",
+            "role": "subagent_result"
+        });
+        if let Some(version_id) = version_id {
+            value["versionId"] = json!(version_id);
+        }
+        value
+    };
+    let status = subagent_result_status(&payload, &metadata);
+    Ok(Some(json!({
+        "subagentSessionId": subagent_session_id,
+        "result": {
+            "sessionId": subagent_session_id,
+            "output": payload.get("message").cloned().unwrap_or_else(|| json!("")),
+            "tokenUsage": payload.get("tokenUsage").cloned().unwrap_or_else(|| json!({})),
+            "durationMs": metadata.get("durationMs").cloned().unwrap_or_else(|| json!(0)),
+            "status": status,
+            "turnsExecuted": metadata.get("turnsExecuted").cloned().unwrap_or_else(|| json!(0)),
+        },
+        "resource": resource.clone(),
+        "resourceRefs": [resource_ref],
+    })))
+}
+
+fn current_resource_payload(inspection: &Value) -> Option<Value> {
+    let current = inspection
+        .pointer("/resource/currentVersionId")
+        .and_then(Value::as_str)?;
+    inspection
+        .get("versions")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|version| version.get("versionId").and_then(Value::as_str) == Some(current))
+        .and_then(|version| version.get("payload"))
+        .cloned()
+}
+
+fn subagent_result_status(payload: &Value, metadata: &Value) -> String {
+    if let Some(stop_reason) = payload.get("stopReason").and_then(Value::as_str) {
+        return stop_reason.to_owned();
+    }
+    match metadata.get("success").and_then(Value::as_bool) {
+        Some(true) => "completed".to_owned(),
+        Some(false) => "failed".to_owned(),
+        None => "unknown".to_owned(),
+    }
+}
+
+fn add_scope_once(scopes: &mut Vec<String>, scope: &str) {
+    if !scopes.iter().any(|existing| existing == scope) {
+        scopes.push(scope.to_owned());
     }
 }
 

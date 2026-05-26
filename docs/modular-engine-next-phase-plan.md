@@ -1,117 +1,128 @@
-# Subagent Lineage Generated Surfaces And Capability-Backed Result Truth Plan
+# Source-Control And AgentControl Generated Surfaces Plan
 
 ## Current Checkpoint
 
 The repo-wide production-grade rubric remains complete at `100/100`. The
-stricter capability-backed-truth score is now `96/100`:
+stricter capability-backed-truth score is now `97/100`:
 
 - memory retain durable truth is `artifact` plus `materialized_file` substrate
   truth;
 - notification delivery/read truth is `notification`, `evidence`, and
   `decision` substrate truth;
+- completed subagent result truth is deterministic `agent_result:subagent:*`
+  resource truth, with generated `subagent.lineage.v1` surfaces;
 - Prompt Library and Voice Notes durable outputs are resource-backed;
 - model-facing capability use is routed through the single `execute`
   orchestrator.
 
-The next highest-value blocker is subagent/result lineage. Fixed Swift sheets
-and event plugins still interpret child-agent pending/result state. The engine
-already has invocation, resource, stream, and event truth; the next phase should
-make that truth server-authored, generated, inspectable, and stale-safe before
-any fixed shell is removed.
+The next highest-value blocker is source-control and AgentControl review
+surfaces. They remain fixed Swift shells because they combine chat context,
+model/settings visibility, worktree status, diff review, conflict handling, and
+deferred prompts. The next phase should move the durable/review truth behind
+those workflows into server-authored generated surfaces without weakening user
+review quality.
 
 ## First-Principles Goal
 
-Subagents are child execution. The durable truth should answer:
+Source-control and AgentControl surfaces are operator review boundaries. The
+durable truth should answer:
 
-- what parent invocation requested the child work;
-- what child invocation, worker, model, prompt, grants, approvals, and resource
-  outputs were used;
-- whether the child is pending, running, completed, failed, cancelled, retried,
-  or stale;
-- what result resources were produced and whether they are current, damaged, or
-  discarded;
-- what safe next action exists for the operator or parent agent;
-- why a stale event, missing result, cancelled run, or failed retry is not
-  actionable.
+- what workspace, session, worktree, branch, file set, and diff state is being
+  reviewed;
+- which capability, invocation, grant, approval, and resource/evidence refs
+  support each suggested action;
+- whether the displayed source-control state is current, stale, conflicted,
+  dirty, blocked, or already applied;
+- what action will mutate state, what approval/risk applies, and what exact
+  target revision will be checked before execution;
+- what is local editing/navigation state versus server-owned substrate truth;
+- why a stale, conflicting, unauthorized, or unsupported action is not safe.
 
-The source of truth should be invocations, grants, decisions, evidence,
-resources, streams, queues, and generated UI resources. Fixed client event
-plugins may render thin chat affordances, but they must not own lineage,
-result truth, retry policy, or action payloads.
+The source of truth should be invocations, grants, resources, decisions,
+evidence, worktree/git capability results, generated UI resources, and stored
+canonical actions. Fixed Swift surfaces may remain as local navigation or
+composition affordances, but they must not own review truth, mutation payloads,
+grant construction, stale-state decisions, or action policy.
 
 ## Scope
 
 Build the next checkpoint as:
 
-1. a complete subagent lineage inventory over current `agent::*` capabilities,
-   invocation records, events, resources, streams, and fixed Swift surfaces;
-2. server-authored generated list/detail surfaces for subagent pending,
-   completed, failed, cancelled, and retried states;
-3. resource/evidence refs for result payloads that are currently only
-   event/plugin interpreted;
-4. static gates that prevent fixed sheets from owning result truth or action
-   payload construction;
-5. docs and score updates from `96/100` only after tests prove the boundary.
+1. a complete AgentControl/source-control inventory over current Swift sheets,
+   Rust capabilities, worktree/git outputs, events, and generated UI support;
+2. generated review surfaces for worktree status, changed-file summaries, diff
+   previews, conflict state, deferred prompts, and canonical git/worktree
+   actions;
+3. server-owned action consequence summaries for source-control and
+   AgentControl actions;
+4. static gates that fixed Swift shells cannot construct target functions,
+   payload templates, grants, revision decisions, source-control policy, or
+   stale-state approvals;
+5. docs and score updates from `97/100` only after tests prove the boundary.
 
 Keep existing public capability ids and response fields stable unless a
 separate clean-break plan explicitly authorizes a schema change.
 
 ## Non-Goals
 
-- No new subagent/product tables.
-- No compatibility reader or fallback event-result interpreter.
-- No client-owned grants, retry policy, generated action target construction,
-  payload templates, or result lineage.
+- No new source-control/product tables.
+- No compatibility reader, fallback route, or fallback renderer.
+- No client-owned grants, target functions, generated action payloads,
+  stale-state policy, retry policy, or source-control mutation decisions.
 - No dynamic UI catalog or `control::act`.
-- No deletion of fixed chat chips/sheets until generated surfaces preserve the
-  current operator role and have absence/source guards.
+- No deletion of fixed chat/source-control shells until generated surfaces
+  preserve the current operator role and have absence/source guards.
+- No broad source-control UX redesign unrelated to server-owned truth.
 
 ## Implementation Plan
 
 ### 1. Inventory And Characterization
 
-- Map `agent::spawn_subagent`, `agent::subagent_status`,
-  `agent::subagent_result`, and related runner events to their current durable
-  records.
-- Identify every fixed Swift surface/plugin that consumes subagent pending or
-  result state.
-- Add characterization tests that prove current child invocations, failures,
-  cancellations, retries, and result references can be reconstructed from
-  substrate truth.
+- Map AgentControl and SourceChanges entrypoints, DTOs, state objects, actions,
+  and current tests.
+- Map `git::*`, `worktree::*`, source-control workflow helpers, deferred prompt
+  paths, and any invocation/resource/evidence refs they currently expose.
+- Identify which current display fields are durable truth, projection state,
+  local editing state, or ephemeral UI affordances.
+- Add characterization tests for current source-control action prerequisites,
+  stale worktree behavior, conflict state, deferred prompt submission, and
+  generated action submission constraints.
 
-### 2. Result Truth Hardening
+### 2. Server-Owned Review Projections
 
-- Ensure child-agent outputs that affect future prompts or operator decisions
-  are `agent_result`, `artifact`, `evidence`, or existing resource-backed
-  outputs with top-level `resourceRefs`.
-- Failure or cancellation should produce bounded evidence, not hidden client
-  state.
-- Duplicate child execution/retry idempotency must not duplicate result
-  resources, child invocations, or approvals.
+- Add or reuse generated `ui::surface_for_target` profiles that can represent:
+  - worktree summary and cleanliness;
+  - changed-file list with bounded diff previews;
+  - conflict state and conflict-resolution prerequisites;
+  - pending/deferred source-change prompts;
+  - canonical actions such as refresh, inspect diff, stage/unstage where
+    supported, apply patch, commit, rollback/discard where safe, and submit
+    deferred prompt.
+- Each action must be stored on a `ui_surface`, revision-pinned,
+  idempotency-aware, approval-aware, and routed through `ui::submit_action`.
+- Large diffs, secret-like content, local file paths, and raw payload templates
+  must be bounded or omitted with inspectable refs.
 
-### 3. Generated Lineage Surfaces
+### 3. AgentControl Generated Surfaces
 
-- Extend `ui::surface_for_target` only if existing target types cannot express
-  child invocation/resource lineage cleanly.
-- Prefer existing target types: `invocation`, `resource`, `goal`, and
-  constrained `resource_collection`.
-- Generated subagent list/detail surfaces should show:
-  - parent/child invocation refs;
-  - status and latest evidence;
-  - model/worker/grant refs;
-  - result resource refs and bounded previews;
-  - failure/cancellation/retry diagnostics;
-  - canonical actions only when target revisions, grants, and schemas are
-    current.
+- Author generated surfaces for server-owned context that AgentControl currently
+  displays: active model/settings summary, capability health/search entrypoints,
+  selected workspace/session refs, skill visibility, source-control entry
+  points, and safe next actions.
+- Keep local shell behavior only where it is genuine navigation/composition,
+  such as opening a chat sheet or choosing where a generated surface appears.
+- Use existing action-summary/consequence helpers so action state, required
+  approval, target revision, and stale/block reasons match control projections.
 
 ### 4. iOS Thin-Shell Boundary
 
-- Keep chat chips as local navigation affordances if they only open
-  server-authored lineage surfaces.
-- Remove fixed result/detail interpretation only after generated surfaces cover
-  pending, completed, failed, cancelled, and retried UX.
-- Add source guards forbidding fixed subagent surfaces from constructing target
-  functions, payload templates, grants, result lineage, or retry policy.
+- Keep `AgentControlView` and SourceChanges sheets as local containers only if
+  they render server-authored surfaces or navigate to them.
+- Remove fixed mutation controls only after equivalent generated actions are
+  available and tested.
+- Add source guards forbidding fixed shells from constructing target functions,
+  payload templates, grants, source-control mutation policy, stale-state
+  decisions, or generated UI action submissions outside stored coordinates.
 
 ### 5. Docs, Score, And Ledger
 
@@ -125,39 +136,50 @@ separate clean-break plan explicitly authorizes a schema change.
 ## Test Plan
 
 - Focused Rust tests:
-  - child invocation lineage survives resume/restart;
-  - pending/completed/failed/cancelled/retried states are reconstructable from
-    substrate truth;
-  - result resources/evidence refs are returned and inspectable;
-  - duplicate retries do not duplicate child invocations or result resources;
-  - generated lineage surfaces expose refs, bounded previews, and canonical
-    actions only.
+  - generated source-control surfaces expose bounded worktree/diff/conflict
+    refs and no raw unbounded payloads;
+  - stale worktree revisions fail before mutation;
+  - deferred source-change prompts submit through stored canonical actions;
+  - mutating git/worktree actions keep existing approval/output-contract
+    behavior;
+  - generated AgentControl surfaces expose refs and action summaries without
+    durable control state.
 - Generated UI tests:
-  - stale target revisions fail before action execution;
-  - unsupported subagent states render as inspectable warnings, not fabricated
+  - stored source-control actions are schema-valid, revision-pinned,
+    idempotent when mutating, approval-aware, and stale-safe;
+  - unsupported source states render inspectable warnings, not fabricated
     success;
-  - generated surfaces do not inline unbounded result payloads or raw secrets.
+  - `ui::submit_action` rejects stale/damaged/expired surfaces before child
+    execution.
+- iOS/source-guard tests:
+  - fixed AgentControl/SourceChanges shells do not construct target functions,
+    payload templates, grants, source-control mutation policy, or stale-state
+    approvals;
+  - if a fixed mutation control is removed, its navigation/action references,
+    previews, and tests are removed with absence gates.
 - Static gates:
-  - no subagent/result product tables;
-  - no fixed Swift result-lineage policy or generated-action construction;
-  - no `control::act`, dynamic UI catalog, compatibility alias, fallback
-    reader, raw-scope authorization, or module action multiplexer.
+  - no source-control/product tables;
+  - no `control::act`, dynamic UI catalog, compatibility alias, fallback reader,
+    raw-scope authorization, module action multiplexer, or alternate worker
+    spawn path.
 - Verification:
-  - `cd packages/agent && cargo test agent:: --lib -- --nocapture`;
-  - focused generated UI tests;
+  - `cd packages/agent && cargo test generated_ui --lib -- --nocapture`;
+  - focused source-control/worktree tests;
   - `cd packages/agent && cargo test --test threat_model_invariants -- --nocapture`;
   - `cd packages/agent && RUSTFLAGS="-D warnings" cargo check --all-targets`;
   - `git diff --check`;
   - `scripts/tron ci fmt check clippy test`;
-  - iOS `xcodegen generate` and targeted source-guard/subagent tests only if
-    Swift files change.
+  - iOS `xcodegen generate` and targeted AgentControl/SourceChanges tests only
+    if Swift files change.
 
 ## Acceptance Criteria
 
-- Subagent/result truth is reconstructable without hidden client event state.
-- Generated lineage surfaces cover all important child execution states.
-- Fixed Swift surfaces either become thin navigation shells or are removed with
-  absence gates.
+- Source-control/AgentControl durable review truth is reconstructable from
+  server substrate records.
+- Generated surfaces cover the highest-risk review and mutation workflows with
+  stored canonical actions.
+- Fixed Swift surfaces either become thin local containers/navigation shells or
+  are removed with absence gates.
 - Every mutation still runs through canonical capabilities and stored generated
   actions.
 - The capability-backed-truth score only increases when tests, docs, static

@@ -137,7 +137,7 @@ Every audited area is evaluated against these questions:
 
 | Domain | Classification | Evidence | Decision | Risk | 100% acceptance |
 |---|---|---|---|---|---|
-| `agent` | capability module / core runtime | agent contracts, runner, subagent/chat tests | Keep | High | Agent outputs stay resource/invocation linked; fixed subagent UI has replacement plan |
+| `agent` | capability module / core runtime | agent contracts, runner, deterministic subagent `agent_result` resources, generated lineage surfaces, subagent/chat tests | Keep | High | Agent outputs stay resource/invocation linked; fixed subagent UI remains thin until generated lineage UX fully replaces it |
 | `auth` | capability module | provider credential storage and auth operations | Keep | High | Secrets remain in auth/profile stores and never logs/UI |
 | `blob` | capability module | blob client/capabilities and storage payload refs | Keep | Medium | Blobs stay referenced by resources/invocations where durable |
 | `browser` | capability module | product-shell map defers browser/display deletion | Defer with reason | Medium | Keep only active capability/event paths; remove with route/DTO proof |
@@ -198,8 +198,9 @@ Every audited area is evaluated against these questions:
 |---|---|---|---|
 | Chat / Session / InputBar / MessageBubble | thin chat harness | Keep | Chat stays harness over server truth and resources |
 | EngineConsole / EngineApproval | thin control client | Keep | Engine Console renders server projections/generated UI only |
-| AgentControl / SourceChanges / Subagents | defer with reason | Keep until generated UI/resource lineage covers current workflows |
-| Notifications | defer with reason | Keep until notification delivery/read semantics are resource-backed |
+| AgentControl / SourceChanges | defer with reason | Keep until generated UI/resource lineage covers current workflows |
+| Subagents | thin client over server-owned lineage truth | Keep fixed chat affordance until generated lineage UX replaces pending/result navigation |
+| Notifications | thin client over resource-backed notification truth | Keep fixed APNs/deep-link affordance until generated inbox navigation is equivalent |
 | PromptLibrary | thin client | Keep | Server prompt state remains artifact resources |
 | VoiceNotes | thin client | Keep | Recording stays affordance; fixed list remains removed |
 | Settings / Onboarding / Skills / System / Components | thin client/support | Keep | Settings parity and pairing/setup remain tested |

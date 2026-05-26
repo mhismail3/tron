@@ -13,7 +13,7 @@ Domain-owned hidden file/table truth is not acceptable unless it is explicitly
 classified as low-level platform substrate with static gates and no agent-policy
 role.
 
-Current capability-backed-truth score: **96/100**.
+Current capability-backed-truth score: **97/100**.
 
 The repo-wide production-grade score remains useful as a reachability,
 organization, and classification score. This score tracks a narrower question:
@@ -24,7 +24,7 @@ invocation/grant backed, inspectable, and recoverable.
 
 | Axis | Points | Current | 100% Definition |
 |---|---:|---:|---|
-| Capability-owned durable truth | 20 | 19 | Every agent- or operator-affecting durable fact is resource/decision/evidence/invocation/grant backed or explicitly accepted substrate |
+| Capability-owned durable truth | 20 | 20 | Every agent- or operator-affecting durable fact is resource/decision/evidence/invocation/grant backed or explicitly accepted substrate |
 | Agent orchestration path | 15 | 14 | Model-facing `execute` can resolve, prepare, approve, run, observe, and self-correct across all core capabilities |
 | Resource/output contracts | 15 | 15 | Mutating durable outputs declare contracts and return refs; failures leave no accepted hidden output |
 | Authority and security | 15 | 15 | Grants, approvals, file/network policy, redaction, and sandboxing are enforced at every boundary |
@@ -34,13 +34,12 @@ invocation/grant backed, inspectable, and recoverable.
 | Test/static proof | 7 | 7 | Focused tests, integration tests, failure tests, absence gates, and docs prove the invariant |
 | Deletion discipline | 3 | 3 | Retired files/tables/routes/fallbacks are removed or statically forbidden |
 
-Total: **96/100**.
+Total: **97/100**.
 
 ## Known Blockers
 
 | Blocker | Current Truth Owner | Why It Blocks 100% | Target Decision |
 |---|---|---|---|
-| Subagent sheets/results | Fixed event/plugin/client projections | Child execution lineage is not fully rendered through generated invocation/resource surfaces | Convert fixed sheets to generated lineage surfaces |
 | Source-control and AgentControl shells | Fixed Swift product shells plus domain/event projections | Review workflows still contain client-shaped operator surfaces | Convert only after generated review surfaces preserve current safety |
 | Cron/scheduled work | `automations.json`, `cron_jobs`, and `cron_runs` | Scheduler product truth remains outside resource/decision truth | Convert unless explicitly accepted as low-level scheduler substrate |
 
@@ -50,6 +49,7 @@ Total: **96/100**.
 |---|---|---|
 | Memory retain | `memory::retain` and hidden `memory::auto_retain_fire` now persist retained journals, rule updates, and arguments as `artifact` resources with linked `materialized_file` markdown projections. `memory.retained` payloads include `resourceRefs` plus recovery/projection `evidenceRefs`, duplicate retain keys do not duplicate memory artifacts, and prompt context appends retained rule/argument artifacts from resource truth. | `packages/agent/src/domains/memory/retain/resources.rs`; `packages/agent/src/engine/tests/memory_retain_resources.rs`; `packages/agent/src/domains/agent/runtime/service/context.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 | Notifications | `notifications::send` persists bounded `notification` resources, delivery `evidence`, and read-state `decision` resources; `notifications::list` reads resource/decision truth and ignores historical event-only rows; generated `notifications.inbox.v1` surfaces expose stored mark-read actions. | `packages/agent/src/domains/notifications/inbox.rs`; `packages/agent/src/engine/tests/notification_resources.rs`; `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/tests/threat_model_invariants.rs` |
+| Subagent lineage | Completed child-agent results are persisted as deterministic `agent_result:subagent:{subagentSessionId}` resources; `agent::subagent_status` and `agent::subagent_result` reconstruct completed output from resource truth even without a live manager; malformed, mismatched, or cross-session resources are rejected before they become status/result truth; generated `subagent.lineage.v1` surfaces expose bounded lineage rows and stored canonical status/result/cancel actions. Fixed iOS subagent sheets remain thin chat navigation/rendering affordances and are statically forbidden from constructing target functions, payload templates, grants, or action submissions. | `packages/agent/src/domains/agent/lineage.rs`; `packages/agent/src/domains/agent/operations/submissions.rs`; `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager/execution.rs`; `packages/agent/src/engine/tests/subagent_lineage.rs`; `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 
 ## Conversion Candidate Register
 
@@ -57,7 +57,7 @@ Total: **96/100**.
 |---|---|---:|---|---|
 | Memory retain | completed durable agent-context truth | 94/100 | Phase 1 | Retained journal/rule/argument outputs are resource-backed, events include refs, context loads resource truth, direct durable file writes are forbidden outside materialization helpers |
 | Notifications | completed operator attention truth | 96/100 | Phase 2 | Send/list/read state is resource/decision/evidence backed; generated inbox surfaces expose canonical read actions; retired read-state truth is absent with gates |
-| Subagent invocation/result surfaces | execution lineage projection | 97/100 | Phase 3 | Child invocation/result state survives resume and renders from server-authored generated lineage surfaces |
+| Subagent invocation/result surfaces | completed execution lineage projection | 97/100 | Phase 3 | Completed child result state survives resume/restart through deterministic `agent_result` resources; malformed or cross-session resources are ignored; generated lineage surfaces render server-owned resource/invocation truth and stored canonical actions; fixed client shells remain thin |
 | Source-control and AgentControl surfaces | operator review projection | 98/100 | Phase 4 | Git/worktree/control review surfaces are server-authored, revision-pinned, and stale-safe before fixed mutation UI is removed |
 | Cron and scheduled work | scheduler product truth | 99-100/100 | Phase 5 | Schedules/runs are resource/decision/invocation/evidence backed, or cron is explicitly accepted as low-level substrate with static gates |
 | Whole-engine audit | final proof | 100/100 | Phase 6 | No unclassified durable truth, hidden file/table state, client policy, fallback reader, or retired route remains |
@@ -171,30 +171,39 @@ Required tests:
 
 ### Phase 3: Subagent, Invocation, And Result Lineage Surfaces
 
-Status: **pending**.
+Status: **completed**.
 
 Target score: **97/100**.
 
-Required behavior:
+Implemented behavior:
 
 - Keep existing `agent::*` capabilities stable.
-- Ensure subagent spawn/status/result records have complete invocation lineage
-  and resource refs.
-- Author generated list/detail surfaces for child invocations, pending states,
-  results, failures, and recovery actions.
-- Replace fixed result/detail sheets only after generated surfaces match active
-  UX.
-- Keep chat chips as thin entrypoints if they only open server-authored lineage
-  surfaces.
+- Completed subagent outputs are persisted as deterministic
+  `agent_result:subagent:{subagentSessionId}` resources.
+- `agent::subagent_status` and `agent::subagent_result` read completed result
+  truth from resources first, then fall back only to the live manager for truly
+  active jobs.
+- Resource-backed status/result reads require matching deterministic resource
+  id, parent session scope, `parentSessionId`, and `subagentSessionId`; malformed
+  or cross-session resources are treated as not ready.
+- `ui::surface_for_target` authors constrained `resource_collection` surfaces
+  for `targetId = "agent_result:subagent"` and
+  `layoutProfile = "subagent.lineage.v1"`.
+- Generated subagent lineage surfaces expose bounded resource/invocation rows
+  plus stored canonical `agent::subagent_status`, `agent::subagent_result`, and
+  `agent::cancel_subagent` actions.
+- Generated lineage surfaces use the caller session context when present and
+  omit malformed, mismatched, or cross-session rows.
+- Fixed chat chips/sheets remain as thin local rendering/navigation
+  affordances; static gates forbid them from constructing target functions,
+  payload templates, grants, action submissions, or capability policy.
 
-Required tests:
+Completed tests:
 
-- Child invocation lineage survives resume/restart.
-- Generated subagent detail shows pending, completed, failed, cancelled, and
-  retried states.
-- Fixed subagent sheets no longer own durable state or result interpretation.
-- Static gates forbid client-owned subagent policy and stale event-only result
-  truth.
+- `subagent_result_and_status_read_resource_truth_without_live_manager`.
+- `generated_subagent_lineage_surface_uses_resource_truth_and_stored_actions`.
+- `malformed_or_cross_session_subagent_resources_are_not_lineage_truth`.
+- `subagent_lineage_resource_truth_boundary_stays_enforced`.
 
 ### Phase 4: Source-Control And AgentControl Generated Surfaces
 

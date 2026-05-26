@@ -663,8 +663,8 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     assert_eq!(total, 100, "capability-backed truth rubric must total 100");
 
     assert!(
-        tracker.contains("Current capability-backed-truth score: **96/100**")
-            && tracker.contains("Total: **96/100**")
+        tracker.contains("Current capability-backed-truth score: **97/100**")
+            && tracker.contains("Total: **97/100**")
             && tracker.contains("Known Blockers")
             && tracker.contains("Conversion Candidate Register")
             && tracker.contains("Verification Standard For Every Phase")
@@ -720,9 +720,10 @@ fn capability_backed_truth_migration_tracker_stays_current() {
 
     assert!(
         production_rubric.contains("Current repo-wide score: **100/100**")
-            && production_rubric.contains("Current capability-backed-truth score: **96/100**")
+            && production_rubric.contains("Current capability-backed-truth score: **97/100**")
             && production_rubric.contains("docs/capability-backed-truth-migration-plan.md")
-            && production_rubric.contains("Notifications are now resource-backed")
+            && production_rubric.contains("Notifications and subagent completed-result")
+            && production_rubric.contains("lineage are now resource-backed")
             && production_rubric.contains("cron/scheduled work truth"),
         "production-grade rubric must distinguish classification score from capability-backed truth migration"
     );
@@ -744,7 +745,7 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     );
     assert!(
         readme.contains("docs/capability-backed-truth-migration-plan.md")
-            && readme.contains("currently at 96/100"),
+            && readme.contains("currently at 97/100"),
         "README must link the capability-backed-truth migration tracker and baseline"
     );
 }
@@ -1514,6 +1515,124 @@ fn notification_resource_truth_boundary_stays_enforced() {
             && notification_tests
                 .contains("notification_generated_inbox_surface_uses_stored_canonical_actions"),
         "notification resource tests must stay in their focused engine ownership boundary"
+    );
+}
+
+#[test]
+fn subagent_lineage_resource_truth_boundary_stays_enforced() {
+    let root = crate_root();
+    let repo = repo_root();
+
+    let lineage = std::fs::read_to_string(root.join("src/domains/agent/lineage.rs"))
+        .expect("read agent lineage helpers");
+    assert!(
+        lineage.contains("agent_result:subagent:")
+            && lineage.contains("subagent_result_resource_id"),
+        "subagent completed-output truth must keep deterministic agent_result resource ids"
+    );
+
+    let execution = std::fs::read_to_string(
+        root.join("src/domains/agent/runner/orchestrator/subagent_manager/execution.rs"),
+    )
+    .expect("read subagent execution");
+    assert!(
+        execution.contains("subagent_result_resource_id(child_session_id)")
+            && execution.contains("\"resourceId\"")
+            && execution.contains("\"lifecycle\": \"final\""),
+        "subagent completion must persist deterministic final agent_result resources"
+    );
+
+    let submissions =
+        std::fs::read_to_string(root.join("src/domains/agent/operations/submissions.rs"))
+            .expect("read agent submissions");
+    for required in [
+        "subagent_result_resource(",
+        "resource::inspect",
+        "ENGINE_INTERNAL_INVOKE_SCOPE",
+        "parentSessionId",
+        "subagentSessionId",
+        "/scope/session",
+        "\"resourceRefs\"",
+        "\"resultResource\"",
+        "SUBAGENT_RESULT_NOT_READY",
+    ] {
+        assert!(
+            submissions.contains(required),
+            "subagent status/result operations must keep resource-backed lineage marker `{required}`"
+        );
+    }
+
+    let ui = std::fs::read_to_string(root.join("src/engine/primitives/ui.rs"))
+        .expect("read generated UI primitive");
+    for required in [
+        "SUBAGENT_COLLECTION_TARGET",
+        "agent_result:subagent",
+        "subagent.lineage.v1",
+        "subagent_collection_projection",
+        "subagent_collection_actions",
+        "context_session_id",
+        "EngineResourceScope::Session",
+        "agent::subagent_status",
+        "agent::subagent_result",
+        "agent::cancel_subagent",
+    ] {
+        assert!(
+            ui.contains(required),
+            "generated UI must keep subagent lineage surface/action support `{required}`"
+        );
+    }
+
+    let engine_tests =
+        std::fs::read_to_string(root.join("src/engine/tests/mod.rs")).expect("read engine tests");
+    let lineage_tests = std::fs::read_to_string(root.join("src/engine/tests/subagent_lineage.rs"))
+        .expect("read subagent lineage tests");
+    assert!(
+        engine_tests.contains("mod subagent_lineage;")
+            && lineage_tests
+                .contains("subagent_result_and_status_read_resource_truth_without_live_manager")
+            && lineage_tests.contains(
+                "generated_subagent_lineage_surface_uses_resource_truth_and_stored_actions"
+            )
+            && lineage_tests
+                .contains("malformed_or_cross_session_subagent_resources_are_not_lineage_truth"),
+        "subagent lineage tests must stay in the focused engine ownership boundary"
+    );
+
+    for rel in [
+        "packages/ios-app/Sources/Views/Subagents/SubagentChip.swift",
+        "packages/ios-app/Sources/Views/Subagents/SubagentDetailSheet.swift",
+        "packages/ios-app/Sources/Views/Subagents/SubagentResultNotificationView.swift",
+        "packages/ios-app/Sources/Views/Subagents/SubagentResultsListSheet.swift",
+        "packages/ios-app/Sources/Views/Subagents/SubagentStatBadge.swift",
+        "packages/ios-app/Sources/ViewModels/State/SubagentState.swift",
+        "packages/ios-app/Sources/ViewModels/Chat/ChatViewModel+SubagentEvents.swift",
+    ] {
+        let content = std::fs::read_to_string(repo.join(rel))
+            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
+        for forbidden in [
+            "targetFunctionId",
+            "payloadTemplate",
+            "requiredGrant",
+            "UiActionSubmissionDTO",
+            "agent::subagent_status",
+            "agent::subagent_result",
+            "agent::cancel_subagent",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{rel} must remain a thin subagent renderer and not construct generated UI action or capability policy `{forbidden}`"
+            );
+        }
+    }
+
+    let reachability_map =
+        std::fs::read_to_string(repo.join("docs/product-shell-reachability-map.md"))
+            .expect("read product shell reachability map");
+    assert!(
+        reachability_map.contains("Converted in capability-backed-truth Phase 3")
+            && reachability_map.contains("subagent.lineage.v1")
+            && reachability_map.contains("keep thin shell over server-owned lineage truth"),
+        "product-shell reachability map must classify subagent lineage as server-owned with fixed shells kept thin"
     );
 }
 

@@ -585,6 +585,7 @@ fn validate_binding_target(
         expires_at: default_expires_at(),
         refresh_policy: json!({"mode": "manual"}),
         links: Vec::new(),
+        context_session_id: invocation.causal_context.session_id.clone(),
     };
     target_projection(host, invocation, &request).map(|_| ())
 }

@@ -51,10 +51,10 @@ operation_bindings! {
             spawn_subagent_value(Some(&invocation.payload), invocation, deps).await
         },
         "subagent_status" => |invocation, deps| {
-            subagent_status_value(Some(&invocation.payload), deps)
+            subagent_status_value(Some(&invocation.payload), invocation, deps).await
         },
         "subagent_result" => |invocation, deps| {
-            subagent_result_value(Some(&invocation.payload), deps)
+            subagent_result_value(Some(&invocation.payload), invocation, deps).await
         },
         "cancel_subagent" => |invocation, deps| {
             cancel_subagent_value(Some(&invocation.payload), invocation, deps).await

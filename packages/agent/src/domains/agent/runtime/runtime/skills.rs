@@ -85,17 +85,19 @@ pub fn collect_pending_skill_payloads(
 /// event store as a side effect — callers that want a pure formatter
 /// against an existing tracker should use the lower-level helpers in
 /// `crate::domains::skills::injector` directly.
+///
+/// The compaction policy is snapshotted before entering the blocking worker so
+/// a concurrent settings reload cannot change emission behavior mid-prepare.
 pub async fn prepare_skill_context_from_session(
     skill_registry: Arc<RwLock<SkillRegistry>>,
     event_store: Arc<EventStore>,
     session_id: String,
 ) -> Result<SkillContextResult, CapabilityError> {
+    let policy = {
+        let settings = crate::domains::settings::get_settings();
+        settings.skills.compaction_policy.clone()
+    };
     run_blocking_task("agent.prompt.skills", move || {
-        let policy = {
-            let settings = crate::domains::settings::get_settings();
-            settings.skills.compaction_policy.clone()
-        };
-
         let tracker = crate::domains::skills::state::reconstruct_tracker(
             &event_store,
             &session_id,
