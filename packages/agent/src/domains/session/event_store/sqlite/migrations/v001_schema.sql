@@ -12,7 +12,6 @@
 --   • Core event sourcing     — workspaces, sessions, events, blobs, branches
 --   • logs                    — server + iOS-client structured logs
 --   • device_tokens           — APNs push-notification tokens
---   • notification_read_state — per-event read tracking
 --   • cron_jobs / cron_runs   — scheduled task machinery
 --
 -- Invariants enforced at the DB layer:
@@ -243,15 +242,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_device_tokens_identity
 CREATE INDEX IF NOT EXISTS idx_device_tokens_session   ON device_tokens(session_id)   WHERE is_active = 1;
 CREATE INDEX IF NOT EXISTS idx_device_tokens_workspace ON device_tokens(workspace_id) WHERE is_active = 1;
 CREATE INDEX IF NOT EXISTS idx_device_tokens_token     ON device_tokens(device_token);
-
--- ═══════════════════════════════════════════════════════════════════════════════
--- Notification Read State
--- ═══════════════════════════════════════════════════════════════════════════════
-
-CREATE TABLE IF NOT EXISTS notification_read_state (
-    event_id TEXT PRIMARY KEY,
-    read_at  TEXT NOT NULL
-);
 
 -- ═══════════════════════════════════════════════════════════════════════════════
 -- Cron Scheduling

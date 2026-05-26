@@ -6,8 +6,8 @@ use serde_json::json;
 use crate::domains::catalog::CapabilitySpec;
 use crate::domains::contract::CapabilityContract;
 use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    Result as EngineResult, RiskLevel,
+    CompensationContract, CompensationKind, DurableOutputContract, EffectClass,
+    IdempotencyContract, Result as EngineResult, RiskLevel,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["notifications.inbox"];
@@ -45,15 +45,18 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "totalCount": {"type": "integer"},
                     "warning": {"type": ["string", "null"]},
                     "sheetContent": {},
-                    "data": {}
+                    "data": {},
+                    "resourceRefs": {"type": "array"},
+                    "evidenceRefs": {"type": "array"}
                 },
-                "required": ["title", "body", "priority", "success", "successCount", "totalCount"],
+                "required": ["title", "body", "priority", "success", "successCount", "totalCount", "resourceRefs", "evidenceRefs"],
                 "type": "object"
             }))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
+            .output_contract(DurableOutputContract::resource_backed(["notification", "evidence"]))
             .compensation(CompensationContract::new(
                 CompensationKind::ManualOnly,
-                "push delivery cannot be unsent; notification_read_state can mark the inbox entry read after delivery",
+                "push delivery cannot be unsent; notification read decisions can mark the inbox entry read after delivery",
             ))
             .high_risk_contract(json!({
                 "directExecutionAllowed": true,
@@ -82,20 +85,29 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":false,"properties":{"notifications":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"unreadCount":{"type":"integer"}},"required":["notifications","unreadCount"],"type":"object"}))
             .build()?,
         CapabilityContract::new("notifications::mark_read", "notifications", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("notifications.write"))
-            .description("Mark one notification inbox event as read.")
+            .description("Mark one notification inbox resource as read.")
             .tags(vec!["notification", "inbox", "read", "badge"])
             .request_schema(json!({"additionalProperties":false,"properties":{"eventId":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["eventId"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"},"decisionRefs":{"type":"array"}},"required":["success","decisionRefs"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .output_contract(optional_decision_output_contract())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
         CapabilityContract::new("notifications::mark_all_read", "notifications", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("notifications.write"))
-            .description("Mark all visible notification inbox events as read, optionally scoped to one session.")
+            .description("Mark all visible notification inbox resources as read, optionally scoped to one session.")
             .tags(vec!["notification", "inbox", "read", "badge"])
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"marked":{"type":"integer"}},"required":["marked"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"marked":{"type":"integer"},"decisionRefs":{"type":"array"}},"required":["marked","decisionRefs"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
+            .output_contract(optional_decision_output_contract())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?
     ])
+}
+
+fn optional_decision_output_contract() -> DurableOutputContract {
+    DurableOutputContract::ResourceBacked {
+        produced_resource_kinds: vec!["decision".to_owned()],
+        required_resource_refs: false,
+    }
 }

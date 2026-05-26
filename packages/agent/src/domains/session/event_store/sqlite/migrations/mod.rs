@@ -306,7 +306,6 @@ mod tests {
             "device_tokens",
             "events",
             "logs",
-            "notification_read_state",
             "schema_version",
             "sessions",
             "workspaces",
@@ -1122,30 +1121,21 @@ mod tests {
         assert_eq!(val, Some(1), "row should retain pre-rejection value");
     }
 
-    // ── notification_read_state ───────────────────────────────────────────
+    // ── retired notification read state ───────────────────────────────────
 
     #[test]
-    fn notification_read_state_insert_and_query() {
+    fn fresh_schema_omits_retired_notification_read_state() {
         let conn = open_memory();
         run_migrations(&conn).unwrap();
-
-        conn.execute(
-            "INSERT INTO notification_read_state (event_id, read_at)
-             VALUES ('evt_1', '2026-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-
-        let (event_id, read_at): (String, String) = conn
+        let count: i64 = conn
             .query_row(
-                "SELECT event_id, read_at FROM notification_read_state WHERE event_id = 'evt_1'",
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'notification_read_state'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .unwrap();
-
-        assert_eq!(event_id, "evt_1");
-        assert_eq!(read_at, "2026-01-01T00:00:00Z");
+        assert_eq!(count, 0);
     }
 
     // ── iOS client log dedup ──────────────────────────────────────────────
@@ -1446,7 +1436,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             table_count, 0,
-            "fresh v3 schema must not create retired prompt-library tables"
+            "fresh v4 schema must not create retired prompt-library tables"
         );
     }
 
@@ -1470,7 +1460,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             index_count, 0,
-            "fresh v3 schema must not create retired prompt-library indexes"
+            "fresh v4 schema must not create retired prompt-library indexes"
         );
     }
 }

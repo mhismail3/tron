@@ -9,7 +9,7 @@ tests, generated projects, CI, schemas, and repo support.
 
 The stricter capability-backed-truth migration score lives in
 `docs/capability-backed-truth-migration-plan.md`. That score is currently
-**94/100** and tracks whether every agent- or operator-affecting durable fact is
+**96/100** and tracks whether every agent- or operator-affecting durable fact is
 owned by canonical capabilities and the collapsed resource/decision/evidence/
 invocation/grant substrate. It intentionally has known blockers even while this
 production-grade classification score remains complete.
@@ -26,15 +26,14 @@ Each axis receives one of these maturity levels:
 
 Current repo-wide score: **100/100**.
 
-Current capability-backed-truth score: **94/100**.
+Current capability-backed-truth score: **96/100**.
 
 This production-grade score means every known source artifact, state owner,
 product shell, and security boundary is either implemented, tested, documented,
 or explicitly classified with static gates. It does not mean every durable fact
-is already capability-backed truth. The capability-backed-truth tracker names
-the remaining migration blockers: notifications, subagent
-lineage surfaces, source-control/AgentControl surfaces, and cron/scheduled work
-truth.
+is already capability-backed truth. Notifications are now resource-backed; the
+remaining migration blockers are subagent lineage surfaces,
+source-control/AgentControl surfaces, and cron/scheduled work truth.
 
 ## Rubric
 
@@ -157,18 +156,19 @@ Evidence:
   workers, queues, leases, approvals, decisions, evidence, streams, and
   generated UI resources.
 - Prompt Library and Voice Notes durable outputs are resource-backed.
-- Storage generation `modular-engine-v3` is a clean break that removes retired
-  Prompt Library tables from fresh schemas. Static gates prove the active
-  consolidated schema no longer creates `prompt_history`, `prompt_snippets`, or
-  their indexes.
+- Storage generation `modular-engine-v4` is a clean break that removes retired
+  Prompt Library tables and retired notification read-state rows from fresh
+  schemas. Static gates prove the active consolidated schema no longer creates
+  `prompt_history`, `prompt_snippets`, `notification_read_state`, or retired
+  prompt indexes.
 - Xcode projects are generated from `project.yml` and regenerate cleanly.
 
 Blockers:
 
 - No current blocker for production-grade classification. The stricter
-  capability-backed-truth migration separately tracks memory retain,
-  notifications, subagent lineage surfaces, source-control/AgentControl
-  surfaces, and cron/scheduled work truth as conversion blockers.
+  capability-backed-truth migration separately tracks subagent lineage
+  surfaces, source-control/AgentControl surfaces, and cron/scheduled work truth
+  as conversion blockers.
 
 Next action:
 
@@ -329,8 +329,10 @@ Evidence:
 
 - Removed iOS product-shell surfaces have absence gates.
 - Old Prompt Library store code remains deleted.
-- Retired Prompt Library tables are absent from fresh modular-engine-v3
-  schemas; runtime Prompt Library truth is `artifact:prompt-*` resources.
+- Retired Prompt Library tables and notification read-state tables are absent
+  from fresh modular-engine-v4 schemas; runtime Prompt Library truth is
+  `artifact:prompt-*` resources, and runtime notification truth is
+  `notification`/`decision`/`evidence` resources.
 
 Blockers:
 
@@ -351,13 +353,13 @@ Next action:
    (`memory::retain`, `mcp::product_protocol`, and `session::commands`); keep
    splitting future broad files before they become catch-alls.
 4. Resolve retired prompt schema ambiguity. Completed by the
-   modular-engine-v3 clean storage reset; keep absence gates on the fresh
+   modular-engine-v4 clean storage reset; keep absence gates on the fresh
    schema and Prompt Library runtime.
 5. Product-shell readiness proof, dependency-tooling decision, and Mac app
    focused audit are completed evidence for the 98/100 checkpoint.
 6. Prompt Library generated management and gated local composer insertion are
    completed evidence for the final 100/100 checkpoint.
-7. Capability-backed-truth migration is now tracked separately at 94/100 in
-   `docs/capability-backed-truth-migration-plan.md`; close notification,
-   subagent lineage, source-control/AgentControl, and cron/scheduled-work
-   blockers before claiming capability-backed truth is complete.
+7. Capability-backed-truth migration is now tracked separately at 96/100 in
+   `docs/capability-backed-truth-migration-plan.md`; close subagent lineage,
+   source-control/AgentControl, and cron/scheduled-work blockers before
+   claiming capability-backed truth is complete.

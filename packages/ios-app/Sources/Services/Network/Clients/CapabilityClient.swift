@@ -2,9 +2,9 @@ import Foundation
 
 /// Client for capability-native engine administration and primitive calls.
 ///
-/// The model still sees only `search`, `inspect`, and `execute`; this client is
-/// the operator/UI path for the same live capability registry, plugin, binding,
-/// policy, audit, and conformance records.
+/// The model-facing surface is the single `execute` orchestrator. This client is
+/// the operator/UI path for the same live capability registry, generated UI,
+/// plugin, binding, policy, audit, and conformance records.
 final class CapabilityClient: EngineDomainClient {
 
     func status(includeSnapshot: Bool = false) async throws -> CapabilityStatusDTO {

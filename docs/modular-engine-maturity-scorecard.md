@@ -150,8 +150,10 @@ Evidence:
   `voice_notes::delete` use resource truth instead of scanning or deleting
   Markdown files as source truth.
 - `prompt_library::history_*` and `prompt_library::snippet_*` now use
-  `artifact` resources as durable truth; fresh modular-engine-v3 databases no
-  longer create retired prompt-library tables.
+  `artifact` resources as durable truth; `notifications::*` inbox/read truth is
+  backed by `notification`, `evidence`, and `decision` resources; fresh
+  modular-engine-v4 databases no longer create retired prompt-library or
+  notification read-state tables.
 
 Blockers:
 

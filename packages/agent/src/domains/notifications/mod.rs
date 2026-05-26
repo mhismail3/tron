@@ -1,7 +1,11 @@
-//! notifications domain worker.
+//! Notifications domain worker.
 //!
-//! This module owns canonical function execution for the notifications namespace and keeps
-//! domain contracts, services, and tests beside the worker that uses them.
+//! This module owns canonical function execution for the `notifications::*`
+//! namespace. Notification delivery/read truth is resource-backed:
+//! `notifications::send` creates a `notification` resource plus delivery
+//! `evidence`, and read/mark-all-read state is stored as `decision` resources.
+//! Session events and APNs delivery remain audit/projection channels, not inbox
+//! source truth.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -10,11 +14,10 @@ pub(crate) use deps::Deps;
 
 use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::Notification;
-use crate::domains::notifications::inbox::NotificationInboxService;
+use crate::domains::notifications::inbox::{DeliveryObservation, NotificationInboxService};
 use crate::domains::worker::DomainRegistrationContext;
 use crate::domains::worker::DomainWorkerModule;
 use crate::engine::Invocation;
-use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::errors::to_json_value;
 use crate::shared::server::params::opt_string;
@@ -58,6 +61,8 @@ async fn notifications_send_value(
             message: "body must not be empty".to_owned(),
         });
     }
+    reject_raw_secret_text(&raw_title, "title")?;
+    reject_raw_secret_text(&raw_body, "body")?;
     let title = crate::shared::text::truncate_with_suffix(&raw_title, MAX_TITLE_LENGTH, "...");
     let body = crate::shared::text::truncate_with_suffix(&raw_body, MAX_BODY_LENGTH, "...");
     let priority = opt_string(params, "priority").unwrap_or_else(|| "normal".to_owned());
@@ -74,50 +79,113 @@ async fn notifications_send_value(
         .map_err(|_| CapabilityError::InvalidParams {
             message: "badge must fit in u32".to_owned(),
         })?;
+    let session_id = resolve_notification_scope(
+        "sessionId",
+        invocation.causal_context.session_id.as_deref(),
+        opt_string(params, "sessionId").as_deref(),
+    )?;
+    let workspace_id = resolve_notification_scope(
+        "workspaceId",
+        invocation.causal_context.workspace_id.as_deref(),
+        opt_string(params, "workspaceId").as_deref(),
+    )?;
     let mut data_object = params
         .and_then(|value| value.get("data"))
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    data_object
-        .entry("invocationId")
-        .or_insert_with(|| Value::String(invocation.id.as_str().to_owned()));
-    if let Some(session_id) = invocation.causal_context.session_id.as_deref() {
-        data_object
-            .entry("sessionId")
-            .or_insert_with(|| Value::String(session_id.to_owned()));
-    }
-    if let Some(workspace_id) = invocation.causal_context.workspace_id.as_deref() {
-        data_object
-            .entry("workspaceId")
-            .or_insert_with(|| Value::String(workspace_id.to_owned()));
-    }
+    data_object.insert(
+        "invocationId".to_owned(),
+        Value::String(invocation.id.as_str().to_owned()),
+    );
+    data_object.insert("sessionId".to_owned(), Value::String(session_id.clone()));
+    data_object.insert(
+        "workspaceId".to_owned(),
+        Value::String(workspace_id.clone()),
+    );
     let data = if data_object.is_empty() {
         None
     } else {
         Some(Value::Object(data_object))
     };
+    if let Some(data) = &data {
+        reject_raw_secret_value(data, "data")?;
+    }
     let sheet_content = params
         .and_then(|value| value.get("sheetContent"))
         .cloned()
         .or_else(|| params.and_then(|value| value.get("sheet_content")).cloned());
+    if let Some(sheet_content) = &sheet_content {
+        reject_raw_secret_value(sheet_content, "sheetContent")?;
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let prepared = NotificationInboxService::prepare(
+        invocation,
+        json!({
+            "notificationId": invocation.id.as_str(),
+            "title": title,
+            "body": body,
+            "priority": priority,
+            "badge": badge,
+            "data": data,
+            "sheetContent": sheet_content,
+            "sessionId": session_id,
+            "workspaceId": workspace_id,
+            "invocationId": invocation.id.as_str(),
+            "createdAt": now,
+            "updatedAt": now,
+            "isUserSession": invocation.causal_context.actor_kind == crate::engine::ActorKind::Agent,
+            "delivery": {
+                "status": "pending",
+                "success": false,
+                "message": Value::Null,
+                "successCount": 0,
+                "totalCount": 0,
+                "warning": Value::Null,
+                "errorCode": Value::Null
+            },
+            "metadata": {
+                "domain": "notifications",
+                "recordKind": "inbox",
+                "sourceFunctionId": "notifications::send"
+            }
+        }),
+    );
     let notification = Notification {
-        title: title.clone(),
-        body: body.clone(),
-        priority: priority.clone(),
+        title: prepared.pending_payload["title"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        body: prepared.pending_payload["body"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned(),
+        priority: prepared.pending_payload["priority"]
+            .as_str()
+            .unwrap_or("normal")
+            .to_owned(),
         badge,
         data: data.clone(),
         sheet_content: sheet_content.clone(),
     };
-    let delivery = deps
-        .notify_delegate
-        .send_notification(&notification)
-        .await
-        .map_err(notify_error)?;
+    let delivery = match deps.notify_delegate.send_notification(&notification).await {
+        Ok(delivery) => DeliveryObservation {
+            success: delivery.success,
+            message: delivery.message,
+            success_count: u64::from(delivery.success_count),
+            total_count: u64::from(delivery.total_count),
+            warning: delivery.warning,
+            error_code: None,
+        },
+        Err(error) => delivery_from_error(error),
+    };
+    let (resource_refs, evidence_refs) =
+        NotificationInboxService::persist_delivery(deps, invocation, prepared, delivery.clone())
+            .await?;
     Ok(json!({
-        "title": title,
-        "body": body,
-        "priority": priority,
+        "title": notification.title,
+        "body": notification.body,
+        "priority": notification.priority,
         "success": delivery.success,
         "message": delivery.message,
         "successCount": delivery.success_count,
@@ -125,23 +193,41 @@ async fn notifications_send_value(
         "warning": delivery.warning,
         "data": data,
         "sheetContent": sheet_content,
+        "resourceRefs": resource_refs,
+        "evidenceRefs": evidence_refs,
     }))
 }
 
-fn notify_error(error: CapabilityExecutionError) -> CapabilityError {
-    match error {
-        CapabilityExecutionError::Validation { message } => {
-            CapabilityError::InvalidParams { message }
+fn delivery_from_error(error: CapabilityExecutionError) -> DeliveryObservation {
+    let (code, message) = match error {
+        CapabilityExecutionError::Validation { message } => ("VALIDATION", message),
+        CapabilityExecutionError::NotFound { message } => ("NOT_FOUND", message),
+        other => ("NOTIFICATION_SEND_FAILED", other.to_string()),
+    };
+    DeliveryObservation {
+        success: false,
+        message: Some(message),
+        success_count: 0,
+        total_count: 0,
+        warning: Some(format!("Notification delivery failed: {code}")),
+        error_code: Some(code.to_owned()),
+    }
+}
+
+fn resolve_notification_scope(
+    field: &str,
+    causal_value: Option<&str>,
+    requested_value: Option<&str>,
+) -> Result<String, CapabilityError> {
+    match (causal_value, requested_value) {
+        (Some(causal), Some(requested)) if causal != requested => {
+            Err(CapabilityError::InvalidParams {
+                message: format!("{field} must match the invocation causal context"),
+            })
         }
-        CapabilityExecutionError::NotFound { message } => CapabilityError::NotFound {
-            code: "NOTIFICATION_TARGET_NOT_FOUND".to_owned(),
-            message,
-        },
-        other => CapabilityError::Custom {
-            code: "NOTIFICATION_SEND_FAILED".to_owned(),
-            message: other.to_string(),
-            details: None,
-        },
+        (Some(causal), _) => Ok(causal.to_owned()),
+        (None, Some(requested)) => Ok(requested.to_owned()),
+        (None, None) => Ok("notifications".to_owned()),
     }
 }
 
@@ -199,7 +285,7 @@ mod tests {
         let ctx = make_test_context();
         let notify = Arc::new(RecordingNotify::default());
         let deps = Deps {
-            event_store: ctx.event_store.clone(),
+            engine_host: ctx.engine_host.clone(),
             notify_delegate: notify.clone(),
         };
         let invocation = test_invocation();
@@ -208,7 +294,12 @@ mod tests {
                 "title": "t".repeat(80),
                 "body": "b".repeat(260),
                 "priority": "high",
-                "data": {"custom": "value"}
+                "data": {
+                    "custom": "value",
+                    "invocationId": "forged-invocation",
+                    "sessionId": "forged-session",
+                    "workspaceId": "forged-workspace"
+                }
             })),
             &deps,
             &invocation,
@@ -229,6 +320,69 @@ mod tests {
             json!(invocation.id.as_str())
         );
     }
+
+    #[tokio::test]
+    async fn send_rejects_scope_overrides_from_causal_invocations() {
+        let ctx = make_test_context();
+        let notify = Arc::new(RecordingNotify::default());
+        let deps = Deps {
+            engine_host: ctx.engine_host.clone(),
+            notify_delegate: notify.clone(),
+        };
+        let invocation = test_invocation();
+        let error = notifications_send_value(
+            Some(&json!({
+                "title": "Scoped",
+                "body": "Scope must come from causal context.",
+                "priority": "normal",
+                "sessionId": "other-session"
+            })),
+            &deps,
+            &invocation,
+        )
+        .await
+        .expect_err("causal context session must not be overridden");
+
+        assert!(
+            error.to_string().contains("causal context"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            notify.last.lock().unwrap().is_none(),
+            "invalid notification must not reach delivery delegate"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_rejects_secret_like_values_before_truncation() {
+        let ctx = make_test_context();
+        let notify = Arc::new(RecordingNotify::default());
+        let deps = Deps {
+            engine_host: ctx.engine_host.clone(),
+            notify_delegate: notify.clone(),
+        };
+        let invocation = test_invocation();
+        let error = notifications_send_value(
+            Some(&json!({
+                "title": format!("{} token=hidden", "safe prefix ".repeat(8)),
+                "body": "body",
+                "priority": "normal"
+            })),
+            &deps,
+            &invocation,
+        )
+        .await
+        .expect_err("raw secret-like title should fail before truncation");
+
+        assert!(
+            error.to_string().contains("secret-like value"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            notify.last.lock().unwrap().is_none(),
+            "invalid notification must not reach delivery delegate"
+        );
+    }
 }
 
 async fn notifications_list_value(
@@ -236,45 +390,69 @@ async fn notifications_list_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let limit = opt_u64(params, "limit", 50).min(100);
-    let pool = deps.event_store.pool().clone();
-    let result = run_blocking_task("notifications::list", move || {
-        let conn = pool.get().map_err(|error| CapabilityError::Internal {
-            message: format!("Failed to get DB connection: {error}"),
-        })?;
-        NotificationInboxService::list(&conn, limit)
-    })
-    .await?;
+    let session_id = opt_string(params, "sessionId");
+    let result = NotificationInboxService::list(deps, limit, session_id.as_deref()).await?;
     to_json_value(&result)
 }
 
 async fn notifications_mark_read_value(
     params: Option<&Value>,
     deps: &Deps,
+    invocation: &Invocation,
 ) -> Result<Value, CapabilityError> {
     let event_id = require_string_param(params, "eventId")?;
-    let pool = deps.event_store.pool().clone();
-    let result = run_blocking_task("notifications.mark_read", move || {
-        let conn = pool.get().map_err(|error| CapabilityError::Internal {
-            message: format!("Failed to get DB connection: {error}"),
-        })?;
-        NotificationInboxService::mark_read(&conn, &event_id)
-    })
-    .await?;
+    let result = NotificationInboxService::mark_read(deps, invocation, &event_id).await?;
     to_json_value(&result)
 }
 
 async fn notifications_mark_all_read_value(
     params: Option<&Value>,
     deps: &Deps,
+    invocation: &Invocation,
 ) -> Result<Value, CapabilityError> {
     let session_id = opt_string(params, "sessionId");
-    let pool = deps.event_store.pool().clone();
-    let result = run_blocking_task("notifications.mark_all_read", move || {
-        let conn = pool.get().map_err(|error| CapabilityError::Internal {
-            message: format!("Failed to get DB connection: {error}"),
-        })?;
-        NotificationInboxService::mark_all_read(&conn, session_id.as_deref())
-    })
-    .await?;
+    let result =
+        NotificationInboxService::mark_all_read(deps, invocation, session_id.as_deref()).await?;
     to_json_value(&result)
+}
+
+fn reject_raw_secret_text(text: &str, field: &str) -> Result<(), CapabilityError> {
+    let trimmed = text.trim();
+    if trimmed.starts_with("secret_ref:") || trimmed.starts_with("vault:") {
+        return Ok(());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if trimmed.starts_with("sk-")
+        || lower.contains("secret=")
+        || lower.contains("token=")
+        || lower.contains("password=")
+        || lower.contains("api_key=")
+        || lower.contains("apikey=")
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "{field} contains secret-like value; store only secret_ref or vault handles"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn reject_raw_secret_value(value: &Value, field: &str) -> Result<(), CapabilityError> {
+    match value {
+        Value::String(text) => reject_raw_secret_text(text, field),
+        Value::Array(items) => {
+            for (idx, item) in items.iter().enumerate() {
+                reject_raw_secret_value(item, &format!("{field}[{idx}]"))?;
+            }
+            Ok(())
+        }
+        Value::Object(map) => {
+            for (key, item) in map {
+                reject_raw_secret_value(item, &format!("{field}.{key}"))?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }

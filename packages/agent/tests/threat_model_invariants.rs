@@ -663,8 +663,8 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     assert_eq!(total, 100, "capability-backed truth rubric must total 100");
 
     assert!(
-        tracker.contains("Current capability-backed-truth score: **94/100**")
-            && tracker.contains("Total: **94/100**")
+        tracker.contains("Current capability-backed-truth score: **96/100**")
+            && tracker.contains("Total: **96/100**")
             && tracker.contains("Known Blockers")
             && tracker.contains("Conversion Candidate Register")
             && tracker.contains("Verification Standard For Every Phase")
@@ -720,14 +720,15 @@ fn capability_backed_truth_migration_tracker_stays_current() {
 
     assert!(
         production_rubric.contains("Current repo-wide score: **100/100**")
-            && production_rubric.contains("Current capability-backed-truth score: **94/100**")
+            && production_rubric.contains("Current capability-backed-truth score: **96/100**")
             && production_rubric.contains("docs/capability-backed-truth-migration-plan.md")
-            && production_rubric.contains("notifications")
+            && production_rubric.contains("Notifications are now resource-backed")
             && production_rubric.contains("cron/scheduled work truth"),
         "production-grade rubric must distinguish classification score from capability-backed truth migration"
     );
     assert!(
         cleanup_audit.contains("Capability-Backed Truth Audit Reset")
+            && cleanup_audit.contains("Notification Resource Contract")
             && cleanup_audit.contains("memory retain")
             && cleanup_audit.contains("resource-backed capability module")
             && cleanup_audit.contains("docs/capability-backed-truth-migration-plan.md"),
@@ -735,13 +736,15 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     );
     assert!(
         reachability_map.contains("memory retain")
+            && reachability_map.contains("notification inbox/detail views")
+            && reachability_map.contains("resource-backed notification")
             && reachability_map.contains("Converted in capability-backed-truth Phase 1")
             && reachability_map.contains("capability-backed-truth migration"),
-        "product-shell reachability map must classify memory retain in deferred domain outputs"
+        "product-shell reachability map must classify memory retain and notification truth in deferred domain outputs"
     );
     assert!(
         readme.contains("docs/capability-backed-truth-migration-plan.md")
-            && readme.contains("currently at 94/100"),
+            && readme.contains("currently at 96/100"),
         "README must link the capability-backed-truth migration tracker and baseline"
     );
 }
@@ -1407,12 +1410,110 @@ fn modular_engine_storage_generation_is_clean_break() {
     let storage = std::fs::read_to_string(crate_root().join("src/shared/storage.rs"))
         .expect("failed to read shared storage");
     assert!(
-        storage.contains("CURRENT_STORAGE_GENERATION: &str = \"modular-engine-v3\""),
-        "storage generation must stay on the retired prompt-schema clean-break generation"
+        storage.contains("CURRENT_STORAGE_GENERATION: &str = \"modular-engine-v4\""),
+        "storage generation must stay on the retired notification-read-state clean-break generation"
     );
     assert!(
         storage.contains("archive_incompatible_active_database(active_db_path)?"),
         "startup must archive incompatible active DB files before opening current schema"
+    );
+}
+
+#[test]
+fn notification_resource_truth_boundary_stays_enforced() {
+    let root = crate_root();
+    let notification_contract =
+        std::fs::read_to_string(root.join("src/domains/notifications/contract.rs"))
+            .expect("read notifications contract");
+    assert!(
+        notification_contract.contains("DurableOutputContract::resource_backed")
+            && notification_contract.contains("notification")
+            && notification_contract.contains("evidence")
+            && notification_contract.contains("decisionRefs")
+            && notification_contract.contains("resourceRefs"),
+        "notification mutating capabilities must keep resource/evidence/decision-backed contracts"
+    );
+
+    let notification_deps = std::fs::read_to_string(root.join("src/domains/notifications/deps.rs"))
+        .expect("read notifications deps");
+    assert!(
+        notification_deps.contains("engine_host: crate::engine::EngineHostHandle")
+            && !notification_deps.contains("event_store"),
+        "notifications durable truth must compose resource capabilities through the engine host"
+    );
+
+    let inbox = std::fs::read_to_string(root.join("src/domains/notifications/inbox.rs"))
+        .expect("read notification inbox");
+    for required in [
+        "notification:",
+        "notification_read",
+        "notification_mark_all_read",
+        "notification_delivery",
+        "resource::create",
+        "resource::update",
+        "evidence::attach",
+        "decision::create",
+        "resource::link",
+        "affects_notification",
+        "linked_notification_targets",
+    ] {
+        assert!(
+            inbox.contains(required),
+            "notification inbox resource boundary must contain `{required}`"
+        );
+    }
+    for forbidden in [
+        "notification_read_state",
+        "PooledConnection",
+        "rusqlite",
+        "FROM events",
+        "JOIN sessions",
+        "json_extract",
+    ] {
+        assert!(
+            !inbox.contains(forbidden),
+            "notification inbox must not reconstruct source truth through `{forbidden}`"
+        );
+    }
+
+    let schema = std::fs::read_to_string(
+        root.join("src/domains/session/event_store/sqlite/migrations/v001_schema.sql"),
+    )
+    .expect("read consolidated schema");
+    assert!(
+        !schema.contains("notification_read_state"),
+        "fresh current schema must not create retired notification_read_state"
+    );
+
+    let ui = std::fs::read_to_string(root.join("src/engine/primitives/ui.rs"))
+        .expect("read ui primitive");
+    for required in [
+        "NOTIFICATION_INBOX_LAYOUT_PROFILE",
+        "notifications.inbox.v1",
+        "notifications::mark_read",
+        "notifications::mark_all_read",
+        "resource_collection target notification",
+    ] {
+        assert!(
+            ui.contains(required),
+            "generated UI must keep notification inbox surface/action support `{required}`"
+        );
+    }
+
+    let engine_tests =
+        std::fs::read_to_string(root.join("src/engine/tests/mod.rs")).expect("read engine tests");
+    let notification_tests =
+        std::fs::read_to_string(root.join("src/engine/tests/notification_resources.rs"))
+            .expect("read notification resource tests");
+    assert!(
+        engine_tests.contains("mod notification_resources;")
+            && notification_tests.contains("notifications_send_list_and_read_are_resource_backed")
+            && notification_tests
+                .contains("notification_list_ignores_unregistered_event_only_rows")
+            && notification_tests.contains("notification_read_state_requires_decision_linkage")
+            && notification_tests
+                .contains("notification_generated_inbox_surface_uses_stored_canonical_actions"),
+        "notification resource tests must stay in their focused engine ownership boundary"
     );
 }
 

@@ -49,16 +49,19 @@ runtime caller, thin-client purpose, or test/support role.
 ## 2026-05-25 Capability-Backed Truth Audit Reset
 
 The production-grade cleanup score remains useful for reachability and
-classification, but the stricter capability-backed-truth audit found one
-high-impact unconverted durable path: memory retain. The 2026-05-26 Phase 1
-slice converted that path to resource-backed truth; the remaining blockers are
-notifications, subagent/source-control product shells, and cron/scheduled work.
+classification, but the stricter capability-backed-truth audit found two
+high-impact unconverted durable paths: memory retain and notification inbox
+state. The 2026-05-26 Phase 1 slice converted memory retain to resource-backed
+truth. Phase 2 converted notification delivery/read truth to
+resource/decision/evidence truth and removed the retired read-state schema.
+The remaining blockers are subagent/source-control product shells and
+cron/scheduled work.
 
 | Area | Evidence | Decision |
 |------|----------|----------|
-| Capability-backed-truth tracker | `docs/capability-backed-truth-migration-plan.md` defines a stricter 100-point score, current 94/100 baseline, phase tracker, conversion register, and verification standard | Keep as the authoritative migration tracker until every candidate is converted or explicitly accepted as low-level substrate |
+| Capability-backed-truth tracker | `docs/capability-backed-truth-migration-plan.md` defines a stricter 100-point score, current 96/100 baseline, phase tracker, conversion register, and verification standard | Keep as the authoritative migration tracker until every candidate is converted or explicitly accepted as low-level substrate |
 | Memory retain | `packages/agent/src/domains/memory/retain/resources.rs`, `packages/agent/src/engine/tests/memory_retain_resources.rs`, and `packages/agent/src/domains/agent/runtime/service/context.rs` prove retained outputs are artifacts/materialized projections, recovery/projection failures emit evidence refs, and prompt context reads retained rule/argument artifacts from resource truth | Completed Phase 1; static gates forbid direct hidden durable writes returning to memory retain |
-| Notifications | `docs/product-shell-reachability-map.md` still classifies the inbox/detail path as deferred event/read-state based operator attention state | Convert after memory retain to resource/decision/evidence backed notification truth |
+| Notification Resource Contract | `packages/agent/src/domains/notifications/inbox.rs`, `packages/agent/src/engine/tests/notification_resources.rs`, and `packages/agent/src/engine/primitives/ui.rs` prove notification delivery is a `notification` resource with delivery `evidence`, read state is `decision` truth, `notifications::list` ignores historical event-only rows, and generated `notifications.inbox.v1` surfaces expose stored read actions | Completed Phase 2; static gates forbid `notification_read_state` and event-payload inbox reconstruction |
 | Subagent and source-control shells | Product-shell reachability map keeps these as fixed thin shells pending generated lineage/review replacements | Convert after server-authored generated surfaces preserve current operator safety |
 | Cron/scheduled work | Cron remains a dedicated scheduler plane with separate files/tables | Convert to resource/decision/invocation/evidence truth unless a later audit explicitly accepts it as low-level scheduler substrate |
 
@@ -67,7 +70,7 @@ Removal proof from this reset:
 - Phase 0 changed no runtime behavior; Phase 1 converted retained-memory
   persistence through canonical resource/materialization capabilities.
 - The existing production-grade 100/100 rubric is not removed. It is narrowed to
-  classification/organization proof, while the new 94/100 tracker owns the
+  classification/organization proof, while the new 96/100 tracker owns the
   stricter capability-backed-truth migration.
 - Memory retain is no longer allowed to regress to direct file/table truth under
   a broad "classified" score.
@@ -300,7 +303,7 @@ Deferred domain-output proof map:
 
 | Domain/surface | Current evidence | Decision |
 |----------------|------------------|----------|
-| `notifications` | `notifications::send/list/mark_read/mark_all_read` still drive APNs, notification inbox, and iOS notification views | Defer; convert inbox state to resources only after delivery semantics and APNs operator UX are specified |
+| `notifications` | `notifications::send/list/mark_read/mark_all_read` now use `notification` resources, delivery `evidence`, and read `decision` truth; generated inbox surfaces expose stored canonical read actions while the fixed iOS shell remains a thin APNs/deep-link affordance | Converted durable truth; replace the fixed navigation shell only after generated UI can preserve session-opening ergonomics |
 | `prompt_library` | Server resource-backed artifacts plus iOS input-bar/history/snippet callers remain active | Converted durable state; keep the iOS sheet as a thin capability client |
 | AgentControl/source-change/subagent sheets | iOS chat sheets and event-state dependencies remain active | Defer; replace with resource lineage/control/generated UI before deleting fixed sheets |
 | `browser`, `display`, `device` | Server domains still register workers and support local device/display flows; iOS display stream DTOs remain active | Keep as capability modules until each output path is separately proven resource-backed or ephemeral |
@@ -331,8 +334,8 @@ client/server dependency, test, or current operator role.
 | Area | Evidence | Decision |
 |------|----------|----------|
 | Product-shell reachability | `docs/product-shell-reachability-map.md` maps AgentControl, SourceChanges, subagent sheets/plugins, notification inbox/detail views, Prompt Library, display stream views, and voice recording affordances by entrypoint, DTO/client, server/event dependency, tests, role, and decision | Keep as the deletion bar for the remaining product shell |
-| Prompt history | `engine/tests/prompt_library_resources.rs` proves `prompt_library::history_record/list/delete/clear` use `artifact:prompt-history:*` resources, dedupe by normalized text hash, run with retired prompt tables absent, and skip disabled/cron captures without accepted refs | Converted; old `prompt_history` rows are not runtime truth and fresh v3 schema no longer creates the table |
-| Prompt snippets | The same test module proves `prompt_library::snippet_create/update/delete/list/get` use `artifact:prompt-snippet:*` resources, return `resourceRefs` for mutations, discard lifecycle on delete, and run with retired prompt tables absent | Converted; old `prompt_snippets` rows are not runtime truth and fresh v3 schema no longer creates the table |
+| Prompt history | `engine/tests/prompt_library_resources.rs` proves `prompt_library::history_record/list/delete/clear` use `artifact:prompt-history:*` resources, dedupe by normalized text hash, run with retired prompt tables absent, and skip disabled/cron captures without accepted refs | Converted; old `prompt_history` rows are not runtime truth and fresh v4 schema no longer creates the table |
+| Prompt snippets | The same test module proves `prompt_library::snippet_create/update/delete/list/get` use `artifact:prompt-snippet:*` resources, return `resourceRefs` for mutations, discard lifecycle on delete, and run with retired prompt tables absent | Converted; old `prompt_snippets` rows are not runtime truth and fresh v4 schema no longer creates the table |
 | Prompt-library contracts | `prompt_library::history_record/delete/clear` and `prompt_library::snippet_create/update/delete` declare artifact-backed output contracts and additive top-level `resourceRefs` | Keep stable public ids/current response fields; no fallback DTO reader |
 | iOS Prompt Library | `PromptLibrarySheet`, `PromptLibraryState`, and `PromptLibraryClient` still call canonical `prompt_library::*` capabilities and Decodable DTOs tolerate additive `resourceRefs` | Keep thin shell; no local policy/resource truth |
 | Static gates | `product_shell_reachability_and_prompt_library_resources_stay_enforced` requires the reachability map, resource-backed prompt contracts, engine-host resource composition, deleted prompt store, and focused prompt-resource tests | Keep as absence proof against DB-backed prompt truth |
@@ -340,11 +343,11 @@ client/server dependency, test, or current operator role.
 Removal proof from this pass:
 
 - No active iOS product shell met the deletion bar. AgentControl,
-  SourceChanges, subagent sheets/plugins, notification inbox/detail, Prompt
-  Library, display stream views, and voice recording affordances remain
+  SourceChanges, subagent sheets/plugins, Prompt Library, display stream views,
+  and voice recording affordances remain
   classified with evidence in the reachability map.
 - No prompt-library storage compatibility path was added. The
-  modular-engine-v3 clean break removes legacy prompt tables from fresh active
+  modular-engine-v4 clean break removes prompt-library tables from fresh active
   schema creation; old databases are archived rather than read or migrated.
 - No iOS change was needed: the existing Swift response DTOs ignore additive
   `resourceRefs`, and mutations still go through canonical server
@@ -355,9 +358,10 @@ Removal proof from this pass:
 These areas are not proven removable in this checkpoint and need separate
 call-graph/test-backed passes:
 
-- `notifications`: still drives APNs, notification inbox, and engine-delivered
-  operator notices. Remove only after notification delivery is replaced by
-  resource/control projections or a generated surface.
+- `notifications`: durable inbox/read truth is converted, but the fixed iOS
+  shell still owns local APNs deep-link/session navigation ergonomics. Remove
+  only after generated surfaces or an accepted local navigation bridge preserves
+  that behavior.
 - `AgentControl`, `SourceChanges`, and subagent sheets: still have chat-sheet
   callers and event-state dependencies. Replace with resource lineage/control
   projections before deletion.
@@ -381,7 +385,7 @@ wire schemas.
 | Memory retain tests | `domains/memory/retain/tests/` has declaration-only `mod.rs`, shared `support.rs`, and concern files for formatting, parsing, writers, handler/event flow, interactive ids, and interactive serialization | Keep split; old `tests.rs` stays absent |
 | MCP product protocol tests | `domains/mcp/product_protocol/tests/` owns stdio client protocol, manager lifecycle, router/schema refresh, and capability-index behavior separately | Keep split; shared mock server fixtures stay in `support.rs` |
 | Session command tests | `domains/session/commands/tests/` separates archive/delete from archive-older-than behavior with shared repo/context setup in `support.rs` | Keep split; old broad test file stays absent |
-| Retired prompt schema | Storage generation is `modular-engine-v3`; fresh consolidated schema no longer creates `prompt_history`, `prompt_snippets`, `idx_prompt_history_*`, or `idx_prompt_snippets_*` | Remove with clean-break storage boundary; no migration reader, compatibility table reader, or row-copy path |
+| Retired prompt schema | Storage generation is `modular-engine-v4`; fresh consolidated schema no longer creates `prompt_history`, `prompt_snippets`, `idx_prompt_history_*`, or `idx_prompt_snippets_*` | Remove with clean-break storage boundary; no migration reader, compatibility table reader, or row-copy path |
 | Prompt Library resources | Prompt Library tests assert resource-backed history/snippet behavior when retired tables are absent | Keep `artifact:prompt-*` resources as durable truth |
 
 ## 2026-05-19 Product-Shell Readiness, Dependency Hygiene, And Mac Audit

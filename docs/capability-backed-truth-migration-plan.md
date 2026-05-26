@@ -13,7 +13,7 @@ Domain-owned hidden file/table truth is not acceptable unless it is explicitly
 classified as low-level platform substrate with static gates and no agent-policy
 role.
 
-Current capability-backed-truth score: **94/100**.
+Current capability-backed-truth score: **96/100**.
 
 The repo-wide production-grade score remains useful as a reachability,
 organization, and classification score. This score tracks a narrower question:
@@ -24,23 +24,22 @@ invocation/grant backed, inspectable, and recoverable.
 
 | Axis | Points | Current | 100% Definition |
 |---|---:|---:|---|
-| Capability-owned durable truth | 20 | 18 | Every agent- or operator-affecting durable fact is resource/decision/evidence/invocation/grant backed or explicitly accepted substrate |
+| Capability-owned durable truth | 20 | 19 | Every agent- or operator-affecting durable fact is resource/decision/evidence/invocation/grant backed or explicitly accepted substrate |
 | Agent orchestration path | 15 | 14 | Model-facing `execute` can resolve, prepare, approve, run, observe, and self-correct across all core capabilities |
-| Resource/output contracts | 15 | 14 | Mutating durable outputs declare contracts and return refs; failures leave no accepted hidden output |
+| Resource/output contracts | 15 | 15 | Mutating durable outputs declare contracts and return refs; failures leave no accepted hidden output |
 | Authority and security | 15 | 15 | Grants, approvals, file/network policy, redaction, and sandboxing are enforced at every boundary |
-| Background/autonomous work | 10 | 8 | Auto-retain, scheduled work, notifications, retries, and cleanup all run through canonical invocations and leave evidence |
+| Background/autonomous work | 10 | 9 | Auto-retain, scheduled work, notifications, retries, and cleanup all run through canonical invocations and leave evidence |
 | Client thinness | 8 | 7 | iOS/Mac render server truth and submit stored actions only; local state is limited to genuine editing/hardware affordances |
-| Observability and recovery | 7 | 6 | Operators and agents can inspect lineage, state, failure, safe next action, and recovery path |
+| Observability and recovery | 7 | 7 | Operators and agents can inspect lineage, state, failure, safe next action, and recovery path |
 | Test/static proof | 7 | 7 | Focused tests, integration tests, failure tests, absence gates, and docs prove the invariant |
 | Deletion discipline | 3 | 3 | Retired files/tables/routes/fallbacks are removed or statically forbidden |
 
-Total: **94/100**.
+Total: **96/100**.
 
 ## Known Blockers
 
 | Blocker | Current Truth Owner | Why It Blocks 100% | Target Decision |
 |---|---|---|---|
-| Notifications | Session events plus notification read-state storage and fixed iOS inbox/detail surfaces | Operator attention/read state is not resource/decision backed | Convert to notification resources, decision read receipts, and generated inbox/detail |
 | Subagent sheets/results | Fixed event/plugin/client projections | Child execution lineage is not fully rendered through generated invocation/resource surfaces | Convert fixed sheets to generated lineage surfaces |
 | Source-control and AgentControl shells | Fixed Swift product shells plus domain/event projections | Review workflows still contain client-shaped operator surfaces | Convert only after generated review surfaces preserve current safety |
 | Cron/scheduled work | `automations.json`, `cron_jobs`, and `cron_runs` | Scheduler product truth remains outside resource/decision truth | Convert unless explicitly accepted as low-level scheduler substrate |
@@ -50,13 +49,14 @@ Total: **94/100**.
 | Conversion | Substrate Truth | Evidence |
 |---|---|---|
 | Memory retain | `memory::retain` and hidden `memory::auto_retain_fire` now persist retained journals, rule updates, and arguments as `artifact` resources with linked `materialized_file` markdown projections. `memory.retained` payloads include `resourceRefs` plus recovery/projection `evidenceRefs`, duplicate retain keys do not duplicate memory artifacts, and prompt context appends retained rule/argument artifacts from resource truth. | `packages/agent/src/domains/memory/retain/resources.rs`; `packages/agent/src/engine/tests/memory_retain_resources.rs`; `packages/agent/src/domains/agent/runtime/service/context.rs`; `packages/agent/tests/threat_model_invariants.rs` |
+| Notifications | `notifications::send` persists bounded `notification` resources, delivery `evidence`, and read-state `decision` resources; `notifications::list` reads resource/decision truth and ignores historical event-only rows; generated `notifications.inbox.v1` surfaces expose stored mark-read actions. | `packages/agent/src/domains/notifications/inbox.rs`; `packages/agent/src/engine/tests/notification_resources.rs`; `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 
 ## Conversion Candidate Register
 
 | Candidate | Classification | Score Target | Phase | Acceptance Criteria |
 |---|---|---:|---|---|
 | Memory retain | completed durable agent-context truth | 94/100 | Phase 1 | Retained journal/rule/argument outputs are resource-backed, events include refs, context loads resource truth, direct durable file writes are forbidden outside materialization helpers |
-| Notifications | operator attention truth | 96/100 | Phase 2 | Send/list/read state is resource/decision/evidence backed; fixed inbox/detail is replaced by generated surfaces; retired read-state truth is absent or ignored with gates |
+| Notifications | completed operator attention truth | 96/100 | Phase 2 | Send/list/read state is resource/decision/evidence backed; generated inbox surfaces expose canonical read actions; retired read-state truth is absent with gates |
 | Subagent invocation/result surfaces | execution lineage projection | 97/100 | Phase 3 | Child invocation/result state survives resume and renders from server-authored generated lineage surfaces |
 | Source-control and AgentControl surfaces | operator review projection | 98/100 | Phase 4 | Git/worktree/control review surfaces are server-authored, revision-pinned, and stale-safe before fixed mutation UI is removed |
 | Cron and scheduled work | scheduler product truth | 99-100/100 | Phase 5 | Schedules/runs are resource/decision/invocation/evidence backed, or cron is explicitly accepted as low-level substrate with static gates |
@@ -141,7 +141,7 @@ Required tests:
 
 ### Phase 2: Notification Resource Contract And Generated Inbox
 
-Status: **pending**.
+Status: **completed**.
 
 Target score: **96/100**.
 
@@ -155,10 +155,9 @@ Required behavior:
 - Store read/dismiss/mark-all state as `decision` resources.
 - Make `notifications::list` read resource/decision truth, not session events or
   `notification_read_state`.
-- Replace fixed iOS inbox/detail with generated notification inbox/detail
-  surfaces after server truth is proven.
-- Remove or ignore retired notification read-state table through a clean storage
-  generation reset if table removal is required.
+- Author generated notification inbox surfaces over server resource truth.
+- Remove the retired notification read-state table through a clean storage
+  generation reset.
 
 Required tests:
 
@@ -167,8 +166,8 @@ Required tests:
 - List ignores old unregistered notification events.
 - Mark-read and mark-all create decisions and are idempotent.
 - Generated inbox actions submit only stored action coordinates.
-- Static gates forbid notification read-state table truth and fixed inbox
-  mutation policy.
+- Static gates forbid notification read-state table truth and event-payload
+  reconstruction.
 
 ### Phase 3: Subagent, Invocation, And Result Lineage Surfaces
 

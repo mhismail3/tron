@@ -3,7 +3,7 @@
 //! Tron stores active server data in one engine-owned SQLite database:
 //! `~/.tron/internal/database/tron.sqlite`. Runtime connections use WAL for
 //! safe concurrent reads/writes; checkpoints and exports create compact
-//! single-file artifacts when the operator needs one. The `modular-engine-v3`
+//! single-file artifacts when the operator needs one. The `modular-engine-v4`
 //! generation is a clean break for the collapsed substrate: startup archives
 //! older active DB, WAL, and SHM files before creating the grant, resource,
 //! ledger, stream, state, queue, approval, lease, compensation, storage, and
@@ -27,7 +27,7 @@ pub const UNIFIED_LOCK_FILENAME: &str = "tron.sqlite.lock";
 
 /// Current storage generation. A live DB without this marker is archived and
 /// reset before startup continues.
-pub const CURRENT_STORAGE_GENERATION: &str = "modular-engine-v3";
+pub const CURRENT_STORAGE_GENERATION: &str = "modular-engine-v4";
 
 /// Metadata key storing the active storage generation.
 pub const STORAGE_GENERATION_KEY: &str = "storage_generation";

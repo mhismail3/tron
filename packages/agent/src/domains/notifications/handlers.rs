@@ -17,10 +17,10 @@ operation_bindings! {
             notifications_list_value(Some(&invocation.payload), deps).await
         },
         "mark_read" => |invocation, deps| {
-            notifications_mark_read_value(Some(&invocation.payload), deps).await
+            notifications_mark_read_value(Some(&invocation.payload), deps, invocation).await
         },
         "mark_all_read" => |invocation, deps| {
-            notifications_mark_all_read_value(Some(&invocation.payload), deps).await
+            notifications_mark_all_read_value(Some(&invocation.payload), deps, invocation).await
         },
     ];
 }

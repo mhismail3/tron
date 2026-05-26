@@ -110,6 +110,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "verifies_signature",
                 "affects_package",
                 "affects_activation",
+                "affects_notification",
                 "revokes",
                 "supersedes",
                 "renewed_by",
@@ -168,6 +169,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "verifies_signature",
                 "affects_package",
                 "affects_activation",
+                "affects_notification",
                 "revokes",
                 "supersedes",
                 "renewed_by",
@@ -176,6 +178,66 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "enforces_revocation",
             ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
+        builtin_type(
+            "notification",
+            "tron.resource.notification.v1",
+            json!({
+                "type": "object",
+                "required": [
+                    "notificationId",
+                    "title",
+                    "body",
+                    "priority",
+                    "sessionId",
+                    "workspaceId",
+                    "invocationId",
+                    "createdAt",
+                    "delivery",
+                    "metadata"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "notificationId": {"type": "string"},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "priority": {"type": "string"},
+                    "badge": {"type": ["integer", "null"]},
+                    "data": {"type": ["object", "null"]},
+                    "sheetContent": {},
+                    "sessionId": {"type": "string"},
+                    "workspaceId": {"type": "string"},
+                    "invocationId": {"type": "string"},
+                    "createdAt": {"type": "string"},
+                    "updatedAt": {"type": "string"},
+                    "isUserSession": {"type": "boolean"},
+                    "delivery": {
+                        "type": "object",
+                        "required": ["status", "success", "successCount", "totalCount"],
+                        "additionalProperties": true,
+                        "properties": {
+                            "status": {"type": "string"},
+                            "success": {"type": "boolean"},
+                            "message": {"type": ["string", "null"]},
+                            "successCount": {"type": "integer"},
+                            "totalCount": {"type": "integer"},
+                            "warning": {"type": ["string", "null"]},
+                            "errorCode": {"type": ["string", "null"]},
+                            "observedAt": {"type": "string"}
+                        }
+                    },
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec![
+                "pending",
+                "active",
+                "delivery_failed",
+                "discarded",
+                "archived",
+            ],
+            vec!["evidence_for", "supported_by", "derived_from", "supersedes"],
+            json!({"read": ["notifications.read", "resource.read"], "write": ["notifications.write", "resource.write"]}),
         ),
         builtin_type(
             UI_SURFACE_KIND,

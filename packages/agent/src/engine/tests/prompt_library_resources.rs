@@ -61,7 +61,7 @@ fn assert_retired_prompt_tables_absent(ctx: &crate::shared::server::context::Ser
         .unwrap();
     assert_eq!(
         retired_count, 0,
-        "fresh modular-engine-v3 databases must not create retired prompt-library tables"
+        "fresh modular-engine-v4 databases must not create retired prompt-library tables"
     );
 }
 

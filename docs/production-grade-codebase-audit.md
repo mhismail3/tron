@@ -344,7 +344,7 @@ not an invisible omission.
 | Completed | Product-shell readiness proof | Every remaining fixed iOS shell has replacement candidate, blocking gap, deletion risk, next prerequisite, and `defer with proof` phase decision |
 | Completed | Dependency/dead-code tooling decision | Optional tools are explicitly deferred with local availability evidence and revisit criteria |
 | Completed | Mac app focused audit | Menu bar, onboarding wizard, server lifecycle, pairing, observability/feedback, resources, generated project, scripts, and tests are classified with evidence |
-| Completed | Resolve inert prompt schema ambiguity | `modular-engine-v3` fresh schema no longer creates `prompt_history`, `prompt_snippets`, or prompt indexes; static gates enforce absence |
+| Completed | Resolve inert prompt/notification schema ambiguity | `modular-engine-v4` fresh schema no longer creates `prompt_history`, `prompt_snippets`, prompt indexes, or `notification_read_state`; static gates enforce absence |
 | Completed | Migrate current high-churn Rust domain tests | Memory retain, MCP product protocol, and session commands broad tests are split into focused `tests/` folders |
 
 ## Verification Record
