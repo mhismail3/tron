@@ -36,7 +36,6 @@ pub(super) enum ProgramWorkerToParent {
     },
     HostCall {
         id: String,
-        primitive: WorkerToolPrimitive,
         payload: Value,
     },
     Result {
@@ -47,32 +46,4 @@ pub(super) enum ProgramWorkerToParent {
         message: String,
         details: Option<Value>,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum WorkerToolPrimitive {
-    Search,
-    Inspect,
-    Execute,
-}
-
-impl From<super::runtime::ProgramToolPrimitive> for WorkerToolPrimitive {
-    fn from(value: super::runtime::ProgramToolPrimitive) -> Self {
-        match value {
-            super::runtime::ProgramToolPrimitive::Search => Self::Search,
-            super::runtime::ProgramToolPrimitive::Inspect => Self::Inspect,
-            super::runtime::ProgramToolPrimitive::Execute => Self::Execute,
-        }
-    }
-}
-
-impl From<WorkerToolPrimitive> for super::runtime::ProgramToolPrimitive {
-    fn from(value: WorkerToolPrimitive) -> Self {
-        match value {
-            WorkerToolPrimitive::Search => Self::Search,
-            WorkerToolPrimitive::Inspect => Self::Inspect,
-            WorkerToolPrimitive::Execute => Self::Execute,
-        }
-    }
 }

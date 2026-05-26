@@ -37,18 +37,19 @@ product truth.
 
 ## Next Work Theme
 
-The next comprehensive phase should not add product features. It should harden
-the 100/100 state through continuous proof:
+The post-100 fault-tolerance closure in
+`docs/extreme-fault-tolerance-audit.md` is complete. The next comprehensive
+phase should be maintenance-mode proof, not another migration:
 
-1. Expand adversarial tests around the single `execute` orchestrator.
-2. Add periodic whole-repo truth-owner scans to catch new hidden state before it
+1. Keep the single model/program `execute` portal stable and self-correcting.
+2. Run periodic whole-repo truth-owner scans to catch new hidden state before it
    ships.
-3. Improve generated UI/operator inspection for capability-backed workflows only
-   where it reduces manual debugging.
+3. Add focused fault drills when a new failure mode appears in manual testing.
 4. Keep iOS/Mac clients thin by verifying every new action is server-authored or
    a genuine local editing/hardware affordance.
 5. Preserve cron cache classification and prevent public reads from depending
    on runtime cache rows.
+6. Treat large critical-path file growth as a regression that needs an owner.
 
 ## Non-Goals
 
@@ -78,7 +79,7 @@ the 100/100 state through continuous proof:
 ### 2. Execute-Orchestrator Stress Matrix
 
 - Keep the single model-facing `execute` primitive as the only provider-visible
-  capability gateway.
+  capability gateway and the single JavaScript program composition gateway.
 - Stress intent-only resolution, explicit target hints, ambiguous matches,
   missing required input, constraints, read-only process execution,
   sandbox-materialized process execution, approval pause/resume, generated UI

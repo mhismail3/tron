@@ -127,6 +127,45 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Fallback event cache remains projection-only")
+    func testFallbackEventCacheRemainsProjectionOnly() throws {
+        let forbidden: [(String, String)] = [
+            ("target" + "Function" + "Id", "generated UI target construction"),
+            ("payload" + "Template", "generated UI payload construction"),
+            ("required" + "Grant", "grant construction"),
+            ("Authority" + "Grant", "grant policy ownership"),
+            ("resource" + "Refs", "resource lineage ownership"),
+            ("Resource" + "Ref", "resource lineage ownership"),
+        ]
+
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let checkedFiles = [
+            iosRoot.appendingPathComponent("Sources/Database/EventDatabase.swift"),
+            iosRoot.appendingPathComponent("Sources/Core/DI/DependencyContainer.swift"),
+            iosRoot.appendingPathComponent("Sources/Services/Diagnostics/DiagnosticsBundleBuilder.swift"),
+        ]
+
+        for url in checkedFiles {
+            let content = try String(contentsOf: url, encoding: .utf8)
+            #expect(
+                content.contains("temporary" + "Fallback")
+                    || content.contains("Event" + "Database" + "Storage" + "Mode")
+                    || content.contains("eventDatabase.storageMode"),
+                "\(url.path) should keep fallback cache mode explicit"
+            )
+            for (needle, reason) in forbidden {
+                #expect(
+                    !content.contains(needle),
+                    "\(url.path) couples fallback event cache mode to \(reason): `\(needle)`"
+                )
+            }
+        }
+    }
+
     @Test("Tron client code uses the engine protocol only")
     func testTronClientTransportIsEngineOnly() throws {
         let forbidden: [(String, String)] = [

@@ -14,6 +14,14 @@ is owned by canonical capabilities and the collapsed resource/decision/evidence/
 invocation/grant substrate, or explicitly accepted as low-level substrate with
 static gates.
 
+The post-100 extreme fault-tolerance score lives in
+`docs/extreme-fault-tolerance-audit.md`. That score is intentionally stricter
+about isolation, dependency-light critical paths, known-good continuation,
+failover exercise, progressive delivery, and code size under stress. It is now
+**100/100** as of the post-100 closure checkpoint; future regressions in
+critical-path ownership, fallback visibility, execute-only composition, or fault
+drills should lower that score before product work proceeds.
+
 ## Scoring Rules
 
 Each axis receives one of these maturity levels:

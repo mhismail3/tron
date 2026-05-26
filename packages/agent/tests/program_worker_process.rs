@@ -80,7 +80,7 @@ fn program_worker_round_trips_host_calls() {
             "type": "run",
             "request": {
                 "language": "javascript",
-                "code": "const result = tools.search({ query: 'filesystem read' }); return result;",
+                "code": "const result = tools.execute({ intent: 'read README', target: 'filesystem::read_file', arguments: { path: 'README.md' } }); return result;",
                 "args": {},
                 "timeoutMs": 500,
                 "budget": {"memoryBytes": 8388608, "maxOutputBytes": 16384, "maxLogBytes": 16384},
@@ -90,7 +90,8 @@ fn program_worker_round_trips_host_calls() {
     );
     let call = read_json(&mut reader);
     assert_eq!(call["type"], "host_call");
-    assert_eq!(call["primitive"], "search");
+    assert!(call.get("primitive").is_none());
+    assert_eq!(call["payload"]["target"], "filesystem::read_file");
     let id = call["id"].as_str().expect("host call id").to_owned();
     write_json(
         &mut writer,

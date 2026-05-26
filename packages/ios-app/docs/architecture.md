@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-20 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-26 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -174,6 +174,12 @@ approval primitive worker instead of through a separate UI-only approval path.
 User decisions invoke canonical `approval::resolve`; iOS does not mutate approval
 state locally. ACKs are coalesced to the latest cursor per subscription so
 bursts do not turn into one engine request per event.
+The local `EventDatabase` is a projection/cache. If Documents storage is
+unavailable at launch, the app uses `temporaryFallback` cache mode rather than
+crashing, logs that mode, includes it in diagnostics bundles, and shows it in
+Engine Console. The fallback cache is never server truth: it cannot construct
+grants, generated UI action targets/templates, resource lineage, or capability
+policy.
 Each visible `ChatView` starts and stops only its own `ChatViewModel` live-event
 task. SwiftUI can create short-lived chat models during navigation and
 reconstruction, so live-stream lifecycle is local to the view model that owns

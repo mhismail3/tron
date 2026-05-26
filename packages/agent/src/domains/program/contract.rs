@@ -36,7 +36,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "language": "javascript",
                 "runtime": "quickjs",
                 "isolation": "first-party OS process worker",
-                "hostAccess": "tools.search/tools.inspect/tools.execute only",
+                "hostAccess": "tools.execute only",
                 "approvalBoundary": "child approvals pause the program and cannot be self-approved",
                 "limits": [
                     "timeoutMs",

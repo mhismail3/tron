@@ -14,8 +14,8 @@
 //! | `deps` | Narrow dependency bundle for catalog, registry-store, embedding, and invocation access |
 //! | `embeddings` | Embedded first-party ONNX/tokenizer provider for offline local search |
 //! | `handlers` | Declarative operation bindings for model primitives plus capability admin/console functions |
-//! | `operations` | Catalog projection, binding resolution, delegated execution, plugin lifecycle, policy, and audit operations |
-//! | `registry` | Durable catalog projection, plugin manifests, binding decisions, search index, inspection handles, pause/run records, program runs, and primer rendering |
+//! | `operations` | Operator/internal capability operations; `operations/execute.rs` owns the model-facing resolve/prepare/run/observe path |
+//! | `registry` | Durable catalog projection, plugin manifests, binding decisions, search index, inspection handles, pause/run records, program runs, and primer rendering; recipes live in `registry/recipes.rs` |
 //! | `types` | Typed contract, implementation, binding, inspection, execution, lifecycle, and program-run records |
 //!
 //! # INVARIANT: the model-facing surface is tiny

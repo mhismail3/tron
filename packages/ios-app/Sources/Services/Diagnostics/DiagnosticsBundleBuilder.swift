@@ -147,6 +147,7 @@ struct DiagnosticsBundleBuilder {
                 osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                 deviceModelClass: UIDevice.current.model,
                 connectionState: Self.connectionStateName(engineClient.connectionState),
+                eventDatabaseStorageMode: eventDatabase.storageMode.rawValue,
                 activeServer: DiagnosticsActiveServer(server: activeServer)
             ),
             logs: DiagnosticsLogs(ios: iosLogs, server: serverLogs),
@@ -377,6 +378,7 @@ struct DiagnosticsEnvironment: Encodable, Sendable {
     let osVersion: String
     let deviceModelClass: String
     let connectionState: String
+    let eventDatabaseStorageMode: String
     let activeServer: DiagnosticsActiveServer?
 }
 

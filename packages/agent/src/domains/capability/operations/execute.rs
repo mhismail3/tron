@@ -1,0 +1,1484 @@
+//! Single execute orchestrator phases for the model-facing capability primitive.
+
+use serde_json::{Map, Value, json};
+
+use super::{
+    ResolvedCapabilityTarget, actor_from_invocation, capability_result_value,
+    effect_class_from_str, effect_field, execute_invoke_value, execute_program_value,
+    index_status_needs_vector_warmup, is_missing_required_argument_error,
+    registry_metadata_sync_policy, registry_store_error, requires_fresh_revision_for_payload,
+    resolve_target, risk_field, risk_level_from_str, schedule_vector_warmup,
+    validate_target_payload,
+};
+use crate::domains::capability::Deps;
+use crate::domains::capability::registry::{
+    CapabilityRegistryEntry, CapabilityRegistrySnapshot, CapabilitySearchFilters,
+    CapabilitySearchPolicy, parse_target, requires_fresh_revision, string_field,
+};
+use crate::domains::capability::types::CapabilityIndexHit;
+use crate::engine::{ActorContext, FunctionDefinition, FunctionHealth, FunctionQuery, Invocation};
+use crate::shared::content::CapabilityResultContent;
+use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::server::context::run_blocking_task;
+use crate::shared::server::errors::CapabilityError;
+
+pub(crate) async fn execute_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    if is_orchestrated_execute_payload(&invocation.payload) {
+        return execute_orchestrated_value(invocation, deps).await;
+    }
+    let mode = string_field(&invocation.payload, "mode").unwrap_or_else(|| "invoke".to_owned());
+    match mode.as_str() {
+        "invoke" => execute_invoke_value(invocation, deps).await,
+        "program" => execute_program_value(invocation, deps).await,
+        other => Err(CapabilityError::InvalidParams {
+            message: format!("Unsupported capability execute mode '{other}'"),
+        }),
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct OrchestratedExecuteInput {
+    pub(super) intent: Option<String>,
+    pub(super) target_params: Option<Value>,
+    pub(super) arguments: Value,
+    pub(super) constraints: Value,
+    pub(super) idempotency_key: Option<String>,
+    pub(super) reason: Option<String>,
+    pub(super) corrections: Vec<Value>,
+}
+
+fn is_orchestrated_execute_payload(params: &Value) -> bool {
+    params.get("intent").is_some()
+        || params.get("target").is_some()
+        || params.get("arguments").is_some()
+        || params.get("constraints").is_some()
+        || (params.get("mode").is_none() && params.get("payload").is_some())
+}
+
+async fn execute_orchestrated_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let orchestration_id = format!("capability-orchestration:{}", uuid::Uuid::now_v7());
+    let actor = actor_from_invocation(invocation)?;
+    let mut input = match parse_orchestrated_execute_input(&invocation.payload) {
+        Ok(input) => input,
+        Err(error) => {
+            let diagnostics =
+                orchestration_request_error_details(&orchestration_id, "request_invalid", &error);
+            record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+            return orchestration_result(
+                "request_invalid",
+                &format!("execute request is invalid: {error}"),
+                diagnostics,
+                true,
+            );
+        }
+    };
+    if let Err(error) = validate_orchestration_constraint_shape(&input.constraints) {
+        let diagnostics = orchestration_details(
+            &orchestration_id,
+            "constraints_rejected",
+            input.intent.as_deref(),
+            None,
+            &input,
+            json!({
+                "phase": "resolve",
+                "error": capability_error_details(&error),
+            }),
+            Vec::new(),
+        );
+        record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+        return orchestration_result(
+            "constraints_rejected",
+            &format!("execute constraints are invalid: {error}"),
+            diagnostics,
+            true,
+        );
+    }
+    let resolve = match input.target_params.clone() {
+        Some(target_params) => OrchestrationResolve {
+            target_params,
+            mode: "explicit_target".to_owned(),
+            candidates: Vec::new(),
+            rejected_candidates: Vec::new(),
+            search_status: Value::Null,
+        },
+        None => {
+            let Some(intent) = input.intent.as_deref() else {
+                let diagnostics = orchestration_details(
+                    &orchestration_id,
+                    "needs_input",
+                    input.intent.as_deref(),
+                    None,
+                    &input,
+                    json!({
+                        "phase": "resolve",
+                        "missingFields": ["intent", "target"]
+                    }),
+                    Vec::new(),
+                );
+                record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+                return orchestration_result(
+                    "needs_input",
+                    "Tell execute either the natural-language intent or an explicit target capability.",
+                    diagnostics,
+                    true,
+                );
+            };
+            match resolve_intent_target(intent, &input.arguments, &actor, deps, &input.constraints)
+                .await?
+            {
+                IntentResolveOutcome::Resolved(resolve) => resolve,
+                IntentResolveOutcome::NeedsCapability {
+                    candidates,
+                    search_status,
+                } => {
+                    let diagnostics = orchestration_details(
+                        &orchestration_id,
+                        "needs_capability",
+                        input.intent.as_deref(),
+                        None,
+                        &input,
+                        json!({
+                            "phase": "resolve",
+                            "candidates": candidates,
+                            "searchStatus": search_status,
+                            "proposedCapabilityShape": {
+                                "contractId": "<namespace>::<function>",
+                                "argumentsSchema": {},
+                                "effect": "pure_read|idempotent_write|external_side_effect",
+                                "risk": "low|medium|high|critical"
+                            }
+                        }),
+                        Vec::new(),
+                    );
+                    record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+                    return orchestration_result(
+                        "needs_capability",
+                        "No visible healthy capability clearly matches that intent.",
+                        diagnostics,
+                        true,
+                    );
+                }
+                IntentResolveOutcome::NeedsSelection {
+                    candidates,
+                    search_status,
+                } => {
+                    let diagnostics = orchestration_details(
+                        &orchestration_id,
+                        "needs_selection",
+                        input.intent.as_deref(),
+                        None,
+                        &input,
+                        json!({
+                            "phase": "resolve",
+                            "candidates": candidates,
+                            "searchStatus": search_status,
+                        }),
+                        Vec::new(),
+                    );
+                    record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+                    return orchestration_result(
+                        "needs_selection",
+                        "Multiple visible capabilities match that intent. Re-run execute with target set to the intended capability.",
+                        diagnostics,
+                        true,
+                    );
+                }
+            }
+        }
+    };
+
+    input.target_params = Some(resolve.target_params.clone());
+    let target = match resolve_target(&resolve.target_params, deps, &actor).await {
+        Ok(target) => target,
+        Err(error @ CapabilityError::NotFound { .. }) => {
+            let diagnostics = orchestration_details(
+                &orchestration_id,
+                "needs_capability",
+                input.intent.as_deref(),
+                None,
+                &input,
+                json!({
+                    "phase": "resolve",
+                    "resolveMode": resolve.mode,
+                    "selectedTarget": resolve.target_params,
+                    "error": capability_error_details(&error),
+                    "proposedCapabilityShape": {
+                        "contractId": "<namespace>::<function>",
+                        "argumentsSchema": {},
+                        "effect": "pure_read|idempotent_write|external_side_effect",
+                        "risk": "low|medium|high|critical"
+                    }
+                }),
+                Vec::new(),
+            );
+            record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+            return orchestration_result(
+                "needs_capability",
+                "No visible healthy capability matches the requested target.",
+                diagnostics,
+                true,
+            );
+        }
+        Err(error) => {
+            let diagnostics = orchestration_details(
+                &orchestration_id,
+                "prepare_failed",
+                input.intent.as_deref(),
+                None,
+                &input,
+                json!({
+                    "phase": "prepare",
+                    "resolveMode": resolve.mode,
+                    "selectedTarget": resolve.target_params,
+                    "error": capability_error_details(&error),
+                }),
+                Vec::new(),
+            );
+            record_orchestration_audit(deps, invocation, diagnostics).await?;
+            return Err(error);
+        }
+    };
+    let function = target.entry.function.clone();
+    if let Err(error) = validate_orchestration_constraints(&input.constraints, &target.entry) {
+        let diagnostics = orchestration_details(
+            &orchestration_id,
+            "constraints_rejected",
+            input.intent.as_deref(),
+            None,
+            &input,
+            json!({
+                "phase": "prepare",
+                "resolveMode": resolve.mode,
+                "selectedTarget": {
+                    "contractId": target.entry.contract_id.as_str(),
+                    "implementationId": target.entry.implementation_id.as_str(),
+                    "functionId": function.id.as_str(),
+                },
+                "error": capability_error_details(&error),
+            }),
+            Vec::new(),
+        );
+        record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+        return orchestration_result(
+            "constraints_rejected",
+            &format!("execute constraints rejected the selected target: {error}"),
+            diagnostics,
+            true,
+        );
+    }
+    normalize_target_specific_arguments(&function, &mut input.arguments, &mut input.corrections);
+    let mut prepared_payload = prepared_execute_payload(&resolve.target_params, &input);
+    if requires_fresh_revision_for_payload(&function, &prepared_payload) {
+        let freshness = record_orchestration_inspection(invocation, deps, &target).await?;
+        prepared_payload["inspectionHandle"] = freshness["inspectionHandle"].clone();
+        prepared_payload["expectedRevision"] = freshness["expectedRevision"].clone();
+        prepared_payload["expectedSchemaDigest"] = freshness["expectedSchemaDigest"].clone();
+        input.corrections.push(correction_record(
+            "freshness_prepared",
+            "execute acquired a fresh inspection handle for mutating or elevated-risk work",
+            1.0,
+        ));
+    }
+
+    let corrected_request = corrected_orchestrated_request(&input);
+    let prepare_diagnostics = json!({
+        "phase": "prepare",
+        "resolveMode": resolve.mode,
+        "candidates": resolve.candidates,
+        "rejectedCandidates": resolve.rejected_candidates,
+        "searchStatus": resolve.search_status,
+        "selectedTarget": {
+            "contractId": target.entry.contract_id.as_str(),
+            "implementationId": target.entry.implementation_id.as_str(),
+            "functionId": function.id.as_str(),
+            "catalogRevision": target.entry.catalog_revision,
+            "schemaDigest": target.entry.schema_digest.as_str(),
+            "effectClass": format!("{:?}", function.effect_class),
+            "riskLevel": format!("{:?}", function.risk_level),
+        },
+        "preparedRequest": redacted_prepared_request_preview(&prepared_payload),
+    });
+
+    let mut prepared_invocation = invocation.clone();
+    prepared_invocation.payload = prepared_payload;
+    let mut result = match execute_invoke_value(&prepared_invocation, deps).await {
+        Ok(result) => result,
+        Err(error) => {
+            let diagnostics = orchestration_details(
+                &orchestration_id,
+                "run_failed",
+                input.intent.as_deref(),
+                Some(corrected_request),
+                &input,
+                json!({
+                    "phase": "run",
+                    "prepare": prepare_diagnostics,
+                    "error": capability_error_details(&error),
+                }),
+                Vec::new(),
+            );
+            record_orchestration_audit(deps, invocation, diagnostics).await?;
+            return Err(error);
+        }
+    };
+    let result_status = serde_json::from_value::<CapabilityResult>(result.clone())
+        .ok()
+        .and_then(|capability_result| capability_result.details)
+        .and_then(|details| {
+            details
+                .get("status")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .unwrap_or_else(|| "executed".to_owned());
+    let diagnostics = orchestration_details(
+        &orchestration_id,
+        &result_status,
+        input.intent.as_deref(),
+        Some(corrected_request),
+        &input,
+        prepare_diagnostics,
+        orchestration_child_invocations(&result),
+    );
+    record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+    result = attach_orchestration_details(result, diagnostics)?;
+    Ok(result)
+}
+
+#[derive(Debug)]
+struct OrchestrationResolve {
+    target_params: Value,
+    mode: String,
+    candidates: Vec<Value>,
+    rejected_candidates: Vec<Value>,
+    search_status: Value,
+}
+
+enum IntentResolveOutcome {
+    Resolved(OrchestrationResolve),
+    NeedsSelection {
+        candidates: Vec<Value>,
+        search_status: Value,
+    },
+    NeedsCapability {
+        candidates: Vec<Value>,
+        search_status: Value,
+    },
+}
+
+pub(super) fn parse_orchestrated_execute_input(
+    params: &Value,
+) -> Result<OrchestratedExecuteInput, CapabilityError> {
+    let mut corrections = Vec::new();
+    let intent = string_field(params, "intent");
+    let mut target_params = target_params_from_hint(params.get("target"))?;
+    if target_params.is_none() {
+        let mut direct_target = Map::new();
+        for key in [
+            "functionId",
+            "implementationId",
+            "contractId",
+            "capabilityId",
+        ] {
+            if let Some(value) = params.get(key).cloned() {
+                direct_target.insert(key.to_owned(), value);
+            }
+        }
+        if !direct_target.is_empty() {
+            let target = Value::Object(direct_target);
+            if parse_target(&target).is_none() {
+                return Err(CapabilityError::InvalidParams {
+                    message: "top-level target fields must include a non-empty functionId, implementationId, capabilityId, or contractId".to_owned(),
+                });
+            }
+            target_params = Some(target);
+            corrections.push(correction_record(
+                "top_level_target_to_target",
+                "moved top-level target fields into target",
+                1.0,
+            ));
+        }
+    }
+    let mut idempotency_key =
+        string_field(params, "idempotencyKey").or_else(|| string_field(params, "idempotency_key"));
+    let mut reason = string_field(params, "reason");
+    let constraints = params
+        .get("constraints")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if !constraints.is_object() {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute.constraints must be an object when provided".to_owned(),
+        });
+    }
+
+    let mut arguments = match (params.get("arguments"), params.get("payload")) {
+        (Some(arguments), Some(payload)) if arguments != payload => {
+            return Err(CapabilityError::InvalidParams {
+                message: "execute received both arguments and payload with different values; use arguments only".to_owned(),
+            });
+        }
+        (Some(arguments), _) => object_value(arguments, "execute.arguments")?,
+        (None, Some(payload)) => {
+            corrections.push(correction_record(
+                "payload_to_arguments",
+                "moved top-level payload into arguments",
+                1.0,
+            ));
+            object_value(payload, "execute payload alias")?
+        }
+        (None, None) => json!({}),
+    };
+
+    normalize_nested_wrapper_shape(
+        &mut arguments,
+        &mut target_params,
+        &mut idempotency_key,
+        &mut reason,
+        &mut corrections,
+    )?;
+
+    Ok(OrchestratedExecuteInput {
+        intent,
+        target_params,
+        arguments,
+        constraints,
+        idempotency_key,
+        reason,
+        corrections,
+    })
+}
+
+fn object_value(value: &Value, label: &str) -> Result<Value, CapabilityError> {
+    if value.is_object() {
+        Ok(value.clone())
+    } else {
+        Err(CapabilityError::InvalidParams {
+            message: format!("{label} must be an object"),
+        })
+    }
+}
+
+fn target_params_from_hint(value: Option<&Value>) -> Result<Option<Value>, CapabilityError> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    if let Some(target) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|target| !target.is_empty())
+    {
+        return Ok(Some(json!({ "capabilityId": target })));
+    }
+    if value.is_object() {
+        if parse_target(value).is_none() {
+            return Err(CapabilityError::InvalidParams {
+                message: "execute.target object must include one of functionId, implementationId, capabilityId, or contractId".to_owned(),
+            });
+        }
+        return Ok(Some(value.clone()));
+    }
+    Err(CapabilityError::InvalidParams {
+        message: "execute.target must be a capability id string or target object".to_owned(),
+    })
+}
+
+fn normalize_nested_wrapper_shape(
+    arguments: &mut Value,
+    target_params: &mut Option<Value>,
+    idempotency_key: &mut Option<String>,
+    reason: &mut Option<String>,
+    corrections: &mut Vec<Value>,
+) -> Result<(), CapabilityError> {
+    let Some(object) = arguments.as_object_mut() else {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute.arguments must be an object".to_owned(),
+        });
+    };
+
+    if target_params.is_none() {
+        let mut nested_target = Map::new();
+        for key in [
+            "functionId",
+            "implementationId",
+            "contractId",
+            "capabilityId",
+        ] {
+            if let Some(value) = object.remove(key) {
+                nested_target.insert(key.to_owned(), value);
+            }
+        }
+        if !nested_target.is_empty() {
+            let target = Value::Object(nested_target);
+            if parse_target(&target).is_none() {
+                return Err(CapabilityError::InvalidParams {
+                    message: "wrapper target fields inside arguments were not valid strings"
+                        .to_owned(),
+                });
+            }
+            *target_params = Some(target);
+            corrections.push(correction_record(
+                "nested_target_to_target",
+                "moved target fields out of arguments into target",
+                1.0,
+            ));
+        }
+    }
+
+    if idempotency_key.is_none()
+        && let Some(value) = object
+            .remove("idempotencyKey")
+            .or_else(|| object.remove("idempotency_key"))
+        && let Some(value) = value
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    {
+        *idempotency_key = Some(value.to_owned());
+        corrections.push(correction_record(
+            "nested_idempotency_key_to_wrapper",
+            "moved idempotencyKey out of arguments",
+            1.0,
+        ));
+    }
+    if reason.is_none()
+        && let Some(value) = object.remove("reason")
+        && let Some(value) = value
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    {
+        *reason = Some(value.to_owned());
+        corrections.push(correction_record(
+            "nested_reason_to_wrapper",
+            "moved reason out of arguments",
+            1.0,
+        ));
+    }
+
+    for key in [
+        "mode",
+        "inspectionHandle",
+        "inspection_handle",
+        "expectedRevision",
+        "expectedSchemaDigest",
+        "expected_schema_digest",
+    ] {
+        if object.remove(key).is_some() {
+            corrections.push(correction_record(
+                "nested_wrapper_field_removed",
+                format!("removed wrapper field {key} from arguments"),
+                1.0,
+            ));
+        }
+    }
+
+    if let Some(payload) = object.remove("payload") {
+        if !payload.is_object() {
+            return Err(CapabilityError::InvalidParams {
+                message: "nested arguments.payload must be an object when supplied".to_owned(),
+            });
+        }
+        if object.is_empty() {
+            *arguments = payload;
+            corrections.push(correction_record(
+                "nested_payload_to_arguments",
+                "moved nested payload into arguments",
+                1.0,
+            ));
+        } else {
+            object.insert("payload".to_owned(), payload);
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) fn normalize_target_specific_arguments(
+    function: &FunctionDefinition,
+    arguments: &mut Value,
+    corrections: &mut Vec<Value>,
+) {
+    if function.id.as_str() != "process::run" {
+        return;
+    }
+    normalize_process_expected_output_aliases(arguments, corrections);
+    let Some(outputs) = arguments
+        .get_mut("expectedOutputs")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    let mut removed = false;
+    for output in outputs.iter_mut() {
+        if let Some(path) = output
+            .as_str()
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        {
+            *output = json!({ "path": path });
+            removed = true;
+            continue;
+        }
+        if let Some(object) = output.as_object_mut() {
+            removed |= object.remove("kind").is_some();
+            removed |= object.remove("role").is_some();
+            removed |= object.remove("type").is_some();
+        }
+    }
+    if removed {
+        corrections.push(correction_record(
+            "process_expected_outputs_shape",
+            "normalized expectedOutputs entries; process::run expects objects with path and optional targetPath only",
+            1.0,
+        ));
+    }
+}
+
+fn normalize_process_expected_output_aliases(arguments: &mut Value, corrections: &mut Vec<Value>) {
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+    if object.get("expectedOutputs").is_some() {
+        return;
+    }
+    let Some(alias) = object
+        .remove("expectedOutputPaths")
+        .or_else(|| object.remove("expectedOutputPath"))
+        .or_else(|| object.remove("outputPaths"))
+        .or_else(|| object.remove("outputPath"))
+    else {
+        return;
+    };
+    let outputs = match alias {
+        Value::String(path) => vec![json!({ "path": path })],
+        Value::Array(values) => values
+            .into_iter()
+            .filter_map(|value| match value {
+                Value::String(path) => Some(json!({ "path": path })),
+                Value::Object(mut object) => {
+                    if !object.contains_key("path")
+                        && let Some(path) = object.remove("targetPath")
+                    {
+                        object.insert("path".to_owned(), path);
+                    }
+                    Some(Value::Object(object))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        Value::Object(object) => vec![Value::Object(object)],
+        _ => Vec::new(),
+    };
+    if outputs.is_empty() {
+        return;
+    }
+    object.insert("expectedOutputs".to_owned(), Value::Array(outputs));
+    corrections.push(correction_record(
+        "process_expected_outputs_alias",
+        "converted expected output path alias into expectedOutputs",
+        1.0,
+    ));
+}
+
+async fn resolve_intent_target(
+    intent: &str,
+    arguments: &Value,
+    actor: &ActorContext,
+    deps: &Deps,
+    constraints: &Value,
+) -> Result<IntentResolveOutcome, CapabilityError> {
+    let functions = deps
+        .engine_host
+        .discover(&FunctionQuery {
+            actor: Some(actor.clone()),
+            health: Some(FunctionHealth::Healthy),
+            ..FunctionQuery::default()
+        })
+        .await;
+    let catalog_revision = deps.engine_host.catalog_revision().await;
+    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
+    let store = deps.registry_store.clone();
+    let embedding_provider = deps.embedding_provider.clone();
+    let policy = CapabilitySearchPolicy::default();
+    let query = intent.to_owned();
+    let snapshot_for_search = snapshot.clone();
+    let search = run_blocking_task("capability.execute.resolve", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        let sync_policy = registry_metadata_sync_policy();
+        store
+            .sync_snapshot(
+                &snapshot_for_search,
+                embedding_provider.as_ref(),
+                &sync_policy,
+            )
+            .map_err(registry_store_error)?;
+        store
+            .search(
+                &query,
+                &CapabilitySearchFilters {
+                    include_unavailable: false,
+                    ..CapabilitySearchFilters::default()
+                },
+                &policy,
+                8,
+                embedding_provider.as_ref(),
+            )
+            .map_err(registry_store_error)
+    })
+    .await?;
+    if index_status_needs_vector_warmup(&search.status) {
+        schedule_vector_warmup(snapshot.clone(), deps);
+    }
+    let all_executable_hits = search
+        .hits
+        .iter()
+        .filter(|hit| hit.kind == "implementation" && !hit.function_id.trim().is_empty())
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut executable_hits = all_executable_hits
+        .into_iter()
+        .filter_map(
+            |hit| match orchestration_constraints_allow_hit(constraints, &hit) {
+                Ok(true) => Some(Ok(hit)),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            },
+        )
+        .collect::<Result<Vec<_>, _>>()?;
+    apply_deterministic_intent_route(
+        intent,
+        arguments,
+        &snapshot,
+        constraints,
+        &mut executable_hits,
+    )?;
+    let argument_rejected_candidates =
+        apply_argument_schema_fit_filter(arguments, &snapshot, &mut executable_hits);
+    let candidates = executable_hits
+        .iter()
+        .map(orchestration_candidate_summary)
+        .collect::<Vec<_>>();
+    let search_status = serde_json::to_value(&search.status).unwrap_or(Value::Null);
+    let Some(selected) = executable_hits.first() else {
+        return Ok(IntentResolveOutcome::NeedsCapability {
+            candidates,
+            search_status,
+        });
+    };
+    if selected.fused_score <= 0.0 {
+        return Ok(IntentResolveOutcome::NeedsCapability {
+            candidates,
+            search_status,
+        });
+    }
+    let selected_has_strong_name_match = intent_strongly_matches_hit(intent, selected);
+    let ambiguous = executable_hits.iter().skip(1).any(|candidate| {
+        candidate.contract_id != selected.contract_id
+            && (selected.fused_score - candidate.fused_score).abs() <= 0.05
+            && (!selected_has_strong_name_match || intent_strongly_matches_hit(intent, candidate))
+    });
+    if ambiguous {
+        return Ok(IntentResolveOutcome::NeedsSelection {
+            candidates,
+            search_status,
+        });
+    }
+    let rejected_candidates = argument_rejected_candidates
+        .into_iter()
+        .chain(
+            executable_hits
+                .iter()
+                .skip(1)
+                .map(orchestration_candidate_summary),
+        )
+        .collect::<Vec<_>>();
+    Ok(IntentResolveOutcome::Resolved(OrchestrationResolve {
+        target_params: json!({ "functionId": selected.function_id }),
+        mode: "intent_resolution".to_owned(),
+        candidates,
+        rejected_candidates,
+        search_status,
+    }))
+}
+
+pub(super) fn intent_strongly_matches_hit(intent: &str, hit: &CapabilityIndexHit) -> bool {
+    let normalized_intent = normalized_intent_words(intent);
+    let Some((namespace, function_name)) = hit.contract_id.split_once("::") else {
+        return false;
+    };
+    let mut tokens = normalized_identifier_words(function_name);
+    if tokens.is_empty() {
+        return false;
+    }
+    let namespace_tokens = normalized_identifier_words(namespace);
+    if namespace_tokens
+        .iter()
+        .any(|token| normalized_intent.contains(token))
+    {
+        tokens.extend(namespace_tokens);
+    }
+    tokens
+        .iter()
+        .filter(|token| token.len() > 1)
+        .all(|token| normalized_intent.contains(token))
+}
+
+fn validate_orchestration_constraint_keys(constraints: &Value) -> Result<(), CapabilityError> {
+    let Some(object) = constraints.as_object() else {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute.constraints must be an object".to_owned(),
+        });
+    };
+    for key in object.keys() {
+        if !matches!(
+            key.as_str(),
+            "riskMax" | "effect" | "allowedContracts" | "allowedNamespaces"
+        ) {
+            return Err(CapabilityError::InvalidParams {
+                message: format!(
+                    "Unsupported execute.constraints field '{key}'. Supported fields: riskMax, effect, allowedContracts, allowedNamespaces"
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_orchestration_constraint_shape(
+    constraints: &Value,
+) -> Result<(), CapabilityError> {
+    validate_orchestration_constraint_keys(constraints)?;
+    let _ = risk_field(constraints, "riskMax")?;
+    let _ = effect_field(constraints, "effect")?;
+    let _ = optional_string_array_field(constraints, "allowedContracts")?;
+    let _ = optional_string_array_field(constraints, "allowedNamespaces")?;
+    Ok(())
+}
+
+pub(super) fn validate_orchestration_constraints(
+    constraints: &Value,
+    entry: &CapabilityRegistryEntry,
+) -> Result<(), CapabilityError> {
+    validate_orchestration_constraint_shape(constraints)?;
+    if let Some(max_risk) = risk_field(constraints, "riskMax")?
+        && entry.function.risk_level > max_risk
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "selected target {} has risk {:?}, above constraint riskMax {:?}",
+                entry.contract_id, entry.function.risk_level, max_risk
+            ),
+        });
+    }
+    if let Some(effect) = effect_field(constraints, "effect")?
+        && entry.function.effect_class != effect
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "selected target {} has effect {:?}, not requested effect {:?}",
+                entry.contract_id, entry.function.effect_class, effect
+            ),
+        });
+    }
+    let allowed_contracts = optional_string_array_field(constraints, "allowedContracts")?;
+    if let Some(contracts) = allowed_contracts
+        && !contracts
+            .iter()
+            .any(|contract| contract == &entry.contract_id)
+    {
+        return Err(CapabilityError::InvalidParams {
+            message: format!(
+                "selected target {} is outside execute.constraints.allowedContracts",
+                entry.contract_id
+            ),
+        });
+    }
+    let allowed_namespaces = optional_string_array_field(constraints, "allowedNamespaces")?;
+    if let Some(namespaces) = allowed_namespaces {
+        let namespace = entry
+            .contract_id
+            .split_once("::")
+            .map(|(namespace, _)| namespace)
+            .unwrap_or(entry.contract_id.as_str());
+        if !namespaces.iter().any(|allowed| allowed == namespace) {
+            return Err(CapabilityError::InvalidParams {
+                message: format!(
+                    "selected target {} is outside execute.constraints.allowedNamespaces",
+                    entry.contract_id
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn orchestration_constraints_allow_hit(
+    constraints: &Value,
+    hit: &CapabilityIndexHit,
+) -> Result<bool, CapabilityError> {
+    validate_orchestration_constraint_shape(constraints)?;
+    if let Some(max_risk) = risk_field(constraints, "riskMax")? {
+        let hit_risk = risk_level_from_str(&hit.risk_level, "candidate riskLevel")?;
+        if hit_risk > max_risk {
+            return Ok(false);
+        }
+    }
+    if let Some(effect) = effect_field(constraints, "effect")? {
+        let hit_effect = effect_class_from_str(&hit.effect_class, "candidate effectClass")?;
+        if hit_effect != effect {
+            return Ok(false);
+        }
+    }
+    if let Some(contracts) = optional_string_array_field(constraints, "allowedContracts")?
+        && !contracts
+            .iter()
+            .any(|contract| contract == &hit.contract_id)
+    {
+        return Ok(false);
+    }
+    if let Some(namespaces) = optional_string_array_field(constraints, "allowedNamespaces")? {
+        let namespace = hit
+            .contract_id
+            .split_once("::")
+            .map(|(namespace, _)| namespace)
+            .unwrap_or(hit.contract_id.as_str());
+        if !namespaces.iter().any(|allowed| allowed == namespace) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn optional_string_array_field(
+    value: &Value,
+    key: &str,
+) -> Result<Option<Vec<String>>, CapabilityError> {
+    let Some(raw) = value.get(key) else {
+        return Ok(None);
+    };
+    let Some(values) = raw.as_array() else {
+        return Err(CapabilityError::InvalidParams {
+            message: format!("execute.constraints.{key} must be an array of strings"),
+        });
+    };
+    let mut strings = Vec::new();
+    for item in values {
+        let Some(item) = item.as_str().map(str::trim).filter(|item| !item.is_empty()) else {
+            return Err(CapabilityError::InvalidParams {
+                message: format!("execute.constraints.{key} must contain only non-empty strings"),
+            });
+        };
+        strings.push(item.to_owned());
+    }
+    Ok(Some(strings))
+}
+
+fn normalized_identifier_words(value: &str) -> Vec<String> {
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter_map(|token| {
+            let token = token.trim().to_ascii_lowercase();
+            (!token.is_empty()).then_some(token)
+        })
+        .collect()
+}
+
+fn normalized_intent_words(value: &str) -> std::collections::BTreeSet<String> {
+    normalized_identifier_words(value).into_iter().collect()
+}
+
+pub(super) fn prepared_execute_payload(
+    target_params: &Value,
+    input: &OrchestratedExecuteInput,
+) -> Value {
+    let mut object = Map::new();
+    object.insert("mode".to_owned(), json!("invoke"));
+    if let Some(target) = target_params.as_object() {
+        for key in [
+            "functionId",
+            "implementationId",
+            "contractId",
+            "capabilityId",
+        ] {
+            if let Some(value) = target.get(key) {
+                object.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    object.insert("payload".to_owned(), input.arguments.clone());
+    if let Some(idempotency_key) = &input.idempotency_key {
+        object.insert("idempotencyKey".to_owned(), json!(idempotency_key));
+    }
+    if let Some(reason) = &input.reason {
+        object.insert("reason".to_owned(), json!(reason));
+    }
+    Value::Object(object)
+}
+
+async fn record_orchestration_inspection(
+    invocation: &Invocation,
+    deps: &Deps,
+    target: &ResolvedCapabilityTarget,
+) -> Result<Value, CapabilityError> {
+    let inspection = target.entry.inspection(target.binding_decision.clone());
+    let handle = inspection.inspection_handle.clone();
+    let entry = target.entry.clone();
+    let decision = target.binding_decision.clone();
+    let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+    let expected_revision = target.entry.function.revision.0;
+    let expected_schema_digest = target.entry.schema_digest.clone();
+    let store = deps.registry_store.clone();
+    run_blocking_task("capability.execute.prepare.record_inspection", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .record_inspection(&handle, &entry, &decision)
+            .map_err(registry_store_error)?;
+        store
+            .record_audit_event(
+                "capability.execute.prepare",
+                Some(&trace_id),
+                json!({
+                    "status": "freshness_prepared",
+                    "contractId": decision.contract_id,
+                    "implementationId": decision.selected_implementation,
+                    "functionId": decision.selected_function_id,
+                    "catalogRevision": decision.catalog_revision,
+                    "schemaDigest": decision.schema_digest,
+                    "inspectionHandle": handle.handle,
+                }),
+            )
+            .map_err(registry_store_error)?;
+        Ok(())
+    })
+    .await?;
+    Ok(json!({
+        "inspectionHandle": inspection.inspection_handle.handle,
+        "expectedRevision": expected_revision,
+        "expectedSchemaDigest": expected_schema_digest
+    }))
+}
+
+fn corrected_orchestrated_request(input: &OrchestratedExecuteInput) -> Value {
+    let mut object = Map::new();
+    if let Some(intent) = &input.intent {
+        object.insert("intent".to_owned(), json!(intent));
+    }
+    if let Some(target) = &input.target_params {
+        object.insert("target".to_owned(), target.clone());
+    }
+    object.insert("arguments".to_owned(), input.arguments.clone());
+    if !input.constraints.as_object().map_or(true, Map::is_empty) {
+        object.insert("constraints".to_owned(), input.constraints.clone());
+    }
+    if let Some(idempotency_key) = &input.idempotency_key {
+        object.insert("idempotencyKey".to_owned(), json!(idempotency_key));
+    }
+    if let Some(reason) = &input.reason {
+        object.insert("reason".to_owned(), json!(reason));
+    }
+    Value::Object(object)
+}
+
+fn orchestration_details(
+    orchestration_id: &str,
+    status: &str,
+    intent: Option<&str>,
+    corrected_request: Option<Value>,
+    input: &OrchestratedExecuteInput,
+    phase_details: Value,
+    child_invocations: Vec<String>,
+) -> Value {
+    let confidence = if input.corrections.is_empty() {
+        1.0
+    } else {
+        0.95
+    };
+    json!({
+        "orchestrationId": orchestration_id,
+        "status": status,
+        "intent": intent,
+        "correctedRequest": corrected_request.unwrap_or_else(|| corrected_orchestrated_request(input)),
+        "correctionsApplied": input.corrections.clone(),
+        "correctionConfidence": confidence,
+        "phaseDetails": phase_details,
+        "childInvocationIds": child_invocations,
+    })
+}
+
+fn orchestration_request_error_details(
+    orchestration_id: &str,
+    status: &str,
+    error: &CapabilityError,
+) -> Value {
+    json!({
+        "orchestrationId": orchestration_id,
+        "status": status,
+        "intent": Value::Null,
+        "correctedRequest": Value::Null,
+        "correctionsApplied": [],
+        "correctionConfidence": 0.0,
+        "phaseDetails": {
+            "phase": "parse",
+            "error": capability_error_details(error),
+        },
+        "childInvocationIds": [],
+    })
+}
+
+fn correction_record(
+    kind: impl Into<String>,
+    message: impl Into<String>,
+    confidence: f64,
+) -> Value {
+    json!({
+        "kind": kind.into(),
+        "message": message.into(),
+        "confidence": confidence,
+    })
+}
+
+pub(super) fn deterministic_intent_route(
+    intent: &str,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+) -> Result<Option<CapabilityIndexHit>, CapabilityError> {
+    if intent_requests_filesystem_read(intent, arguments) {
+        return deterministic_hit_for_function(
+            "filesystem::read_file",
+            snapshot,
+            constraints,
+            "deterministic_path_read",
+        );
+    }
+    Ok(None)
+}
+
+pub(super) fn apply_deterministic_intent_route(
+    intent: &str,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+    executable_hits: &mut Vec<CapabilityIndexHit>,
+) -> Result<(), CapabilityError> {
+    if let Some(routed) = deterministic_intent_route(intent, arguments, snapshot, constraints)? {
+        executable_hits.retain(|hit| hit.function_id != routed.function_id);
+        executable_hits.insert(0, routed);
+    }
+    Ok(())
+}
+
+pub(super) fn apply_argument_schema_fit_filter(
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+    executable_hits: &mut Vec<CapabilityIndexHit>,
+) -> Vec<Value> {
+    if arguments.as_object().is_none_or(Map::is_empty) {
+        return Vec::new();
+    }
+
+    let original_hits = std::mem::take(executable_hits);
+    let mut compatible = Vec::new();
+    let mut missing_required = Vec::new();
+    let mut rejected = Vec::new();
+
+    for hit in &original_hits {
+        match argument_schema_fit_for_hit(hit, arguments, snapshot) {
+            ArgumentSchemaFit::Compatible => compatible.push(hit.clone()),
+            ArgumentSchemaFit::MissingRequired => missing_required.push(hit.clone()),
+            ArgumentSchemaFit::Incompatible(reason) => {
+                rejected.push(rejected_candidate_summary(
+                    hit,
+                    "argument_schema_mismatch",
+                    reason,
+                ));
+            }
+        }
+    }
+
+    if !compatible.is_empty() {
+        for hit in &missing_required {
+            rejected.push(rejected_candidate_summary(
+                hit,
+                "argument_missing_required",
+                "candidate is missing required arguments while another candidate accepts the supplied arguments",
+            ));
+        }
+        *executable_hits = compatible;
+        return rejected;
+    }
+
+    if !missing_required.is_empty() {
+        *executable_hits = missing_required;
+        return rejected;
+    }
+
+    *executable_hits = original_hits;
+    Vec::new()
+}
+
+enum ArgumentSchemaFit {
+    Compatible,
+    MissingRequired,
+    Incompatible(String),
+}
+
+fn argument_schema_fit_for_hit(
+    hit: &CapabilityIndexHit,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+) -> ArgumentSchemaFit {
+    let Some(entry) = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.function_id == hit.function_id)
+    else {
+        return ArgumentSchemaFit::Incompatible(
+            "candidate is not present in the live registry snapshot".to_owned(),
+        );
+    };
+    let mut normalized_arguments = arguments.clone();
+    let mut ignored_corrections = Vec::new();
+    normalize_target_specific_arguments(
+        &entry.function,
+        &mut normalized_arguments,
+        &mut ignored_corrections,
+    );
+    match validate_target_payload(entry, &normalized_arguments) {
+        Ok(()) => ArgumentSchemaFit::Compatible,
+        Err(error) if is_missing_required_argument_error(&error) => {
+            ArgumentSchemaFit::MissingRequired
+        }
+        Err(error) => ArgumentSchemaFit::Incompatible(error.to_string()),
+    }
+}
+
+fn rejected_candidate_summary(
+    hit: &CapabilityIndexHit,
+    reason: &str,
+    message: impl Into<String>,
+) -> Value {
+    let mut summary = orchestration_candidate_summary(hit);
+    if let Some(object) = summary.as_object_mut() {
+        object.insert("rejectionReason".to_owned(), json!(reason));
+        object.insert("rejectionMessage".to_owned(), json!(message.into()));
+    }
+    summary
+}
+
+fn intent_requests_filesystem_read(intent: &str, arguments: &Value) -> bool {
+    let Some(path) = arguments.get("path").and_then(Value::as_str) else {
+        return false;
+    };
+    if path.trim().is_empty() {
+        return false;
+    }
+    let words = normalized_intent_words(intent);
+    let asks_for_read = ["read", "open", "cat", "content", "line", "lines"]
+        .iter()
+        .any(|word| words.contains(*word));
+    let asks_for_write = [
+        "write",
+        "edit",
+        "modify",
+        "delete",
+        "remove",
+        "create",
+        "overwrite",
+        "patch",
+    ]
+    .iter()
+    .any(|word| words.contains(*word));
+    asks_for_read && !asks_for_write
+}
+
+fn deterministic_hit_for_function(
+    function_id: &str,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+    matched_by: &str,
+) -> Result<Option<CapabilityIndexHit>, CapabilityError> {
+    let Some(entry) = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.function_id == function_id)
+    else {
+        return Ok(None);
+    };
+    let hit = orchestration_hit_from_entry(entry, matched_by, 100.0);
+    if !orchestration_constraints_allow_hit(constraints, &hit)? {
+        return Ok(None);
+    }
+    Ok(Some(hit))
+}
+
+pub(super) fn orchestration_hit_from_entry(
+    entry: &CapabilityRegistryEntry,
+    matched_by: &str,
+    score: f32,
+) -> CapabilityIndexHit {
+    let document = entry.search_document();
+    CapabilityIndexHit {
+        kind: document.kind,
+        capability_id: document.capability_id,
+        contract_id: document.contract_id,
+        implementation_id: document.implementation_id,
+        plugin_id: document.plugin_id,
+        worker_id: document.worker_id,
+        function_id: document.function_id,
+        catalog_revision: document.catalog_revision,
+        schema_digest: document.schema_digest,
+        trust_tier: document.trust_tier,
+        health: document.health,
+        visibility: document.visibility,
+        effect_class: document.effect_class,
+        risk_level: document.risk_level,
+        lexical_score: score,
+        vector_score: None,
+        fused_score: score,
+        matched_by: matched_by.to_owned(),
+        snippet: bounded_snippet(&document.text),
+        requires_inspect: requires_fresh_revision(&entry.function),
+        recipe: document.recipe,
+    }
+}
+
+fn bounded_snippet(value: &str) -> String {
+    const MAX: usize = 240;
+    let mut snippet = value.chars().take(MAX).collect::<String>();
+    if value.chars().count() > MAX {
+        snippet.push_str("...");
+    }
+    snippet
+}
+
+fn orchestration_candidate_summary(hit: &CapabilityIndexHit) -> Value {
+    json!({
+        "kind": hit.kind.as_str(),
+        "contractId": hit.contract_id.as_str(),
+        "implementationId": hit.implementation_id.as_str(),
+        "functionId": hit.function_id.as_str(),
+        "score": hit.fused_score,
+        "matchedBy": hit.matched_by.as_str(),
+        "riskLevel": hit.risk_level.as_str(),
+        "effectClass": hit.effect_class.as_str(),
+        "snippet": hit.snippet.as_str(),
+    })
+}
+
+fn redacted_prepared_request_preview(prepared_payload: &Value) -> Value {
+    json!({
+        "mode": prepared_payload.get("mode").cloned().unwrap_or(Value::Null),
+        "contractId": prepared_payload.get("contractId").cloned(),
+        "capabilityId": prepared_payload.get("capabilityId").cloned(),
+        "functionId": prepared_payload.get("functionId").cloned(),
+        "implementationId": prepared_payload.get("implementationId").cloned(),
+        "hasPayload": prepared_payload.get("payload").is_some(),
+        "hasInspectionHandle": prepared_payload.get("inspectionHandle").is_some(),
+        "hasIdempotencyKey": prepared_payload.get("idempotencyKey").is_some(),
+    })
+}
+
+fn orchestration_child_invocations(value: &Value) -> Vec<String> {
+    value
+        .get("details")
+        .and_then(|details| details.get("childInvocations"))
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn attach_orchestration_details(
+    value: Value,
+    orchestration: Value,
+) -> Result<Value, CapabilityError> {
+    let mut result: CapabilityResult =
+        serde_json::from_value(value).map_err(|error| CapabilityError::Internal {
+            message: error.to_string(),
+        })?;
+    let mut details = match result.details.take() {
+        Some(Value::Object(object)) => Value::Object(object),
+        Some(value) => json!({ "toolDetails": value }),
+        None => json!({}),
+    };
+    if let Value::Object(object) = &mut details {
+        object.insert("orchestration".to_owned(), orchestration.clone());
+        for key in [
+            "correctedRequest",
+            "correctionsApplied",
+            "correctionConfidence",
+        ] {
+            if let Some(value) = orchestration.get(key) {
+                object.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    result.details = Some(details);
+    capability_result_value(result)
+}
+
+fn orchestration_result(
+    status: &str,
+    message: &str,
+    diagnostics: Value,
+    is_error: bool,
+) -> Result<Value, CapabilityError> {
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            message.to_owned(),
+        )]),
+        details: Some(json!({
+            "status": status,
+            "orchestration": diagnostics,
+            "childInvocationCreated": false,
+            "approvalCreated": false,
+            "resourceRefs": [],
+        })),
+        is_error: is_error.then_some(true),
+        stop_turn: None,
+    })
+}
+
+fn capability_error_details(error: &CapabilityError) -> Value {
+    json!({
+        "code": error.code(),
+        "message": error.to_string(),
+        "details": error.details(),
+    })
+}
+
+async fn record_orchestration_audit(
+    deps: &Deps,
+    invocation: &Invocation,
+    diagnostics: Value,
+) -> Result<(), CapabilityError> {
+    let store = deps.registry_store.clone();
+    let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+    run_blocking_task("capability.execute.orchestration_audit", move || {
+        let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+            message: "capability registry store mutex poisoned".to_owned(),
+        })?;
+        store
+            .record_audit_event("capability.orchestration", Some(&trace_id), diagnostics)
+            .map_err(registry_store_error)?;
+        Ok(())
+    })
+    .await
+}

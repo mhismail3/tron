@@ -187,7 +187,8 @@ struct ContentView: View {
         NavigationStack {
             EngineConsoleView(
                 engineClient: engineClient,
-                actions: dashboardActions
+                actions: dashboardActions,
+                eventDatabaseStorageMode: dependencies.eventDatabaseStorageMode
             )
         }
     }

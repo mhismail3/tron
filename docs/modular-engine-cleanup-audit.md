@@ -725,6 +725,22 @@ classifier correctly rejected as unproven.
 | Boundary | Unknown interpreters remain rejected in `executionMode=read_only`; content verification should use `materializedOutputs`, `materialized_file::read`, or the returned materialized path/resource | The fix improves usability without weakening the read-only process classifier |
 | Regression coverage | Added process tests for relative session-worktree materialization, target-path escape rejection, and materialized output summaries; added resource-kernel tests proving relative materialized paths honor runtime working-directory metadata and cannot escape it | Future process/resource changes must fail if relative materialized outputs leak into the server cwd |
 
+### 2026-05-26 Post-100 Extreme Fault Tolerance Closure
+
+The post-100 audit identified remaining fault-tolerance work after the
+capability-backed-truth migration reached 100/100. This cleanup closes those
+items without adding product behavior, storage planes, compatibility readers, or
+new public capability ids.
+
+| Area | Evidence | Decision |
+|---|---|---|
+| Capability execution ownership | `domains/capability/operations.rs` was replaced by `operations/mod.rs` plus `operations/execute.rs`; provider-visible tools remain execute-only | Keep `mod.rs` as the operator/internal coordination surface and isolate the critical execute orchestration path |
+| Capability registry ownership | `domains/capability/registry.rs` was replaced by `registry/mod.rs` plus `registry/recipes.rs` | Keep recipe/training-data generation separate from registry persistence and semantic index mechanics |
+| Generated UI ownership | `engine/primitives/ui.rs` now delegates server-authored surface generation to `engine/primitives/ui/authoring/`; target-family modules own prompt-library, notification, subagent, source-control, and AgentControl surfaces while `ui/validation.rs` remains the stored-action validation boundary | Keep UI dispatch thin and server-owned generated surfaces inspectable by target family |
+| Program composition | JavaScript programs now receive only frozen `tools.execute`; host calls route through `capability::execute`, merge risk budget into constraints, and enforce allowed target bounds before child execution | Remove the last internal search/inspect composition exception and keep program orchestration aligned with the model-facing primitive |
+| iOS cache visibility | `EventDatabaseStorageMode` records `primaryDocuments` versus `temporaryFallback`, logs fallback mode, exposes it in Engine Console and diagnostics bundles, and source guards keep it projection-only | Startup may remain resilient, but fallback cache loss is visible and never becomes server truth |
+| Static proof | Threat invariants now check the split files, retired single-file boundaries, execute-only program runtime/protocol, and EventDatabase fallback mode | Future changes must fail visibly if they reintroduce hidden composition or silent cache fallback |
+
 ## Static Gates
 
 The cleanup is protected by static tests that require:
@@ -743,6 +759,8 @@ The cleanup is protected by static tests that require:
 - no provider clarification that allows warm-up/probe/example capability calls
   before an exact user-requested target payload.
 - no provider-visible capability primitive except `execute`.
+- no JavaScript program `tools.search`/`tools.inspect` host surface.
+- no silent iOS EventDatabase fallback cache mode.
 
 ## Verification Targets
 

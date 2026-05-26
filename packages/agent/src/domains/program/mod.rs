@@ -25,8 +25,8 @@
 //! # INVARIANT: no host APIs in JavaScript
 //!
 //! JavaScript programs receive only immutable `args`, `console.log`, and the
-//! frozen `tools.search`/`tools.inspect`/`tools.execute` host-call surface for
-//! bounded program composition. There is no
+//! frozen `tools.execute` host-call surface for bounded program composition.
+//! There is no
 //! filesystem, network, process, import loader, environment, secret, mutable
 //! clock, native module, or host object surface.
 

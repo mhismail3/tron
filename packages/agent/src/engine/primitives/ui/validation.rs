@@ -4,6 +4,7 @@
 //! executable canonical capability invocations. The parent UI primitive remains
 //! responsible for registration, dispatch, and surface authoring.
 
+use super::authoring::{SurfaceAuthoringRequest, actor_context, target_projection};
 use super::*;
 
 pub(super) fn validate_surface(

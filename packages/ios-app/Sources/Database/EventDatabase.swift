@@ -3,6 +3,15 @@ import SQLite3
 
 // MARK: - Event Database
 
+enum EventDatabaseStorageMode: String, Equatable, Sendable {
+    case primaryDocuments
+    case temporaryFallback
+
+    var isTemporaryFallback: Bool {
+        self == .temporaryFallback
+    }
+}
+
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
 // Do NOT define a local logger property - it would shadow the global one
 
@@ -14,6 +23,7 @@ final class EventDatabase: DatabaseTransport {
 
     private let dbActor: DatabaseActor
     let dbPath: String
+    let storageMode: EventDatabaseStorageMode
 
     private(set) var isInitialized = false
 
@@ -47,6 +57,7 @@ final class EventDatabase: DatabaseTransport {
         try? fileManager.createDirectory(at: dbDir, withIntermediateDirectories: true)
 
         self.dbPath = dbDir.appendingPathComponent("prod.db").path
+        self.storageMode = .primaryDocuments
         self.dbActor = DatabaseActor(dbPath: self.dbPath)
     }
 
@@ -56,6 +67,7 @@ final class EventDatabase: DatabaseTransport {
         let dir = (fallbackPath as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         self.dbPath = fallbackPath
+        self.storageMode = .temporaryFallback
         self.dbActor = DatabaseActor(dbPath: fallbackPath)
     }
 
@@ -65,7 +77,15 @@ final class EventDatabase: DatabaseTransport {
         try await dbActor.open()
 
         isInitialized = true
-        logger.info("Event database initialized at \(self.dbPath)", category: .session)
+        switch storageMode {
+        case .primaryDocuments:
+            logger.info("Event database initialized at \(self.dbPath)", category: .session)
+        case .temporaryFallback:
+            logger.warning(
+                "Event database initialized in temporary fallback cache mode at \(self.dbPath); local projections may be lost and server substrate remains authoritative",
+                category: .session
+            )
+        }
     }
 
     func close() async {

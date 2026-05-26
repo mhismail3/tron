@@ -95,6 +95,10 @@ The repo-wide package/submodule hygiene audit lives in
 [`docs/production-grade-codebase-audit.md`](docs/production-grade-codebase-audit.md),
 with the 100-point production-grade rubric in
 [`docs/production-grade-rubric.md`](docs/production-grade-rubric.md).
+The post-100 fault-tolerance audit lives in
+[`docs/extreme-fault-tolerance-audit.md`](docs/extreme-fault-tolerance-audit.md);
+it applies isolation, dependency-light critical-path, known-good continuation,
+failover exercise, and progressive-delivery principles to the modular engine.
 The stricter capability-backed-truth migration tracker lives in
 [`docs/capability-backed-truth-migration-plan.md`](docs/capability-backed-truth-migration-plan.md);
 it is currently at 100/100 after the memory-retain, notification-resource,
@@ -153,6 +157,7 @@ tron/
 +-- docs/
 |   +-- capability-backed-truth-migration-plan.md 100-point capability-backed truth tracker
 |   +-- collapsed-modular-engine-architecture.md Collapsed worker/capability/resource target
+|   +-- extreme-fault-tolerance-audit.md Post-100 isolation/recovery/critical-path audit
 |   +-- manual-testing-readiness.md Clean manual-QA checklist for the capability runtime
 |   +-- modular-engine-audit.md     Audit and target direction for the modular engine pivot
 |   +-- modular-engine-cleanup-audit.md Proof map for cleanup/removal decisions
@@ -520,8 +525,8 @@ before their functions can enter the capability registry.
 `program::run_javascript` worker. The parent engine spawns the
 `tron-program-worker` OS process with a stripped environment and a temporary
 working directory, then communicates over the program JSON-line protocol. The
-child process owns QuickJS, freezes the JavaScript host surface to
-`tools.search`, `tools.inspect`, `tools.execute`, and exposes no filesystem,
+child process owns QuickJS, freezes the JavaScript host surface to the single
+`tools.execute` composition API, and exposes no filesystem,
 network, process, import, environment, secret, mutable-clock, native-module,
 or arbitrary host-object access. Program requests carry explicit limits for
 timeout, memory, stack, output/log bytes, child-call count, recursion depth,

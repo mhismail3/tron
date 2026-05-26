@@ -32,28 +32,7 @@ pub(crate) trait ProgramExecutor: Send + Sync {
 
 /// Synchronous host-call surface exposed to QuickJS callbacks.
 pub(crate) trait ProgramToolHost: Send + Sync {
-    fn call(
-        &self,
-        primitive: ProgramToolPrimitive,
-        payload: Value,
-    ) -> Result<Value, ProgramRuntimeError>;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProgramToolPrimitive {
-    Search,
-    Inspect,
-    Execute,
-}
-
-impl ProgramToolPrimitive {
-    fn function_id(self) -> &'static str {
-        match self {
-            Self::Search => "capability::search",
-            Self::Inspect => "capability::inspect",
-            Self::Execute => "capability::execute",
-        }
-    }
+    fn call(&self, payload: Value) -> Result<Value, ProgramRuntimeError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -240,47 +219,11 @@ impl ProgramExecutor for QuickJsProgramExecutor {
         let output = match context.with(|ctx| {
             let globals = ctx.globals();
             install_host_denials(&globals)?;
-            let search_host = tool_host.clone();
-            let search_gate = child_gate.clone();
-            let search_records = child_records.clone();
-            let search = Function::new(ctx.clone(), move |raw: String| {
-                host_call_json(
-                    search_host.as_ref(),
-                    ProgramToolPrimitive::Search,
-                    raw,
-                    &search_gate,
-                    &search_records,
-                )
-            })?
-            .with_name("search")?;
-            globals.set("__tronSearchJson", search)?;
-
-            let inspect_host = tool_host.clone();
-            let inspect_gate = child_gate.clone();
-            let inspect_records = child_records.clone();
-            let inspect = Function::new(ctx.clone(), move |raw: String| {
-                host_call_json(
-                    inspect_host.as_ref(),
-                    ProgramToolPrimitive::Inspect,
-                    raw,
-                    &inspect_gate,
-                    &inspect_records,
-                )
-            })?
-            .with_name("inspect")?;
-            globals.set("__tronInspectJson", inspect)?;
-
             let execute_host = tool_host.clone();
             let execute_gate = child_gate.clone();
             let execute_records = child_records.clone();
             let execute = Function::new(ctx.clone(), move |raw: String| {
-                host_call_json(
-                    execute_host.as_ref(),
-                    ProgramToolPrimitive::Execute,
-                    raw,
-                    &execute_gate,
-                    &execute_records,
-                )
+                host_call_json(execute_host.as_ref(), raw, &execute_gate, &execute_records)
             })?
             .with_name("execute")?;
             globals.set("__tronExecuteJson", execute)?;
@@ -454,7 +397,6 @@ struct ProgramChildGate {
 
 fn host_call_json(
     tool_host: &dyn ProgramToolHost,
-    primitive: ProgramToolPrimitive,
     raw: String,
     gate: &Arc<Mutex<ProgramChildGate>>,
     records: &Arc<Mutex<ProgramChildRecords>>,
@@ -481,8 +423,7 @@ fn host_call_json(
                 "program child-call limit exceeded",
             ));
         }
-        if primitive == ProgramToolPrimitive::Execute
-            && payload.get("mode").and_then(Value::as_str) == Some("program")
+        if payload.get("mode").and_then(Value::as_str) == Some("program")
             && gate.max_recursion_depth == 0
         {
             return Err(rquickjs::Error::new_from_js_message(
@@ -493,7 +434,7 @@ fn host_call_json(
         }
         gate.calls += 1;
     }
-    let value = tool_host.call(primitive, payload).map_err(|error| {
+    let value = tool_host.call(payload).map_err(|error| {
         record_terminal_error(records, error.clone());
         rquickjs::Error::new_from_js_message(
             "program",
@@ -596,8 +537,6 @@ fn program_prelude() -> &'static str {
     const __tronCall = (name, value) => JSON.parse(globalThis[name](JSON.stringify(__tronParse(value))));
     const __tronLog = (...values) => globalThis.__tronLogJson(JSON.stringify(values));
     const tools = Object.freeze({
-      search(input) { return __tronCall("__tronSearchJson", input); },
-      inspect(input) { return __tronCall("__tronInspectJson", input); },
       execute(input) { return __tronCall("__tronExecuteJson", input); }
     });
     Object.defineProperty(globalThis, "tools", { value: tools, writable: false, configurable: false });
@@ -674,47 +613,39 @@ impl EngineProgramToolHost {
         }
     }
 
-    fn enforce_execute_policy(&self, payload: &Value) -> Result<(), ProgramRuntimeError> {
+    fn enforce_execute_policy(&self, payload: &mut Value) -> Result<(), ProgramRuntimeError> {
         if payload.get("mode").and_then(Value::as_str) == Some("program") {
             return Err(ProgramRuntimeError::new(
                 "PROGRAM_PRIMITIVE_RECURSION_DENIED",
                 "programs cannot recursively invoke execute mode 'program'",
             ));
         }
-        let target = payload
-            .get("contractId")
-            .or_else(|| payload.get("contract_id"))
-            .or_else(|| payload.get("implementationId"))
-            .or_else(|| payload.get("implementation_id"))
-            .or_else(|| payload.get("functionId"))
-            .or_else(|| payload.get("function_id"))
-            .and_then(Value::as_str)
-            .unwrap_or_default();
+        let target = execute_target_hint(payload).unwrap_or_default();
         if target.starts_with("capability::") {
             return Err(ProgramRuntimeError::new(
                 "PROGRAM_PRIMITIVE_RECURSION_DENIED",
                 "programs cannot execute capability primitives through tools.execute",
             ));
         }
-        if let Some(contract) = payload
-            .get("contractId")
-            .or_else(|| payload.get("contract_id"))
-            .and_then(Value::as_str)
-            && !self.allowed_contracts.is_empty()
+        if !self.allowed_contracts.is_empty() && target.is_empty() {
+            return Err(ProgramRuntimeError::new(
+                "PROGRAM_CONTRACT_NOT_ALLOWED",
+                "programs with allowedContracts must provide an explicit tools.execute target",
+            ));
+        }
+        if !self.allowed_contracts.is_empty()
             && !self
                 .allowed_contracts
                 .iter()
-                .any(|allowed| allowed == contract)
+                .any(|allowed| allowed == &target)
         {
             return Err(ProgramRuntimeError::new(
                 "PROGRAM_CONTRACT_NOT_ALLOWED",
-                format!("program is not allowed to execute contract {contract}"),
+                format!("program is not allowed to execute target {target}"),
             ));
         }
-        if let Some(implementation) = payload
-            .get("implementationId")
-            .or_else(|| payload.get("implementation_id"))
-            .and_then(Value::as_str)
+        let implementation = execute_implementation_hint(payload);
+        if let Some(implementation) = implementation
             && !self.allowed_implementations.is_empty()
             && !self
                 .allowed_implementations
@@ -726,11 +657,11 @@ impl EngineProgramToolHost {
                 format!("program is not allowed to execute implementation {implementation}"),
             ));
         }
-        self.enforce_risk_budget(payload)?;
+        self.merge_risk_budget(payload)?;
         Ok(())
     }
 
-    fn enforce_risk_budget(&self, payload: &Value) -> Result<(), ProgramRuntimeError> {
+    fn merge_risk_budget(&self, payload: &mut Value) -> Result<(), ProgramRuntimeError> {
         let Some(max_risk) = self
             .budget
             .as_ref()
@@ -738,46 +669,44 @@ impl EngineProgramToolHost {
         else {
             return Ok(());
         };
-        let Some(inspect_payload) = inspect_payload_for_execute(payload) else {
-            return Ok(());
-        };
-        let max_rank = risk_budget_rank(max_risk).ok_or_else(|| {
+        risk_budget_rank(max_risk).ok_or_else(|| {
             ProgramRuntimeError::new(
                 "PROGRAM_INVALID_RISK_BUDGET",
                 format!("unsupported program risk budget '{max_risk}'"),
             )
         })?;
-        let inspection = self.invoke_primitive(ProgramToolPrimitive::Inspect, inspect_payload)?;
-        let details = inspection
-            .get("details")
-            .or_else(|| inspection.get("detailsJson"))
-            .unwrap_or(&inspection);
-        let risk = details
-            .pointer("/contract/riskLevel")
-            .or_else(|| details.pointer("/implementation/riskLevel"))
-            .and_then(Value::as_str)
-            .unwrap_or("critical");
-        let actual_rank = risk_budget_rank(risk).unwrap_or(usize::MAX);
-        if actual_rank > max_rank {
+        let object = payload.as_object_mut().ok_or_else(|| {
+            ProgramRuntimeError::new(
+                "PROGRAM_TOOL_PAYLOAD_INVALID",
+                "tools.execute expects a JSON object payload",
+            )
+        })?;
+        let constraints = object
+            .entry("constraints".to_owned())
+            .or_insert_with(|| json!({}));
+        let constraints_object = constraints.as_object_mut().ok_or_else(|| {
+            ProgramRuntimeError::new(
+                "PROGRAM_TOOL_PAYLOAD_INVALID",
+                "tools.execute constraints must be an object",
+            )
+        })?;
+        if let Some(existing) = constraints_object.get("riskMax").and_then(Value::as_str)
+            && risk_budget_rank(existing).unwrap_or(usize::MAX)
+                > risk_budget_rank(max_risk).unwrap_or(usize::MAX)
+        {
             return Err(ProgramRuntimeError::new(
                 "PROGRAM_RISK_BUDGET_EXCEEDED",
-                format!("child capability risk '{risk}' exceeds program riskMax '{max_risk}'"),
-            )
-            .with_details(json!({
-                "riskMax": max_risk,
-                "childRisk": risk,
-                "inspection": details,
-            })));
+                format!(
+                    "tools.execute constraints.riskMax '{existing}' exceeds program riskMax '{max_risk}'"
+                ),
+            ));
         }
+        constraints_object.insert("riskMax".to_owned(), json!(max_risk));
         Ok(())
     }
 
-    fn invoke_primitive(
-        &self,
-        primitive: ProgramToolPrimitive,
-        payload: Value,
-    ) -> Result<Value, ProgramRuntimeError> {
-        let function_id = FunctionId::new(primitive.function_id()).map_err(|error| {
+    fn invoke_execute(&self, payload: Value) -> Result<Value, ProgramRuntimeError> {
+        let function_id = FunctionId::new("capability::execute").map_err(|error| {
             ProgramRuntimeError::new("PROGRAM_HOST_INVALID_FUNCTION", error.to_string())
         })?;
         let invocation = Invocation::new_sync(function_id, payload, self.causal_context.clone());
@@ -793,19 +722,41 @@ impl EngineProgramToolHost {
     }
 }
 
-fn inspect_payload_for_execute(payload: &Value) -> Option<Value> {
-    let mut object = serde_json::Map::new();
-    for (camel, snake) in [
-        ("capabilityId", "capability_id"),
-        ("contractId", "contract_id"),
-        ("implementationId", "implementation_id"),
-        ("functionId", "function_id"),
-    ] {
-        if let Some(value) = payload.get(camel).or_else(|| payload.get(snake)).cloned() {
-            object.insert(camel.to_owned(), value);
+fn execute_target_hint(payload: &Value) -> Option<String> {
+    if let Some(target) = payload.get("target") {
+        if let Some(target) = target.as_str() {
+            return Some(target.to_owned());
+        }
+        if let Some(object) = target.as_object() {
+            for key in ["contractId", "contract_id", "functionId", "function_id"] {
+                if let Some(value) = object.get(key).and_then(Value::as_str) {
+                    return Some(value.to_owned());
+                }
+            }
         }
     }
-    (!object.is_empty()).then(|| Value::Object(object))
+    for key in ["contractId", "contract_id", "functionId", "function_id"] {
+        if let Some(value) = payload.get(key).and_then(Value::as_str) {
+            return Some(value.to_owned());
+        }
+    }
+    None
+}
+
+fn execute_implementation_hint(payload: &Value) -> Option<&str> {
+    if let Some(target) = payload.get("target").and_then(Value::as_object) {
+        for key in ["implementationId", "implementation_id"] {
+            if let Some(value) = target.get(key).and_then(Value::as_str) {
+                return Some(value);
+            }
+        }
+    }
+    for key in ["implementationId", "implementation_id"] {
+        if let Some(value) = payload.get(key).and_then(Value::as_str) {
+            return Some(value);
+        }
+    }
+    None
 }
 
 fn risk_budget_rank(risk: &str) -> Option<usize> {
@@ -819,20 +770,13 @@ fn risk_budget_rank(risk: &str) -> Option<usize> {
 }
 
 impl ProgramToolHost for EngineProgramToolHost {
-    fn call(
-        &self,
-        primitive: ProgramToolPrimitive,
-        payload: Value,
-    ) -> Result<Value, ProgramRuntimeError> {
-        if primitive == ProgramToolPrimitive::Execute {
-            self.enforce_execute_policy(&payload)?;
-        }
-        let value = self.invoke_primitive(primitive, payload)?;
-        if primitive == ProgramToolPrimitive::Execute
-            && value
-                .get("details")
-                .and_then(|details| details.get("approvalState"))
-                .is_some()
+    fn call(&self, mut payload: Value) -> Result<Value, ProgramRuntimeError> {
+        self.enforce_execute_policy(&mut payload)?;
+        let value = self.invoke_execute(payload)?;
+        if value
+            .get("details")
+            .and_then(|details| details.get("approvalState"))
+            .is_some()
         {
             return Err(ProgramRuntimeError::new(
                 "PROGRAM_APPROVAL_REQUIRED",
@@ -853,13 +797,9 @@ mod tests {
     struct EchoHost;
 
     impl ProgramToolHost for EchoHost {
-        fn call(
-            &self,
-            primitive: ProgramToolPrimitive,
-            payload: Value,
-        ) -> Result<Value, ProgramRuntimeError> {
+        fn call(&self, payload: Value) -> Result<Value, ProgramRuntimeError> {
             Ok(json!({
-                "primitive": format!("{:?}", primitive),
+                "primitive": "Execute",
                 "payload": payload,
                 "details": {
                     "childInvocations": ["child-1"],
@@ -902,12 +842,25 @@ mod tests {
 
     #[test]
     fn javascript_program_can_call_frozen_tools_host_surface() {
-        let result = run(r#"return tools.search({ query: "read" });"#).expect("program");
-        assert_eq!(result.output["primitive"], "Search");
+        let result = run(r#"return tools.execute({ intent: "read", target: "filesystem::read_file", arguments: { path: "README.md" } });"#)
+            .expect("program");
+        assert_eq!(result.output["primitive"], "Execute");
         assert_eq!(result.child_invocations, vec!["child-1"]);
         assert_eq!(
             result.selected_implementations,
             vec!["first_party.test.v1.echo"]
+        );
+    }
+
+    #[test]
+    fn javascript_program_exposes_execute_only_tools_surface() {
+        let result = run(
+            r#"return { execute: typeof tools.execute, search: typeof tools["search"], inspect: typeof tools["inspect"] };"#,
+        )
+        .expect("program");
+        assert_eq!(
+            result.output,
+            json!({"execute": "function", "search": "undefined", "inspect": "undefined"})
         );
     }
 
@@ -938,11 +891,11 @@ mod tests {
     #[test]
     fn javascript_program_enforces_child_call_limit() {
         let result = run(r#"
-            tools.search({ query: "one" });
-            tools.search({ query: "two" });
-            tools.search({ query: "three" });
-            tools.search({ query: "four" });
-            tools.search({ query: "five" });
+            tools.execute({ intent: "one", target: "filesystem::read_file", arguments: { path: "one" } });
+            tools.execute({ intent: "two", target: "filesystem::read_file", arguments: { path: "two" } });
+            tools.execute({ intent: "three", target: "filesystem::read_file", arguments: { path: "three" } });
+            tools.execute({ intent: "four", target: "filesystem::read_file", arguments: { path: "four" } });
+            tools.execute({ intent: "five", target: "filesystem::read_file", arguments: { path: "five" } });
             return null;
             "#)
         .expect("program record");

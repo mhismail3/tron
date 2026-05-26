@@ -16,7 +16,7 @@ use super::protocol::{
 };
 use super::runtime::{
     ProgramExecutor, ProgramRunRequest, ProgramRunResult, ProgramRuntimeError, ProgramToolHost,
-    ProgramToolPrimitive, QuickJsProgramExecutor, failed_result_for_request,
+    QuickJsProgramExecutor, failed_result_for_request,
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -188,21 +188,16 @@ impl ProcessProgramExecutor {
                 ));
             }
             match recv_worker_message(&line_rx, remaining) {
-                Ok(ProgramWorkerToParent::HostCall {
-                    id,
-                    primitive,
-                    payload,
-                }) => {
-                    let response =
-                        match tool_host.call(ProgramToolPrimitive::from(primitive), payload) {
-                            Ok(value) => ParentToProgramWorker::HostResult { id, value },
-                            Err(error) => ParentToProgramWorker::HostError {
-                                id,
-                                code: error.code,
-                                message: error.message,
-                                details: error.details,
-                            },
-                        };
+                Ok(ProgramWorkerToParent::HostCall { id, payload }) => {
+                    let response = match tool_host.call(payload) {
+                        Ok(value) => ParentToProgramWorker::HostResult { id, value },
+                        Err(error) => ParentToProgramWorker::HostError {
+                            id,
+                            code: error.code,
+                            message: error.message,
+                            details: error.details,
+                        },
+                    };
                     if let Err(error) = write_parent_message(&mut writer, &response) {
                         terminate_child(&mut child);
                         return Ok(failed_result_for_request(
@@ -323,11 +318,7 @@ impl WorkerProcessToolHost {
 }
 
 impl ProgramToolHost for WorkerProcessToolHost {
-    fn call(
-        &self,
-        primitive: ProgramToolPrimitive,
-        payload: Value,
-    ) -> Result<Value, ProgramRuntimeError> {
+    fn call(&self, payload: Value) -> Result<Value, ProgramRuntimeError> {
         let id = format!(
             "program_host_call_{}",
             self.next_id.fetch_add(1, Ordering::SeqCst)
@@ -336,7 +327,6 @@ impl ProgramToolHost for WorkerProcessToolHost {
             &self.writer,
             &ProgramWorkerToParent::HostCall {
                 id: id.clone(),
-                primitive: primitive.into(),
                 payload,
             },
         )?;
@@ -535,11 +525,7 @@ mod tests {
     struct NoopToolHost;
 
     impl ProgramToolHost for NoopToolHost {
-        fn call(
-            &self,
-            _primitive: ProgramToolPrimitive,
-            _payload: Value,
-        ) -> Result<Value, ProgramRuntimeError> {
+        fn call(&self, _payload: Value) -> Result<Value, ProgramRuntimeError> {
             Ok(json!({}))
         }
     }

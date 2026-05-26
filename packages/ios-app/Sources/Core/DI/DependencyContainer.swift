@@ -40,6 +40,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Local SQLite event database - persists across server changes
     private(set) var eventDatabase: EventDatabase
 
+    var eventDatabaseStorageMode: EventDatabaseStorageMode {
+        eventDatabase.storageMode
+    }
+
     /// Push notification service - persists across server changes
     private(set) var pushNotificationService: PushNotificationService
 

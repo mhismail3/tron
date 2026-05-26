@@ -598,6 +598,157 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
 }
 
 #[test]
+fn extreme_fault_tolerance_audit_stays_current() {
+    let crate_root = crate_root();
+    let repo_root = repo_root();
+    let audit_path = repo_root
+        .join("docs")
+        .join("extreme-fault-tolerance-audit.md");
+    let audit = std::fs::read_to_string(&audit_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", audit_path.display()));
+    let readme_path = repo_root.join("README.md");
+    let readme = std::fs::read_to_string(&readme_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
+
+    for required in [
+        "https://planetscale.com/blog/the-principles-of-extreme-fault-tolerance",
+        "Current extreme-fault-tolerance score: **100/100**",
+        "Tracked file count before this audit artifact was added: 1941",
+        "Critical Execution Plane",
+        "Authority Plane",
+        "Resource And Durable Truth Plane",
+        "Worker And Runtime Plane",
+        "Control And Generated UI Plane",
+        "Client Projection Plane",
+        "Storage, Logs, And Platform Plane",
+        "No Legacy/Fallback/Dead-Code Review",
+        "Large File Findings",
+        "Fault Injection And Recovery Matrix",
+        "Fault-Tolerance Backlog",
+        "Capability Execute Critical-Path Split",
+        "Generated UI Authoring Split",
+        "iOS Fallback Cache Visibility",
+        "Program Worker Execute-Only Convergence",
+        "Static Gate And Integration Test Decomposition",
+        "Fault Drill Suite",
+    ] {
+        assert!(
+            audit.contains(required),
+            "extreme fault tolerance audit must include `{required}`"
+        );
+    }
+
+    let axes = [
+        ("Critical-path isolation", 15_u32),
+        ("Dependency-light data path", 15),
+        ("Static stability and known-good continuation", 12),
+        ("Recovery and failover exercise", 12),
+        ("Progressive delivery and blast-radius control", 8),
+        ("Observability and auditability", 10),
+        ("Code organization under stress", 10),
+        ("Client thinness under failure", 8),
+        ("Drift protection", 6),
+        ("Dependency and supply-chain control", 4),
+    ];
+    let mut total = 0_u32;
+    for (axis, expected_points) in axes {
+        let table_line = audit
+            .lines()
+            .find(|line| line.starts_with('|') && line.contains(axis))
+            .unwrap_or_else(|| panic!("extreme fault tolerance audit missing axis {axis}"));
+        let columns = table_line.split('|').map(str::trim).collect::<Vec<_>>();
+        let points = columns
+            .get(2)
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_else(|| panic!("extreme fault tolerance axis {axis} must include points"));
+        assert_eq!(
+            points, expected_points,
+            "extreme fault tolerance point value changed for {axis}"
+        );
+        total += points;
+    }
+    assert_eq!(
+        total, 100,
+        "extreme fault tolerance scorecard must total 100"
+    );
+
+    for fault_domain in [
+        "`packages/agent/src/domains/capability/operations/mod.rs`",
+        "`packages/agent/src/domains/capability/operations/execute.rs`",
+        "`packages/agent/src/domains/capability/registry/mod.rs`",
+        "`packages/agent/src/domains/capability/registry/recipes.rs`",
+        "`packages/agent/src/engine/primitives/ui.rs`",
+        "`packages/agent/src/engine/primitives/ui/authoring/mod.rs`",
+        "`packages/agent/src/engine/primitives/ui/authoring/prompt.rs`",
+        "`packages/agent/src/engine/primitives/ui/authoring/notifications.rs`",
+        "`packages/agent/src/engine/primitives/ui/authoring/subagent.rs`",
+        "`packages/agent/src/engine/primitives/ui/authoring/source_control.rs`",
+        "`packages/agent/src/engine/primitives/ui/authoring/agent_control.rs`",
+        "`packages/agent/src/engine/primitives/module.rs`",
+        "`packages/agent/src/engine/host.rs`",
+        "`packages/agent/tests/threat_model_invariants.rs`",
+        "`packages/ios-app/Sources/Database/EventDatabase.swift`",
+        "`packages/agent/src/domains/program/mod.rs`",
+    ] {
+        assert!(
+            audit.contains(fault_domain),
+            "extreme fault tolerance audit must classify hardening target `{fault_domain}`"
+        );
+    }
+
+    for required_file in [
+        "src/domains/capability/operations/mod.rs",
+        "src/domains/capability/operations/execute.rs",
+        "src/domains/capability/registry/mod.rs",
+        "src/domains/capability/registry/recipes.rs",
+        "src/engine/primitives/ui/authoring/mod.rs",
+        "src/engine/primitives/ui/authoring/prompt.rs",
+        "src/engine/primitives/ui/authoring/notifications.rs",
+        "src/engine/primitives/ui/authoring/subagent.rs",
+        "src/engine/primitives/ui/authoring/source_control.rs",
+        "src/engine/primitives/ui/authoring/agent_control.rs",
+    ] {
+        assert!(
+            crate_root.join(required_file).is_file(),
+            "extreme fault tolerance split boundary must exist: {required_file}"
+        );
+    }
+    for removed_file in [
+        "src/domains/capability/operations.rs",
+        "src/domains/capability/registry.rs",
+        "src/engine/primitives/ui/authoring.rs",
+    ] {
+        assert!(
+            !crate_root.join(removed_file).exists(),
+            "oversized retired single-file boundary must stay split: {removed_file}"
+        );
+    }
+    let program_runtime =
+        std::fs::read_to_string(crate_root.join("src/domains/program/runtime.rs"))
+            .expect("failed to read program runtime");
+    assert!(
+        !program_runtime.contains("tools.search")
+            && !program_runtime.contains("tools.inspect")
+            && program_runtime.contains("tools.execute"),
+        "program runtime must keep the internal composition host execute-only"
+    );
+    let event_database = std::fs::read_to_string(
+        repo_root.join("packages/ios-app/Sources/Database/EventDatabase.swift"),
+    )
+    .expect("failed to read iOS EventDatabase");
+    assert!(
+        event_database.contains("EventDatabaseStorageMode")
+            && event_database.contains("temporaryFallback"),
+        "iOS EventDatabase must expose fallback-cache mode visibly"
+    );
+
+    assert!(
+        readme.contains("docs/extreme-fault-tolerance-audit.md"),
+        "README must link the extreme fault tolerance audit"
+    );
+}
+
+#[test]
 fn capability_backed_truth_migration_tracker_stays_current() {
     let repo_root = repo_root();
     let tracker_path = repo_root
@@ -1295,6 +1446,32 @@ fn capability_registry_authority_stays_deleted() {
             && !capability_contract_source.contains("\"modelPrimitiveName\": \"inspect\""),
         "provider metadata must expose only the single model-facing execute primitive"
     );
+    let program_runtime_source =
+        std::fs::read_to_string(crate_root.join("src/domains/program/runtime.rs"))
+            .expect("failed to read program runtime");
+    let program_protocol_source =
+        std::fs::read_to_string(crate_root.join("src/domains/program/protocol.rs"))
+            .expect("failed to read program protocol");
+    for (label, content) in [
+        ("program runtime", program_runtime_source),
+        ("program protocol", program_protocol_source),
+    ] {
+        for forbidden in [
+            "tools.search",
+            "tools.inspect",
+            "ProgramToolPrimitive::Search",
+            "ProgramToolPrimitive::Inspect",
+            "WorkerToolPrimitive::Search",
+            "WorkerToolPrimitive::Inspect",
+            "__tronSearchJson",
+            "__tronInspectJson",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{label} must keep the internal JavaScript host surface execute-only; found `{forbidden}`"
+            );
+        }
+    }
     for prompt_path in [
         "defaults/profiles/default/prompts/core.md",
         "defaults/profiles/default/prompts/chat.md",
@@ -1489,6 +1666,8 @@ fn notification_resource_truth_boundary_stays_enforced() {
 
     let ui = std::fs::read_to_string(root.join("src/engine/primitives/ui.rs"))
         .expect("read ui primitive");
+    let ui_authoring = read_generated_ui_authoring_tree(&root);
+    let ui_tree = [ui.as_str(), ui_authoring.as_str()].join("\n");
     for required in [
         "NOTIFICATION_INBOX_LAYOUT_PROFILE",
         "notifications.inbox.v1",
@@ -1497,7 +1676,7 @@ fn notification_resource_truth_boundary_stays_enforced() {
         "resource_collection target notification",
     ] {
         assert!(
-            ui.contains(required),
+            ui_tree.contains(required),
             "generated UI must keep notification inbox surface/action support `{required}`"
         );
     }
@@ -1565,6 +1744,8 @@ fn subagent_lineage_resource_truth_boundary_stays_enforced() {
 
     let ui = std::fs::read_to_string(root.join("src/engine/primitives/ui.rs"))
         .expect("read generated UI primitive");
+    let ui_authoring = read_generated_ui_authoring_tree(&root);
+    let ui_tree = [ui.as_str(), ui_authoring.as_str()].join("\n");
     for required in [
         "SUBAGENT_COLLECTION_TARGET",
         "agent_result:subagent",
@@ -1578,7 +1759,7 @@ fn subagent_lineage_resource_truth_boundary_stays_enforced() {
         "agent::cancel_subagent",
     ] {
         assert!(
-            ui.contains(required),
+            ui_tree.contains(required),
             "generated UI must keep subagent lineage surface/action support `{required}`"
         );
     }
@@ -1853,16 +2034,21 @@ fn resource_materialization_enforcement_gates_stay_on() {
         "process::run read_only execution must use the strict low-risk classifier, not a write-like blacklist"
     );
     let capability_operations =
-        std::fs::read_to_string(crate_root.join("src/domains/capability/operations.rs"))
+        std::fs::read_to_string(crate_root.join("src/domains/capability/operations/mod.rs"))
             .expect("failed to read capability operations");
+    let capability_execute =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/operations/execute.rs"))
+            .expect("failed to read capability execute operations");
+    let capability_execute_tree =
+        [capability_operations.as_str(), capability_execute.as_str()].join("\n");
     assert!(
-        capability_operations.contains("preflight_rejection_result")
-            && capability_operations.contains("\"childInvocationCreated\": false")
-            && capability_operations.contains("\"approvalCreated\": false")
-            && capability_operations.contains("\"resourceRefs\": []")
-            && capability_operations
+        capability_execute_tree.contains("preflight_rejection_result")
+            && capability_execute_tree.contains("\"childInvocationCreated\": false")
+            && capability_execute_tree.contains("\"approvalCreated\": false")
+            && capability_execute_tree.contains("\"resourceRefs\": []")
+            && capability_execute_tree
                 .contains("validate_target_policy_before_approval(&function, &payload)")
-            && capability_operations.contains("validate_target_payload(&target.entry, &payload)"),
+            && capability_execute_tree.contains("validate_target_payload(&target.entry, &payload)"),
         "capability::execute target preflight rejections must return structured isError results without child invocations, approvals, or resource refs"
     );
 
@@ -2032,10 +2218,11 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
 
     let ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
         .expect("failed to read generated UI primitive");
+    let ui_authoring = read_generated_ui_authoring_tree(&crate_root);
     let ui_validation =
         std::fs::read_to_string(crate_root.join("src/engine/primitives/ui/validation.rs"))
             .expect("failed to read generated UI validation boundary");
-    let ui_tree = [ui.as_str(), ui_validation.as_str()].join("\n");
+    let ui_tree = [ui.as_str(), ui_authoring.as_str(), ui_validation.as_str()].join("\n");
     for required in [
         "ui::catalog",
         "ui::create_surface",
@@ -2761,32 +2948,34 @@ fn module_package_activation_gates_stay_on() {
 
     let ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
         .expect("failed to read generated UI primitive");
+    let ui_authoring = read_generated_ui_authoring_tree(&crate_root);
+    let ui_tree = [ui.as_str(), ui_authoring.as_str()].join("\n");
     assert!(
-        ui.contains("\"package\"")
-            && ui.contains("\"module_config\"")
-            && ui.contains("\"activation\"")
-            && ui.contains("module::inspect_package")
-            && ui.contains("module::check_health")
-            && ui.contains("module::verify_integrity")
-            && ui.contains("module::recover_activation")
-            && ui.contains("module::verify_source")
-            && ui.contains("module::register_source")
-            && ui.contains("module::verify_signature")
-            && ui.contains("module::audit_policy")
-            && ui.contains("module::record_policy_audit")
-            && ui.contains("module::reconcile_trust")
-            && ui.contains("module::inspect_trust")
-            && ui.contains("module::renew_trust_root")
-            && ui.contains("module::rotate_signature_key")
-            && ui.contains("module::expire_trust_decision")
-            && ui.contains("module::enforce_revocation")
-            && ui.contains("module::simulate_trust_change")
-            && ui.contains("module::record_trust_review")
-            && ui.contains("module::trust_audit_status")
-            && ui.contains("module::schedule_trust_audit")
-            && ui.contains("module::run_scheduled_trust_audit")
-            && ui.contains("module::record_trust_audit_retention")
-            && ui.contains("module::run_conformance"),
+        ui_tree.contains("\"package\"")
+            && ui_tree.contains("\"module_config\"")
+            && ui_tree.contains("\"activation\"")
+            && ui_tree.contains("module::inspect_package")
+            && ui_tree.contains("module::check_health")
+            && ui_tree.contains("module::verify_integrity")
+            && ui_tree.contains("module::recover_activation")
+            && ui_tree.contains("module::verify_source")
+            && ui_tree.contains("module::register_source")
+            && ui_tree.contains("module::verify_signature")
+            && ui_tree.contains("module::audit_policy")
+            && ui_tree.contains("module::record_policy_audit")
+            && ui_tree.contains("module::reconcile_trust")
+            && ui_tree.contains("module::inspect_trust")
+            && ui_tree.contains("module::renew_trust_root")
+            && ui_tree.contains("module::rotate_signature_key")
+            && ui_tree.contains("module::expire_trust_decision")
+            && ui_tree.contains("module::enforce_revocation")
+            && ui_tree.contains("module::simulate_trust_change")
+            && ui_tree.contains("module::record_trust_review")
+            && ui_tree.contains("module::trust_audit_status")
+            && ui_tree.contains("module::schedule_trust_audit")
+            && ui_tree.contains("module::run_scheduled_trust_audit")
+            && ui_tree.contains("module::record_trust_audit_retention")
+            && ui_tree.contains("module::run_conformance"),
         "generated UI authoring must support module package targets through canonical actions"
     );
     assert!(
@@ -4452,6 +4641,25 @@ fn rust_files_under(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     visit_rust_files(root, &mut files);
     files
+}
+
+fn read_generated_ui_authoring_tree(crate_root: &Path) -> String {
+    [
+        "src/engine/primitives/ui/authoring/mod.rs",
+        "src/engine/primitives/ui/authoring/prompt.rs",
+        "src/engine/primitives/ui/authoring/notifications.rs",
+        "src/engine/primitives/ui/authoring/subagent.rs",
+        "src/engine/primitives/ui/authoring/source_control.rs",
+        "src/engine/primitives/ui/authoring/agent_control.rs",
+    ]
+    .into_iter()
+    .map(|rel| {
+        let path = crate_root.join(rel);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 fn files_to_scan(root: &Path) -> Vec<PathBuf> {

@@ -43,13 +43,19 @@ struct EngineConsoleView: View {
 
     let engineClient: EngineClient
     let actions: DashboardToolbarActions
+    let eventDatabaseStorageMode: EventDatabaseStorageMode
     @State private var state: EngineConsoleState
     @State private var section: ConsoleSection = .overview
     @State private var showAdvancedSections = false
 
-    init(engineClient: EngineClient, actions: DashboardToolbarActions) {
+    init(
+        engineClient: EngineClient,
+        actions: DashboardToolbarActions,
+        eventDatabaseStorageMode: EventDatabaseStorageMode = .primaryDocuments
+    ) {
         self.engineClient = engineClient
         self.actions = actions
+        self.eventDatabaseStorageMode = eventDatabaseStorageMode
         _state = State(initialValue: EngineConsoleState(engineClient: engineClient))
     }
 
@@ -166,6 +172,15 @@ struct EngineConsoleView: View {
             EngineConsoleMetricGrid(metrics: overviewMetrics)
 
             readinessCard
+
+            if eventDatabaseStorageMode.isTemporaryFallback {
+                EngineConsoleBanner(
+                    symbol: "externaldrive.badge.exclamationmark",
+                    title: "Temporary local event cache",
+                    message: "Documents storage was unavailable at launch. This device is using a temporary projection cache; server substrate truth remains authoritative and local cache rows may be lost.",
+                    tint: .tronAmber
+                )
+            }
 
             if let warning = indexWarning {
                 EngineConsoleBanner(
