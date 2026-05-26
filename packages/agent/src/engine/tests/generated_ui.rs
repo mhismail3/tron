@@ -22,11 +22,44 @@ fn generated_prompt_collection_request(layout_profile: &str, target_id: &str) ->
     })
 }
 
+fn generated_source_control_request(session_id: &str) -> Value {
+    json!({
+        "targetType": "source_control",
+        "targetId": session_id,
+        "purpose": "Review source-control state and actions",
+        "layoutProfile": "source_control.session.v1",
+        "maxPreviewBytes": 1024,
+        "expiresAt": "2100-01-01T00:00:00Z"
+    })
+}
+
+fn generated_agent_control_request(session_id: &str) -> Value {
+    json!({
+        "targetType": "agent_control",
+        "targetId": session_id,
+        "purpose": "Review session control state and safe actions",
+        "layoutProfile": "agent_control.session.v1",
+        "maxPreviewBytes": 1024,
+        "expiresAt": "2100-01-01T00:00:00Z"
+    })
+}
+
 fn prompt_ui_context(key: &str) -> CausalContext {
     mutating_causal(key)
         .with_scope("ui.write")
         .with_scope("prompt_library.read")
         .with_scope("prompt_library.write")
+}
+
+fn source_control_ui_context(key: &str, session_id: &str) -> CausalContext {
+    mutating_causal(key)
+        .with_session_id(session_id)
+        .with_scope("ui.write")
+        .with_scope("control.read")
+        .with_scope("worktree.read")
+        .with_scope("worktree.write")
+        .with_scope("git.read")
+        .with_scope("git.write")
 }
 
 fn sessionless_prompt_ui_context(key: &str) -> CausalContext {
@@ -43,6 +76,46 @@ fn prompt_write_context(key: &str) -> CausalContext {
 
 fn prompt_internal_write_context(key: &str) -> CausalContext {
     prompt_write_context(key).with_scope(crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE)
+}
+
+fn register_source_control_capabilities(handle: &EngineHostHandle) {
+    handle
+        .register_worker_for_setup(worker("worktree", "worktree"), false)
+        .unwrap();
+    handle
+        .register_worker_for_setup(worker("git", "git"), false)
+        .unwrap();
+    for spec in crate::domains::worktree::contract::capabilities()
+        .unwrap()
+        .into_iter()
+        .chain(crate::domains::git::contract::capabilities().unwrap())
+    {
+        let function = crate::domains::contract::function_definition_for_capability(&spec);
+        let response = match function.id.as_str() {
+            "worktree::get_status" => json!({
+                "branch": "feature/source-control-generated-ui",
+                "isDirty": true,
+                "files": [
+                    {"path": "README.md", "status": "modified", "additions": 3, "deletions": 1},
+                    {"path": "docs/capability-backed-truth-migration-plan.md", "status": "modified", "additions": 8, "deletions": 0}
+                ],
+                "conflictState": "none"
+            }),
+            "worktree::get_diff" => json!({
+                "file": "README.md",
+                "diffPreview": "@@ bounded diff preview @@"
+            }),
+            "worktree::list_conflicts" => json!({"conflicts": []}),
+            _ => json!({"ok": true, "functionId": function.id.as_str()}),
+        };
+        handle
+            .register_function_for_setup(
+                function,
+                Some(Arc::new(StaticValueHandler(response))),
+                false,
+            )
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -363,6 +436,156 @@ async fn ui_surface_for_target_supports_core_substrate_targets() {
             target_type
         );
     }
+}
+
+#[tokio::test]
+async fn ui_surface_for_target_authors_source_control_session_surface() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    register_source_control_capabilities(&handle);
+    let session_id = "sess-source-control-generated-ui";
+
+    let status = handle
+        .invoke(host_invocation(
+            "worktree::get_status",
+            json!({"sessionId": session_id}),
+            causal()
+                .with_session_id(session_id)
+                .with_scope("worktree.read"),
+        ))
+        .await;
+    assert_eq!(status.error, None);
+    let diff = handle
+        .invoke(host_invocation(
+            "worktree::get_diff",
+            json!({"sessionId": session_id, "file": "README.md"}),
+            causal()
+                .with_session_id(session_id)
+                .with_scope("worktree.read"),
+        ))
+        .await;
+    assert_eq!(diff.error, None);
+
+    let created = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_source_control_request(session_id),
+            source_control_ui_context("generated-source-control-session", session_id),
+        ))
+        .await;
+
+    assert_eq!(created.error, None);
+    let surface = &created.value.as_ref().unwrap()["surface"];
+    assert_eq!(surface["authoring"]["targetType"], "source_control");
+    assert_eq!(surface["authoring"]["targetId"], session_id);
+    assert_eq!(
+        surface["authoring"]["layoutProfile"],
+        "source_control.session.v1"
+    );
+    let layout_text = surface["layout"].to_string();
+    for required in [
+        "Source Control Review",
+        "feature/source-control-generated-ui",
+        "README.md",
+        "worktree::get_status",
+        "worktree::get_diff",
+    ] {
+        assert!(
+            layout_text.contains(required),
+            "source-control surface layout must include `{required}`"
+        );
+    }
+    assert!(
+        !layout_text.contains("payloadTemplate"),
+        "source-control layout must not inline action templates"
+    );
+    let actions = surface["actions"].as_array().unwrap();
+    for (action_id, function_id) in [
+        ("refresh-worktree-status", "worktree::get_status"),
+        ("inspect-worktree-diff", "worktree::get_diff"),
+        ("commit-worktree", "worktree::commit"),
+        ("list-conflicts", "worktree::list_conflicts"),
+        ("finalize-session", "worktree::finalize_session"),
+        ("push-branch", "git::push"),
+        ("sync-main", "git::sync_main"),
+    ] {
+        assert!(
+            actions.iter().any(|action| {
+                action["actionId"] == action_id
+                    && action["targetFunctionId"] == function_id
+                    && action["targetRevision"].is_u64()
+                    && action["idempotencyKeyTemplate"] == "${submission.idempotencyKey}"
+                    && action.get("consequence").is_some()
+            }),
+            "missing stored source-control action {action_id} -> {function_id}"
+        );
+    }
+    let commit = actions
+        .iter()
+        .find(|action| action["actionId"] == "commit-worktree")
+        .unwrap();
+    assert_eq!(commit["approvalPolicy"]["required"], true);
+    assert_eq!(commit["payloadTemplate"]["sessionId"], session_id);
+    assert_eq!(commit["payloadTemplate"]["message"], "${input.message}");
+    assert_eq!(commit["payloadTemplate"]["stageAll"], "${input.stageAll}");
+}
+
+#[tokio::test]
+async fn ui_surface_for_target_authors_agent_control_session_surface() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    register_source_control_capabilities(&handle);
+    let session_id = "sess-agent-control-generated-ui";
+    let _ = handle
+        .invoke(host_invocation(
+            "worktree::get_status",
+            json!({"sessionId": session_id}),
+            causal()
+                .with_session_id(session_id)
+                .with_scope("worktree.read"),
+        ))
+        .await;
+
+    let created = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_agent_control_request(session_id),
+            source_control_ui_context("generated-agent-control-session", session_id),
+        ))
+        .await;
+
+    assert_eq!(created.error, None);
+    let surface = &created.value.as_ref().unwrap()["surface"];
+    assert_eq!(surface["authoring"]["targetType"], "agent_control");
+    assert_eq!(
+        surface["authoring"]["layoutProfile"],
+        "agent_control.session.v1"
+    );
+    let layout_text = surface["layout"].to_string();
+    for required in [
+        "Agent Control",
+        "Session",
+        "Catalog",
+        "Workers",
+        "Source Control",
+    ] {
+        assert!(
+            layout_text.contains(required),
+            "agent-control surface layout must include `{required}`"
+        );
+    }
+    let actions = surface["actions"].as_array().unwrap();
+    assert!(actions.iter().any(|action| {
+        action["actionId"] == "open-source-control"
+            && action["targetFunctionId"] == "ui::surface_for_target"
+            && action["payloadTemplate"]["targetType"] == "source_control"
+            && action["payloadTemplate"]["targetId"] == session_id
+            && action["payloadTemplate"]["layoutProfile"] == "source_control.session.v1"
+            && action["consequence"]["recommendedCanonicalAction"] == "ui::surface_for_target"
+    }));
+    assert!(actions.iter().any(|action| {
+        action["actionId"] == "control-snapshot"
+            && action["targetFunctionId"] == "control::snapshot"
+            && action["payloadTemplate"]["sessionId"] == session_id
+    }));
 }
 
 #[tokio::test]

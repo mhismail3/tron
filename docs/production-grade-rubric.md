@@ -9,7 +9,7 @@ tests, generated projects, CI, schemas, and repo support.
 
 The stricter capability-backed-truth migration score lives in
 `docs/capability-backed-truth-migration-plan.md`. That score is currently
-**97/100** and tracks whether every agent- or operator-affecting durable fact is
+**98/100** and tracks whether every agent- or operator-affecting durable fact is
 owned by canonical capabilities and the collapsed resource/decision/evidence/
 invocation/grant substrate. It intentionally has known blockers even while this
 production-grade classification score remains complete.
@@ -26,14 +26,15 @@ Each axis receives one of these maturity levels:
 
 Current repo-wide score: **100/100**.
 
-Current capability-backed-truth score: **97/100**.
+Current capability-backed-truth score: **98/100**.
 
 This production-grade score means every known source artifact, state owner,
 product shell, and security boundary is either implemented, tested, documented,
 or explicitly classified with static gates. It does not mean every durable fact
 is already capability-backed truth. Notifications and subagent completed-result
-lineage are now resource-backed; the remaining migration blockers are
-source-control/AgentControl surfaces and cron/scheduled work truth.
+lineage are now resource-backed, and source-control/AgentControl review has
+server-authored generated surfaces; the remaining migration blocker is
+cron/scheduled work truth.
 
 ## Rubric
 
@@ -166,9 +167,8 @@ Evidence:
 Blockers:
 
 - No current blocker for production-grade classification. The stricter
-  capability-backed-truth migration separately tracks subagent lineage
-  surfaces, source-control/AgentControl surfaces, and cron/scheduled work truth
-  as conversion blockers.
+  capability-backed-truth migration separately tracks cron/scheduled work truth
+  as the remaining conversion blocker.
 
 Next action:
 
@@ -359,7 +359,7 @@ Next action:
    focused audit are completed evidence for the 98/100 checkpoint.
 6. Prompt Library generated management and gated local composer insertion are
    completed evidence for the final 100/100 checkpoint.
-7. Capability-backed-truth migration is now tracked separately at 97/100 in
+7. Capability-backed-truth migration is now tracked separately at 98/100 in
    `docs/capability-backed-truth-migration-plan.md`; close
-   source-control/AgentControl and cron/scheduled-work blockers before claiming
-   capability-backed truth is complete.
+   cron/scheduled-work truth before claiming capability-backed truth is
+   complete.

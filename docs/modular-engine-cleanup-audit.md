@@ -55,16 +55,17 @@ high-impact durable paths that needed stronger substrate ownership. The
 Phase 2 converted notification delivery/read truth to
 resource/decision/evidence truth and removed the retired read-state schema.
 Phase 3 moved completed subagent result truth to deterministic `agent_result`
-resources and added generated subagent lineage surfaces. The remaining blockers
-are source-control/AgentControl product shells and cron/scheduled work.
+resources and added generated subagent lineage surfaces. Phase 4 added
+server-authored source-control and AgentControl generated surfaces with stored
+canonical actions. The remaining blocker is cron/scheduled work.
 
 | Area | Evidence | Decision |
 |------|----------|----------|
-| Capability-backed-truth tracker | `docs/capability-backed-truth-migration-plan.md` defines a stricter 100-point score, current 97/100 baseline, phase tracker, conversion register, and verification standard | Keep as the authoritative migration tracker until every candidate is converted or explicitly accepted as low-level substrate |
+| Capability-backed-truth tracker | `docs/capability-backed-truth-migration-plan.md` defines a stricter 100-point score, current 98/100 baseline, phase tracker, conversion register, and verification standard | Keep as the authoritative migration tracker until every candidate is converted or explicitly accepted as low-level substrate |
 | Memory retain | `packages/agent/src/domains/memory/retain/resources.rs`, `packages/agent/src/engine/tests/memory_retain_resources.rs`, and `packages/agent/src/domains/agent/runtime/service/context.rs` prove retained outputs are artifacts/materialized projections, recovery/projection failures emit evidence refs, and prompt context reads retained rule/argument artifacts from resource truth | Completed Phase 1; static gates forbid direct hidden durable writes returning to memory retain |
 | Notification Resource Contract | `packages/agent/src/domains/notifications/inbox.rs`, `packages/agent/src/engine/tests/notification_resources.rs`, and `packages/agent/src/engine/primitives/ui.rs` prove notification delivery is a `notification` resource with delivery `evidence`, read state is `decision` truth, `notifications::list` ignores historical event-only rows, and generated `notifications.inbox.v1` surfaces expose stored read actions | Completed Phase 2; static gates forbid `notification_read_state` and event-payload inbox reconstruction |
 | Subagent lineage | `packages/agent/src/domains/agent/lineage.rs`, `packages/agent/src/domains/agent/operations/submissions.rs`, `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager/execution.rs`, `packages/agent/src/engine/tests/subagent_lineage.rs`, and `packages/agent/src/engine/primitives/ui.rs` prove completed child-agent result truth is deterministic `agent_result:subagent:*` resources, status/result can reconstruct without a live manager, malformed or cross-session resources are ignored, and generated `subagent.lineage.v1` surfaces expose bounded server-owned lineage/actions | Completed Phase 3; fixed Swift subagent sheets remain thin rendering/navigation only and static gates forbid client-owned action or policy construction |
-| Source-control and AgentControl shells | Product-shell reachability map keeps these as fixed thin shells pending generated review/control replacements | Convert after server-authored generated surfaces preserve current operator safety |
+| Source-control and AgentControl shells | `source_control.session.v1` and `agent_control.session.v1` generated surfaces now expose bounded server-owned source-control/control review projections and stored canonical actions. Product-shell reachability keeps fixed Swift shells only as thin navigation/review containers while conflict/deferred-prompt UX remains bespoke. | Completed Phase 4 server-owned projection boundary; remove fixed controls only after generated UX equivalence is proven |
 | Cron/scheduled work | Cron remains a dedicated scheduler plane with separate files/tables | Convert to resource/decision/invocation/evidence truth unless a later audit explicitly accepts it as low-level scheduler substrate |
 
 Removal proof from this reset:
@@ -72,7 +73,7 @@ Removal proof from this reset:
 - Phase 0 changed no runtime behavior; Phase 1 converted retained-memory
   persistence through canonical resource/materialization capabilities.
 - The existing production-grade 100/100 rubric is not removed. It is narrowed to
-  classification/organization proof, while the new 97/100 tracker owns the
+  classification/organization proof, while the new 98/100 tracker owns the
   stricter capability-backed-truth migration.
 - Memory retain is no longer allowed to regress to direct file/table truth under
   a broad "classified" score.
@@ -307,7 +308,7 @@ Deferred domain-output proof map:
 |----------------|------------------|----------|
 | `notifications` | `notifications::send/list/mark_read/mark_all_read` now use `notification` resources, delivery `evidence`, and read `decision` truth; generated inbox surfaces expose stored canonical read actions while the fixed iOS shell remains a thin APNs/deep-link affordance | Converted durable truth; replace the fixed navigation shell only after generated UI can preserve session-opening ergonomics |
 | `prompt_library` | Server resource-backed artifacts plus iOS input-bar/history/snippet callers remain active | Converted durable state; keep the iOS sheet as a thin capability client |
-| AgentControl/source-change/subagent sheets | AgentControl and SourceChanges remain active fixed review shells. Subagent completed-result truth is now deterministic `agent_result` resource truth with generated lineage surfaces, while fixed subagent chat sheets remain thin render/navigation affordances. | Defer AgentControl/source-control conversion; keep subagent fixed shells thin until generated lineage UX fully replaces chat-specific pending/result navigation |
+| AgentControl/source-change/subagent sheets | AgentControl and SourceChanges now have generated `agent_control.session.v1` and `source_control.session.v1` server-owned review surfaces with stored canonical actions. Fixed AgentControl/SourceChanges shells remain active only as thin navigation/review containers while conflict/deferred-prompt UX remains bespoke. Subagent completed-result truth is deterministic `agent_result` resource truth with generated lineage surfaces, while fixed subagent chat sheets remain thin render/navigation affordances. | Completed AgentControl/source-control server projection boundary; remove fixed shell controls only after generated UX equivalence and absence gates are proven |
 | `browser`, `display`, `device` | Server domains still register workers and support local device/display flows; iOS display stream DTOs remain active | Keep as capability modules until each output path is separately proven resource-backed or ephemeral |
 | `transcription` | Server domain remains the reusable audio-to-text capability used by voice notes; model cache/sidecar state is runtime infrastructure | Keep; audit retained transcript outputs separately if direct transcription results become durable |
 | `voice_notes` | Now resource-backed through `artifact` and `materialized_file`; list/delete use resource truth | Converted; remove any future file-scan compatibility proposals |

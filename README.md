@@ -97,8 +97,9 @@ with the 100-point production-grade rubric in
 [`docs/production-grade-rubric.md`](docs/production-grade-rubric.md).
 The stricter capability-backed-truth migration tracker lives in
 [`docs/capability-backed-truth-migration-plan.md`](docs/capability-backed-truth-migration-plan.md);
-it is currently at 97/100 after the memory-retain, notification-resource, and
-subagent-lineage conversions and tracks the
+it is currently at 98/100 after the memory-retain, notification-resource,
+subagent-lineage, and source-control/AgentControl generated-surface conversions
+and tracks the
 remaining work to make every agent- or operator-affecting durable fact
 capability-owned substrate truth.
 The current operator checklist for local package trust, audits, revocation, and
@@ -564,6 +565,10 @@ Generated UI is persisted as
 submits only the stored
 surface/version/action coordinates, user input, and idempotency key; the server
 reconstructs and authorizes the canonical target invocation.
+Generated authoring currently covers substrate targets, prompt-library,
+notification, subagent-lineage, source-control, and AgentControl review
+surfaces; source-control mutations remain stored canonical `git::*` or
+`worktree::*` actions.
 
 The module package lifecycle is also resource-native. `module::register_package`
 validates manifest digest, provenance, namespace ownership, declared capability

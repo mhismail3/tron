@@ -576,7 +576,11 @@ fn validate_binding_target(
         target_type: target_type.to_owned(),
         target_id: target_id.to_owned(),
         purpose: "validate binding".to_owned(),
-        layout_profile: "compact".to_owned(),
+        layout_profile: binding
+            .get("layoutProfile")
+            .and_then(Value::as_str)
+            .unwrap_or("compact")
+            .to_owned(),
         expected_target_revision: None,
         existing_surface_resource_id: None,
         expected_current_version_id: None,

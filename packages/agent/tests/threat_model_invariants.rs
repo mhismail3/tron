@@ -663,8 +663,8 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     assert_eq!(total, 100, "capability-backed truth rubric must total 100");
 
     assert!(
-        tracker.contains("Current capability-backed-truth score: **97/100**")
-            && tracker.contains("Total: **97/100**")
+        tracker.contains("Current capability-backed-truth score: **98/100**")
+            && tracker.contains("Total: **98/100**")
             && tracker.contains("Known Blockers")
             && tracker.contains("Conversion Candidate Register")
             && tracker.contains("Verification Standard For Every Phase")
@@ -720,10 +720,10 @@ fn capability_backed_truth_migration_tracker_stays_current() {
 
     assert!(
         production_rubric.contains("Current repo-wide score: **100/100**")
-            && production_rubric.contains("Current capability-backed-truth score: **97/100**")
+            && production_rubric.contains("Current capability-backed-truth score: **98/100**")
             && production_rubric.contains("docs/capability-backed-truth-migration-plan.md")
             && production_rubric.contains("Notifications and subagent completed-result")
-            && production_rubric.contains("lineage are now resource-backed")
+            && production_rubric.contains("source-control/AgentControl review has")
             && production_rubric.contains("cron/scheduled work truth"),
         "production-grade rubric must distinguish classification score from capability-backed truth migration"
     );
@@ -745,7 +745,7 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     );
     assert!(
         readme.contains("docs/capability-backed-truth-migration-plan.md")
-            && readme.contains("currently at 97/100"),
+            && readme.contains("currently at 98/100"),
         "README must link the capability-backed-truth migration tracker and baseline"
     );
 }
@@ -4166,6 +4166,61 @@ fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
         assert!(
             !prompt_management.contains(forbidden),
             "iOS generated Prompt Library management must not construct `{forbidden}`"
+        );
+    }
+
+    let agent_control_root = repo
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("Views")
+        .join("AgentControl");
+    let source_changes_root = repo
+        .join("packages")
+        .join("ios-app")
+        .join("Sources")
+        .join("Views")
+        .join("SourceChanges");
+    for (label, root) in [
+        ("AgentControl", agent_control_root.as_path()),
+        ("SourceChanges", source_changes_root.as_path()),
+    ] {
+        for entry in std::fs::read_dir(root)
+            .unwrap_or_else(|error| panic!("read {label} source root: {error}"))
+        {
+            let entry = entry.unwrap_or_else(|error| panic!("read {label} entry: {error}"));
+            let path = entry.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("swift") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {path:?}: {error}"));
+            for forbidden in [
+                "targetFunctionId",
+                "payloadTemplate",
+                "requiredGrant",
+                "UiActionSubmissionDTO",
+            ] {
+                assert!(
+                    !content.contains(forbidden),
+                    "{label} fixed shell file {path:?} must not construct generated action `{forbidden}`"
+                );
+            }
+        }
+    }
+
+    let generated_ui_tests =
+        std::fs::read_to_string(crate_root.join("src/engine/tests/generated_ui.rs"))
+            .expect("read generated ui tests");
+    for required in [
+        "source_control.session.v1",
+        "agent_control.session.v1",
+        "ui_surface_for_target_authors_source_control_session_surface",
+        "ui_surface_for_target_authors_agent_control_session_surface",
+    ] {
+        assert!(
+            generated_ui_tests.contains(required),
+            "generated UI tests must keep source-control/AgentControl generated boundary proof `{required}`"
         );
     }
 

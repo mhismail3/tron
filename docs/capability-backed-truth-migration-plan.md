@@ -13,7 +13,7 @@ Domain-owned hidden file/table truth is not acceptable unless it is explicitly
 classified as low-level platform substrate with static gates and no agent-policy
 role.
 
-Current capability-backed-truth score: **97/100**.
+Current capability-backed-truth score: **98/100**.
 
 The repo-wide production-grade score remains useful as a reachability,
 organization, and classification score. This score tracks a narrower question:
@@ -29,18 +29,17 @@ invocation/grant backed, inspectable, and recoverable.
 | Resource/output contracts | 15 | 15 | Mutating durable outputs declare contracts and return refs; failures leave no accepted hidden output |
 | Authority and security | 15 | 15 | Grants, approvals, file/network policy, redaction, and sandboxing are enforced at every boundary |
 | Background/autonomous work | 10 | 9 | Auto-retain, scheduled work, notifications, retries, and cleanup all run through canonical invocations and leave evidence |
-| Client thinness | 8 | 7 | iOS/Mac render server truth and submit stored actions only; local state is limited to genuine editing/hardware affordances |
+| Client thinness | 8 | 8 | iOS/Mac render server truth and submit stored actions only; local state is limited to genuine editing/hardware affordances |
 | Observability and recovery | 7 | 7 | Operators and agents can inspect lineage, state, failure, safe next action, and recovery path |
 | Test/static proof | 7 | 7 | Focused tests, integration tests, failure tests, absence gates, and docs prove the invariant |
 | Deletion discipline | 3 | 3 | Retired files/tables/routes/fallbacks are removed or statically forbidden |
 
-Total: **97/100**.
+Total: **98/100**.
 
 ## Known Blockers
 
 | Blocker | Current Truth Owner | Why It Blocks 100% | Target Decision |
 |---|---|---|---|
-| Source-control and AgentControl shells | Fixed Swift product shells plus domain/event projections | Review workflows still contain client-shaped operator surfaces | Convert only after generated review surfaces preserve current safety |
 | Cron/scheduled work | `automations.json`, `cron_jobs`, and `cron_runs` | Scheduler product truth remains outside resource/decision truth | Convert unless explicitly accepted as low-level scheduler substrate |
 
 ## Completed Conversions
@@ -50,6 +49,7 @@ Total: **97/100**.
 | Memory retain | `memory::retain` and hidden `memory::auto_retain_fire` now persist retained journals, rule updates, and arguments as `artifact` resources with linked `materialized_file` markdown projections. `memory.retained` payloads include `resourceRefs` plus recovery/projection `evidenceRefs`, duplicate retain keys do not duplicate memory artifacts, and prompt context appends retained rule/argument artifacts from resource truth. | `packages/agent/src/domains/memory/retain/resources.rs`; `packages/agent/src/engine/tests/memory_retain_resources.rs`; `packages/agent/src/domains/agent/runtime/service/context.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 | Notifications | `notifications::send` persists bounded `notification` resources, delivery `evidence`, and read-state `decision` resources; `notifications::list` reads resource/decision truth and ignores historical event-only rows; generated `notifications.inbox.v1` surfaces expose stored mark-read actions. | `packages/agent/src/domains/notifications/inbox.rs`; `packages/agent/src/engine/tests/notification_resources.rs`; `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 | Subagent lineage | Completed child-agent results are persisted as deterministic `agent_result:subagent:{subagentSessionId}` resources; `agent::subagent_status` and `agent::subagent_result` reconstruct completed output from resource truth even without a live manager; malformed, mismatched, or cross-session resources are rejected before they become status/result truth; generated `subagent.lineage.v1` surfaces expose bounded lineage rows and stored canonical status/result/cancel actions. Fixed iOS subagent sheets remain thin chat navigation/rendering affordances and are statically forbidden from constructing target functions, payload templates, grants, or action submissions. | `packages/agent/src/domains/agent/lineage.rs`; `packages/agent/src/domains/agent/operations/submissions.rs`; `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager/execution.rs`; `packages/agent/src/engine/tests/subagent_lineage.rs`; `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/tests/threat_model_invariants.rs` |
+| Source-control and AgentControl surfaces | Generated `source_control.session.v1` surfaces project session-scoped git/worktree invocation truth, bounded changed-file/status/conflict summaries, and stored canonical `worktree::*` / `git::*` actions. Generated `agent_control.session.v1` surfaces expose session/catalog/control summaries plus a stored action that opens the source-control review surface. Fixed Swift shells remain thin navigation/review containers and are statically forbidden from constructing generated action targets, payload templates, grants, or action submissions. | `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/src/engine/tests/generated_ui.rs`; `packages/agent/src/engine/resources/ui_surface.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 
 ## Conversion Candidate Register
 
@@ -58,7 +58,7 @@ Total: **97/100**.
 | Memory retain | completed durable agent-context truth | 94/100 | Phase 1 | Retained journal/rule/argument outputs are resource-backed, events include refs, context loads resource truth, direct durable file writes are forbidden outside materialization helpers |
 | Notifications | completed operator attention truth | 96/100 | Phase 2 | Send/list/read state is resource/decision/evidence backed; generated inbox surfaces expose canonical read actions; retired read-state truth is absent with gates |
 | Subagent invocation/result surfaces | completed execution lineage projection | 97/100 | Phase 3 | Completed child result state survives resume/restart through deterministic `agent_result` resources; malformed or cross-session resources are ignored; generated lineage surfaces render server-owned resource/invocation truth and stored canonical actions; fixed client shells remain thin |
-| Source-control and AgentControl surfaces | operator review projection | 98/100 | Phase 4 | Git/worktree/control review surfaces are server-authored, revision-pinned, and stale-safe before fixed mutation UI is removed |
+| Source-control and AgentControl surfaces | completed operator review projection | 98/100 | Phase 4 | Git/worktree/control review surfaces are server-authored, revision-pinned, stale-safe, and use stored canonical actions while fixed Swift shells stay thin |
 | Cron and scheduled work | scheduler product truth | 99-100/100 | Phase 5 | Schedules/runs are resource/decision/invocation/evidence backed, or cron is explicitly accepted as low-level substrate with static gates |
 | Whole-engine audit | final proof | 100/100 | Phase 6 | No unclassified durable truth, hidden file/table state, client policy, fallback reader, or retired route remains |
 
@@ -207,27 +207,32 @@ Completed tests:
 
 ### Phase 4: Source-Control And AgentControl Generated Surfaces
 
-Status: **pending**.
+Status: **completed**.
 
 Target score: **98/100**.
 
 Required behavior:
 
-- Define generated surfaces for source changes, worktree status, diff summaries,
-  conflict state, deferred prompts, and canonical git/worktree actions.
-- Keep local UI only for true composition/editing affordances that have no
-  durable engine state until submitted.
-- Move source-control action consequence summaries to server-owned capability
-  metadata and action summaries.
-- Remove fixed management controls once generated surfaces are equivalent.
+- Add generated `source_control.session.v1` surfaces that derive session-scoped
+  source-control review state from existing git/worktree invocation records and
+  bounded capability results.
+- Add generated `agent_control.session.v1` surfaces that expose session/catalog
+  summary state and route source-control review through a stored
+  `ui::surface_for_target` action.
+- Keep fixed AgentControl/SourceChanges Swift shells as navigation/review
+  containers only until generated UI fully replaces every bespoke workflow.
+- Keep every mutation routed through canonical `git::*`, `worktree::*`,
+  `control::*`, and `ui::*` capabilities.
 
 Required tests:
 
-- Generated source-control review surfaces are revision-pinned and stale-safe.
-- Mutating git/worktree actions require the same approvals and output contracts
-  as direct capability use.
-- iOS submits only stored generated action coordinates.
-- Static gates protect against fixed shell mutation returning.
+- `ui_surface_for_target_authors_source_control_session_surface` proves bounded
+  source-control projection layout and stored canonical worktree/git actions.
+- `ui_surface_for_target_authors_agent_control_session_surface` proves the
+  AgentControl generated surface and stored source-control handoff action.
+- `product_shell_reachability_and_prompt_library_resources_stay_enforced`
+  statically forbids AgentControl/SourceChanges Swift shells from constructing
+  generated action targets, payload templates, grants, or action submissions.
 
 ### Phase 5: Cron And Scheduled Work Truth Decision
 

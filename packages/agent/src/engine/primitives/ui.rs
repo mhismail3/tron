@@ -2,7 +2,9 @@
 //!
 //! `ui_surface` is a resource kind. The `ui::*` capabilities are narrow
 //! wrappers around the generic resource store plus the fixed component catalog.
-//! They do not own durable state.
+//! They do not own durable state. Generated profile authoring is kept here so
+//! fixed clients can render server-owned review surfaces without constructing
+//! target functions, payload templates, grants, or stale-state policy locally.
 
 mod validation;
 
@@ -47,6 +49,10 @@ pub(crate) const EXPIRE_SURFACE_FUNCTION: &str = "ui::expire_surface";
 
 const GENERATED_AUTHORING_MODE: &str = "generated";
 const RESOURCE_COLLECTION_TARGET: &str = "resource_collection";
+const SOURCE_CONTROL_TARGET: &str = "source_control";
+const AGENT_CONTROL_TARGET: &str = "agent_control";
+const SOURCE_CONTROL_SESSION_LAYOUT_PROFILE: &str = "source_control.session.v1";
+const AGENT_CONTROL_SESSION_LAYOUT_PROFILE: &str = "agent_control.session.v1";
 const PROMPT_SNIPPET_COLLECTION_TARGET: &str = "artifact:prompt-snippet";
 const PROMPT_HISTORY_COLLECTION_TARGET: &str = "artifact:prompt-history";
 const PROMPT_SNIPPET_RESOURCE_PREFIX: &str = "artifact:prompt-snippet:";
@@ -62,6 +68,8 @@ const SUBAGENT_COLLECTION_TARGET: &str = "agent_result:subagent";
 const SUBAGENT_RESULT_RESOURCE_PREFIX: &str = "agent_result:subagent:";
 const SUBAGENT_LINEAGE_LAYOUT_PROFILE: &str = "subagent.lineage.v1";
 const SUBAGENT_COLLECTION_LIMIT: usize = 50;
+const SOURCE_CONTROL_INVOCATION_LIMIT: usize = 12;
+const SOURCE_CONTROL_FILE_LIMIT: usize = 25;
 
 pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
     Ok(vec![
@@ -721,6 +729,7 @@ fn author_surface_for_target(
         "targetType": request.target_type,
         "targetId": request.target_id,
         "role": "target",
+        "layoutProfile": request.layout_profile,
         "label": projection.title,
     })];
     for link in &request.links {
@@ -841,6 +850,8 @@ fn target_projection(
             })
         }
         RESOURCE_COLLECTION_TARGET => resource_collection_projection(host, request),
+        SOURCE_CONTROL_TARGET => source_control_projection(host, request),
+        AGENT_CONTROL_TARGET => agent_control_projection(host, invocation, request),
         "package" => {
             let resource_id = if request.target_id.starts_with("worker-package:") {
                 request.target_id.clone()
@@ -1280,6 +1291,238 @@ fn subagent_collection_projection(
     })
 }
 
+fn source_control_projection(
+    host: &dyn PrimitiveRuntimeHost,
+    request: &SurfaceAuthoringRequest,
+) -> Result<TargetProjection> {
+    if request.layout_profile != SOURCE_CONTROL_SESSION_LAYOUT_PROFILE {
+        return Err(EngineError::PolicyViolation(format!(
+            "source_control target requires layoutProfile {SOURCE_CONTROL_SESSION_LAYOUT_PROFILE}"
+        )));
+    }
+    let session_id = request.target_id.as_str();
+    let recent = source_control_invocation_rows(host, session_id, request);
+    let latest_status = latest_source_control_result(host, session_id, "worktree::get_status")
+        .unwrap_or_else(|| json!({}));
+    let latest_conflicts =
+        latest_source_control_result(host, session_id, "worktree::list_conflicts")
+            .unwrap_or_else(|| json!({"conflicts": []}));
+    let changed_files = source_control_file_rows(&latest_status, request);
+    let branch = bounded_text_preview(
+        latest_status
+            .get("branch")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        request.max_preview_bytes,
+    );
+    let dirty = latest_status
+        .get("isDirty")
+        .or_else(|| latest_status.get("dirty"))
+        .cloned()
+        .unwrap_or_else(|| json!(false));
+    let conflict_state = latest_status
+        .get("conflictState")
+        .or_else(|| latest_status.get("conflictsState"))
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| {
+            if latest_conflicts
+                .get("conflicts")
+                .and_then(Value::as_array)
+                .is_some_and(|conflicts| !conflicts.is_empty())
+            {
+                "conflicted"
+            } else {
+                "none"
+            }
+        })
+        .to_owned();
+    let warnings = if recent.is_empty() {
+        vec![json!(
+            "No source-control invocations have been recorded for this session."
+        )]
+    } else {
+        Vec::new()
+    };
+    Ok(TargetProjection {
+        title: "Source Control Review".to_owned(),
+        summary: format!(
+            "{branch} / {conflict_state} / {} changed files",
+            changed_files.len()
+        ),
+        revision: host.catalog_revision().0,
+        graph: json!({
+            "sourceControl": {
+                "sessionId": session_id,
+                "branch": branch,
+                "dirty": dirty,
+                "conflictState": conflict_state,
+                "changedFiles": changed_files,
+                "recentInvocations": recent,
+                "latestStatus": bounded_json(latest_status, request.max_preview_bytes),
+                "latestConflicts": bounded_json(latest_conflicts, request.max_preview_bytes),
+                "warnings": warnings,
+                "limit": SOURCE_CONTROL_INVOCATION_LIMIT,
+            }
+        }),
+    })
+}
+
+fn agent_control_projection(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    request: &SurfaceAuthoringRequest,
+) -> Result<TargetProjection> {
+    if request.layout_profile != AGENT_CONTROL_SESSION_LAYOUT_PROFILE {
+        return Err(EngineError::PolicyViolation(format!(
+            "agent_control target requires layoutProfile {AGENT_CONTROL_SESSION_LAYOUT_PROFILE}"
+        )));
+    }
+    let session_id = request.target_id.as_str();
+    let actor = actor_context(invocation);
+    let functions = host.discover_functions(&FunctionQuery {
+        actor: Some(actor.clone()),
+        include_internal: false,
+        ..FunctionQuery::default()
+    });
+    let workers = host.visible_workers(&actor);
+    let session_invocations = host
+        .invocations()
+        .into_iter()
+        .filter(|record| record.session_id.as_deref() == Some(session_id))
+        .collect::<Vec<_>>();
+    let failed_invocations = session_invocations
+        .iter()
+        .filter(|record| !record.succeeded)
+        .count();
+    let recent_source_control = source_control_invocation_rows(host, session_id, request)
+        .into_iter()
+        .take(5)
+        .collect::<Vec<_>>();
+    Ok(TargetProjection {
+        title: "Agent Control".to_owned(),
+        summary: format!(
+            "{} capabilities / {} workers / {} recent session invocations",
+            functions.len(),
+            workers.len(),
+            session_invocations.len()
+        ),
+        revision: host.catalog_revision().0,
+        graph: json!({
+            "agentControl": {
+                "sessionId": session_id,
+                "catalogRevision": host.catalog_revision().0,
+                "capabilityCount": functions.len(),
+                "workerCount": workers.len(),
+                "sessionInvocationCount": session_invocations.len(),
+                "failedInvocationCount": failed_invocations,
+                "recentSourceControl": recent_source_control,
+            }
+        }),
+    })
+}
+
+fn source_control_invocation_rows(
+    host: &dyn PrimitiveRuntimeHost,
+    session_id: &str,
+    request: &SurfaceAuthoringRequest,
+) -> Vec<Value> {
+    let mut records = host
+        .invocations()
+        .into_iter()
+        .filter(|record| {
+            record.session_id.as_deref() == Some(session_id)
+                && is_source_control_function(record.function_id.as_str())
+        })
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+    records
+        .into_iter()
+        .take(SOURCE_CONTROL_INVOCATION_LIMIT)
+        .map(|record| {
+            json!({
+                "invocationId": record.invocation_id.as_str(),
+                "functionId": record.function_id.as_str(),
+                "status": if record.succeeded { "completed" } else { "failed" },
+                "timestamp": record.timestamp.to_rfc3339(),
+                "catalogRevision": record.catalog_revision.0,
+                "functionRevision": record.function_revision.0,
+                "resourceRefs": record.produced_resource_refs,
+                "summary": invocation_result_summary(&record, request),
+            })
+        })
+        .collect()
+}
+
+fn latest_source_control_result(
+    host: &dyn PrimitiveRuntimeHost,
+    session_id: &str,
+    function_id: &str,
+) -> Option<Value> {
+    let mut records = host
+        .invocations()
+        .into_iter()
+        .filter(|record| {
+            record.session_id.as_deref() == Some(session_id)
+                && record.function_id.as_str() == function_id
+                && record.succeeded
+        })
+        .collect::<Vec<_>>();
+    records.sort_by(|left, right| right.timestamp.cmp(&left.timestamp));
+    records.into_iter().find_map(|record| record.result_value)
+}
+
+fn source_control_file_rows(status: &Value, request: &SurfaceAuthoringRequest) -> Vec<Value> {
+    let Some(files) = status
+        .get("files")
+        .or_else(|| status.get("changes"))
+        .or_else(|| status.get("changedFiles"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    files
+        .iter()
+        .take(SOURCE_CONTROL_FILE_LIMIT)
+        .filter_map(|file| {
+            let path = file
+                .get("path")
+                .or_else(|| file.get("file"))
+                .and_then(Value::as_str)?;
+            if unsafe_prompt_preview_text(path) {
+                return None;
+            }
+            Some(json!({
+                "path": bounded_text_preview(path, request.max_preview_bytes),
+                "status": file
+                    .get("status")
+                    .or_else(|| file.get("state"))
+                    .cloned()
+                    .unwrap_or_else(|| json!("modified")),
+                "additions": file.get("additions").cloned().unwrap_or(Value::Null),
+                "deletions": file.get("deletions").cloned().unwrap_or(Value::Null),
+            }))
+        })
+        .collect()
+}
+
+fn is_source_control_function(function_id: &str) -> bool {
+    function_id.starts_with("worktree::") || function_id.starts_with("git::")
+}
+
+fn invocation_result_summary(
+    record: &crate::engine::invocation::InvocationRecord,
+    request: &SurfaceAuthoringRequest,
+) -> String {
+    if let Some(error) = &record.error {
+        return bounded_text_preview(&error.to_string(), request.max_preview_bytes);
+    }
+    let Some(value) = &record.result_value else {
+        return "No result payload".to_owned();
+    };
+    let text = bounded_json(value.clone(), request.max_preview_bytes).to_string();
+    bounded_text_preview(&text, request.max_preview_bytes)
+}
+
 fn prompt_snippet_collection_row(
     inspection: &EngineResourceInspection,
     payload: &Value,
@@ -1698,6 +1941,23 @@ fn bounded_text_preview(text: &str, max_preview_bytes: usize) -> String {
     }
 }
 
+fn display_identifier(value: &str) -> String {
+    let char_count = value.chars().count();
+    if char_count <= 24 {
+        return value.to_owned();
+    }
+    let prefix = value.chars().take(10).collect::<String>();
+    let suffix = value
+        .chars()
+        .rev()
+        .take(8)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
+}
+
 fn unsafe_prompt_preview_text(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("secret=")
@@ -1716,6 +1976,12 @@ fn layout_for_projection(
 ) -> Value {
     if request.target_type == RESOURCE_COLLECTION_TARGET {
         return resource_collection_layout(request, projection);
+    }
+    if request.target_type == SOURCE_CONTROL_TARGET {
+        return source_control_session_layout(projection);
+    }
+    if request.target_type == AGENT_CONTROL_TARGET {
+        return agent_control_session_layout(projection);
     }
     json!({
         "type": "Section",
@@ -2035,6 +2301,177 @@ fn subagent_collection_layout(projection: &TargetProjection, rows: &[Value]) -> 
     json!({"type": "Section", "props": {"title": projection.title}, "children": children})
 }
 
+fn source_control_session_layout(projection: &TargetProjection) -> Value {
+    let source = projection
+        .graph
+        .get("sourceControl")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let files = source
+        .get("changedFiles")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let recent = source
+        .get("recentInvocations")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut children = vec![
+        json!({"type": "Metric", "props": {
+            "label": "Session",
+            "value": source
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .map(display_identifier)
+                .map(Value::String)
+                .unwrap_or(Value::Null)
+        }}),
+        json!({"type": "Metric", "props": {
+            "label": "Branch",
+            "value": source.get("branch").cloned().unwrap_or_else(|| json!("unknown"))
+        }}),
+        json!({"type": "Metric", "props": {
+            "label": "Changed files",
+            "value": files.len()
+        }}),
+        json!({"type": "Metric", "props": {
+            "label": "Conflict state",
+            "value": source.get("conflictState").cloned().unwrap_or_else(|| json!("unknown"))
+        }}),
+    ];
+    children.push(json!({
+        "type": "Disclosure",
+        "props": {"title": "Changed Files", "open": !files.is_empty()},
+        "children": if files.is_empty() {
+            vec![json!({"type": "EmptyState", "props": {
+                "title": "No changed files",
+                "message": "Run worktree status to refresh source-control state."
+            }})]
+        } else {
+            vec![json!({"type": "Table", "props": {
+                "columns": ["path", "status", "additions", "deletions"],
+                "rows": files
+            }})]
+        }
+    }));
+    let mut invocation_children = Vec::new();
+    for row in recent {
+        if let Some(invocation_id) = row.get("invocationId").and_then(Value::as_str) {
+            invocation_children.push(json!({"type": "InvocationRef", "props": {
+                "invocationId": invocation_id,
+                "label": row.get("functionId").and_then(Value::as_str).unwrap_or("Source-control invocation")
+            }}));
+        }
+        invocation_children.push(json!({"type": "Metric", "props": {
+            "label": "Status",
+            "value": row.get("status").cloned().unwrap_or_else(|| json!("unknown"))
+        }}));
+        invocation_children.push(json!({"type": "Text", "props": {
+            "text": row.get("summary").cloned().unwrap_or(Value::Null)
+        }}));
+    }
+    if invocation_children.is_empty() {
+        invocation_children.push(json!({"type": "EmptyState", "props": {
+            "title": "No source-control history",
+            "message": "Source-control capability invocations will appear here."
+        }}));
+    }
+    children.push(json!({
+        "type": "Disclosure",
+        "props": {"title": "Recent Source-Control Invocations", "open": false},
+        "children": invocation_children
+    }));
+    children.push(json!({
+        "type": "Disclosure",
+        "props": {"title": "Review Actions", "open": true},
+        "children": [
+            {"type": "Button", "props": {"label": "Refresh status", "actionId": "refresh-worktree-status"}},
+            {"type": "TextField", "props": {"name": "file", "label": "File path for diff", "required": true}},
+            {"type": "Button", "props": {"label": "Inspect diff", "actionId": "inspect-worktree-diff"}},
+            {"type": "Button", "props": {"label": "List conflicts", "actionId": "list-conflicts"}},
+            {"type": "TextField", "props": {"name": "message", "label": "Commit message", "required": true}},
+            {"type": "Toggle", "props": {"name": "stageAll", "label": "Stage all changes", "value": true}},
+            {"type": "Confirmation", "props": {
+                "title": "Commit worktree",
+                "message": "Create a git commit through the canonical worktree capability.",
+                "confirmActionId": "commit-worktree"
+            }},
+            {"type": "Confirmation", "props": {
+                "title": "Finalize session",
+                "message": "Publish or merge the session worktree using server policy.",
+                "confirmActionId": "finalize-session"
+            }},
+            {"type": "Confirmation", "props": {
+                "title": "Push branch",
+                "message": "Push through the canonical git capability with approval and policy checks.",
+                "confirmActionId": "push-branch"
+            }},
+            {"type": "Confirmation", "props": {
+                "title": "Sync main",
+                "message": "Run a dry-run main-branch sync through the canonical git capability.",
+                "confirmActionId": "sync-main"
+            }}
+        ]
+    }));
+    json!({"type": "Section", "props": {"title": projection.title}, "children": children})
+}
+
+fn agent_control_session_layout(projection: &TargetProjection) -> Value {
+    let agent = projection
+        .graph
+        .get("agentControl")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let recent_source_control = agent
+        .get("recentSourceControl")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    json!({
+        "type": "Section",
+        "props": {"title": projection.title},
+        "children": [
+            {"type": "Metric", "props": {
+                "label": "Session",
+                "value": agent
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .map(display_identifier)
+                    .map(Value::String)
+                    .unwrap_or(Value::Null)
+            }},
+            {"type": "Metric", "props": {
+                "label": "Catalog",
+                "value": agent.get("catalogRevision").cloned().unwrap_or(Value::Null)
+            }},
+            {"type": "Metric", "props": {
+                "label": "Capabilities",
+                "value": agent.get("capabilityCount").cloned().unwrap_or(Value::Null)
+            }},
+            {"type": "Metric", "props": {
+                "label": "Workers",
+                "value": agent.get("workerCount").cloned().unwrap_or(Value::Null)
+            }},
+            {"type": "Metric", "props": {
+                "label": "Failed invocations",
+                "value": agent.get("failedInvocationCount").cloned().unwrap_or(Value::Null)
+            }},
+            {"type": "Disclosure", "props": {"title": "Source Control", "open": true}, "children": [
+                {"type": "Button", "props": {"label": "Open source-control review", "actionId": "open-source-control"}},
+                {"type": "Button", "props": {"label": "Control snapshot", "actionId": "control-snapshot"}},
+                {"type": "Text", "props": {
+                    "text": if recent_source_control.is_empty() {
+                        json!("No recent source-control capability invocations for this session.")
+                    } else {
+                        json!(format!("{} recent source-control invocations are linked from server truth.", recent_source_control.len()))
+                    }
+                }}
+            ]}
+        ]
+    })
+}
+
 fn generated_actions(
     host: &dyn PrimitiveRuntimeHost,
     invocation: &crate::engine::Invocation,
@@ -2072,6 +2509,12 @@ fn generated_actions(
         actions.extend(resource_collection_actions(
             host, invocation, request, &functions,
         )?);
+    }
+    if request.target_type == SOURCE_CONTROL_TARGET {
+        actions.extend(source_control_actions(invocation, request, &functions)?);
+    }
+    if request.target_type == AGENT_CONTROL_TARGET {
+        actions.extend(agent_control_actions(invocation, request, &functions)?);
     }
     if request.target_type == "package" {
         if let Some(inspect_package) = functions
@@ -2861,6 +3304,166 @@ fn resource_collection_actions(
     }
 }
 
+fn source_control_actions(
+    invocation: &crate::engine::Invocation,
+    request: &SurfaceAuthoringRequest,
+    functions: &[FunctionDefinition],
+) -> Result<Vec<Value>> {
+    let session_id = request.target_id.as_str();
+    let mut actions = Vec::new();
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "refresh-worktree-status",
+        "Refresh Status",
+        "worktree::get_status",
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        json!({"sessionId": session_id}),
+    )?;
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "inspect-worktree-diff",
+        "Inspect Diff",
+        "worktree::get_diff",
+        json!({
+            "type": "object",
+            "required": ["file"],
+            "additionalProperties": false,
+            "properties": {"file": {"type": "string"}}
+        }),
+        json!({"sessionId": session_id, "file": "${input.file}"}),
+    )?;
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "list-conflicts",
+        "List Conflicts",
+        "worktree::list_conflicts",
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        json!({"sessionId": session_id}),
+    )?;
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "commit-worktree",
+        "Commit Worktree",
+        "worktree::commit",
+        json!({
+            "type": "object",
+            "required": ["message", "stageAll"],
+            "additionalProperties": false,
+            "properties": {
+                "message": {"type": "string"},
+                "stageAll": {"type": "boolean"}
+            }
+        }),
+        json!({
+            "sessionId": session_id,
+            "message": "${input.message}",
+            "stageAll": "${input.stageAll}"
+        }),
+    )?;
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "finalize-session",
+        "Finalize Session",
+        "worktree::finalize_session",
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        json!({"sessionId": session_id}),
+    )?;
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "push-branch",
+        "Push Branch",
+        "git::push",
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        json!({"sessionId": session_id}),
+    )?;
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "sync-main",
+        "Sync Main",
+        "git::sync_main",
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        json!({"sessionId": session_id, "dryRun": true}),
+    )?;
+    Ok(actions)
+}
+
+fn agent_control_actions(
+    invocation: &crate::engine::Invocation,
+    request: &SurfaceAuthoringRequest,
+    functions: &[FunctionDefinition],
+) -> Result<Vec<Value>> {
+    let session_id = request.target_id.as_str();
+    let mut actions = Vec::new();
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "open-source-control",
+        "Open Source Control",
+        SURFACE_FOR_TARGET_FUNCTION,
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        json!({
+            "targetType": SOURCE_CONTROL_TARGET,
+            "targetId": session_id,
+            "purpose": "Review source-control state and actions",
+            "layoutProfile": SOURCE_CONTROL_SESSION_LAYOUT_PROFILE,
+            "maxPreviewBytes": 2048
+        }),
+    )?;
+    push_optional_action(
+        &mut actions,
+        invocation,
+        functions,
+        "control-snapshot",
+        "Control Snapshot",
+        "control::snapshot",
+        json!({"type": "object", "additionalProperties": false, "properties": {}}),
+        json!({"limit": 100, "sessionId": session_id}),
+    )?;
+    Ok(actions)
+}
+
+fn push_optional_action(
+    actions: &mut Vec<Value>,
+    invocation: &crate::engine::Invocation,
+    functions: &[FunctionDefinition],
+    action_id: &str,
+    label: &str,
+    target_function: &str,
+    input_schema: Value,
+    payload_template: Value,
+) -> Result<()> {
+    if functions
+        .iter()
+        .any(|function| function.id.as_str() == target_function)
+    {
+        actions.push(prompt_collection_action(
+            invocation,
+            functions,
+            action_id,
+            label,
+            target_function,
+            input_schema,
+            payload_template,
+        )?);
+    }
+    Ok(())
+}
+
 fn prompt_snippet_collection_actions(
     host: &dyn PrimitiveRuntimeHost,
     invocation: &crate::engine::Invocation,
@@ -3403,6 +4006,8 @@ fn ensure_supported_target_type(target_type: &str) -> Result<()> {
             | "capability"
             | "goal"
             | RESOURCE_COLLECTION_TARGET
+            | SOURCE_CONTROL_TARGET
+            | AGENT_CONTROL_TARGET
             | "package"
             | "module_config"
             | "decision"
@@ -3558,7 +4163,7 @@ fn surface_for_target_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "goal", "resource_collection", "package", "module_config", "decision", "activation", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
+                "enum": ["worker", "capability", "goal", "resource_collection", "source_control", "agent_control", "package", "module_config", "decision", "activation", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "purpose": {"type": "string"},

@@ -1,186 +1,165 @@
-# Source-Control And AgentControl Generated Surfaces Plan
+# Cron And Scheduled Work Capability-Backed Truth Plan
 
 ## Current Checkpoint
 
-The repo-wide production-grade rubric remains complete at `100/100`. The
-stricter capability-backed-truth score is now `97/100`:
+The stricter capability-backed-truth score is now `98/100`.
 
-- memory retain durable truth is `artifact` plus `materialized_file` substrate
-  truth;
+Completed conversion slices:
+
+- retained memory truth is `artifact` plus `materialized_file` substrate truth;
 - notification delivery/read truth is `notification`, `evidence`, and
   `decision` substrate truth;
-- completed subagent result truth is deterministic `agent_result:subagent:*`
-  resource truth, with generated `subagent.lineage.v1` surfaces;
-- Prompt Library and Voice Notes durable outputs are resource-backed;
-- model-facing capability use is routed through the single `execute`
-  orchestrator.
+- completed subagent result truth is deterministic `agent_result` resource
+  truth with generated lineage surfaces;
+- source-control and AgentControl review now have server-authored generated
+  `source_control.session.v1` and `agent_control.session.v1` surfaces with
+  stored canonical actions;
+- model-facing capability use goes through the single `execute` orchestrator.
 
-The next highest-value blocker is source-control and AgentControl review
-surfaces. They remain fixed Swift shells because they combine chat context,
-model/settings visibility, worktree status, diff review, conflict handling, and
-deferred prompts. The next phase should move the durable/review truth behind
-those workflows into server-authored generated surfaces without weakening user
-review quality.
+The remaining capability-backed-truth blocker is cron/scheduled work. Cron still
+has a dedicated scheduler product plane with separate schedule/run truth. The
+next phase should either convert that truth to resources/decisions/invocations/
+evidence or prove that cron is acceptable low-level scheduler substrate with
+narrow static gates. The default decision is conversion.
 
 ## First-Principles Goal
 
-Source-control and AgentControl surfaces are operator review boundaries. The
-durable truth should answer:
+Scheduled work changes future agent behavior. The durable truth must answer:
 
-- what workspace, session, worktree, branch, file set, and diff state is being
-  reviewed;
-- which capability, invocation, grant, approval, and resource/evidence refs
-  support each suggested action;
-- whether the displayed source-control state is current, stale, conflicted,
-  dirty, blocked, or already applied;
-- what action will mutate state, what approval/risk applies, and what exact
-  target revision will be checked before execution;
-- what is local editing/navigation state versus server-owned substrate truth;
-- why a stale, conflicting, unauthorized, or unsupported action is not safe.
+- who created or updated the schedule;
+- what canonical capability/action will run;
+- what scope, grant ceiling, approval policy, and idempotency key apply;
+- what cadence, timezone, expiry, and missed-window behavior apply;
+- which queue item, invocation, result, evidence, and resource refs belong to
+  each run;
+- whether a schedule is active, expired, revoked, stale, malformed, or blocked;
+- how an operator inspects, disables, retries, or deletes the schedule without
+  touching hidden files/tables.
 
-The source of truth should be invocations, grants, resources, decisions,
-evidence, worktree/git capability results, generated UI resources, and stored
-canonical actions. Fixed Swift surfaces may remain as local navigation or
-composition affordances, but they must not own review truth, mutation payloads,
-grant construction, stale-state decisions, or action policy.
+The source of truth should be existing `decision`, `evidence`, invocation,
+grant, queue, lease, and generated UI resources. Queue and lease internals may
+remain substrate mechanics; product schedule/run truth should not live in a
+parallel cron table or JSON file.
 
 ## Scope
 
 Build the next checkpoint as:
 
-1. a complete AgentControl/source-control inventory over current Swift sheets,
-   Rust capabilities, worktree/git outputs, events, and generated UI support;
-2. generated review surfaces for worktree status, changed-file summaries, diff
-   previews, conflict state, deferred prompts, and canonical git/worktree
-   actions;
-3. server-owned action consequence summaries for source-control and
-   AgentControl actions;
-4. static gates that fixed Swift shells cannot construct target functions,
-   payload templates, grants, revision decisions, source-control policy, or
-   stale-state approvals;
-5. docs and score updates from `97/100` only after tests prove the boundary.
-
-Keep existing public capability ids and response fields stable unless a
-separate clean-break plan explicitly authorizes a schema change.
+1. a complete inventory of current `cron::*` capabilities, scheduler files,
+   database tables, iOS DTO/client paths, tests, and docs;
+2. a conversion design for schedules as resource/decision truth and runs as
+   invocation/evidence truth;
+3. implementation of the smallest coherent conversion slice that removes hidden
+   scheduler product truth without weakening retries or operator control;
+4. generated schedule list/detail surfaces with stored canonical actions;
+5. static gates forbidding retired cron tables/files/readers if conversion is
+   completed, or documenting an accepted-substrate decision if not;
+6. docs and score updates from `98/100` only after full verification passes.
 
 ## Non-Goals
 
-- No new source-control/product tables.
-- No compatibility reader, fallback route, or fallback renderer.
-- No client-owned grants, target functions, generated action payloads,
-  stale-state policy, retry policy, or source-control mutation decisions.
+- No compatibility reader or row-copy migration.
+- No new scheduler table.
+- No client-owned target function, payload template, grant, retry policy,
+  cadence policy, or stale-state decision.
 - No dynamic UI catalog or `control::act`.
-- No deletion of fixed chat/source-control shells until generated surfaces
-  preserve the current operator role and have absence/source guards.
-- No broad source-control UX redesign unrelated to server-owned truth.
+- No marketplace, remote package fetch, or worker-spawn changes.
+- No broad iOS scheduler redesign until server truth is proven.
 
 ## Implementation Plan
 
 ### 1. Inventory And Characterization
 
-- Map AgentControl and SourceChanges entrypoints, DTOs, state objects, actions,
-  and current tests.
-- Map `git::*`, `worktree::*`, source-control workflow helpers, deferred prompt
-  paths, and any invocation/resource/evidence refs they currently expose.
-- Identify which current display fields are durable truth, projection state,
-  local editing state, or ephemeral UI affordances.
-- Add characterization tests for current source-control action prerequisites,
-  stale worktree behavior, conflict state, deferred prompt submission, and
-  generated action submission constraints.
+- Map current cron state owners: files, tables, DTOs, queue paths, run records,
+  routes, and tests.
+- Identify which state is durable product truth versus queue/lease substrate.
+- Add characterization tests for create/update/delete/list/run, retry,
+  duplicate idempotency, missed windows, disabled/expired schedules, and
+  operator inspection.
+- Document the exact clean-break blast radius before changing storage.
 
-### 2. Server-Owned Review Projections
+### 2. Decision-Backed Schedule Truth
 
-- Add or reuse generated `ui::surface_for_target` profiles that can represent:
-  - worktree summary and cleanliness;
-  - changed-file list with bounded diff previews;
-  - conflict state and conflict-resolution prerequisites;
-  - pending/deferred source-change prompts;
-  - canonical actions such as refresh, inspect diff, stage/unstage where
-    supported, apply patch, commit, rollback/discard where safe, and submit
-    deferred prompt.
-- Each action must be stored on a `ui_surface`, revision-pinned,
-  idempotency-aware, approval-aware, and routed through `ui::submit_action`.
-- Large diffs, secret-like content, local file paths, and raw payload templates
-  must be bounded or omitted with inspectable refs.
+- Represent schedules as `decision` resources with:
+  - schedule id;
+  - canonical target function/action;
+  - cadence/timezone/wall-clock metadata;
+  - scope/session/workspace selectors;
+  - grant ceiling and actor;
+  - expiry/revocation/lifecycle;
+  - idempotency and retry policy snapshot.
+- Use CAS for schedule updates and lifecycle discard/archive.
+- Reject malformed, over-broad, expired, or unauthorized schedules before queue
+  enqueue or target execution.
 
-### 3. AgentControl Generated Surfaces
+### 3. Invocation/Evidence Run Truth
 
-- Author generated surfaces for server-owned context that AgentControl currently
-  displays: active model/settings summary, capability health/search entrypoints,
-  selected workspace/session refs, skill visibility, source-control entry
-  points, and safe next actions.
-- Keep local shell behavior only where it is genuine navigation/composition,
-  such as opening a chat sheet or choosing where a generated surface appears.
-- Use existing action-summary/consequence helpers so action state, required
-  approval, target revision, and stale/block reasons match control projections.
+- Represent each scheduled run as a canonical invocation plus bounded evidence.
+- Use deterministic idempotency keys per schedule version and due bucket.
+- Ensure retries replay or resume through existing queue/idempotency substrate
+  without duplicate target invocations or resource versions.
+- Record skipped, stale, malformed, unauthorized, and failed runs as evidence
+  without fabricating success.
 
-### 4. iOS Thin-Shell Boundary
+### 4. Generated Operator Surfaces
 
-- Keep `AgentControlView` and SourceChanges sheets as local containers only if
-  they render server-authored surfaces or navigate to them.
-- Remove fixed mutation controls only after equivalent generated actions are
-  available and tested.
-- Add source guards forbidding fixed shells from constructing target functions,
-  payload templates, grants, source-control mutation policy, stale-state
-  decisions, or generated UI action submissions outside stored coordinates.
+- Add generated schedule collection/detail surfaces over decision/evidence truth.
+- Stored actions may target only canonical cron/schedule capabilities,
+  `ui::refresh_surface`, and safe inspect/retry/expire/archive operations.
+- Surfaces must be revision-pinned, bounded, redacted, and stale-safe.
+- iOS remains a thin renderer/client; fixed cron/product shells stay removed.
 
-### 5. Docs, Score, And Ledger
+### 5. Clean-Break Removal Or Accepted-Substrate Decision
+
+- If conversion is completed, remove active `cron_jobs`, `cron_runs`, and
+  `automations.json` product truth with a storage generation reset and absence
+  tests.
+- If any scheduler substrate must remain, document it as low-level substrate
+  with strict limits and static gates proving it cannot own product policy,
+  grants, durable run results, or operator truth.
+
+### 6. Docs, Score, And Ledger
 
 - Update `docs/capability-backed-truth-migration-plan.md`.
-- Update `docs/product-shell-reachability-map.md`.
 - Update `docs/modular-engine-cleanup-audit.md`.
+- Update `docs/product-shell-reachability-map.md` only if client surfaces change.
 - Update `docs/production-grade-rubric.md`.
-- Update README only if public capability behavior or schema lists change.
+- Update README database/capability sections if schema or public capability
+  wording changes.
 - Update `~/LEDGER.jsonl` after verification.
 
 ## Test Plan
 
 - Focused Rust tests:
-  - generated source-control surfaces expose bounded worktree/diff/conflict
-    refs and no raw unbounded payloads;
-  - stale worktree revisions fail before mutation;
-  - deferred source-change prompts submit through stored canonical actions;
-  - mutating git/worktree actions keep existing approval/output-contract
-    behavior;
-  - generated AgentControl surfaces expose refs and action summaries without
-    durable control state.
+  - schedule create/update/delete/list use decision/resource truth;
+  - run/retry uses deterministic invocation/evidence truth;
+  - duplicate due buckets do not create duplicate invocations/resources;
+  - expired/revoked/stale schedules fail closed;
+  - malformed schedules are inspectable but not runnable.
 - Generated UI tests:
-  - stored source-control actions are schema-valid, revision-pinned,
-    idempotent when mutating, approval-aware, and stale-safe;
-  - unsupported source states render inspectable warnings, not fabricated
-    success;
-  - `ui::submit_action` rejects stale/damaged/expired surfaces before child
-    execution.
-- iOS/source-guard tests:
-  - fixed AgentControl/SourceChanges shells do not construct target functions,
-    payload templates, grants, source-control mutation policy, or stale-state
-    approvals;
-  - if a fixed mutation control is removed, its navigation/action references,
-    previews, and tests are removed with absence gates.
+  - schedule surfaces expose bounded refs and stored canonical actions only;
+  - stale/expired/damaged surfaces fail before child execution.
 - Static gates:
-  - no source-control/product tables;
-  - no `control::act`, dynamic UI catalog, compatibility alias, fallback reader,
-    raw-scope authorization, module action multiplexer, or alternate worker
-    spawn path.
+  - no active cron/scheduler product tables if converted;
+  - no `automations.json` product truth if converted;
+  - no `control::act`, dynamic UI catalog, raw-scope auth, compatibility reader,
+    fallback DTO, or client-owned scheduler policy.
 - Verification:
-  - `cd packages/agent && cargo test generated_ui --lib -- --nocapture`;
-  - focused source-control/worktree tests;
-  - `cd packages/agent && cargo test --test threat_model_invariants -- --nocapture`;
-  - `cd packages/agent && RUSTFLAGS="-D warnings" cargo check --all-targets`;
+  - focused cron/scheduler tests;
+  - `cargo test generated_ui --lib -- --nocapture` if surfaces change;
+  - `cargo test resource_ --lib -- --nocapture` if resource contracts change;
+  - `cargo test --test threat_model_invariants -- --nocapture`;
+  - `RUSTFLAGS="-D warnings" cargo check --all-targets`;
   - `git diff --check`;
   - `scripts/tron ci fmt check clippy test`;
-  - iOS `xcodegen generate` and targeted AgentControl/SourceChanges tests only
-    if Swift files change.
+  - iOS/Mac targeted tests only if client/project files change.
 
 ## Acceptance Criteria
 
-- Source-control/AgentControl durable review truth is reconstructable from
-  server substrate records.
-- Generated surfaces cover the highest-risk review and mutation workflows with
-  stored canonical actions.
-- Fixed Swift surfaces either become thin local containers/navigation shells or
-  are removed with absence gates.
-- Every mutation still runs through canonical capabilities and stored generated
-  actions.
-- The capability-backed-truth score only increases when tests, docs, static
-  gates, and full verification pass.
+- Scheduled-work product truth is reconstructable from collapsed substrate truth,
+  or cron is explicitly accepted as low-level substrate with proof.
+- Every scheduled run has invocation/evidence lineage.
+- Operators can inspect stale, skipped, failed, completed, and retried runs.
+- No hidden scheduler file/table truth affects agent behavior.
+- The capability-backed-truth score only reaches `99/100` or `100/100` after
+  tests, docs, static gates, full CI, and ledger update pass.
