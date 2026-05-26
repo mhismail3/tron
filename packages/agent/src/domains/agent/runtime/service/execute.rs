@@ -154,6 +154,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     let context_policy = session_plan.runtime_context_policy();
     let prompt_context = load_prompt_context_bundle(
         context_artifacts.clone(),
+        engine_host.clone(),
         event_store.clone(),
         memory_registry.clone(),
         &session_id,

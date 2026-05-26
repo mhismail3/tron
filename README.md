@@ -97,8 +97,9 @@ with the 100-point production-grade rubric in
 [`docs/production-grade-rubric.md`](docs/production-grade-rubric.md).
 The stricter capability-backed-truth migration tracker lives in
 [`docs/capability-backed-truth-migration-plan.md`](docs/capability-backed-truth-migration-plan.md);
-it starts from a 90/100 baseline and tracks the remaining work to make every
-agent- or operator-affecting durable fact capability-owned substrate truth.
+it is currently at 94/100 after the memory-retain conversion and tracks the
+remaining work to make every agent- or operator-affecting durable fact
+capability-owned substrate truth.
 The current operator checklist for local package trust, audits, revocation, and
 cleanup lives in
 [`docs/module-package-trust-operations.md`](docs/module-package-trust-operations.md).

@@ -1,6 +1,7 @@
 //! Memory event payloads: retained, auto-retain triggered.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Payload for `memory.retained` events.
 ///
@@ -18,6 +19,16 @@ pub struct MemoryRetainedPayload {
     pub summary: String,
     /// ISO 8601 timestamp when the retain completed.
     pub timestamp: String,
+    /// Kind of retained output: journal, memory, argument, or a combination.
+    #[serde(default)]
+    pub entry_type: Option<String>,
+    /// Resource refs produced by the retain pipeline.
+    #[serde(default)]
+    pub resource_refs: Vec<Value>,
+    /// Evidence refs produced while retaining. Empty when no recovery evidence
+    /// was required.
+    #[serde(default)]
+    pub evidence_refs: Vec<Value>,
 }
 
 /// Payload for `memory.auto_retain_triggered` events.

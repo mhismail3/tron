@@ -1,6 +1,6 @@
 # Modular Engine Cleanup Audit
 
-Last verified: 2026-05-25 on `next/modular-capability-engine`.
+Last verified: 2026-05-26 on `next/modular-capability-engine`.
 
 This document is the proof map for the cleanup pass that follows the generated
 UI substrate checkpoint. The rule for this pass is remove with proof: code is
@@ -19,7 +19,7 @@ runtime caller, thin-client purpose, or test/support role.
 | Domain registration | capability modules | 36 domain contract files and 32 startup worker-module registrations in `domains/registration.rs` | Keep as current capability surface until each domain is individually proven unused or duplicated |
 | `cron` server domain and iOS DTO/client | capability module | `cron::` contracts, `CronClient`, DTO tests | Keep as reusable capability module; remove fixed iOS dashboard shell |
 | `voice_notes` server domain and recording components | resource-backed capability module / chat affordance | `voice_notes::save/list/delete` contracts and chat recording sheet/button still have callers; durable notes are `artifact`/`materialized_file` resources | Keep; no file-backed list/delete truth |
-| `memory` retain pipeline | conversion blocker | `memory::retain` and hidden `memory::auto_retain_fire` still route retained journal/rule/argument output through markdown files under `~/.tron/memory/` and `~/.tron/workspace/knowledge/arguments/` before future prompts read them | Convert first in `docs/capability-backed-truth-migration-plan.md`; markdown must become materialized projection, not source truth |
+| `memory` retain pipeline | resource-backed capability module | `memory::retain` and hidden `memory::auto_retain_fire` persist retained journals, rule updates, and arguments as `artifact` resources with linked `materialized_file` markdown projections; `memory.retained` events include refs | Keep; markdown is now a materialized projection, not retained-memory source truth |
 | iOS chat/session surfaces | thin shell | `ContentView`, `SessionSidebar`, `ChatView`, onboarding/settings pairing paths | Keep as thin chat harness until replaced by generated surfaces |
 | iOS Engine Console | thin control client | `NavigationMode.engine`, `EngineConsoleState`, `control::*` DTOs, generated UI renderer | Keep; no local policy truth |
 | Fixed iOS Automations dashboard | remove candidate | only reached through `NavigationMode.automations`; duplicates future control/generated UI surface for cron | Remove from top-level navigation and delete fixed views |
@@ -50,26 +50,26 @@ runtime caller, thin-client purpose, or test/support role.
 
 The production-grade cleanup score remains useful for reachability and
 classification, but the stricter capability-backed-truth audit found one
-high-impact unconverted durable path: memory retain. Retained memory can affect
-future prompts, so direct markdown truth is not acceptable as the final
-architecture.
+high-impact unconverted durable path: memory retain. The 2026-05-26 Phase 1
+slice converted that path to resource-backed truth; the remaining blockers are
+notifications, subagent/source-control product shells, and cron/scheduled work.
 
 | Area | Evidence | Decision |
 |------|----------|----------|
-| Capability-backed-truth tracker | `docs/capability-backed-truth-migration-plan.md` defines a stricter 100-point score, current 90/100 baseline, phase tracker, conversion register, and verification standard | Keep as the authoritative migration tracker until every candidate is converted or explicitly accepted as low-level substrate |
-| Memory retain | `memory::retain` / `memory::auto_retain_fire` write journal, core memory, and argument markdown through the retain writer; memory injection reads `MEMORY.md` and `rules/*.md` filesystem state | Convert before notification/product-shell work because it is autonomous durable agent-context truth |
+| Capability-backed-truth tracker | `docs/capability-backed-truth-migration-plan.md` defines a stricter 100-point score, current 94/100 baseline, phase tracker, conversion register, and verification standard | Keep as the authoritative migration tracker until every candidate is converted or explicitly accepted as low-level substrate |
+| Memory retain | `packages/agent/src/domains/memory/retain/resources.rs`, `packages/agent/src/engine/tests/memory_retain_resources.rs`, and `packages/agent/src/domains/agent/runtime/service/context.rs` prove retained outputs are artifacts/materialized projections, recovery/projection failures emit evidence refs, and prompt context reads retained rule/argument artifacts from resource truth | Completed Phase 1; static gates forbid direct hidden durable writes returning to memory retain |
 | Notifications | `docs/product-shell-reachability-map.md` still classifies the inbox/detail path as deferred event/read-state based operator attention state | Convert after memory retain to resource/decision/evidence backed notification truth |
 | Subagent and source-control shells | Product-shell reachability map keeps these as fixed thin shells pending generated lineage/review replacements | Convert after server-authored generated surfaces preserve current operator safety |
 | Cron/scheduled work | Cron remains a dedicated scheduler plane with separate files/tables | Convert to resource/decision/invocation/evidence truth unless a later audit explicitly accepts it as low-level scheduler substrate |
 
 Removal proof from this reset:
 
-- No runtime code behavior changed in Phase 0; this checkpoint is documentation,
-  scoring, and static gates.
+- Phase 0 changed no runtime behavior; Phase 1 converted retained-memory
+  persistence through canonical resource/materialization capabilities.
 - The existing production-grade 100/100 rubric is not removed. It is narrowed to
-  classification/organization proof, while the new 90/100 tracker owns the
+  classification/organization proof, while the new 94/100 tracker owns the
   stricter capability-backed-truth migration.
-- Memory retain is no longer allowed to disappear from conversion planning under
+- Memory retain is no longer allowed to regress to direct file/table truth under
   a broad "classified" score.
 
 ## 2026-05-19 Engine Test Ownership Split

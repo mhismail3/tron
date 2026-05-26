@@ -4,9 +4,12 @@
 //! It runs as an async background task and acts as a smart
 //! router:
 //!
-//! - **Always** writes a journal entry to `~/.tron/memory/sessions/`
-//! - **Conditionally** updates core memories in `~/.tron/memory/rules/`
-//! - **Conditionally** creates argument docs in `~/.tron/workspace/knowledge/arguments/`
+//! - **Always** persists a journal `artifact` resource and materialized markdown
+//!   projection under `~/.tron/memory/sessions/`
+//! - **Conditionally** persists core-memory `artifact` resources and
+//!   materialized projections under `~/.tron/memory/rules/`
+//! - **Conditionally** persists argument `artifact` resources and materialized
+//!   projections under `~/.tron/workspace/knowledge/arguments/`
 //!
 //! The summarizer uses Sonnet 4.6 and produces structured output with `<journal>`,
 //! `<core_memory>`, and `<argument>` sections that the retain runtime routes
@@ -31,8 +34,9 @@
 //! split beside it: `slice` reads the event-store window, `transcript`
 //! serializes messages for the summarizer, `background` runs the async retain
 //! task, `summarizer` owns subagent execution, `parsing` decodes structured
-//! summarizer output, `writer` owns filesystem writes, and `events` owns the
-//! retain lifecycle event records.
+//! summarizer output, `resources` owns resource-backed durable truth, `writer`
+//! owns markdown projection formatting, and `events` owns the retain lifecycle
+//! event records.
 //!
 //! ## Concurrency
 //!
@@ -50,6 +54,7 @@ use tracing::debug;
 use crate::domains::agent::runner::orchestrator::subagent_manager::SubagentManager;
 use crate::domains::memory::Deps as MemoryDeps;
 use crate::domains::session::event_store::EventStore;
+use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::map_event_store_error;
 use crate::shared::server::errors::CapabilityError;
@@ -61,6 +66,7 @@ pub(crate) mod auto_retain;
 mod background;
 mod events;
 mod parsing;
+mod resources;
 mod slice;
 mod summarizer;
 mod transcript;
@@ -97,6 +103,7 @@ pub(crate) enum RetainSource {
 /// it via [`RetainDeps::from_memory_deps`].
 #[derive(Clone)]
 pub(crate) struct RetainDeps {
+    pub engine_host: crate::engine::EngineHostHandle,
     pub orchestrator: Arc<crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator>,
     pub event_store: Arc<EventStore>,
     pub subagent_manager: Option<Arc<SubagentManager>>,
@@ -105,6 +112,7 @@ pub(crate) struct RetainDeps {
 impl RetainDeps {
     pub(crate) fn from_memory_deps(deps: &MemoryDeps) -> Self {
         Self {
+            engine_host: deps.engine_host.clone(),
             orchestrator: Arc::clone(&deps.orchestrator),
             event_store: Arc::clone(&deps.event_store),
             subagent_manager: deps.subagent_manager.clone(),
@@ -114,6 +122,7 @@ impl RetainDeps {
     #[cfg(test)]
     fn from_test_context(ctx: &crate::shared::server::context::ServerRuntimeContext) -> Self {
         Self {
+            engine_host: ctx.engine_host.clone(),
             orchestrator: Arc::clone(&ctx.orchestrator),
             event_store: Arc::clone(&ctx.event_store),
             subagent_manager: ctx.subagent_manager.clone(),
@@ -126,7 +135,7 @@ impl RetainDeps {
 // =============================================================================
 
 /// Trigger a memory retain: summarize session history since the last boundary
-/// and write to `~/.tron/memory/sessions/{session_id}.md`.
+/// and persist resource-backed retained memory plus markdown projections.
 ///
 /// This operation is non-blocking — it emits `MemoryUpdating` immediately,
 /// spawns the summarizer as a background task, and returns. The background
@@ -134,10 +143,11 @@ impl RetainDeps {
 pub(crate) async fn trigger_manual_retain(
     params: Option<&Value>,
     memory_deps: &MemoryDeps,
+    parent_invocation: Option<Invocation>,
 ) -> Result<Value, CapabilityError> {
     let session_id = require_string_param(params, "sessionId")?;
     let deps = RetainDeps::from_memory_deps(memory_deps);
-    trigger_retain(&deps, session_id, RetainSource::Manual).await
+    trigger_retain(&deps, session_id, RetainSource::Manual, parent_invocation).await
 }
 
 // =============================================================================
@@ -156,6 +166,7 @@ pub(crate) async fn trigger_retain(
     deps: &RetainDeps,
     session_id: String,
     source: RetainSource,
+    parent_invocation: Option<Invocation>,
 ) -> Result<Value, CapabilityError> {
     // Acquire the retain slot. If another retain is already running for this
     // session, return the sentinel response and emit nothing — no events, no
@@ -209,6 +220,7 @@ pub(crate) async fn trigger_retain(
                     summary: None,
                     entry_type: Some("journal".to_owned()),
                     event_id: None,
+                    resource_refs: Some(Vec::new()),
                 });
         return Ok(json!({ "retained": false, "reason": "nothing_new" }));
     };
@@ -247,31 +259,32 @@ pub(crate) async fn trigger_retain(
                     summary: None,
                     entry_type: Some("journal".to_owned()),
                     event_id: None,
+                    resource_refs: Some(Vec::new()),
                 });
         return Ok(json!({ "retained": false, "reason": "empty_transcript" }));
     }
 
     // ── Spawn background retain task ────────────────────────────────────────
     // The handler returns immediately. The background task runs the summarizer,
-    // parses the output, writes files, and emits MemoryUpdated when done.
+    // parses the output, persists resource truth, materializes markdown
+    // projections, and emits MemoryUpdated when done.
     //
     // The RetainGuard moves into the spawn so the in-flight slot is held for
     // the full summarizer duration, then released on drop — whether the task
     // completes, errors, or panics.
     let bg_session_id = session_id.clone();
-    let bg_event_store = deps.event_store.clone();
     let bg_broadcast = Arc::clone(deps.orchestrator.broadcast());
-    let bg_subagent_manager = deps.subagent_manager.clone();
     let bg_start_ts = slice.start_ts;
     let bg_end_ts = slice.end_ts;
+    let bg_deps = deps.clone();
 
     let bg_source = source;
     drop(tokio::spawn(async move {
         retain_background_task(
+            bg_deps,
+            parent_invocation,
             bg_session_id,
-            bg_event_store,
             bg_broadcast,
-            bg_subagent_manager,
             working_directory,
             model,
             transcript,

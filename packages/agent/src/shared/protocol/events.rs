@@ -940,6 +940,8 @@ tron_events! {
         entry_type: Option<String>,
         #[serde(rename = "eventId", skip_serializing_if = "Option::is_none")]
         event_id: Option<String>,
+        #[serde(rename = "resourceRefs", skip_serializing_if = "Option::is_none")]
+        resource_refs: Option<Vec<serde_json::Value>>,
     } => "memory_updated",
 
     /// Auto-retain threshold crossed; retain pipeline is about to start.
@@ -2290,6 +2292,7 @@ mod tests {
                 summary: None,
                 entry_type: None,
                 event_id: None,
+                resource_refs: None,
             },
             TronEvent::MemoryAutoRetainTriggered {
                 base: base.clone(),
@@ -2639,6 +2642,7 @@ mod tests {
             summary: Some("summary text".into()),
             entry_type: Some("feature".into()),
             event_id: Some("evt_123".into()),
+            resource_refs: Some(vec![]),
         };
         assert_eq!(e.event_type(), "memory_updated");
     }

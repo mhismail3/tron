@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
+    pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) event_store: Arc<EventStore>,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) subagent_manager:
@@ -16,6 +17,7 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
+            engine_host: deps.engine_host.clone(),
             event_store: deps.event_store.clone(),
             orchestrator: deps.orchestrator.clone(),
             subagent_manager: deps.subagent_manager.clone(),

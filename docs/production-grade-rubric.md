@@ -1,6 +1,6 @@
 # Production-Grade Robustness Rubric
 
-Last scored: 2026-05-19 on `next/modular-capability-engine`.
+Last scored: 2026-05-26 on `next/modular-capability-engine`.
 
 This rubric measures the whole repository, not only the modular engine
 substrate. The existing modular-engine maturity scorecard remains the
@@ -9,7 +9,7 @@ tests, generated projects, CI, schemas, and repo support.
 
 The stricter capability-backed-truth migration score lives in
 `docs/capability-backed-truth-migration-plan.md`. That score is currently
-**90/100** and tracks whether every agent- or operator-affecting durable fact is
+**94/100** and tracks whether every agent- or operator-affecting durable fact is
 owned by canonical capabilities and the collapsed resource/decision/evidence/
 invocation/grant substrate. It intentionally has known blockers even while this
 production-grade classification score remains complete.
@@ -26,13 +26,13 @@ Each axis receives one of these maturity levels:
 
 Current repo-wide score: **100/100**.
 
-Current capability-backed-truth score: **90/100**.
+Current capability-backed-truth score: **94/100**.
 
 This production-grade score means every known source artifact, state owner,
 product shell, and security boundary is either implemented, tested, documented,
 or explicitly classified with static gates. It does not mean every durable fact
 is already capability-backed truth. The capability-backed-truth tracker names
-the remaining migration blockers: memory retain, notifications, subagent
+the remaining migration blockers: notifications, subagent
 lineage surfaces, source-control/AgentControl surfaces, and cron/scheduled work
 truth.
 
@@ -357,8 +357,7 @@ Next action:
    focused audit are completed evidence for the 98/100 checkpoint.
 6. Prompt Library generated management and gated local composer insertion are
    completed evidence for the final 100/100 checkpoint.
-7. Capability-backed-truth migration is now tracked separately at 90/100 in
-   `docs/capability-backed-truth-migration-plan.md`; close memory retain,
-   notification, subagent lineage, source-control/AgentControl, and
-   cron/scheduled-work blockers before claiming capability-backed truth is
-   complete.
+7. Capability-backed-truth migration is now tracked separately at 94/100 in
+   `docs/capability-backed-truth-migration-plan.md`; close notification,
+   subagent lineage, source-control/AgentControl, and cron/scheduled-work
+   blockers before claiming capability-backed truth is complete.

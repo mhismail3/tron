@@ -9,6 +9,7 @@ async fn handler_requires_session_id() {
         &crate::domains::memory::Deps::from_engine(
             &crate::domains::worker::DomainRegistrationContext::from_context(&ctx),
         ),
+        None,
     )
     .await
     .unwrap_err();
@@ -27,7 +28,7 @@ async fn handler_returns_nothing_new_for_empty_session() {
         .unwrap();
 
     let deps = RetainDeps::from_test_context(&ctx);
-    let result = trigger_retain(&deps, cr.session.id.clone(), RetainSource::Manual)
+    let result = trigger_retain(&deps, cr.session.id.clone(), RetainSource::Manual, None)
         .await
         .unwrap();
     // No events since boundary (sequence 0 => empty since) => nothing_new
@@ -51,6 +52,7 @@ async fn auto_source_persists_trigger_event() {
         &deps,
         session_id.clone(),
         RetainSource::Auto { interval_fired: 5 },
+        None,
     )
     .await
     .unwrap();
@@ -86,7 +88,7 @@ async fn trigger_retain_skips_when_already_in_flight() {
         .expect("fresh session must be claimable");
 
     let deps = RetainDeps::from_test_context(&ctx);
-    let result = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
+    let result = trigger_retain(&deps, session_id.clone(), RetainSource::Manual, None)
         .await
         .unwrap();
     assert_eq!(result["retained"], false);
@@ -97,6 +99,7 @@ async fn trigger_retain_skips_when_already_in_flight() {
         &deps,
         session_id.clone(),
         RetainSource::Auto { interval_fired: 5 },
+        None,
     )
     .await
     .unwrap();
@@ -125,7 +128,7 @@ async fn manual_source_does_not_persist_trigger_event() {
     let session_id = cr.session.id.clone();
 
     let deps = RetainDeps::from_test_context(&ctx);
-    let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
+    let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual, None)
         .await
         .unwrap();
 
@@ -242,7 +245,7 @@ async fn manual_retain_never_emits_auto_retain_failed() {
         .unwrap();
 
     let deps = RetainDeps::from_test_context(&ctx);
-    let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual)
+    let _ = trigger_retain(&deps, session_id.clone(), RetainSource::Manual, None)
         .await
         .unwrap();
 

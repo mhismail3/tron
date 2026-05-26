@@ -105,6 +105,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             summary,
             entry_type,
             event_id,
+            resource_refs,
             ..
         } => Some(session_scoped(
             event,
@@ -114,6 +115,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "summary": summary,
                 "entryType": entry_type,
                 "eventId": event_id,
+                "resourceRefs": resource_refs,
             })),
         )),
         TronEvent::MemoryAutoRetainTriggered { interval_fired, .. } => Some(session_scoped(

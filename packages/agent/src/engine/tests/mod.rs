@@ -17,6 +17,7 @@ mod host_invocation;
 mod ids_types;
 mod leases_compensation;
 mod ledger_idempotency;
+mod memory_retain_resources;
 mod meta_primitives;
 mod module_activation;
 mod prompt_library_resources;

@@ -1,6 +1,8 @@
-//! Memory retain file path and writer helpers.
-
-use std::fs;
+//! Memory retain path and markdown formatting helpers.
+//!
+//! Durable retain truth is persisted through engine resources. The helpers in
+//! this module only compute projection paths and markdown bodies for
+//! `materialized_file` resources; they do not own filesystem writes.
 
 use chrono::Utc;
 
@@ -99,78 +101,23 @@ pub(super) fn split_title_and_body(journal_text: &str) -> (String, String) {
     (title, rest.trim_start().to_owned())
 }
 
-/// Write a session journal entry to `~/.tron/memory/sessions/{session_id}.md`.
-pub(super) fn write_session_entry(
-    session_id: &str,
-    created_ts: &str,
-    model: &str,
-    start_ts: &str,
-    end_ts: &str,
-    title: &str,
-    body: &str,
-) -> std::io::Result<()> {
-    let path = session_file_path(session_id);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let section = format_session_section(start_ts, end_ts, title, body);
-    let is_new = !path.exists();
-
-    use std::io::Write as _;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
-
-    if is_new {
-        let frontmatter = format_session_frontmatter(session_id, created_ts, model);
-        file.write_all(frontmatter.as_bytes())?;
-    }
-    file.write_all(section.as_bytes())?;
-    Ok(())
+/// Format frontmatter for a resource-backed core memory projection.
+pub(super) fn format_core_memory_frontmatter(created_ts: &str) -> String {
+    let today = created_ts
+        .split_once('T')
+        .map(|(date, _)| date)
+        .unwrap_or(created_ts);
+    format!("---\ntype: core-memory\ncreated: \"{today}\"\nupdated: \"{today}\"\n---\n\n")
 }
 
-/// Write or append a core memory update to a file in `memory/rules/`.
-pub(super) fn write_core_memory_update(
-    path: &std::path::Path,
-    update: &str,
-) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let is_new = !path.exists();
-    let now = Utc::now();
-    let ts = now.format("%Y-%m-%d %H:%M").to_string();
-
-    use std::io::Write as _;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-
-    if is_new {
-        let today = now.format("%Y-%m-%d").to_string();
-        let frontmatter =
-            format!("---\ntype: core-memory\ncreated: \"{today}\"\nupdated: \"{today}\"\n---\n\n");
-        file.write_all(frontmatter.as_bytes())?;
-    }
-
-    let entry = format!("\n## {ts}\n\n- {update}\n");
-    file.write_all(entry.as_bytes())?;
-    Ok(())
+/// Format a timestamped core memory update entry.
+pub(super) fn format_core_memory_entry(created_ts: &str, update: &str) -> String {
+    let ts = short_ts(created_ts);
+    format!("\n## {ts}\n\n- {update}\n")
 }
 
-/// Write an argument document to `knowledge/arguments/{slug}.md`.
-pub(super) fn write_argument_entry(
-    path: &std::path::Path,
-    arg: &ArgumentContent,
-) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
+/// Format an argument document for `knowledge/arguments/{slug}.md`.
+pub(super) fn format_argument_document(arg: &ArgumentContent) -> String {
     let today = Utc::now().format("%Y-%m-%d").to_string();
     let topics_yaml = if arg.topics.is_empty() {
         "[]".to_owned()
@@ -183,13 +130,10 @@ pub(super) fn write_argument_entry(
         format!("[{}]", arg.sources.join(", "))
     };
 
-    let content = format!(
+    format!(
         "---\ntype: argument\ntags: []\ntopics: {topics_yaml}\nsources: {sources_yaml}\ncreated: \"{today}\"\norigin: retain\n---\n\n# {title}\n\n## Thesis\n\n{thesis}\n\n## Evidence\n\n{evidence}\n",
         title = arg.title,
         thesis = arg.thesis,
         evidence = arg.evidence,
-    );
-
-    fs::write(path, content)?;
-    Ok(())
+    )
 }

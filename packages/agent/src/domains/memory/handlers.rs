@@ -9,10 +9,10 @@ operation_bindings! {
     hidden = [];
     bindings = [
         "auto_retain_fire" => |invocation, deps| {
-            operations::auto_retain_fire(&invocation.payload, deps).await
+            operations::auto_retain_fire(invocation, deps).await
         },
         "retain" => |invocation, deps| {
-            operations::retain(&invocation.payload, deps).await
+            operations::retain(invocation, deps).await
         },
     ];
 }

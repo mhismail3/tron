@@ -663,8 +663,8 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     assert_eq!(total, 100, "capability-backed truth rubric must total 100");
 
     assert!(
-        tracker.contains("Current capability-backed-truth score: **90/100**")
-            && tracker.contains("Total: **90/100**")
+        tracker.contains("Current capability-backed-truth score: **94/100**")
+            && tracker.contains("Total: **94/100**")
             && tracker.contains("Known Blockers")
             && tracker.contains("Conversion Candidate Register")
             && tracker.contains("Verification Standard For Every Phase")
@@ -720,30 +720,121 @@ fn capability_backed_truth_migration_tracker_stays_current() {
 
     assert!(
         production_rubric.contains("Current repo-wide score: **100/100**")
-            && production_rubric.contains("Current capability-backed-truth score: **90/100**")
+            && production_rubric.contains("Current capability-backed-truth score: **94/100**")
             && production_rubric.contains("docs/capability-backed-truth-migration-plan.md")
-            && production_rubric.contains("memory retain")
+            && production_rubric.contains("notifications")
             && production_rubric.contains("cron/scheduled work truth"),
         "production-grade rubric must distinguish classification score from capability-backed truth migration"
     );
     assert!(
         cleanup_audit.contains("Capability-Backed Truth Audit Reset")
             && cleanup_audit.contains("memory retain")
-            && cleanup_audit.contains("conversion blocker")
+            && cleanup_audit.contains("resource-backed capability module")
             && cleanup_audit.contains("docs/capability-backed-truth-migration-plan.md"),
         "cleanup audit must keep memory retain and the new tracker visible"
     );
     assert!(
         reachability_map.contains("memory retain")
-            && reachability_map.contains("Conversion blocker")
+            && reachability_map.contains("Converted in capability-backed-truth Phase 1")
             && reachability_map.contains("capability-backed-truth migration"),
         "product-shell reachability map must classify memory retain in deferred domain outputs"
     );
     assert!(
         readme.contains("docs/capability-backed-truth-migration-plan.md")
-            && readme.contains("90/100 baseline"),
+            && readme.contains("currently at 94/100"),
         "README must link the capability-backed-truth migration tracker and baseline"
     );
+}
+
+#[test]
+fn memory_retain_resource_truth_boundary_stays_enforced() {
+    let root = crate_root();
+    let memory_contract = std::fs::read_to_string(root.join("src/domains/memory/contract.rs"))
+        .expect("read memory contract");
+    assert!(
+        memory_contract.contains("DurableOutputContract::ResourceBacked")
+            && memory_contract.contains("artifact")
+            && memory_contract.contains("materialized_file")
+            && memory_contract.contains("evidence")
+            && memory_contract.contains("\"resourceRefs\""),
+        "memory retain capabilities must keep resource-backed output contracts and ref-aware schemas"
+    );
+
+    let retain_mod = std::fs::read_to_string(root.join("src/domains/memory/retain/mod.rs"))
+        .expect("read memory retain mod");
+    assert!(
+        retain_mod.contains("mod resources;"),
+        "memory retain resource persistence must stay in its focused resources boundary"
+    );
+    let retain_resources =
+        std::fs::read_to_string(root.join("src/domains/memory/retain/resources.rs"))
+            .expect("read memory retain resources");
+    for required in [
+        "artifact:memory-journal:",
+        "artifact:memory-rule:",
+        "artifact:memory-argument:",
+        "evidence::attach",
+        "memory_retain_recovery",
+        "memory_projection_failure",
+        "materialized_file::update",
+        "resource::link",
+        "resourceRefs",
+    ] {
+        assert!(
+            retain_resources.contains(required),
+            "memory retain resources boundary must contain `{required}`"
+        );
+    }
+
+    for rel in [
+        "src/domains/memory/retain/background.rs",
+        "src/domains/memory/retain/mod.rs",
+        "src/domains/memory/retain/resources.rs",
+        "src/domains/memory/retain/writer.rs",
+    ] {
+        let content = std::fs::read_to_string(root.join(rel))
+            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
+        for forbidden in [
+            "OpenOptions",
+            "std::fs::write",
+            "write_all",
+            "create_dir_all",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{rel} must not use {forbidden} as retained-memory durable truth"
+            );
+        }
+    }
+
+    let context_service =
+        std::fs::read_to_string(root.join("src/domains/agent/runtime/service/context.rs"))
+            .expect("read agent context service");
+    assert!(
+        context_service.contains("load_retained_memory_resource_context")
+            && context_service.contains("artifact:memory-rule:")
+            && context_service.contains("artifact:memory-argument:"),
+        "prompt context assembly must include resource-backed retained memory"
+    );
+
+    let engine_tests =
+        std::fs::read_to_string(root.join("src/engine/tests/mod.rs")).expect("read engine tests");
+    assert!(
+        engine_tests.contains("mod memory_retain_resources;"),
+        "memory retain resource tests must stay in an engine test ownership boundary"
+    );
+    let memory_tests =
+        std::fs::read_to_string(root.join("src/engine/tests/memory_retain_resources.rs"))
+            .expect("read memory retain resource tests");
+    for required in [
+        "memory_retain_produces_resource_backed_journal_and_projection",
+        "memory_retain_idempotency_does_not_duplicate_memory_artifacts",
+    ] {
+        assert!(
+            memory_tests.contains(required),
+            "memory retain resource proof test `{required}` must remain present"
+        );
+    }
 }
 
 #[test]

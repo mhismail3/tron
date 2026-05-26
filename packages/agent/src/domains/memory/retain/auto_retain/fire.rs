@@ -1,6 +1,7 @@
 use super::RetainDeps;
 use super::{AutoRetainDecision, gather_state, should_auto_retain};
 use crate::domains::memory::retain::{RetainSource, trigger_retain};
+use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
 use tracing::debug;
 use tracing::warn;
@@ -16,17 +17,26 @@ use tracing::warn;
 /// Reads the current `memory.auto_retain_interval` from the settings singleton.
 /// The setting is hot-reloadable via `settings::update` capability, so user changes
 /// take effect on the next agent run without a server restart.
-pub async fn maybe_fire(deps: &RetainDeps, session_id: &str) {
+pub async fn maybe_fire(
+    deps: &RetainDeps,
+    session_id: &str,
+    parent_invocation: Option<Invocation>,
+) {
     let interval = crate::domains::settings::get_settings()
         .memory
         .auto_retain_interval;
-    maybe_fire_with_interval(deps, session_id, interval).await;
+    maybe_fire_with_interval(deps, session_id, interval, parent_invocation).await;
 }
 
 /// Core of [`maybe_fire`] with the threshold passed in explicitly. Exists so
 /// tests can exercise the full `gather_state` → `should_auto_retain` →
 /// `trigger_retain` composition without mutating the global settings singleton.
-pub(super) async fn maybe_fire_with_interval(deps: &RetainDeps, session_id: &str, interval: u32) {
+pub(super) async fn maybe_fire_with_interval(
+    deps: &RetainDeps,
+    session_id: &str,
+    interval: u32,
+    parent_invocation: Option<Invocation>,
+) {
     // Cheap short-circuit: avoid hitting SQLite when auto-retain is disabled.
     if interval == 0 {
         return;
@@ -64,6 +74,7 @@ pub(super) async fn maybe_fire_with_interval(deps: &RetainDeps, session_id: &str
                 deps,
                 session_id_owned.clone(),
                 RetainSource::Auto { interval_fired },
+                parent_invocation,
             )
             .await
             {

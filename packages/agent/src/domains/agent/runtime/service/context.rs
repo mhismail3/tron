@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use serde_json::{Value, json};
 use tracing::warn;
 
 use super::{
@@ -45,6 +46,7 @@ impl PromptContextBundle {
 
 pub(super) async fn load_prompt_context_bundle(
     context_artifacts: Arc<crate::domains::session::context::ContextArtifactsService>,
+    engine_host: crate::engine::EngineHostHandle,
     event_store: Arc<crate::domains::session::event_store::EventStore>,
     memory_registry: Arc<parking_lot::Mutex<crate::domains::agent::runner::memory::MemoryRegistry>>,
     session_id: &str,
@@ -78,7 +80,7 @@ pub(super) async fn load_prompt_context_bundle(
         process_results_context,
         user_job_actions_context,
     );
-    let memory = load_memory_context(memory_registry, context_policy);
+    let memory = load_memory_context(engine_host, memory_registry, context_policy).await;
     let memory = append_worktree_context(memory, worktree_info, resolved_profile);
 
     PromptContextBundle {
@@ -166,19 +168,137 @@ fn join_job_results_context(
     }
 }
 
-fn load_memory_context(
+async fn load_memory_context(
+    engine_host: crate::engine::EngineHostHandle,
     memory_registry: Arc<parking_lot::Mutex<crate::domains::agent::runner::memory::MemoryRegistry>>,
     context_policy: &crate::domains::agent::runner::context::local_policy::ContextPolicy,
 ) -> Option<String> {
     if context_policy.strip_memory() {
         return None;
     }
-    let mut registry = memory_registry.lock();
-    Some(
+    let base = {
+        let mut registry = memory_registry.lock();
         registry
             .content(&crate::shared::paths::home_dir())
-            .to_string(),
+            .to_string()
+    };
+    join_context_parts([
+        Some(base),
+        load_retained_memory_resource_context(&engine_host).await,
+    ])
+}
+
+async fn load_retained_memory_resource_context(
+    engine_host: &crate::engine::EngineHostHandle,
+) -> Option<String> {
+    let listed = invoke_resource_read(
+        engine_host,
+        "resource::list",
+        json!({"kind": "artifact", "limit": 10_000}),
+        "memory-context-list",
     )
+    .await?;
+    let mut ids = listed["resources"]
+        .as_array()?
+        .iter()
+        .filter_map(|resource| resource.get("resourceId").and_then(Value::as_str))
+        .filter(|id| {
+            id.starts_with("artifact:memory-rule:") || id.starts_with("artifact:memory-argument:")
+        })
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    ids.sort();
+
+    let mut sections = Vec::new();
+    for id in ids.into_iter().take(200) {
+        let inspected = invoke_resource_read(
+            engine_host,
+            "resource::inspect",
+            json!({"resourceId": id}),
+            "memory-context-inspect",
+        )
+        .await?;
+        let inspection = inspected.get("inspection")?;
+        if inspection["resource"]["lifecycle"] == "discarded" {
+            continue;
+        }
+        let payload = current_resource_payload(inspection)?;
+        let title = payload
+            .get("title")
+            .and_then(Value::as_str)
+            .unwrap_or("Retained memory");
+        let body = payload
+            .get("body")
+            .or_else(|| payload.get("summary"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if !body.is_empty() {
+            sections.push(format!("### {title}\n\n{body}"));
+        }
+    }
+    if sections.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "## Resource-backed retained memory\n\n{}",
+            sections.join("\n\n")
+        ))
+    }
+}
+
+async fn invoke_resource_read(
+    engine_host: &crate::engine::EngineHostHandle,
+    function_id: &str,
+    payload: Value,
+    idempotency_label: &str,
+) -> Option<Value> {
+    let causal = crate::engine::CausalContext::new(
+        crate::engine::ActorId::new("system:memory-context").ok()?,
+        crate::engine::ActorKind::System,
+        crate::engine::AuthorityGrantId::new("engine-system").ok()?,
+        crate::engine::TraceId::new("memory-context").ok()?,
+    )
+    .with_scope("resource.read")
+    .with_idempotency_key(idempotency_label);
+    let result = engine_host
+        .invoke(crate::engine::Invocation::new_sync(
+            crate::engine::FunctionId::new(function_id).ok()?,
+            payload,
+            causal,
+        ))
+        .await;
+    if let Some(error) = result.error {
+        warn!(error = %error, "failed to load resource-backed retained memory");
+        return None;
+    }
+    result.value
+}
+
+fn current_resource_payload(inspection: &Value) -> Option<&Value> {
+    let current = inspection
+        .pointer("/resource/currentVersionId")
+        .and_then(Value::as_str)?;
+    inspection
+        .get("versions")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|version| version["versionId"] == current)
+        .and_then(|version| version.get("payload"))
+}
+
+fn join_context_parts(parts: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    let parts = parts
+        .into_iter()
+        .flatten()
+        .map(|part| part.trim().to_owned())
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
 }
 
 fn append_worktree_context(
@@ -212,4 +332,48 @@ fn append_worktree_context(
         Some(memory) => format!("{memory}{worktree_context}"),
         None => worktree_context,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_context(key: &str) -> crate::engine::CausalContext {
+        crate::engine::CausalContext::new(
+            crate::engine::ActorId::new("system:test").unwrap(),
+            crate::engine::ActorKind::System,
+            crate::engine::AuthorityGrantId::new("engine-system").unwrap(),
+            crate::engine::TraceId::new("memory-context-test").unwrap(),
+        )
+        .with_scope("resource.write")
+        .with_idempotency_key(key)
+    }
+
+    #[tokio::test]
+    async fn retained_memory_context_reads_resource_artifacts() {
+        let handle = crate::engine::EngineHostHandle::new_in_memory().unwrap();
+        let created = handle
+            .invoke(crate::engine::Invocation::new_sync(
+                crate::engine::FunctionId::new("artifact::create").unwrap(),
+                json!({
+                    "resourceId": "artifact:memory-rule:test:001",
+                    "scope": "system",
+                    "lifecycle": "promoted",
+                    "payload": {
+                        "title": "Memory rule update: test.md",
+                        "body": "- Always verify resource-backed truth",
+                        "metadata": {"domain": "memory", "recordKind": "rule"}
+                    }
+                }),
+                write_context("memory-context-artifact-create"),
+            ))
+            .await;
+        assert_eq!(created.error, None);
+
+        let context = load_retained_memory_resource_context(&handle)
+            .await
+            .expect("resource-backed memory context");
+        assert!(context.contains("Resource-backed retained memory"));
+        assert!(context.contains("Always verify resource-backed truth"));
+    }
 }

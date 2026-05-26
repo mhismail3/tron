@@ -7,26 +7,25 @@ use serde_json::json;
 use tracing::{debug, warn};
 
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
-use crate::domains::agent::runner::orchestrator::subagent_manager::SubagentManager;
+use crate::domains::session::event_store::AppendOptions;
 use crate::domains::session::event_store::types::EventType;
-use crate::domains::session::event_store::{AppendOptions, EventStore};
+use crate::engine::Invocation;
 
+use super::RetainDeps;
 use super::RetainSource;
 use super::events::emit_auto_retain_failed;
 use super::parsing::{parse_retain_output, slugify};
+use super::resources::{RetainedMemoryPayload, persist_retained_memory_outputs};
 use super::summarizer::{SummarizerOutcome, keyword_summary, run_summarizer};
-use super::writer::{
-    argument_file_path, core_memory_file_path, split_title_and_body, write_argument_entry,
-    write_core_memory_update, write_session_entry,
-};
+use super::writer::split_title_and_body;
 
-/// Background task that runs the summarizer and writes results.
+/// Background task that runs the summarizer and persists retained outputs.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn retain_background_task(
+    deps: RetainDeps,
+    parent_invocation: Option<Invocation>,
     session_id: String,
-    event_store: Arc<EventStore>,
     broadcast: Arc<EventEmitter>,
-    subagent_manager: Option<Arc<SubagentManager>>,
     working_directory: String,
     model: String,
     transcript: String,
@@ -34,7 +33,7 @@ pub(super) async fn retain_background_task(
     end_ts: String,
     source: RetainSource,
 ) {
-    let outcome = match subagent_manager {
+    let outcome = match deps.subagent_manager.clone() {
         Some(manager) => run_summarizer(manager, &session_id, &working_directory, transcript).await,
         None => {
             warn!(session_id = %session_id, "no subagent manager for memory retain, using keyword recovery");
@@ -54,7 +53,7 @@ pub(super) async fn retain_background_task(
         (source, summarizer_failure.as_ref())
     {
         emit_auto_retain_failed(
-            &event_store,
+            &deps.event_store,
             &broadcast,
             &session_id,
             interval_fired,
@@ -68,44 +67,72 @@ pub(super) async fn retain_background_task(
     let (title, body) = split_title_and_body(journal_text);
     let created_ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
-    if let Err(e) = write_session_entry(
-        &session_id,
-        &created_ts,
-        &model,
-        &start_ts,
-        &end_ts,
-        &title,
-        &body,
-    ) {
-        warn!(session_id = %session_id, error = %e, "failed to write session journal file");
-    }
-
     let mut entry_type_parts = vec!["journal"];
-
     if let Some(ref cm) = parsed.core_memory {
-        let path = core_memory_file_path(&cm.file);
-        if let Err(e) = write_core_memory_update(&path, &cm.update) {
-            warn!(session_id = %session_id, error = %e, "failed to write core memory update");
-        } else {
-            debug!(session_id = %session_id, file = %cm.file, "updated core memory");
-            entry_type_parts.push("memory");
-        }
+        debug!(session_id = %session_id, file = %cm.file, "parsed core memory update");
+        entry_type_parts.push("memory");
     }
-
     if let Some(ref arg) = parsed.argument {
         let slug = slugify(&arg.title);
-        let path = argument_file_path(&slug);
-        if let Err(e) = write_argument_entry(&path, arg) {
-            warn!(session_id = %session_id, error = %e, "failed to write argument");
-        } else {
-            debug!(session_id = %session_id, slug = %slug, "created argument");
-            entry_type_parts.push("argument");
-        }
+        debug!(session_id = %session_id, slug = %slug, "parsed argument memory");
+        entry_type_parts.push("argument");
     }
 
     let entry_type = entry_type_parts.join("+");
+    let source_label = match source {
+        RetainSource::Manual => "manual",
+        RetainSource::Auto { .. } => "auto",
+    };
+    let retained_outputs = match persist_retained_memory_outputs(
+        &deps,
+        parent_invocation.as_ref(),
+        RetainedMemoryPayload {
+            session_id: &session_id,
+            created_ts: &created_ts,
+            model: &model,
+            start_ts: &start_ts,
+            end_ts: &end_ts,
+            title: &title,
+            body: &body,
+            source: source_label,
+            summarizer_failure: summarizer_failure.as_deref(),
+            core_memory: parsed.core_memory.as_ref(),
+            argument: parsed.argument.as_ref(),
+        },
+    )
+    .await
+    {
+        Ok(outputs) => outputs,
+        Err(error) => {
+            warn!(session_id = %session_id, error = %error, "failed to persist resource-backed memory retain output");
+            if let RetainSource::Auto { interval_fired } = source {
+                emit_auto_retain_failed(
+                    &deps.event_store,
+                    &broadcast,
+                    &session_id,
+                    interval_fired,
+                    &error.to_string(),
+                )
+                .await;
+            }
+            let _ = broadcast.emit(crate::shared::events::TronEvent::MemoryUpdated {
+                base: crate::shared::events::BaseEvent::now(&session_id),
+                title: None,
+                summary: Some(
+                    "Memory retain failed before resource-backed persistence completed".to_owned(),
+                ),
+                entry_type: Some("failed".to_owned()),
+                event_id: None,
+                resource_refs: Some(Vec::new()),
+            });
+            return;
+        }
+    };
+    let resource_refs = retained_outputs.resource_refs;
+    let evidence_refs = retained_outputs.evidence_refs;
 
-    let retained_event_id = event_store
+    let retained_event_id = deps
+        .event_store
         .append(&AppendOptions {
             session_id: &session_id,
             event_type: EventType::MemoryRetained,
@@ -117,6 +144,8 @@ pub(super) async fn retain_background_task(
                 "rangeStart": start_ts,
                 "rangeEnd": end_ts,
                 "entryType": entry_type,
+                "resourceRefs": &resource_refs,
+                "evidenceRefs": &evidence_refs,
             }),
             parent_id: None,
             sequence: None,
@@ -134,5 +163,6 @@ pub(super) async fn retain_background_task(
         } else {
             Some(retained_event_id)
         },
+        resource_refs: Some(resource_refs),
     });
 }
