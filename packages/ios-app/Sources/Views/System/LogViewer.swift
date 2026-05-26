@@ -4,10 +4,7 @@ import SwiftUI
 
 struct LogViewer: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dependencies) private var dependencies
     @State private var logs: [(Date, LogCategory, LogLevel, String)] = []
-    @State private var isExporting = false
-    @State private var exportSuccess = false
     @State private var copySuccess = false
     @State private var selectedLevel: LogLevel = .info
     @State private var selectedCategory: LogCategory?
@@ -40,16 +37,6 @@ struct LogViewer: View {
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    Button { exportLogsToServer() } label: {
-                        Image(systemName: exportSuccess ? "checkmark" : "square.and.arrow.up")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(.tronEmerald)
-                            .contentTransition(.symbolEffect(.replace.downUp))
-                    }
-                    .disabled(isExporting)
-                }
-
-                ToolbarItem(placement: .primaryAction) {
                     Button { copyLogsToClipboard() } label: {
                         Image(systemName: copySuccess ? "checkmark" : "doc.on.doc")
                             .font(TronTypography.buttonSM)
@@ -58,7 +45,6 @@ struct LogViewer: View {
                     }
                 }
             }
-            .sensoryFeedback(.success, trigger: exportSuccess)
             .sensoryFeedback(.success, trigger: copySuccess)
             .onAppear { refreshLogs() }
         }
@@ -114,8 +100,7 @@ struct LogViewer: View {
                 .padding(.horizontal, 10)
             }
 
-            // Entry count
-            Text("\(filteredLogs.count) entries")
+            Text("\(filteredLogs.count) entries • Server sync is automatic while connected")
                 .font(.system(.caption, design: .monospaced, weight: .bold))
                 .foregroundStyle(.tronTextMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -165,39 +150,6 @@ struct LogViewer: View {
         Task {
             try? await Task.sleep(for: .seconds(0.6))
             copySuccess = false
-        }
-    }
-
-    private func exportLogsToServer() {
-        guard !isExporting else { return }
-
-        isExporting = true
-        exportSuccess = true
-
-        Task {
-            defer { isExporting = false }
-
-            let allLogs = logger.getRecentLogs(count: 10000, level: .verbose, category: nil)
-
-            let entries = allLogs.map { entry in
-                ClientLogEntry(
-                    timestamp: DateParser.formatISO8601WithMillis(entry.0),
-                    level: String(describing: entry.2).lowercased(),
-                    category: entry.1.rawValue,
-                    message: entry.3
-                )
-            }
-
-            do {
-                let engineClient = dependencies.engineClient
-                let result = try await engineClient.misc.ingestLogs(entries: entries, idempotencyKey: .userAction("logs.ingest"))
-                logger.info("Ingested \(result.inserted) of \(entries.count) log entries into server", category: .general)
-            } catch {
-                logger.error("Failed to ingest logs to server: \(error.localizedDescription)", category: .general)
-            }
-
-            try? await Task.sleep(for: .seconds(0.6))
-            exportSuccess = false
         }
     }
 

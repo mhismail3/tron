@@ -181,7 +181,6 @@ final class MiscClient: EngineDomainClient {
             idempotencyKey: idempotencyKey
         )
 
-        logger.info("Ingested \(result.inserted) log entries into server database", category: .general)
         return result
     }
 

@@ -53,6 +53,11 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Draft store for persisting input bar state per session
     private(set) var draftStore: DraftStore
 
+    /// Automatically mirrors bounded, redacted client logs into the connected
+    /// server's log table. Server-side `logs::ingest` owns durable storage and
+    /// deduplication; this service only batches the local in-memory buffer.
+    private(set) var clientLogIngestionService: ClientLogIngestionService
+
     /// Shared audio recorder — starts on-demand when user taps mic
     let audioRecorder = AudioRecorder()
 
@@ -186,6 +191,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
         )
         engineClient = client
+        clientLogIngestionService = ClientLogIngestionService(engineClient: client)
 
         // Initialize centralized connection policy layer
         let manager = ConnectionManager(provider: client)
@@ -242,6 +248,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         // Initialize event store manager
         eventStoreManager.initialize()
+        clientLogIngestionService.start()
 
         isInitialized = true
         TronLogger.shared.info("DependencyContainer initialized with \(eventStoreManager.sessions.count) sessions", category: .session)
@@ -385,6 +392,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
         )
         engineClient = newClient
+        clientLogIngestionService.updateEngineClient(newClient)
 
         let newManager = ConnectionManager(provider: newClient)
         connectionManager = newManager

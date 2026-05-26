@@ -579,8 +579,20 @@ struct SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/Views/System/LogViewer.swift"),
             encoding: .utf8
         )
+        let ingestionService = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Services/Diagnostics/ClientLogIngestionService.swift"),
+            encoding: .utf8
+        )
         let miscClient = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/MiscClient.swift"),
+            encoding: .utf8
+        )
+        let dependencyContainer = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Core/DI/DependencyContainer.swift"),
+            encoding: .utf8
+        )
+        let app = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/App/TronMobileApp.swift"),
             encoding: .utf8
         )
         let architectureDoc = try String(
@@ -601,15 +613,35 @@ struct SourceGuardTests {
         #expect(!settingsView.contains("#if DEBUG || BETA"))
         #expect(!logViewer.hasPrefix("#if DEBUG || BETA"))
         #expect(!logViewer.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"))
+        #expect(!logViewer.contains("exportLogsToServer"))
+        #expect(!logViewer.contains("square.and.arrow.up"))
+        #expect(logViewer.contains("Server sync is automatic while connected"))
+        #expect(ingestionService.contains("ClientLogIngestionPlanner"))
+        #expect(ingestionService.contains("ios:client-log-ingest:"))
+        #expect(ingestionService.contains("uploadedEntryFingerprints"))
+        #expect(ingestionService.contains("visibleEntryFingerprints"))
+        #expect(ingestionService.contains("DiagnosticsRedactor"))
+        #expect(ingestionService.contains("Task.isCancelled"))
+        #expect(ingestionService.contains("uploadTaskSerial"))
+        #expect(ingestionService.contains("isSuccessfulIngestionPlumbing"))
+        #expect(dependencyContainer.contains("clientLogIngestionService.start()"))
+        #expect(dependencyContainer.contains("clientLogIngestionService.updateEngineClient(newClient)"))
+        #expect(app.contains("container.clientLogIngestionService.handleConnectionChange"))
+        #expect(app.contains("container.clientLogIngestionService.handleScenePhaseChange"))
         #expect(miscClient.contains("func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult"))
 
         let ingestStart = try #require(miscClient.range(of: "func ingestLogs(entries: [ClientLogEntry]"))
         let diagnosticsStart = try #require(miscClient.range(of: "// MARK: - Diagnostics (debug / beta only)"))
         let ingestBlock = miscClient[ingestStart.lowerBound..<diagnosticsStart.lowerBound]
         #expect(!ingestBlock.contains("#if DEBUG || BETA"))
+        #expect(!ingestBlock.contains("logger.info"))
 
         #expect(architectureDoc.contains("The settings toolbar exposes Logs in every build configuration."))
+        #expect(architectureDoc.contains("mirrors bounded client logs into the server `logs` table"))
+        #expect(architectureDoc.contains("self-feeding diagnostics loop"))
         #expect(rootReadme.contains("Settings also exposes the Logs sheet in every iOS build configuration"))
+        #expect(rootReadme.contains("automatically ingests deduplicated client logs"))
+        #expect(rootReadme.contains("self-feeding diagnostics loops"))
     }
 
     @Test("fast production scheme keeps prod identity with debug build settings")

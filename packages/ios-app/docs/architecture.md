@@ -460,10 +460,17 @@ diagnostics JSON, opens the native Mail composer with the tracked support
 recipient and attachment, and shows an alert when Mail is unavailable because
 iOS does not reliably attach files through a default-mail-app handoff.
 The settings toolbar exposes Logs in every build configuration. Production and
-TestFlight builds can still copy or export redacted in-memory client logs while
-the production logger keeps its lower-volume `.info` default. The
-`logs::ingest` client wrapper remains production-available for this explicit
-user action; broader system diagnostics stay debug/beta-only.
+TestFlight builds can still inspect and copy redacted in-memory client logs
+while the production logger keeps its lower-volume `.info` default. During
+normal connected app execution, `ClientLogIngestionService` automatically
+mirrors bounded client logs into the server `logs` table through `logs::ingest`
+with send-boundary redaction, endpoint-scoped entry fingerprints, deterministic
+batch idempotency, and cancellation of stale scheduled uploads after server
+changes. Successful `logs::ingest` transport/debug plumbing is omitted from
+automatic upload to avoid a self-feeding diagnostics loop, while ingestion
+failures and reconnect warnings remain eligible for server-side inspection.
+The server remains the durable, deduplicated log truth. Broader system
+diagnostics stay debug/beta-only.
 When the active paired server cannot be reached, Settings keeps local paired
 server management visible but hides server-backed controls until the connection
 returns and settings reload. The main sheet keeps App and Server visible,

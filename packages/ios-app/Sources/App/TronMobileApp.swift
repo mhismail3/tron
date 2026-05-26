@@ -62,6 +62,7 @@ struct TronMobileApp: App {
             }
             .onChange(of: container.engineClient.connectionState) { oldState, newState in
                 handleConnectionBannerTransition(to: newState)
+                container.clientLogIngestionService.handleConnectionChange(from: oldState, to: newState)
 
                 // When connection is established, make sure the paired client
                 // has an APNs token registered with the engine.
@@ -101,6 +102,7 @@ struct TronMobileApp: App {
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 let isBackground = newPhase != .active
                 container.setBackgroundState(isBackground)
+                container.clientLogIngestionService.handleScenePhaseChange(isActive: newPhase == .active)
 
                 // Flush any pending debounced draft save before backgrounding
                 if isBackground {

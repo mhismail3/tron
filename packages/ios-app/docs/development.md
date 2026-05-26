@@ -157,6 +157,20 @@ builds a redacted `tron-diagnostics-<timestamp>.json` attachment that includes
 bounded iOS logs, `logs::recent(limit: 1000)` when connected, local session and
 event summaries, and MetricKit payloads.
 
+When the app is connected to a paired server,
+`ClientLogIngestionService` automatically mirrors the bounded, redacted
+`TronLogger` buffer into the server `logs` table through `logs::ingest`.
+The upload redacts messages again at the send boundary, tracks entry
+fingerprints for the active server endpoint, uses deterministic batch
+idempotency, and still relies on the server's client-log dedupe index as
+durable truth. Endpoint changes cancel stale scheduled uploads, and repeated
+reconnects or foreground transitions do not resend unchanged local buffers or
+create duplicate DB rows. Successful `logs::ingest` transport/debug plumbing is
+filtered before upload so automatic syncing cannot create a self-feeding log
+loop; failed ingestion and reconnect warnings are retained. The Logs sheet
+remains production-available for local inspection and copying; it is not the
+source of durable log truth.
+
 Mail delivery uses the tracked `TRON_FEEDBACK_EMAIL` build setting and opens
 the native Mail composer with the support recipient, subject, body, and JSON
 attachment filled in. The body names the attachment and describes the actual

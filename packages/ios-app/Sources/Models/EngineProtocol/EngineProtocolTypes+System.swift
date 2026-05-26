@@ -163,7 +163,7 @@ struct RecentLogEntry: Decodable, Sendable {
 }
 
 /// A single log entry for ingestion into the server database.
-struct ClientLogEntry: Encodable {
+struct ClientLogEntry: Encodable, Equatable, Sendable {
     let timestamp: String   // ISO 8601 with millis ("2026-03-03T14:30:05.123Z")
     let level: String       // "verbose", "debug", "info", "warning", "error"
     let category: String    // "WebSocket", "engine protocol", etc.
