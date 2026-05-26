@@ -35,6 +35,36 @@ fn shell_job(name: &str) -> Value {
     })
 }
 
+fn cache_only_job() -> crate::domains::cron::CronJob {
+    let now = Utc::now();
+    crate::domains::cron::CronJob {
+        id: "cron_cache_only".to_owned(),
+        name: "Cache-only cron".to_owned(),
+        description: None,
+        enabled: true,
+        schedule: crate::domains::cron::Schedule::Every {
+            interval_secs: 60,
+            anchor: None,
+        },
+        payload: crate::domains::cron::Payload::ShellCommand {
+            command: "printf hidden".to_owned(),
+            working_directory: None,
+            timeout_secs: 5,
+        },
+        delivery: vec![crate::domains::cron::Delivery::Silent],
+        overlap_policy: crate::domains::cron::OverlapPolicy::Skip,
+        misfire_policy: crate::domains::cron::MisfirePolicy::Skip,
+        max_retries: 0,
+        auto_disable_after: 0,
+        stuck_timeout_secs: 7200,
+        tags: vec!["cache-only".to_owned()],
+        capability_restrictions: None,
+        workspace_id: Some("workspace-cron".to_owned()),
+        created_at: now,
+        updated_at: now,
+    }
+}
+
 fn current_payload(inspection: &Value) -> Value {
     let current = inspection["resource"]["currentVersionId"].as_str().unwrap();
     inspection["versions"]
@@ -240,5 +270,146 @@ async fn cron_runtime_lifecycle_flip_updates_decision_truth_idempotently() {
         replayed["versions"].as_array().unwrap().len(),
         version_count,
         "repeated runtime lifecycle flips must not create duplicate resource versions"
+    );
+}
+
+#[tokio::test]
+async fn cron_runtime_cache_rows_are_not_product_truth() {
+    let ctx = crate::shared::server::test_support::make_test_context_with_cron_scheduler();
+    let handle = ctx.engine_host.clone();
+    let sched = ctx.cron_scheduler.as_ref().unwrap();
+    let job = cache_only_job();
+    crate::domains::cron::store::upsert_job(sched.pool(), &job).unwrap();
+    sched.reload_job(job.clone());
+
+    let listed = handle
+        .invoke(host_invocation(
+            "cron::list",
+            json!({"workspaceId": "workspace-cron"}),
+            cron_read_context(),
+        ))
+        .await;
+    assert_eq!(listed.error, None);
+    assert!(
+        listed.value.as_ref().unwrap()["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["id"] != job.id),
+        "cache-only cron rows must not appear in operator schedule truth"
+    );
+
+    let fetched = handle
+        .invoke(host_invocation(
+            "cron::get",
+            json!({"jobId": job.id}),
+            cron_read_context(),
+        ))
+        .await;
+    assert!(
+        fetched
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("Job not found")),
+        "cron::get must ignore cache-only rows"
+    );
+
+    let run = handle
+        .invoke(host_invocation(
+            "cron::run",
+            json!({"jobId": job.id}),
+            cron_write_context("cron-cache-only-run"),
+        ))
+        .await;
+    assert!(
+        run.error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("Job not found")),
+        "cron::run must not execute cache-only rows"
+    );
+}
+
+#[tokio::test]
+async fn cron_run_rehydrates_runtime_cache_from_decision_truth() {
+    let ctx = crate::shared::server::test_support::make_test_context_with_cron_scheduler();
+    let handle = ctx.engine_host.clone();
+    let sched = ctx.cron_scheduler.as_ref().unwrap();
+
+    let created = handle
+        .invoke(host_invocation(
+            "cron::create",
+            json!({"job": shell_job("Hydrated cron")}),
+            cron_write_context("cron-hydrate-create"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let job_id = created.value.as_ref().unwrap()["job"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    sched.remove_job(&job_id);
+    crate::domains::cron::store::delete_job(sched.pool(), &job_id).unwrap();
+    assert!(sched.get_job(&job_id).is_none());
+    assert!(
+        crate::domains::cron::store::get_job(sched.pool(), &job_id)
+            .unwrap()
+            .is_none()
+    );
+
+    let run = handle
+        .invoke(host_invocation(
+            "cron::run",
+            json!({"jobId": job_id}),
+            cron_write_context("cron-hydrate-run"),
+        ))
+        .await;
+    assert_eq!(run.error, None);
+    assert_eq!(run.value.as_ref().unwrap()["triggered"], true);
+    assert!(sched.get_job(&job_id).is_some());
+    assert!(
+        crate::domains::cron::store::get_job(sched.pool(), &job_id)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn cron_run_rejects_disabled_schedule_decision() {
+    let ctx = crate::shared::server::test_support::make_test_context_with_cron_scheduler();
+    let handle = ctx.engine_host.clone();
+
+    let created = handle
+        .invoke(host_invocation(
+            "cron::create",
+            json!({"job": shell_job("Disabled cron")}),
+            cron_write_context("cron-disabled-create"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let job_id = created.value.as_ref().unwrap()["job"]["id"]
+        .as_str()
+        .unwrap();
+
+    let disabled = handle
+        .invoke(host_invocation(
+            "cron::update",
+            json!({"jobId": job_id, "enabled": false}),
+            cron_write_context("cron-disabled-update"),
+        ))
+        .await;
+    assert_eq!(disabled.error, None);
+
+    let run = handle
+        .invoke(host_invocation(
+            "cron::run",
+            json!({"jobId": job_id}),
+            cron_write_context("cron-disabled-run"),
+        ))
+        .await;
+    assert!(
+        run.error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("CRON_JOB_DISABLED")),
+        "manual cron run must fail closed when the schedule decision is disabled"
     );
 }

@@ -18,8 +18,9 @@
 //! engine trigger/idempotency/ledger records.
 //! Schedule and run facts that affect operators or future agent behavior are
 //! resource-backed. The cron SQLite tables remain a low-level scheduler cache
-//! until the final storage-plane removal phase; they are not the product source
-//! of truth for cron schedule definitions.
+//! for timer, retry, running-state, stuck-run, and executor bookkeeping; they
+//! are not the product source of truth for cron schedule definitions or
+//! completed run observations.
 //!
 //! ## Invariants
 //!

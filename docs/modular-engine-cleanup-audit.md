@@ -58,25 +58,27 @@ Phase 3 moved completed subagent result truth to deterministic `agent_result`
 resources and added generated subagent lineage surfaces. Phase 4 added
 server-authored source-control and AgentControl generated surfaces with stored
 canonical actions. Phase 5 moved cron schedule definitions to `decision`
-resources and completed run observations to `evidence` resources. The remaining
-blocker is the cron runtime scheduler cache remove-or-accept decision.
+resources and completed run observations to `evidence` resources. Phase 6
+accepted the remaining cron runtime scheduler cache as low-level substrate after
+proving cache-only rows are not product truth and schedule decisions can
+rehydrate the cache.
 
 | Area | Evidence | Decision |
 |------|----------|----------|
-| Capability-backed-truth tracker | `docs/capability-backed-truth-migration-plan.md` defines a stricter 100-point score, current 99/100 baseline, phase tracker, conversion register, and verification standard | Keep as the authoritative migration tracker until every candidate is converted or explicitly accepted as low-level substrate |
+| Capability-backed-truth tracker | `docs/capability-backed-truth-migration-plan.md` defines a stricter 100-point score, current 100/100 baseline, phase tracker, conversion register, and verification standard | Keep as the authoritative migration tracker; update it before any new durable state owner is introduced |
 | Memory retain | `packages/agent/src/domains/memory/retain/resources.rs`, `packages/agent/src/engine/tests/memory_retain_resources.rs`, and `packages/agent/src/domains/agent/runtime/service/context.rs` prove retained outputs are artifacts/materialized projections, recovery/projection failures emit evidence refs, and prompt context reads retained rule/argument artifacts from resource truth | Completed Phase 1; static gates forbid direct hidden durable writes returning to memory retain |
 | Notification Resource Contract | `packages/agent/src/domains/notifications/inbox.rs`, `packages/agent/src/engine/tests/notification_resources.rs`, and `packages/agent/src/engine/primitives/ui.rs` prove notification delivery is a `notification` resource with delivery `evidence`, read state is `decision` truth, `notifications::list` ignores historical event-only rows, and generated `notifications.inbox.v1` surfaces expose stored read actions | Completed Phase 2; static gates forbid `notification_read_state` and event-payload inbox reconstruction |
 | Subagent lineage | `packages/agent/src/domains/agent/lineage.rs`, `packages/agent/src/domains/agent/operations/submissions.rs`, `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager/execution.rs`, `packages/agent/src/engine/tests/subagent_lineage.rs`, and `packages/agent/src/engine/primitives/ui.rs` prove completed child-agent result truth is deterministic `agent_result:subagent:*` resources, status/result can reconstruct without a live manager, malformed or cross-session resources are ignored, and generated `subagent.lineage.v1` surfaces expose bounded server-owned lineage/actions | Completed Phase 3; fixed Swift subagent sheets remain thin rendering/navigation only and static gates forbid client-owned action or policy construction |
 | Source-control and AgentControl shells | `source_control.session.v1` and `agent_control.session.v1` generated surfaces now expose bounded server-owned source-control/control review projections and stored canonical actions. Product-shell reachability keeps fixed Swift shells only as thin navigation/review containers while conflict/deferred-prompt UX remains bespoke. | Completed Phase 4 server-owned projection boundary; remove fixed controls only after generated UX equivalence is proven |
-| Cron/scheduled work | `packages/agent/src/domains/cron/implementation/domain/truth.rs`, `packages/agent/src/engine/tests/cron_resources.rs`, and `threat_model_invariants::cron_schedule_truth_boundary_stays_resource_backed` prove schedule definitions are `decision:cron-schedule:*` resources, completed run observations are `evidence:cron-run:*`, production create/update/delete/list/get-runs do not use `automations.json`, and one-shot/auto-disabled lifecycle flips update decision truth | Completed Phase 5 to 99/100; `cron_jobs` and `cron_runs` remain classified as scheduler runtime cache until Phase 6 removes or formally accepts them as non-product substrate |
+| Cron/scheduled work | `packages/agent/src/domains/cron/implementation/domain/truth.rs`, `packages/agent/src/domains/cron/operations/runs.rs`, `packages/agent/src/engine/tests/cron_resources.rs`, and `threat_model_invariants::cron_schedule_truth_boundary_stays_resource_backed` prove schedule definitions are `decision:cron-schedule:*` resources, completed run observations are `evidence:cron-run:*`, production create/update/delete/list/get-runs do not use `automations.json`, manual `cron::run` binds from schedule decisions, cache-only rows are ignored, disabled schedule decisions fail closed, and one-shot/auto-disabled lifecycle flips update decision truth | Completed Phase 6 to 100/100; `cron_jobs` and `cron_runs` are accepted low-level scheduler cache for timer/executor mechanics only, not product/operator truth |
 
 Removal proof from this reset:
 
 - Phase 0 changed no runtime behavior; Phase 1 converted retained-memory
   persistence through canonical resource/materialization capabilities.
 - The existing production-grade 100/100 rubric is not removed. It is narrowed to
-  classification/organization proof, while the new 98/100 tracker owns the
-  stricter capability-backed-truth migration.
+  classification/organization proof, while the capability-backed-truth tracker
+  owns the stricter durable-truth invariant and now also reaches 100/100.
 - Memory retain is no longer allowed to regress to direct file/table truth under
   a broad "classified" score.
 

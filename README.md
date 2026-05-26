@@ -97,11 +97,11 @@ with the 100-point production-grade rubric in
 [`docs/production-grade-rubric.md`](docs/production-grade-rubric.md).
 The stricter capability-backed-truth migration tracker lives in
 [`docs/capability-backed-truth-migration-plan.md`](docs/capability-backed-truth-migration-plan.md);
-it is currently at 99/100 after the memory-retain, notification-resource,
-subagent-lineage, source-control/AgentControl generated-surface, and cron
-schedule/run-observation conversions and tracks the
-remaining work to make every agent- or operator-affecting durable fact
-capability-owned substrate truth.
+it is currently at 100/100 after the memory-retain, notification-resource,
+subagent-lineage, source-control/AgentControl generated-surface, cron
+schedule/run-observation, and scheduler-cache acceptance phases. Cron runtime
+tables remain mechanical scheduler cache only; every agent- or
+operator-affecting durable fact is capability-owned substrate truth.
 The current operator checklist for local package trust, audits, revocation, and
 cleanup lives in
 [`docs/module-package-trust-operations.md`](docs/module-package-trust-operations.md).

@@ -19,12 +19,27 @@ pub(crate) async fn cron_run_value(
 ) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
-    let _job = sched
-        .get_job(&job_id)
-        .ok_or_else(|| CapabilityError::NotFound {
-            code: "NOT_FOUND".into(),
-            message: format!("Job not found: {job_id}"),
-        })?;
+    let resource_id = crate::domains::cron::truth::schedule_decision_id(&job_id);
+    let record = crate::domains::cron::truth::inspect_schedule_record(
+        &deps.engine_host,
+        Some(invocation),
+        &resource_id,
+    )
+    .await?
+    .ok_or_else(|| CapabilityError::NotFound {
+        code: "NOT_FOUND".into(),
+        message: format!("Job not found: {job_id}"),
+    })?;
+    let job = record.job;
+    if !job.enabled {
+        return Err(CapabilityError::Custom {
+            code: "CRON_JOB_DISABLED".into(),
+            message: format!("Job is disabled: {job_id}"),
+            details: None,
+        });
+    }
+    crate::domains::cron::store::upsert_job(sched.pool(), &job).map_err(map_cron_error)?;
+    sched.reload_job(job.clone());
     let now = Utc::now();
     let _ = crate::domains::cron::store::update_next_run_at(sched.pool(), &job_id, Some(now));
     if let Some(mut runtime) = sched.get_runtime_state(&job_id) {

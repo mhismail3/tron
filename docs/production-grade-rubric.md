@@ -9,10 +9,10 @@ tests, generated projects, CI, schemas, and repo support.
 
 The stricter capability-backed-truth migration score lives in
 `docs/capability-backed-truth-migration-plan.md`. That score is currently
-**99/100** and tracks whether every agent- or operator-affecting durable fact is
-owned by canonical capabilities and the collapsed resource/decision/evidence/
-invocation/grant substrate. It intentionally has known blockers even while this
-production-grade classification score remains complete.
+**100/100** and tracks whether every agent- or operator-affecting durable fact
+is owned by canonical capabilities and the collapsed resource/decision/evidence/
+invocation/grant substrate, or explicitly accepted as low-level substrate with
+static gates.
 
 ## Scoring Rules
 
@@ -26,17 +26,17 @@ Each axis receives one of these maturity levels:
 
 Current repo-wide score: **100/100**.
 
-Current capability-backed-truth score: **99/100**.
+Current capability-backed-truth score: **100/100**.
 
 This production-grade score means every known source artifact, state owner,
 product shell, and security boundary is either implemented, tested, documented,
-or explicitly classified with static gates. It does not mean every durable fact
-is already capability-backed truth. Notifications and subagent completed-result
-lineage are now resource-backed, source-control/AgentControl review has
-server-authored generated surfaces, and cron schedule/run observation truth is
-decision/evidence backed. The remaining migration blocker is the cron runtime
-scheduler cache: it is no longer product truth, but it still needs final
-remove-or-formally-accept proof before the stricter score reaches 100/100.
+or explicitly classified with static gates. The stricter capability-backed-truth
+score is also complete: memory retain, notifications, subagent completed-result
+lineage, source-control/AgentControl review, prompt-library and voice-note
+durable outputs, and cron schedule/run observation truth are all substrate
+backed. The remaining cron runtime scheduler tables are formally accepted as
+mechanical cache, not product truth, with tests proving cache-only rows are
+ignored and decision truth can rehydrate the cache.
 
 ## Rubric
 
@@ -168,17 +168,15 @@ Evidence:
 
 Blockers:
 
-- No current blocker for production-grade classification. The stricter
-  capability-backed-truth migration separately tracks the cron runtime scheduler
-  cache as the remaining remove-or-accept blocker.
+- No current blocker. The cron runtime scheduler cache is explicitly classified
+  as low-level substrate and cannot own public schedule/run truth.
 
 Next action:
 
 - Keep fresh-schema absence gates on and require resource-backed durable output
-  for any newly converted domain.
-- Advance `docs/capability-backed-truth-migration-plan.md` phase by phase until
-  every agent- or operator-affecting durable fact is capability-owned truth or
-  explicitly accepted low-level substrate.
+  for any newly added domain.
+- Re-run the capability-backed-truth audit whenever new background work,
+  client-visible state, schedule state, or durable output is introduced.
 
 ### Security and authority - 12/12
 
@@ -361,7 +359,6 @@ Next action:
    focused audit are completed evidence for the 98/100 checkpoint.
 6. Prompt Library generated management and gated local composer insertion are
    completed evidence for the final 100/100 checkpoint.
-7. Capability-backed-truth migration is now tracked separately at 99/100 in
-   `docs/capability-backed-truth-migration-plan.md`; close the final cron
-   runtime scheduler cache remove-or-accept audit before claiming
-   capability-backed truth is complete.
+7. Capability-backed-truth migration is now complete at 100/100 in
+   `docs/capability-backed-truth-migration-plan.md`; preserve the cron runtime
+   scheduler cache classification and static gates when adding scheduled work.

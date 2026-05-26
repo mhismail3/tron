@@ -663,8 +663,8 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     assert_eq!(total, 100, "capability-backed truth rubric must total 100");
 
     assert!(
-        tracker.contains("Current capability-backed-truth score: **99/100**")
-            && tracker.contains("Total: **99/100**")
+        tracker.contains("Current capability-backed-truth score: **100/100**")
+            && tracker.contains("Total: **100/100**")
             && tracker.contains("Known Blockers")
             && tracker.contains("Conversion Candidate Register")
             && tracker.contains("Verification Standard For Every Phase")
@@ -720,10 +720,10 @@ fn capability_backed_truth_migration_tracker_stays_current() {
 
     assert!(
         production_rubric.contains("Current repo-wide score: **100/100**")
-            && production_rubric.contains("Current capability-backed-truth score: **99/100**")
+            && production_rubric.contains("Current capability-backed-truth score: **100/100**")
             && production_rubric.contains("docs/capability-backed-truth-migration-plan.md")
-            && production_rubric.contains("Notifications and subagent completed-result")
-            && production_rubric.contains("source-control/AgentControl review has")
+            && production_rubric.contains("memory retain, notifications")
+            && production_rubric.contains("source-control/AgentControl review")
             && production_rubric.contains("cron runtime")
             && production_rubric.contains("scheduler cache"),
         "production-grade rubric must distinguish classification score from capability-backed truth migration"
@@ -746,7 +746,7 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     );
     assert!(
         readme.contains("docs/capability-backed-truth-migration-plan.md")
-            && readme.contains("currently at 99/100"),
+            && readme.contains("currently at 100/100"),
         "README must link the capability-backed-truth migration tracker and baseline"
     );
 }
@@ -1703,8 +1703,10 @@ fn cron_schedule_truth_boundary_stays_resource_backed() {
     let runs = std::fs::read_to_string(root.join("src/domains/cron/operations/runs.rs"))
         .expect("read cron run operations");
     assert!(
-        runs.contains("truth::list_run_evidence") && !runs.contains("store::get_runs"),
-        "cron::get_runs must read evidence truth, not the runtime cache"
+        runs.contains("truth::list_run_evidence")
+            && runs.contains("truth::inspect_schedule_record")
+            && !runs.contains("store::get_runs"),
+        "cron run operations must bind from decision/evidence truth, not the runtime cache"
     );
 
     let callbacks = std::fs::read_to_string(root.join("src/domains/cron/callbacks.rs"))
@@ -1752,7 +1754,10 @@ fn cron_schedule_truth_boundary_stays_resource_backed() {
             && cron_tests.contains("cron_create_update_delete_are_decision_backed")
             && cron_tests.contains("cron_get_runs_reads_evidence_truth")
             && cron_tests
-                .contains("cron_runtime_lifecycle_flip_updates_decision_truth_idempotently"),
+                .contains("cron_runtime_lifecycle_flip_updates_decision_truth_idempotently")
+            && cron_tests.contains("cron_runtime_cache_rows_are_not_product_truth")
+            && cron_tests.contains("cron_run_rehydrates_runtime_cache_from_decision_truth")
+            && cron_tests.contains("cron_run_rejects_disabled_schedule_decision"),
         "cron resource tests must stay in their focused engine ownership boundary"
     );
 
