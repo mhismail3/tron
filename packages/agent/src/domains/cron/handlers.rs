@@ -30,7 +30,7 @@ operation_bindings! {
             cron_status_value(deps).await
         },
         "get_runs" => |invocation, deps| {
-            cron_get_runs_value(&invocation.payload, deps).await
+            cron_get_runs_value(&invocation.payload, invocation, deps).await
         },
         "scheduled_fire" => |invocation, deps| {
             cron_scheduled_fire_value(&invocation.payload, invocation, deps).await

@@ -1,23 +1,30 @@
-//! JSON configuration file management.
+//! Cron job validation plus test-only file fixtures.
 //!
-//! The canonical job definitions live in `~/.tron/workspace/automations/automations.json`.
-//! This module handles loading, saving (atomic writes), validation,
-//! and file change detection.
+//! Production schedule truth is decision resources. The JSON helpers in this
+//! file are compiled only for scheduler tests that exercise timer behavior with
+//! compact fixture setup.
 
+#[cfg(test)]
 use std::io::Write as _;
+#[cfg(test)]
 use std::path::Path;
+#[cfg(test)]
 use std::time::SystemTime;
 
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 
 use crate::domains::cron::errors::CronError;
 use crate::domains::cron::schedule::CronExpression;
-use crate::domains::cron::types::{CronConfig, CronJob, Payload, Schedule};
+#[cfg(test)]
+use crate::domains::cron::types::CronConfig;
+use crate::domains::cron::types::{CronJob, Payload, Schedule};
 
 /// Load the cron config from a JSON file.
 ///
 /// Returns `Ok(empty config)` if the file doesn't exist yet.
 /// On parse failure, attempts recovery from the backup file.
+#[cfg(test)]
 pub fn load_config(path: &Path, backup_path: &Path) -> Result<CronConfig, CronError> {
     if !path.exists() {
         return Ok(CronConfig::default());
@@ -54,6 +61,7 @@ pub fn load_config(path: &Path, backup_path: &Path) -> Result<CronConfig, CronEr
 /// Atomically write config to a JSON file.
 ///
 /// Strategy: write .tmp → `sync_all` → backup existing → atomic rename.
+#[cfg(test)]
 pub fn save_config(path: &Path, backup_path: &Path, config: &CronConfig) -> Result<(), CronError> {
     // Reject symlinks
     if path.exists() {
@@ -184,6 +192,7 @@ pub fn validate_job(job: &CronJob) -> Result<(), CronError> {
 ///
 /// Handles edge cases: NFS coarse mtime, multiple writes within one second,
 /// file replaced without mtime change (some editors).
+#[cfg(test)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileFingerprint {
     /// File modification time.
@@ -194,6 +203,7 @@ pub struct FileFingerprint {
     pub hash: [u8; 32],
 }
 
+#[cfg(test)]
 impl FileFingerprint {
     /// Compute a fingerprint for the given path.
     ///

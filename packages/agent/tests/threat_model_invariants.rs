@@ -663,8 +663,8 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     assert_eq!(total, 100, "capability-backed truth rubric must total 100");
 
     assert!(
-        tracker.contains("Current capability-backed-truth score: **98/100**")
-            && tracker.contains("Total: **98/100**")
+        tracker.contains("Current capability-backed-truth score: **99/100**")
+            && tracker.contains("Total: **99/100**")
             && tracker.contains("Known Blockers")
             && tracker.contains("Conversion Candidate Register")
             && tracker.contains("Verification Standard For Every Phase")
@@ -720,11 +720,12 @@ fn capability_backed_truth_migration_tracker_stays_current() {
 
     assert!(
         production_rubric.contains("Current repo-wide score: **100/100**")
-            && production_rubric.contains("Current capability-backed-truth score: **98/100**")
+            && production_rubric.contains("Current capability-backed-truth score: **99/100**")
             && production_rubric.contains("docs/capability-backed-truth-migration-plan.md")
             && production_rubric.contains("Notifications and subagent completed-result")
             && production_rubric.contains("source-control/AgentControl review has")
-            && production_rubric.contains("cron/scheduled work truth"),
+            && production_rubric.contains("cron runtime")
+            && production_rubric.contains("scheduler cache"),
         "production-grade rubric must distinguish classification score from capability-backed truth migration"
     );
     assert!(
@@ -745,7 +746,7 @@ fn capability_backed_truth_migration_tracker_stays_current() {
     );
     assert!(
         readme.contains("docs/capability-backed-truth-migration-plan.md")
-            && readme.contains("currently at 98/100"),
+            && readme.contains("currently at 99/100"),
         "README must link the capability-backed-truth migration tracker and baseline"
     );
 }
@@ -1633,6 +1634,134 @@ fn subagent_lineage_resource_truth_boundary_stays_enforced() {
             && reachability_map.contains("subagent.lineage.v1")
             && reachability_map.contains("keep thin shell over server-owned lineage truth"),
         "product-shell reachability map must classify subagent lineage as server-owned with fixed shells kept thin"
+    );
+}
+
+#[test]
+fn cron_schedule_truth_boundary_stays_resource_backed() {
+    let root = crate_root();
+    let repo = repo_root();
+
+    let contract = std::fs::read_to_string(root.join("src/domains/cron/contract.rs"))
+        .expect("read cron contract");
+    for required in [
+        "DurableOutputContract::resource_backed([\"decision\"])",
+        "cron::create",
+        "cron::update",
+        "cron::delete",
+        "resourceRefs",
+    ] {
+        assert!(
+            contract.contains(required),
+            "cron contract must keep decision-backed output marker `{required}`"
+        );
+    }
+
+    let truth =
+        std::fs::read_to_string(root.join("src/domains/cron/implementation/domain/truth.rs"))
+            .expect("read cron truth boundary");
+    for required in [
+        "CRON_SCHEDULE_DECISION_TYPE",
+        "CRON_RUN_EVIDENCE_TYPE",
+        "decision:cron-schedule:",
+        "evidence:cron-run:",
+        "decision::create",
+        "evidence::attach",
+        "resource::update",
+        "set_schedule_enabled",
+    ] {
+        assert!(
+            truth.contains(required),
+            "cron truth boundary must keep resource-backed marker `{required}`"
+        );
+    }
+
+    let jobs = std::fs::read_to_string(root.join("src/domains/cron/operations/jobs.rs"))
+        .expect("read cron job operations");
+    for required in [
+        "truth::list_schedule_records",
+        "truth::create_schedule_decision",
+        "truth::update_schedule_decision",
+        "truth::archive_schedule_decision",
+    ] {
+        assert!(
+            jobs.contains(required),
+            "cron job operations must compose schedule truth through `{required}`"
+        );
+    }
+    for forbidden in [
+        "config::load_config",
+        "config::save_config",
+        "automations.json",
+    ] {
+        assert!(
+            !jobs.contains(forbidden),
+            "cron job operations must not use legacy file truth `{forbidden}`"
+        );
+    }
+
+    let runs = std::fs::read_to_string(root.join("src/domains/cron/operations/runs.rs"))
+        .expect("read cron run operations");
+    assert!(
+        runs.contains("truth::list_run_evidence") && !runs.contains("store::get_runs"),
+        "cron::get_runs must read evidence truth, not the runtime cache"
+    );
+
+    let callbacks = std::fs::read_to_string(root.join("src/domains/cron/callbacks.rs"))
+        .expect("read cron callbacks");
+    assert!(
+        callbacks.contains("truth::attach_run_evidence")
+            && callbacks.contains("truth::set_schedule_enabled"),
+        "cron callbacks must persist run evidence and lifecycle flips through resource truth"
+    );
+
+    let scheduler =
+        std::fs::read_to_string(root.join("src/domains/cron/implementation/runtime/scheduler.rs"))
+            .expect("read cron scheduler");
+    assert!(
+        scheduler.contains("load_schedule_truth")
+            && scheduler.contains("truth::list_schedule_records")
+            && scheduler.contains("sync_job_cache")
+            && scheduler.contains("truth::set_schedule_enabled"),
+        "cron scheduler must derive from decision truth and keep cache lifecycle flips synchronized"
+    );
+    let production_scheduler = scheduler
+        .split("#[cfg(test)]")
+        .next()
+        .unwrap_or(scheduler.as_str());
+    assert!(
+        !production_scheduler.contains("config::load_config"),
+        "production scheduler startup must not fall back to automations.json truth"
+    );
+
+    let config =
+        std::fs::read_to_string(root.join("src/domains/cron/implementation/domain/config.rs"))
+            .expect("read cron config helpers");
+    assert!(
+        config.contains("#[cfg(test)]\npub fn load_config")
+            && config.contains("#[cfg(test)]\npub fn save_config"),
+        "automations.json helpers must stay test-only fixtures"
+    );
+
+    let engine_tests =
+        std::fs::read_to_string(root.join("src/engine/tests/mod.rs")).expect("read engine tests");
+    let cron_tests = std::fs::read_to_string(root.join("src/engine/tests/cron_resources.rs"))
+        .expect("read cron resource tests");
+    assert!(
+        engine_tests.contains("mod cron_resources;")
+            && cron_tests.contains("cron_create_update_delete_are_decision_backed")
+            && cron_tests.contains("cron_get_runs_reads_evidence_truth")
+            && cron_tests
+                .contains("cron_runtime_lifecycle_flip_updates_decision_truth_idempotently"),
+        "cron resource tests must stay in their focused engine ownership boundary"
+    );
+
+    let readme = std::fs::read_to_string(repo.join("README.md")).expect("read README");
+    assert!(
+        readme.contains("decision resources")
+            && readme.contains("evidence resources")
+            && readme.contains("scheduler runtime cache"),
+        "README must classify cron decisions/evidence as truth and cron tables as cache"
     );
 }
 

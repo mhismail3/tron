@@ -29,8 +29,11 @@ pub(crate) async fn cron_list_value(
         .get("workspaceId")
         .and_then(Value::as_str)
         .map(String::from);
-    let filtered: Vec<_> = sched.with_jobs(|jobs| {
-        jobs.values()
+    let filtered: Vec<_> =
+        crate::domains::cron::truth::list_schedule_records(&deps.engine_host, None)
+            .await?
+            .into_iter()
+            .map(|record| record.job)
             .filter(|job| {
                 if let Some(enabled) = enabled_filter
                     && job.enabled != enabled
@@ -49,9 +52,7 @@ pub(crate) async fn cron_list_value(
                 }
                 true
             })
-            .cloned()
-            .collect()
-    });
+            .collect();
     let runtime_states: Vec<_> = filtered
         .iter()
         .filter_map(|job| sched.get_runtime_state(&job.id))
@@ -74,16 +75,25 @@ pub(crate) async fn cron_list_value(
 pub(crate) async fn cron_get_value(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
-    let job = sched
-        .get_job(&job_id)
-        .ok_or_else(|| CapabilityError::NotFound {
-            code: "NOT_FOUND".into(),
-            message: format!("Job not found: {job_id}"),
-        })?;
+    let resource_id = crate::domains::cron::truth::schedule_decision_id(&job_id);
+    let record =
+        crate::domains::cron::truth::inspect_schedule_record(&deps.engine_host, None, &resource_id)
+            .await?
+            .ok_or_else(|| CapabilityError::NotFound {
+                code: "NOT_FOUND".into(),
+                message: format!("Job not found: {job_id}"),
+            })?;
+    let job = record.job;
     let runtime_state = sched.get_runtime_state(&job_id);
-    let (recent_runs, _total) =
-        crate::domains::cron::store::get_runs(sched.pool(), Some(&job_id), None, 10, 0)
-            .map_err(map_cron_error)?;
+    let (recent_runs, _total) = crate::domains::cron::truth::list_run_evidence(
+        &deps.engine_host,
+        None,
+        &job_id,
+        None,
+        10,
+        0,
+    )
+    .await?;
     Ok(json!({
         "job": to_json_value(&job)?,
         "runtimeState": runtime_state.map(|state| json!({
@@ -207,8 +217,13 @@ pub(crate) async fn cron_create_value(
         }
     })?;
     let _guard = sched.config_lock().lock().await;
-    if crate::domains::cron::store::name_exists(sched.pool(), &job.name, None)
-        .map_err(map_cron_error)?
+    if crate::domains::cron::truth::name_exists(
+        &deps.engine_host,
+        Some(invocation),
+        &job.name,
+        None,
+    )
+    .await?
     {
         return Err(CapabilityError::Custom {
             code: "ALREADY_EXISTS".into(),
@@ -216,12 +231,9 @@ pub(crate) async fn cron_create_value(
             details: None,
         });
     }
-    let mut config =
-        crate::domains::cron::config::load_config(sched.config_path(), sched.backup_path())
-            .map_err(map_cron_error)?;
-    config.jobs.push(job.clone());
-    crate::domains::cron::config::save_config(sched.config_path(), sched.backup_path(), &config)
-        .map_err(map_cron_error)?;
+    let (_, _, resource_refs) =
+        crate::domains::cron::truth::create_schedule_decision(&deps.engine_host, invocation, &job)
+            .await?;
     crate::domains::cron::store::upsert_job(sched.pool(), &job).map_err(map_cron_error)?;
     let next = crate::domains::cron::schedule::compute_next_run(&job.schedule, now);
     let _ = crate::domains::cron::store::update_next_run_at(sched.pool(), &job.id, next);
@@ -239,7 +251,7 @@ pub(crate) async fn cron_create_value(
         .await
         .map_err(crate::shared::server::error_mapping::engine_error_to_capability_error)?;
     publish_cron_stream(invocation, deps, "created", &job.id, None).await;
-    Ok(json!({ "job": to_json_value(&job)? }))
+    Ok(json!({ "job": to_json_value(&job)?, "resourceRefs": resource_refs }))
 }
 
 pub(crate) async fn cron_update_value(
@@ -250,20 +262,26 @@ pub(crate) async fn cron_update_value(
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let _guard = sched.config_lock().lock().await;
-    let mut config =
-        crate::domains::cron::config::load_config(sched.config_path(), sched.backup_path())
-            .map_err(map_cron_error)?;
-    let job = config
-        .jobs
-        .iter_mut()
-        .find(|job| job.id == job_id)
-        .ok_or_else(|| CapabilityError::NotFound {
-            code: "NOT_FOUND".into(),
-            message: format!("Job not found: {job_id}"),
-        })?;
+    let resource_id = crate::domains::cron::truth::schedule_decision_id(&job_id);
+    let record = crate::domains::cron::truth::inspect_schedule_record(
+        &deps.engine_host,
+        Some(invocation),
+        &resource_id,
+    )
+    .await?
+    .ok_or_else(|| CapabilityError::NotFound {
+        code: "NOT_FOUND".into(),
+        message: format!("Job not found: {job_id}"),
+    })?;
+    let mut job = record.job.clone();
     if let Some(name) = payload.get("name").and_then(Value::as_str) {
-        if crate::domains::cron::store::name_exists(sched.pool(), name, Some(&job_id))
-            .map_err(map_cron_error)?
+        if crate::domains::cron::truth::name_exists(
+            &deps.engine_host,
+            Some(invocation),
+            name,
+            Some(&job_id),
+        )
+        .await?
         {
             return Err(CapabilityError::Custom {
                 code: "ALREADY_EXISTS".into(),
@@ -271,7 +289,7 @@ pub(crate) async fn cron_update_value(
                 details: None,
             });
         }
-        name.clone_into(&mut job.name);
+        job.name = name.to_owned();
     }
     if let Some(desc) = payload.get("description") {
         job.description = desc.as_str().map(String::from);
@@ -344,14 +362,19 @@ pub(crate) async fn cron_update_value(
         };
     }
     job.updated_at = Utc::now();
-    crate::domains::cron::config::validate_job(job).map_err(|error| {
+    crate::domains::cron::config::validate_job(&job).map_err(|error| {
         CapabilityError::InvalidParams {
             message: error.to_string(),
         }
     })?;
     let updated_job = job.clone();
-    crate::domains::cron::config::save_config(sched.config_path(), sched.backup_path(), &config)
-        .map_err(map_cron_error)?;
+    let resource_refs = crate::domains::cron::truth::update_schedule_decision(
+        &deps.engine_host,
+        invocation,
+        &record,
+        &updated_job,
+    )
+    .await?;
     crate::domains::cron::store::upsert_job(sched.pool(), &updated_job).map_err(map_cron_error)?;
     let now = Utc::now();
     let next = crate::domains::cron::schedule::compute_next_run(&updated_job.schedule, now);
@@ -367,7 +390,7 @@ pub(crate) async fn cron_update_value(
         .await
         .map_err(crate::shared::server::error_mapping::engine_error_to_capability_error)?;
     publish_cron_stream(invocation, deps, "updated", &updated_job.id, None).await;
-    Ok(json!({ "job": to_json_value(&updated_job)? }))
+    Ok(json!({ "job": to_json_value(&updated_job)?, "resourceRefs": resource_refs }))
 }
 
 pub(crate) async fn cron_delete_value(
@@ -378,24 +401,28 @@ pub(crate) async fn cron_delete_value(
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let _guard = sched.config_lock().lock().await;
-    let mut config =
-        crate::domains::cron::config::load_config(sched.config_path(), sched.backup_path())
-            .map_err(map_cron_error)?;
-    let before_len = config.jobs.len();
-    config.jobs.retain(|job| job.id != job_id);
-    if config.jobs.len() == before_len {
-        return Err(CapabilityError::NotFound {
-            code: "NOT_FOUND".into(),
-            message: format!("Job not found: {job_id}"),
-        });
-    }
-    crate::domains::cron::config::save_config(sched.config_path(), sched.backup_path(), &config)
-        .map_err(map_cron_error)?;
+    let resource_id = crate::domains::cron::truth::schedule_decision_id(&job_id);
+    let record = crate::domains::cron::truth::inspect_schedule_record(
+        &deps.engine_host,
+        Some(invocation),
+        &resource_id,
+    )
+    .await?
+    .ok_or_else(|| CapabilityError::NotFound {
+        code: "NOT_FOUND".into(),
+        message: format!("Job not found: {job_id}"),
+    })?;
+    let resource_refs = crate::domains::cron::truth::archive_schedule_decision(
+        &deps.engine_host,
+        invocation,
+        &record,
+    )
+    .await?;
     let _ =
         crate::domains::cron::store::delete_job(sched.pool(), &job_id).map_err(map_cron_error)?;
     sched.remove_job(&job_id);
     drop(_guard);
     sched.reschedule_notify().notify_one();
     publish_cron_stream(invocation, deps, "deleted", &job_id, None).await;
-    Ok(json!({ "deleted": true }))
+    Ok(json!({ "deleted": true, "resourceRefs": resource_refs }))
 }

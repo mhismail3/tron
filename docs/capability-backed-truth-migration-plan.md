@@ -13,7 +13,7 @@ Domain-owned hidden file/table truth is not acceptable unless it is explicitly
 classified as low-level platform substrate with static gates and no agent-policy
 role.
 
-Current capability-backed-truth score: **98/100**.
+Current capability-backed-truth score: **99/100**.
 
 The repo-wide production-grade score remains useful as a reachability,
 organization, and classification score. This score tracks a narrower question:
@@ -28,19 +28,19 @@ invocation/grant backed, inspectable, and recoverable.
 | Agent orchestration path | 15 | 14 | Model-facing `execute` can resolve, prepare, approve, run, observe, and self-correct across all core capabilities |
 | Resource/output contracts | 15 | 15 | Mutating durable outputs declare contracts and return refs; failures leave no accepted hidden output |
 | Authority and security | 15 | 15 | Grants, approvals, file/network policy, redaction, and sandboxing are enforced at every boundary |
-| Background/autonomous work | 10 | 9 | Auto-retain, scheduled work, notifications, retries, and cleanup all run through canonical invocations and leave evidence |
+| Background/autonomous work | 10 | 10 | Auto-retain, scheduled work, notifications, retries, and cleanup all run through canonical invocations and leave evidence |
 | Client thinness | 8 | 8 | iOS/Mac render server truth and submit stored actions only; local state is limited to genuine editing/hardware affordances |
 | Observability and recovery | 7 | 7 | Operators and agents can inspect lineage, state, failure, safe next action, and recovery path |
 | Test/static proof | 7 | 7 | Focused tests, integration tests, failure tests, absence gates, and docs prove the invariant |
 | Deletion discipline | 3 | 3 | Retired files/tables/routes/fallbacks are removed or statically forbidden |
 
-Total: **98/100**.
+Total: **99/100**.
 
 ## Known Blockers
 
 | Blocker | Current Truth Owner | Why It Blocks 100% | Target Decision |
 |---|---|---|---|
-| Cron/scheduled work | `automations.json`, `cron_jobs`, and `cron_runs` | Scheduler product truth remains outside resource/decision truth | Convert unless explicitly accepted as low-level scheduler substrate |
+| Final scheduler substrate proof | `cron_jobs` / `cron_runs` runtime cache | Schedule definitions and completed run observations are now decision/evidence truth, but the runtime timer cache remains as low-level scheduler substrate until the final audit removes or formally accepts it | Complete Phase 6 whole-engine audit and either remove the cache with a storage reset or lock it down as non-product substrate |
 
 ## Completed Conversions
 
@@ -50,6 +50,7 @@ Total: **98/100**.
 | Notifications | `notifications::send` persists bounded `notification` resources, delivery `evidence`, and read-state `decision` resources; `notifications::list` reads resource/decision truth and ignores historical event-only rows; generated `notifications.inbox.v1` surfaces expose stored mark-read actions. | `packages/agent/src/domains/notifications/inbox.rs`; `packages/agent/src/engine/tests/notification_resources.rs`; `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 | Subagent lineage | Completed child-agent results are persisted as deterministic `agent_result:subagent:{subagentSessionId}` resources; `agent::subagent_status` and `agent::subagent_result` reconstruct completed output from resource truth even without a live manager; malformed, mismatched, or cross-session resources are rejected before they become status/result truth; generated `subagent.lineage.v1` surfaces expose bounded lineage rows and stored canonical status/result/cancel actions. Fixed iOS subagent sheets remain thin chat navigation/rendering affordances and are statically forbidden from constructing target functions, payload templates, grants, or action submissions. | `packages/agent/src/domains/agent/lineage.rs`; `packages/agent/src/domains/agent/operations/submissions.rs`; `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager/execution.rs`; `packages/agent/src/engine/tests/subagent_lineage.rs`; `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 | Source-control and AgentControl surfaces | Generated `source_control.session.v1` surfaces project session-scoped git/worktree invocation truth, bounded changed-file/status/conflict summaries, and stored canonical `worktree::*` / `git::*` actions. Generated `agent_control.session.v1` surfaces expose session/catalog/control summaries plus a stored action that opens the source-control review surface. Fixed Swift shells remain thin navigation/review containers and are statically forbidden from constructing generated action targets, payload templates, grants, or action submissions. | `packages/agent/src/engine/primitives/ui.rs`; `packages/agent/src/engine/tests/generated_ui.rs`; `packages/agent/src/engine/resources/ui_surface.rs`; `packages/agent/tests/threat_model_invariants.rs` |
+| Cron schedule and run observations | `cron::create`, `cron::update`, `cron::delete`, and `cron::list` now use `decision:cron-schedule:*` resources for schedule definitions; `cron::get_runs` reads bounded `evidence:cron-run:*` resources; run completion attaches evidence; one-shot and auto-disabled lifecycle flips update the schedule decision. `cron_jobs` and `cron_runs` remain only as runtime timer/execution caches until Phase 6. | `packages/agent/src/domains/cron/implementation/domain/truth.rs`; `packages/agent/src/domains/cron/operations/jobs.rs`; `packages/agent/src/domains/cron/operations/runs.rs`; `packages/agent/src/domains/cron/callbacks.rs`; `packages/agent/src/engine/tests/cron_resources.rs`; `packages/agent/tests/threat_model_invariants.rs` |
 
 ## Conversion Candidate Register
 
@@ -59,7 +60,7 @@ Total: **98/100**.
 | Notifications | completed operator attention truth | 96/100 | Phase 2 | Send/list/read state is resource/decision/evidence backed; generated inbox surfaces expose canonical read actions; retired read-state truth is absent with gates |
 | Subagent invocation/result surfaces | completed execution lineage projection | 97/100 | Phase 3 | Completed child result state survives resume/restart through deterministic `agent_result` resources; malformed or cross-session resources are ignored; generated lineage surfaces render server-owned resource/invocation truth and stored canonical actions; fixed client shells remain thin |
 | Source-control and AgentControl surfaces | completed operator review projection | 98/100 | Phase 4 | Git/worktree/control review surfaces are server-authored, revision-pinned, stale-safe, and use stored canonical actions while fixed Swift shells stay thin |
-| Cron and scheduled work | scheduler product truth | 99-100/100 | Phase 5 | Schedules/runs are resource/decision/invocation/evidence backed, or cron is explicitly accepted as low-level substrate with static gates |
+| Cron and scheduled work | completed schedule/run observation truth with runtime cache blocker | 99/100 | Phase 5 | Schedules are `decision` resources, completed runs are `evidence`, mutating contracts return refs, and `automations.json` is test-only; runtime cron tables are classified as cache until final removal/acceptance |
 | Whole-engine audit | final proof | 100/100 | Phase 6 | No unclassified durable truth, hidden file/table state, client policy, fallback reader, or retired route remains |
 
 ## Phase Tracker
@@ -236,33 +237,35 @@ Required tests:
 
 ### Phase 5: Cron And Scheduled Work Truth Decision
 
-Status: **pending**.
+Status: **completed to 99/100**.
 
-Target score: **99/100** if classified with proof, **100/100** if converted.
+Target score: **99/100**.
 
-Default decision: convert scheduled work truth unless implementation proves the
-scheduler must remain low-level substrate.
+Decision: convert operator/product truth now, then leave final cache removal or
+formal low-level-substrate acceptance to Phase 6.
 
 Required behavior:
 
-- Represent schedules as `decision` or `goal` resources with cadence, scope,
-  grant ceiling, actor, expiry, and target action.
-- Represent runs as invocations plus evidence.
-- Keep queue/lease internals as substrate, not product truth.
-- Remove domain-owned `automations.json`, `cron_jobs`, and `cron_runs` as
-  authoritative truth through a clean storage-generation reset if conversion is
-  feasible.
-- If conversion is deferred, document cron as accepted scheduler substrate with
-  explicit limits and static gates.
+- Represent schedule definitions as `decision:cron-schedule:*` resources.
+- Represent completed run observations as bounded `evidence:cron-run:*`
+  resources linked to the schedule decision.
+- Keep `cron_jobs` and `cron_runs` as scheduler runtime cache only: timer wakeup,
+  running-state, retry, stuck-run, and short-lived executor mechanics.
+- Keep `automations.json` loaders/savers as test-only fixtures; production
+  create/update/delete/list no longer use the file.
+- Keep lifecycle flips synchronized from runtime back to decision truth for
+  one-shot completion and auto-disable after consecutive failures.
 
 Required tests:
 
-- Create/update/delete/list/run schedule operations read/write resource/decision
-  truth.
-- Missed/retried runs leave evidence and no duplicate invocations.
-- Old scheduler tables/files are absent from fresh current storage if
-  converted.
-- Static gates forbid reintroducing hidden scheduler product truth.
+- `cron_create_update_delete_are_decision_backed` proves mutating schedule
+  operations return decision refs and list/get read decision truth.
+- `cron_get_runs_reads_evidence_truth` proves completed run observations are
+  listed from evidence truth.
+- Static gates keep `automations.json` production readers out of cron
+  operations and require run listing to use evidence truth.
+- Static gates require docs to classify `cron_jobs` / `cron_runs` as scheduler
+  runtime cache, not product truth.
 
 ### Phase 6: Final Whole-Engine Capability-Backed Audit
 

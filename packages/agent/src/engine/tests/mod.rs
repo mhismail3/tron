@@ -9,6 +9,7 @@ pub(in crate::engine::tests) use support::*;
 
 mod approval;
 mod catalog_discovery;
+mod cron_resources;
 mod domain_outputs;
 mod external_worker;
 mod generated_ui;

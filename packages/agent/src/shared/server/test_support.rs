@@ -214,6 +214,85 @@ pub fn make_test_context() -> ServerRuntimeContext {
     ctx
 }
 
+/// Build an in-memory runtime context with cron registered against a live test scheduler.
+pub fn make_test_context_with_cron_scheduler() -> ServerRuntimeContext {
+    let pool = crate::domains::session::event_store::new_in_memory(
+        &crate::domains::session::event_store::ConnectionConfig::default(),
+    )
+    .unwrap();
+    {
+        let conn = pool.get().unwrap();
+        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+    }
+    let store = Arc::new(EventStore::new(pool.clone()));
+    let mgr = Arc::new(SessionManager::new(store.clone()));
+    let orch = Arc::new(Orchestrator::new(mgr.clone()));
+    let home = unique_tron_home();
+    let settings_path = test_user_profile_path(&home);
+    let auth_path = test_auth_path(&home);
+    let profile_runtime = test_profile_runtime(&home);
+    let settings = crate::domains::settings::load_settings_from_path(&settings_path)
+        .expect("test profile settings should load from isolated Tron home");
+    crate::domains::settings::init_settings(settings);
+    let engine_host = crate::engine::EngineHostHandle::new_in_memory().unwrap();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let cron_deps = crate::domains::cron::ExecutorDeps {
+        agent_executor: None,
+        event_publisher: std::sync::OnceLock::new(),
+        push_notifier: None,
+        event_injector: None,
+        http_client: reqwest::Client::new(),
+        pool: pool.clone(),
+    };
+    let cron_scheduler = Arc::new(crate::domains::cron::CronScheduler::new(
+        pool,
+        Arc::new(crate::domains::cron::SystemClock),
+        cron_deps,
+        unique_test_path("cron-automations", "json"),
+        unique_test_path("cron-automations", "json.bak"),
+        cancel,
+    ));
+    let ctx = ServerRuntimeContext {
+        orchestrator: orch,
+        session_manager: mgr,
+        event_store: store,
+        engine_host: engine_host.clone(),
+        skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
+        memory_registry: Arc::new(Mutex::new(MemoryRegistry::new())),
+        settings_path,
+        profile_runtime,
+        agent_deps: None,
+        capability_support_config: make_test_capability_support_config_config(),
+        server_start_time: Instant::now(),
+        transcription_engine: Arc::new(std::sync::OnceLock::new()),
+        subagent_manager: None,
+        health_tracker: Arc::new(crate::domains::model::providers::ProviderHealthTracker::new()),
+        shutdown_coordinator: None,
+        origin: "localhost:9847".to_string(),
+        cron_scheduler: Some(cron_scheduler.clone()),
+        worktree_coordinator: None,
+        device_request_broker: None,
+        context_artifacts: Arc::new(ContextArtifactsService::new()),
+        auth_path,
+        oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        mcp_router: None,
+        display_stream_registry: None,
+        process_manager: None,
+        job_manager: None,
+        output_buffer_registry: None,
+        hook_abort_tracker: Arc::new(
+            crate::domains::agent::runner::hooks::abort_tracker::HookAbortTracker::new(),
+        ),
+        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
+        onboarded_marker_path: unique_test_path("onboarded", "marker"),
+        release_fetcher: None,
+        updater_state_path: unique_test_path("updater-state", "json"),
+    };
+    crate::transport::setup::register_server_domains_for_context(&ctx).unwrap();
+    cron_scheduler.set_engine_host(engine_host);
+    ctx
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

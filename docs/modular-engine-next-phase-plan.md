@@ -1,8 +1,8 @@
-# Cron And Scheduled Work Capability-Backed Truth Plan
+# Final Capability-Backed Truth Audit And Scheduler Cache Decision Plan
 
 ## Current Checkpoint
 
-The stricter capability-backed-truth score is now `98/100`.
+The stricter capability-backed-truth score is now `99/100`.
 
 Completed conversion slices:
 
@@ -14,152 +14,135 @@ Completed conversion slices:
 - source-control and AgentControl review now have server-authored generated
   `source_control.session.v1` and `agent_control.session.v1` surfaces with
   stored canonical actions;
+- cron schedule definitions are `decision:cron-schedule:*` resources and
+  completed run observations are `evidence:cron-run:*` resources;
 - model-facing capability use goes through the single `execute` orchestrator.
 
-The remaining capability-backed-truth blocker is cron/scheduled work. Cron still
-has a dedicated scheduler product plane with separate schedule/run truth. The
-next phase should either convert that truth to resources/decisions/invocations/
-evidence or prove that cron is acceptable low-level scheduler substrate with
-narrow static gates. The default decision is conversion.
+The only remaining capability-backed-truth blocker is the cron runtime scheduler
+cache. `cron_jobs` and `cron_runs` are no longer product truth, but they still
+exist as timer/executor/cache tables. The final phase must either remove them
+with a clean storage generation reset or formally accept them as low-level
+scheduler substrate with static gates proving they cannot own product policy,
+operator truth, or agent-facing durable state.
 
 ## First-Principles Goal
 
-Scheduled work changes future agent behavior. The durable truth must answer:
+The final 100/100 state must make this statement true:
 
-- who created or updated the schedule;
-- what canonical capability/action will run;
-- what scope, grant ceiling, approval policy, and idempotency key apply;
-- what cadence, timezone, expiry, and missed-window behavior apply;
-- which queue item, invocation, result, evidence, and resource refs belong to
-  each run;
-- whether a schedule is active, expired, revoked, stale, malformed, or blocked;
-- how an operator inspects, disables, retries, or deletes the schedule without
-  touching hidden files/tables.
+Every durable fact that affects agent behavior, operator state, retries,
+approvals, future prompts, or user-visible state is reconstructable from
+canonical capabilities and collapsed substrate truth. Any remaining table/file is
+strictly mechanical substrate and cannot become a hidden source of policy or
+product truth.
 
-The source of truth should be existing `decision`, `evidence`, invocation,
-grant, queue, lease, and generated UI resources. Queue and lease internals may
-remain substrate mechanics; product schedule/run truth should not live in a
-parallel cron table or JSON file.
+## Phase Scope
 
-## Scope
+Build the next checkpoint as a final proof phase:
 
-Build the next checkpoint as:
-
-1. a complete inventory of current `cron::*` capabilities, scheduler files,
-   database tables, iOS DTO/client paths, tests, and docs;
-2. a conversion design for schedules as resource/decision truth and runs as
-   invocation/evidence truth;
-3. implementation of the smallest coherent conversion slice that removes hidden
-   scheduler product truth without weakening retries or operator control;
-4. generated schedule list/detail surfaces with stored canonical actions;
-5. static gates forbidding retired cron tables/files/readers if conversion is
-   completed, or documenting an accepted-substrate decision if not;
-6. docs and score updates from `98/100` only after full verification passes.
+1. Re-audit every capability-backed-truth conversion candidate.
+2. Decide whether the cron runtime cache is removable or should remain accepted
+   scheduler substrate.
+3. If removable, bump storage generation and remove `cron_jobs` / `cron_runs`
+   from fresh schema plus runtime code.
+4. If accepted, add stronger static gates and docs that confine the cache to
+   timer/executor mechanics only.
+5. Prove the single model-facing `execute` path can still resolve, prepare, run,
+   and observe core capabilities with no hidden search/inspect dependency.
+6. Update score/docs/README/ledger only after full verification passes.
 
 ## Non-Goals
 
-- No compatibility reader or row-copy migration.
-- No new scheduler table.
-- No client-owned target function, payload template, grant, retry policy,
-  cadence policy, or stale-state decision.
-- No dynamic UI catalog or `control::act`.
-- No marketplace, remote package fetch, or worker-spawn changes.
-- No broad iOS scheduler redesign until server truth is proven.
+- No compatibility reader, row-copy migration, fallback DTO, or retired cron file
+  reader.
+- No `control::act`, dynamic UI catalog, client-authored action target, or
+  client-owned policy.
+- No marketplace, remote package fetch, package trust expansion, or worker-spawn
+  path change.
+- No public capability id or schema change unless a blocker proves the old shape
+  is unsafe.
 
-## Implementation Plan
+## Work Plan
 
-### 1. Inventory And Characterization
+### 1. Final Conversion Inventory
 
-- Map current cron state owners: files, tables, DTOs, queue paths, run records,
-  routes, and tests.
-- Identify which state is durable product truth versus queue/lease substrate.
-- Add characterization tests for create/update/delete/list/run, retry,
-  duplicate idempotency, missed windows, disabled/expired schedules, and
-  operator inspection.
-- Document the exact clean-break blast radius before changing storage.
+- Re-scan Rust domains, engine primitives, iOS/Mac shells, scripts, schemas, and
+  docs for unclassified durable state.
+- Confirm memory, notifications, prompt library, voice notes, subagent lineage,
+  source-control/AgentControl, and cron all have focused tests and static gates.
+- Add absence checks for any retired files/tables/routes discovered during the
+  scan.
 
-### 2. Decision-Backed Schedule Truth
+### 2. Cron Runtime Cache Decision
 
-- Represent schedules as `decision` resources with:
-  - schedule id;
-  - canonical target function/action;
-  - cadence/timezone/wall-clock metadata;
-  - scope/session/workspace selectors;
-  - grant ceiling and actor;
-  - expiry/revocation/lifecycle;
-  - idempotency and retry policy snapshot.
-- Use CAS for schedule updates and lifecycle discard/archive.
-- Reject malformed, over-broad, expired, or unauthorized schedules before queue
-  enqueue or target execution.
+- Inspect every production read/write of `cron_jobs` and `cron_runs`.
+- Classify each access as timer wakeup, running-state cache, retry bookkeeping,
+  stuck-run cleanup, delivery bookkeeping, or product/operator truth.
+- Remove or rewrite any product/operator read to decision/evidence/invocation
+  truth.
+- Decide:
+  - **Remove** if runtime can derive due work entirely from decisions plus queue
+    state without weakening retry/stuck-run behavior.
+  - **Accept as substrate** if the tables are strictly mechanical and a removal
+    would only reimplement queue/lease mechanics under another name.
 
-### 3. Invocation/Evidence Run Truth
+### 3. Removal Path If Feasible
 
-- Represent each scheduled run as a canonical invocation plus bounded evidence.
-- Use deterministic idempotency keys per schedule version and due bucket.
-- Ensure retries replay or resume through existing queue/idempotency substrate
-  without duplicate target invocations or resource versions.
-- Record skipped, stale, malformed, unauthorized, and failed runs as evidence
-  without fabricating success.
+- Bump storage generation.
+- Remove `cron_jobs`, `cron_runs`, cron indexes, and cron table tests from the
+  fresh consolidated schema.
+- Replace timer state with queue/lease/resource-derived due work.
+- Persist all run outcomes through evidence and canonical invocations.
+- Add absence gates proving fresh DBs do not create cron tables.
 
-### 4. Generated Operator Surfaces
+### 4. Accepted-Substrate Path If Removal Is Safer
 
-- Add generated schedule collection/detail surfaces over decision/evidence truth.
-- Stored actions may target only canonical cron/schedule capabilities,
-  `ui::refresh_surface`, and safe inspect/retry/expire/archive operations.
-- Surfaces must be revision-pinned, bounded, redacted, and stale-safe.
-- iOS remains a thin renderer/client; fixed cron/product shells stay removed.
+- Keep `cron_jobs` / `cron_runs` only as scheduler cache.
+- Add static gates proving:
+  - cron public list/get/get-runs never read cache as truth;
+  - schedule mutations write decisions first;
+  - completed run observations attach evidence;
+  - production `automations.json` readers remain absent;
+  - README/schema docs call cron tables cache, not product truth.
+- Add recovery tests showing schedule truth can repopulate an empty runtime
+  cache.
 
-### 5. Clean-Break Removal Or Accepted-Substrate Decision
+### 5. Execute-Orchestrator Final Proof
 
-- If conversion is completed, remove active `cron_jobs`, `cron_runs`, and
-  `automations.json` product truth with a storage generation reset and absence
-  tests.
-- If any scheduler substrate must remain, document it as low-level substrate
-  with strict limits and static gates proving it cannot own product policy,
-  grants, durable run results, or operator truth.
+- Run manual and automated tests for intent-only resolution, explicit target
+  hints, read-only execution, sandbox materialized execution, approval pause and
+  resume, generated UI action execution, and failure correction diagnostics.
+- Ensure all execution details remain inspectable through invocation/audit
+  substrate without exposing model-visible `search` / `inspect` tools.
 
 ### 6. Docs, Score, And Ledger
 
-- Update `docs/capability-backed-truth-migration-plan.md`.
-- Update `docs/modular-engine-cleanup-audit.md`.
-- Update `docs/product-shell-reachability-map.md` only if client surfaces change.
-- Update `docs/production-grade-rubric.md`.
-- Update README database/capability sections if schema or public capability
-  wording changes.
-- Update `~/LEDGER.jsonl` after verification.
+- Update `docs/capability-backed-truth-migration-plan.md` to 100/100 only when
+  the final cache decision has proof.
+- Update `docs/production-grade-rubric.md`,
+  `docs/modular-engine-cleanup-audit.md`, `README.md`, and any touched
+  progressive docs.
+- Append `~/LEDGER.jsonl` with the final decision, score, and verification
+  outcome.
 
-## Test Plan
+## Verification
 
-- Focused Rust tests:
-  - schedule create/update/delete/list use decision/resource truth;
-  - run/retry uses deterministic invocation/evidence truth;
-  - duplicate due buckets do not create duplicate invocations/resources;
-  - expired/revoked/stale schedules fail closed;
-  - malformed schedules are inspectable but not runnable.
-- Generated UI tests:
-  - schedule surfaces expose bounded refs and stored canonical actions only;
-  - stale/expired/damaged surfaces fail before child execution.
-- Static gates:
-  - no active cron/scheduler product tables if converted;
-  - no `automations.json` product truth if converted;
-  - no `control::act`, dynamic UI catalog, raw-scope auth, compatibility reader,
-    fallback DTO, or client-owned scheduler policy.
-- Verification:
-  - focused cron/scheduler tests;
-  - `cargo test generated_ui --lib -- --nocapture` if surfaces change;
-  - `cargo test resource_ --lib -- --nocapture` if resource contracts change;
-  - `cargo test --test threat_model_invariants -- --nocapture`;
-  - `RUSTFLAGS="-D warnings" cargo check --all-targets`;
-  - `git diff --check`;
-  - `scripts/tron ci fmt check clippy test`;
-  - iOS/Mac targeted tests only if client/project files change.
+- Focused Rust tests for cron resources/cache recovery or removal.
+- `cd packages/agent && cargo test generated_ui --lib -- --nocapture`.
+- `cd packages/agent && cargo test resource_ --lib -- --nocapture`.
+- `cd packages/agent && cargo test --test threat_model_invariants -- --nocapture`.
+- `cd packages/agent && RUSTFLAGS="-D warnings" cargo check --all-targets`.
+- `git diff --check`.
+- `scripts/tron ci fmt check clippy test`.
+- iOS/Mac `xcodegen generate` and targeted tests only if client/project files
+  change.
 
 ## Acceptance Criteria
 
-- Scheduled-work product truth is reconstructable from collapsed substrate truth,
-  or cron is explicitly accepted as low-level substrate with proof.
-- Every scheduled run has invocation/evidence lineage.
-- Operators can inspect stale, skipped, failed, completed, and retried runs.
-- No hidden scheduler file/table truth affects agent behavior.
-- The capability-backed-truth score only reaches `99/100` or `100/100` after
-  tests, docs, static gates, full CI, and ledger update pass.
+- Capability-backed-truth score reaches 100/100 only with proof.
+- No unclassified durable state owner remains.
+- No hidden file/table state affects agent behavior, operator truth, retries, or
+  approvals.
+- No client-owned grant, lineage, action-template, or policy path remains.
+- Every autonomous workflow runs through canonical invocation/capability paths
+  and leaves inspectable substrate evidence.
+- All retired tables/files/routes/fallbacks are removed or statically forbidden.

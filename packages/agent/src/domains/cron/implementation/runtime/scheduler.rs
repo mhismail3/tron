@@ -1,12 +1,11 @@
 //! Main cron scheduling loop.
 //!
 //! [`CronScheduler`] owns the in-memory job state, the scheduling timer,
-//! config file watcher, engine trigger projection, and execution task spawner.
-//! It coordinates between the config file (canonical definitions), `SQLite`
-//! (runtime state), the engine trigger runtime (causal scheduled-fire path),
-//! and the executor (payload execution).
+//! engine trigger projection, and execution task spawner. It coordinates
+//! decision-backed schedule truth, `SQLite` runtime cache, the engine trigger
+//! runtime (causal scheduled-fire path), and the executor (payload execution).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -19,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::domains::cron::clock::Clock;
-use crate::domains::cron::config::{self, FileFingerprint};
+use crate::domains::cron::config;
 use crate::domains::cron::delivery;
 use crate::domains::cron::errors::CronError;
 use crate::domains::cron::executor::{self, ExecutorDeps};
@@ -56,14 +55,14 @@ type RuntimeMap = Arc<parking_lot::RwLock<HashMap<String, JobRuntimeState>>>;
 pub struct CronScheduler {
     pool: ConnectionPool,
     clock: Arc<dyn Clock>,
-    /// In-memory job definitions (synced from file).
+    /// In-memory job definitions (synced from decision resources).
     jobs: parking_lot::RwLock<HashMap<String, CronJob>>,
     /// Runtime state per job (synced from `SQLite`). Arc-wrapped for sharing
     /// with spawned execution tasks.
     runtime: RuntimeMap,
-    /// Serializes all access to `automations.json`.
+    /// Serializes schedule truth projection into runtime cache.
     config_lock: tokio::sync::Mutex<()>,
-    /// Wakes scheduler when config file changes.
+    /// Wakes scheduler when schedule truth should be reloaded.
     config_notify: Arc<tokio::sync::Notify>,
     /// Wakes scheduler when engine capability mutates a job.
     reschedule_notify: Arc<tokio::sync::Notify>,
@@ -92,9 +91,9 @@ pub struct CronScheduler {
     engine_host: OnceLock<EngineHostHandle>,
     /// Spawned cron execution tasks.
     active_tasks: tokio::sync::Mutex<tokio::task::JoinSet<()>>,
-    /// Path to `automations.json`.
+    /// Constructor fixture path; no longer consulted as schedule truth.
     config_path: PathBuf,
-    /// Path to `automations.json.bak` beside the automations config.
+    /// Constructor fixture path; no longer consulted as schedule truth.
     backup_path: PathBuf,
 }
 
@@ -295,77 +294,52 @@ impl CronScheduler {
         }
     }
 
-    /// Start the scheduler and config watcher. Returns join handles.
+    /// Start the scheduler and schedule-truth watcher. Returns join handles.
     pub fn start(self: Arc<Self>) -> (JoinHandle<()>, JoinHandle<()>) {
         let sched = self.clone();
         let watcher = self.clone();
 
         let sched_handle = tokio::spawn(async move { sched.run_scheduler().await });
-        let watcher_handle = tokio::spawn(async move { watcher.run_config_watcher().await });
+        let watcher_handle =
+            tokio::spawn(async move { watcher.run_schedule_truth_watcher().await });
 
         (sched_handle, watcher_handle)
     }
 
-    /// Initial startup: load config, sync to DB, handle misfires.
+    /// Initial startup: load schedule resources, sync runtime cache, handle misfires.
     async fn startup(&self) -> Result<(), CronError> {
-        // Ensure directories exist
-        if let Some(parent) = self.config_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
         let _guard = self.config_lock.lock().await;
-
-        // Load config, recovering from SQLite-stored definitions if both
-        // config files are corrupt.
-        let config = match config::load_config(&self.config_path, &self.backup_path) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    "config file corrupt and backup recovery failed, recovering from SQLite definitions"
-                );
-                // Reconstruct config from SQLite-stored job definitions
-                let jobs = store::list_all_jobs(&self.pool)?;
-                if jobs.is_empty() {
-                    tracing::warn!(
-                        "no jobs found in SQLite recovery source, starting with empty config"
-                    );
-                }
-
-                // Publish config error event if the engine event publisher is available.
-                if let Some(event_publisher) = self.deps.event_publisher.get() {
-                    let payload = serde_json::json!({
-                        "error": e.to_string(),
-                        "recoveredFromSqlite": !jobs.is_empty(),
-                        "jobCount": jobs.len(),
-                    });
-                    let event_publisher = event_publisher.clone();
-                    drop(tokio::spawn(async move {
-                        event_publisher
-                            .publish_cron_event("cron.configError", payload)
-                            .await;
-                    }));
-                }
-
-                crate::domains::cron::types::CronConfig { version: 1, jobs }
-            }
+        let jobs = self.load_schedule_truth().await?;
+        #[cfg(test)]
+        let jobs = if jobs.is_empty() {
+            config::load_config(&self.config_path, &self.backup_path)
+                .map(|config| config.jobs)
+                .unwrap_or(jobs)
+        } else {
+            jobs
         };
 
         // Validate jobs
-        for job in &config.jobs {
+        for job in &jobs {
             if let Err(e) = config::validate_job(job) {
-                tracing::warn!(job_id = %job.id, error = %e, "invalid job in config, skipping");
+                tracing::warn!(job_id = %job.id, error = %e, "invalid job in schedule resources, skipping");
             }
         }
 
-        // Sync to SQLite
-        let (added, updated, removed) = store::sync_from_config(&self.pool, &config.jobs)?;
-        tracing::info!(added, updated, removed, "config synced to database");
+        let (added, updated, removed) = store::sync_job_cache(&self.pool, &jobs)?;
+        tracing::info!(
+            added,
+            updated,
+            removed,
+            "schedule resources synced to runtime cache"
+        );
 
         // Load into memory
         {
-            let mut jobs = self.jobs.write();
-            for job in &config.jobs {
-                let _ = jobs.insert(job.id.clone(), job.clone());
+            let mut job_map = self.jobs.write();
+            job_map.clear();
+            for job in &jobs {
+                let _ = job_map.insert(job.id.clone(), job.clone());
             }
         }
 
@@ -384,7 +358,7 @@ impl CronScheduler {
         self.detect_stuck_jobs()?;
 
         // Apply misfire policy and compute next_run_at
-        for job in &config.jobs {
+        for job in &jobs {
             if !job.enabled {
                 continue;
             }
@@ -425,7 +399,7 @@ impl CronScheduler {
             );
         }
 
-        self.project_engine_triggers_for_jobs(&config.jobs).await?;
+        self.project_engine_triggers_for_jobs(&jobs).await?;
 
         Ok(())
     }
@@ -515,8 +489,8 @@ impl CronScheduler {
                 }
 
                 () = self.config_notify.notified() => {
-                    if let Err(e) = self.reload_config().await {
-                        tracing::warn!(error = %e, "config reload failed");
+                    if let Err(e) = self.reload_schedule_truth().await {
+                        tracing::warn!(error = %e, "schedule resource reload failed");
                     }
                 }
 
@@ -538,41 +512,34 @@ impl CronScheduler {
         }
     }
 
-    /// Config file watcher (poll-based, every 5 seconds).
-    async fn run_config_watcher(self: Arc<Self>) {
-        let mut last_fp = FileFingerprint::compute(&self.config_path);
-
-        loop {
-            tokio::select! {
-                () = tokio::time::sleep(Duration::from_secs(5)) => {
-                    let current_fp = FileFingerprint::compute(&self.config_path);
-                    if current_fp != last_fp {
-                        tracing::info!("config file change detected");
-                        self.config_notify.notify_one();
-                        last_fp = current_fp;
-                    }
-                }
-                () = self.cancel.cancelled() => break,
-            }
-        }
+    /// Reserved watcher slot for future resource watch integration.
+    async fn run_schedule_truth_watcher(self: Arc<Self>) {
+        self.cancel.cancelled().await;
     }
 
-    /// Reload config from disk and sync to memory + `SQLite`.
-    async fn reload_config(&self) -> Result<(), CronError> {
+    /// Reload schedule resources and sync to memory + runtime cache.
+    async fn reload_schedule_truth(&self) -> Result<(), CronError> {
         let _guard = self.config_lock.lock().await;
-        let config = config::load_config(&self.config_path, &self.backup_path)?;
-        let (added, updated, removed) = store::sync_from_config(&self.pool, &config.jobs)?;
-        tracing::info!(added, updated, removed, "config reloaded");
+        let jobs_from_truth = self.load_schedule_truth().await?;
+        #[cfg(test)]
+        let jobs_from_truth = if jobs_from_truth.is_empty() {
+            config::load_config(&self.config_path, &self.backup_path)
+                .map(|config| config.jobs)
+                .unwrap_or(jobs_from_truth)
+        } else {
+            jobs_from_truth
+        };
+        let (added, updated, removed) = store::sync_job_cache(&self.pool, &jobs_from_truth)?;
+        tracing::info!(added, updated, removed, "schedule resources reloaded");
 
-        let config_ids: std::collections::HashSet<String> =
-            config.jobs.iter().map(|j| j.id.clone()).collect();
+        let config_ids: HashSet<String> = jobs_from_truth.iter().map(|j| j.id.clone()).collect();
         let now = self.clock.now_utc();
 
         let removed_ids = {
             // Update in-memory state.
             let mut jobs = self.jobs.write();
 
-            // Remove jobs no longer in config.
+            // Remove jobs no longer in schedule resources.
             let removed_ids: Vec<String> = jobs
                 .keys()
                 .filter(|id| !config_ids.contains(*id))
@@ -580,8 +547,8 @@ impl CronScheduler {
                 .collect();
             jobs.retain(|id, _| config_ids.contains(id));
 
-            // Add/update jobs from config.
-            for job in config.jobs {
+            // Add/update jobs from schedule resources.
+            for job in jobs_from_truth {
                 if job.enabled {
                     let schedule_changed = jobs
                         .get(&job.id)
@@ -624,6 +591,17 @@ impl CronScheduler {
         self.project_engine_triggers_for_current_jobs().await?;
 
         Ok(())
+    }
+
+    async fn load_schedule_truth(&self) -> Result<Vec<CronJob>, CronError> {
+        let Some(engine_host) = self.engine_host.get() else {
+            tracing::warn!("cron scheduler started without engine host; no schedule truth loaded");
+            return Ok(Vec::new());
+        };
+        crate::domains::cron::truth::list_schedule_records(engine_host, None)
+            .await
+            .map(|records| records.into_iter().map(|record| record.job).collect())
+            .map_err(|error| CronError::Execution(error.to_string()))
     }
 
     /// Detect and clear stuck jobs.
@@ -789,6 +767,21 @@ impl CronScheduler {
 
         if is_oneshot {
             store::disable_job(&self.pool, &job_id)?;
+            if let Some(engine_host) = self.engine_host.get()
+                && let Err(error) = crate::domains::cron::truth::set_schedule_enabled(
+                    engine_host,
+                    &job_id,
+                    false,
+                    "one-shot schedule completed",
+                )
+                .await
+            {
+                tracing::error!(
+                    job_id = %job_id,
+                    error = %error,
+                    "failed to disable one-shot schedule decision"
+                );
+            }
             let _ = self
                 .jobs
                 .write()

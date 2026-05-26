@@ -127,21 +127,22 @@ pub(crate) async fn cron_status_value(deps: &Deps) -> Result<Value, CapabilityEr
 
 pub(crate) async fn cron_get_runs_value(
     payload: &Value,
+    invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
-    let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
     let limit = opt_u64(Some(payload), "limit", 20) as u32;
     let offset = opt_u64(Some(payload), "offset", 0) as u32;
     let status_filter = payload.get("status").and_then(Value::as_str);
-    let (runs, total) = crate::domains::cron::store::get_runs(
-        sched.pool(),
-        Some(&job_id),
+    let (runs, total) = crate::domains::cron::truth::list_run_evidence(
+        &deps.engine_host,
+        Some(invocation),
+        &job_id,
         status_filter,
         limit,
         offset,
     )
-    .map_err(map_cron_error)?;
+    .await?;
     Ok(json!({
         "runs": to_json_value(&runs)?,
         "total": total,

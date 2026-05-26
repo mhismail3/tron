@@ -97,9 +97,9 @@ with the 100-point production-grade rubric in
 [`docs/production-grade-rubric.md`](docs/production-grade-rubric.md).
 The stricter capability-backed-truth migration tracker lives in
 [`docs/capability-backed-truth-migration-plan.md`](docs/capability-backed-truth-migration-plan.md);
-it is currently at 98/100 after the memory-retain, notification-resource,
-subagent-lineage, and source-control/AgentControl generated-surface conversions
-and tracks the
+it is currently at 99/100 after the memory-retain, notification-resource,
+subagent-lineage, source-control/AgentControl generated-surface, and cron
+schedule/run-observation conversions and tracks the
 remaining work to make every agent- or operator-affecting durable fact
 capability-owned substrate truth.
 The current operator checklist for local package trust, audits, revocation, and
@@ -1157,13 +1157,13 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 | `device_tokens` | iOS push notification tokens — identity is `(device_token, platform, workspace_id, bundle_id)` (COALESCE-nullable unique index collapses NULL workspace/bundle to a single canonical row; `bundle_id` lets the relay send Beta-scheme tokens to the correct APNs topic) |
-| `cron_jobs` | Cron job definitions: schedule, payload, delivery, overlap/misfire policies, runtime state (next/last run, consecutive failures) |
-| `cron_runs` | Per-run history for cron jobs (status, started/completed timestamps, output, exit code) |
+| `cron_jobs` | Cron scheduler runtime cache: due-time, running-state, retry, and consecutive-failure bookkeeping derived from `decision:cron-schedule:*` truth |
+| `cron_runs` | Cron executor runtime cache: in-flight and recent run bookkeeping; completed operator-visible run observations are `evidence:cron-run:*` evidence resources |
 | `constitution_home_audit` | Audited creates, updates, moves, deletes, seeds, repairs, and external edits for files under `~/.tron/` |
 | `constitution_resolution_audit` | Settings, instruction, context, provider-payload, vault, automation, and outcome resolution records with effective hashes and blob refs |
 | `constitution_context_blocks` | Typed model-context blocks for replay: source home/path/blob, hash, sensitivity, cache class, inclusion reason, precedence, and provider surface |
 
-The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Cron state still lives in dedicated cron tables. Prompt Library history/snippets are resource-backed `artifact:prompt-*` resources, and notification inbox/read truth is resource/decision backed; fresh modular-engine-v4 databases no longer create retired prompt-library tables or the retired notification read-state table. Session/task views are reconstructed from the canonical event log.
+The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Cron schedule truth is stored as `decision:cron-schedule:*` decision resources and completed run observations are stored as `evidence:cron-run:*` resources; the cron tables are scheduler runtime cache only. Prompt Library history/snippets are resource-backed `artifact:prompt-*` resources, and notification inbox/read truth is resource/decision backed; fresh modular-engine-v4 databases no longer create retired prompt-library tables or the retired notification read-state table. Session/task views are reconstructed from the canonical event log.
 
 ---
 
@@ -1399,7 +1399,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- inbox/
 |   |   +-- voice-notes/           Transcribed voice notes
 |   +-- projects/                  Project-local active work
-|   +-- automations/               Cron job definitions and working directories
+|   +-- automations/               Test-only automation fixtures and working directories
 |   +-- plans/                     Plan files and TODOs
 |   +-- reports/                   Analysis and investigation reports
 |   +-- renders/                   Rendered pages displayed in chat

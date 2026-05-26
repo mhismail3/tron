@@ -455,7 +455,8 @@ pub struct JobRuntimeState {
     pub running_since: Option<DateTime<Utc>>,
 }
 
-/// JSON config file schema.
+/// Test-only JSON config fixture schema.
+#[cfg(test)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CronConfig {
     /// Schema version (currently 1).
@@ -464,6 +465,7 @@ pub struct CronConfig {
     pub jobs: Vec<CronJob>,
 }
 
+#[cfg(test)]
 impl Default for CronConfig {
     fn default() -> Self {
         Self {

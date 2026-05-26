@@ -543,7 +543,7 @@ pub fn gc_old_runs(
 // ── Sync helpers ──
 
 /// Sync config file jobs into `SQLite`. Returns (added, updated, removed) counts.
-pub fn sync_from_config(
+pub fn sync_job_cache(
     pool: &ConnectionPool,
     jobs: &[CronJob],
 ) -> Result<(u32, u32, u32), CronError> {

@@ -138,6 +138,11 @@ impl CronEventPublisher {
 #[async_trait]
 impl crate::domains::cron::executor::EventPublisher for CronEventPublisher {
     async fn publish_cron_result(&self, job: &CronJob, run: &CronRun) {
+        if let Err(error) =
+            crate::domains::cron::truth::attach_run_evidence(&self.engine_host, job, run).await
+        {
+            tracing::warn!(job_id = %job.id, run_id = %run.id, error = %error, "cron run evidence attachment failed");
+        }
         let event = ServerEventPayload {
             event_type: "cron.runComplete".to_owned(),
             session_id: None,
@@ -163,6 +168,22 @@ impl crate::domains::cron::executor::EventPublisher for CronEventPublisher {
     }
 
     async fn publish_cron_event(&self, event_type: &str, payload: serde_json::Value) {
+        if event_type == "cron.jobAutoDisabled"
+            && let Some(job_id) = payload.get("jobId").and_then(serde_json::Value::as_str)
+            && let Err(error) = crate::domains::cron::truth::set_schedule_enabled(
+                &self.engine_host,
+                job_id,
+                false,
+                "auto-disabled after consecutive cron failures",
+            )
+            .await
+        {
+            tracing::error!(
+                job_id,
+                error = %error,
+                "failed to disable auto-disabled cron schedule decision"
+            );
+        }
         let event = ServerEventPayload {
             event_type: event_type.to_owned(),
             session_id: None,

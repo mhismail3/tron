@@ -248,24 +248,24 @@ fn gc_deletes_old_runs() {
 }
 
 #[test]
-fn sync_from_config_adds_new_jobs() {
+fn sync_job_cache_adds_new_jobs() {
     let pool = setup_pool();
     let jobs = vec![make_job("cron_1", "Job 1"), make_job("cron_2", "Job 2")];
-    let (added, updated, removed) = sync_from_config(&pool, &jobs).unwrap();
+    let (added, updated, removed) = sync_job_cache(&pool, &jobs).unwrap();
     assert_eq!(added, 2);
     assert_eq!(updated, 0);
     assert_eq!(removed, 0);
 }
 
 #[test]
-fn sync_from_config_updates_changed_jobs() {
+fn sync_job_cache_updates_changed_jobs() {
     let pool = setup_pool();
     let jobs = vec![make_job("cron_1", "Job 1")];
-    sync_from_config(&pool, &jobs).unwrap();
+    sync_job_cache(&pool, &jobs).unwrap();
 
     let mut updated_jobs = vec![make_job("cron_1", "Updated Job 1")];
     updated_jobs[0].max_retries = 5;
-    let (added, updated, removed) = sync_from_config(&pool, &updated_jobs).unwrap();
+    let (added, updated, removed) = sync_job_cache(&pool, &updated_jobs).unwrap();
     assert_eq!(added, 0);
     assert_eq!(updated, 1);
     assert_eq!(removed, 0);
@@ -276,13 +276,13 @@ fn sync_from_config_updates_changed_jobs() {
 }
 
 #[test]
-fn sync_from_config_removes_deleted_jobs() {
+fn sync_job_cache_removes_deleted_jobs() {
     let pool = setup_pool();
     let jobs = vec![make_job("cron_1", "Job 1"), make_job("cron_2", "Job 2")];
-    sync_from_config(&pool, &jobs).unwrap();
+    sync_job_cache(&pool, &jobs).unwrap();
 
     // Sync with only job 1
-    let (_, _, removed) = sync_from_config(&pool, &jobs[..1]).unwrap();
+    let (_, _, removed) = sync_job_cache(&pool, &jobs[..1]).unwrap();
     assert_eq!(removed, 1);
     assert!(get_job(&pool, "cron_2").unwrap().is_none());
 }
@@ -466,7 +466,7 @@ fn upsert_job_null_capability_restrictions() {
 fn sync_preserves_runtime_state() {
     let pool = setup_pool();
     let jobs = vec![make_job("cron_1", "Job 1")];
-    sync_from_config(&pool, &jobs).unwrap();
+    sync_job_cache(&pool, &jobs).unwrap();
 
     // Set some runtime state
     let now = Utc::now();
@@ -475,7 +475,7 @@ fn sync_preserves_runtime_state() {
     let _ = increment_consecutive_failures(&pool, "cron_1").unwrap();
 
     // Re-sync with the same job
-    sync_from_config(&pool, &jobs).unwrap();
+    sync_job_cache(&pool, &jobs).unwrap();
 
     // Runtime state preserved
     let state = get_runtime_state(&pool, "cron_1").unwrap().unwrap();

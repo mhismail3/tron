@@ -9,7 +9,7 @@ tests, generated projects, CI, schemas, and repo support.
 
 The stricter capability-backed-truth migration score lives in
 `docs/capability-backed-truth-migration-plan.md`. That score is currently
-**98/100** and tracks whether every agent- or operator-affecting durable fact is
+**99/100** and tracks whether every agent- or operator-affecting durable fact is
 owned by canonical capabilities and the collapsed resource/decision/evidence/
 invocation/grant substrate. It intentionally has known blockers even while this
 production-grade classification score remains complete.
@@ -26,15 +26,17 @@ Each axis receives one of these maturity levels:
 
 Current repo-wide score: **100/100**.
 
-Current capability-backed-truth score: **98/100**.
+Current capability-backed-truth score: **99/100**.
 
 This production-grade score means every known source artifact, state owner,
 product shell, and security boundary is either implemented, tested, documented,
 or explicitly classified with static gates. It does not mean every durable fact
 is already capability-backed truth. Notifications and subagent completed-result
-lineage are now resource-backed, and source-control/AgentControl review has
-server-authored generated surfaces; the remaining migration blocker is
-cron/scheduled work truth.
+lineage are now resource-backed, source-control/AgentControl review has
+server-authored generated surfaces, and cron schedule/run observation truth is
+decision/evidence backed. The remaining migration blocker is the cron runtime
+scheduler cache: it is no longer product truth, but it still needs final
+remove-or-formally-accept proof before the stricter score reaches 100/100.
 
 ## Rubric
 
@@ -167,8 +169,8 @@ Evidence:
 Blockers:
 
 - No current blocker for production-grade classification. The stricter
-  capability-backed-truth migration separately tracks cron/scheduled work truth
-  as the remaining conversion blocker.
+  capability-backed-truth migration separately tracks the cron runtime scheduler
+  cache as the remaining remove-or-accept blocker.
 
 Next action:
 
@@ -359,7 +361,7 @@ Next action:
    focused audit are completed evidence for the 98/100 checkpoint.
 6. Prompt Library generated management and gated local composer insertion are
    completed evidence for the final 100/100 checkpoint.
-7. Capability-backed-truth migration is now tracked separately at 98/100 in
-   `docs/capability-backed-truth-migration-plan.md`; close
-   cron/scheduled-work truth before claiming capability-backed truth is
-   complete.
+7. Capability-backed-truth migration is now tracked separately at 99/100 in
+   `docs/capability-backed-truth-migration-plan.md`; close the final cron
+   runtime scheduler cache remove-or-accept audit before claiming
+   capability-backed truth is complete.

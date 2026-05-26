@@ -4,8 +4,9 @@
 //!
 //! ## Architecture
 //!
-//! - **Config file** (`~/.tron/workspace/automations/automations.json`): Canonical job definitions
-//! - **`SQLite`** (`tron.sqlite`): Runtime state (`next_run_at`, failures, runs)
+//! - **Decision resources**: Canonical schedule definitions
+//! - **Evidence resources**: Completed run observations linked to schedules
+//! - **`SQLite`** (`tron.sqlite`): Scheduler runtime cache (`next_run_at`, failures, in-flight runs)
 //! - **Engine projection**: enabled jobs register live `cron_schedule` trigger definitions
 //! - **Scheduler**: Timer-based loop that dispatches due jobs through `EngineTriggerRuntime`
 //! - **Executor**: Payload execution via callback traits (shell, webhook, agent, system event)
@@ -15,9 +16,10 @@
 //! target hidden `cron::scheduled_fire`, which preserves the existing overlap,
 //! misfire, retry, timeout, delivery, and run-history behavior while adding
 //! engine trigger/idempotency/ledger records.
-//! `automations.json` and cron runtime SQLite remain durable truth for job
-//! definitions and run history in this package; engine triggers are the live
-//! invocation/watch surface.
+//! Schedule and run facts that affect operators or future agent behavior are
+//! resource-backed. The cron SQLite tables remain a low-level scheduler cache
+//! until the final storage-plane removal phase; they are not the product source
+//! of truth for cron schedule definitions.
 //!
 //! ## Invariants
 //!
@@ -39,7 +41,6 @@
 //!   the DB write fails, the in-memory update is skipped to prevent divergence.
 //! - **Allowlist-only restrictions**: `CapabilityRestrictions` uses `deny_unknown_fields` —
 //!   unknown `deniedContracts` JSON is rejected at parse time.
-//! - **Full-file hashing**: The config watcher hashes the entire file, not a prefix.
 //! - **Minimum timeout**: Shell (1s–3600s) and webhook (1s–300s) payloads reject 0s timeout.
 //! - **Engine-attached fires**: In production, `main.rs` attaches the engine
 //!   host before `start()`. When attached, scheduled fires must dispatch
@@ -71,6 +72,8 @@ pub mod schedule;
 pub mod scheduler;
 #[path = "runtime/store.rs"]
 pub mod store;
+#[path = "domain/truth.rs"]
+pub(crate) mod truth;
 #[path = "domain/types.rs"]
 pub mod types;
 
@@ -79,7 +82,9 @@ pub use clock::{Clock, SystemClock};
 pub use errors::CronError;
 pub use executor::{AgentTurnResult, ExecutorDeps};
 pub use scheduler::CronScheduler;
+#[cfg(test)]
+pub use types::CronConfig;
 pub use types::{
-    CapabilityRestrictions, CronConfig, CronJob, CronRun, Delivery, ExecutionOutput,
-    JobRuntimeState, MisfirePolicy, OverlapPolicy, Payload, RunStatus, Schedule,
+    CapabilityRestrictions, CronJob, CronRun, Delivery, ExecutionOutput, JobRuntimeState,
+    MisfirePolicy, OverlapPolicy, Payload, RunStatus, Schedule,
 };
