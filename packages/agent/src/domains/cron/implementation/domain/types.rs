@@ -455,26 +455,6 @@ pub struct JobRuntimeState {
     pub running_since: Option<DateTime<Utc>>,
 }
 
-/// Test-only JSON config fixture schema.
-#[cfg(test)]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CronConfig {
-    /// Schema version (currently 1).
-    pub version: u32,
-    /// Job definitions.
-    pub jobs: Vec<CronJob>,
-}
-
-#[cfg(test)]
-impl Default for CronConfig {
-    fn default() -> Self {
-        Self {
-            version: 1,
-            jobs: Vec::new(),
-        }
-    }
-}
-
 /// Output captured from a payload execution.
 #[derive(Clone, Debug, Default)]
 pub struct ExecutionOutput {
@@ -780,13 +760,6 @@ mod tests {
             Payload::Webhook { method, .. } => assert_eq!(method, "POST"),
             _ => panic!("wrong variant"),
         }
-    }
-
-    #[test]
-    fn cron_config_default() {
-        let c = CronConfig::default();
-        assert_eq!(c.version, 1);
-        assert!(c.jobs.is_empty());
     }
 
     // ── CapabilityRestrictions tests ────────────────────────────────────────

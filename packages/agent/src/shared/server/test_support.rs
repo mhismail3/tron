@@ -248,8 +248,6 @@ pub fn make_test_context_with_cron_scheduler() -> ServerRuntimeContext {
         pool,
         Arc::new(crate::domains::cron::SystemClock),
         cron_deps,
-        unique_test_path("cron-automations", "json"),
-        unique_test_path("cron-automations", "json.bak"),
         cancel,
     ));
     let ctx = ServerRuntimeContext {

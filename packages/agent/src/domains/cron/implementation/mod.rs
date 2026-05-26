@@ -83,8 +83,6 @@ pub use clock::{Clock, SystemClock};
 pub use errors::CronError;
 pub use executor::{AgentTurnResult, ExecutorDeps};
 pub use scheduler::CronScheduler;
-#[cfg(test)]
-pub use types::CronConfig;
 pub use types::{
     CapabilityRestrictions, CronJob, CronRun, Delivery, ExecutionOutput, JobRuntimeState,
     MisfirePolicy, OverlapPolicy, Payload, RunStatus, Schedule,

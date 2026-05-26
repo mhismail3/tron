@@ -127,8 +127,6 @@ pub mod files {
     /// loop and the user-mode auto-updater. Presence of the file blocks
     /// any further install actions without touching settings.
     pub const AUTO_UPDATE_PAUSE: &str = "auto-update.pause";
-    /// Canonical cron job definitions.
-    pub const AUTOMATIONS_JSON: &str = "automations.json";
     /// Profile prompt file name used by project-local prompt overrides.
     pub const SYSTEM_MD: &str = "SYSTEM.md";
     /// Canonical user-memory root file.
@@ -491,16 +489,6 @@ pub fn auto_update_pause_path() -> PathBuf {
     run_dir().join(files::AUTO_UPDATE_PAUSE)
 }
 
-/// `~/.tron/workspace/automations/automations.json`
-pub fn automations_path() -> PathBuf {
-    automations_dir().join(files::AUTOMATIONS_JSON)
-}
-
-/// `~/.tron/workspace/automations/automations.json.bak`
-pub fn automations_backup_path() -> PathBuf {
-    automations_dir().join("automations.json.bak")
-}
-
 /// `~/.tron/profiles/user/prompts/core.md`
 pub fn global_system_prompt_path() -> PathBuf {
     profiles_dir()
@@ -858,27 +846,6 @@ mod tests {
     fn global_system_prompt_path_correct() {
         let p = global_system_prompt_path();
         assert!(p.ends_with(format!("{}/user/{}/core.md", dirs::PROFILES, dirs::PROMPTS)));
-    }
-
-    #[test]
-    fn automations_path_correct() {
-        let p = automations_path();
-        assert!(p.ends_with(format!(
-            "{}/{}/{}",
-            dirs::WORKSPACE,
-            dirs::AUTOMATIONS,
-            files::AUTOMATIONS_JSON
-        )));
-    }
-
-    #[test]
-    fn automations_backup_path_correct() {
-        let p = automations_backup_path();
-        assert!(p.ends_with(format!(
-            "{}/{}/automations.json.bak",
-            dirs::WORKSPACE,
-            dirs::AUTOMATIONS
-        )));
     }
 
     #[test]

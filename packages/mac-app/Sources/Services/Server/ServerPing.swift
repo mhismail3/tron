@@ -4,8 +4,7 @@ import ServiceManagement
 /// Result of a single `system::ping` engine probe. The four non-success cases
 /// drive distinct UI affordances in the menu bar / wizard so the user
 /// gets the right action ("re-pair" vs "wait for boot" vs "check
-/// network"). Replaces the old `ServerInfo?` return which conflated
-/// "server is down" with "token rejected".
+/// network").
 ///
 /// INVARIANT: `ServerStatusPoller.singleSnapshot` MUST map ping
 /// results into explicit menu-bar states:

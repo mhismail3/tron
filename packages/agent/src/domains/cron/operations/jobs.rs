@@ -216,7 +216,7 @@ pub(crate) async fn cron_create_value(
             message: error.to_string(),
         }
     })?;
-    let _guard = sched.config_lock().lock().await;
+    let _guard = sched.schedule_truth_lock().lock().await;
     if crate::domains::cron::truth::name_exists(
         &deps.engine_host,
         Some(invocation),
@@ -261,7 +261,7 @@ pub(crate) async fn cron_update_value(
 ) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
-    let _guard = sched.config_lock().lock().await;
+    let _guard = sched.schedule_truth_lock().lock().await;
     let resource_id = crate::domains::cron::truth::schedule_decision_id(&job_id);
     let record = crate::domains::cron::truth::inspect_schedule_record(
         &deps.engine_host,
@@ -400,7 +400,7 @@ pub(crate) async fn cron_delete_value(
 ) -> Result<Value, CapabilityError> {
     let sched = scheduler(deps)?;
     let job_id = require_string_param(Some(payload), "jobId")?;
-    let _guard = sched.config_lock().lock().await;
+    let _guard = sched.schedule_truth_lock().lock().await;
     let resource_id = crate::domains::cron::truth::schedule_decision_id(&job_id);
     let record = crate::domains::cron::truth::inspect_schedule_record(
         &deps.engine_host,

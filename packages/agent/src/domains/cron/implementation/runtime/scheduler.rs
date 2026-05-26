@@ -6,7 +6,6 @@
 //! runtime (causal scheduled-fire path), and the executor (payload execution).
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -61,9 +60,9 @@ pub struct CronScheduler {
     /// with spawned execution tasks.
     runtime: RuntimeMap,
     /// Serializes schedule truth projection into runtime cache.
-    config_lock: tokio::sync::Mutex<()>,
+    schedule_truth_lock: tokio::sync::Mutex<()>,
     /// Wakes scheduler when schedule truth should be reloaded.
-    config_notify: Arc<tokio::sync::Notify>,
+    schedule_truth_notify: Arc<tokio::sync::Notify>,
     /// Wakes scheduler when engine capability mutates a job.
     reschedule_notify: Arc<tokio::sync::Notify>,
     /// Shutdown signal.
@@ -91,10 +90,9 @@ pub struct CronScheduler {
     engine_host: OnceLock<EngineHostHandle>,
     /// Spawned cron execution tasks.
     active_tasks: tokio::sync::Mutex<tokio::task::JoinSet<()>>,
-    /// Constructor fixture path; no longer consulted as schedule truth.
-    config_path: PathBuf,
-    /// Constructor fixture path; no longer consulted as schedule truth.
-    backup_path: PathBuf,
+    /// In-memory schedule truth for scheduler unit tests.
+    #[cfg(test)]
+    test_schedule_truth: parking_lot::RwLock<Option<Vec<CronJob>>>,
 }
 
 impl CronScheduler {
@@ -103,8 +101,6 @@ impl CronScheduler {
         pool: ConnectionPool,
         clock: Arc<dyn Clock>,
         deps: ExecutorDeps,
-        config_path: PathBuf,
-        backup_path: PathBuf,
         cancel: CancellationToken,
     ) -> Self {
         Self {
@@ -112,8 +108,8 @@ impl CronScheduler {
             clock,
             jobs: parking_lot::RwLock::new(HashMap::new()),
             runtime: Arc::new(parking_lot::RwLock::new(HashMap::new())),
-            config_lock: tokio::sync::Mutex::new(()),
-            config_notify: Arc::new(tokio::sync::Notify::new()),
+            schedule_truth_lock: tokio::sync::Mutex::new(()),
+            schedule_truth_notify: Arc::new(tokio::sync::Notify::new()),
             reschedule_notify: Arc::new(tokio::sync::Notify::new()),
             cancel,
             execution_semaphore: Arc::new(tokio::sync::Semaphore::new(DEFAULT_EXECUTION_LIMIT)),
@@ -121,8 +117,8 @@ impl CronScheduler {
             deps: Arc::new(deps),
             engine_host: OnceLock::new(),
             active_tasks: tokio::sync::Mutex::new(tokio::task::JoinSet::new()),
-            config_path,
-            backup_path,
+            #[cfg(test)]
+            test_schedule_truth: parking_lot::RwLock::new(None),
         }
     }
 
@@ -151,19 +147,9 @@ impl CronScheduler {
         self.reschedule_notify.clone()
     }
 
-    /// Get the config lock used to serialize cron config access.
-    pub fn config_lock(&self) -> &tokio::sync::Mutex<()> {
-        &self.config_lock
-    }
-
-    /// Get the config file path.
-    pub fn config_path(&self) -> &std::path::Path {
-        &self.config_path
-    }
-
-    /// Get the path to the backup config file.
-    pub fn backup_path(&self) -> &std::path::Path {
-        &self.backup_path
+    /// Get the lock used to serialize schedule-truth projection.
+    pub fn schedule_truth_lock(&self) -> &tokio::sync::Mutex<()> {
+        &self.schedule_truth_lock
     }
 
     /// Get the connection pool.
@@ -174,6 +160,12 @@ impl CronScheduler {
     /// Get the clock.
     pub fn clock(&self) -> &dyn Clock {
         &*self.clock
+    }
+
+    #[cfg(test)]
+    fn set_test_schedule_truth(&self, jobs: Vec<CronJob>) {
+        *self.test_schedule_truth.write() = Some(jobs);
+        self.schedule_truth_notify.notify_one();
     }
 
     /// Get current job count.
@@ -308,16 +300,8 @@ impl CronScheduler {
 
     /// Initial startup: load schedule resources, sync runtime cache, handle misfires.
     async fn startup(&self) -> Result<(), CronError> {
-        let _guard = self.config_lock.lock().await;
+        let _guard = self.schedule_truth_lock.lock().await;
         let jobs = self.load_schedule_truth().await?;
-        #[cfg(test)]
-        let jobs = if jobs.is_empty() {
-            config::load_config(&self.config_path, &self.backup_path)
-                .map(|config| config.jobs)
-                .unwrap_or(jobs)
-        } else {
-            jobs
-        };
 
         // Validate jobs
         for job in &jobs {
@@ -488,7 +472,7 @@ impl CronScheduler {
                     self.drain_completed_tasks().await;
                 }
 
-                () = self.config_notify.notified() => {
+                () = self.schedule_truth_notify.notified() => {
                     if let Err(e) = self.reload_schedule_truth().await {
                         tracing::warn!(error = %e, "schedule resource reload failed");
                     }
@@ -519,16 +503,8 @@ impl CronScheduler {
 
     /// Reload schedule resources and sync to memory + runtime cache.
     async fn reload_schedule_truth(&self) -> Result<(), CronError> {
-        let _guard = self.config_lock.lock().await;
+        let _guard = self.schedule_truth_lock.lock().await;
         let jobs_from_truth = self.load_schedule_truth().await?;
-        #[cfg(test)]
-        let jobs_from_truth = if jobs_from_truth.is_empty() {
-            config::load_config(&self.config_path, &self.backup_path)
-                .map(|config| config.jobs)
-                .unwrap_or(jobs_from_truth)
-        } else {
-            jobs_from_truth
-        };
         let (added, updated, removed) = store::sync_job_cache(&self.pool, &jobs_from_truth)?;
         tracing::info!(added, updated, removed, "schedule resources reloaded");
 
@@ -594,6 +570,11 @@ impl CronScheduler {
     }
 
     async fn load_schedule_truth(&self) -> Result<Vec<CronJob>, CronError> {
+        #[cfg(test)]
+        if let Some(jobs) = self.test_schedule_truth.read().clone() {
+            return Ok(jobs);
+        }
+
         let Some(engine_host) = self.engine_host.get() else {
             tracing::warn!("cron scheduler started without engine host; no schedule truth loaded");
             return Ok(Vec::new());
@@ -980,8 +961,6 @@ mod tests {
     fn setup() -> (
         ConnectionPool,
         Arc<FakeClock>,
-        PathBuf,
-        PathBuf,
         CancellationToken,
         tempfile::TempDir,
     ) {
@@ -1000,10 +979,8 @@ mod tests {
                 .to_utc(),
         ));
         let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("automations.json");
-        let backup_path = dir.path().join("automations.json.bak");
         let cancel = CancellationToken::new();
-        (pool, clock, config_path, backup_path, cancel, dir)
+        (pool, clock, cancel, dir)
     }
 
     fn make_deps(pool: &ConnectionPool) -> ExecutorDeps {
@@ -1019,16 +996,9 @@ mod tests {
 
     #[tokio::test]
     async fn scheduler_starts_and_stops() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = Arc::new(CronScheduler::new(
-            pool,
-            clock,
-            deps,
-            config_path,
-            backup_path,
-            cancel.clone(),
-        ));
+        let scheduler = Arc::new(CronScheduler::new(pool, clock, deps, cancel.clone()));
 
         let (h1, h2) = scheduler.start();
 
@@ -1041,10 +1011,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scheduler_loads_config_on_startup() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+    async fn scheduler_loads_schedule_truth_on_startup() {
+        let (pool, clock, cancel, _dir) = setup();
 
-        // Write a config file
         let job = CronJob {
             id: "cron_1".into(),
             name: "Test".into(),
@@ -1071,21 +1040,9 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let config = CronConfig {
-            version: 1,
-            jobs: vec![job],
-        };
-        config::save_config(&config_path, &backup_path, &config).unwrap();
-
         let deps = make_deps(&pool);
-        let scheduler = Arc::new(CronScheduler::new(
-            pool,
-            clock,
-            deps,
-            config_path,
-            backup_path,
-            cancel.clone(),
-        ));
+        let scheduler = Arc::new(CronScheduler::new(pool, clock, deps, cancel.clone()));
+        scheduler.set_test_schedule_truth(vec![job]);
 
         let sched_ref = scheduler.clone();
         let (h1, h2) = scheduler.start();
@@ -1101,7 +1058,7 @@ mod tests {
 
     #[tokio::test]
     async fn scheduler_does_not_double_fire() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
 
         // Set clock to 1ms before 13:00 UTC
         clock.set(
@@ -1136,21 +1093,14 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let config = CronConfig {
-            version: 1,
-            jobs: vec![job],
-        };
-        config::save_config(&config_path, &backup_path, &config).unwrap();
-
         let deps = make_deps(&pool);
         let scheduler = Arc::new(CronScheduler::new(
             pool.clone(),
             clock.clone(),
             deps,
-            config_path,
-            backup_path,
             cancel.clone(),
         ));
+        scheduler.set_test_schedule_truth(vec![job]);
 
         let notify = scheduler.reschedule_notify();
         let (h1, h2) = scheduler.clone().start();
@@ -1189,8 +1139,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reload_config_preserves_next_run_at() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+    async fn reload_schedule_truth_preserves_next_run_at() {
+        let (pool, clock, cancel, _dir) = setup();
 
         let job = CronJob {
             id: "cron_preserve".into(),
@@ -1218,21 +1168,14 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let config = CronConfig {
-            version: 1,
-            jobs: vec![job],
-        };
-        config::save_config(&config_path, &backup_path, &config).unwrap();
-
         let deps = make_deps(&pool);
         let scheduler = Arc::new(CronScheduler::new(
             pool.clone(),
             clock.clone(),
             deps,
-            config_path.clone(),
-            backup_path.clone(),
             cancel.clone(),
         ));
+        scheduler.set_test_schedule_truth(vec![job]);
 
         let (h1, h2) = scheduler.clone().start();
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1244,8 +1187,8 @@ mod tests {
             .next_run_at
             .expect("should have next_run_at");
 
-        // Trigger config reload (same content — no schedule change)
-        scheduler.config_notify.notify_one();
+        // Trigger schedule-truth reload (same content — no schedule change)
+        scheduler.schedule_truth_notify.notify_one();
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         let after = scheduler
@@ -1265,8 +1208,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reload_config_recomputes_on_schedule_change() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+    async fn reload_schedule_truth_recomputes_on_schedule_change() {
+        let (pool, clock, cancel, _dir) = setup();
 
         let job = CronJob {
             id: "cron_change".into(),
@@ -1294,21 +1237,14 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        let config = CronConfig {
-            version: 1,
-            jobs: vec![job.clone()],
-        };
-        config::save_config(&config_path, &backup_path, &config).unwrap();
-
         let deps = make_deps(&pool);
         let scheduler = Arc::new(CronScheduler::new(
             pool.clone(),
             clock.clone(),
             deps,
-            config_path.clone(),
-            backup_path.clone(),
             cancel.clone(),
         ));
+        scheduler.set_test_schedule_truth(vec![job.clone()]);
 
         let (h1, h2) = scheduler.clone().start();
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1325,13 +1261,7 @@ mod tests {
             expression: "0 10 * * *".into(),
             timezone: "UTC".into(),
         };
-        let new_config = CronConfig {
-            version: 1,
-            jobs: vec![updated_job],
-        };
-        config::save_config(&config_path, &backup_path, &new_config).unwrap();
-
-        scheduler.config_notify.notify_one();
+        scheduler.set_test_schedule_truth(vec![updated_job]);
         tokio::time::sleep(Duration::from_millis(200)).await;
 
         let after = scheduler
@@ -1357,16 +1287,9 @@ mod tests {
 
     #[tokio::test]
     async fn scheduler_reschedule_notify_wakes() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = Arc::new(CronScheduler::new(
-            pool,
-            clock,
-            deps,
-            config_path,
-            backup_path,
-            cancel.clone(),
-        ));
+        let scheduler = Arc::new(CronScheduler::new(pool, clock, deps, cancel.clone()));
 
         let notify = scheduler.reschedule_notify();
         let (h1, h2) = scheduler.clone().start();
@@ -1383,16 +1306,9 @@ mod tests {
 
     #[test]
     fn detect_stuck_updates_original_run() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(
-            pool.clone(),
-            clock.clone(),
-            deps,
-            config_path,
-            backup_path,
-            cancel,
-        );
+        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, cancel);
 
         // Insert a job with running_since 3 hours ago (timeout is 7200s = 2h)
         let job = CronJob {
@@ -1441,16 +1357,9 @@ mod tests {
 
     #[test]
     fn detect_stuck_creates_synthetic_when_no_run() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(
-            pool.clone(),
-            clock.clone(),
-            deps,
-            config_path,
-            backup_path,
-            cancel,
-        );
+        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, cancel);
 
         let job = CronJob {
             id: "cron_ghost".into(),
@@ -1494,7 +1403,7 @@ mod tests {
 
     #[tokio::test]
     async fn startup_cleans_orphaned_runs() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
 
         // Pre-populate with a job and orphaned running runs
         let job = CronJob {
@@ -1524,13 +1433,6 @@ mod tests {
             updated_at: Utc::now(),
         };
 
-        // Config must include the job so sync doesn't delete it (and NULL the run job_ids)
-        let config = CronConfig {
-            version: 1,
-            jobs: vec![job.clone()],
-        };
-        crate::domains::cron::config::save_config(&config_path, &backup_path, &config).unwrap();
-
         store::upsert_job(&pool, &job).unwrap();
         store::insert_run(&pool, "orphan_1", "cron_orphan", "Orphan", Utc::now()).unwrap();
         store::insert_run(&pool, "orphan_2", "cron_orphan", "Orphan", Utc::now()).unwrap();
@@ -1542,10 +1444,9 @@ mod tests {
             pool.clone(),
             clock,
             deps,
-            config_path,
-            backup_path,
             cancel.clone(),
         ));
+        scheduler.set_test_schedule_truth(vec![job.clone()]);
         let (h1, h2) = scheduler.start();
         tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -1561,16 +1462,9 @@ mod tests {
 
     #[test]
     fn overlap_unblocked_after_stuck_detection() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(
-            pool.clone(),
-            clock.clone(),
-            deps,
-            config_path,
-            backup_path,
-            cancel,
-        );
+        let scheduler = CronScheduler::new(pool.clone(), clock.clone(), deps, cancel);
 
         let job = CronJob {
             id: "cron_overlap".into(),
@@ -1615,9 +1509,9 @@ mod tests {
 
     #[test]
     fn with_jobs_provides_read_access() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
+        let scheduler = CronScheduler::new(pool, clock, deps, cancel);
 
         let job = CronJob {
             id: "cron_wj".into(),
@@ -1653,9 +1547,9 @@ mod tests {
 
     #[test]
     fn get_job_returns_none_for_missing() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
+        let scheduler = CronScheduler::new(pool, clock, deps, cancel);
 
         assert!(scheduler.get_job("nonexistent").is_none());
     }
@@ -1666,9 +1560,9 @@ mod tests {
     /// dedicated capacity even when every delivery-pool slot is claimed.
     #[tokio::test]
     async fn agent_job_bypasses_delivery_queue() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
+        let scheduler = CronScheduler::new(pool, clock, deps, cancel);
 
         // Saturate the delivery pool — simulate a webhook flood that has
         // claimed every lightweight-delivery permit.
@@ -1756,9 +1650,9 @@ mod tests {
 
     #[test]
     fn get_job_returns_existing() {
-        let (pool, clock, config_path, backup_path, cancel, _dir) = setup();
+        let (pool, clock, cancel, _dir) = setup();
         let deps = make_deps(&pool);
-        let scheduler = CronScheduler::new(pool, clock, deps, config_path, backup_path, cancel);
+        let scheduler = CronScheduler::new(pool, clock, deps, cancel);
 
         let job = CronJob {
             id: "cron_gj".into(),
@@ -1873,7 +1767,7 @@ mod tests {
 
     #[tokio::test]
     async fn auto_disable_sends_push_notification() {
-        let (pool, clock, _, _, _, _dir) = setup();
+        let (pool, clock, _cancel, _dir) = setup();
         let notifier = Arc::new(MockPushNotifier::new());
         let event_publisher = Arc::new(MockEventPublisher::new());
 
@@ -1935,7 +1829,7 @@ mod tests {
 
     #[tokio::test]
     async fn auto_disable_publishes_event() {
-        let (pool, clock, _, _, _, _dir) = setup();
+        let (pool, clock, _cancel, _dir) = setup();
         let event_publisher = Arc::new(MockEventPublisher::new());
 
         let deps = ExecutorDeps {
@@ -1986,7 +1880,7 @@ mod tests {
 
     #[tokio::test]
     async fn auto_disable_works_without_notifier() {
-        let (pool, clock, _, _, _, _dir) = setup();
+        let (pool, clock, _cancel, _dir) = setup();
 
         let deps = make_deps(&pool); // No notifier, no event_publisher
 

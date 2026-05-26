@@ -391,10 +391,14 @@ mod tests {
             _config: ManagedProcessConfig,
             _task: Pin<Box<dyn std::future::Future<Output = ManagedProcessResult> + Send>>,
         ) -> Result<ManagedProcessHandle, CapabilityExecutionError> {
-            unimplemented!()
+            Err(CapabilityExecutionError::Validation {
+                message: "mock process manager does not support spawn_managed".to_owned(),
+            })
         }
         fn promote_to_background(&self, _process_id: &str) -> Result<(), CapabilityExecutionError> {
-            unimplemented!()
+            Err(CapabilityExecutionError::Validation {
+                message: "mock process manager does not support promote_to_background".to_owned(),
+            })
         }
         fn cancel_process(
             &self,

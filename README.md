@@ -11,8 +11,7 @@ This README is the single, canonical reference for the project and is expected t
 ## Table of Contents
 
 - [Architecture](#architecture)
-- [Modular Engine Audit](#modular-engine-audit)
-- [Collapsed Modular Engine](#collapsed-modular-engine)
+- [Living Architecture Docs](#living-architecture-docs)
 - [Repository Structure](#repository-structure)
 - [Rust Modules](#rust-modules)
 - [Quick Start](#quick-start)
@@ -77,63 +76,34 @@ This README is the single, canonical reference for the project and is expected t
 
 ---
 
-## Modular Engine Audit
+## Living Architecture Docs
 
-The durable audit for the post-mobile-first direction lives in
-[`docs/modular-engine-audit.md`](docs/modular-engine-audit.md). It inventories
-the Rust server and iOS app, classifies engine-kernel, core-runtime,
-capability-module, and product-shell surfaces, and defines the target direction:
-Tron as a modular local capability engine with a thin chat and generated-native
-UI harness.
+The durable architecture docs live beside the code they describe. The root
+README is the map; source files, `mod.rs` docs, `INVARIANT:` comments, and
+concern-owned tests are the durable truth. One-off phase plans, migration
+rubrics, and audit snapshots are not kept as source-of-truth docs because they
+drift after the code changes.
 
-The cleanup proof map for removing product-shell surfaces and consolidating the
-recent modular-engine additions lives in
-[`docs/modular-engine-cleanup-audit.md`](docs/modular-engine-cleanup-audit.md).
-The measurable maturity target and current score live in
-[`docs/modular-engine-maturity-scorecard.md`](docs/modular-engine-maturity-scorecard.md).
-The repo-wide package/submodule hygiene audit lives in
-[`docs/production-grade-codebase-audit.md`](docs/production-grade-codebase-audit.md),
-with the 100-point production-grade rubric in
-[`docs/production-grade-rubric.md`](docs/production-grade-rubric.md).
-The post-100 fault-tolerance audit lives in
-[`docs/extreme-fault-tolerance-audit.md`](docs/extreme-fault-tolerance-audit.md);
-it applies isolation, dependency-light critical-path, known-good continuation,
-failover exercise, and progressive-delivery principles to the modular engine.
-The stricter capability-backed-truth migration tracker lives in
-[`docs/capability-backed-truth-migration-plan.md`](docs/capability-backed-truth-migration-plan.md);
-it is currently at 100/100 after the memory-retain, notification-resource,
-subagent-lineage, source-control/AgentControl generated-surface, cron
-schedule/run-observation, and scheduler-cache acceptance phases. Cron runtime
-tables remain mechanical scheduler cache only; every agent- or
-operator-affecting durable fact is capability-owned substrate truth.
-The current operator checklist for local package trust, audits, revocation, and
-cleanup lives in
-[`docs/module-package-trust-operations.md`](docs/module-package-trust-operations.md).
+Current living entry points:
 
-## Collapsed Modular Engine
+- `packages/agent/src/lib.rs`: Rust crate/module tree.
+- `packages/agent/src/engine/mod.rs`: engine fabric ownership.
+- `packages/agent/src/engine/resources/mod.rs`: resource substrate ownership.
+- `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
+- `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`,
+  registry, recipes, and provider export.
+- `packages/agent/src/domains/cron/implementation/mod.rs`: decision-backed
+  schedule truth and scheduler-cache boundary.
+- `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
+- `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
+- `packages/agent/tests/threat_model_invariants.rs`: absence gates and
+  cross-cutting architectural invariants.
 
-The implementation target for the modular-engine rebuild lives in
-[`docs/collapsed-modular-engine-architecture.md`](docs/collapsed-modular-engine-architecture.md).
-The next substrate checkpoint is planned in
-[`docs/modular-engine-next-phase-plan.md`](docs/modular-engine-next-phase-plan.md).
-The core rule is one substrate: workers invoke capabilities against typed
-resources under scoped grants. Artifacts, goals, claims, evidence, decisions,
-generated UI surfaces, module config, worker packages, activation records,
-secret refs, and materialized files are modeled as resource kinds rather than
-separate persistence planes. The current substrate slice has engine-owned
-`grant::*` authority, built-in resource type definitions for artifacts, goals,
-claims, evidence, decisions, generated UI surfaces, materialized files, patch
-proposals, execution outputs, agent results, worker packages, module configs,
-and activation records, thin wrapper capabilities over the generic
-`resource::*` kernel, resource-backed output enforcement for converted
-durable-output paths, a fixed `tron.ui.catalog.core.v1` generated UI catalog,
-server-authored `ui::*` surface/action capabilities, `module::*` package
-lifecycle, source trust, trust-root renewal, key-rotation evidence, revocation
-enforcement, trust-change simulation, trust-review evidence, decision-backed
-scheduled trust audits, trust-audit status, trust-audit retention-review
-evidence, health, integrity, and recovery capabilities, and control projections
-that expose activation runtime cleanup diagnostics, `uiSurfaceRefs`, and module
-resource refs without adding durable control-plane state.
+Capability-backed truth means durable facts that affect agents or operators are
+owned by resources, decisions, evidence, invocations, grants, queues, leases, or
+generated UI resources; domain-owned hidden files or tables are acceptable only
+as explicitly documented low-level cache/substrate boundaries with static gates,
+and they are not policy, lineage, or product truth.
 
 ---
 
@@ -154,17 +124,6 @@ tron/
 |   +-- tron-cli            Contributor CLI helper for local service management
 |   +-- tron-ios-beta       Local physical-device build/install/stop helper for iOS app variants
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
-+-- docs/
-|   +-- capability-backed-truth-migration-plan.md 100-point capability-backed truth tracker
-|   +-- collapsed-modular-engine-architecture.md Collapsed worker/capability/resource target
-|   +-- extreme-fault-tolerance-audit.md Post-100 isolation/recovery/critical-path audit
-|   +-- manual-testing-readiness.md Clean manual-QA checklist for the capability runtime
-|   +-- modular-engine-audit.md     Audit and target direction for the modular engine pivot
-|   +-- modular-engine-cleanup-audit.md Proof map for cleanup/removal decisions
-|   +-- modular-engine-maturity-scorecard.md 100-point maturity rubric and blockers
-|   +-- module-package-trust-operations.md Operator checklist for package trust/audits
-|   +-- production-grade-codebase-audit.md Repo-wide package/submodule hygiene proof map
-|   +-- production-grade-rubric.md Repo-wide 100-point production-grade rubric
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
@@ -1516,14 +1475,6 @@ cd packages/ios-app
 xcodegen generate
 xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
-
-### Manual Readiness
-
-Use [docs/manual-testing-readiness.md](docs/manual-testing-readiness.md) before
-broad manual QA. It covers clean local state, helper packaging, single
-`execute` capability orchestration, program runs, provider-switch history
-reconstruction, Engine Console checks, offline behavior, Mac wrapper smoke, and
-relay/APNs smoke checks.
 
 ### CI
 

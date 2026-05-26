@@ -97,7 +97,7 @@ fn register_source_control_capabilities(handle: &EngineHostHandle) {
                 "isDirty": true,
                 "files": [
                     {"path": "README.md", "status": "modified", "additions": 3, "deletions": 1},
-                    {"path": "docs/capability-backed-truth-migration-plan.md", "status": "modified", "additions": 8, "deletions": 0}
+                    {"path": "packages/agent/src/domains/capability/mod.rs", "status": "modified", "additions": 8, "deletions": 0}
                 ],
                 "conflictState": "none"
             }),

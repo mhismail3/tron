@@ -72,18 +72,8 @@ fn repo_root() -> PathBuf {
 }
 
 #[test]
-fn cleanup_audit_and_fixed_ios_dashboard_removals_stay_in_force() {
+fn fixed_ios_dashboard_removals_stay_in_force() {
     let repo_root = repo_root();
-    let cleanup_audit = repo_root
-        .join("docs")
-        .join("modular-engine-cleanup-audit.md");
-    let cleanup_audit_text = std::fs::read_to_string(&cleanup_audit)
-        .unwrap_or_else(|e| panic!("failed to read {cleanup_audit:?}: {e}"));
-    assert!(
-        cleanup_audit_text.contains("remove with proof")
-            && cleanup_audit_text.contains("Cleanup Decisions Applied"),
-        "cleanup audit must remain the proof map for whole-repo removals"
-    );
 
     for removed_path in [
         [
@@ -167,319 +157,111 @@ fn cleanup_audit_and_fixed_ios_dashboard_removals_stay_in_force() {
 }
 
 #[test]
-fn modular_engine_maturity_scorecard_stays_current() {
+fn architecture_documentation_stays_code_adjacent() {
     let repo_root = repo_root();
-    let scorecard_path = repo_root
-        .join("docs")
-        .join("modular-engine-maturity-scorecard.md");
-    let scorecard = std::fs::read_to_string(&scorecard_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+    let crate_root = crate_root();
 
-    let axes = [
-        ("Architecture simplicity", 15_u32),
-        ("Security/authority", 15),
-        ("Resource model", 12),
-        ("Runtime reliability", 15),
-        ("Operator readiness", 12),
-        ("Code comprehensibility", 12),
-        ("Test/proof strength", 12),
-        ("Docs/operations", 7),
-    ];
-
-    let mut total = 0_u32;
-    for (axis, points) in axes {
-        let table_line = scorecard
-            .lines()
-            .find(|line| line.starts_with('|') && line.contains(axis))
-            .unwrap_or_else(|| panic!("scorecard missing rubric row for {axis}"));
-        let columns = table_line.split('|').map(str::trim).collect::<Vec<_>>();
-        let scored_points = columns
-            .get(2)
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or_else(|| panic!("scorecard row for {axis} must include numeric points"));
-        assert_eq!(scored_points, points, "scorecard points changed for {axis}");
-        total += scored_points;
-
-        let section_marker = format!("### {axis} ");
-        let section_start = scorecard
-            .find(&section_marker)
-            .unwrap_or_else(|| panic!("scorecard missing axis section for {axis}"));
-        let section = &scorecard[section_start..];
-        let section_end = section.find("\n### ").unwrap_or(section.len());
-        let section = &section[..section_end];
+    for retired in [
+        "docs/capability-backed-truth-migration-plan.md",
+        "docs/capability-orchestration-audit.md",
+        "docs/collapsed-modular-engine-architecture.md",
+        "docs/extreme-fault-tolerance-audit.md",
+        "docs/manual-testing-readiness.md",
+        "docs/modular-engine-audit.md",
+        "docs/modular-engine-cleanup-audit.md",
+        "docs/modular-engine-maturity-scorecard.md",
+        "docs/modular-engine-next-phase-plan.md",
+        "docs/module-package-trust-operations.md",
+        "docs/product-shell-reachability-map.md",
+        "docs/production-grade-codebase-audit.md",
+        "docs/production-grade-rubric.md",
+    ] {
         assert!(
-            section.contains("Evidence:") && section.contains("Blockers:"),
-            "scorecard axis {axis} must include evidence and blockers"
+            !repo_root.join(retired).exists(),
+            "session/rubric audit doc must stay deleted; durable truth belongs near code/tests: {retired}"
         );
     }
-    assert_eq!(total, 100, "maturity scorecard rubric must total 100");
+
+    let docs_dir = repo_root.join("docs");
+    if docs_dir.exists() {
+        let mut markdown = Vec::new();
+        visit_files_with_extensions(&docs_dir, &["md"], &mut markdown);
+        assert!(
+            markdown.is_empty(),
+            "repo-level docs directory should not regain stale standalone markdown truth: {markdown:?}"
+        );
+    }
+
+    let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
     assert!(
-        scorecard.contains("Current score:")
-            && scorecard.contains("100% Definition")
-            && scorecard.contains("Collapsed substrate rules")
-            && scorecard.contains("package/source/policy/trust/audit tables are forbidden")
-            && scorecard
-                .contains("workers invoke capabilities against resources under scoped grants")
-            && scorecard.contains("control and iOS state are rebuildable projections only")
-            && scorecard.contains("control::act")
-            && scorecard.contains("dynamic UI catalogs")
-            && scorecard.contains("raw-scope authorization")
-            && scorecard.contains("fallback manifest fields")
-            && scorecard.contains("compatibility aliases")
-            && scorecard.contains("module action multiplexers"),
-        "scorecard must encode the collapsed substrate and forbidden-path rules"
+        readme.contains("The durable architecture docs live beside the code they describe")
+            && readme.contains("source files, `mod.rs` docs, `INVARIANT:` comments")
+            && readme.contains("packages/agent/src/lib.rs")
+            && readme.contains("packages/agent/src/engine/mod.rs")
+            && readme.contains("packages/agent/src/domains/capability/mod.rs")
+            && readme.contains("packages/agent/tests/threat_model_invariants.rs"),
+        "README must point readers to code-adjacent architecture docs and invariant tests"
     );
+    for retired_marker in [
+        "docs/production-grade",
+        "docs/capability-backed",
+        "docs/extreme-fault",
+        "docs/modular-engine",
+        "docs/product-shell",
+        "docs/manual-testing",
+    ] {
+        assert!(
+            !readme.contains(retired_marker),
+            "README must not link stale central proof doc marker `{retired_marker}`"
+        );
+    }
+
+    for rel in [
+        "src/lib.rs",
+        "src/engine/mod.rs",
+        "src/engine/primitives/mod.rs",
+        "src/engine/resources/mod.rs",
+        "src/domains/capability/mod.rs",
+        "src/domains/cron/implementation/mod.rs",
+    ] {
+        let content = std::fs::read_to_string(crate_root.join(rel))
+            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
+        assert!(
+            content.contains("//!") || content.contains("//!"),
+            "{rel} must keep module-level progressive documentation"
+        );
+    }
 }
 
 #[test]
-fn production_grade_codebase_audit_and_rubric_stay_current() {
+fn production_code_does_not_keep_placeholder_macros() {
+    let repo_root = repo_root();
+    let roots = [
+        repo_root.join("packages/agent/src"),
+        repo_root.join("packages/ios-app/Sources"),
+        repo_root.join("packages/mac-app/Sources"),
+    ];
+    for root in roots {
+        let mut files = Vec::new();
+        visit_files_with_extensions(&root, &["rs", "swift"], &mut files);
+        for path in files {
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+            for marker in ["unimplemented!(", "todo!("] {
+                assert!(
+                    !text.contains(marker),
+                    "{} must not keep placeholder macro `{marker}` in production source",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn rust_test_ownership_stays_code_adjacent() {
     let repo_root = repo_root();
     let crate_root = crate_root();
-    let audit_path = repo_root
-        .join("docs")
-        .join("production-grade-codebase-audit.md");
-    let rubric_path = repo_root.join("docs").join("production-grade-rubric.md");
-    let audit = std::fs::read_to_string(&audit_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", audit_path.display()));
-    let rubric = std::fs::read_to_string(&rubric_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", rubric_path.display()));
-    let readme_path = repo_root.join("README.md");
-    let readme = std::fs::read_to_string(&readme_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
-
-    for required in [
-        "Package Map",
-        "Rust Agent Package",
-        "Engine Submodule Map",
-        "Engine Primitive Map",
-        "Resource Kernel Map",
-        "Module Primitive Map",
-        "Rust Domain Map",
-        "iOS Package Map",
-        "Mac Package Map",
-        "Mac App Focused Audit",
-        "Repo Support Map",
-        "Test Organization Findings",
-        "Product-Shell Replacement Readiness",
-        "Dependency Tooling Decision",
-        "Prioritized Cleanup Backlog",
-        "docs/product-shell-reachability-map.md",
-        "packages/agent/src/engine/tests/mod.rs",
-        "packages/agent/src/engine/tests/support.rs",
-        "packages/agent/src/domains/memory/retain/tests/mod.rs",
-        "packages/agent/src/domains/mcp/product_protocol/tests/mod.rs",
-        "packages/agent/src/domains/session/commands/tests/mod.rs",
-        "Rust Test Placement Convention",
-        "prompt_history",
-        "prompt_snippets",
-        "cargo machete: deferred",
-        "cargo udeps: deferred",
-        "cargo llvm-cov: deferred",
-        "periphery: deferred",
-    ] {
-        assert!(
-            audit.contains(required),
-            "production-grade audit must include `{required}`"
-        );
-    }
-
-    for package in [
-        "`packages/agent`",
-        "`packages/ios-app`",
-        "`packages/mac-app`",
-        "`scripts/`",
-        "`.github/`",
-        "`docs/`",
-        "`packages/agent/skills/`",
-        "Generated Xcode projects",
-    ] {
-        assert!(
-            audit.contains(package),
-            "production-grade audit must classify top-level package/support area `{package}`"
-        );
-    }
-
-    for primitive in [
-        "`action_summary`",
-        "`approval`",
-        "`catalog`",
-        "`control`",
-        "`grant`",
-        "`module`",
-        "`observability`",
-        "`queue`",
-        "`resource`",
-        "`runtime`",
-        "`state`",
-        "`storage`",
-        "`stream`",
-        "`ui`",
-        "`worker`",
-    ] {
-        assert!(
-            audit.contains(primitive),
-            "production-grade audit must classify engine primitive `{primitive}`"
-        );
-    }
-
-    for resource_submodule in [
-        "`types`",
-        "`definitions`",
-        "`validation`",
-        "`versions`",
-        "`ui_surface`",
-        "`store`",
-    ] {
-        assert!(
-            audit.contains(resource_submodule),
-            "production-grade audit must classify resource kernel submodule `{resource_submodule}`"
-        );
-    }
-
-    for module_submodule in [
-        "Parent `module.rs`",
-        "`activation_runtime`",
-        "`source_trust`",
-        "`health_integrity`",
-        "`trust_review`",
-        "`trust_audit`",
-    ] {
-        assert!(
-            audit.contains(module_submodule),
-            "production-grade audit must classify module primitive boundary `{module_submodule}`"
-        );
-    }
-
-    for domain in [
-        "`agent`",
-        "`auth`",
-        "`blob`",
-        "`browser`",
-        "`capability`",
-        "`capability_support`",
-        "`context`",
-        "`cron`",
-        "`device`",
-        "`display`",
-        "`events`",
-        "`filesystem`",
-        "`git`",
-        "`import`",
-        "`job`",
-        "`logs`",
-        "`mcp`",
-        "`memory`",
-        "`message`",
-        "`model`",
-        "`notifications`",
-        "`plan`",
-        "`process`",
-        "`program`",
-        "`prompt_library`",
-        "`repo`",
-        "`sandbox`",
-        "`session`",
-        "`settings`",
-        "`skills`",
-        "`system`",
-        "`transcription`",
-        "`tree`",
-        "`voice_notes`",
-        "`web`",
-        "`worktree`",
-    ] {
-        assert!(
-            audit.contains(domain),
-            "production-grade audit must classify Rust domain `{domain}`"
-        );
-    }
-
-    for ios_area in [
-        "`App`",
-        "`Core`",
-        "`Database`",
-        "`Models`",
-        "`Services`",
-        "`ViewModels`",
-        "`Views`",
-        "`Theme`",
-        "`Utilities`",
-        "`Protocols`",
-        "`Resources`",
-        "`Tests`",
-        "`project.yml`",
-    ] {
-        assert!(
-            audit.contains(ios_area),
-            "production-grade audit must classify iOS area `{ios_area}`"
-        );
-    }
-
-    for mac_area in [
-        "Menu bar",
-        "Onboarding wizard",
-        "Server lifecycle",
-        "Pairing/local connection",
-        "Observability and feedback",
-        "Bundled resources",
-        "Generated project and signing config",
-        "Mac helper scripts",
-        "Mac tests",
-    ] {
-        assert!(
-            audit.contains(mac_area),
-            "production-grade audit must include focused Mac audit row `{mac_area}`"
-        );
-    }
-
-    let axes = [
-        ("Architecture and ownership", 12_u32),
-        ("Folder and test organization", 10),
-        ("Reachability and dead code", 10),
-        ("State and persistence", 10),
-        ("Security and authority", 12),
-        ("Resource/output correctness", 8),
-        ("Runtime reliability", 10),
-        ("Client thinness", 7),
-        ("Observability and operations", 7),
-        ("Dependency and supply-chain hygiene", 5),
-        ("Docs and drift protection", 6),
-        ("Deletion discipline", 3),
-    ];
-    let mut total = 0_u32;
-    for (axis, expected_points) in axes {
-        let table_line = rubric
-            .lines()
-            .find(|line| line.starts_with('|') && line.contains(axis))
-            .unwrap_or_else(|| panic!("production-grade rubric missing axis {axis}"));
-        let columns = table_line.split('|').map(str::trim).collect::<Vec<_>>();
-        let points = columns
-            .get(2)
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or_else(|| panic!("rubric axis {axis} must include point value"));
-        assert_eq!(points, expected_points, "point value changed for {axis}");
-        total += points;
-    }
-    assert_eq!(total, 100, "production-grade rubric must total 100");
-    assert!(
-        rubric.contains("Current repo-wide score: **100/100**")
-            && rubric.contains("Post-100 Maintenance Backlog")
-            && rubric.contains("broad/high-churn domain test")
-            && rubric.contains("retired prompt schema ambiguity")
-            && rubric.contains("Product-shell readiness proof")
-            && rubric.contains("dependency-tooling decision")
-            && rubric.contains("Mac app")
-            && rubric.contains("focused audit")
-            && rubric.contains("Prompt Library composer insertion boundary")
-            && rubric.contains("No raw-scope/client-policy trust")
-            && rubric.contains("No current blocker"),
-        "production-grade rubric must include score, blockers, and next actions"
-    );
-    assert!(
-        readme.contains("docs/production-grade-codebase-audit.md")
-            && readme.contains("docs/production-grade-rubric.md"),
-        "README must link the repo-wide audit and production-grade rubric"
-    );
 
     let old_engine_tests = crate_root.join("src/engine/tests.rs");
     assert!(
@@ -598,107 +380,9 @@ fn production_grade_codebase_audit_and_rubric_stay_current() {
 }
 
 #[test]
-fn extreme_fault_tolerance_audit_stays_current() {
+fn critical_execution_and_ui_boundaries_stay_split() {
     let crate_root = crate_root();
     let repo_root = repo_root();
-    let audit_path = repo_root
-        .join("docs")
-        .join("extreme-fault-tolerance-audit.md");
-    let audit = std::fs::read_to_string(&audit_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", audit_path.display()));
-    let readme_path = repo_root.join("README.md");
-    let readme = std::fs::read_to_string(&readme_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
-
-    for required in [
-        "https://planetscale.com/blog/the-principles-of-extreme-fault-tolerance",
-        "Current extreme-fault-tolerance score: **100/100**",
-        "Tracked file count before this audit artifact was added: 1941",
-        "Critical Execution Plane",
-        "Authority Plane",
-        "Resource And Durable Truth Plane",
-        "Worker And Runtime Plane",
-        "Control And Generated UI Plane",
-        "Client Projection Plane",
-        "Storage, Logs, And Platform Plane",
-        "No Legacy/Fallback/Dead-Code Review",
-        "Large File Findings",
-        "Fault Injection And Recovery Matrix",
-        "Fault-Tolerance Backlog",
-        "Capability Execute Critical-Path Split",
-        "Generated UI Authoring Split",
-        "iOS Fallback Cache Visibility",
-        "Program Worker Execute-Only Convergence",
-        "Static Gate And Integration Test Decomposition",
-        "Fault Drill Suite",
-    ] {
-        assert!(
-            audit.contains(required),
-            "extreme fault tolerance audit must include `{required}`"
-        );
-    }
-
-    let axes = [
-        ("Critical-path isolation", 15_u32),
-        ("Dependency-light data path", 15),
-        ("Static stability and known-good continuation", 12),
-        ("Recovery and failover exercise", 12),
-        ("Progressive delivery and blast-radius control", 8),
-        ("Observability and auditability", 10),
-        ("Code organization under stress", 10),
-        ("Client thinness under failure", 8),
-        ("Drift protection", 6),
-        ("Dependency and supply-chain control", 4),
-    ];
-    let mut total = 0_u32;
-    for (axis, expected_points) in axes {
-        let table_line = audit
-            .lines()
-            .find(|line| line.starts_with('|') && line.contains(axis))
-            .unwrap_or_else(|| panic!("extreme fault tolerance audit missing axis {axis}"));
-        let columns = table_line.split('|').map(str::trim).collect::<Vec<_>>();
-        let points = columns
-            .get(2)
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or_else(|| panic!("extreme fault tolerance axis {axis} must include points"));
-        assert_eq!(
-            points, expected_points,
-            "extreme fault tolerance point value changed for {axis}"
-        );
-        total += points;
-    }
-    assert_eq!(
-        total, 100,
-        "extreme fault tolerance scorecard must total 100"
-    );
-
-    for fault_domain in [
-        "`packages/agent/src/domains/capability/operations/mod.rs`",
-        "`packages/agent/src/domains/capability/operations/execute.rs`",
-        "`packages/agent/src/domains/capability/operations/run.rs`",
-        "`packages/agent/src/domains/capability/operations/search.rs`",
-        "`packages/agent/src/domains/capability/operations/inspect.rs`",
-        "`packages/agent/src/domains/capability/operations/audit.rs`",
-        "`packages/agent/src/domains/capability/registry/mod.rs`",
-        "`packages/agent/src/domains/capability/registry/recipes.rs`",
-        "`packages/agent/src/engine/primitives/ui.rs`",
-        "`packages/agent/src/engine/primitives/ui/authoring/mod.rs`",
-        "`packages/agent/src/engine/primitives/ui/authoring/prompt.rs`",
-        "`packages/agent/src/engine/primitives/ui/authoring/notifications.rs`",
-        "`packages/agent/src/engine/primitives/ui/authoring/subagent.rs`",
-        "`packages/agent/src/engine/primitives/ui/authoring/source_control.rs`",
-        "`packages/agent/src/engine/primitives/ui/authoring/agent_control.rs`",
-        "`packages/agent/src/engine/primitives/module.rs`",
-        "`packages/agent/src/engine/host.rs`",
-        "`packages/agent/tests/threat_model_invariants.rs`",
-        "`packages/ios-app/Sources/Database/EventDatabase.swift`",
-        "`packages/agent/src/domains/program/mod.rs`",
-    ] {
-        assert!(
-            audit.contains(fault_domain),
-            "extreme fault tolerance audit must classify hardening target `{fault_domain}`"
-        );
-    }
 
     for required_file in [
         "src/domains/capability/operations/mod.rs",
@@ -718,7 +402,7 @@ fn extreme_fault_tolerance_audit_stays_current() {
     ] {
         assert!(
             crate_root.join(required_file).is_file(),
-            "extreme fault tolerance split boundary must exist: {required_file}"
+            "critical execution/UI split boundary must exist: {required_file}"
         );
     }
     for removed_file in [
@@ -731,6 +415,7 @@ fn extreme_fault_tolerance_audit_stays_current() {
             "oversized retired single-file boundary must stay split: {removed_file}"
         );
     }
+
     let program_runtime =
         std::fs::read_to_string(crate_root.join("src/domains/program/runtime.rs"))
             .expect("failed to read program runtime");
@@ -749,164 +434,48 @@ fn extreme_fault_tolerance_audit_stays_current() {
             && event_database.contains("temporaryFallback"),
         "iOS EventDatabase must expose fallback-cache mode visibly"
     );
-
-    assert!(
-        readme.contains("docs/extreme-fault-tolerance-audit.md"),
-        "README must link the extreme fault tolerance audit"
-    );
 }
 
 #[test]
-fn capability_backed_truth_migration_tracker_stays_current() {
-    let repo_root = repo_root();
-    let tracker_path = repo_root
-        .join("docs")
-        .join("capability-backed-truth-migration-plan.md");
-    let tracker = std::fs::read_to_string(&tracker_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", tracker_path.display()));
-    let production_rubric_path = repo_root.join("docs").join("production-grade-rubric.md");
-    let production_rubric =
-        std::fs::read_to_string(&production_rubric_path).unwrap_or_else(|error| {
-            panic!(
-                "failed to read {}: {error}",
-                production_rubric_path.display()
-            )
-        });
-    let cleanup_audit_path = repo_root
-        .join("docs")
-        .join("modular-engine-cleanup-audit.md");
-    let cleanup_audit = std::fs::read_to_string(&cleanup_audit_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", cleanup_audit_path.display()));
-    let reachability_map_path = repo_root
-        .join("docs")
-        .join("product-shell-reachability-map.md");
-    let reachability_map =
-        std::fs::read_to_string(&reachability_map_path).unwrap_or_else(|error| {
-            panic!(
-                "failed to read {}: {error}",
-                reachability_map_path.display()
-            )
-        });
-    let readme_path = repo_root.join("README.md");
-    let readme = std::fs::read_to_string(&readme_path)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", readme_path.display()));
+fn capability_backed_truth_boundaries_stay_code_enforced() {
+    let root = crate_root();
+    let repo = repo_root();
 
-    let axes = [
-        ("Capability-owned durable truth", 20_u32),
-        ("Agent orchestration path", 15),
-        ("Resource/output contracts", 15),
-        ("Authority and security", 15),
-        ("Background/autonomous work", 10),
-        ("Client thinness", 8),
-        ("Observability and recovery", 7),
-        ("Test/static proof", 7),
-        ("Deletion discipline", 3),
-    ];
-    let mut total = 0_u32;
-    for (axis, expected_points) in axes {
-        let table_line = tracker
-            .lines()
-            .find(|line| line.starts_with('|') && line.contains(axis))
-            .unwrap_or_else(|| panic!("capability-backed truth tracker missing axis {axis}"));
-        let columns = table_line.split('|').map(str::trim).collect::<Vec<_>>();
-        let points = columns
-            .get(2)
-            .and_then(|value| value.parse::<u32>().ok())
-            .unwrap_or_else(|| panic!("tracker axis {axis} must include point value"));
-        assert_eq!(
-            points, expected_points,
-            "capability-backed truth point value changed for {axis}"
-        );
-        total += points;
-    }
-    assert_eq!(total, 100, "capability-backed truth rubric must total 100");
-
-    assert!(
-        tracker.contains("Current capability-backed-truth score: **100/100**")
-            && tracker.contains("Total: **100/100**")
-            && tracker.contains("Known Blockers")
-            && tracker.contains("Conversion Candidate Register")
-            && tracker.contains("Verification Standard For Every Phase")
-            && tracker.contains("No unclassified durable state owner remains"),
-        "capability-backed truth tracker must include score, blockers, candidates, verification, and final acceptance"
-    );
-
-    for candidate in [
-        "Memory retain",
-        "Notifications",
-        "Subagent",
-        "Source-control",
-        "AgentControl",
-        "Cron",
-        "scheduled work",
-        "Whole-engine audit",
+    for rel in [
+        "src/engine/tests/memory_retain_resources.rs",
+        "src/engine/tests/notification_resources.rs",
+        "src/engine/tests/subagent_lineage.rs",
+        "src/engine/tests/generated_ui.rs",
+        "src/engine/tests/cron_resources.rs",
+        "src/engine/tests/prompt_library_resources.rs",
+        "src/engine/tests/domain_outputs.rs",
     ] {
         assert!(
-            tracker.contains(candidate),
-            "capability-backed truth tracker must classify conversion candidate `{candidate}`"
+            root.join(rel).is_file(),
+            "capability-backed truth proof must live in focused test boundary {rel}"
         );
     }
 
-    for phase in [
-        "Phase 0: Plan, Audit, And Score Reset",
-        "Phase 1: Memory Retain Resource Conversion",
-        "Phase 2: Notification Resource Contract And Generated Inbox",
-        "Phase 3: Subagent, Invocation, And Result Lineage Surfaces",
-        "Phase 4: Source-Control And AgentControl Generated Surfaces",
-        "Phase 5: Cron And Scheduled Work Truth Decision",
-        "Phase 6: Final Whole-Engine Capability-Backed Audit",
+    for rel in [
+        "src/domains/memory/retain/resources.rs",
+        "src/domains/notifications/inbox.rs",
+        "src/domains/agent/lineage.rs",
+        "src/domains/cron/implementation/domain/truth.rs",
+        "src/domains/prompt_library/mod.rs",
+        "src/domains/voice_notes/mod.rs",
     ] {
         assert!(
-            tracker.contains(phase),
-            "capability-backed truth tracker must include `{phase}`"
+            root.join(rel).is_file(),
+            "capability-backed truth owner must be code-adjacent at {rel}"
         );
     }
 
-    for invariant in [
-        "no compatibility readers",
-        "no direct hidden durable write",
-        "raw file/table truth",
-        "resource truth",
-        "generated UI",
-        "canonical invocation/capability paths",
-        "full CI",
-    ] {
-        assert!(
-            tracker.contains(invariant),
-            "capability-backed truth tracker must encode invariant `{invariant}`"
-        );
-    }
-
+    let readme = std::fs::read_to_string(repo.join("README.md")).expect("read README");
     assert!(
-        production_rubric.contains("Current repo-wide score: **100/100**")
-            && production_rubric.contains("Current capability-backed-truth score: **100/100**")
-            && production_rubric.contains("docs/capability-backed-truth-migration-plan.md")
-            && production_rubric.contains("memory retain, notifications")
-            && production_rubric.contains("source-control/AgentControl review")
-            && production_rubric.contains("cron runtime")
-            && production_rubric.contains("scheduler cache"),
-        "production-grade rubric must distinguish classification score from capability-backed truth migration"
-    );
-    assert!(
-        cleanup_audit.contains("Capability-Backed Truth Audit Reset")
-            && cleanup_audit.contains("Notification Resource Contract")
-            && cleanup_audit.contains("memory retain")
-            && cleanup_audit.contains("resource-backed capability module")
-            && cleanup_audit.contains("docs/capability-backed-truth-migration-plan.md"),
-        "cleanup audit must keep memory retain and the new tracker visible"
-    );
-    assert!(
-        reachability_map.contains("memory retain")
-            && reachability_map.contains("notification inbox/detail views")
-            && reachability_map.contains("resource-backed notification")
-            && reachability_map.contains("Converted in capability-backed-truth Phase 1")
-            && reachability_map.contains("capability-backed-truth migration"),
-        "product-shell reachability map must classify memory retain and notification truth in deferred domain outputs"
-    );
-    assert!(
-        readme.contains("docs/capability-backed-truth-migration-plan.md")
-            && readme.contains("currently at 100/100"),
-        "README must link the capability-backed-truth migration tracker and baseline"
+        readme.contains("Capability-backed truth")
+            && readme.contains("resources, decisions, evidence, invocations, grants")
+            && readme.contains("domain-owned hidden files or tables"),
+        "README must describe the capability-backed truth invariant without relying on migration rubrics"
     );
 }
 
@@ -1815,14 +1384,15 @@ fn subagent_lineage_resource_truth_boundary_stays_enforced() {
         }
     }
 
-    let reachability_map =
-        std::fs::read_to_string(repo.join("docs/product-shell-reachability-map.md"))
-            .expect("read product shell reachability map");
+    let generated_ui_tests =
+        std::fs::read_to_string(root.join("src/engine/tests/subagent_lineage.rs"))
+            .expect("read subagent lineage tests");
     assert!(
-        reachability_map.contains("Converted in capability-backed-truth Phase 3")
-            && reachability_map.contains("subagent.lineage.v1")
-            && reachability_map.contains("keep thin shell over server-owned lineage truth"),
-        "product-shell reachability map must classify subagent lineage as server-owned with fixed shells kept thin"
+        generated_ui_tests.contains("subagent.lineage.v1")
+            && generated_ui_tests.contains(
+                "generated_subagent_lineage_surface_uses_resource_truth_and_stored_actions"
+            ),
+        "subagent lineage generated surface proof must live with subagent lineage tests"
     );
 }
 
@@ -1916,22 +1486,24 @@ fn cron_schedule_truth_boundary_stays_resource_backed() {
             && scheduler.contains("truth::set_schedule_enabled"),
         "cron scheduler must derive from decision truth and keep cache lifecycle flips synchronized"
     );
-    let production_scheduler = scheduler
-        .split("#[cfg(test)]")
-        .next()
-        .unwrap_or(scheduler.as_str());
     assert!(
-        !production_scheduler.contains("config::load_config"),
-        "production scheduler startup must not fall back to automations.json truth"
+        !scheduler.contains("config::load_config")
+            && !scheduler.contains("config::save_config")
+            && !scheduler.contains("automations.json")
+            && !scheduler.contains("config_path")
+            && !scheduler.contains("backup_path"),
+        "cron scheduler must not retain file-backed schedule truth or fixture paths"
     );
 
     let config =
         std::fs::read_to_string(root.join("src/domains/cron/implementation/domain/config.rs"))
             .expect("read cron config helpers");
     assert!(
-        config.contains("#[cfg(test)]\npub fn load_config")
-            && config.contains("#[cfg(test)]\npub fn save_config"),
-        "automations.json helpers must stay test-only fixtures"
+        !config.contains("load_config")
+            && !config.contains("save_config")
+            && !config.contains("automations.json")
+            && config.contains("pub fn validate_job"),
+        "cron config boundary must be validation-only; schedule truth is decision resources"
     );
 
     let engine_tests =
@@ -4382,49 +3954,6 @@ fn operator_consequence_and_voice_note_resource_boundaries_stay_enforced() {
 fn product_shell_reachability_and_prompt_library_resources_stay_enforced() {
     let repo = repo_root();
     let crate_root = crate_root();
-    let reachability_map = repo.join("docs").join("product-shell-reachability-map.md");
-    let reachability_text = std::fs::read_to_string(&reachability_map)
-        .unwrap_or_else(|error| panic!("failed to read {reachability_map:?}: {error}"));
-    for required in [
-        "AgentControl",
-        "SourceChanges",
-        "subagent",
-        "notification inbox",
-        "Prompt Library",
-        "display stream",
-        "voice recording",
-        "Product-Shell Replacement Readiness",
-        "Replacement candidate",
-        "Blocking gap",
-        "Deletion risk",
-        "Next prerequisite",
-        "Phase decision",
-        "keep thin shell",
-        "convert to generated UI",
-        "complete with gated local composer insertion",
-        "accepted local editing boundary",
-        "defer with reason",
-        "defer with proof",
-    ] {
-        assert!(
-            reachability_text.contains(required),
-            "product-shell reachability map must classify `{required}`"
-        );
-    }
-    for shell in [
-        "AgentControl sheets/cards",
-        "SourceChanges sheets",
-        "Subagent sheets/plugins",
-        "notification inbox/detail views",
-        "Prompt Library sheets/state",
-        "display stream views",
-        "voice recording affordances",
-    ] {
-        assert!(
-            reachability_text.contains(shell),
-            "product-shell readiness map must include `{shell}`"
-        );
-    }
 
     let prompt_library_root = repo
         .join("packages")

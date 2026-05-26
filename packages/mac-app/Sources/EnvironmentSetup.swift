@@ -29,7 +29,7 @@ struct EnvironmentSetup: Sendable {
     var readBearerToken: @Sendable () -> String?
 
     /// Reads `server.tailscaleIp` from `~/.tron/profiles/user/profile.toml`.
-    /// Returns nil if missing/unset. Pairing treats this as a fallback
+    /// Returns nil if missing/unset. Pairing treats this as a last-known
     /// cache only; fresh installs resolve Tailscale live first.
     var readTailscaleIPFromSettings: @Sendable () -> String?
 
@@ -65,8 +65,9 @@ struct EnvironmentSetup: Sendable {
     /// Returns a classified `ServerPingResult` so the caller can
     /// distinguish "server is down" from "token rejected" — the menu
     /// bar tone + wizard recovery copy depend on this distinction.
-    /// Honors the supplied bearer token (nil for legacy unauthenticated
-    /// hosts).
+    /// Honors the supplied bearer token. `nil` means the token could not be
+    /// read locally; authenticated servers should classify that as
+    /// `.unauthorized`.
     var pingServer: @Sendable (String?) async -> ServerPingResult
 
     /// LaunchAgent control surface - load/unload/restart/check.

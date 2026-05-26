@@ -679,8 +679,6 @@ fn init_cron(
     profile_runtime: Arc<tron::domains::agent::runner::ProfileRuntime>,
 ) -> CronState {
     let cancel = tokio_util::sync::CancellationToken::new();
-    let config_path = tron::shared::paths::automations_path();
-    let backup_path = tron::shared::paths::automations_backup_path();
 
     let agent_executor = services.agent_deps.as_ref().map(|deps| {
         Arc::new(tron::domains::cron::impls::CronAgentTurnExecutor::new(
@@ -723,8 +721,6 @@ fn init_cron(
         services.event_store.pool().clone(),
         Arc::new(tron::domains::cron::SystemClock),
         deps,
-        config_path,
-        backup_path,
         cancel.clone(),
     ));
 
