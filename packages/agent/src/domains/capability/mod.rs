@@ -50,7 +50,14 @@
 //! original `capability::execute` result must still project the executed
 //! approval state and resumed child invocation id. The model should not need to
 //! query approval internals to answer whether approval happened or which target
-//! invocation produced the output.
+//! invocation produced the output. The agent turn runner also projects the
+//! bounded execute observation metadata into the model-visible tool result
+//! text, because provider APIs only feed the LLM result content, not the
+//! engine-only `details` object used by UI and audit surfaces.
+//! Intent-only resolution fails closed: if the best match has no lexical/name
+//! anchor, no supplied argument shape, and only a weak semantic score, execute
+//! returns `needs_capability` instead of presenting unrelated low-confidence
+//! candidates as an actionable selection.
 //! Interactive and async capabilities are represented by durable pause/run
 //! records, not by special runner branches. A capability that needs approval,
 //! user input, streaming, or background execution returns lifecycle metadata;

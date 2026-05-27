@@ -35,6 +35,16 @@ final class MemoryCoordinator {
         context.flushPendingTextUpdates()
         context.finalizeStreamingMessage()
 
+        if let index = retainInProgressIndex(context: context) {
+            withAnimation(.smooth(duration: 0.35)) {
+                context.messages[index].content = .memoryAutoRetainInProgress(
+                    intervalFired: pluginResult.intervalFired
+                )
+            }
+            context.messageIndex.rebuild(from: context.messages)
+            return
+        }
+
         let inProgressMessage = ChatMessage.memoryAutoRetainInProgress(
             intervalFired: pluginResult.intervalFired
         )
@@ -61,24 +71,26 @@ final class MemoryCoordinator {
         context.flushPendingTextUpdates()
         context.finalizeStreamingMessage()
 
-        if let inProgressId = context.memoryRetainInProgressMessageId,
-           let index = context.messageIndex.index(for: inProgressId) {
+        if let index = retainInProgressIndex(context: context) {
             withAnimation(.smooth(duration: 0.35)) {
                 context.messages[index].content = .memoryAutoRetainFailed(
                     intervalFired: pluginResult.intervalFired,
                     reason: pluginResult.reason
                 )
             }
+            context.messageIndex.rebuild(from: context.messages)
             // Don't clear the in-progress marker — the paired `memory_updated`
             // still arrives, and `handleMemoryUpdated` will either replace
             // this message with the fallback summary or leave it as-is.
         } else {
             // Defensive: `triggered` should always arrive before `failed`,
             // so no pill to update. Append a standalone failure notice.
-            context.appendToMessages(ChatMessage.memoryAutoRetainFailed(
+            let failureMessage = ChatMessage.memoryAutoRetainFailed(
                 intervalFired: pluginResult.intervalFired,
                 reason: pluginResult.reason
-            ))
+            )
+            context.appendToMessages(failureMessage)
+            context.memoryRetainInProgressMessageId = failureMessage.id
         }
     }
 
@@ -121,27 +133,42 @@ final class MemoryCoordinator {
             context.logInfo("Memory retained: \(title)")
 
             // Mutate content in-place to keep the same message identity → smooth animation
-            if let inProgressId = context.memoryRetainInProgressMessageId,
-               let index = context.messageIndex.index(for: inProgressId) {
+            if let index = retainInProgressIndex(context: context) {
                 withAnimation(.smooth(duration: 0.35)) {
                     context.messages[index].content = .memoryRetained(title: title, summary: pluginResult.summary)
                 }
-                context.memoryRetainInProgressMessageId = nil
+                context.messageIndex.rebuild(from: context.messages)
             } else {
                 context.appendToMessages(ChatMessage.memoryRetained(title: title, summary: pluginResult.summary))
             }
+            context.memoryRetainInProgressMessageId = nil
         } else {
             context.logInfo("Memory retain: nothing new")
 
-            if let inProgressId = context.memoryRetainInProgressMessageId,
-               let index = context.messageIndex.index(for: inProgressId) {
+            if let index = retainInProgressIndex(context: context) {
                 withAnimation(.smooth(duration: 0.35)) {
                     context.messages[index].content = .memoryRetainedNothingNew
                 }
-                context.memoryRetainInProgressMessageId = nil
+                context.messageIndex.rebuild(from: context.messages)
             } else {
                 context.appendToMessages(ChatMessage.memoryRetainedNothingNew())
             }
+            context.memoryRetainInProgressMessageId = nil
         }
+    }
+
+    private func retainInProgressIndex(context: MemoryContext) -> Int? {
+        guard let inProgressId = context.memoryRetainInProgressMessageId else {
+            return nil
+        }
+        if let indexed = context.messageIndex.index(for: inProgressId) {
+            return indexed
+        }
+        if let scanned = context.messages.firstIndex(where: { $0.id == inProgressId }) {
+            context.messageIndex.rebuild(from: context.messages)
+            return scanned
+        }
+        context.memoryRetainInProgressMessageId = nil
+        return nil
     }
 }

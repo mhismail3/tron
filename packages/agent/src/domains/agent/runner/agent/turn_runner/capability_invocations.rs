@@ -6,6 +6,7 @@ use crate::domains::capability_support::implementations::primitive_surface::{
     PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
 };
 use crate::domains::capability_support::implementations::traits::ExecutionMode;
+use crate::shared::content::CapabilityResultContent;
 use crate::shared::events::ActivatedRuleInfo;
 use crate::shared::messages::{CapabilityResultMessageContent, Message};
 use serde_json::{Value, json};
@@ -536,9 +537,13 @@ fn extract_result_text(exec_result: &CapabilityInvocationExecutionResult) -> Str
 fn extract_result_content(
     exec_result: &CapabilityInvocationExecutionResult,
 ) -> CapabilityResultMessageContent {
+    let execute_observation = execute_observation_text(exec_result.result.details.as_ref());
     match &exec_result.result.content {
         crate::shared::model_capabilities::CapabilityResultBody::Text(text) => {
-            CapabilityResultMessageContent::Text(text.clone())
+            CapabilityResultMessageContent::Text(prefix_execute_observation(
+                execute_observation.as_deref(),
+                text,
+            ))
         }
         crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
             let has_images = blocks.iter().any(|b| {
@@ -548,7 +553,12 @@ fn extract_result_content(
                 )
             });
             if has_images {
-                CapabilityResultMessageContent::Blocks(blocks.clone())
+                let mut projected = Vec::new();
+                if let Some(observation) = execute_observation {
+                    projected.push(CapabilityResultContent::text(observation));
+                }
+                projected.extend(blocks.clone());
+                CapabilityResultMessageContent::Blocks(projected)
             } else {
                 let text = blocks
                     .iter()
@@ -560,9 +570,90 @@ fn extract_result_content(
                     })
                     .collect::<Vec<_>>()
                     .join("\n");
-                CapabilityResultMessageContent::Text(text)
+                CapabilityResultMessageContent::Text(prefix_execute_observation(
+                    execute_observation.as_deref(),
+                    &text,
+                ))
             }
         }
+    }
+}
+
+fn prefix_execute_observation(observation: Option<&str>, text: &str) -> String {
+    match observation {
+        Some(observation) if !text.is_empty() => format!("{observation}\n\n{text}"),
+        Some(observation) => observation.to_owned(),
+        None => text.to_owned(),
+    }
+}
+
+fn execute_observation_text(details: Option<&Value>) -> Option<String> {
+    let details = details?;
+    let orchestration = details.get("orchestration")?;
+    let selected_target = details
+        .get("functionId")
+        .or_else(|| orchestration.pointer("/phaseDetails/selectedTarget/functionId"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let selected_implementation = details
+        .get("selectedImplementation")
+        .or_else(|| orchestration.pointer("/phaseDetails/selectedTarget/implementationId"))
+        .and_then(Value::as_str);
+    let child_invocation_ids = details
+        .get("childInvocations")
+        .or_else(|| orchestration.get("childInvocationIds"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let resource_refs = details
+        .get("resourceRefs")
+        .or_else(|| details.pointer("/output/resourceRefs"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let approval = execute_approval_state(details);
+    let observation = json!({
+        "status": details
+            .get("status")
+            .or_else(|| orchestration.get("status"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown"),
+        "selectedTarget": selected_target,
+        "selectedImplementation": selected_implementation,
+        "childInvocationIds": child_invocation_ids,
+        "approval": approval,
+        "resourceRefs": resource_refs,
+        "correctionsApplied": details
+            .get("correctionsApplied")
+            .or_else(|| orchestration.get("correctionsApplied"))
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+    });
+    let observation = serde_json::to_string_pretty(&observation).ok()?;
+    Some(format!(
+        "[execute observation - metadata for reasoning, not user output]\n{observation}\n[/execute observation]"
+    ))
+}
+
+fn execute_approval_state(details: &Value) -> &'static str {
+    if details
+        .get("approvalExecuted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "approved_executed"
+    } else if details
+        .get("approvalCreated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "pending"
+    } else if details
+        .get("approvalRequired")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "required"
+    } else {
+        "not_required"
     }
 }
 
@@ -587,6 +678,19 @@ mod tests {
             blocked_by_guardrail: false,
             is_interactive: false,
             stops_turn: false,
+        }
+    }
+
+    fn make_exec_result_with_details(
+        content: CapabilityResultBody,
+        details: Value,
+    ) -> CapabilityInvocationExecutionResult {
+        CapabilityInvocationExecutionResult {
+            result: CapabilityResult {
+                details: Some(details),
+                ..make_exec_result(content).result
+            },
+            ..make_exec_result(CapabilityResultBody::Text(String::new()))
         }
     }
 
@@ -645,6 +749,62 @@ mod tests {
             }
             CapabilityResultMessageContent::Text(_) => panic!("expected Blocks variant"),
         }
+    }
+
+    #[test]
+    fn extract_result_content_projects_execute_observation_for_model() {
+        let exec = make_exec_result_with_details(
+            CapabilityResultBody::Text("Testing out a README here.\n".into()),
+            json!({
+                "status": "ok",
+                "functionId": "filesystem::read_file",
+                "selectedImplementation": "first_party.filesystem.v1.read_file",
+                "childInvocations": ["child-123"],
+                "resourceRefs": [],
+                "orchestration": {
+                    "status": "ok",
+                    "correctionsApplied": []
+                }
+            }),
+        );
+
+        let content = extract_result_content(&exec);
+
+        let CapabilityResultMessageContent::Text(text) = content else {
+            panic!("expected text projection");
+        };
+        assert!(text.contains("[execute observation"));
+        assert!(text.contains("\"selectedTarget\": \"filesystem::read_file\""));
+        assert!(text.contains("\"child-123\""));
+        assert!(text.contains("\"approval\": \"not_required\""));
+        assert!(text.ends_with("Testing out a README here.\n"));
+    }
+
+    #[test]
+    fn extract_result_content_projects_execute_observation_before_images() {
+        let exec = make_exec_result_with_details(
+            CapabilityResultBody::Blocks(vec![CapabilityResultContent::image(
+                "imgdata",
+                "image/png",
+            )]),
+            json!({
+                "status": "ok",
+                "functionId": "browser::screenshot",
+                "childInvocations": ["child-image"],
+                "orchestration": {"status": "ok"}
+            }),
+        );
+
+        let content = extract_result_content(&exec);
+
+        let CapabilityResultMessageContent::Blocks(blocks) = content else {
+            panic!("expected block projection");
+        };
+        assert_eq!(blocks.len(), 2);
+        assert!(
+            matches!(&blocks[0], CapabilityResultContent::Text { text } if text.contains("child-image"))
+        );
+        assert!(matches!(&blocks[1], CapabilityResultContent::Image { .. }));
     }
 
     // ── extract_result_text regression tests ──

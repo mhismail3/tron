@@ -21,6 +21,8 @@ use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
+const MIN_UNANCHORED_INTENT_SCORE: f32 = 0.1;
+
 pub(crate) async fn execute_value(
     invocation: &Invocation,
     deps: &Deps,
@@ -780,6 +782,12 @@ async fn resolve_intent_target(
         });
     }
     let selected_has_strong_name_match = intent_strongly_matches_hit(intent, selected);
+    if lacks_sufficient_intent_resolution_evidence(intent, arguments, selected) {
+        return Ok(IntentResolveOutcome::NeedsCapability {
+            candidates,
+            search_status,
+        });
+    }
     let ambiguous = executable_hits.iter().skip(1).any(|candidate| {
         candidate.contract_id != selected.contract_id
             && (selected.fused_score - candidate.fused_score).abs() <= 0.05
@@ -1374,6 +1382,26 @@ fn orchestration_candidate_summary(hit: &CapabilityIndexHit) -> Value {
         "effectClass": hit.effect_class.as_str(),
         "snippet": hit.snippet.as_str(),
     })
+}
+
+pub(super) fn lacks_sufficient_intent_resolution_evidence(
+    intent: &str,
+    arguments: &Value,
+    selected: &CapabilityIndexHit,
+) -> bool {
+    if selected.fused_score >= MIN_UNANCHORED_INTENT_SCORE {
+        return false;
+    }
+    if selected.lexical_score > 0.0 || intent_strongly_matches_hit(intent, selected) {
+        return false;
+    }
+    if arguments
+        .as_object()
+        .is_some_and(|object| !object.is_empty())
+    {
+        return false;
+    }
+    true
 }
 
 fn redacted_prepared_request_preview(prepared_payload: &Value) -> Value {

@@ -168,7 +168,10 @@ pub fn generate_capability_clarification_message(
         exact id, a prior `execute` result selected it, or a primed recipe makes it unambiguous. Put \
         only target capability arguments inside `arguments`; wrapper fields such as `target`, \
         `idempotencyKey`, `reason`, and `constraints` stay top-level. The engine resolves, prepares, \
-        checks freshness, requests approval when needed, runs, and observes.\n\
+        checks freshness, requests approval when needed, runs, and observes. `execute` results include \
+        an `[execute observation]` metadata block for reasoning; use it to answer selected target, child \
+        invocation, approval, correction, and resource-ref questions, but do not quote the metadata block \
+        unless the user asks for raw details.\n\
         Common contracts include filesystem capabilities for file operations, `process::run` for \
         command execution, and web capabilities for network retrieval when they are visible to the session.\n\
         If the user gives an exact contract id and arguments, call that exact target once; do not run \
@@ -830,6 +833,7 @@ mod tests {
         assert!(result.contains("target for discovery"));
         assert!(result.contains("only target capability arguments inside `arguments`"));
         assert!(result.contains("The engine resolves, prepares"));
+        assert!(result.contains("[execute observation]"));
     }
 
     #[test]

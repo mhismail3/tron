@@ -1,4 +1,10 @@
 //! Turn runner — orchestrates a single turn: context → stream → capabilities → events.
+//!
+//! Capability result content is the only provider-portable channel back into
+//! the model. Engine/UI/audit metadata stays in `details`, but model-facing
+//! `execute` observations are projected into result text here so every provider
+//! can reason about selected targets, child invocations, approvals, and
+//! resource refs without gaining a second capability API.
 
 mod capability_invocations;
 mod persistence;

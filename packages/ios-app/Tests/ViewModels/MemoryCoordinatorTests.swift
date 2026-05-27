@@ -90,6 +90,39 @@ final class MemoryCoordinatorTests: XCTestCase {
         XCTAssertNil(mockContext.memoryRetainInProgressMessageId)
     }
 
+    func testMemoryUpdatedFindsInProgressPillWhenIndexIsStale() {
+        let inProgressMsg = ChatMessage.memoryAutoRetainInProgress(intervalFired: 10)
+        mockContext.messages.append(inProgressMsg)
+        mockContext.memoryRetainInProgressMessageId = inProgressMsg.id
+
+        let result = MemoryUpdatedPlugin.Result(title: "Recovered Memory", summary: "A summary")
+        coordinator.handleMemoryUpdated(result, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 1)
+        if case .systemEvent(.memoryRetained(let title, _)) = mockContext.messages[0].content {
+            XCTAssertEqual(title, "Recovered Memory")
+        } else {
+            XCTFail("Expected stale-index auto pill to become memoryRetained")
+        }
+        XCTAssertNil(mockContext.memoryRetainInProgressMessageId)
+        XCTAssertEqual(mockContext.messageIndex.index(for: inProgressMsg.id), 0)
+    }
+
+    func testMemoryUpdatedClearsStaleInProgressIdWhenPillWasPruned() {
+        mockContext.memoryRetainInProgressMessageId = UUID()
+
+        let result = MemoryUpdatedPlugin.Result(title: "Pruned Memory", summary: nil)
+        coordinator.handleMemoryUpdated(result, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 1)
+        if case .systemEvent(.memoryRetained(let title, _)) = mockContext.messages[0].content {
+            XCTAssertEqual(title, "Pruned Memory")
+        } else {
+            XCTFail("Expected final memory retained pill")
+        }
+        XCTAssertNil(mockContext.memoryRetainInProgressMessageId)
+    }
+
     func testMemoryUpdatedWithTitleAppendsWhenNoInProgress() {
         let result = MemoryUpdatedPlugin.Result(title: "My Memory", summary: nil)
         coordinator.handleMemoryUpdated(result, context: mockContext)
@@ -165,6 +198,26 @@ final class MemoryCoordinatorTests: XCTestCase {
         )
     }
 
+    func testAutoRetainTriggeredCoalescesExistingRetainPill() {
+        coordinator.handleMemoryAutoRetainTriggered(
+            MemoryAutoRetainTriggeredPlugin.Result(intervalFired: 5),
+            context: mockContext
+        )
+
+        coordinator.handleMemoryAutoRetainTriggered(
+            MemoryAutoRetainTriggeredPlugin.Result(intervalFired: 10),
+            context: mockContext
+        )
+
+        XCTAssertEqual(mockContext.messages.count, 1)
+        if case .systemEvent(.memoryAutoRetainInProgress(let interval)) = mockContext.messages[0].content {
+            XCTAssertEqual(interval, 10)
+        } else {
+            XCTFail("Expected existing auto-retain pill to update in place")
+        }
+        XCTAssertEqual(mockContext.memoryRetainInProgressMessageId, mockContext.messages[0].id)
+    }
+
     func testMemoryUpdatingSkippedWhenAutoRetainPillAlreadyExists() {
         // Auto-retain triggered first (arrives before memory_updating on the wire).
         let autoResult = MemoryAutoRetainTriggeredPlugin.Result(intervalFired: 5)
@@ -199,6 +252,28 @@ final class MemoryCoordinatorTests: XCTestCase {
             XCTAssertEqual(title, "Auto summary")
         } else {
             XCTFail("Expected auto pill to become memoryRetained after updated")
+        }
+        XCTAssertNil(mockContext.memoryRetainInProgressMessageId)
+    }
+
+    func testAutoRetainFailureWithoutTriggerStillCompletesOnMemoryUpdated() {
+        coordinator.handleMemoryAutoRetainFailed(
+            MemoryAutoRetainFailedPlugin.Result(intervalFired: 10, reason: "test failure"),
+            context: mockContext
+        )
+        XCTAssertEqual(mockContext.messages.count, 1)
+        XCTAssertEqual(mockContext.memoryRetainInProgressMessageId, mockContext.messages[0].id)
+
+        coordinator.handleMemoryUpdated(
+            MemoryUpdatedPlugin.Result(title: "Fallback summary", summary: "body"),
+            context: mockContext
+        )
+
+        XCTAssertEqual(mockContext.messages.count, 1)
+        if case .systemEvent(.memoryRetained(let title, _)) = mockContext.messages[0].content {
+            XCTAssertEqual(title, "Fallback summary")
+        } else {
+            XCTFail("Expected failure pill to complete into retained memory")
         }
         XCTAssertNil(mockContext.memoryRetainInProgressMessageId)
     }

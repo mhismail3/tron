@@ -48,7 +48,7 @@ enum MyEventPlugin: DispatchableEventPlugin {
 |----------|----------|--------|
 | Streaming | `Plugins/Streaming/` | text_delta, thinking_delta, turn_start, turn_end, agent_turn |
 | Capability invocation | `Plugins/CapabilityInvocation/` | `capability.invocation.*`, `capability.resolution`, `capability.pause.*`, and `capability.run.status` transport labels carrying capability identity and lifecycle state |
-| Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, context_cleared, message_deleted, skill_deactivated, turn_failed |
+| Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, memory_auto_retain_triggered, memory_auto_retain_failed, context_cleared, message_deleted, skill_deactivated, turn_failed |
 | Session | `Plugins/Session/` | connected |
 | Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
 | Browser | `Plugins/Browser/` | browser_frame, browser_closed |
@@ -67,6 +67,17 @@ func registerAll() {
     // ... all plugins
 }
 ```
+
+### Memory Retain Lifecycle
+
+Manual retain and auto-retain use the same final `agent.memory_updated` event.
+The auto path emits `agent.memory_auto_retain_triggered` before the generic
+`agent.memory_updating` event so the UI can show the automatic-retain pill
+without stacking a second spinner. `MemoryCoordinator` tracks the in-progress
+message id, repairs a stale message index by scanning the current message list,
+and always clears the in-progress marker when `agent.memory_updated` arrives.
+If an in-progress pill was pruned, the completion event appends a final retained
+or nothing-new pill rather than leaving a permanent loading state.
 
 ## Event Dispatch
 

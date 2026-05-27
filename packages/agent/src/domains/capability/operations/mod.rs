@@ -61,9 +61,9 @@ pub(crate) use execute::execute_value;
 #[cfg(test)]
 use execute::{
     apply_argument_schema_fit_filter, apply_deterministic_intent_route, deterministic_intent_route,
-    intent_strongly_matches_hit, normalize_target_specific_arguments,
-    orchestration_constraints_allow_hit, orchestration_hit_from_entry,
-    parse_orchestrated_execute_input, prepared_execute_payload,
+    intent_strongly_matches_hit, lacks_sufficient_intent_resolution_evidence,
+    normalize_target_specific_arguments, orchestration_constraints_allow_hit,
+    orchestration_hit_from_entry, parse_orchestrated_execute_input, prepared_execute_payload,
     validate_orchestration_constraint_shape, validate_orchestration_constraints,
 };
 #[cfg(test)]
@@ -1586,16 +1586,29 @@ fn validate_target_payload(
     let function = &entry.function;
     if let Some(schema) = &function.request_schema {
         crate::engine::schema::validate_payload(&function.id, "request", schema, payload)
-            .map_err(|error| recipe_validation_error(entry, error))?;
+            .map_err(|error| recipe_validation_error_for_payload(entry, payload, error))?;
     }
     Ok(())
 }
 
-fn recipe_validation_error(
+fn recipe_validation_error_for_payload(
     entry: &CapabilityRegistryEntry,
+    payload: &Value,
     error: crate::engine::EngineError,
 ) -> CapabilityError {
-    let schema_details = schema_violation_details(&error);
+    let schema_details = schema_violation_details(
+        &error,
+        entry.function.request_schema.as_ref(),
+        Some(payload),
+    );
+    recipe_validation_error_with_schema_details(entry, error, schema_details)
+}
+
+fn recipe_validation_error_with_schema_details(
+    entry: &CapabilityRegistryEntry,
+    error: crate::engine::EngineError,
+    schema_details: Option<Value>,
+) -> CapabilityError {
     let mapped = engine_error_to_capability_error(error);
     let recipe = entry.agent_recipe();
     let example = serde_json::to_string(&recipe.execute_template).unwrap_or_else(|_| {
@@ -1646,7 +1659,11 @@ fn recipe_validation_error(
     }
 }
 
-fn schema_violation_details(error: &crate::engine::EngineError) -> Option<Value> {
+fn schema_violation_details(
+    error: &crate::engine::EngineError,
+    schema: Option<&Value>,
+    payload: Option<&Value>,
+) -> Option<Value> {
     let crate::engine::EngineError::SchemaViolation {
         path,
         message,
@@ -1664,12 +1681,118 @@ fn schema_violation_details(error: &crate::engine::EngineError) -> Option<Value>
         "argumentPath": argument_path,
     });
     if message == "required field is missing" {
+        let parent_path = schema_path_parent(path);
         let missing = schema_path_leaf(path);
+        let (missing_fields, missing_argument_paths) =
+            missing_required_arguments(schema, payload, &parent_path).unwrap_or_else(|| {
+                (
+                    vec![missing.clone()],
+                    vec![schema_path_to_argument_path(path)],
+                )
+            });
         details["validationKind"] = json!("missing_required_argument");
-        details["missingFields"] = json!([missing]);
-        details["missingArgumentPaths"] = json!([argument_path]);
+        details["missingFields"] = json!(missing_fields);
+        details["missingArgumentPaths"] = json!(missing_argument_paths);
     }
     Some(details)
+}
+
+fn missing_required_arguments(
+    schema: Option<&Value>,
+    payload: Option<&Value>,
+    parent_path: &str,
+) -> Option<(Vec<String>, Vec<String>)> {
+    let schema_parent = schema_node_at_path(schema?, parent_path)?;
+    let payload_parent = payload_node_at_path(payload?, parent_path)?;
+    let required = schema_parent.get("required")?.as_array()?;
+    let payload_object = payload_parent.as_object()?;
+    let mut missing_fields = Vec::new();
+    let mut missing_argument_paths = Vec::new();
+    for item in required {
+        let field = item.as_str()?;
+        if !payload_object.contains_key(field) {
+            missing_fields.push(field.to_owned());
+            missing_argument_paths.push(argument_path_for_field(parent_path, field));
+        }
+    }
+    if missing_fields.is_empty() {
+        None
+    } else {
+        Some((missing_fields, missing_argument_paths))
+    }
+}
+
+fn schema_node_at_path<'a>(schema: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut node = schema;
+    for token in schema_path_tokens(path) {
+        match token {
+            SchemaPathToken::Property(name) => {
+                node = node.get("properties")?.get(name)?;
+            }
+            SchemaPathToken::Index(_) => {
+                node = node.get("items")?;
+            }
+        }
+    }
+    Some(node)
+}
+
+fn payload_node_at_path<'a>(payload: &'a Value, path: &str) -> Option<&'a Value> {
+    let mut node = payload;
+    for token in schema_path_tokens(path) {
+        match token {
+            SchemaPathToken::Property(name) => {
+                node = node.as_object()?.get(name)?;
+            }
+            SchemaPathToken::Index(index) => {
+                node = node.as_array()?.get(index)?;
+            }
+        }
+    }
+    Some(node)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum SchemaPathToken<'a> {
+    Property(&'a str),
+    Index(usize),
+}
+
+fn schema_path_tokens(path: &str) -> Vec<SchemaPathToken<'_>> {
+    let mut tokens = Vec::new();
+    let Some(mut rest) = path.strip_prefix('$') else {
+        return tokens;
+    };
+    while !rest.is_empty() {
+        if let Some(after_dot) = rest.strip_prefix('.') {
+            let next_dot = after_dot.find('.');
+            let next_bracket = after_dot.find('[');
+            let end = match (next_dot, next_bracket) {
+                (Some(dot), Some(bracket)) => dot.min(bracket),
+                (Some(dot), None) => dot,
+                (None, Some(bracket)) => bracket,
+                (None, None) => after_dot.len(),
+            };
+            if end == 0 {
+                break;
+            }
+            tokens.push(SchemaPathToken::Property(&after_dot[..end]));
+            rest = &after_dot[end..];
+            continue;
+        }
+        if let Some(after_bracket) = rest.strip_prefix('[') {
+            let Some(end) = after_bracket.find(']') else {
+                break;
+            };
+            if let Ok(index) = after_bracket[..end].parse::<usize>() {
+                tokens.push(SchemaPathToken::Index(index));
+            }
+            rest = &after_bracket[end + 1..];
+            continue;
+        }
+        break;
+    }
+    tokens
 }
 
 fn merge_validation_details(
@@ -1699,6 +1822,25 @@ fn schema_path_to_argument_path(path: &str) -> String {
         "arguments".to_owned()
     } else {
         format!("arguments.{trimmed}")
+    }
+}
+
+fn schema_path_parent(path: &str) -> String {
+    let Some(last_dot) = path.rfind('.') else {
+        return "$".to_owned();
+    };
+    if last_dot == 0 {
+        "$".to_owned()
+    } else {
+        path[..last_dot].to_owned()
+    }
+}
+
+fn argument_path_for_field(parent_path: &str, field: &str) -> String {
+    if parent_path == "$" || parent_path.is_empty() {
+        format!("arguments.{field}")
+    } else {
+        format!("{}.{}", schema_path_to_argument_path(parent_path), field)
     }
 }
 
@@ -2751,6 +2893,46 @@ mod tests {
     }
 
     #[test]
+    fn low_confidence_unanchored_intent_is_not_treated_as_selection() {
+        let hit = CapabilityIndexHit {
+            kind: "implementation".to_owned(),
+            capability_id: "module::verify_source".to_owned(),
+            contract_id: "module::verify_source".to_owned(),
+            implementation_id: "first_party.module.v1.verify_source".to_owned(),
+            plugin_id: "first_party.module".to_owned(),
+            worker_id: "module".to_owned(),
+            function_id: "module::verify_source".to_owned(),
+            catalog_revision: 1,
+            schema_digest: "digest".to_owned(),
+            trust_tier: "first_party_signed".to_owned(),
+            health: "Healthy".to_owned(),
+            visibility: "system".to_owned(),
+            effect_class: "idempotent_write".to_owned(),
+            risk_level: "medium".to_owned(),
+            lexical_score: 0.0,
+            vector_score: Some(0.07),
+            fused_score: 0.07,
+            matched_by: "local_vector".to_owned(),
+            snippet: "verify package source refs".to_owned(),
+            requires_inspect: false,
+            recipe: None,
+        };
+
+        assert!(lacks_sufficient_intent_resolution_evidence(
+            "calibrate the starship warp-core coolant pump",
+            &json!({}),
+            &hit
+        ));
+
+        let anchored_arguments = json!({"expectedCurrentVersionId": "ver_test"});
+        assert!(!lacks_sufficient_intent_resolution_evidence(
+            "verify source",
+            &anchored_arguments,
+            &hit
+        ));
+    }
+
+    #[test]
     fn deterministic_intent_route_prefers_filesystem_read_for_path_arguments() {
         let read = test_function("filesystem::read_file");
         let mut stop = test_function("sandbox::stop_spawned_worker");
@@ -3133,6 +3315,74 @@ mod tests {
                 .as_str()
                 .expect("message")
                 .contains("Required arguments: command")
+        );
+    }
+
+    #[test]
+    fn execute_missing_required_arguments_reports_complete_same_scope_set() {
+        let mut function = test_function("process::run");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command", "executionMode"],
+            "properties": {
+                "command": {"type": "string"},
+                "executionMode": {"type": "string", "enum": ["read_only", "sandbox_materialized"]},
+                "expectedOutputs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["path", "targetPath"],
+                        "properties": {
+                            "path": {"type": "string"},
+                            "targetPath": {"type": "string"}
+                        }
+                    }
+                }
+            }
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry: entry.clone(),
+        };
+        let error = validate_target_payload(&entry, &json!({})).expect_err("payload error");
+
+        let value = preflight_rejection_result(&function, &target, error, "needs_input")
+            .expect("structured result");
+        let details = value["details"].clone();
+        assert_eq!(
+            details["error"]["details"]["missingFields"],
+            json!(["command", "executionMode"])
+        );
+        assert_eq!(
+            details["guidance"]["missingArgumentPaths"],
+            json!(["arguments.command", "arguments.executionMode"])
+        );
+
+        let nested_error = validate_target_payload(
+            &entry,
+            &json!({
+                "command": "echo hi",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{}]
+            }),
+        )
+        .expect_err("nested payload error");
+        let nested_value =
+            preflight_rejection_result(&function, &target, nested_error, "needs_input")
+                .expect("structured result");
+        let nested_details = nested_value["details"].clone();
+        assert_eq!(
+            nested_details["error"]["details"]["missingFields"],
+            json!(["path", "targetPath"])
+        );
+        assert_eq!(
+            nested_details["guidance"]["missingArgumentPaths"],
+            json!([
+                "arguments.expectedOutputs[0].path",
+                "arguments.expectedOutputs[0].targetPath"
+            ])
         );
     }
 
