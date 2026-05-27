@@ -170,6 +170,7 @@ async fn execute_orchestrated_value(
                     candidates,
                     search_status,
                 } => {
+                    let message = needs_selection_message(&candidates);
                     let diagnostics = orchestration_details(
                         &orchestration_id,
                         "needs_selection",
@@ -184,12 +185,7 @@ async fn execute_orchestrated_value(
                         Vec::new(),
                     );
                     record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
-                    return orchestration_result(
-                        "needs_selection",
-                        "Multiple visible capabilities match that intent. Re-run execute with target set to the intended capability.",
-                        diagnostics,
-                        true,
-                    );
+                    return orchestration_result("needs_selection", &message, diagnostics, true);
                 }
             }
         }
@@ -778,12 +774,28 @@ async fn resolve_intent_target(
         .collect::<Vec<_>>();
     let search_status = serde_json::to_value(&search.status).unwrap_or(Value::Null);
     let Some(selected) = executable_hits.first() else {
+        if let Some(candidates) =
+            clarification_candidates_for_intent(intent, &snapshot, constraints)?
+        {
+            return Ok(IntentResolveOutcome::NeedsSelection {
+                candidates,
+                search_status,
+            });
+        }
         return Ok(IntentResolveOutcome::NeedsCapability {
             candidates,
             search_status,
         });
     };
     if selected.fused_score <= 0.0 {
+        if let Some(candidates) =
+            clarification_candidates_for_intent(intent, &snapshot, constraints)?
+        {
+            return Ok(IntentResolveOutcome::NeedsSelection {
+                candidates,
+                search_status,
+            });
+        }
         return Ok(IntentResolveOutcome::NeedsCapability {
             candidates,
             search_status,
@@ -791,6 +803,14 @@ async fn resolve_intent_target(
     }
     let selected_has_strong_name_match = intent_strongly_matches_hit(intent, selected);
     if lacks_sufficient_intent_resolution_evidence(intent, arguments, selected) {
+        if let Some(candidates) =
+            clarification_candidates_for_intent(intent, &snapshot, constraints)?
+        {
+            return Ok(IntentResolveOutcome::NeedsSelection {
+                candidates,
+                search_status,
+            });
+        }
         return Ok(IntentResolveOutcome::NeedsCapability {
             candidates,
             search_status,
@@ -1192,6 +1212,104 @@ pub(super) fn apply_deterministic_intent_route(
         executable_hits.insert(0, routed);
     }
     Ok(())
+}
+
+pub(super) fn clarification_candidates_for_intent(
+    intent: &str,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+) -> Result<Option<Vec<Value>>, CapabilityError> {
+    let namespaces = namespaces_referenced_by_intent(intent, snapshot);
+    if namespaces.is_empty() {
+        return Ok(None);
+    }
+
+    let mut hits = Vec::new();
+    for entry in &snapshot.entries {
+        if entry.function_id == "capability::execute" {
+            continue;
+        }
+        let Some((namespace, _)) = entry.function_id.split_once("::") else {
+            continue;
+        };
+        if !namespaces.contains(namespace) {
+            continue;
+        }
+        let hit = orchestration_hit_from_entry(entry, "namespace_clarification", 0.05);
+        if orchestration_constraints_allow_hit(constraints, &hit)? {
+            hits.push(hit);
+        }
+    }
+
+    if hits.is_empty() {
+        return Ok(None);
+    }
+    hits.sort_by(|left, right| {
+        left.contract_id
+            .cmp(&right.contract_id)
+            .then_with(|| left.function_id.cmp(&right.function_id))
+    });
+    hits.truncate(8);
+    Ok(Some(
+        hits.iter()
+            .map(orchestration_candidate_summary)
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn namespaces_referenced_by_intent(
+    intent: &str,
+    snapshot: &CapabilityRegistrySnapshot,
+) -> BTreeSet<String> {
+    let words = normalized_intent_words(intent);
+    if words.is_empty() {
+        return BTreeSet::new();
+    }
+    let mut namespaces = BTreeSet::new();
+    for entry in &snapshot.entries {
+        let Some((namespace, _)) = entry.function_id.split_once("::") else {
+            continue;
+        };
+        if namespace_intent_match(namespace, &words) {
+            namespaces.insert(namespace.to_owned());
+        }
+    }
+    namespaces
+}
+
+fn namespace_intent_match(namespace: &str, words: &BTreeSet<String>) -> bool {
+    let namespace_words = normalized_identifier_words(namespace);
+    namespace_words
+        .iter()
+        .any(|word| words.contains(word) || words.contains(&singular_word(word)))
+        || namespace_aliases(namespace)
+            .iter()
+            .any(|alias| words.contains(*alias))
+}
+
+fn singular_word(word: &str) -> String {
+    word.strip_suffix('s').unwrap_or(word).to_owned()
+}
+
+fn namespace_aliases(namespace: &str) -> &'static [&'static str] {
+    match namespace {
+        "filesystem" => &[
+            "file",
+            "files",
+            "folder",
+            "folders",
+            "directory",
+            "directories",
+        ],
+        "process" => &["command", "commands", "shell", "terminal"],
+        "prompt_library" => &["prompt", "prompts", "snippet", "snippets", "history"],
+        "resource" => &["resource", "resources", "artifact", "artifacts"],
+        "worker" => &["worker", "workers"],
+        "grant" => &["grant", "grants", "permission", "permissions"],
+        "approval" => &["approval", "approvals"],
+        "module" => &["module", "modules", "package", "packages"],
+        _ => &[],
+    }
 }
 
 pub(super) fn apply_argument_schema_fit_filter(
@@ -1610,10 +1728,28 @@ fn attach_orchestration_details(
         None => json!({}),
     };
     if let Value::Object(object) = &mut details {
-        if object.get("resourceRefs").is_none()
-            && let Some(resource_refs) = orchestration.get("resourceRefs")
+        if object.get("resourceRefs").is_none() {
+            let resource_refs = orchestration
+                .get("resourceRefs")
+                .filter(|value| value.as_array().is_some())
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            object.insert("resourceRefs".to_owned(), resource_refs);
+        }
+        if object.get("childInvocationIds").is_none()
+            && let Some(child_invocation_ids) = orchestration.get("childInvocationIds")
         {
-            object.insert("resourceRefs".to_owned(), resource_refs.clone());
+            object.insert(
+                "childInvocationIds".to_owned(),
+                child_invocation_ids.clone(),
+            );
+        }
+        if object.get("approvalDecision").is_none() {
+            let approval_decision = orchestration
+                .get("approvalDecision")
+                .cloned()
+                .unwrap_or_else(default_no_approval_decision);
+            object.insert("approvalDecision".to_owned(), approval_decision);
         }
         object.insert("orchestration".to_owned(), orchestration.clone());
         for key in [
@@ -1636,20 +1772,80 @@ fn orchestration_result(
     diagnostics: Value,
     is_error: bool,
 ) -> Result<Value, CapabilityError> {
+    let details = terminal_orchestration_result_details(status, diagnostics);
     capability_result_value(CapabilityResult {
         content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
             message.to_owned(),
         )]),
-        details: Some(json!({
-            "status": status,
-            "orchestration": diagnostics,
-            "childInvocationCreated": false,
-            "approvalCreated": false,
-            "resourceRefs": [],
-        })),
+        details: Some(details),
         is_error: is_error.then_some(true),
         stop_turn: None,
     })
+}
+
+fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Value {
+    let mut details = Map::new();
+    details.insert("status".to_owned(), json!(status));
+    details.insert("orchestration".to_owned(), diagnostics.clone());
+    details.insert("childInvocationCreated".to_owned(), json!(false));
+    details.insert("approvalCreated".to_owned(), json!(false));
+    details.insert(
+        "approvalDecision".to_owned(),
+        default_no_approval_decision(),
+    );
+    details.insert("resourceRefs".to_owned(), json!([]));
+
+    if let Some(phase_details) = diagnostics.get("phaseDetails") {
+        for key in [
+            "candidates",
+            "rejectedCandidates",
+            "missingFields",
+            "missingPaths",
+            "searchStatus",
+            "proposedCapabilityShape",
+            "error",
+        ] {
+            if let Some(value) = phase_details.get(key) {
+                details.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+    for key in [
+        "correctedRequest",
+        "correctionsApplied",
+        "correctionConfidence",
+        "childInvocationIds",
+    ] {
+        if let Some(value) = diagnostics.get(key) {
+            details.insert(key.to_owned(), value.clone());
+        }
+    }
+    Value::Object(details)
+}
+
+fn default_no_approval_decision() -> Value {
+    json!({
+        "approvalRequired": false,
+        "approvalCreated": false,
+        "approvalExecuted": false,
+        "approvalReplayed": false,
+        "status": "not_required",
+    })
+}
+
+fn needs_selection_message(candidates: &[Value]) -> String {
+    let candidate_ids = candidates
+        .iter()
+        .filter_map(|candidate| candidate.get("functionId").and_then(Value::as_str))
+        .take(6)
+        .collect::<Vec<_>>();
+    if candidate_ids.is_empty() {
+        return "Multiple visible capabilities match that intent. Re-run execute with target set to the intended capability.".to_owned();
+    }
+    format!(
+        "Multiple visible capabilities match that intent. Re-run execute with target set to one of: {}.",
+        candidate_ids.join(", ")
+    )
 }
 
 fn capability_error_details(error: &CapabilityError) -> Value {
@@ -1744,5 +1940,95 @@ mod tests {
             details["orchestration"]["approvalDecision"]["approvalId"],
             json!("approval-test")
         );
+    }
+
+    #[test]
+    fn observe_phase_defaults_empty_refs_and_no_approval() {
+        let result = capability_result_value(CapabilityResult {
+            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                "ok".to_owned(),
+            )]),
+            details: Some(json!({
+                "status": "ok",
+                "output": {
+                    "entries": []
+                },
+                "childInvocations": ["child-read"]
+            })),
+            is_error: None,
+            stop_turn: None,
+        })
+        .expect("capability result");
+        let orchestration = json!({
+            "status": "ok",
+            "childInvocationIds": ["child-read"]
+        });
+
+        let attached =
+            attach_orchestration_details(result, orchestration).expect("attached result");
+        let attached: CapabilityResult =
+            serde_json::from_value(attached).expect("capability result");
+        let details = attached.details.expect("details");
+
+        assert_eq!(details["resourceRefs"], json!([]));
+        assert_eq!(details["childInvocationIds"], json!(["child-read"]));
+        assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
+        assert_eq!(details["approvalDecision"]["approvalCreated"], json!(false));
+    }
+
+    #[test]
+    fn terminal_orchestration_result_promotes_recovery_fields() {
+        let diagnostics = json!({
+            "orchestrationId": "capability-orchestration:test",
+            "status": "needs_selection",
+            "intent": "do something with files",
+            "correctedRequest": {
+                "intent": "do something with files",
+                "arguments": {}
+            },
+            "correctionsApplied": [],
+            "correctionConfidence": 1.0,
+            "phaseDetails": {
+                "phase": "resolve",
+                "candidates": [
+                    {
+                        "functionId": "filesystem::read_file",
+                        "contractId": "filesystem::read_file"
+                    },
+                    {
+                        "functionId": "filesystem::list_dir",
+                        "contractId": "filesystem::list_dir"
+                    }
+                ],
+                "searchStatus": {
+                    "vectorIndex": "ready"
+                }
+            },
+            "childInvocationIds": []
+        });
+
+        let result = orchestration_result(
+            "needs_selection",
+            "Multiple visible capabilities match that intent.",
+            diagnostics,
+            true,
+        )
+        .expect("orchestration result");
+        let result: CapabilityResult = serde_json::from_value(result).expect("capability result");
+        let details = result.details.expect("details");
+
+        assert_eq!(details["status"], json!("needs_selection"));
+        assert_eq!(
+            details["candidates"][0]["functionId"],
+            json!("filesystem::read_file")
+        );
+        assert_eq!(details["searchStatus"]["vectorIndex"], json!("ready"));
+        assert_eq!(
+            details["correctedRequest"]["intent"],
+            json!("do something with files")
+        );
+        assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
+        assert_eq!(details["resourceRefs"], json!([]));
     }
 }

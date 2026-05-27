@@ -66,6 +66,11 @@
 //! catalog before applying ambiguity checks. This keeps `execute` usable when
 //! semantic ranking is noisy while still failing closed for empty or
 //! non-matching argument sets.
+//! Vague intents that name a known capability namespace fail closed as
+//! `needs_selection`, not `needs_capability`: the result includes bounded
+//! top-level candidate summaries and the same list in orchestration diagnostics
+//! so both the model and audit surfaces can recover without knowing internal
+//! diagnostic paths.
 //! Interactive and async capabilities are represented by durable pause/run
 //! records, not by special runner branches. A capability that needs approval,
 //! user input, streaming, or background execution returns lifecycle metadata;

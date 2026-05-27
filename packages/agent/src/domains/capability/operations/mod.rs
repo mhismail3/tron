@@ -60,10 +60,11 @@ use audit::{audit_event_matches_orchestration_filters, filter_orchestration_audi
 pub(crate) use execute::execute_value;
 #[cfg(test)]
 use execute::{
-    apply_argument_schema_fit_filter, apply_deterministic_intent_route, deterministic_intent_route,
-    intent_strongly_matches_hit, lacks_sufficient_intent_resolution_evidence,
-    normalize_target_specific_arguments, orchestration_constraints_allow_hit,
-    orchestration_hit_from_entry, parse_orchestrated_execute_input, prepared_execute_payload,
+    apply_argument_schema_fit_filter, apply_deterministic_intent_route,
+    clarification_candidates_for_intent, deterministic_intent_route, intent_strongly_matches_hit,
+    lacks_sufficient_intent_resolution_evidence, normalize_target_specific_arguments,
+    orchestration_constraints_allow_hit, orchestration_hit_from_entry,
+    parse_orchestrated_execute_input, prepared_execute_payload,
     promote_argument_schema_fit_candidates, validate_orchestration_constraint_shape,
     validate_orchestration_constraints,
 };
@@ -2931,6 +2932,48 @@ mod tests {
             &anchored_arguments,
             &hit
         ));
+    }
+
+    #[test]
+    fn vague_known_namespace_intent_returns_clarification_candidates() {
+        let read = test_function("filesystem::read_file");
+        let search = test_function("filesystem::search_text");
+        let process = test_function("process::run");
+        let execute = test_function("capability::execute");
+        let snapshot = CapabilityRegistrySnapshot::new(vec![process, execute, search, read], 11);
+
+        let candidates = clarification_candidates_for_intent(
+            "do something useful with files",
+            &snapshot,
+            &json!({}),
+        )
+        .expect("clarification")
+        .expect("filesystem candidates");
+
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate["functionId"] == json!("filesystem::read_file"))
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate["functionId"] == json!("filesystem::search_text"))
+        );
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate["functionId"] != json!("process::run"))
+        );
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate["functionId"] != json!("capability::execute"))
+        );
+        assert!(candidates.iter().all(|candidate| {
+            candidate["matchedBy"] == json!("namespace_clarification")
+                && candidate["score"].as_f64().is_some_and(|score| score > 0.0)
+        }));
     }
 
     #[test]

@@ -350,6 +350,11 @@ unambiguous, and put only target capability fields inside `arguments`. When
 argument shape against the live catalog, so schema-valid target arguments such
 as `{"command":"date","executionMode":"read_only"}` can select `process::run`
 even if semantic ranking alone would be noisy.
+If an intent is too broad but clearly names a known capability namespace, such
+as “do something useful with files,” `execute` returns `needs_selection` with
+bounded top-level candidate summaries. It does not fabricate a target, create a
+child invocation, request approval, or produce durable refs until the agent
+re-runs `execute` with the intended target.
 Important parity anchors are:
 
 | Previous surface | Capability contract |
