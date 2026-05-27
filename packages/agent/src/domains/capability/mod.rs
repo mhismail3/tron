@@ -60,6 +60,12 @@
 //! anchor, no supplied argument shape, and only a weak semantic score, execute
 //! returns `needs_capability` instead of presenting unrelated low-confidence
 //! candidates as an actionable selection.
+//! Target-shaped arguments are also a positive resolution signal. When a model
+//! omits `target` but supplies arguments that validate against a live
+//! capability schema, the resolver may promote that capability from the full
+//! catalog before applying ambiguity checks. This keeps `execute` usable when
+//! semantic ranking is noisy while still failing closed for empty or
+//! non-matching argument sets.
 //! Interactive and async capabilities are represented by durable pause/run
 //! records, not by special runner branches. A capability that needs approval,
 //! user input, streaming, or background execution returns lifecycle metadata;

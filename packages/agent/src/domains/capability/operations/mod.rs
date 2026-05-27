@@ -64,7 +64,8 @@ use execute::{
     intent_strongly_matches_hit, lacks_sufficient_intent_resolution_evidence,
     normalize_target_specific_arguments, orchestration_constraints_allow_hit,
     orchestration_hit_from_entry, parse_orchestrated_execute_input, prepared_execute_payload,
-    validate_orchestration_constraint_shape, validate_orchestration_constraints,
+    promote_argument_schema_fit_candidates, validate_orchestration_constraint_shape,
+    validate_orchestration_constraints,
 };
 #[cfg(test)]
 use inspect::inspect_targets;
@@ -3215,6 +3216,67 @@ mod tests {
                     && candidate["rejectionReason"] == json!("argument_missing_required")
             }),
             "read_file should not remain ambiguous when process aliases normalize cleanly"
+        );
+    }
+
+    #[test]
+    fn orchestration_argument_fit_promotes_schema_match_missing_from_search_hits() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let mut unrelated = test_function("job::stream_output");
+        unrelated.request_schema = Some(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["jobId"],
+            "properties": {
+                "jobId": {"type": "string"},
+                "offset": {"type": "integer"}
+            }
+        }));
+        let snapshot = CapabilityRegistrySnapshot::new(
+            vec![
+                unrelated.clone(),
+                crate::domains::contract::function_definition_for_capability(&process_spec),
+            ],
+            44,
+        );
+        let mut hits = vec![orchestration_hit_from_entry(
+            &CapabilityRegistryEntry::from_function(unrelated, 44),
+            "hybrid_local",
+            0.09,
+        )];
+
+        promote_argument_schema_fit_candidates(
+            &json!({
+                "command": "date",
+                "executionMode": "read_only"
+            }),
+            &snapshot,
+            &json!({}),
+            &mut hits,
+        )
+        .expect("promotion");
+        let rejected = apply_argument_schema_fit_filter(
+            &json!({
+                "command": "date",
+                "executionMode": "read_only"
+            }),
+            &snapshot,
+            &mut hits,
+        );
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].function_id, "process::run");
+        assert_eq!(hits[0].matched_by, "argument_schema_fit");
+        assert!(
+            rejected.iter().any(|candidate| {
+                candidate["functionId"] == json!("job::stream_output")
+                    && candidate["rejectionReason"] == json!("argument_missing_required")
+            }),
+            "search hits that do not accept the supplied arguments must be rejected"
         );
     }
 

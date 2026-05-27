@@ -345,7 +345,11 @@ expectations instead of bare ids.
 The model-facing contract is intent-first: use `intent` alone for unfamiliar
 tasks or capability matching, add `target` only when the user supplied an exact
 id, a prior `execute` result selected it, or a primed recipe makes it
-unambiguous, and put only target capability fields inside `arguments`.
+unambiguous, and put only target capability fields inside `arguments`. When
+`target` is omitted, the resolver uses both the semantic intent and the supplied
+argument shape against the live catalog, so schema-valid target arguments such
+as `{"command":"date","executionMode":"read_only"}` can select `process::run`
+even if semantic ranking alone would be noisy.
 Important parity anchors are:
 
 | Previous surface | Capability contract |

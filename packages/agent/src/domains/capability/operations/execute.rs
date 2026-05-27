@@ -1,6 +1,7 @@
 //! Single execute orchestrator phases for the model-facing capability primitive.
 
 use serde_json::{Map, Value, json};
+use std::collections::BTreeSet;
 
 use super::{
     ResolvedCapabilityTarget, actor_from_invocation, capability_result_value,
@@ -763,6 +764,12 @@ async fn resolve_intent_target(
         constraints,
         &mut executable_hits,
     )?;
+    promote_argument_schema_fit_candidates(
+        arguments,
+        &snapshot,
+        constraints,
+        &mut executable_hits,
+    )?;
     let argument_rejected_candidates =
         apply_argument_schema_fit_filter(arguments, &snapshot, &mut executable_hits);
     let candidates = executable_hits
@@ -1234,6 +1241,108 @@ pub(super) fn apply_argument_schema_fit_filter(
 
     *executable_hits = original_hits;
     Vec::new()
+}
+
+pub(super) fn promote_argument_schema_fit_candidates(
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+    executable_hits: &mut Vec<CapabilityIndexHit>,
+) -> Result<(), CapabilityError> {
+    if arguments.as_object().is_none_or(Map::is_empty) {
+        return Ok(());
+    }
+
+    let mut promoted = Vec::new();
+    for entry in &snapshot.entries {
+        if entry.function_id == "capability::execute"
+            || executable_hits
+                .iter()
+                .any(|hit| hit.function_id == entry.function_id)
+        {
+            continue;
+        }
+        let hit = orchestration_hit_from_entry(entry, "argument_schema_fit", 0.0);
+        if !orchestration_constraints_allow_hit(constraints, &hit)? {
+            continue;
+        }
+        let Some(score) = argument_schema_promotion_score(entry, arguments) else {
+            continue;
+        };
+        promoted.push(orchestration_hit_from_entry(
+            entry,
+            "argument_schema_fit",
+            score,
+        ));
+    }
+
+    if promoted.is_empty() {
+        return Ok(());
+    }
+
+    executable_hits.extend(promoted);
+    executable_hits.sort_by(|left, right| {
+        right
+            .fused_score
+            .partial_cmp(&left.fused_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| left.function_id.cmp(&right.function_id))
+    });
+    executable_hits.dedup_by(|left, right| left.function_id == right.function_id);
+    Ok(())
+}
+
+fn argument_schema_promotion_score(
+    entry: &CapabilityRegistryEntry,
+    arguments: &Value,
+) -> Option<f32> {
+    let mut normalized_arguments = arguments.clone();
+    let mut ignored_corrections = Vec::new();
+    normalize_target_specific_arguments(
+        &entry.function,
+        &mut normalized_arguments,
+        &mut ignored_corrections,
+    );
+    let supplied = normalized_arguments
+        .as_object()
+        .filter(|object| !object.is_empty())?;
+    if validate_target_payload(entry, &normalized_arguments).is_err() {
+        return None;
+    }
+
+    let properties = schema_property_names(entry.function.request_schema.as_ref()?);
+    if properties.is_empty() {
+        return None;
+    }
+    let matched = supplied
+        .keys()
+        .filter(|key| properties.contains(key.as_str()))
+        .count();
+    if matched == 0 {
+        return None;
+    }
+    let required = schema_required_property_names(entry.function.request_schema.as_ref()?);
+    let required_matched = required
+        .iter()
+        .filter(|key| supplied.contains_key(**key))
+        .count();
+    Some(50.0 + (matched as f32) + (required_matched as f32 * 2.0))
+}
+
+fn schema_property_names(schema: &Value) -> BTreeSet<&str> {
+    schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| properties.keys().map(String::as_str).collect())
+        .unwrap_or_default()
+}
+
+fn schema_required_property_names(schema: &Value) -> BTreeSet<&str> {
+    schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|required| required.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
 }
 
 enum ArgumentSchemaFit {
