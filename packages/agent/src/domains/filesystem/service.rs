@@ -312,6 +312,39 @@ pub(crate) fn edit_file(
     }))
 }
 
+pub(crate) fn apply_patch(
+    path: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+) -> Result<Value, CapabilityError> {
+    if old_string.is_empty() {
+        return append_patch(path, new_string);
+    }
+    edit_file(path, old_string, new_string, replace_all)
+}
+
+fn append_patch(path: &str, new_string: &str) -> Result<Value, CapabilityError> {
+    trace_out_of_home(path, "apply_patch");
+    if new_string.is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "newString must not be empty when oldString is empty".to_owned(),
+        });
+    }
+    let content = read_text(path)?;
+    let updated = format!("{content}{new_string}");
+    std::fs::write(path, updated.as_bytes()).map_err(|error| CapabilityError::Custom {
+        code: errors::FILE_ERROR.into(),
+        message: error.to_string(),
+        details: None,
+    })?;
+    Ok(serde_json::json!({
+        "path": path,
+        "replacements": 1,
+        "diff": unified_diff(&content, &updated),
+    }))
+}
+
 pub(crate) fn diff_file(path: &str, new_content: &str) -> Result<Value, CapabilityError> {
     let content = read_text(path)?;
     Ok(serde_json::json!({

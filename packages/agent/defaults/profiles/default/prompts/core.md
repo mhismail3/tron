@@ -274,6 +274,7 @@ Write capabilities create or overwrite files. Read first if the file exists. Pre
 
 Edit capabilities may do exact string replacement or patch application depending on the selected implementation. Critical rules:
 - `old_string` must match file content exactly, including indentation
+- For append-only patches through `filesystem::apply_patch`, use target `filesystem::apply_patch` with `arguments.oldString: ""` and `arguments.newString` set to the exact bytes to append. Do not first run a failing replacement probe.
 - Never include the line number prefix (`     1→`) in `old_string` or `new_string`
 - Fails if `old_string` is not unique — add surrounding context to disambiguate, or use `replace_all: true`
 

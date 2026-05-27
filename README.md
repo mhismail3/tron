@@ -92,6 +92,8 @@ Current living entry points:
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
 - `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`,
   registry, recipes, and provider export.
+- `packages/agent/docs/capability-orchestration-test-scorecard.md`: manual
+  and automated substrate testing scorecard for the single `execute` portal.
 - `packages/agent/src/domains/cron/implementation/mod.rs`: decision-backed
   schedule truth and scheduler-cache boundary.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
@@ -378,6 +380,11 @@ internal worktree directories stay out of the session snapshot.
 `filesystem::read_file` accepts optional 1-based `startLine` and `endLine`
 bounds so requests like “read the first 20 lines of README.md” do not require a
 shell command or schema guess.
+`filesystem::apply_patch` accepts exact replacement patches with `oldString`
+and `newString`. For intentional append-only edits, pass `oldString: ""` and
+the exact bytes to append in `newString`; the orchestrator also normalizes a
+missing `oldString` plus non-empty `newString` into that append shape before
+target validation so the agent does not need to probe with a failing call.
 
 `process::run` and `notifications::send` both have direct, low-overhead paths
 for safe/default use. `process::run` requires `executionMode`: classifier-

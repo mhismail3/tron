@@ -5,6 +5,10 @@
 //!
 //! Relative paths are resolved against trusted engine runtime metadata for the
 //! active session working directory before reaching the raw service helpers.
+//! `filesystem::apply_patch` owns both exact replacement and explicit append
+//! semantics: `oldString == ""` appends `newString` exactly so the model-facing
+//! execute orchestrator can normalize append requests without first probing a
+//! guaranteed-failing replacement.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -157,7 +161,30 @@ async fn filesystem_apply_patch_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
-    filesystem_edit_file_value(invocation, deps, "applied_patch").await
+    let params = Some(&invocation.payload);
+    let path = require_string_param(params, "path")?;
+    let path = resolve_invocation_path(invocation, &path);
+    let path_for_ref = path.clone();
+    let old_string = require_string_param(params, "oldString")?;
+    let new_string = require_string_param(params, "newString")?;
+    let replace_all = opt_bool(params, "replaceAll").unwrap_or(false);
+    let mut value = run_blocking_task("filesystem::apply_patch", move || {
+        filesystem_service::apply_patch(&path, &old_string, &new_string, replace_all)
+    })
+    .await?;
+    let path_for_ref = value["path"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or(path_for_ref);
+    attach_patch_and_materialized_file_refs(
+        deps,
+        invocation,
+        &mut value,
+        &path_for_ref,
+        "applied_patch",
+    )
+    .await?;
+    Ok(value)
 }
 
 async fn attach_materialized_file_ref(

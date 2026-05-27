@@ -2776,6 +2776,32 @@ mod tests {
     }
 
     #[test]
+    fn orchestrated_execute_normalizes_apply_patch_append_intent() {
+        let apply_patch_spec = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "filesystem::apply_patch")
+            .expect("filesystem::apply_patch spec");
+        let function =
+            crate::domains::contract::function_definition_for_capability(&apply_patch_spec);
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 78);
+        let mut arguments = json!({
+            "path": "README.md",
+            "newString": "Execute append smoke\n"
+        });
+        let mut corrections = Vec::new();
+
+        normalize_target_specific_arguments(&function, &mut arguments, &mut corrections);
+
+        assert_eq!(arguments["oldString"], json!(""));
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("filesystem_apply_patch_append_shape")
+        }));
+        validate_target_payload(&entry, &arguments)
+            .expect("normalized append payload schema-valid");
+    }
+
+    #[test]
     fn orchestrated_execute_prepared_payload_preserves_target_arguments_only() {
         let input = parse_orchestrated_execute_input(&json!({
             "intent": "read the readme",

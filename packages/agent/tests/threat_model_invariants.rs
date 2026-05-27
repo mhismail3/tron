@@ -727,6 +727,14 @@ fn tron_dev_background_start_is_file_logged_and_health_checked() {
         "background dev startup must use a transient LaunchAgent so automation shells do not own the server process group"
     );
     assert!(
+        background_start.contains("launchd_stop \"$DEV_PLIST_NAME\"")
+            && background_start
+                .find("launchd_stop \"$DEV_PLIST_NAME\"")
+                .zip(background_start.find("launchctl bootstrap"))
+                .is_some_and(|(stop, bootstrap)| stop < bootstrap),
+        "background dev startup must boot out stale dev takeover jobs before launchctl bootstrap"
+    );
+    assert!(
         content.contains("=== tron dev background exit") && content.contains("code=\\$exit_code"),
         "background dev startup must record process exit details for postmortem automation"
     );

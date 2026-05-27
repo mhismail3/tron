@@ -93,14 +93,17 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::diff","payload":{"path":"README.md","newContent":"new file content"},"reason":"Preview a proposed README change."})])
             .build()?,
         CapabilityContract::new("filesystem::apply_patch", "filesystem", EffectClass::ReversibleSideEffect, RiskLevel::Medium, Some("filesystem.write"))
-            .description("Apply an exact-string patch to a file and return the resulting diff.")
-            .tags(vec!["patch", "apply patch", "edit", "replace", "file", "filesystem"])
+            .description("Apply an exact-string patch to a file and return the resulting diff. To append bytes, pass oldString as an empty string and newString as the exact bytes to append.")
+            .tags(vec!["patch", "apply patch", "edit", "replace", "append", "file", "filesystem"])
             .request_schema(json!({"additionalProperties":false,"properties":{"newString":{"type":"string"},"oldString":{"type":"string"},"path":{"type":"string"},"replaceAll":{"type":"boolean"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path","oldString","newString"],"type":"object"}))
             .response_schema(filesystem_resource_backed_response(json!({"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}}), vec!["path", "replacements", "diff"]))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .output_contract(DurableOutputContract::resource_backed(["materialized_file", "patch_proposal"]))
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "patch edits return a diff for manual reversal when the edited file still exists"))
-            .examples(vec![json!({"mode":"invoke","contractId":"filesystem::apply_patch","payload":{"path":"README.md","oldString":"old text","newString":"new text"},"idempotencyKey":"patch-readme-<turn>","reason":"Apply an exact text replacement."})])
+            .examples(vec![
+                json!({"mode":"invoke","contractId":"filesystem::apply_patch","payload":{"path":"README.md","oldString":"old text","newString":"new text"},"idempotencyKey":"patch-readme-<turn>","reason":"Apply an exact text replacement."}),
+                json!({"mode":"invoke","contractId":"filesystem::apply_patch","payload":{"path":"README.md","oldString":"","newString":"Appended line\n"},"idempotencyKey":"append-readme-<turn>","reason":"Append an exact line to README.md."})
+            ])
             .build()?
     ])
 }

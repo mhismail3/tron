@@ -669,6 +669,11 @@ dev_start_background() {
         return 2
     fi
 
+    # Stop any previous dev takeover job before bootstrapping a fresh one.
+    # launchd can keep a loaded-but-not-running job after a forced process kill;
+    # boot it out first so agent automation can repeat `tron dev -bd`.
+    launchd_stop "$DEV_PLIST_NAME"
+
     # Stop the installed helper for dev takeover.
     if service_is_running; then
         print_status "Stopping installed service for dev takeover..."

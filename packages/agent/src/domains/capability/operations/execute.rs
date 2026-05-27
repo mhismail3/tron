@@ -665,9 +665,16 @@ pub(super) fn normalize_target_specific_arguments(
     arguments: &mut Value,
     corrections: &mut Vec<Value>,
 ) {
-    if function.id.as_str() != "process::run" {
-        return;
+    match function.id.as_str() {
+        "process::run" => normalize_process_run_arguments(arguments, corrections),
+        "filesystem::apply_patch" => {
+            normalize_filesystem_apply_patch_arguments(arguments, corrections)
+        }
+        _ => {}
     }
+}
+
+fn normalize_process_run_arguments(arguments: &mut Value, corrections: &mut Vec<Value>) {
     normalize_process_expected_output_aliases(arguments, corrections);
     let Some(outputs) = arguments
         .get_mut("expectedOutputs")
@@ -696,6 +703,25 @@ pub(super) fn normalize_target_specific_arguments(
         corrections.push(correction_record(
             "process_expected_outputs_shape",
             "normalized expectedOutputs entries; process::run expects objects with path and optional targetPath only",
+            1.0,
+        ));
+    }
+}
+
+fn normalize_filesystem_apply_patch_arguments(arguments: &mut Value, corrections: &mut Vec<Value>) {
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+    if !object.contains_key("oldString")
+        && object
+            .get("newString")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty())
+    {
+        object.insert("oldString".to_owned(), Value::String(String::new()));
+        corrections.push(correction_record(
+            "filesystem_apply_patch_append_shape",
+            "set oldString to an empty string so filesystem::apply_patch appends newString exactly",
             1.0,
         ));
     }

@@ -12,6 +12,15 @@ fn voice_read_context() -> CausalContext {
         .with_scope("voice_notes.read")
 }
 
+fn model_execute_context(key: &str) -> CausalContext {
+    mutating_causal(key)
+        .with_scope("capability.execute")
+        .with_scope("primitive.allow:*")
+        .with_scope("contract.allow:*")
+        .with_scope("implementation.allow:*")
+        .with_scope("plugin.allow:*")
+}
+
 async fn voice_note_resources(handle: &EngineHostHandle, kind: &str) -> Vec<Value> {
     let listed = handle
         .invoke(host_invocation(
@@ -95,6 +104,156 @@ async fn filesystem_apply_patch_is_resource_backed_with_patch_evidence() {
     assert!(
         payload.get("baseContentHash").is_none(),
         "filesystem apply_patch must not persist null optional patch fields"
+    );
+}
+
+#[tokio::test]
+async fn filesystem_apply_patch_empty_old_string_appends_and_replays() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("README.md");
+    std::fs::write(&target, "Testing out a README here.\n").unwrap();
+    let payload = json!({
+        "path": target.to_string_lossy(),
+        "oldString": "",
+        "newString": "Execute append smoke\n"
+    });
+
+    let first = handle
+        .invoke(host_invocation(
+            "filesystem::apply_patch",
+            payload.clone(),
+            mutating_causal("filesystem-apply-patch-empty-append").with_scope("filesystem.write"),
+        ))
+        .await;
+    assert_eq!(first.error, None);
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "Testing out a README here.\nExecute append smoke\n"
+    );
+    let value = first.value.as_ref().unwrap();
+    assert_eq!(value["replacements"], 1);
+    assert!(
+        value["diff"]
+            .as_str()
+            .unwrap()
+            .contains("+Execute append smoke")
+    );
+    assert!(
+        value["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "patch_proposal"
+                && reference["role"] == "applied_patch")
+    );
+
+    let replay = handle
+        .invoke(host_invocation(
+            "filesystem::apply_patch",
+            payload,
+            mutating_causal("filesystem-apply-patch-empty-append").with_scope("filesystem.write"),
+        ))
+        .await;
+    assert_eq!(replay.error, None);
+    assert!(
+        replay.replayed_from.is_some(),
+        "duplicate append patch key should replay instead of appending again"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "Testing out a README here.\nExecute append smoke\n"
+    );
+}
+
+#[tokio::test]
+async fn capability_execute_apply_patch_append_shape_runs_without_failed_probe() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("README.md");
+    std::fs::write(&target, "Testing out a README here.\n").unwrap();
+
+    let first = handle
+        .invoke(host_invocation(
+            "capability::execute",
+            json!({
+                "intent": "Append an exact smoke-test line to README.md.",
+                "target": "filesystem::apply_patch",
+                "arguments": {
+                    "path": target.to_string_lossy(),
+                    "newString": "Execute orchestrated append smoke\n"
+                },
+                "idempotencyKey": "execute-apply-patch-child-append",
+                "reason": "Append a deterministic test line"
+            }),
+            model_execute_context("execute-apply-patch-wrapper-1"),
+        ))
+        .await;
+    assert_eq!(first.error, None);
+    let value = first.value.as_ref().unwrap();
+    assert_eq!(value["isError"], Value::Null);
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "Testing out a README here.\nExecute orchestrated append smoke\n"
+    );
+    let details = &value["details"];
+    assert!(
+        details["correctionsApplied"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|correction| correction["kind"] == "filesystem_apply_patch_append_shape")
+    );
+    assert!(
+        details["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "patch_proposal")
+    );
+
+    let replay = handle
+        .invoke(host_invocation(
+            "capability::execute",
+            json!({
+                "intent": "Append an exact smoke-test line to README.md.",
+                "target": "filesystem::apply_patch",
+                "arguments": {
+                    "path": target.to_string_lossy(),
+                    "newString": "Execute orchestrated append smoke\n"
+                },
+                "idempotencyKey": "execute-apply-patch-child-append",
+                "reason": "Append a deterministic test line"
+            }),
+            model_execute_context("execute-apply-patch-wrapper-2"),
+        ))
+        .await;
+    assert_eq!(replay.error, None);
+    let replay_value = replay.value.as_ref().unwrap();
+    assert_eq!(replay_value["isError"], Value::Null);
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "Testing out a README here.\nExecute orchestrated append smoke\n"
+    );
+    let records = handle.invocation_records().await;
+    let apply_patch_records = records
+        .iter()
+        .filter(|record| {
+            record.function_id.as_str() == "filesystem::apply_patch"
+                && record.idempotency_key.as_deref() == Some("execute-apply-patch-child-append")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        apply_patch_records.len(),
+        2,
+        "two execute attempts should produce one child execution and one child replay"
+    );
+    assert!(
+        apply_patch_records
+            .iter()
+            .any(|record| record.replayed_from.is_some())
     );
 }
 
