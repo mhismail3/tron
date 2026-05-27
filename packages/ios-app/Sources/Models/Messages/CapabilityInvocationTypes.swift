@@ -337,6 +337,9 @@ struct CapabilityInvocationDisplayModel: Equatable {
                 ?? "Capability metadata")
                 .truncated(to: 120)
         default:
+            if primitive == "execute", target == nil {
+                return "Invocation"
+            }
             if let payloadSummary {
                 return payloadSummary.truncated(to: 140)
             }
@@ -375,6 +378,9 @@ struct CapabilityInvocationDisplayModel: Equatable {
             }
             if let functionId = identity.functionId, !functionId.hasPrefix("capability::") {
                 return functionId
+            }
+            if primitive == "execute" {
+                return nil
             }
             return identity.implementationId
         }

@@ -1678,9 +1678,6 @@ pub(super) fn lacks_sufficient_intent_resolution_evidence(
     arguments: &Value,
     selected: &CapabilityIndexHit,
 ) -> bool {
-    if selected.fused_score >= MIN_UNANCHORED_INTENT_SCORE {
-        return false;
-    }
     if intent_strongly_matches_hit(intent, selected) {
         return false;
     }
@@ -1688,6 +1685,12 @@ pub(super) fn lacks_sufficient_intent_resolution_evidence(
         .as_object()
         .is_some_and(|object| !object.is_empty())
     {
+        return false;
+    }
+    if selected.matched_by == "local_lexical" {
+        return true;
+    }
+    if selected.fused_score >= MIN_UNANCHORED_INTENT_SCORE {
         return false;
     }
     true

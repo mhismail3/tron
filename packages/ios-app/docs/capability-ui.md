@@ -124,7 +124,9 @@ hints. When an early `execute` event has not resolved the binding yet, the chip
 uses the server-provided hint when available and otherwise derives a stable
 generic color from the requested contract id in the submitted arguments so
 running process, filesystem, notification, and other first-party capability
-chips do not all collapse to the generic execute color.
+chips do not all collapse to the generic execute color. Intent-only `execute`
+events that have no concrete target render as `Execute` / `Invocation`; the app
+must not expose the wrapper implementation id as a target or chip label.
 `capability.invocation.generating` creates the chip immediately, before worker
 dispatch completes; `started`, `progress`, and `completed` update that same
 invocation id. While running, chips show live elapsed time from `generatedAt` or

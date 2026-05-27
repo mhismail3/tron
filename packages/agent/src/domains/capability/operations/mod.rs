@@ -2944,6 +2944,39 @@ mod tests {
     }
 
     #[test]
+    fn high_score_lexical_noise_without_anchor_is_not_treated_as_selection() {
+        let hit = CapabilityIndexHit {
+            kind: "implementation".to_owned(),
+            capability_id: "module::run_conformance".to_owned(),
+            contract_id: "module::run_conformance".to_owned(),
+            implementation_id: "first_party.module.v1.run_conformance".to_owned(),
+            plugin_id: "first_party.module".to_owned(),
+            worker_id: "module".to_owned(),
+            function_id: "module::run_conformance".to_owned(),
+            catalog_revision: 1,
+            schema_digest: "digest".to_owned(),
+            trust_tier: "first_party_signed".to_owned(),
+            health: "Healthy".to_owned(),
+            visibility: "system".to_owned(),
+            effect_class: "idempotent_write".to_owned(),
+            risk_level: "medium".to_owned(),
+            lexical_score: 11.17,
+            vector_score: None,
+            fused_score: 11.17,
+            matched_by: "local_lexical".to_owned(),
+            snippet: "record bounded package runtime conformance evidence".to_owned(),
+            requires_inspect: false,
+            recipe: None,
+        };
+
+        assert!(lacks_sufficient_intent_resolution_evidence(
+            "calibrate warp-core coolant harmonics for a starship drive",
+            &json!({}),
+            &hit
+        ));
+    }
+
+    #[test]
     fn vague_known_namespace_intent_returns_clarification_candidates() {
         let read = test_function("filesystem::read_file");
         let search = test_function("filesystem::search_text");

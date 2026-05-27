@@ -80,6 +80,29 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertFalse(invocation.display.commandText.contains("first_party.capability.v1.execute"))
     }
 
+    func testIntentOnlyExecuteDoesNotExposeWrapperImplementationAsTarget() {
+        let invocation = testCapabilityInvocation(
+            status: .error,
+            arguments: #"{"intent":"calibrate warp-core coolant harmonics for a starship drive","reason":"Attempt to resolve the requested capability without inventing a target."}"#,
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "execute",
+                contractId: "capability::execute",
+                implementationId: "first_party.capability.v1.execute",
+                functionId: "capability::execute",
+                pluginId: "first_party.capability",
+                trustTier: "first_party_signed"
+            )
+        )
+
+        XCTAssertEqual(invocation.display.primitiveTitle, "Execute")
+        XCTAssertEqual(invocation.display.chipTitle, "Execute")
+        XCTAssertNil(invocation.display.targetId)
+        XCTAssertEqual(invocation.display.capabilityName, "Execute")
+        XCTAssertEqual(invocation.display.commandText, "Invocation")
+        XCTAssertFalse(invocation.display.chipTitle.contains("first_party"))
+        XCTAssertFalse(invocation.display.commandText.contains("first_party"))
+    }
+
     func testExecuteChipSuppressesSessionWorktreeIdsForPathPayloads() {
         let invocation = testCapabilityInvocation(
             status: .success,
