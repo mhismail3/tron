@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-26 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-27 (capability-native chat/event rendering, exact-text chat composer input for capability ids/JSON/idempotency keys, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -194,6 +194,10 @@ reconnect. Catalog, ledger, idempotency, approval, lease, stream visibility, and
 worker ownership stay server-side. Before sending prompt-producing agent writes,
 the client awaits the `events.session` subscription; if that cannot be
 established, it does not start server work that the UI cannot observe.
+The chat composer preserves exact prompt input: autocapitalization,
+autocorrection, and text-content inference are disabled because capability ids,
+JSON fragments, file paths, quoted strings, and idempotency keys are
+engine-facing instructions rather than prose to rewrite.
 Foreground notification inbox updates follow the same thin-client rule:
 notification capability completions delivered over `/engine` refresh the inbox, while
 APNs remains the background device-delivery transport. Read-state mutations are

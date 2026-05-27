@@ -25,6 +25,7 @@ struct GlassTextField: View {
 
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
+                .exactAgentPromptInput()
                 .font(TronTypography.input)
                 .foregroundStyle(.tronEmerald)
                 .padding(.leading, 14)
@@ -65,6 +66,7 @@ struct SimplifiedTextField: View {
 
             TextField("", text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
+                .exactAgentPromptInput()
                 .font(TronTypography.input)
                 .foregroundStyle(.tronEmerald)
                 .padding(.horizontal, 14)
@@ -125,6 +127,7 @@ struct TextFieldWithHistory: View {
 
                     TextField("", text: $text, axis: .vertical)
                         .textFieldStyle(.plain)
+                        .exactAgentPromptInput()
                         .font(TronTypography.input)
                         .foregroundStyle(.tronEmerald)
                         .padding(.horizontal, 14)
@@ -186,4 +189,3 @@ struct TextFieldWithHistory: View {
         }
     }
 }
-

@@ -15,6 +15,17 @@ extension View {
         }
     }
 
+    /// Preserves exact prompt text for agent instructions. Chat prompts often
+    /// include capability ids, idempotency keys, file paths, and JSON fragments
+    /// that must not be autocorrected or capitalized before they reach the
+    /// engine.
+    func exactAgentPromptInput() -> some View {
+        self
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled(true)
+            .textContentType(.none)
+    }
+
 }
 
 // MARK: - Button Styles

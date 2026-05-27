@@ -385,6 +385,7 @@ struct InputBar: View {
 
             TextField("", text: $state.text, axis: .vertical)
                 .textFieldStyle(.plain)
+                .exactAgentPromptInput()
                 .font(TronTypography.input)
                 .foregroundStyle(config.readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
                 .padding(.leading, 14)

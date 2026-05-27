@@ -408,6 +408,39 @@ struct SourceGuardTests {
         #expect(!appEntry.contains("if #available(iOS 26.0, *)"))
     }
 
+    @Test("Chat composer preserves exact agent prompt text")
+    func testChatComposerPreservesExactAgentPromptText() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let inputRoot = iosRoot.appendingPathComponent("Sources/Views/InputBar")
+        let inputBar = try String(
+            contentsOf: inputRoot.appendingPathComponent("InputBar.swift"),
+            encoding: .utf8
+        )
+        let inputTextField = try String(
+            contentsOf: inputRoot.appendingPathComponent("InputTextField.swift"),
+            encoding: .utf8
+        )
+        let viewExtensions = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Extensions/View+Extensions.swift"),
+            encoding: .utf8
+        )
+
+        #expect(viewExtensions.contains("func exactAgentPromptInput() -> some View"))
+        #expect(viewExtensions.contains(".textInputAutocapitalization(.never)"))
+        #expect(viewExtensions.contains(".autocorrectionDisabled(true)"))
+        #expect(viewExtensions.contains(".textContentType(.none)"))
+        #expect(inputBar.contains(".exactAgentPromptInput()"))
+        #expect(inputTextField.components(separatedBy: ".exactAgentPromptInput()").count - 1 == 3)
+        for inputFile in [inputBar, inputTextField] {
+            #expect(!inputFile.contains(".textInputAutocapitalization(.sentences)"))
+            #expect(!inputFile.contains(".textInputAutocapitalization(.words)"))
+            #expect(!inputFile.contains(".autocorrectionDisabled(false)"))
+        }
+    }
+
     @Test("Prompt Library picker is selection-only and management is generated UI")
     func testPromptLibraryPickerBoundaryAndGeneratedManagement() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
