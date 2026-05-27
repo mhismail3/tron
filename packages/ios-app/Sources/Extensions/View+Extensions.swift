@@ -23,6 +23,7 @@ extension View {
         self
             .textInputAutocapitalization(.never)
             .autocorrectionDisabled(true)
+            .keyboardType(.asciiCapable)
             .textContentType(.none)
     }
 

@@ -195,9 +195,9 @@ worker ownership stay server-side. Before sending prompt-producing agent writes,
 the client awaits the `events.session` subscription; if that cannot be
 established, it does not start server work that the UI cannot observe.
 The chat composer preserves exact prompt input: autocapitalization,
-autocorrection, and text-content inference are disabled because capability ids,
-JSON fragments, file paths, quoted strings, and idempotency keys are
-engine-facing instructions rather than prose to rewrite.
+autocorrection, text-content inference, and non-ASCII keyboard substitutions are
+disabled because capability ids, JSON fragments, file paths, quoted strings, and
+idempotency keys are engine-facing instructions rather than prose to rewrite.
 Foreground notification inbox updates follow the same thin-client rule:
 notification capability completions delivered over `/engine` refresh the inbox, while
 APNs remains the background device-delivery transport. Read-state mutations are

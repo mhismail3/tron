@@ -431,6 +431,7 @@ struct SourceGuardTests {
         #expect(viewExtensions.contains("func exactAgentPromptInput() -> some View"))
         #expect(viewExtensions.contains(".textInputAutocapitalization(.never)"))
         #expect(viewExtensions.contains(".autocorrectionDisabled(true)"))
+        #expect(viewExtensions.contains(".keyboardType(.asciiCapable)"))
         #expect(viewExtensions.contains(".textContentType(.none)"))
         #expect(inputBar.contains(".exactAgentPromptInput()"))
         #expect(inputTextField.components(separatedBy: ".exactAgentPromptInput()").count - 1 == 3)
