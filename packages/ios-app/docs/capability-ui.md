@@ -1,6 +1,6 @@
 # Capability UI And Engine Console
 
-> Last verified: 2026-05-21
+> Last verified: 2026-05-27
 
 The iOS capability UI is a thin client over server-owned capability records. It
 does not maintain a local tool catalog and does not choose capability bindings
@@ -136,11 +136,15 @@ duration remains available in collapsed metadata for audit.
 Parallel calls are ordered by event enqueue order, not completion order, so a
 fast child cannot jump ahead of an earlier running invocation.
 
-Invocation detail sheets use the same display model. The toolbar carries the
-primitive icon and title, while the first card focuses on operator-readable
-capability identity: friendly capability name, status and observed duration
-pills, and a user-facing plugin/source label such as `File System
-(First-party)` or `GitHub (MCP)`. Request, execution path, result, approval,
+Invocation detail sheets use the same display model. When `execute` resolves a
+concrete target, the toolbar carries the resolved capability title and
+target-aware icon (`Run Command`, `Read File`, `Send Notification`, and so on);
+the `Execution Path` section remains the place that explains the model-visible
+`execute` wrapper. Intent-only or unresolved calls still use `Execute` as the
+toolbar title. The first card focuses on operator-readable capability identity:
+friendly capability name, status and observed duration pills, and a
+user-facing plugin/source label such as `File System (First-party)` or `GitHub
+(MCP)`. Request, execution path, result, approval,
 artifacts, logs, and error classification are separated into sheet-native
 sections. Request, execution path, and result sections use the same
 capability-owned sheet accent so a single invocation reads as one coherent

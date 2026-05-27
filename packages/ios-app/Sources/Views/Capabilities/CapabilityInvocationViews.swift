@@ -67,7 +67,7 @@ struct CapabilityInvocationChip: View {
 
     @ViewBuilder
     private var leadingAccessory: some View {
-        Image(systemName: CapabilityPresentation.symbol(for: data.identity))
+        Image(systemName: CapabilityPresentation.symbol(for: data.identity, targetId: display.targetId))
             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
             .foregroundStyle(textColor)
             .frame(width: 18, height: 18)
@@ -165,8 +165,8 @@ struct CapabilityInvocationDetailSheet: View {
 
     var body: some View {
         CapabilityDetailSheetContainer(
-            modelPrimitiveName: display.primitiveTitle,
-            iconName: CapabilityPresentation.symbol(for: data.identity),
+            modelPrimitiveName: display.sheetTitle,
+            iconName: CapabilityPresentation.symbol(for: data.identity, targetId: display.targetId),
             accent: accent
         ) {
             ScrollView(.vertical) {

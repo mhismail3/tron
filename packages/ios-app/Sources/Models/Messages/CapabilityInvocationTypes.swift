@@ -193,6 +193,7 @@ struct CapabilityDisplayGroup: Equatable, Identifiable {
 
 struct CapabilityInvocationDisplayModel: Equatable {
     let primitiveTitle: String
+    let sheetTitle: String
     let chipTitle: String
     let capabilityName: String
     let commandText: String
@@ -226,6 +227,12 @@ struct CapabilityInvocationDisplayModel: Equatable {
             primitive: primitive,
             capabilityName: capabilityName,
             identity: data.identity
+        )
+        self.sheetTitle = Self.sheetTitle(
+            primitive: primitive,
+            chipTitle: self.chipTitle,
+            capabilityName: capabilityName,
+            target: target
         )
         self.capabilityName = capabilityName
         self.targetId = target
@@ -302,6 +309,18 @@ struct CapabilityInvocationDisplayModel: Equatable {
         default:
             return capabilityName
         }
+    }
+
+    private static func sheetTitle(
+        primitive: String,
+        chipTitle: String,
+        capabilityName: String,
+        target: String?
+    ) -> String {
+        guard primitive == "execute", target != nil else {
+            return primitiveTitle(primitive)
+        }
+        return chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? "Execute"
     }
 
     private static func statusText(_ status: CapabilityInvocationStatus) -> String {
@@ -1015,14 +1034,14 @@ enum CapabilityPresentation {
         return "Capability"
     }
 
-    static func symbol(for identity: CapabilityIdentity) -> String {
+    static func symbol(for identity: CapabilityIdentity, targetId: String? = nil) -> String {
         if let icon = presentationString("sfSymbol", for: identity)
             ?? presentationString("symbol", for: identity)
             ?? presentationString("icon", for: identity),
            let symbol = nativeSymbolName(for: icon) {
             return symbol
         }
-        let id = identity.contractId ?? identity.functionId ?? identity.modelPrimitiveName ?? ""
+        let id = targetId?.nilIfEmpty ?? identity.contractId ?? identity.functionId ?? identity.modelPrimitiveName ?? ""
         if id.hasPrefix("filesystem::") { return "doc.text.magnifyingglass" }
         if id.hasPrefix("process::") { return "terminal" }
         if id.hasPrefix("web::") { return "globe" }

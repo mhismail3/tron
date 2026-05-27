@@ -34,6 +34,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         )
 
         XCTAssertEqual(invocation.display.primitiveTitle, "Inspect")
+        XCTAssertEqual(invocation.display.sheetTitle, "Inspect")
         XCTAssertEqual(invocation.display.chipTitle, "Inspect")
         XCTAssertEqual(invocation.display.capabilityName, "Run Command")
         XCTAssertEqual(invocation.display.commandText, "Run Command")
@@ -70,6 +71,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         )
 
         XCTAssertEqual(invocation.display.primitiveTitle, "Execute")
+        XCTAssertEqual(invocation.display.sheetTitle, "Run Command")
         XCTAssertEqual(invocation.display.chipTitle, "Run Command")
         XCTAssertEqual(invocation.display.targetId, "process::run")
         XCTAssertEqual(invocation.display.payloadSummary, "date +%s")
@@ -95,6 +97,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         )
 
         XCTAssertEqual(invocation.display.primitiveTitle, "Execute")
+        XCTAssertEqual(invocation.display.sheetTitle, "Execute")
         XCTAssertEqual(invocation.display.chipTitle, "Execute")
         XCTAssertNil(invocation.display.targetId)
         XCTAssertEqual(invocation.display.capabilityName, "Execute")
@@ -237,6 +240,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         )
 
         XCTAssertEqual(invocation.display.commandText, "pwd && sed -n '1,3p' README.md")
+        XCTAssertEqual(invocation.display.sheetTitle, "Run Command")
         XCTAssertEqual(
             invocation.display.requestRows.map(\.label),
             ["Command", "Execution mode", "Intent", "Reason"]
@@ -436,6 +440,10 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(
             CapabilityPresentation.themeColorHex(for: identity, targetId: "process::run"),
             "#38BDF8"
+        )
+        XCTAssertEqual(
+            CapabilityPresentation.symbol(for: identity, targetId: "process::run"),
+            "terminal"
         )
         XCTAssertEqual(
             CapabilityPresentation.themeColorHex(for: identity, targetId: "notifications::send"),
