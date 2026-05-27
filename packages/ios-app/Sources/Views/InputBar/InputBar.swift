@@ -383,17 +383,22 @@ struct InputBar: View {
                     .padding(.vertical, 10)
             }
 
-            ExactPromptTextInput(
-                text: $state.text,
-                isEditable: !config.readOnly,
-                textColor: UIColor(config.readOnly ? Color.tronEmerald.opacity(0.5) : Color.tronEmerald),
-                onFocusChanged: { isFocused = $0 }
-            )
+            TextField("", text: $state.text, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(TronTypography.input)
+                .foregroundStyle(config.readOnly ? .tronEmerald.opacity(0.5) : .tronEmerald)
                 .padding(.leading, 14)
                 .padding(.trailing, textFieldTrailingPadding)
                 .padding(.vertical, 10)
+                .lineLimit(1...8)
+                .focused($isFocused)
                 .disabled(config.readOnly)
                 .accessibilityLabel("Message input")
+                .onSubmit {
+                    if !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !config.readOnly {
+                        actions.onSend()
+                    }
+                }
         }
         .frame(minHeight: actionButtonSize)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))

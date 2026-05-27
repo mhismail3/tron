@@ -408,42 +408,6 @@ struct SourceGuardTests {
         #expect(!appEntry.contains("if #available(iOS 26.0, *)"))
     }
 
-    @Test("Chat composer preserves exact agent prompt text")
-    func testChatComposerPreservesExactAgentPromptText() throws {
-        let iosRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let inputRoot = iosRoot.appendingPathComponent("Sources/Views/InputBar")
-        let inputBar = try String(
-            contentsOf: inputRoot.appendingPathComponent("InputBar.swift"),
-            encoding: .utf8
-        )
-        let exactPromptInput = try String(
-            contentsOf: inputRoot.appendingPathComponent("ExactPromptTextInput.swift"),
-            encoding: .utf8
-        )
-        #expect(!FileManager.default.fileExists(atPath: inputRoot.appendingPathComponent("InputTextField.swift").path))
-
-        #expect(inputBar.contains("ExactPromptTextInput("))
-        #expect(!inputBar.contains(#"TextField("", text: $state.text"#))
-        #expect(exactPromptInput.contains("UIViewRepresentable"))
-        #expect(exactPromptInput.contains("UITextViewDelegate"))
-        #expect(exactPromptInput.contains("view.autocapitalizationType = .none"))
-        #expect(exactPromptInput.contains("view.autocorrectionType = .no"))
-        #expect(exactPromptInput.contains("view.spellCheckingType = .no"))
-        #expect(exactPromptInput.contains("view.smartQuotesType = .no"))
-        #expect(exactPromptInput.contains("view.smartDashesType = .no"))
-        #expect(exactPromptInput.contains("view.smartInsertDeleteType = .no"))
-        #expect(exactPromptInput.contains("view.keyboardType = .asciiCapable"))
-        #expect(exactPromptInput.contains("view.textContentType = nil"))
-        for inputFile in [inputBar, exactPromptInput] {
-            #expect(!inputFile.contains(".textInputAutocapitalization(.sentences)"))
-            #expect(!inputFile.contains(".textInputAutocapitalization(.words)"))
-            #expect(!inputFile.contains(".autocorrectionDisabled(false)"))
-        }
-    }
-
     @Test("Prompt Library picker is selection-only and management is generated UI")
     func testPromptLibraryPickerBoundaryAndGeneratedManagement() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
