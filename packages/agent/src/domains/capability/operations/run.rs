@@ -236,6 +236,14 @@ pub(super) fn preflight_rejection_result(
     let details = error.details();
     let message = error.to_string();
     let guidance = preflight_guidance(status, details.as_ref());
+    let missing_fields = guidance
+        .get("missingFields")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let missing_argument_paths = guidance
+        .get("missingArgumentPaths")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
     capability_result_value(CapabilityResult {
         content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
             preflight_message(function, status, &message),
@@ -257,8 +265,11 @@ pub(super) fn preflight_rejection_result(
             "selectedImplementation": target.binding_decision.selected_implementation,
             "bindingDecision": target.binding_decision,
             "childInvocationCreated": false,
+            "childInvocationIds": [],
             "approvalCreated": false,
-            "resourceRefs": []
+            "resourceRefs": [],
+            "missingFields": missing_fields,
+            "missingArgumentPaths": missing_argument_paths
         })),
         is_error: Some(true),
         stop_turn: None,

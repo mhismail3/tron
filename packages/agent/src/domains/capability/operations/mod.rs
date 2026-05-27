@@ -3408,10 +3408,16 @@ mod tests {
             details["error"]["details"]["missingFields"],
             json!(["command"])
         );
+        assert_eq!(details["missingFields"], json!(["command"]));
+        assert_eq!(
+            details["missingArgumentPaths"],
+            json!(["arguments.command"])
+        );
         assert_eq!(
             details["guidance"]["missingArgumentPaths"],
             json!(["arguments.command"])
         );
+        assert_eq!(details["childInvocationIds"], json!([]));
         assert_eq!(details["childInvocationCreated"], json!(false));
         assert_eq!(details["approvalCreated"], json!(false));
         assert_eq!(details["resourceRefs"], json!([]));
@@ -3461,6 +3467,14 @@ mod tests {
             json!(["command", "executionMode"])
         );
         assert_eq!(
+            details["missingFields"],
+            json!(["command", "executionMode"])
+        );
+        assert_eq!(
+            details["missingArgumentPaths"],
+            json!(["arguments.command", "arguments.executionMode"])
+        );
+        assert_eq!(
             details["guidance"]["missingArgumentPaths"],
             json!(["arguments.command", "arguments.executionMode"])
         );
@@ -3481,6 +3495,17 @@ mod tests {
         assert_eq!(
             nested_details["error"]["details"]["missingFields"],
             json!(["path", "targetPath"])
+        );
+        assert_eq!(
+            nested_details["missingFields"],
+            json!(["path", "targetPath"])
+        );
+        assert_eq!(
+            nested_details["missingArgumentPaths"],
+            json!([
+                "arguments.expectedOutputs[0].path",
+                "arguments.expectedOutputs[0].targetPath"
+            ])
         );
         assert_eq!(
             nested_details["guidance"]["missingArgumentPaths"],

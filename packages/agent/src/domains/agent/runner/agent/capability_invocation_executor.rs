@@ -863,7 +863,7 @@ async fn execute_capability_primitive_via_engine(
     runtime_metadata: &[(String, String)],
     effective_args: Value,
 ) -> crate::shared::model_capabilities::CapabilityResult {
-    let material = stable_capability_invocation_material(
+    let idempotency_key = model_capability_invocation_idempotency_key(
         run_id,
         session_id,
         turn,
@@ -873,8 +873,6 @@ async fn execute_capability_primitive_via_engine(
         workspace_id,
         &effective_args,
     );
-    let fingerprint = sha256_hex(material.as_bytes());
-    let idempotency_key = format!("model-capability-invocation:v1:{fingerprint}");
     let function_id = target.function_id.clone();
     let actor_id = match ActorId::new(format!("agent:{session_id}")) {
         Ok(id) => id,
@@ -962,6 +960,63 @@ fn stable_capability_invocation_material(
         "{:?}:{session_id}:{turn}:{invocation_id}:{model_primitive_name}:{working_directory}:{workspace_id:?}:{effective_args}",
         run_id
     ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn model_capability_invocation_idempotency_key(
+    run_id: Option<&str>,
+    session_id: &str,
+    turn: i64,
+    invocation_id: &str,
+    model_primitive_name: &str,
+    working_directory: &str,
+    workspace_id: Option<&str>,
+    effective_args: &Value,
+) -> String {
+    if model_primitive_name == "execute"
+        && let Some(caller_key) = execute_caller_idempotency_key(effective_args)
+    {
+        let material = json!({
+            "modelPrimitiveName": model_primitive_name,
+            "callerIdempotencyKey": caller_key,
+        });
+        return format!(
+            "model-capability-invocation:v1:caller:{}",
+            sha256_hex(
+                serde_json::to_string(&material)
+                    .unwrap_or_default()
+                    .as_bytes()
+            )
+        );
+    }
+
+    let material = stable_capability_invocation_material(
+        run_id,
+        session_id,
+        turn,
+        invocation_id,
+        model_primitive_name,
+        working_directory,
+        workspace_id,
+        effective_args,
+    );
+    let fingerprint = sha256_hex(material.as_bytes());
+    format!("model-capability-invocation:v1:{fingerprint}")
+}
+
+fn execute_caller_idempotency_key(effective_args: &Value) -> Option<&str> {
+    fn string_key(value: &Value) -> Option<&str> {
+        value
+            .get("idempotencyKey")
+            .or_else(|| value.get("idempotency_key"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+
+    string_key(effective_args)
+        .or_else(|| effective_args.get("arguments").and_then(string_key))
+        .or_else(|| effective_args.get("payload").and_then(string_key))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -1237,6 +1292,21 @@ mod tests {
     }
 
     #[derive(Clone)]
+    struct CountingCapabilityHandler {
+        captured: Arc<Mutex<Vec<Invocation>>>,
+    }
+
+    #[async_trait]
+    impl crate::engine::InProcessFunctionHandler for CountingCapabilityHandler {
+        async fn invoke(&self, invocation: Invocation) -> crate::engine::Result<Value> {
+            let mut captured = self.captured.lock();
+            let count = captured.len() + 1;
+            captured.push(invocation);
+            Ok(json!({"content": format!("ok-{count}")}))
+        }
+    }
+
+    #[derive(Clone)]
     struct StopTurnCapabilityHandler;
 
     #[async_trait]
@@ -1429,6 +1499,121 @@ mod tests {
             invocation.causal_context.idempotency_key.as_deref(),
             Some(expected_key.as_str())
         );
+    }
+
+    #[tokio::test]
+    async fn execute_model_primitive_prefers_caller_idempotency_key_for_engine_replay() {
+        let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
+        engine_host
+            .register_worker(
+                WorkerDefinition::new(
+                    WorkerId::new("capability").expect("worker id"),
+                    WorkerKind::InProcess,
+                    ActorId::new("capability-owner").expect("actor id"),
+                    AuthorityGrantId::new("capability-grant").expect("grant id"),
+                )
+                .with_namespace_claim("capability"),
+                false,
+            )
+            .await
+            .expect("register worker");
+
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let function_id = FunctionId::new("capability::capture").expect("function id");
+        let function = FunctionDefinition::new(
+            function_id.clone(),
+            WorkerId::new("capability").expect("worker id"),
+            "Capture capability invocation".to_owned(),
+            VisibilityScope::System,
+            EffectClass::IdempotentWrite,
+        )
+        .with_risk(RiskLevel::Medium)
+        .with_required_authority(AuthorityRequirement::scope("capability.execute"))
+        .with_idempotency(crate::engine::IdempotencyContract::caller_session_engine_ledger());
+        engine_host
+            .register_function(
+                function.clone(),
+                Some(Arc::new(CountingCapabilityHandler {
+                    captured: Arc::clone(&captured),
+                })),
+                false,
+            )
+            .await
+            .expect("register function");
+
+        let mut targets_by_name = BTreeMap::new();
+        let _ = targets_by_name.insert(
+            "execute".to_owned(),
+            EngineCapabilityTarget {
+                model_capability_id: "execute".to_owned(),
+                function_id,
+                function,
+                stops_turn: false,
+                is_interactive: false,
+                execution_mode: ExecutionMode::Parallel,
+            },
+        );
+        let surface = ResolvedCapabilitySurface {
+            catalog_revision: crate::engine::CatalogRevision(42),
+            capabilities: Vec::new(),
+            targets_by_name,
+            all_model_capability_ids: vec!["execute".to_owned()],
+            turn_stopping_capabilities: HashSet::new(),
+        };
+        let emitter = Arc::new(EventEmitter::new());
+        let cancel = CancellationToken::new();
+        let spec = default_execution_spec();
+        let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &spec);
+        ctx.engine_host = Some(&engine_host);
+
+        let payload = json!({
+            "intent": "read a file",
+            "target": "filesystem::read_file",
+            "arguments": {"path": "README.md"},
+            "idempotencyKey": "manual-read-file-explicit-001"
+        });
+        let first_call = CapabilityInvocationDraft::new(
+            "provider-call-id-1",
+            "execute",
+            payload_object(&payload),
+        );
+        let second_call = CapabilityInvocationDraft::new(
+            "provider-call-id-2",
+            "execute",
+            payload_object(&payload),
+        );
+        let first_result =
+            execute_capability_invocation(&first_call, "session-1", "/tmp/worktree", &ctx).await;
+        let second_result =
+            execute_capability_invocation(&second_call, "session-1", "/tmp/worktree", &ctx).await;
+
+        assert_eq!(first_result.result.is_error, None);
+        assert_eq!(second_result.result.is_error, None);
+        let captured = captured.lock().clone();
+        assert_eq!(
+            captured.len(),
+            1,
+            "same execute idempotencyKey must replay top-level execute instead of re-running handler"
+        );
+        let invocation = captured.first().expect("first invocation");
+        let expected_key = model_capability_invocation_idempotency_key(
+            Some("run-1"),
+            "session-1",
+            1,
+            "different-provider-call-id",
+            "execute",
+            "/tmp/worktree",
+            None,
+            &payload,
+        );
+        assert_eq!(
+            invocation.causal_context.idempotency_key.as_deref(),
+            Some(expected_key.as_str())
+        );
+    }
+
+    fn payload_object(value: &Value) -> serde_json::Map<String, Value> {
+        value.as_object().expect("payload object").clone()
     }
 
     #[test]

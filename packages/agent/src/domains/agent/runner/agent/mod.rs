@@ -8,7 +8,7 @@
 //! | `turn_runner` | Single turn: resolve live engine capability surface → build context → LLM call → process stream → invocations |
 //! | `stream_processor` | Consumes `Stream<StreamEvent>`, drives the select loop |
 //! | `stream_state` | Accumulator struct + event handlers for stream processing |
-//! | `capability_invocation_executor` | Execute capability invocations with policy/hooks/cancellation, then route actual execution through canonical engine functions; production fails closed if the live catalog target is unavailable |
+//! | `capability_invocation_executor` | Execute capability invocations with policy/hooks/cancellation, derive stable engine idempotency from model-facing `execute.idempotencyKey` when supplied, then route actual execution through canonical engine functions; production fails closed if the live catalog target is unavailable |
 //! | `event_emitter` | Broadcast channel wrapper for agent lifecycle events |
 //! | `compaction_handler` | Post-turn compaction trigger and subagent summarizer |
 //!

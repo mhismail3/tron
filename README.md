@@ -479,8 +479,11 @@ mutating or elevated-risk target needs one, uses supplied `arguments` to prefer
 schema-compatible candidates, validates target arguments, corrects safe
 wrapper-shape mistakes such as `payload` versus `arguments`, and only then
 routes through the same approval and child-invocation substrate. Mutating calls
-still require stable idempotency; model capability invocations derive a child
-key from the parent call when one is not passed explicitly. Every orchestration
+still require stable idempotency; when the model-facing `execute` payload
+supplies `idempotencyKey`, that caller key owns the top-level execute replay
+across provider call ids, and child calls inherit or receive stable keys from
+the prepared plan. When no caller key is supplied, model capability invocations
+derive a provider-call-scoped key for the attempt. Every orchestration
 attempt records bounded audit diagnostics with candidate scores, selected
 target, rejected candidates, corrections, freshness/approval decisions, child
 invocation ids, resource refs, replay source, and result classification.

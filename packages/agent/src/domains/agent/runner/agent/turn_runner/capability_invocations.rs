@@ -601,6 +601,7 @@ fn execute_observation_text(details: Option<&Value>) -> Option<String> {
         .and_then(Value::as_str);
     let child_invocation_ids = details
         .get("childInvocations")
+        .or_else(|| details.get("childInvocationIds"))
         .or_else(|| orchestration.get("childInvocationIds"))
         .cloned()
         .unwrap_or_else(|| json!([]));
@@ -610,6 +611,15 @@ fn execute_observation_text(details: Option<&Value>) -> Option<String> {
         .cloned()
         .unwrap_or_else(|| json!([]));
     let approval = execute_approval_state(details);
+    let approval_decision = details.get("approvalDecision").cloned().unwrap_or_else(|| {
+        json!({
+            "status": approval,
+            "approvalRequired": false,
+            "approvalCreated": false,
+            "approvalExecuted": false,
+            "approvalReplayed": false
+        })
+    });
     let observation = json!({
         "status": details
             .get("status")
@@ -620,6 +630,7 @@ fn execute_observation_text(details: Option<&Value>) -> Option<String> {
         "selectedImplementation": selected_implementation,
         "childInvocationIds": child_invocation_ids,
         "approval": approval,
+        "approvalDecision": approval_decision,
         "resourceRefs": resource_refs,
         "correctionsApplied": details
             .get("correctionsApplied")
@@ -665,11 +676,54 @@ fn execute_guidance_summary(details: &Value) -> Value {
     {
         summary.insert("validationKind".to_owned(), json!(validation_kind));
     }
+    if let Some(proposed_shape) = details
+        .get("proposedCapabilityShape")
+        .or_else(|| details.pointer("/orchestration/phaseDetails/proposedCapabilityShape"))
+        .cloned()
+    {
+        summary.insert("proposedCapabilityShape".to_owned(), proposed_shape);
+    }
+    if let Some(candidates) = details
+        .get("candidates")
+        .or_else(|| details.pointer("/orchestration/phaseDetails/candidates"))
+        .filter(|value| value.as_array().is_some())
+        .cloned()
+    {
+        summary.insert("candidates".to_owned(), candidates);
+    }
 
     Value::Object(summary)
 }
 
 fn execute_approval_state(details: &Value) -> &'static str {
+    if let Some(decision) = details.get("approvalDecision") {
+        if decision
+            .get("approvalExecuted")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || decision.get("status").and_then(Value::as_str) == Some("executed")
+        {
+            return "approved_executed";
+        }
+        if decision
+            .get("approvalCreated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || matches!(
+                decision.get("status").and_then(Value::as_str),
+                Some("pending" | "created")
+            )
+        {
+            return "pending";
+        }
+        if decision
+            .get("approvalRequired")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return "required";
+        }
+    }
     if details
         .get("approvalExecuted")
         .and_then(Value::as_bool)
@@ -849,6 +903,79 @@ mod tests {
         assert!(text.contains("\"missingArgumentPaths\""));
         assert!(text.contains("\"arguments.command\""));
         assert!(text.contains("\"arguments.executionMode\""));
+    }
+
+    #[test]
+    fn extract_result_content_projects_needs_capability_guidance_for_model() {
+        let exec = make_exec_result_with_details(
+            CapabilityResultBody::Text(
+                "No visible healthy capability matches the requested target.".into(),
+            ),
+            json!({
+                "status": "needs_capability",
+                "resourceRefs": [],
+                "childInvocationIds": [],
+                "approvalDecision": {
+                    "status": "not_required",
+                    "approvalRequired": false,
+                    "approvalCreated": false,
+                    "approvalExecuted": false,
+                    "approvalReplayed": false
+                },
+                "proposedCapabilityShape": {
+                    "contractId": "<namespace>::<function>",
+                    "argumentsSchema": {},
+                    "effect": "pure_read|idempotent_write|external_side_effect",
+                    "risk": "low|medium|high|critical"
+                },
+                "orchestration": {
+                    "status": "needs_capability",
+                    "childInvocationIds": [],
+                    "correctionsApplied": []
+                }
+            }),
+        );
+
+        let content = extract_result_content(&exec);
+
+        let CapabilityResultMessageContent::Text(text) = content else {
+            panic!("expected text projection");
+        };
+        assert!(text.contains("\"status\": \"needs_capability\""));
+        assert!(text.contains("\"approvalDecision\""));
+        assert!(text.contains("\"status\": \"not_required\""));
+        assert!(text.contains("\"childInvocationIds\": []"));
+        assert!(text.contains("\"proposedCapabilityShape\""));
+        assert!(text.contains("\"contractId\": \"<namespace>::<function>\""));
+    }
+
+    #[test]
+    fn execute_observation_approval_summary_reads_structured_decision() {
+        let exec = make_exec_result_with_details(
+            CapabilityResultBody::Text("Approval is pending.".into()),
+            json!({
+                "status": "approval_required",
+                "orchestration": {"status": "approval_required"},
+                "approvalDecision": {
+                    "status": "pending",
+                    "approvalRequired": true,
+                    "approvalCreated": true,
+                    "approvalExecuted": false,
+                    "approvalReplayed": false
+                },
+                "childInvocationIds": [],
+                "resourceRefs": []
+            }),
+        );
+
+        let content = extract_result_content(&exec);
+
+        let CapabilityResultMessageContent::Text(text) = content else {
+            panic!("expected text projection");
+        };
+        assert!(text.contains("\"approval\": \"pending\""));
+        assert!(text.contains("\"approvalDecision\""));
+        assert!(text.contains("\"status\": \"pending\""));
     }
 
     #[test]

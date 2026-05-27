@@ -1673,6 +1673,10 @@ fn enrich_orchestration_with_result(orchestration: &mut Value, result: &Value) {
     if let Some(approval_decision) = execution_approval_decision(details) {
         object.insert("approvalDecision".to_owned(), approval_decision);
     }
+    if let Some((missing_fields, missing_argument_paths)) = execution_missing_input(details) {
+        object.insert("missingFields".to_owned(), missing_fields);
+        object.insert("missingArgumentPaths".to_owned(), missing_argument_paths);
+    }
 }
 
 fn execution_resource_refs(details: &Value) -> Option<Value> {
@@ -1704,14 +1708,81 @@ fn execution_approval_decision(details: &Value) -> Option<Value> {
             .iter()
             .any(|key| details.get(*key).is_some());
             has_approval_fields.then(|| {
+                let approval_required = details
+                    .get("approvalRequired")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let approval_created = details
+                    .get("approvalCreated")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let approval_executed = details
+                    .get("approvalExecuted")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                let approval_replayed = details
+                    .get("approvalReplayed")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
                 json!({
-                    "approvalRequired": details.get("approvalRequired").cloned().unwrap_or(Value::Null),
-                    "approvalCreated": details.get("approvalCreated").cloned().unwrap_or(Value::Null),
-                    "approvalExecuted": details.get("approvalExecuted").cloned().unwrap_or(Value::Null),
-                    "approvalReplayed": details.get("approvalReplayed").cloned().unwrap_or(Value::Null),
+                    "approvalRequired": approval_required,
+                    "approvalCreated": approval_created,
+                    "approvalExecuted": approval_executed,
+                    "approvalReplayed": approval_replayed,
+                    "status": if approval_required || approval_created || approval_executed || approval_replayed {
+                        "approval_flow"
+                    } else {
+                        "not_required"
+                    },
                 })
             })
         })
+}
+
+fn execution_missing_input(details: &Value) -> Option<(Value, Value)> {
+    let missing_fields = details
+        .get("missingFields")
+        .filter(|value| value.as_array().is_some())
+        .cloned()
+        .or_else(|| {
+            details
+                .get("guidance")
+                .and_then(|guidance| guidance.get("missingFields"))
+                .filter(|value| value.as_array().is_some())
+                .cloned()
+        })
+        .or_else(|| {
+            details
+                .get("error")
+                .and_then(|error| error.get("details"))
+                .and_then(|details| details.get("missingFields"))
+                .filter(|value| value.as_array().is_some())
+                .cloned()
+        });
+    let missing_argument_paths = details
+        .get("missingArgumentPaths")
+        .filter(|value| value.as_array().is_some())
+        .cloned()
+        .or_else(|| {
+            details
+                .get("guidance")
+                .and_then(|guidance| guidance.get("missingArgumentPaths"))
+                .filter(|value| value.as_array().is_some())
+                .cloned()
+        })
+        .or_else(|| {
+            details
+                .get("error")
+                .and_then(|error| error.get("details"))
+                .and_then(|details| details.get("missingArgumentPaths"))
+                .filter(|value| value.as_array().is_some())
+                .cloned()
+        });
+
+    match (missing_fields, missing_argument_paths) {
+        (Some(fields), Some(paths)) => Some((fields, paths)),
+        _ => None,
+    }
 }
 
 fn attach_orchestration_details(
@@ -1800,7 +1871,7 @@ fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Va
             "candidates",
             "rejectedCandidates",
             "missingFields",
-            "missingPaths",
+            "missingArgumentPaths",
             "searchStatus",
             "proposedCapabilityShape",
             "error",
@@ -1974,6 +2045,75 @@ mod tests {
         assert_eq!(details["childInvocationIds"], json!(["child-read"]));
         assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
         assert_eq!(details["approvalDecision"]["approvalCreated"], json!(false));
+    }
+
+    #[test]
+    fn observe_phase_promotes_needs_input_recovery_fields() {
+        let result = capability_result_value(CapabilityResult {
+            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                "filesystem::read_file needs input before child execution".to_owned(),
+            )]),
+            details: Some(json!({
+                "status": "needs_input",
+                "error": {
+                    "code": "INVALID_PARAMS",
+                    "details": {
+                        "validationKind": "missing_required_argument",
+                        "missingFields": ["path"],
+                        "missingArgumentPaths": ["arguments.path"]
+                    }
+                },
+                "guidance": {
+                    "kind": "provide_missing_arguments",
+                    "missingFields": ["path"],
+                    "missingArgumentPaths": ["arguments.path"]
+                },
+                "missingFields": ["path"],
+                "missingArgumentPaths": ["arguments.path"],
+                "childInvocationCreated": false,
+                "childInvocationIds": [],
+                "approvalCreated": false,
+                "resourceRefs": []
+            })),
+            is_error: Some(true),
+            stop_turn: None,
+        })
+        .expect("capability result");
+        let mut orchestration = json!({
+            "status": "needs_input",
+            "childInvocationIds": []
+        });
+
+        enrich_orchestration_with_result(&mut orchestration, &result);
+        assert_eq!(orchestration["missingFields"], json!(["path"]));
+        assert_eq!(
+            orchestration["missingArgumentPaths"],
+            json!(["arguments.path"])
+        );
+        assert_eq!(
+            orchestration["approvalDecision"]["status"],
+            json!("not_required")
+        );
+
+        let attached =
+            attach_orchestration_details(result, orchestration).expect("attached result");
+        let attached: CapabilityResult =
+            serde_json::from_value(attached).expect("capability result");
+        let details = attached.details.expect("details");
+
+        assert_eq!(details["missingFields"], json!(["path"]));
+        assert_eq!(details["missingArgumentPaths"], json!(["arguments.path"]));
+        assert_eq!(details["childInvocationIds"], json!([]));
+        assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
+        assert_eq!(
+            details["approvalDecision"]["approvalRequired"],
+            json!(false)
+        );
+        assert_eq!(details["orchestration"]["missingFields"], json!(["path"]));
+        assert_eq!(
+            details["orchestration"]["missingArgumentPaths"],
+            json!(["arguments.path"])
+        );
     }
 
     #[test]
