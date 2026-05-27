@@ -303,6 +303,50 @@ async fn materialized_file_invalid_scope_does_not_touch_target_file() {
 }
 
 #[tokio::test]
+async fn patch_proposal_omits_absent_optional_string_fields() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+
+    let proposed = handle
+        .invoke(host_invocation(
+            "patch::propose",
+            json!({
+                "targetPath": "README.md",
+                "diff": "--- README.md\n+++ README.md\n@@\n-old\n+new\n"
+            }),
+            mutating_causal("patch-propose-optional-fields").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(proposed.error, None);
+    let resource_id = proposed.value.as_ref().unwrap()["resource"]["resourceId"]
+        .as_str()
+        .unwrap();
+
+    let inspected = handle
+        .invoke(host_invocation(
+            "resource::inspect",
+            json!({"resourceId": resource_id}),
+            causal().with_scope("resource.read"),
+        ))
+        .await;
+    assert_eq!(inspected.error, None);
+    let payload = &inspected.value.as_ref().unwrap()["inspection"]["versions"][0]["payload"];
+    assert_eq!(payload["targetPath"], "README.md");
+    assert_eq!(payload["status"], "proposed");
+    assert!(
+        payload.get("targetResourceId").is_none(),
+        "absent optional targetResourceId must not be serialized as null"
+    );
+    assert!(
+        payload.get("baseVersionId").is_none(),
+        "absent optional baseVersionId must not be serialized as null"
+    );
+    assert!(
+        payload.get("baseContentHash").is_none(),
+        "absent optional baseContentHash must not be serialized as null"
+    );
+}
+
+#[tokio::test]
 async fn resource_backed_invocation_fails_without_top_level_resource_refs() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle

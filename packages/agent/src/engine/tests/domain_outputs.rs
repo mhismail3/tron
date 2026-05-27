@@ -47,6 +47,58 @@ async fn inspect_resource(handle: &EngineHostHandle, resource_id: &str) -> Value
 }
 
 #[tokio::test]
+async fn filesystem_apply_patch_is_resource_backed_with_patch_evidence() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("README.md");
+    std::fs::write(&target, "Testing out a README here.\n").unwrap();
+
+    let applied = handle
+        .invoke(host_invocation(
+            "filesystem::apply_patch",
+            json!({
+                "path": target.to_string_lossy(),
+                "oldString": "Testing out a README here.\n",
+                "newString": "Testing out a README here.\nExecute apply_patch smoke\n"
+            }),
+            mutating_causal("filesystem-apply-patch-resource-backed")
+                .with_scope("filesystem.write"),
+        ))
+        .await;
+    assert_eq!(applied.error, None);
+    assert_eq!(
+        std::fs::read_to_string(&target).unwrap(),
+        "Testing out a README here.\nExecute apply_patch smoke\n"
+    );
+    let value = applied.value.as_ref().unwrap();
+    let refs = value["resourceRefs"].as_array().unwrap();
+    assert!(refs.iter().any(|reference| {
+        reference["kind"] == "materialized_file" && reference["role"] == "updated_file"
+    }));
+    let patch_ref = refs
+        .iter()
+        .find(|reference| {
+            reference["kind"] == "patch_proposal" && reference["role"] == "applied_patch"
+        })
+        .expect("apply_patch should return patch proposal evidence");
+
+    let patch = inspect_resource(&handle, patch_ref["resourceId"].as_str().unwrap()).await;
+    assert_eq!(patch["resource"]["kind"], "patch_proposal");
+    assert_eq!(patch["resource"]["lifecycle"], "proposed");
+    let payload = &patch["versions"][0]["payload"];
+    assert_eq!(
+        payload["targetPath"].as_str(),
+        Some(target.to_string_lossy().as_ref())
+    );
+    assert_eq!(payload["status"], "proposed");
+    assert!(
+        payload.get("baseContentHash").is_none(),
+        "filesystem apply_patch must not persist null optional patch fields"
+    );
+}
+
+#[tokio::test]
 async fn voice_notes_save_list_and_delete_are_resource_backed() {
     let ctx = crate::shared::server::test_support::make_test_context();
     let handle = ctx.engine_host.clone();

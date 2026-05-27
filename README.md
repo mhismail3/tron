@@ -272,7 +272,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 
 | Command | Description |
 |---------|-------------|
-| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` background via `nohup`). Stops the installed `com.tron.server` job before binding port `9847`, loads push relay env from `packages/mac-app/.env.local` when present, waits for `/health` in background mode, writes pre-database startup output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop. |
+| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`, loads push relay env from `packages/mac-app/.env.local` when present, waits for `/health` in background mode, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
 | `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc` |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
@@ -296,11 +296,11 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron start` | Start the launchd service (`com.tron.server`) |
 | `tron stop` | Stop the service |
 | `tron restart` | Restart the service |
-| `tron status` | Show service status, PID, port |
+| `tron status` | Show service/dev-takeover status, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
 | `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm) |
 | `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
 | `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to pair again) |
-| `tron logs` | Query database logs (`-h` for filter options) |
+| `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs (`-h` for filter options) |
 | `tron errors` | Show recent errors |
 
 ### Build Profiles

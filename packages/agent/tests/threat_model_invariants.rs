@@ -705,12 +705,34 @@ fn tron_dev_background_start_is_file_logged_and_health_checked() {
         .expect("scripts/tron must contain dev_start_background before dev_stop");
 
     assert!(
-        background_start.contains("tron-dev-background.log"),
+        background_start.contains("DEV_BACKGROUND_LOG"),
         "background dev startup must preserve server stdout/stderr in a file log"
     );
     assert!(
         background_start.contains("http://127.0.0.1:$PROD_PORT/health"),
         "background dev startup must wait for /health, not just a live pid"
+    );
+    assert!(
+        background_start.contains("listener_pid_for_port \"$PROD_PORT\""),
+        "background dev startup must report the actual listener pid instead of trusting the launched child pid"
+    );
+    assert!(
+        background_start.contains("cmd_status_json"),
+        "background dev startup must support machine-readable status for agent automation"
+    );
+    assert!(
+        content.contains("create_dev_launchd_plist()")
+            && background_start
+                .contains("launchctl bootstrap \"gui/$(id -u)\" \"$DEV_PLIST_PATH\""),
+        "background dev startup must use a transient LaunchAgent so automation shells do not own the server process group"
+    );
+    assert!(
+        content.contains("=== tron dev background exit") && content.contains("code=\\$exit_code"),
+        "background dev startup must record process exit details for postmortem automation"
+    );
+    assert!(
+        content.contains("trap \"\" HUP"),
+        "background dev startup must ignore terminal hangups so non-interactive agents can launch it reliably"
     );
     assert!(
         background_start.contains("tail -n 80 \"$dev_log\""),
@@ -719,6 +741,54 @@ fn tron_dev_background_start_is_file_logged_and_health_checked() {
     assert!(
         !background_start.contains(">/dev/null 2>&1 &"),
         "background dev startup must not discard pre-database startup failures"
+    );
+}
+
+#[test]
+fn tron_cli_status_and_logs_are_agent_automation_ready() {
+    let repo_root = repo_root();
+    let script_path = repo_root.join("scripts").join("tron");
+    let script = std::fs::read_to_string(&script_path)
+        .unwrap_or_else(|e| panic!("failed to read {script_path:?}: {e}"));
+    let lib_path = repo_root.join("scripts").join("tron-lib.sh");
+    let lib = std::fs::read_to_string(&lib_path)
+        .unwrap_or_else(|e| panic!("failed to read {lib_path:?}: {e}"));
+
+    assert!(
+        lib.contains("DB_PATH=\"$TRON_HOME/internal/database/tron.sqlite\""),
+        "tron logs/status helpers must use the unified tron.sqlite database, not retired log.db"
+    );
+    assert!(
+        lib.contains("--tail)") && lib.contains("--json)"),
+        "tron logs must keep machine-friendly --tail and --json aliases used by automation"
+    );
+    assert!(
+        lib.contains("cmd_status_json()"),
+        "tron status must expose a machine-readable status function"
+    );
+    assert!(
+        lib.contains("\"mode\"") && lib.contains("\"listenerPid\"") && lib.contains("\"healthy\""),
+        "tron status --json must include mode, listenerPid, and healthy fields"
+    );
+    assert!(
+        lib.contains("\"pidFileStale\"")
+            && lib.contains("\"pidFilePid\"")
+            && lib.contains("\"logPath\"")
+            && lib.contains("\"devLaunchdLoaded\""),
+        "tron status --json must expose stale pid-file and log-path diagnostics for agents"
+    );
+    assert!(
+        lib.contains("DEV_BACKGROUND_LOG=\"$RUN_DIR/tron-dev-background.log\"")
+            && lib.contains("DEV_BACKGROUND_PID_FILE=\"$RUN_DIR/tron-dev-background.pid\""),
+        "dev background log and pid paths must stay centralized in scripts/tron-lib.sh"
+    );
+    assert!(
+        script.contains("status)    shift; cmd_status \"$@\" ;;"),
+        "main dispatch must pass status flags such as --json through to cmd_status"
+    );
+    assert!(
+        script.contains("--wait SECONDS") && script.contains("--json"),
+        "tron dev help and parser must advertise agent-friendly --wait and --json flags"
     );
 }
 

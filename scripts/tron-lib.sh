@@ -40,6 +40,8 @@ INSTALLED_PROGRAM_WORKER="$INSTALLED_BUNDLE/Contents/MacOS/tron-program-worker"
 DEV_BUNDLE="$RUN_DIR/Tron-Dev.app"
 DEV_BINARY="$DEV_BUNDLE/Contents/MacOS/tron"
 DEV_PROGRAM_WORKER="$DEV_BUNDLE/Contents/MacOS/tron-program-worker"
+DEV_BACKGROUND_LOG="$RUN_DIR/tron-dev-background.log"
+DEV_BACKGROUND_PID_FILE="$RUN_DIR/tron-dev-background.pid"
 
 # Keychain profile name for xcrun notarytool (see notarize_bundle).
 # One-time setup per developer machine:
@@ -49,7 +51,9 @@ NOTARIZE_PROFILE="tron-notarize"
 
 # Service configuration
 PLIST_NAME="com.tron.server"
+DEV_PLIST_NAME="com.tron.server.dev-takeover"
 PLIST_PATH="$HOME/Library/LaunchAgents/$PLIST_NAME.plist"
+DEV_PLIST_PATH="$HOME/Library/LaunchAgents/$DEV_PLIST_NAME.plist"
 RELEASE_APP="/Applications/Tron.app"
 RELEASE_APP_BINARY="$RELEASE_APP/Contents/MacOS/Tron"
 RELEASE_LAUNCH_AGENT_PLIST="$RELEASE_APP/Contents/Library/LaunchAgents/$PLIST_NAME.plist"
@@ -60,7 +64,7 @@ DEPLOYED_COMMIT_FILE="$CONTRIBUTOR_DIR/deployed-commit"
 ONBOARDED_MARKER_PATH="$RUN_DIR/.onboarded"
 
 # Database
-DB_PATH="$TRON_HOME/internal/database/log.db"
+DB_PATH="$TRON_HOME/internal/database/tron.sqlite"
 
 # OAuth
 AUTH_FILE="$PROFILES_DIR/auth.json"
@@ -391,6 +395,104 @@ health_check() {
     [ "$response" = "200" ]
 }
 
+listener_pid_for_port() {
+    local port="${1:-$PROD_PORT}"
+    lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
+}
+
+pid_uptime() {
+    local pid="$1"
+    [ -n "$pid" ] || return 0
+    ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ' || true
+}
+
+server_health_bool() {
+    if health_check; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+cmd_status_json() {
+    local service_loaded=false
+    local dev_loaded=false
+    local mode="stopped"
+    local listener_pid
+    local pid_file_pid=""
+    local pid_file_stale=false
+    local uptime=""
+    local healthy
+
+    if service_is_running; then
+        service_loaded=true
+        mode="prod"
+    fi
+    if launchd_is_loaded "$DEV_PLIST_NAME"; then
+        dev_loaded=true
+        if [ "$mode" = "stopped" ]; then
+            mode="dev_starting"
+        fi
+    fi
+
+    listener_pid="$(listener_pid_for_port "$PROD_PORT")"
+    if [ -f "$DEV_BACKGROUND_PID_FILE" ]; then
+        pid_file_pid="$(cat "$DEV_BACKGROUND_PID_FILE" 2>/dev/null || true)"
+    fi
+    if [ -n "$listener_pid" ]; then
+        if [ "$service_loaded" = true ]; then
+            mode="prod"
+        elif [ "$dev_loaded" = true ]; then
+            mode="dev_takeover"
+        else
+            mode="dev_takeover"
+        fi
+        uptime="$(pid_uptime "$listener_pid")"
+    elif [ -n "$pid_file_pid" ]; then
+        pid_file_stale=true
+    fi
+
+    healthy="$(server_health_bool)"
+
+    TRON_STATUS_MODE="$mode" \
+    TRON_STATUS_SERVICE_LOADED="$service_loaded" \
+    TRON_STATUS_DEV_LOADED="$dev_loaded" \
+    TRON_STATUS_DEV_LABEL="$DEV_PLIST_NAME" \
+    TRON_STATUS_LISTENER_PID="$listener_pid" \
+    TRON_STATUS_PID_FILE_PID="$pid_file_pid" \
+    TRON_STATUS_PID_FILE_STALE="$pid_file_stale" \
+    TRON_STATUS_HEALTHY="$healthy" \
+    TRON_STATUS_UPTIME="$uptime" \
+    TRON_STATUS_SERVER_URL="http://localhost:$PROD_PORT" \
+    TRON_STATUS_HEALTH_URL="http://localhost:$PROD_PORT/health" \
+    TRON_STATUS_DB_PATH="$DB_PATH" \
+    TRON_STATUS_LOG_PATH="$DEV_BACKGROUND_LOG" \
+    TRON_STATUS_PID_FILE_PATH="$DEV_BACKGROUND_PID_FILE" \
+    python3 - <<'PY'
+import json
+import os
+
+pid = os.environ.get("TRON_STATUS_LISTENER_PID") or None
+pid_file_pid = os.environ.get("TRON_STATUS_PID_FILE_PID") or None
+print(json.dumps({
+    "mode": os.environ["TRON_STATUS_MODE"],
+    "serviceLoaded": os.environ["TRON_STATUS_SERVICE_LOADED"] == "true",
+    "devLaunchdLoaded": os.environ["TRON_STATUS_DEV_LOADED"] == "true",
+    "devLaunchdLabel": os.environ["TRON_STATUS_DEV_LABEL"],
+    "listenerPid": int(pid) if pid and pid.isdigit() else None,
+    "pidFilePid": int(pid_file_pid) if pid_file_pid and pid_file_pid.isdigit() else None,
+    "pidFileStale": os.environ["TRON_STATUS_PID_FILE_STALE"] == "true",
+    "healthy": os.environ["TRON_STATUS_HEALTHY"] == "true",
+    "uptime": os.environ.get("TRON_STATUS_UPTIME") or None,
+    "server": os.environ["TRON_STATUS_SERVER_URL"],
+    "health": os.environ["TRON_STATUS_HEALTH_URL"],
+    "databasePath": os.environ["TRON_STATUS_DB_PATH"],
+    "logPath": os.environ["TRON_STATUS_LOG_PATH"],
+    "pidFilePath": os.environ["TRON_STATUS_PID_FILE_PATH"],
+}, sort_keys=True))
+PY
+}
+
 # Create a minimal headless .app bundle for macOS TCC identity.
 # macOS identifies app bundles by CFBundleIdentifier — a stable string that
 # survives binary replacements. This is how permissions persist across deploys.
@@ -701,6 +803,7 @@ sign_and_notarize() {
 query_logs() {
     local level=""
     local output=""
+    local format="text"
     local limit=50
     local session=""
     local search=""
@@ -710,6 +813,8 @@ query_logs() {
             -l|--level)   level="$2"; shift 2 ;;
             -o|--output)  output="$2"; shift 2 ;;
             -n|--limit)   limit="$2"; shift 2 ;;
+            --tail)        limit="$2"; shift 2 ;;
+            --json)        format="json"; shift ;;
             -s|--session) session="$2"; shift 2 ;;
             -q|--search)  search="$2"; shift 2 ;;
             -h|--help)
@@ -721,6 +826,8 @@ query_logs() {
                 echo "Options:"
                 echo "  -l, --level LEVEL    Filter by level (trace/debug/info/warn/error)"
                 echo "  -n, --limit N        Number of logs to show (default: 50)"
+                echo "  --tail N             Alias for --limit N"
+                echo "  --json               Emit newline-delimited JSON rows"
                 echo "  -o, --output FILE    Write output to file"
                 echo "  -s, --session ID     Filter by session ID"
                 echo "  -q, --search TEXT    Search log messages"
@@ -765,6 +872,10 @@ query_logs() {
     fi
 
     [ -n "$session" ] && conditions+=("session_id LIKE '%$session%'")
+    if ! [[ "$limit" =~ ^[0-9]+$ ]] || [ "$limit" -lt 1 ]; then
+        print_error "Invalid limit: $limit"
+        return 1
+    fi
 
     local where_clause=""
     if [ ${#conditions[@]} -gt 0 ]; then
@@ -772,17 +883,22 @@ query_logs() {
     fi
 
     local sql
+    local select_clause="timestamp, level, component, message, session_id, error_message"
+    if [ "$format" = "json" ]; then
+        select_clause="json_object('timestamp', timestamp, 'level', level, 'component', component, 'message', message, 'sessionId', session_id, 'workspaceId', workspace_id, 'traceId', trace_id, 'origin', origin, 'errorMessage', error_message)"
+    fi
+
     if [ -n "$search" ]; then
         local escaped_search="${search//\'/\'\'}"
         local search_cond="(message LIKE '%${escaped_search}%' OR component LIKE '%${escaped_search}%' OR error_message LIKE '%${escaped_search}%')"
-        sql="SELECT timestamp, level, component, message, session_id, error_message
+        sql="SELECT $select_clause
              FROM logs
              WHERE ${search_cond}
              ${where_clause:+AND ${where_clause#WHERE }}
              ORDER BY timestamp DESC
              LIMIT $limit"
     else
-        sql="SELECT timestamp, level, component, message, session_id, error_message
+        sql="SELECT $select_clause
              FROM logs
              $where_clause
              ORDER BY timestamp DESC
@@ -799,6 +915,16 @@ query_logs() {
 
     if [ -z "$result" ]; then
         echo -e "${DIM}No logs found matching criteria${NC}"
+        return 0
+    fi
+
+    if [ "$format" = "json" ]; then
+        if [ -n "$output" ]; then
+            echo "$result" > "$output"
+            print_success "Wrote $(wc -l < "$output" | tr -d ' ') logs to $output"
+        else
+            echo "$result"
+        fi
         return 0
     fi
 
@@ -871,6 +997,30 @@ RESULT
 #=============================================================================
 
 cmd_status() {
+    local output_json=false
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --json) output_json=true; shift ;;
+            -h|--help)
+                echo ""
+                echo -e "${CYAN}tron status${NC} - Show service/dev takeover status"
+                echo ""
+                echo "Usage: tron status [--json]"
+                echo ""
+                echo "Options:"
+                echo "  --json  Emit machine-readable status on stdout"
+                echo ""
+                return 0
+                ;;
+            *) shift ;;
+        esac
+    done
+
+    if [ "$output_json" = true ]; then
+        cmd_status_json
+        return
+    fi
+
     # $PROJECT_DIR is set by workspace script; otherwise try workspace-path file
     local git_dir="${PROJECT_DIR:-}"
     if [ -z "$git_dir" ] && [ -f "$CONTRIBUTOR_DIR/workspace-path" ]; then
@@ -921,13 +1071,38 @@ cmd_status() {
     # Dev takeover status
     if ! service_is_running; then
         local dev_pid
-        dev_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
+        dev_pid=$(listener_pid_for_port "$PROD_PORT")
         if [ -n "$dev_pid" ]; then
             echo ""
             print_success "Dev takeover: ${GREEN}ACTIVE${NC} (PID: $dev_pid)"
             echo "  Server: http://localhost:$PROD_PORT"
+            echo "  Health: http://localhost:$PROD_PORT/health"
             local dev_uptime=$(ps -o etime= -p "$dev_pid" 2>/dev/null | tr -d ' ')
             [ -n "$dev_uptime" ] && echo "  Uptime: $dev_uptime"
+            if health_check; then
+                echo -e "  Status: ${GREEN}Healthy${NC}"
+            else
+                echo -e "  Status: ${YELLOW}Not responding${NC}"
+            fi
+        elif launchd_is_loaded "$DEV_PLIST_NAME"; then
+            echo ""
+            print_warning "Dev takeover launchd job is loaded but no listener is active"
+            echo "  Label: $DEV_PLIST_NAME"
+            echo "  Log file: $DEV_BACKGROUND_LOG"
+        fi
+    fi
+
+    if ! service_is_running; then
+        local stale_pid_file="$DEV_BACKGROUND_PID_FILE"
+        local stale_pid=""
+        if [ -f "$stale_pid_file" ]; then
+            stale_pid="$(cat "$stale_pid_file" 2>/dev/null || true)"
+            if [ -n "$stale_pid" ] && [ -z "$(listener_pid_for_port "$PROD_PORT")" ]; then
+                echo ""
+                print_warning "Dev takeover pid file is stale (recorded PID: $stale_pid)"
+                echo "  PID file: $stale_pid_file"
+                echo "  Log file: $DEV_BACKGROUND_LOG"
+            fi
         fi
     fi
 

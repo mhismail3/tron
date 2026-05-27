@@ -1746,21 +1746,35 @@ fn patch_propose_response(
     store: &mut super::ResourceStoreBackend,
     invocation: &Invocation,
 ) -> Result<Value> {
-    let payload = json!({
-        "targetPath": required_str(&invocation.payload, "targetPath")?,
-        "targetResourceId": optional_string(invocation.payload.get("targetResourceId"))?,
-        "baseVersionId": optional_string(invocation.payload.get("baseVersionId"))?,
-        "baseContentHash": optional_string(invocation.payload.get("baseContentHash"))?,
-        "diff": required_str(&invocation.payload, "diff")?,
-        "status": "proposed",
-        "result": invocation.payload.get("result").cloned().unwrap_or_else(|| json!({})),
-    });
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        "targetPath".to_owned(),
+        json!(required_str(&invocation.payload, "targetPath")?),
+    );
+    for field in ["targetResourceId", "baseVersionId", "baseContentHash"] {
+        if let Some(value) = optional_string(invocation.payload.get(field))? {
+            payload.insert(field.to_owned(), json!(value));
+        }
+    }
+    payload.insert(
+        "diff".to_owned(),
+        json!(required_str(&invocation.payload, "diff")?),
+    );
+    payload.insert("status".to_owned(), json!("proposed"));
+    payload.insert(
+        "result".to_owned(),
+        invocation
+            .payload
+            .get("result")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    );
     let resource = create_typed_resource(
         store,
         invocation,
         "patch_proposal",
         Some("proposed"),
-        Some(payload),
+        Some(Value::Object(payload)),
     )?;
     let resource_ref = resource_ref_from_resource(&resource, "patch");
     Ok(json!({
@@ -1797,19 +1811,34 @@ fn patch_apply_response(
             .or_else(|| patch_payload.get("targetResourceId").and_then(Value::as_str).map(str::to_owned)),
     });
     let (_materialized, file_version) = create_materialized_file(store, &child_invocation, true)?;
+    let mut patch_payload_update = serde_json::Map::new();
+    patch_payload_update.insert("targetPath".to_owned(), json!(path));
+    patch_payload_update.insert(
+        "targetResourceId".to_owned(),
+        json!(file_version.resource_id.as_str()),
+    );
+    for field in ["baseVersionId", "baseContentHash"] {
+        if let Some(value) = patch_payload.get(field).and_then(Value::as_str) {
+            patch_payload_update.insert(field.to_owned(), json!(value));
+        }
+    }
+    patch_payload_update.insert(
+        "diff".to_owned(),
+        patch_payload
+            .get("diff")
+            .cloned()
+            .unwrap_or_else(|| json!("")),
+    );
+    patch_payload_update.insert("status".to_owned(), json!("applied"));
+    patch_payload_update.insert(
+        "result".to_owned(),
+        json!({"versionId": file_version.version_id.as_str()}),
+    );
     let patch_version = store.update(UpdateResource {
         resource_id: patch_id.clone(),
         expected_current_version_id: patch_inspection.resource.current_version_id.clone(),
         lifecycle: Some("applied".to_owned()),
-        payload: json!({
-            "targetPath": path,
-            "targetResourceId": file_version.resource_id.as_str(),
-            "baseVersionId": patch_payload.get("baseVersionId").cloned().unwrap_or(Value::Null),
-            "baseContentHash": patch_payload.get("baseContentHash").cloned().unwrap_or(Value::Null),
-            "diff": patch_payload.get("diff").cloned().unwrap_or_else(|| json!("")),
-            "status": "applied",
-            "result": {"versionId": file_version.version_id.as_str()},
-        }),
+        payload: Value::Object(patch_payload_update),
         state: None,
         locations: Vec::new(),
         trace_id: invocation.causal_context.trace_id.clone(),
