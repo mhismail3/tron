@@ -1497,6 +1497,15 @@ fn is_capability_primitive(function: &FunctionDefinition) -> bool {
         .unwrap_or(false)
 }
 
+fn capability_primitive_target_error(function: &FunctionDefinition) -> CapabilityError {
+    CapabilityError::InvalidParams {
+        message: format!(
+            "execute cannot target {} because it is a capability primitive. This call is already the execute primitive; set target to the real capability, for example filesystem::read_file or process::run, and put only that target's arguments inside arguments.",
+            function.id.as_str()
+        ),
+    }
+}
+
 fn enforce_execution_policy(
     invocation: &Invocation,
     decision: &CapabilityBindingDecision,

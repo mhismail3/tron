@@ -3,10 +3,10 @@
 use serde_json::{Value, json};
 
 use super::{
-    ResolvedCapabilityTarget, actor_from_invocation, capability_result_value,
-    child_idempotency_key, child_idempotency_required, enforce_execution_policy,
-    execution_requires_approval, is_capability_primitive, merge_optional_details,
-    missing_inspection_requirements_error, registry_store_error,
+    ResolvedCapabilityTarget, actor_from_invocation, capability_primitive_target_error,
+    capability_result_value, child_idempotency_key, child_idempotency_required,
+    enforce_execution_policy, execution_requires_approval, is_capability_primitive,
+    merge_optional_details, missing_inspection_requirements_error, registry_store_error,
     requires_fresh_revision_for_payload, resolve_target, validate_inspection_handle,
     validate_target_payload, validate_target_policy_before_approval,
 };
@@ -31,9 +31,7 @@ pub(super) async fn execute_invoke_value(
     let target = resolve_target(&invocation.payload, deps, &actor).await?;
     let function = target.entry.function.clone();
     if is_capability_primitive(&function) {
-        return Err(CapabilityError::InvalidParams {
-            message: "execute cannot recursively invoke capability primitives. This call is already the execute primitive; set target to the real capability, for example process::run, and put only that target's arguments inside arguments.".to_owned(),
-        });
+        return Err(capability_primitive_target_error(&function));
     }
     enforce_execution_policy(invocation, &target.binding_decision, &function)?;
 

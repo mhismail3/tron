@@ -4,11 +4,11 @@ use serde_json::{Map, Value, json};
 use std::collections::BTreeSet;
 
 use super::{
-    ResolvedCapabilityTarget, actor_from_invocation, capability_result_value,
-    effect_class_from_str, effect_field, index_status_needs_vector_warmup,
-    registry_metadata_sync_policy, registry_store_error, requires_fresh_revision_for_payload,
-    resolve_target, risk_field, risk_level_from_str, run, schedule_vector_warmup,
-    validate_target_payload,
+    ResolvedCapabilityTarget, actor_from_invocation, capability_primitive_target_error,
+    capability_result_value, effect_class_from_str, effect_field, index_status_needs_vector_warmup,
+    is_capability_primitive, registry_metadata_sync_policy, registry_store_error,
+    requires_fresh_revision_for_payload, resolve_target, risk_field, risk_level_from_str, run,
+    schedule_vector_warmup, validate_target_payload,
 };
 use crate::domains::capability::Deps;
 use crate::domains::capability::registry::{
@@ -243,6 +243,44 @@ async fn execute_orchestrated_value(
         }
     };
     let function = target.entry.function.clone();
+    if is_capability_primitive(&function) {
+        let error = capability_primitive_target_error(&function);
+        let diagnostics = orchestration_details(
+            &orchestration_id,
+            "request_invalid",
+            input.intent.as_deref(),
+            None,
+            &input,
+            json!({
+                "phase": "prepare",
+                "resolveMode": resolve.mode,
+                "selectedTarget": {
+                    "contractId": target.entry.contract_id.as_str(),
+                    "implementationId": target.entry.implementation_id.as_str(),
+                    "functionId": function.id.as_str(),
+                    "catalogRevision": target.entry.catalog_revision,
+                    "schemaDigest": target.entry.schema_digest.as_str(),
+                },
+                "error": capability_error_details(&error),
+                "guidance": {
+                    "kind": "target_real_capability",
+                    "message": "Call execute once. Use target for the real capability you want, not capability::execute, and put only that capability's arguments inside arguments.",
+                    "examples": [
+                        {"target": "filesystem::read_file", "arguments": {"path": "README.md"}},
+                        {"target": "process::run", "arguments": {"command": "date", "executionMode": "read_only"}}
+                    ]
+                }
+            }),
+            Vec::new(),
+        );
+        record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+        return orchestration_result(
+            "request_invalid",
+            &format!("execute target is invalid: {error}"),
+            diagnostics,
+            true,
+        );
+    }
     if let Err(error) = validate_orchestration_constraints(&input.constraints, &target.entry) {
         let diagnostics = orchestration_details(
             &orchestration_id,
@@ -1875,6 +1913,7 @@ fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Va
             "searchStatus",
             "proposedCapabilityShape",
             "error",
+            "guidance",
         ] {
             if let Some(value) = phase_details.get(key) {
                 details.insert(key.to_owned(), value.clone());
@@ -2168,6 +2207,56 @@ mod tests {
             json!("do something with files")
         );
         assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
+        assert_eq!(details["resourceRefs"], json!([]));
+    }
+
+    #[test]
+    fn terminal_orchestration_result_promotes_guidance_for_invalid_target() {
+        let diagnostics = json!({
+            "orchestrationId": "capability-orchestration:test",
+            "status": "request_invalid",
+            "intent": "wrap execute",
+            "correctedRequest": {
+                "intent": "wrap execute",
+                "target": "capability::execute",
+                "arguments": {}
+            },
+            "correctionsApplied": [],
+            "correctionConfidence": 1.0,
+            "phaseDetails": {
+                "phase": "prepare",
+                "selectedTarget": {
+                    "functionId": "capability::execute"
+                },
+                "error": {
+                    "code": "INVALID_PARAMS",
+                    "message": "execute cannot target capability::execute because it is a capability primitive"
+                },
+                "guidance": {
+                    "kind": "target_real_capability",
+                    "message": "Call execute once.",
+                    "examples": [
+                        {"target": "filesystem::read_file", "arguments": {"path": "README.md"}}
+                    ]
+                }
+            },
+            "childInvocationIds": []
+        });
+
+        let result = orchestration_result(
+            "request_invalid",
+            "execute target is invalid.",
+            diagnostics,
+            true,
+        )
+        .expect("orchestration result");
+        let result: CapabilityResult = serde_json::from_value(result).expect("capability result");
+        let details = result.details.expect("details");
+
+        assert_eq!(details["status"], json!("request_invalid"));
+        assert_eq!(details["guidance"]["kind"], json!("target_real_capability"));
+        assert_eq!(details["childInvocationIds"], json!([]));
         assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
         assert_eq!(details["resourceRefs"], json!([]));
     }

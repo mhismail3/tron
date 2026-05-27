@@ -391,14 +391,14 @@ fn execute_model_request_schema() -> serde_json::Value {
             "arguments": {"type": "object", "description": "Arguments for the resolved target capability only. Example for process::run: {\"command\":\"date\",\"executionMode\":\"read_only\"}. Omit arguments for pure discovery if required fields are not known yet. If execute returns needs_input, retry the same selected target with the missing fields. Do not include wrapper fields such as target, contractId, capabilityId, functionId, implementationId, payload, mode, inspectionHandle, idempotencyKey, reason, or expectedRevision here."},
             "constraints": {
                 "type": "object",
-                "additionalProperties": false,
+                "additionalProperties": true,
                 "properties": {
                     "riskMax": {"type": "string", "description": "Optional maximum risk: low, medium, high, or critical."},
                     "effect": {"type": "string", "description": "Optional exact effect-class constraint, such as pure_read or external_side_effect."},
                     "allowedContracts": {"type": "array", "items": {"type": "string"}},
                     "allowedNamespaces": {"type": "array", "items": {"type": "string"}}
                 },
-                "description": "Optional v1 bounds for resolution and preparation. Supported fields are riskMax, effect, allowedContracts, and allowedNamespaces. Constraints never broaden authority; unsupported constraint fields are rejected instead of ignored."
+                "description": "Optional v1 bounds for resolution and preparation. Supported fields are riskMax, effect, allowedContracts, and allowedNamespaces. The schema accepts an object so execute can return structured constraints_rejected guidance for unsupported fields instead of failing at provider/schema validation. Constraints never broaden authority; unsupported constraint fields are rejected instead of ignored."
             },
             "payload": {"type": "object", "description": "Accepted only as a correctable alias for arguments. Prefer arguments; if supplied, the engine records a payload_to_arguments correction."},
             "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key for mutating or resource-producing work. Safe read-only calls may omit it. Keep this top-level; do not put it inside arguments."},
@@ -653,6 +653,16 @@ mod tests {
             .as_str()
             .expect("payload alias description");
         assert!(payload_description.contains("correctable alias"));
+
+        assert_eq!(
+            schema["properties"]["constraints"]["additionalProperties"],
+            json!(true),
+            "model-facing execute must route unsupported constraint fields through orchestration guidance"
+        );
+        let constraints_description = schema["properties"]["constraints"]["description"]
+            .as_str()
+            .expect("constraints description");
+        assert!(constraints_description.contains("constraints_rejected"));
 
         let idempotency_description = schema["properties"]["idempotencyKey"]["description"]
             .as_str()
