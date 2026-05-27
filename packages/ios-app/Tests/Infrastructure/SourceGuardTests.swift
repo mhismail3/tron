@@ -419,23 +419,25 @@ struct SourceGuardTests {
             contentsOf: inputRoot.appendingPathComponent("InputBar.swift"),
             encoding: .utf8
         )
-        let inputTextField = try String(
-            contentsOf: inputRoot.appendingPathComponent("InputTextField.swift"),
+        let exactPromptInput = try String(
+            contentsOf: inputRoot.appendingPathComponent("ExactPromptTextInput.swift"),
             encoding: .utf8
         )
-        let viewExtensions = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Extensions/View+Extensions.swift"),
-            encoding: .utf8
-        )
+        #expect(!FileManager.default.fileExists(atPath: inputRoot.appendingPathComponent("InputTextField.swift").path))
 
-        #expect(viewExtensions.contains("func exactAgentPromptInput() -> some View"))
-        #expect(viewExtensions.contains(".textInputAutocapitalization(.never)"))
-        #expect(viewExtensions.contains(".autocorrectionDisabled(true)"))
-        #expect(viewExtensions.contains(".keyboardType(.asciiCapable)"))
-        #expect(viewExtensions.contains(".textContentType(.none)"))
-        #expect(inputBar.contains(".exactAgentPromptInput()"))
-        #expect(inputTextField.components(separatedBy: ".exactAgentPromptInput()").count - 1 == 3)
-        for inputFile in [inputBar, inputTextField] {
+        #expect(inputBar.contains("ExactPromptTextInput("))
+        #expect(!inputBar.contains(#"TextField("", text: $state.text"#))
+        #expect(exactPromptInput.contains("UIViewRepresentable"))
+        #expect(exactPromptInput.contains("UITextViewDelegate"))
+        #expect(exactPromptInput.contains("view.autocapitalizationType = .none"))
+        #expect(exactPromptInput.contains("view.autocorrectionType = .no"))
+        #expect(exactPromptInput.contains("view.spellCheckingType = .no"))
+        #expect(exactPromptInput.contains("view.smartQuotesType = .no"))
+        #expect(exactPromptInput.contains("view.smartDashesType = .no"))
+        #expect(exactPromptInput.contains("view.smartInsertDeleteType = .no"))
+        #expect(exactPromptInput.contains("view.keyboardType = .asciiCapable"))
+        #expect(exactPromptInput.contains("view.textContentType = nil"))
+        for inputFile in [inputBar, exactPromptInput] {
             #expect(!inputFile.contains(".textInputAutocapitalization(.sentences)"))
             #expect(!inputFile.contains(".textInputAutocapitalization(.words)"))
             #expect(!inputFile.contains(".autocorrectionDisabled(false)"))

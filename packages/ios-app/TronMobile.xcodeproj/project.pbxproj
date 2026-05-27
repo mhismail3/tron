@@ -461,7 +461,6 @@
 		9048D955BCAD323414ECF050 /* InteractivePopGestureEnabler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A3B448D4BFCEE5CCA03B17E /* InteractivePopGestureEnabler.swift */; };
 		905084A9FBDDEF2ABADC1FF4 /* UserInteractionViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5264C4200057D764B5E8D396 /* UserInteractionViewer.swift */; };
 		917725861DF55D59AE45214A /* EngineProtocolTypes+PromptLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09D6C71C40C3D3B3F0351F72 /* EngineProtocolTypes+PromptLibrary.swift */; };
-		91913D4D67A083554752DE1A /* InputTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = B478FD27FC82E5A327E552C0 /* InputTextField.swift */; };
 		919158F20BD63691213F11DB /* IBMPlexMono-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = CF69380B2E839981F4B4E30E /* IBMPlexMono-Light.ttf */; };
 		91B1C9C5295032287DEDFC43 /* SessionEvent+Summary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50681B0022CE0DC53DBDD6EC /* SessionEvent+Summary.swift */; };
 		92ACA2A5BB42F349E463117D /* TextContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75F155A58B279098B1890026 /* TextContentView.swift */; };
@@ -738,6 +737,7 @@
 		E91B02E1709302557C6FC422 /* MemorySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD995EFB90E03464D115FD49 /* MemorySection.swift */; };
 		E9DAF5D4C59C2CEE77849300 /* CapabilityArgumentParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D9114819AFE4BBBB919923 /* CapabilityArgumentParserTests.swift */; };
 		E9F59C12D8C326B102257D82 /* PromptLibraryManagementSurfaceSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = C28833A97764DBF8F355302C /* PromptLibraryManagementSurfaceSheet.swift */; };
+		E9F78B2874AC71AD406F7B3E /* ExactPromptTextInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957FAEAA0F2A9356B518701F /* ExactPromptTextInput.swift */; };
 		EA5BF8AD66175B36167BFE38 /* SettingsSectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0CC011B42691A3B41CD7A0E /* SettingsSectionHeader.swift */; };
 		EA6277326CA60A196FE41715 /* ContextSettingsPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC1C325D5E32EDF3D5B0CED0 /* ContextSettingsPage.swift */; };
 		EA667FF49EB94A85A9163E8C /* SheetCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EC812A9F8EF55833E9FCB1 /* SheetCoordinatorTests.swift */; };
@@ -1327,6 +1327,7 @@
 		93C91C4F1A308F5CA00B54C4 /* EngineProtocolTypesWorktreeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineProtocolTypesWorktreeTests.swift; sourceTree = "<group>"; };
 		94E8411550275B4DEA1E38CD /* SubagentChip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentChip.swift; sourceTree = "<group>"; };
 		955D79B6FEFDD1A5C60BCCCD /* SettingsSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSupport.swift; sourceTree = "<group>"; };
+		957FAEAA0F2A9356B518701F /* ExactPromptTextInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExactPromptTextInput.swift; sourceTree = "<group>"; };
 		95A57FFB0CA4967AA9029825 /* SubagentStatBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentStatBadge.swift; sourceTree = "<group>"; };
 		967D014F043148A42666DDA5 /* TreeRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TreeRepositoryTests.swift; sourceTree = "<group>"; };
 		96E1AEE3FD94E75C67C21B73 /* VoiceNotesRecordingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceNotesRecordingSheet.swift; sourceTree = "<group>"; };
@@ -1436,7 +1437,6 @@
 		B3E729EBF19BB143F74A6C41 /* EventTypeRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventTypeRegistryTests.swift; sourceTree = "<group>"; };
 		B44475F52803F0F4948BDD96 /* OnboardingStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStateTests.swift; sourceTree = "<group>"; };
 		B474F56DF5573C102B41B7FA /* ImageContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageContent.swift; sourceTree = "<group>"; };
-		B478FD27FC82E5A327E552C0 /* InputTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputTextField.swift; sourceTree = "<group>"; };
 		B4B65C803EB12E8C7004E843 /* View+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "View+Extensions.swift"; sourceTree = "<group>"; };
 		B52996CFD0633CCF275D0DF5 /* DiagnosticsRedactorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsRedactorTests.swift; sourceTree = "<group>"; };
 		B5A3DB5AC2086A0D9E86275F /* Lora-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Lora-Variable.ttf"; sourceTree = "<group>"; };
@@ -1991,9 +1991,9 @@
 				ECB574CA5B16F48033D035C7 /* ActionButtons.swift */,
 				8631238374F0989089F9869D /* AgentControlPill.swift */,
 				20D71FD429E259D6D18119E1 /* ContentAreaView.swift */,
+				957FAEAA0F2A9356B518701F /* ExactPromptTextInput.swift */,
 				B2A91A0F33B2C429B2442B45 /* InputAreaDragModifier.swift */,
 				B86A01BCFC99D98B0D971D0B /* InputBar.swift */,
-				B478FD27FC82E5A327E552C0 /* InputTextField.swift */,
 				6F1C9A2BCF89A42D355F6C52 /* MentionDetector.swift */,
 				54A83E475470DDBE6E3004ED /* PullUpPanelView.swift */,
 				03D7AD1B96B2C212ED477C66 /* QueuedMessageChipsView.swift */,
@@ -3944,6 +3944,7 @@
 				6C91A735B07E78CE065621D4 /* EventTreeBuilder.swift in Sources */,
 				4EEFF2555FCED42D52D53F69 /* EventTypeRegistry.swift in Sources */,
 				C0629A9C0BD76E3873E8C114 /* EventTypes.swift in Sources */,
+				E9F78B2874AC71AD406F7B3E /* ExactPromptTextInput.swift in Sources */,
 				3253A783FA5635BB0B0B787A /* ExtendedPayloads.swift in Sources */,
 				34CD98D623F22BC392E97303 /* FeedbackComposer.swift in Sources */,
 				9B25D6A477AA9E9003D3501A /* FeedbackMailView.swift in Sources */,
@@ -3981,7 +3982,6 @@
 				19E0C5A85FE1390F8A7905E4 /* InputBar.swift in Sources */,
 				86949BE4A6994E2F50DBC43F /* InputBarState.swift in Sources */,
 				3C69ADE0EE80669C6BB15291 /* InputHistoryStore.swift in Sources */,
-				91913D4D67A083554752DE1A /* InputTextField.swift in Sources */,
 				30E964BB00B69B945ABFD88A /* InteractionPolicy.swift in Sources */,
 				62E86AEACE77BC758DE18051 /* InteractionPolicyEnvironment.swift in Sources */,
 				9048D955BCAD323414ECF050 /* InteractivePopGestureEnabler.swift in Sources */,
