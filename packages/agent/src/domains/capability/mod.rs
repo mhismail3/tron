@@ -56,6 +56,11 @@
 //! engine-only `details` object used by UI and audit surfaces. That projection
 //! includes correction guidance such as missing argument paths so the model can
 //! repair a call without guessing at wrapper-vs-target payload shape.
+//! Target idempotency is owned by the selected capability, not by the
+//! model-provider wrapper. The runner gives each provider tool call its own
+//! wrapper idempotency key, while `execute.idempotencyKey` is forwarded into the
+//! prepared child invocation so target replay, approval replay, and durable
+//! output deduplication still happen at the capability boundary.
 //! Intent-only resolution fails closed: if the best match has no lexical/name
 //! anchor, no supplied argument shape, and only a weak semantic score, execute
 //! returns `needs_capability` instead of presenting unrelated low-confidence

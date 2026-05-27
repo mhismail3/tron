@@ -973,23 +973,6 @@ fn model_capability_invocation_idempotency_key(
     workspace_id: Option<&str>,
     effective_args: &Value,
 ) -> String {
-    if model_primitive_name == "execute"
-        && let Some(caller_key) = execute_caller_idempotency_key(effective_args)
-    {
-        let material = json!({
-            "modelPrimitiveName": model_primitive_name,
-            "callerIdempotencyKey": caller_key,
-        });
-        return format!(
-            "model-capability-invocation:v1:caller:{}",
-            sha256_hex(
-                serde_json::to_string(&material)
-                    .unwrap_or_default()
-                    .as_bytes()
-            )
-        );
-    }
-
     let material = stable_capability_invocation_material(
         run_id,
         session_id,
@@ -1002,21 +985,6 @@ fn model_capability_invocation_idempotency_key(
     );
     let fingerprint = sha256_hex(material.as_bytes());
     format!("model-capability-invocation:v1:{fingerprint}")
-}
-
-fn execute_caller_idempotency_key(effective_args: &Value) -> Option<&str> {
-    fn string_key(value: &Value) -> Option<&str> {
-        value
-            .get("idempotencyKey")
-            .or_else(|| value.get("idempotency_key"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-    }
-
-    string_key(effective_args)
-        .or_else(|| effective_args.get("arguments").and_then(string_key))
-        .or_else(|| effective_args.get("payload").and_then(string_key))
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -1502,7 +1470,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_model_primitive_prefers_caller_idempotency_key_for_engine_replay() {
+    async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped() {
         let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
         engine_host
             .register_worker(
@@ -1577,10 +1545,12 @@ mod tests {
             "execute",
             payload_object(&payload),
         );
+        let mut replay_payload = payload.clone();
+        replay_payload["reason"] = json!("same target action requested from a later model turn");
         let second_call = CapabilityInvocationDraft::new(
             "provider-call-id-2",
             "execute",
-            payload_object(&payload),
+            payload_object(&replay_payload),
         );
         let first_result =
             execute_capability_invocation(&first_call, "session-1", "/tmp/worktree", &ctx).await;
@@ -1592,23 +1562,37 @@ mod tests {
         let captured = captured.lock().clone();
         assert_eq!(
             captured.len(),
-            1,
-            "same execute idempotencyKey must replay top-level execute instead of re-running handler"
+            2,
+            "target idempotencyKey must not become the model-wrapper key; replay belongs to the target capability"
         );
-        let invocation = captured.first().expect("first invocation");
-        let expected_key = model_capability_invocation_idempotency_key(
+        let first_expected_key = model_capability_invocation_idempotency_key(
             Some("run-1"),
             "session-1",
             1,
-            "different-provider-call-id",
+            "provider-call-id-1",
             "execute",
             "/tmp/worktree",
             None,
             &payload,
         );
+        let second_expected_key = model_capability_invocation_idempotency_key(
+            Some("run-1"),
+            "session-1",
+            1,
+            "provider-call-id-2",
+            "execute",
+            "/tmp/worktree",
+            None,
+            &replay_payload,
+        );
+        assert_ne!(first_expected_key, second_expected_key);
         assert_eq!(
-            invocation.causal_context.idempotency_key.as_deref(),
-            Some(expected_key.as_str())
+            captured[0].causal_context.idempotency_key.as_deref(),
+            Some(first_expected_key.as_str())
+        );
+        assert_eq!(
+            captured[1].causal_context.idempotency_key.as_deref(),
+            Some(second_expected_key.as_str())
         );
     }
 
