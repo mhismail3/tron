@@ -35,7 +35,7 @@ The “done” bar requires:
 
 ## Current score
 
-Current manual-test substrate confidence: **52/100**.
+Current manual-test substrate confidence: **56/100**.
 
 This score is intentionally conservative. The production codebase can still be
 high quality while this manual substrate exercise remains incomplete; this
@@ -44,8 +44,8 @@ been exercised end-to-end through the app and verified from server logs.
 
 | Axis | Points | Current | Evidence | Remaining proof |
 |---|---:|---:|---|---|
-| Execute ergonomics and correction | 15 | 9 | `process::run` expected-output correction, wrapper/target guidance, `filesystem::apply_patch` append correction tests, live simulator append execution without probe failures, and live `needs_selection`/`needs_capability` guardrails | `needs_input`, unknown-capability, stale-plan, and provider-shape parity tests |
-| Capability resolution and recipes | 10 | 6 | Engine Console search/inspect flows, resolved explicit `process::run` targets, live intent-only `filesystem::read_file` resolution from `execute` without an explicit target, broad unresolved intent fail-closed as `needs_capability`, and filesystem-namespace ambiguity as `needs_selection` | Intent-only resolution across process/web/worker/module, ranking audit, and vector-warmup degradation |
+| Execute ergonomics and correction | 15 | 10 | `process::run` expected-output correction, wrapper/target guidance, `filesystem::apply_patch` append correction tests, live simulator append execution without probe failures, live `needs_selection`/`needs_capability` guardrails, and live `needs_input` guidance with exact missing paths | Stale-plan and provider-shape parity tests |
+| Capability resolution and recipes | 10 | 7 | Engine Console search/inspect flows, resolved explicit `process::run` targets, live intent-only `filesystem::read_file` resolution from `execute` without an explicit target, broad/unknown intent fail-closed as `needs_capability`, filesystem-namespace ambiguity as `needs_selection`, and known-target missing input as `needs_input` | Intent-only resolution across process/web/worker/module, ranking audit, and vector-warmup degradation |
 | Core filesystem/process paths | 15 | 9 | Read-only `process::run`, policy rejection for unsafe read-only commands, sandbox materialized output, live intent-only `filesystem::read_file`, and apply-patch append/replay tests | List/find/search/write/edit failure modes, path roots, timeouts, resource-output replay, and no probe calls |
 | Approval and freshness | 10 | 5 | Approval-required sandbox command, resume ordering fix, no-approval detail-sheet suppression | Denial, timeout, stale revision, replayed approval, and concurrent approval edge cases |
 | Idempotency and replay | 10 | 5 | Sandbox materialized replay inspection, apply-patch append replay unit/integration tests, and live simulator `filesystem::apply_patch` replay verification | Queue retry, duplicate UI submission, duplicate provider tool call, and cross-session replay |
@@ -69,6 +69,8 @@ been exercised end-to-end through the app and verified from server logs.
 | Intent-only `filesystem::read_file` | Covered | A fresh simulator session asked the model to use only `execute`, with no target, to read the first line of `README.md`. The orchestrator resolved `filesystem::read_file` in `intent_resolution` mode, ran one child invocation, required no approval, produced no resource refs, and returned `Testing out a README here.` | DB session `sess_019e6b22-5d18-75e3-909d-ffff4223aa0c`, `capability.orchestration` audit event at `2026-05-27T20:31:55Z` |
 | Broad unresolved intent | Covered | A fresh simulator session called `execute` with intent `work with README.md` and empty arguments. The result failed closed as `needs_capability`, returned low-confidence candidates and a proposed capability shape, and created no child invocation. This is the intended behavior for no clear namespace/action anchor. | DB session `sess_019e6b25-445a-7ae2-82be-397acb398fff`, payload ref `payload_ref_019e6b25-ebc3-7a50-885e-7dbcb262ade8` |
 | Namespace ambiguity | Covered | A fresh simulator session called `execute` with intent `filesystem README.md` and empty arguments. The result was `needs_selection`, returned bounded filesystem candidates, and created no child invocation. | DB session `sess_019e6b28-b568-7690-96b3-f1518b48fba7`, payload ref `payload_ref_019e6b29-7131-7d83-8bd0-b0bbf4dc5268` |
+| Missing required input | Covered | A fresh simulator session called `execute` with intent `read a file` and empty arguments. The result selected `filesystem::read_file`, returned `needs_input`, reported missing `arguments.path`, included a concrete corrected example, and created no child invocation. | DB session `sess_019e6bd6-6178-7ca2-be97-5ff962236885`, payload ref `payload_ref_019e6bd6-fc9e-7273-8e6b-da475db81906` |
+| Unknown capability intent | Covered | A fresh simulator session called `execute` with intent `calibrate a quantum pineapple teleporter` and empty arguments. The result was `needs_capability`, included the proposed capability shape, returned bounded low-confidence candidates, and created no child invocation. | DB session `sess_019e6bd8-a9a3-7922-9eee-37775e725f2c` |
 | Memory auto-retain | Partially covered | Auto-retain runs through engine capabilities and no longer blocks normal testing, but it needs a final regression under the current server build. | Prior server-log review; pending current-build retest |
 
 ## Remaining test matrix
@@ -169,8 +171,16 @@ Move to execute-portal basics under the current build:
 2. ambiguous intent returning `needs_selection` without a child invocation;
    **covered on 2026-05-27**
 3. missing required fields returning `needs_input` with exact fields and no
-   child invocation;
+   child invocation; **covered on 2026-05-27**
 4. unknown domain returning `needs_capability` with a proposed shape and no
-   hallucinated target;
+   hallucinated target; **covered on 2026-05-27**
 5. DB reconstruction for each case using invocation rows, orchestration
    diagnostics, and capability audit events.
+
+The next checkpoint should move into filesystem substrate breadth:
+
+1. `filesystem::read_file` missing file and absolute-path/root-bound behavior;
+2. `filesystem::list_dir`, `filesystem::glob`, and `filesystem::search_text`
+   bounded result behavior;
+3. exact replacement `filesystem::apply_patch` and duplicate idempotency;
+4. failed validation proving no accepted resource refs or child side effects.
