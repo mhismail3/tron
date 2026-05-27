@@ -238,8 +238,13 @@ async fn execute_orchestrated_value(
                 }),
                 Vec::new(),
             );
-            record_orchestration_audit(deps, invocation, diagnostics).await?;
-            return Err(error);
+            record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+            return orchestration_result(
+                "prepare_failed",
+                &format!("execute could not prepare the selected target: {error}"),
+                diagnostics,
+                true,
+            );
         }
     };
     let function = target.entry.function.clone();
@@ -346,21 +351,39 @@ async fn execute_orchestrated_value(
     let mut result = match run::execute_invoke_value(&prepared_invocation, deps).await {
         Ok(result) => result,
         Err(error) => {
+            let failure_status = orchestration_failure_status(&error);
+            let failure_phase = if failure_status == "prepare_failed" {
+                "prepare"
+            } else {
+                "run"
+            };
             let diagnostics = orchestration_details(
                 &orchestration_id,
-                "run_failed",
+                failure_status,
                 input.intent.as_deref(),
                 Some(corrected_request),
                 &input,
                 json!({
-                    "phase": "run",
+                    "phase": failure_phase,
                     "prepare": prepare_diagnostics,
+                    "selectedTarget": {
+                        "contractId": target.entry.contract_id.as_str(),
+                        "implementationId": target.entry.implementation_id.as_str(),
+                        "functionId": function.id.as_str(),
+                        "catalogRevision": target.entry.catalog_revision,
+                        "schemaDigest": target.entry.schema_digest.as_str(),
+                    },
                     "error": capability_error_details(&error),
                 }),
                 Vec::new(),
             );
-            record_orchestration_audit(deps, invocation, diagnostics).await?;
-            return Err(error);
+            record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+            let message = if failure_status == "prepare_failed" {
+                format!("execute could not prepare the selected target: {error}")
+            } else {
+                format!("execute failed while running the selected target: {error}")
+            };
+            return orchestration_result(failure_status, &message, diagnostics, true);
         }
     };
     let result_status = serde_json::from_value::<CapabilityResult>(result.clone())
@@ -1658,7 +1681,7 @@ pub(super) fn lacks_sufficient_intent_resolution_evidence(
     if selected.fused_score >= MIN_UNANCHORED_INTENT_SCORE {
         return false;
     }
-    if selected.lexical_score > 0.0 || intent_strongly_matches_hit(intent, selected) {
+    if intent_strongly_matches_hit(intent, selected) {
         return false;
     }
     if arguments
@@ -1912,6 +1935,7 @@ fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Va
             "missingArgumentPaths",
             "searchStatus",
             "proposedCapabilityShape",
+            "selectedTarget",
             "error",
             "guidance",
         ] {
@@ -1964,6 +1988,15 @@ fn capability_error_details(error: &CapabilityError) -> Value {
         "message": error.to_string(),
         "details": error.details(),
     })
+}
+
+fn orchestration_failure_status(error: &CapabilityError) -> &'static str {
+    match error.code() {
+        "CAPABILITY_DENIED" | "INSPECTION_HANDLE_INVALID" | "STALE_CAPABILITY_REVISION" => {
+            "prepare_failed"
+        }
+        _ => "run_failed",
+    }
 }
 
 async fn record_orchestration_audit(
@@ -2255,9 +2288,28 @@ mod tests {
         let details = result.details.expect("details");
 
         assert_eq!(details["status"], json!("request_invalid"));
+        assert_eq!(
+            details["selectedTarget"]["functionId"],
+            json!("capability::execute")
+        );
         assert_eq!(details["guidance"]["kind"], json!("target_real_capability"));
         assert_eq!(details["childInvocationIds"], json!([]));
         assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
         assert_eq!(details["resourceRefs"], json!([]));
+    }
+
+    #[test]
+    fn orchestration_failure_status_keeps_policy_denials_in_prepare_phase() {
+        let denied = CapabilityError::Custom {
+            code: "CAPABILITY_DENIED".to_owned(),
+            message: "process::run is not allowed by the active capability policy".to_owned(),
+            details: None,
+        };
+        let runtime = CapabilityError::Internal {
+            message: "worker disappeared".to_owned(),
+        };
+
+        assert_eq!(orchestration_failure_status(&denied), "prepare_failed");
+        assert_eq!(orchestration_failure_status(&runtime), "run_failed");
     }
 }
