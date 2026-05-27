@@ -338,7 +338,7 @@ async fn execute_orchestrated_value(
                 .map(ToOwned::to_owned)
         })
         .unwrap_or_else(|| "executed".to_owned());
-    let diagnostics = orchestration_details(
+    let mut diagnostics = orchestration_details(
         &orchestration_id,
         &result_status,
         input.intent.as_deref(),
@@ -347,6 +347,7 @@ async fn execute_orchestrated_value(
         prepare_diagnostics,
         orchestration_child_invocations(&result),
     );
+    enrich_orchestration_with_result(&mut diagnostics, &result);
     record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
     result = attach_orchestration_details(result, diagnostics)?;
     Ok(result)
@@ -1432,6 +1433,60 @@ fn orchestration_child_invocations(value: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn enrich_orchestration_with_result(orchestration: &mut Value, result: &Value) {
+    let Some(details) = result.get("details") else {
+        return;
+    };
+    let Some(object) = orchestration.as_object_mut() else {
+        return;
+    };
+    if let Some(resource_refs) = execution_resource_refs(details) {
+        object.insert("resourceRefs".to_owned(), resource_refs);
+    }
+    if let Some(approval_decision) = execution_approval_decision(details) {
+        object.insert("approvalDecision".to_owned(), approval_decision);
+    }
+}
+
+fn execution_resource_refs(details: &Value) -> Option<Value> {
+    details
+        .get("resourceRefs")
+        .filter(|value| value.as_array().is_some())
+        .cloned()
+        .or_else(|| {
+            details
+                .get("output")
+                .and_then(|output| output.get("resourceRefs"))
+                .filter(|value| value.as_array().is_some())
+                .cloned()
+        })
+}
+
+fn execution_approval_decision(details: &Value) -> Option<Value> {
+    details
+        .get("approvalState")
+        .filter(|value| value.is_object())
+        .cloned()
+        .or_else(|| {
+            let has_approval_fields = [
+                "approvalRequired",
+                "approvalCreated",
+                "approvalExecuted",
+                "approvalReplayed",
+            ]
+            .iter()
+            .any(|key| details.get(*key).is_some());
+            has_approval_fields.then(|| {
+                json!({
+                    "approvalRequired": details.get("approvalRequired").cloned().unwrap_or(Value::Null),
+                    "approvalCreated": details.get("approvalCreated").cloned().unwrap_or(Value::Null),
+                    "approvalExecuted": details.get("approvalExecuted").cloned().unwrap_or(Value::Null),
+                    "approvalReplayed": details.get("approvalReplayed").cloned().unwrap_or(Value::Null),
+                })
+            })
+        })
+}
+
 fn attach_orchestration_details(
     value: Value,
     orchestration: Value,
@@ -1446,6 +1501,11 @@ fn attach_orchestration_details(
         None => json!({}),
     };
     if let Value::Object(object) = &mut details {
+        if object.get("resourceRefs").is_none()
+            && let Some(resource_refs) = orchestration.get("resourceRefs")
+        {
+            object.insert("resourceRefs".to_owned(), resource_refs.clone());
+        }
         object.insert("orchestration".to_owned(), orchestration.clone());
         for key in [
             "correctedRequest",
@@ -1508,4 +1568,72 @@ async fn record_orchestration_audit(
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observe_phase_promotes_child_resource_refs_and_approval_state() {
+        let resource_refs = json!([
+            {
+                "kind": "materialized_file",
+                "resourceId": "materialized_file:test",
+                "versionId": "ver_test",
+                "role": "updated"
+            },
+            {
+                "kind": "execution_output",
+                "resourceId": "res_test",
+                "versionId": "ver_output",
+                "role": "created"
+            }
+        ]);
+        let result = capability_result_value(CapabilityResult {
+            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                "ok".to_owned(),
+            )]),
+            details: Some(json!({
+                "status": "ok",
+                "output": {
+                    "stdout": "ok\n",
+                    "resourceRefs": resource_refs.clone()
+                },
+                "approvalState": {
+                    "approvalId": "approval-test",
+                    "approvalCreated": true,
+                    "approvalExecuted": true,
+                    "status": "Executed"
+                },
+                "childInvocations": ["child-test"]
+            })),
+            is_error: None,
+            stop_turn: None,
+        })
+        .expect("capability result");
+
+        let mut orchestration = json!({
+            "status": "ok",
+            "childInvocationIds": ["child-test"]
+        });
+        enrich_orchestration_with_result(&mut orchestration, &result);
+        assert_eq!(orchestration["resourceRefs"], resource_refs);
+        assert_eq!(
+            orchestration["approvalDecision"]["approvalId"],
+            json!("approval-test")
+        );
+
+        let attached =
+            attach_orchestration_details(result, orchestration).expect("attached result");
+        let attached: CapabilityResult =
+            serde_json::from_value(attached).expect("capability result");
+        let details = attached.details.expect("details");
+        assert_eq!(details["resourceRefs"], resource_refs);
+        assert_eq!(details["orchestration"]["resourceRefs"], resource_refs);
+        assert_eq!(
+            details["orchestration"]["approvalDecision"]["approvalId"],
+            json!("approval-test")
+        );
+    }
 }

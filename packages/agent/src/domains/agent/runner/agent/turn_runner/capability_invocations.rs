@@ -626,11 +626,47 @@ fn execute_observation_text(details: Option<&Value>) -> Option<String> {
             .or_else(|| orchestration.get("correctionsApplied"))
             .cloned()
             .unwrap_or_else(|| json!([])),
+        "guidance": execute_guidance_summary(details),
     });
     let observation = serde_json::to_string_pretty(&observation).ok()?;
     Some(format!(
         "[execute observation - metadata for reasoning, not user output]\n{observation}\n[/execute observation]"
     ))
+}
+
+fn execute_guidance_summary(details: &Value) -> Value {
+    let guidance = details.get("guidance");
+    let error_details = details.pointer("/error/details");
+    let missing_fields = guidance
+        .and_then(|value| value.get("missingFields"))
+        .or_else(|| error_details.and_then(|value| value.get("missingFields")))
+        .cloned();
+    let missing_argument_paths = guidance
+        .and_then(|value| value.get("missingArgumentPaths"))
+        .or_else(|| error_details.and_then(|value| value.get("missingArgumentPaths")))
+        .cloned();
+
+    let mut summary = serde_json::Map::new();
+    if let Some(kind) = guidance
+        .and_then(|value| value.get("kind"))
+        .and_then(Value::as_str)
+    {
+        summary.insert("kind".to_owned(), json!(kind));
+    }
+    if let Some(fields) = missing_fields {
+        summary.insert("missingFields".to_owned(), fields);
+    }
+    if let Some(paths) = missing_argument_paths {
+        summary.insert("missingArgumentPaths".to_owned(), paths);
+    }
+    if let Some(validation_kind) = error_details
+        .and_then(|value| value.get("validationKind"))
+        .and_then(Value::as_str)
+    {
+        summary.insert("validationKind".to_owned(), json!(validation_kind));
+    }
+
+    Value::Object(summary)
 }
 
 fn execute_approval_state(details: &Value) -> &'static str {
@@ -778,6 +814,41 @@ mod tests {
         assert!(text.contains("\"child-123\""));
         assert!(text.contains("\"approval\": \"not_required\""));
         assert!(text.ends_with("Testing out a README here.\n"));
+    }
+
+    #[test]
+    fn extract_result_content_projects_execute_guidance_for_model() {
+        let exec = make_exec_result_with_details(
+            CapabilityResultBody::Text("process::run needs more input".into()),
+            json!({
+                "status": "needs_input",
+                "functionId": "process::run",
+                "resourceRefs": [],
+                "guidance": {
+                    "kind": "provide_missing_arguments",
+                    "missingFields": ["command", "executionMode"],
+                    "missingArgumentPaths": ["arguments.command", "arguments.executionMode"]
+                },
+                "orchestration": {
+                    "status": "needs_input",
+                    "childInvocationIds": [],
+                    "correctionsApplied": []
+                }
+            }),
+        );
+
+        let content = extract_result_content(&exec);
+
+        let CapabilityResultMessageContent::Text(text) = content else {
+            panic!("expected text projection");
+        };
+        assert!(text.contains("\"guidance\""));
+        assert!(text.contains("\"missingFields\""));
+        assert!(text.contains("\"command\""));
+        assert!(text.contains("\"executionMode\""));
+        assert!(text.contains("\"missingArgumentPaths\""));
+        assert!(text.contains("\"arguments.command\""));
+        assert!(text.contains("\"arguments.executionMode\""));
     }
 
     #[test]

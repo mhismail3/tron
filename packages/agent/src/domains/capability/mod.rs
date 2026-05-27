@@ -53,7 +53,9 @@
 //! invocation produced the output. The agent turn runner also projects the
 //! bounded execute observation metadata into the model-visible tool result
 //! text, because provider APIs only feed the LLM result content, not the
-//! engine-only `details` object used by UI and audit surfaces.
+//! engine-only `details` object used by UI and audit surfaces. That projection
+//! includes correction guidance such as missing argument paths so the model can
+//! repair a call without guessing at wrapper-vs-target payload shape.
 //! Intent-only resolution fails closed: if the best match has no lexical/name
 //! anchor, no supplied argument shape, and only a weak semantic score, execute
 //! returns `needs_capability` instead of presenting unrelated low-confidence
