@@ -125,13 +125,32 @@ pub(super) fn spawn_capability_agent_task(params: CapabilityAgentTaskLaunch) {
 }
 
 async fn run_subsession_task(params: SubsessionTaskLaunch) {
-    let working_directory = acquire_worktree_directory(
+    let working_directory = match acquire_worktree_directory(
         params.worktree_coordinator.as_ref(),
         &params.child_session_id,
         params.working_directory,
         "subsession",
     )
-    .await;
+    .await
+    {
+        Ok(working_directory) => working_directory,
+        Err(error) => {
+            tracing::warn!(
+                child_session_id = %params.child_session_id,
+                parent_session_id = %params.parent_session_id,
+                error = %error,
+                "subsession stopped before model execution because worktree isolation failed"
+            );
+            complete_failure(
+                &params.session_manager,
+                &params.tracker,
+                &params.child_session_id,
+                error,
+            )
+            .await;
+            return;
+        }
+    };
 
     let provider = match params
         .provider_factory
@@ -297,13 +316,32 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
 }
 
 async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
-    let working_directory = acquire_worktree_directory(
+    let working_directory = match acquire_worktree_directory(
         params.worktree_coordinator.as_ref(),
         &params.child_session_id,
         params.working_directory,
         "subagent",
     )
-    .await;
+    .await
+    {
+        Ok(working_directory) => working_directory,
+        Err(error) => {
+            tracing::warn!(
+                child_session_id = %params.child_session_id,
+                parent_session_id = %params.parent_session_id,
+                error = %error,
+                "subagent stopped before model execution because worktree isolation failed"
+            );
+            complete_failure(
+                &params.session_manager,
+                &params.tracker,
+                &params.child_session_id,
+                error,
+            )
+            .await;
+            return;
+        }
+    };
 
     let provider = match params
         .provider_factory
@@ -685,9 +723,9 @@ async fn acquire_worktree_directory(
     session_id: &str,
     working_directory: String,
     label: &str,
-) -> String {
+) -> Result<String, String> {
     let Some(coord) = coordinator else {
-        return working_directory;
+        return Ok(working_directory);
     };
 
     match coord
@@ -695,25 +733,18 @@ async fn acquire_worktree_directory(
         .await
     {
         Ok(crate::domains::worktree::AcquireResult::Acquired(info)) => {
-            info.worktree_path.to_string_lossy().to_string()
+            Ok(info.worktree_path.to_string_lossy().to_string())
         }
         Ok(crate::domains::worktree::AcquireResult::Deferred(reason)) => {
             tracing::debug!(
                 session_id = %session_id,
                 reason = ?reason,
-                "{label} worktree deferred, using original directory"
+                "{label} worktree isolation intentionally deferred"
             );
-            working_directory
+            Ok(working_directory)
         }
-        Ok(crate::domains::worktree::AcquireResult::Passthrough) => working_directory,
-        Err(error) => {
-            tracing::warn!(
-                session_id = %session_id,
-                error = %error,
-                "{label} worktree acquisition failed, using original directory"
-            );
-            working_directory
-        }
+        Ok(crate::domains::worktree::AcquireResult::Passthrough) => Ok(working_directory),
+        Err(error) => Err(format!("{label} worktree acquisition failed: {error}")),
     }
 }
 

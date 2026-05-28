@@ -167,6 +167,29 @@ fn make_config(task: &str) -> SubagentConfig {
     }
 }
 
+fn run_git(dir: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn init_test_repo(dir: &std::path::Path) {
+    run_git(dir, &["init"]);
+    run_git(dir, &["config", "user.email", "test@test.com"]);
+    run_git(dir, &["config", "user.name", "Test"]);
+    std::fs::write(dir.join("README.md"), "# test\n").unwrap();
+    run_git(dir, &["add", "-A"]);
+    run_git(dir, &["commit", "-m", "init"]);
+}
+
 #[tokio::test]
 async fn spawn_creates_session_and_tracks() {
     let (manager, _mgr, store) = make_subagent_manager(Arc::new(MockProvider));
@@ -177,6 +200,34 @@ async fn spawn_creates_session_and_tracks() {
     // Session should exist in DB
     let session = store.get_session(&handle.session_id).unwrap();
     assert!(session.is_some());
+}
+
+#[tokio::test]
+async fn spawn_fails_closed_when_subagent_worktree_acquisition_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    init_test_repo(dir.path());
+    std::fs::write(dir.path().join(".worktrees"), "blocks worktree directory").unwrap();
+
+    let (manager, _, store) = make_subagent_manager(Arc::new(MockProvider));
+    manager.set_worktree_coordinator(Arc::new(
+        crate::domains::worktree::WorktreeCoordinator::new(
+            crate::domains::worktree::WorktreeConfig::default(),
+            store,
+        ),
+    ));
+
+    let mut config = make_config("must not run without worktree isolation");
+    config.working_directory = dir.path().to_string_lossy().to_string();
+    config.blocking_timeout_ms = Some(5_000);
+
+    let handle = manager.spawn(config).await.unwrap();
+    let message = handle.output.unwrap_or_default();
+    assert_eq!(handle.success, Some(false));
+    assert_eq!(handle.turns_executed, Some(0));
+    assert!(
+        message.contains("worktree acquisition failed"),
+        "unexpected error: {message}"
+    );
 }
 
 #[tokio::test]
@@ -405,6 +456,33 @@ fn make_subsession_config(task: &str, parent: &str) -> SubsessionConfig {
         working_directory: "/tmp".into(),
         ..SubsessionConfig::default()
     }
+}
+
+#[tokio::test]
+async fn spawn_subsession_fails_closed_when_worktree_acquisition_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    init_test_repo(dir.path());
+    std::fs::write(dir.path().join(".worktrees"), "blocks worktree directory").unwrap();
+
+    let (manager, _, store) = make_subagent_manager(Arc::new(MockProvider));
+    manager.set_worktree_coordinator(Arc::new(
+        crate::domains::worktree::WorktreeCoordinator::new(
+            crate::domains::worktree::WorktreeConfig::default(),
+            store,
+        ),
+    ));
+
+    let mut config =
+        make_subsession_config("must not run without worktree isolation", "parent-001");
+    config.working_directory = dir.path().to_string_lossy().to_string();
+    config.blocking_timeout_ms = Some(5_000);
+
+    let error = manager.spawn_subsession(config).await.unwrap_err();
+    let message = error.to_string();
+    assert!(
+        message.contains("worktree acquisition failed"),
+        "unexpected error: {message}"
+    );
 }
 
 #[tokio::test]

@@ -2,6 +2,10 @@
 //!
 //! Spawns child agents in-process, tracks their state, and forwards
 //! events from child sessions to the parent session's broadcast.
+//!
+//! INVARIANT: when a worktree coordinator is configured, child agents that
+//! fail to acquire isolation complete as failed before provider/model
+//! execution. They must not silently downgrade into the parent repository.
 
 use std::sync::Arc;
 use std::time::Instant;
