@@ -10,7 +10,9 @@
 //! - [`should_auto_retain`] — pure policy decision, no I/O.
 //! - [`gather_state`] — sync state read from the event store.
 //! - [`maybe_fire`] — async entry point used by the hidden
-//!   `memory::auto_retain_fire` engine function.
+//!   `memory::auto_retain_fire` engine function. It reports whether retention
+//!   fired, skipped, or failed so background memory behavior remains auditable
+//!   without reading logs.
 
 use crate::shared::server::errors::SESSION_NOT_FOUND;
 

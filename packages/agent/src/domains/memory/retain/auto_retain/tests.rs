@@ -354,7 +354,12 @@ async fn maybe_fire_persists_trigger_when_threshold_crossed() {
     append_user_message(&ctx.event_store, &sid, "c");
 
     let deps = deps_from_ctx(&ctx);
-    maybe_fire_with_interval(&deps, &sid, 3, None).await;
+    let outcome = maybe_fire_with_interval(&deps, &sid, 3, None).await;
+    assert!(outcome.fired);
+    assert_eq!(outcome.status, "retaining");
+    assert_eq!(outcome.reason, None);
+    assert_eq!(outcome.interval, 3);
+    assert_eq!(outcome.user_messages_since_retain, Some(3));
 
     let row = ctx
         .event_store
@@ -378,7 +383,12 @@ async fn maybe_fire_skips_below_threshold() {
     append_user_message(&ctx.event_store, &sid, "b");
 
     let deps = deps_from_ctx(&ctx);
-    maybe_fire_with_interval(&deps, &sid, 5, None).await;
+    let outcome = maybe_fire_with_interval(&deps, &sid, 5, None).await;
+    assert!(!outcome.fired);
+    assert_eq!(outcome.status, "skipped");
+    assert_eq!(outcome.reason.as_deref(), Some("below_threshold"));
+    assert_eq!(outcome.interval, 5);
+    assert_eq!(outcome.user_messages_since_retain, Some(2));
 
     let row = ctx
         .event_store
@@ -400,7 +410,12 @@ async fn maybe_fire_zero_is_disabled() {
     }
 
     let deps = deps_from_ctx(&ctx);
-    maybe_fire_with_interval(&deps, &sid, 0, None).await;
+    let outcome = maybe_fire_with_interval(&deps, &sid, 0, None).await;
+    assert!(!outcome.fired);
+    assert_eq!(outcome.status, "skipped");
+    assert_eq!(outcome.reason.as_deref(), Some("disabled"));
+    assert_eq!(outcome.interval, 0);
+    assert_eq!(outcome.user_messages_since_retain, None);
 
     let row = ctx
         .event_store
@@ -424,7 +439,12 @@ async fn maybe_fire_skips_subagent() {
     }
 
     let deps = deps_from_ctx(&ctx);
-    maybe_fire_with_interval(&deps, &child, 5, None).await;
+    let outcome = maybe_fire_with_interval(&deps, &child, 5, None).await;
+    assert!(!outcome.fired);
+    assert_eq!(outcome.status, "skipped");
+    assert_eq!(outcome.reason.as_deref(), Some("subagent"));
+    assert_eq!(outcome.interval, 5);
+    assert_eq!(outcome.user_messages_since_retain, Some(100));
 
     let row = ctx
         .event_store
@@ -456,7 +476,9 @@ async fn maybe_fire_respects_prior_retain_boundary() {
     // 2 more user messages; interval 3 → should NOT fire.
     append_user_message(&ctx.event_store, &sid, "post-1");
     append_user_message(&ctx.event_store, &sid, "post-2");
-    maybe_fire_with_interval(&deps, &sid, 3, None).await;
+    let outcome = maybe_fire_with_interval(&deps, &sid, 3, None).await;
+    assert!(!outcome.fired);
+    assert_eq!(outcome.reason.as_deref(), Some("below_threshold"));
     assert!(
         ctx.event_store
             .get_latest_event_by_type(&sid, "memory.auto_retain_triggered")
@@ -467,7 +489,8 @@ async fn maybe_fire_respects_prior_retain_boundary() {
 
     // 1 more (total 3 since retain) → fires.
     append_user_message(&ctx.event_store, &sid, "post-3");
-    maybe_fire_with_interval(&deps, &sid, 3, None).await;
+    let outcome = maybe_fire_with_interval(&deps, &sid, 3, None).await;
+    assert!(outcome.fired);
     assert!(
         ctx.event_store
             .get_latest_event_by_type(&sid, "memory.auto_retain_triggered")
@@ -529,7 +552,9 @@ async fn maybe_fire_counts_user_messages_not_agent_iterations() {
     // Interval 2 — with the old buggy logic that counted turn iterations,
     // this would fire after 2 internal iterations. With the correct
     // user-message-based counter, it MUST NOT fire after a single prompt.
-    maybe_fire_with_interval(&deps, &sid, 2, None).await;
+    let outcome = maybe_fire_with_interval(&deps, &sid, 2, None).await;
+    assert!(!outcome.fired);
+    assert_eq!(outcome.reason.as_deref(), Some("below_threshold"));
 
     let row = ctx
         .event_store
@@ -542,7 +567,8 @@ async fn maybe_fire_counts_user_messages_not_agent_iterations() {
 
     // Send a second user message. Now we have 2 user exchanges — fires.
     append_user_message(&ctx.event_store, &sid, "next prompt");
-    maybe_fire_with_interval(&deps, &sid, 2, None).await;
+    let outcome = maybe_fire_with_interval(&deps, &sid, 2, None).await;
+    assert!(outcome.fired);
 
     let row = ctx
         .event_store

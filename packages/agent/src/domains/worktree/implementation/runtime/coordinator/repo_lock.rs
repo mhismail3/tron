@@ -240,16 +240,17 @@ mod tests {
         let dir_a = tempdir().unwrap();
         let dir_b = tempdir().unwrap();
 
-        let _a = coord
-            .acquire_repo_lock(dir_a.path(), "a", LockedOp::SyncMain)
-            .await;
+        let lock_a = coord.repo_mutex(dir_a.path());
+        let lock_b = coord.repo_mutex(dir_b.path());
+        assert!(
+            !Arc::ptr_eq(&lock_a, &lock_b),
+            "different repo roots must get independent mutexes"
+        );
 
-        // Different repo → must return immediately.
-        let start = Instant::now();
-        let _b = coord
-            .acquire_repo_lock(dir_b.path(), "b", LockedOp::SyncMain)
-            .await;
-        assert!(start.elapsed() < Duration::from_millis(50));
+        let _a = lock_a.try_lock().expect("first repo lock");
+        let _b = lock_b
+            .try_lock()
+            .expect("different repo lock must not wait on first repo");
     }
 
     #[tokio::test]

@@ -1,6 +1,6 @@
 //! Auto-retain scheduling owned by the memory worker.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::domains::memory::Deps;
 use crate::domains::memory::retain::{self, RetainDeps};
@@ -15,11 +15,11 @@ pub(crate) async fn auto_retain_fire(
     let payload = &invocation.payload;
     let session_id = require_string_param(Some(payload), "sessionId")?;
     let _run_id = require_string_param(Some(payload), "runId")?;
-    retain::auto_retain::maybe_fire(
+    let outcome = retain::auto_retain::maybe_fire(
         &RetainDeps::from_memory_deps(deps),
         &session_id,
         Some(invocation.clone()),
     )
     .await;
-    Ok(json!({"fired": true, "reason": null}))
+    Ok(outcome.into_value())
 }

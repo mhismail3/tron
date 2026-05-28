@@ -19,7 +19,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("memory::auto_retain_fire", "memory", EffectClass::ExternalSideEffect, RiskLevel::High, Some("memory.write"))
             .visibility(VisibilityScope::Internal)
             .request_schema(json!({"additionalProperties":false,"properties":{"runId":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":["string","null"]}},"required":["sessionId","runId"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"fired":{"type":"boolean"},"reason":{"type":["string","null"]}},"required":["fired"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"fired":{"type":"boolean"},"interval":{"type":"integer"},"reason":{"type":["string","null"]},"status":{"type":"string"},"userMessagesSinceRetain":{"type":["integer","null"]}},"required":["fired","status"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .output_contract(optional_memory_output_contract())
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "auto-retain only schedules the memory retain pipeline after a successful agent run; retain guard/idempotency prevent duplicate retention"))

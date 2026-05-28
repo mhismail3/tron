@@ -206,3 +206,51 @@ async fn memory_retain_idempotency_does_not_duplicate_memory_artifacts() {
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     assert_eq!(memory_artifacts(&handle).await.len(), artifacts_after_first);
 }
+
+#[tokio::test]
+async fn auto_retain_fire_reports_skip_without_memory_side_effects() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let created = ctx
+        .event_store
+        .create_session("claude-sonnet-4-6", "/tmp", None, None, None, None)
+        .unwrap();
+    let session_id = created.session.id;
+    ctx.event_store
+        .append(&AppendOptions {
+            session_id: &session_id,
+            event_type: EventType::MessageUser,
+            payload: json!({"content": "One prompt should stay below the default auto-retain interval."}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+
+    let fired = handle
+        .invoke(host_invocation(
+            "memory::auto_retain_fire",
+            json!({"sessionId": session_id.clone(), "runId": "run-auto-retain-skip"}),
+            memory_write_context("memory-auto-retain-skip", &session_id),
+        ))
+        .await;
+    assert_eq!(fired.error, None);
+    let value = fired.value.expect("auto retain response");
+    assert_eq!(value["fired"], false);
+    assert_eq!(value["status"], "skipped");
+    assert_eq!(value["reason"], "below_threshold");
+    assert_eq!(value["userMessagesSinceRetain"], 1);
+    assert!(
+        ctx.event_store
+            .get_latest_event_by_type(&session_id, "memory.auto_retain_triggered")
+            .unwrap()
+            .is_none(),
+        "below threshold auto-retain must not emit a trigger event"
+    );
+    assert!(
+        ctx.event_store
+            .get_latest_event_by_type(&session_id, "memory.retained")
+            .unwrap()
+            .is_none(),
+        "below threshold auto-retain must not persist memory"
+    );
+}

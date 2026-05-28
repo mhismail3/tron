@@ -2348,6 +2348,7 @@ async fn error_path_does_not_leak_session_lock() {
         .unwrap();
     let sid = session.session.id;
     let coord = WorktreeCoordinator::new(WorktreeConfig::default(), store);
+    let lock = coord.session_acquire_mutex(&sid);
 
     // First call: returns Deferred(EmptyRepository). We care about the
     // lock being released afterward, not the result itself.
@@ -2356,17 +2357,9 @@ async fn error_path_does_not_leak_session_lock() {
         .await
         .unwrap();
 
-    // Second call for the same session must not block on a stuck lock.
-    let start = std::time::Instant::now();
-    let _ = coord
-        .maybe_acquire_with_override(&sid, dir.path(), Some(true))
-        .await
-        .unwrap();
-    assert!(
-        start.elapsed() < std::time::Duration::from_millis(500),
-        "error-path must release the per-session lock; elapsed={:?}",
-        start.elapsed()
-    );
+    let _probe = lock
+        .try_lock()
+        .expect("error path must release the per-session lock");
 }
 
 /// After acquire returns, the per-session lock must be released so a

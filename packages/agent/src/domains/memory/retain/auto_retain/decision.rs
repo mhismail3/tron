@@ -37,6 +37,17 @@ pub enum SkipReason {
     BelowThreshold,
 }
 
+impl SkipReason {
+    pub(super) const fn as_str(self) -> &'static str {
+        match self {
+            SkipReason::Disabled => "disabled",
+            SkipReason::Subagent => "subagent",
+            SkipReason::NoUserMessages => "no_user_messages",
+            SkipReason::BelowThreshold => "below_threshold",
+        }
+    }
+}
+
 /// Pure policy decision. No I/O.
 ///
 /// Threshold: fire when `user_messages_since_retain >= interval`. The input is
