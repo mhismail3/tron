@@ -3317,6 +3317,27 @@ mod tests {
     }
 
     #[test]
+    fn deterministic_intent_route_prefers_filesystem_read_for_path_in_intent() {
+        let read = test_function("filesystem::read_file");
+        let mut stop = test_function("sandbox::stop_spawned_worker");
+        stop.effect_class = EffectClass::ExternalSideEffect;
+        stop.risk_level = RiskLevel::High;
+        let snapshot = CapabilityRegistrySnapshot::new(vec![stop, read], 7);
+
+        let hit = deterministic_intent_route(
+            "Read only the first line of README.md.",
+            &json!({}),
+            &snapshot,
+            &json!({}),
+        )
+        .expect("route check")
+        .expect("filesystem read route");
+
+        assert_eq!(hit.function_id, "filesystem::read_file");
+        assert_eq!(hit.matched_by, "deterministic_path_read");
+    }
+
+    #[test]
     fn deterministic_intent_route_preempts_bad_search_ranking() {
         let read = test_function("filesystem::read_file");
         let mut stop = test_function("sandbox::stop_spawned_worker");

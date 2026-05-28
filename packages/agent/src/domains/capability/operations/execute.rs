@@ -400,6 +400,12 @@ async fn execute_orchestrated_value(
         );
     }
     normalize_target_arguments(&function, &mut input.arguments, &mut input.corrections);
+    normalize_intent_target_arguments(
+        &function,
+        input.intent.as_deref(),
+        &mut input.arguments,
+        &mut input.corrections,
+    );
     normalize_contextual_target_arguments(
         &function,
         invocation,
@@ -879,6 +885,53 @@ pub(super) fn normalize_target_arguments(
 ) {
     normalize_target_specific_arguments(function, arguments, corrections);
     normalize_schema_property_name_aliases(function, arguments, corrections);
+}
+
+pub(super) fn normalize_intent_target_arguments(
+    function: &FunctionDefinition,
+    intent: Option<&str>,
+    arguments: &mut Value,
+    corrections: &mut Vec<Value>,
+) {
+    let Some(intent) = intent else {
+        return;
+    };
+    if function.id.as_str() != "filesystem::read_file" {
+        return;
+    }
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+
+    if !object.contains_key("path") {
+        if let Some(path) = intent_file_path_candidate(intent) {
+            object.insert("path".to_owned(), json!(path));
+            corrections.push(correction_record(
+                "intent_file_path_to_target_argument",
+                "bound safe relative file path from execute intent into filesystem::read_file arguments",
+                0.92,
+            ));
+        }
+    }
+
+    if object.contains_key("path") {
+        if let Some(line_count) = intent_first_line_count(intent) {
+            if !object.contains_key("startLine") {
+                object.insert("startLine".to_owned(), json!(1));
+            }
+            if !object.contains_key("endLine") {
+                object.insert("endLine".to_owned(), json!(line_count));
+            }
+            corrections.push(correction_record(
+                "intent_first_lines_to_target_arguments",
+                format!(
+                    "bound first {line_count} line{} from execute intent into filesystem::read_file arguments",
+                    if line_count == 1 { "" } else { "s" }
+                ),
+                0.9,
+            ));
+        }
+    }
 }
 
 pub(super) fn normalize_contextual_target_arguments(
@@ -2114,12 +2167,6 @@ fn rejected_candidate_summary(
 }
 
 fn intent_requests_filesystem_read(intent: &str, arguments: &Value) -> bool {
-    let Some(path) = arguments.get("path").and_then(Value::as_str) else {
-        return false;
-    };
-    if path.trim().is_empty() {
-        return false;
-    }
     let words = normalized_intent_words(intent);
     let asks_for_read = ["read", "open", "cat", "content", "line", "lines"]
         .iter()
@@ -2136,7 +2183,124 @@ fn intent_requests_filesystem_read(intent: &str, arguments: &Value) -> bool {
     ]
     .iter()
     .any(|word| words.contains(*word));
-    asks_for_read && !asks_for_write
+    if !asks_for_read || asks_for_write {
+        return false;
+    }
+    arguments
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| !path.trim().is_empty())
+        || intent_file_path_candidate(intent).is_some()
+}
+
+fn intent_file_path_candidate(intent: &str) -> Option<String> {
+    intent.split_whitespace().find_map(|token| {
+        let token = clean_intent_path_token(token)?;
+        safe_relative_intent_path(&token).then_some(token)
+    })
+}
+
+fn clean_intent_path_token(token: &str) -> Option<String> {
+    let mut value = token
+        .trim_matches(|character: char| {
+            matches!(
+                character,
+                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>'
+            )
+        })
+        .trim_end_matches(|character: char| {
+            matches!(
+                character,
+                '"' | '\'' | '`' | ')' | ']' | '}' | ',' | ':' | ';'
+            )
+        })
+        .to_owned();
+    while value.ends_with('.') && value[..value.len().saturating_sub(1)].contains('.') {
+        value.pop();
+    }
+    while let Some(stripped) = value.strip_prefix("./") {
+        value = stripped.to_owned();
+    }
+    (!value.is_empty()).then_some(value)
+}
+
+fn safe_relative_intent_path(path: &str) -> bool {
+    if path.is_empty()
+        || path.len() > 240
+        || path.starts_with('/')
+        || path.starts_with('~')
+        || path.contains("://")
+        || path.chars().any(|character| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '.' | '/' | '_' | '-' | '@'))
+        })
+    {
+        return false;
+    }
+    let mut segments = path.split('/').peekable();
+    if segments.peek().is_none() {
+        return false;
+    }
+    if segments.any(|segment| segment.is_empty() || segment == "." || segment == "..") {
+        return false;
+    }
+    let Some(file_name) = path.rsplit('/').next() else {
+        return false;
+    };
+    path.contains('/') || file_name.contains('.') || is_common_file_name(file_name)
+}
+
+fn is_common_file_name(file_name: &str) -> bool {
+    matches!(
+        file_name,
+        "README" | "LICENSE" | "Makefile" | "Dockerfile" | "Gemfile" | "Rakefile"
+    )
+}
+
+fn intent_first_line_count(intent: &str) -> Option<u64> {
+    let words = normalized_identifier_words(intent);
+    for (index, word) in words.iter().enumerate() {
+        if word != "first" {
+            continue;
+        }
+        match words.get(index + 1).map(String::as_str) {
+            Some("line" | "lines") => return Some(1),
+            Some(count_word) => {
+                let Some(count) = intent_number_word(count_word) else {
+                    continue;
+                };
+                if words
+                    .get(index + 2)
+                    .is_some_and(|next| next == "line" || next == "lines")
+                {
+                    return Some(count);
+                }
+            }
+            None => {}
+        }
+    }
+    None
+}
+
+fn intent_number_word(word: &str) -> Option<u64> {
+    if let Ok(value) = word.parse::<u64>() {
+        return (1..=200).contains(&value).then_some(value);
+    }
+    match word {
+        "one" => Some(1),
+        "two" => Some(2),
+        "three" => Some(3),
+        "four" => Some(4),
+        "five" => Some(5),
+        "six" => Some(6),
+        "seven" => Some(7),
+        "eight" => Some(8),
+        "nine" => Some(9),
+        "ten" => Some(10),
+        "eleven" => Some(11),
+        "twelve" => Some(12),
+        "twenty" => Some(20),
+        _ => None,
+    }
 }
 
 fn intent_requests_worktree_diff(intent: &str) -> bool {
@@ -2723,9 +2887,10 @@ mod tests {
     }
 
     fn function_from_capability(function_id: &str) -> FunctionDefinition {
-        let specs = crate::domains::worktree::contract::capabilities()
-            .expect("worktree specs")
+        let specs = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
             .into_iter()
+            .chain(crate::domains::worktree::contract::capabilities().expect("worktree specs"))
             .chain(crate::domains::git::contract::capabilities().expect("git specs"));
         let spec = specs
             .into_iter()
@@ -3045,6 +3210,62 @@ mod tests {
         let entry = CapabilityRegistryEntry::from_function(function, 391);
         validate_target_payload(&entry, &arguments)
             .expect("trusted working directory should make repo probe schema-valid");
+    }
+
+    #[test]
+    fn intent_argument_normalization_binds_safe_filesystem_path_and_line_range() {
+        let function = function_from_capability("filesystem::read_file");
+        let mut arguments = json!({});
+        let mut corrections = Vec::new();
+
+        normalize_intent_target_arguments(
+            &function,
+            Some("Read only the first three lines of README.md."),
+            &mut arguments,
+            &mut corrections,
+        );
+
+        assert_eq!(arguments["path"], json!("README.md"));
+        assert_eq!(arguments["startLine"], json!(1));
+        assert_eq!(arguments["endLine"], json!(3));
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("intent_file_path_to_target_argument")
+        }));
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("intent_first_lines_to_target_arguments")
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function, 391);
+        validate_target_payload(&entry, &arguments)
+            .expect("intent binding should make read_file payload schema-valid");
+    }
+
+    #[test]
+    fn intent_argument_normalization_rejects_unsafe_paths_from_intent() {
+        let function = function_from_capability("filesystem::read_file");
+        let unsafe_intents = [
+            "Read the first line of /etc/passwd.",
+            "Read the first line of ../README.md.",
+            "Read the first line of https://example.com/README.md.",
+            "Read the first line of README.md;rm.",
+        ];
+
+        for intent in unsafe_intents {
+            let mut arguments = json!({});
+            let mut corrections = Vec::new();
+
+            normalize_intent_target_arguments(
+                &function,
+                Some(intent),
+                &mut arguments,
+                &mut corrections,
+            );
+
+            assert!(
+                arguments.get("path").is_none(),
+                "unsafe intent should not bind a path: {intent}"
+            );
+            assert!(corrections.is_empty());
+        }
     }
 
     #[test]
