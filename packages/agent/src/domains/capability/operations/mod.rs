@@ -62,9 +62,9 @@ pub(crate) use execute::execute_value;
 use execute::{
     apply_argument_schema_fit_filter, apply_deterministic_intent_route,
     clarification_candidates_for_intent, deterministic_intent_route, intent_strongly_matches_hit,
-    lacks_sufficient_intent_resolution_evidence, normalize_target_specific_arguments,
-    orchestration_constraints_allow_hit, orchestration_hit_from_entry,
-    parse_orchestrated_execute_input, prepared_execute_payload,
+    lacks_sufficient_intent_resolution_evidence, normalize_target_idempotency_argument,
+    normalize_target_specific_arguments, orchestration_constraints_allow_hit,
+    orchestration_hit_from_entry, parse_orchestrated_execute_input, prepared_execute_payload,
     promote_argument_schema_fit_candidates, validate_orchestration_constraint_shape,
     validate_orchestration_constraints,
 };
@@ -2744,6 +2744,61 @@ mod tests {
             corrections
                 .iter()
                 .any(|correction| correction["kind"] == json!("process_expected_outputs_shape"))
+        );
+    }
+
+    #[test]
+    fn orchestrated_execute_forwards_wrapper_idempotency_when_target_schema_requires_it() {
+        let mut function = test_function("ui::submit_action");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "required": [
+                "surfaceResourceId",
+                "surfaceVersionId",
+                "actionId",
+                "userInput",
+                "idempotencyKey"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "surfaceResourceId": {"type": "string"},
+                "surfaceVersionId": {"type": "string"},
+                "actionId": {"type": "string"},
+                "userInput": {"type": "object"},
+                "idempotencyKey": {"type": "string"}
+            }
+        }));
+        let mut input = parse_orchestrated_execute_input(&json!({
+            "target": "ui::submit_action",
+            "arguments": {
+                "surfaceResourceId": "ui-surface-resource_collection-artifact-prompt-snippet",
+                "surfaceVersionId": "ver_test",
+                "actionId": "create-snippet",
+                "userInput": {"name": "Gateway", "text": "Created through stored UI action"}
+            },
+            "idempotencyKey": "ui-action-submit-key"
+        }))
+        .expect("input");
+
+        normalize_target_idempotency_argument(
+            &function,
+            &mut input.arguments,
+            input.idempotency_key.as_deref(),
+            &mut input.corrections,
+        );
+
+        assert_eq!(
+            input.arguments["idempotencyKey"],
+            json!("ui-action-submit-key")
+        );
+        assert!(input.corrections.iter().any(|correction| {
+            correction["kind"] == json!("wrapper_idempotency_key_to_target_argument")
+        }));
+        let prepared = prepared_execute_payload(input.target_params.as_ref().unwrap(), &input);
+        assert_eq!(prepared["idempotencyKey"], json!("ui-action-submit-key"));
+        assert_eq!(
+            prepared["payload"]["idempotencyKey"],
+            json!("ui-action-submit-key")
         );
     }
 

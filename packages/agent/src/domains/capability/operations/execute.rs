@@ -314,6 +314,12 @@ async fn execute_orchestrated_value(
         );
     }
     normalize_target_specific_arguments(&function, &mut input.arguments, &mut input.corrections);
+    normalize_target_idempotency_argument(
+        &function,
+        &mut input.arguments,
+        input.idempotency_key.as_deref(),
+        &mut input.corrections,
+    );
     let mut prepared_payload = prepared_execute_payload(&resolve.target_params, &input);
     if requires_fresh_revision_for_payload(&function, &prepared_payload) {
         let freshness = record_orchestration_inspection(invocation, deps, &target).await?;
@@ -673,6 +679,42 @@ pub(super) fn normalize_target_specific_arguments(
         }
         _ => {}
     }
+}
+
+pub(super) fn normalize_target_idempotency_argument(
+    function: &FunctionDefinition,
+    arguments: &mut Value,
+    wrapper_idempotency_key: Option<&str>,
+    corrections: &mut Vec<Value>,
+) {
+    let Some(idempotency_key) = wrapper_idempotency_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+    if object.contains_key("idempotencyKey") || object.contains_key("idempotency_key") {
+        return;
+    }
+    let Some(schema) = function.request_schema.as_ref() else {
+        return;
+    };
+    if !schema_property_names(schema).contains("idempotencyKey") {
+        return;
+    }
+
+    object.insert("idempotencyKey".to_owned(), json!(idempotency_key));
+    corrections.push(correction_record(
+        "wrapper_idempotency_key_to_target_argument",
+        format!(
+            "copied execute.idempotencyKey into {} arguments because the selected target schema requires idempotencyKey",
+            function.id.as_str()
+        ),
+        1.0,
+    ));
 }
 
 fn normalize_filesystem_list_dir_arguments(arguments: &mut Value, corrections: &mut Vec<Value>) {

@@ -60,7 +60,11 @@
 //! model-provider wrapper. The runner gives each provider tool call its own
 //! wrapper idempotency key, while `execute.idempotencyKey` is forwarded into the
 //! prepared child invocation so target replay, approval replay, and durable
-//! output deduplication still happen at the capability boundary.
+//! output deduplication still happen at the capability boundary. If a selected
+//! target schema also declares its own `idempotencyKey` field, `execute` copies
+//! the same top-level key into the target arguments as a deterministic shape
+//! correction instead of forcing the model to learn nested gateway-specific
+//! idempotency placement.
 //! Intent-only resolution fails closed: if the best match has no lexical/name
 //! anchor, no supplied argument shape, and only a weak semantic score, execute
 //! returns `needs_capability` instead of presenting unrelated low-confidence

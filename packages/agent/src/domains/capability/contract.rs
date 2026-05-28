@@ -388,7 +388,7 @@ fn execute_model_request_schema() -> serde_json::Value {
             "capabilityId": {"type": "string", "description": "Correctable target alias only for callers that already know the capability id from the user, a prior execute result, or a primed recipe. Prefer target when possible."},
             "functionId": {"type": "string", "description": "Correctable target alias only for callers that already know the registered function id from the user, a prior execute result, or a primed recipe. Prefer target when possible."},
             "implementationId": {"type": "string", "description": "Correctable target alias only for callers that already know the implementation id from the user, a prior execute result, or a primed recipe. Prefer target when possible."},
-            "arguments": {"type": "object", "description": "Arguments for the resolved target capability only. Example for process::run: {\"command\":\"date\",\"executionMode\":\"read_only\"}. Omit arguments for pure discovery if required fields are not known yet. If execute returns needs_input, retry the same selected target with the missing fields. Do not include wrapper fields such as target, contractId, capabilityId, functionId, implementationId, payload, mode, inspectionHandle, idempotencyKey, reason, or expectedRevision here."},
+            "arguments": {"type": "object", "description": "Arguments for the resolved target capability only. Example for process::run: {\"command\":\"date\",\"executionMode\":\"read_only\"}. Omit arguments for pure discovery if required fields are not known yet. If execute returns needs_input, retry the same selected target with the missing fields. Do not include wrapper fields such as target, contractId, capabilityId, functionId, implementationId, payload, mode, inspectionHandle, reason, or expectedRevision here. Keep idempotencyKey top-level; when the selected target schema itself requires idempotencyKey, execute copies the top-level key into the target arguments safely."},
             "constraints": {
                 "type": "object",
                 "additionalProperties": true,
@@ -401,7 +401,7 @@ fn execute_model_request_schema() -> serde_json::Value {
                 "description": "Optional v1 bounds for resolution and preparation. Supported fields are riskMax, effect, allowedContracts, and allowedNamespaces. The schema accepts an object so execute can return structured constraints_rejected guidance for unsupported fields instead of failing at provider/schema validation. Constraints never broaden authority; unsupported constraint fields are rejected instead of ignored."
             },
             "payload": {"type": "object", "description": "Accepted only as a correctable alias for arguments. Prefer arguments; if supplied, the engine records a payload_to_arguments correction."},
-            "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key for mutating or resource-producing work. Safe read-only calls may omit it. Keep this top-level; do not put it inside arguments."},
+            "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key for mutating or resource-producing work. Safe read-only calls may omit it. Keep this top-level; execute forwards it into the prepared child invocation and, for targets whose own schema requires idempotencyKey, safely copies it into target arguments."},
             "reason": {"type": "string", "description": "Short reason for the requested action, used in audit records and approval prompts."}
         }
     })
@@ -667,7 +667,8 @@ mod tests {
         let idempotency_description = schema["properties"]["idempotencyKey"]["description"]
             .as_str()
             .expect("idempotency description");
-        assert!(idempotency_description.contains("do not put it inside arguments"));
+        assert!(idempotency_description.contains("Keep this top-level"));
+        assert!(idempotency_description.contains("safely copies it into target arguments"));
     }
 
     #[test]
