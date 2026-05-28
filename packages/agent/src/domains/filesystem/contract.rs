@@ -16,11 +16,11 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["filesystem.changes"];
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
         CapabilityContract::new("filesystem::list_dir", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
-            .description("List entries in a directory, optionally including hidden files.")
+            .description("List entries in a directory, optionally including hidden files and bounding the number of returned entries.")
             .tags(vec!["list", "directory", "folder", "ls", "files", "workspace"])
-            .request_schema(json!({"additionalProperties":false,"properties":{"path":{"type":"string"},"sessionId":{"type":"string"},"showHidden":{"type":"boolean"},"workspaceId":{"type":"string"}},"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"maxResults":{"type":"integer"},"path":{"type":"string"},"sessionId":{"type":"string"},"showHidden":{"type":"boolean"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"entries":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"parent":{"type":["string","null"]},"path":{"type":"string"}},"required":["path","parent","entries"],"type":"object"}))
-            .examples(vec![json!({"mode":"invoke","contractId":"filesystem::list_dir","payload":{"path":"."},"reason":"List the current worktree directory."})])
+            .examples(vec![json!({"mode":"invoke","contractId":"filesystem::list_dir","payload":{"path":".","maxResults":20},"reason":"List the current worktree directory."})])
             .build()?,
         CapabilityContract::new("filesystem::get_home", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
             .description("Return the user's home path and commonly useful filesystem locations.")

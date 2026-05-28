@@ -62,7 +62,11 @@ fn trace_out_of_home(path: &str, op: &'static str) {
 #[inline(always)]
 fn trace_out_of_home(_path: &str, _op: &'static str) {}
 
-pub(crate) fn list_dir(path: &str, show_hidden: bool) -> Result<Value, CapabilityError> {
+pub(crate) fn list_dir(
+    path: &str,
+    show_hidden: bool,
+    max_results: usize,
+) -> Result<Value, CapabilityError> {
     trace_out_of_home(path, "list_dir");
     let entries = std::fs::read_dir(path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -124,6 +128,7 @@ pub(crate) fn list_dir(path: &str, show_hidden: bool) -> Result<Value, Capabilit
             }
         }
     });
+    items.truncate(max_results);
 
     let parent = Path::new(&path)
         .parent()
@@ -572,7 +577,7 @@ mod tests {
 
         // list_dir also accepts traversal (picker-browse use case).
         let parent_traversal = format!("{}/..", inner.to_string_lossy());
-        let listing = list_dir(&parent_traversal, false)
+        let listing = list_dir(&parent_traversal, false, 100)
             .expect("trusted-local list_dir MUST allow traversal");
         let entries = listing["entries"].as_array().unwrap();
         assert!(entries.iter().any(|e| e["name"] == "secret.txt"));

@@ -1,6 +1,6 @@
 # Capability orchestration test scorecard
 
-Last updated: 2026-05-27.
+Last updated: 2026-05-28.
 
 This scorecard tracks the manual and automated proof that Tron’s single
 model-facing `execute` portal is intuitive, robust, auditable, and safe enough
@@ -35,7 +35,7 @@ The “done” bar requires:
 
 ## Current score
 
-Current manual-test substrate confidence: **59/100**.
+Current manual-test substrate confidence: **62/100**.
 
 This score is intentionally conservative. The production codebase can still be
 high quality while this manual substrate exercise remains incomplete; this
@@ -44,16 +44,16 @@ been exercised end-to-end through the app and verified from server logs.
 
 | Axis | Points | Current | Evidence | Remaining proof |
 |---|---:|---:|---|---|
-| Execute ergonomics and correction | 15 | 10 | `process::run` expected-output correction, wrapper/target guidance, `filesystem::apply_patch` append correction tests, live simulator append execution without probe failures, live `needs_selection`/`needs_capability` guardrails, and live `needs_input` guidance with exact missing paths | Stale-plan and provider-shape parity tests |
+| Execute ergonomics and correction | 15 | 11 | `process::run` expected-output correction, wrapper/target guidance, `filesystem::apply_patch` append correction tests, `filesystem::list_dir` `maxEntries` alias correction, live simulator append execution without probe failures, live `needs_selection`/`needs_capability` guardrails, and live `needs_input` guidance with exact missing paths | Stale-plan and provider-shape parity tests |
 | Capability resolution and recipes | 10 | 7 | Engine Console search/inspect flows, resolved explicit `process::run` targets, live intent-only `filesystem::read_file` resolution from `execute` without an explicit target, broad/unknown intent fail-closed as `needs_capability`, filesystem-namespace ambiguity as `needs_selection`, and known-target missing input as `needs_input` | Intent-only resolution across process/web/worker/module, ranking audit, and vector-warmup degradation |
-| Core filesystem/process paths | 15 | 11 | Read-only `process::run`, policy rejection for unsafe read-only commands, process cwd/path/root escape rejection, sandbox materialized output target bounding, process env allowlisting, live intent-only `filesystem::read_file`, live missing-file failure, live absolute-path root-bound rejection, and apply-patch append/replay tests | List/find/search/write/edit failure modes, timeouts, resource-output replay, and no probe calls |
+| Core filesystem/process paths | 15 | 13 | Read-only `process::run`, policy rejection for unsafe read-only commands, process cwd/path/root escape rejection, sandbox materialized output target bounding, process env allowlisting, live intent-only `filesystem::read_file`, live missing-file failure, live absolute-path root-bound rejection, bounded `filesystem::list_dir`/`glob`/`search_text` through `execute`, and apply-patch append/replay tests | Find/write/edit failure modes, timeouts, resource-output replay, and no probe calls |
 | Approval and freshness | 10 | 5 | Approval-required sandbox command, resume ordering fix, no-approval detail-sheet suppression | Denial, timeout, stale revision, replayed approval, and concurrent approval edge cases |
 | Idempotency and replay | 10 | 5 | Sandbox materialized replay inspection, apply-patch append replay unit/integration tests, and live simulator `filesystem::apply_patch` replay verification | Queue retry, duplicate UI submission, duplicate provider tool call, and cross-session replay |
 | Resource-output substrate | 10 | 5 | Prompt library and voice notes resource conversions, materialized `process::run` output refs, patch proposal refs | Artifact/materialized-file damage, CAS, hash mismatch, discard, and retained evidence under failure |
 | Generated UI/action gateway | 10 | 5 | Prompt management generated surface, action toasts, stale/offline fail-closed renderer behavior | Generic action staleness, malformed input, revoked grant, and target revision drift through live app |
 | Module/worker extensibility | 10 | 2 | Rust module package activation/trust/health tests exist | Live local-process package activation, worker spawn/health/disable/recovery, trust audit, and package UI through app |
 | Observability/log ingestion | 5 | 5 | Server ledger/event queries used during manual testing, auto-ingest path exercised, live replay test reconstructed from `engine_invocations` plus resource refs without relying on screenshots, and failed child invocations now remain visible in `execute` orchestration details | Standardize the DB query bundle for every scenario |
-| Provider parity | 5 | 0 | Provider exports are covered by code tests, not manual testing yet | OpenAI, Anthropic, Gemini, Kimi, and Ollama execute-schema parity with identical correction/result behavior |
+| Provider parity | 5 | 0 | Provider exports are covered by code tests, not manual testing yet. A direct Anthropic `/engine` retest stopped at `tool_use` without child invocations, so this axis stays blocked until provider loop parity is proven. | OpenAI, Anthropic, Gemini, Kimi, and Ollama execute-schema parity with identical correction/result behavior |
 
 ## Already exercised and fixed
 
@@ -73,6 +73,8 @@ been exercised end-to-end through the app and verified from server logs.
 | Unknown capability intent | Covered | A fresh simulator session called `execute` with intent `calibrate a quantum pineapple teleporter` and empty arguments. The result was `needs_capability`, included the proposed capability shape, returned bounded low-confidence candidates, and created no child invocation. | DB session `sess_019e6bd8-a9a3-7922-9eee-37775e725f2c` |
 | Model-facing filesystem root bounds | Covered | A simulator guardrail session proved missing files fail cleanly and absolute host paths such as `/etc/passwd` are rejected inside the model-facing filesystem capability path. Relative and allowed absolute paths still resolve against the active session worktree, while raw service helpers remain trusted-local internals only. Failed child invocations now surface in `execute.details.childInvocationIds` and nested orchestration details instead of disappearing from the user-facing result. | `filesystem::*` tests, `capability_execute_reports_failed_child_invocation_lineage`, DB sessions `sess_019e6bde-08d5-7331-8577-c74335d84ada` and `sess_019e6bec-0218-7d51-a211-0fe632f2963a` |
 | Model-facing process root and env bounds | Covered by focused tests | `process::run` still supports useful read-only workspace checks, but every invocation requires active session worktree truth. Read-only cwd/path operands, symlink/glob operands, and sandbox materialization targets must stay inside that worktree. Child processes receive an allowlisted environment rather than inherited server secrets, and explicit env payloads reject secret-like keys/values. | `process_run_requires_active_session_worktree`, `read_only_process_rejects_paths_outside_session_worktree`, `read_only_process_rejects_symlink_operands_that_escape_worktree`, `read_only_process_rejects_shell_glob_path_operands`, `read_only_find_allows_name_globs_but_bounds_search_roots`, `sandbox_materialized_absolute_target_path_cannot_escape_session_worktree`, `safe_process_environment_is_explicitly_allowlisted`, `process_run_rejects_secret_like_env_payloads` |
+| Bounded filesystem discovery | Covered for OpenAI path | A live OpenAI `/engine` retest asked the model to use only `execute` for `filesystem::list_dir` with `maxEntries`, `filesystem::glob`, and `filesystem::search_text`. The orchestrator normalized `maxEntries` to `maxResults`, selected the correct targets, required no approval, created exactly one child invocation per target, returned no durable refs for pure reads, and recorded the correction in `capability.orchestration` audit diagnostics. | DB session `sess_019e6c9a-c3b7-73d1-afad-2b5df04824b8`; child invocations `019e6c9a-ea64-7373-aa30-48237bfe5a48`, `019e6c9a-f6ee-7573-be96-ecbe3ae61432`, `019e6c9a-f7b0-7860-b409-3d403cc45137`; `list_dir_honors_max_results_bound`; `orchestrated_execute_normalizes_list_dir_max_entries_alias_before_schema_validation` |
+| Direct Anthropic provider retest | Blocked | A direct `/engine` session on the default Anthropic model reached provider `tool_use` stop state but produced no capability child invocations. This is intentionally recorded as a provider-parity blocker instead of being blended into OpenAI substrate evidence. | DB session `sess_019e6c97-be45-7711-bee3-94b1c6ff1729`; Provider parity axis remains `0/5` |
 | iOS reconnect after server rebuild | Covered by focused tests | Dashboard/chat connection state now belongs to the shared `EngineConnection` foreground reconnect loop. Normal reconnect keeps probing at a bounded cadence while foregrounded, so screens recover after dev-server rebuilds without owning retry logic or staying permanently failed until manual tap. | `ReconnectProbePolicyTests`, `EngineConnectionReconnectTests`, `packages/ios-app/docs/architecture.md`, `packages/ios-app/docs/onboarding.md` |
 | Memory auto-retain | Partially covered | Auto-retain runs through engine capabilities and no longer blocks normal testing, but it needs a final regression under the current server build. | Prior server-log review; pending current-build retest |
 
@@ -164,6 +166,9 @@ agree.
 - Treat screenshots as UI evidence only; the acceptance decision comes from
   `engine_invocations`, `capability_audit_events`, resource refs, and the
   resulting workspace state.
+- If the macOS Simulator window is not visible to Computer Use but
+  `xcrun simctl io booted screenshot` works, label any `/engine` WebSocket
+  retest as server-substrate evidence rather than full app UI evidence.
 
 ## Next logical checkpoint
 
@@ -182,9 +187,8 @@ Move to execute-portal basics under the current build:
 
 The next checkpoint should continue filesystem substrate breadth:
 
-1. `filesystem::list_dir`, `filesystem::glob`, and `filesystem::search_text`
-   bounded result behavior;
-2. exact replacement `filesystem::apply_patch` and duplicate idempotency;
-3. failed validation proving no accepted resource refs or child side effects;
+1. exact replacement `filesystem::apply_patch` and duplicate idempotency;
+2. failed validation proving no accepted resource refs or child side effects;
+3. `filesystem::find`, `write_file`, and `edit_file` bounds/idempotency;
 4. reconnect recovery during a live dev-server rebuild while a dashboard/chat
    screen is already mounted.

@@ -2776,6 +2776,32 @@ mod tests {
     }
 
     #[test]
+    fn orchestrated_execute_normalizes_list_dir_max_entries_alias_before_schema_validation() {
+        let list_dir_spec = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "filesystem::list_dir")
+            .expect("filesystem::list_dir spec");
+        let function = crate::domains::contract::function_definition_for_capability(&list_dir_spec);
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 79);
+        let mut arguments = json!({
+            "path": ".",
+            "maxEntries": 20
+        });
+        let mut corrections = Vec::new();
+
+        normalize_target_specific_arguments(&function, &mut arguments, &mut corrections);
+
+        assert_eq!(arguments["maxResults"], json!(20));
+        assert!(arguments.get("maxEntries").is_none());
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("filesystem_list_dir_max_entries_alias")
+        }));
+        validate_target_payload(&entry, &arguments)
+            .expect("normalized list_dir payload schema-valid");
+    }
+
+    #[test]
     fn orchestrated_execute_normalizes_apply_patch_append_intent() {
         let apply_patch_spec = crate::domains::filesystem::contract::capabilities()
             .expect("filesystem specs")

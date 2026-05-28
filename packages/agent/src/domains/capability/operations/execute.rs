@@ -667,10 +667,31 @@ pub(super) fn normalize_target_specific_arguments(
 ) {
     match function.id.as_str() {
         "process::run" => normalize_process_run_arguments(arguments, corrections),
+        "filesystem::list_dir" => normalize_filesystem_list_dir_arguments(arguments, corrections),
         "filesystem::apply_patch" => {
             normalize_filesystem_apply_patch_arguments(arguments, corrections)
         }
         _ => {}
+    }
+}
+
+fn normalize_filesystem_list_dir_arguments(arguments: &mut Value, corrections: &mut Vec<Value>) {
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+    if object.contains_key("maxEntries") {
+        if !object.contains_key("maxResults")
+            && let Some(value) = object.remove("maxEntries")
+        {
+            object.insert("maxResults".to_owned(), value);
+        } else {
+            object.remove("maxEntries");
+        }
+        corrections.push(correction_record(
+            "filesystem_list_dir_max_entries_alias",
+            "normalized maxEntries to maxResults; filesystem::list_dir uses maxResults to bound directory entries",
+            1.0,
+        ));
     }
 }
 

@@ -10,6 +10,9 @@
 //! semantics: `oldString == ""` appends `newString` exactly so the model-facing
 //! execute orchestrator can normalize append requests without first probing a
 //! guaranteed-failing replacement.
+//! Directory discovery stays bounded at the target contract (`maxResults`),
+//! while the execute orchestrator owns harmless alias normalization such as
+//! `maxEntries`.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -160,8 +163,11 @@ async fn filesystem_list_dir_value(
             .unwrap_or(home),
     };
     let show_hidden = opt_bool(params, "showHidden").unwrap_or(false);
+    let max_results = usize::try_from(opt_u64(params, "maxResults", 500))
+        .unwrap_or(500)
+        .min(10_000);
     run_blocking_task("filesystem::list_dir", move || {
-        filesystem_service::list_dir(&path, show_hidden)
+        filesystem_service::list_dir(&path, show_hidden, max_results)
     })
     .await
 }
@@ -511,6 +517,18 @@ mod tests {
     use serde_json::json;
 
     fn test_invocation(working_directory: Option<&str>) -> Invocation {
+        test_invocation_with_payload(
+            "filesystem::read_file",
+            json!({"path": "README.md"}),
+            working_directory,
+        )
+    }
+
+    fn test_invocation_with_payload(
+        function_id: &str,
+        payload: Value,
+        working_directory: Option<&str>,
+    ) -> Invocation {
         let mut causal = CausalContext::new(
             ActorId::new("agent:test").expect("actor id"),
             ActorKind::Agent,
@@ -524,8 +542,8 @@ mod tests {
             );
         }
         Invocation::new_sync(
-            FunctionId::new("filesystem::read_file").expect("function id"),
-            json!({"path": "README.md"}),
+            FunctionId::new(function_id).expect("function id"),
+            payload,
             causal,
         )
     }
@@ -629,5 +647,31 @@ mod tests {
         let resolved = resolve_invocation_path(&invocation, "README.md").expect("resolve");
 
         assert_eq!(resolved, "README.md");
+    }
+
+    #[tokio::test]
+    async fn list_dir_honors_max_results_bound() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        for name in ["c.txt", "b.txt", "a.txt"] {
+            std::fs::write(tempdir.path().join(name), "fixture").expect("write fixture");
+        }
+        let root = tempdir.path().to_string_lossy().into_owned();
+        let invocation = test_invocation_with_payload(
+            "filesystem::list_dir",
+            json!({"path": ".", "maxResults": 2}),
+            Some(&root),
+        );
+
+        let deps = Deps {
+            engine_host: crate::engine::EngineHostHandle::new_in_memory().expect("host"),
+        };
+        let result = filesystem_list_dir_value(&invocation, &deps)
+            .await
+            .expect("list dir");
+
+        let entries = result["entries"].as_array().expect("entries");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0]["name"], json!("a.txt"));
+        assert_eq!(entries[1]["name"], json!("b.txt"));
     }
 }
