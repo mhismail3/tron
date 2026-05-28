@@ -343,7 +343,7 @@ pub(super) fn preflight_rejection_result(
             "missingFields": missing_fields,
             "missingArgumentPaths": missing_argument_paths
         })),
-        is_error: Some(true),
+        is_error: (status != "needs_input").then_some(true),
         stop_turn: None,
     })
 }

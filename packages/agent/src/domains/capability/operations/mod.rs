@@ -3714,7 +3714,7 @@ mod tests {
         assert!(text.contains("process::run needs input before child execution"));
         assert!(!text.contains("process::run rejected before child execution"));
 
-        assert_eq!(result.is_error, Some(true));
+        assert_eq!(result.is_error, None);
         let details = result.details.expect("details");
         assert_eq!(details["status"], json!("needs_input"));
         assert_eq!(details["error"]["code"], json!("INVALID_PARAMS"));

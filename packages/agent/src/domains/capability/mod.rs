@@ -36,16 +36,23 @@
 //! contracts may lower the effective risk before this check, as `process::run`
 //! does for classifier-approved read/check commands, but the same payload
 //! classifier must also drive approval so the fast path cannot bypass safety.
+//! Discovery-only requests are a first-class execute path: `operation=discover`
+//! or a clear no-mutation discovery intent returns recipe/schema/sequence
+//! guidance without creating a target child invocation, approval, or durable
+//! output. Ambiguity, missing input, and missing capability states are guidance
+//! outcomes, not runtime failures.
 //! Low-risk user-visible notifications are another explicit direct path:
 //! `notifications::send` is still idempotent and audited, but it is primed and
 //! executable without a separate inspect round trip so notification parity does
 //! not depend on shelling out to OS notification commands.
 //! Target-owned payload schema, policy, and idempotency preflight rejections
-//! are surfaced as structured `CapabilityResult { is_error: true }` values with
-//! no child invocation, approval, or durable output. Capability execution should
-//! fail the engine invocation only for wrapper-level authority/availability
-//! problems or unexpected child execution failures, not for normal target
-//! contract rejections that the model must report back to the operator.
+//! are surfaced as structured `CapabilityResult` values with no child
+//! invocation, approval, or durable output. Missing required input is guidance;
+//! invalid payloads and policy denials remain errors. Capability execution
+//! should fail the engine invocation only for wrapper-level
+//! authority/availability problems or unexpected child execution failures, not
+//! for normal target contract rejections that the model must report back to the
+//! operator.
 //! Approval-required executions resume through `approval::resolve`, but the
 //! original `capability::execute` result must still project the executed
 //! approval state, the `execute` engine invocation id, and resumed child

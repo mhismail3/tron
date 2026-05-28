@@ -28,6 +28,7 @@ const EXECUTE_WRAPPER_KEYS: &[&str] = &[
     "target",
     "arguments",
     "constraints",
+    "operation",
     "payload",
     "idempotencyKey",
     "idempotency_key",
@@ -73,9 +74,35 @@ pub(super) struct OrchestratedExecuteInput {
     pub(super) target_params: Option<Value>,
     pub(super) arguments: Value,
     pub(super) constraints: Value,
+    pub(super) operation: Option<String>,
     pub(super) idempotency_key: Option<String>,
     pub(super) reason: Option<String>,
     pub(super) corrections: Vec<Value>,
+}
+
+impl OrchestratedExecuteInput {
+    fn discovery_only(&self) -> bool {
+        if self.operation.as_deref() == Some("discover") {
+            return true;
+        }
+        if self.operation.as_deref() == Some("run") {
+            return false;
+        }
+        if self
+            .arguments
+            .as_object()
+            .is_some_and(|object| !object.is_empty())
+        {
+            return false;
+        }
+        discovery_only_text(self.intent.as_deref())
+            || discovery_only_text(self.reason.as_deref())
+            || self
+                .constraints
+                .get("operation")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value.eq_ignore_ascii_case("discover"))
+    }
 }
 
 fn is_orchestrated_execute_payload(params: &Value) -> bool {
@@ -163,7 +190,7 @@ async fn execute_orchestrated_value(
                     "needs_input",
                     "Tell execute either the natural-language intent or an explicit target capability.",
                     diagnostics,
-                    true,
+                    orchestration_status_is_error("needs_input"),
                 );
             };
             match resolve_intent_target(intent, &input.arguments, &actor, deps, &input.constraints)
@@ -198,7 +225,7 @@ async fn execute_orchestrated_value(
                         "needs_capability",
                         "No visible healthy capability clearly matches that intent.",
                         diagnostics,
-                        true,
+                        orchestration_status_is_error("needs_capability"),
                     );
                 }
                 IntentResolveOutcome::NeedsSelection {
@@ -220,7 +247,12 @@ async fn execute_orchestrated_value(
                         Vec::new(),
                     );
                     record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
-                    return orchestration_result("needs_selection", &message, diagnostics, true);
+                    return orchestration_result(
+                        "needs_selection",
+                        &message,
+                        diagnostics,
+                        orchestration_status_is_error("needs_selection"),
+                    );
                 }
             }
         }
@@ -255,7 +287,7 @@ async fn execute_orchestrated_value(
                 "needs_capability",
                 "No visible healthy capability matches the requested target.",
                 diagnostics,
-                true,
+                orchestration_status_is_error("needs_capability"),
             );
         }
         Err(error) => {
@@ -346,6 +378,24 @@ async fn execute_orchestrated_value(
             &format!("execute constraints rejected the selected target: {error}"),
             diagnostics,
             true,
+        );
+    }
+    if input.discovery_only() {
+        let diagnostics = orchestration_details(
+            &orchestration_id,
+            "capability_discovery",
+            input.intent.as_deref(),
+            Some(corrected_orchestrated_request(&input)),
+            &input,
+            discovery_phase_details(&resolve, &target),
+            Vec::new(),
+        );
+        record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+        return orchestration_result(
+            "capability_discovery",
+            &discovery_message(&target),
+            diagnostics,
+            false,
         );
     }
     normalize_target_arguments(&function, &mut input.arguments, &mut input.corrections);
@@ -536,6 +586,9 @@ pub(super) fn parse_orchestrated_execute_input(
         }
         (None, None) => json!({}),
     };
+    let operation = string_field(params, "operation")
+        .map(|value| normalize_execute_operation(&value))
+        .transpose()?;
 
     normalize_nested_wrapper_shape(
         &mut arguments,
@@ -551,6 +604,7 @@ pub(super) fn parse_orchestrated_execute_input(
         target_params,
         arguments,
         constraints,
+        operation,
         idempotency_key,
         reason,
         corrections,
@@ -632,6 +686,48 @@ fn object_value(value: &Value, label: &str) -> Result<Value, CapabilityError> {
             message: format!("{label} must be an object"),
         })
     }
+}
+
+fn normalize_execute_operation(value: &str) -> Result<String, CapabilityError> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "auto" => Ok("auto".to_owned()),
+        "discover" | "discovery" | "inspect" | "describe" | "dry_run" | "dry-run" => {
+            Ok("discover".to_owned())
+        }
+        "run" | "invoke" | "execute" => Ok("run".to_owned()),
+        _ => Err(CapabilityError::InvalidParams {
+            message: format!(
+                "Unsupported execute.operation '{value}'; use discover, run, or omit it for auto"
+            ),
+        }),
+    }
+}
+
+fn discovery_only_text(value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let normalized = value.to_ascii_lowercase();
+    let discovery_terms = [
+        "discover",
+        "discovery only",
+        "required fields",
+        "required arguments",
+        "capability id",
+        "capability ids",
+        "schema",
+        "schemas",
+        "safe sequence",
+        "dry run",
+        "dry-run",
+        "do not execute",
+        "don't execute",
+        "do not mutate",
+        "no mutations",
+        "without mutating",
+    ];
+    discovery_terms.iter().any(|term| normalized.contains(term))
 }
 
 fn target_params_from_hint(value: Option<&Value>) -> Result<Option<Value>, CapabilityError> {
@@ -1492,6 +1588,11 @@ fn corrected_orchestrated_request(input: &OrchestratedExecuteInput) -> Value {
     if let Some(target) = &input.target_params {
         object.insert("target".to_owned(), target.clone());
     }
+    if let Some(operation) = &input.operation
+        && operation != "auto"
+    {
+        object.insert("operation".to_owned(), json!(operation));
+    }
     object.insert("arguments".to_owned(), input.arguments.clone());
     if !input.constraints.as_object().map_or(true, Map::is_empty) {
         object.insert("constraints".to_owned(), input.constraints.clone());
@@ -1992,6 +2093,57 @@ fn orchestration_candidate_summary(hit: &CapabilityIndexHit) -> Value {
     })
 }
 
+fn discovery_phase_details(
+    resolve: &OrchestrationResolve,
+    target: &ResolvedCapabilityTarget,
+) -> Value {
+    let inspection = target.entry.inspection(target.binding_decision.clone());
+    let recipe = serde_json::to_value(&inspection.recipe).unwrap_or(Value::Null);
+    json!({
+        "phase": "discover",
+        "resolveMode": resolve.mode,
+        "candidates": resolve.candidates,
+        "rejectedCandidates": resolve.rejected_candidates,
+        "searchStatus": resolve.search_status,
+        "selectedTarget": {
+            "contractId": target.entry.contract_id.as_str(),
+            "implementationId": target.entry.implementation_id.as_str(),
+            "functionId": target.entry.function.id.as_str(),
+            "catalogRevision": target.entry.catalog_revision,
+            "schemaDigest": target.entry.schema_digest.as_str(),
+            "effectClass": format!("{:?}", target.entry.function.effect_class),
+            "riskLevel": format!("{:?}", target.entry.function.risk_level),
+        },
+        "recipe": recipe,
+        "executionRequirements": inspection.execution_requirements,
+        "docs": {
+            "summary": target.entry.function.description.as_str(),
+        }
+    })
+}
+
+fn discovery_message(target: &ResolvedCapabilityTarget) -> String {
+    let recipe = target.entry.agent_recipe();
+    let required = if recipe.required_payload.is_empty() {
+        "none".to_owned()
+    } else {
+        recipe.required_payload.join("; ")
+    };
+    let optional = if recipe.optional_payload.is_empty() {
+        "none".to_owned()
+    } else {
+        recipe.optional_payload.join("; ")
+    };
+    format!(
+        "Capability discovery for {}. Required arguments: {}. Optional arguments: {}. Effect/risk: {:?}/{:?}. No child invocation was created.",
+        target.entry.contract_id,
+        required,
+        optional,
+        target.entry.function.effect_class,
+        target.entry.function.risk_level
+    )
+}
+
 pub(super) fn lacks_sufficient_intent_resolution_evidence(
     intent: &str,
     arguments: &Value,
@@ -2282,6 +2434,13 @@ fn orchestration_result(
     })
 }
 
+fn orchestration_status_is_error(status: &str) -> bool {
+    !matches!(
+        status,
+        "capability_discovery" | "needs_input" | "needs_selection" | "needs_capability"
+    )
+}
+
 fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Value {
     let mut details = Map::new();
     details.insert("status".to_owned(), json!(status));
@@ -2305,6 +2464,9 @@ fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Va
             "selectedTarget",
             "error",
             "guidance",
+            "recipe",
+            "executionRequirements",
+            "docs",
         ] {
             if let Some(value) = phase_details.get(key) {
                 details.insert(key.to_owned(), value.clone());
@@ -2398,6 +2560,50 @@ async fn record_orchestration_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovery_only_intent_is_guidance_not_execution() {
+        let input = parse_orchestrated_execute_input(&json!({
+            "intent": "Discover module package registration required fields. Do not execute mutations.",
+            "reason": "RWO discovery only"
+        }))
+        .expect("input");
+
+        assert!(input.discovery_only());
+        assert_eq!(input.operation, None);
+        assert!(!orchestration_status_is_error("capability_discovery"));
+        assert!(!orchestration_status_is_error("needs_selection"));
+        assert!(!orchestration_status_is_error("needs_input"));
+        assert!(!orchestration_status_is_error("needs_capability"));
+        assert!(orchestration_status_is_error("request_invalid"));
+        assert!(orchestration_status_is_error("target_policy_rejected"));
+    }
+
+    #[test]
+    fn explicit_execute_operation_controls_discovery_inference() {
+        let discover = parse_orchestrated_execute_input(&json!({
+            "operation": "discover",
+            "intent": "module package registration",
+            "arguments": {}
+        }))
+        .expect("discover input");
+        assert!(discover.discovery_only());
+
+        let run = parse_orchestrated_execute_input(&json!({
+            "operation": "run",
+            "intent": "Discover README.md by reading it",
+            "arguments": {}
+        }))
+        .expect("run input");
+        assert!(!run.discovery_only());
+
+        let invalid = parse_orchestrated_execute_input(&json!({
+            "operation": "unsupported-probe",
+            "intent": "read README.md"
+        }))
+        .expect_err("invalid operation");
+        assert!(invalid.to_string().contains("execute.operation"));
+    }
 
     #[test]
     fn observe_phase_promotes_child_resource_refs_and_approval_state() {
