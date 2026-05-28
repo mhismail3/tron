@@ -154,7 +154,7 @@ pub(super) async fn execute_invoke_value(
     }
     let result = deps.engine_host.invoke(child).await;
     if let Some(error) = result.error.clone() {
-        return Err(engine_error_to_capability_error(error));
+        return child_run_failure_result(deps, &function, &target, result, error).await;
     }
     let output = result.value.clone().unwrap_or(Value::Null);
     let catalog_revision = result.catalog_revision.0;
@@ -220,6 +220,80 @@ pub(super) async fn execute_invoke_value(
         content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(text)]),
         details: Some(details),
         is_error: None,
+        stop_turn: None,
+    })
+}
+
+async fn child_run_failure_result(
+    deps: &Deps,
+    function: &FunctionDefinition,
+    target: &ResolvedCapabilityTarget,
+    result: crate::engine::InvocationResult,
+    error: crate::engine::EngineError,
+) -> Result<Value, CapabilityError> {
+    let mapped = engine_error_to_capability_error(error);
+    let code = mapped.code().to_owned();
+    let details_value = mapped.details();
+    let message = mapped.to_string();
+    let child_invocations = vec![result.invocation_id.as_str().to_owned()];
+    let audit_payload = json!({
+        "status": "run_failed",
+        "contractId": target.binding_decision.contract_id.clone(),
+        "implementationId": target.binding_decision.selected_implementation.clone(),
+        "functionId": result.function_id.as_str(),
+        "catalogRevision": result.catalog_revision.0,
+        "functionRevision": result.function_revision.0,
+        "schemaDigest": target.entry.schema_digest.clone(),
+        "childInvocations": child_invocations,
+        "error": {
+            "code": code,
+            "message": message,
+            "details": details_value
+        }
+    });
+    {
+        let store = deps.registry_store.clone();
+        let trace_id = result.trace_id.as_str().to_owned();
+        let audit_payload = audit_payload.clone();
+        run_blocking_task("capability.execute.audit_failure", move || {
+            let mut store = store.lock().map_err(|_| CapabilityError::Internal {
+                message: "capability registry store mutex poisoned".to_owned(),
+            })?;
+            store
+                .record_audit_event("capability.execute", Some(&trace_id), audit_payload)
+                .map_err(registry_store_error)?;
+            Ok(())
+        })
+        .await?;
+    }
+
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(format!(
+            "{} failed during child execution: {message}",
+            function.id.as_str()
+        ))]),
+        details: Some(json!({
+            "status": "run_failed",
+            "error": {
+                "code": code,
+                "message": message,
+                "details": details_value
+            },
+            "contractId": target.entry.contract_id.clone(),
+            "implementationId": target.entry.implementation_id.clone(),
+            "functionId": function.id.as_str(),
+            "catalogRevision": result.catalog_revision.0,
+            "functionRevision": result.function_revision.0,
+            "schemaDigest": target.entry.schema_digest.clone(),
+            "selectedImplementation": target.binding_decision.selected_implementation.clone(),
+            "bindingDecision": target.binding_decision.clone(),
+            "childInvocationCreated": true,
+            "childInvocationId": result.invocation_id.as_str(),
+            "childInvocationIds": child_invocations,
+            "approvalCreated": false,
+            "resourceRefs": []
+        })),
+        is_error: Some(true),
         stop_turn: None,
     })
 }

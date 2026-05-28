@@ -1,7 +1,7 @@
 import Foundation
 
 // ARCHITECTURE: ~966 lines — connection state machine (7 states), reconnection strategies
-// (single normal probe + deploy-aware), bounded ping verification, heartbeat loop, message
+// (foreground normal retry loop + deploy-aware), bounded ping verification, heartbeat loop, message
 // routing, and background state management.
 // These are tightly coupled transport concerns that share connection state. Pragmatic trigger:
 // if a third reconnection strategy is needed.
@@ -146,7 +146,8 @@ final class EngineConnection {
     private var isConnectedFlag = false
     private var reconnectAttempts = 0
 
-    /// Normal reconnect policy — one short automatic probe before parking in `.failed`.
+    /// Normal reconnect policy — retry while foreground so dev rebuilds and
+    /// Mac restarts recover without forcing every screen to own retry logic.
     private let reconnectPolicy = ReconnectProbePolicy()
 
     private let requestTimeout: TimeInterval = 30.0
@@ -154,6 +155,7 @@ final class EngineConnection {
     nonisolated static let connectionOpenTimeout: TimeInterval = 10.0
     nonisolated static let manualRetryOpenTimeout: TimeInterval = connectionOpenTimeout
     nonisolated static let automaticReconnectProbeTimeout: TimeInterval = ReconnectProbePolicy().probeTimeout
+    nonisolated static let automaticReconnectRetryDelay: TimeInterval = ReconnectProbePolicy().retryDelay
     nonisolated static let heartbeatInterval: TimeInterval = 5.0
     nonisolated static let failedAfterExhaustionReason = "Connection lost — tap to retry"
 
@@ -985,57 +987,75 @@ final class EngineConnection {
                 await self?.startDeployReconnection()
             }
         } else {
-            // Start the single normal reconnect probe in a tracked task.
+            // Start the foreground retry loop in a tracked task.
             reconnectTask = Task { [weak self] in
                 await self?.startReconnection()
             }
         }
     }
 
-    /// Run one short automatic reconnect probe.
-    /// After that probe fails, park in `.failed` so the user sees "not connected"
-    /// until they manually retry or a deploy-aware reconnect is explicitly active.
+    /// Run foreground automatic reconnect probes until the socket returns,
+    /// authentication fails, the app backgrounds, or an optional policy cap is
+    /// reached. This keeps dashboard and chat controls self-healing after a
+    /// dev-server rebuild without adding per-view retry loops.
     private func startReconnection() async {
         guard !isConnectedFlag && !isInBackground && !Task.isCancelled else { return }
-        reconnectAttempts += 1
+        while !isConnectedFlag && !isInBackground && !Task.isCancelled {
+            reconnectAttempts += 1
 
-        guard reconnectAttempts <= reconnectPolicy.maxAutomaticAttempts else {
-            logger.warning("Automatic reconnect probe budget exhausted - entering read-only mode", category: .websocket)
-            reconnectAttempts = 0
-            connectionState = .failed(reason: Self.failedAfterExhaustionReason)
-            return
+            if let maxAutomaticAttempts = reconnectPolicy.maxAutomaticAttempts,
+               reconnectAttempts > maxAutomaticAttempts {
+                logger.warning("Automatic reconnect probe budget exhausted - entering read-only mode", category: .websocket)
+                reconnectAttempts = 0
+                connectionState = .failed(reason: Self.failedAfterExhaustionReason)
+                return
+            }
+
+            let reconnectingState = ConnectionState.reconnecting(
+                attempt: reconnectAttempts,
+                nextRetrySeconds: 0
+            )
+            let attemptBudget = reconnectPolicy.maxAutomaticAttempts.map { "\($0)" } ?? "unbounded"
+            logger.info(
+                "Starting reconnect probe \(reconnectAttempts)/\(attemptBudget) (timeout: \(reconnectPolicy.probeTimeout)s)",
+                category: .websocket
+            )
+
+            await connect(
+                openTimeout: reconnectPolicy.probeTimeout,
+                stateOnStart: reconnectingState,
+                stateOnFailure: reconnectingState
+            )
+
+            if isConnectedFlag {
+                reconnectAttempts = 0
+                return
+            }
+
+            if case .unauthorized = connectionState {
+                reconnectAttempts = 0
+                return
+            }
+
+            guard !isInBackground && !Task.isCancelled else { return }
+
+            await waitBeforeNextReconnectProbe(attempt: reconnectAttempts)
         }
+    }
 
-        let reconnectingState = ConnectionState.reconnecting(
-            attempt: reconnectAttempts,
-            nextRetrySeconds: 0
-        )
-        logger.info(
-            "Starting reconnect probe \(reconnectAttempts)/\(reconnectPolicy.maxAutomaticAttempts) (timeout: \(reconnectPolicy.probeTimeout)s)",
-            category: .websocket
-        )
+    private func waitBeforeNextReconnectProbe(attempt: Int) async {
+        let totalDelay = max(0, Int(ceil(reconnectPolicy.retryDelay)))
+        guard totalDelay > 0 else { return }
 
-        await connect(
-            openTimeout: reconnectPolicy.probeTimeout,
-            stateOnStart: reconnectingState,
-            stateOnFailure: reconnectingState
-        )
-
-        if isConnectedFlag {
-            reconnectAttempts = 0
-            return
+        var remainingSeconds = totalDelay
+        while remainingSeconds > 0 && !isConnectedFlag && !isInBackground && !Task.isCancelled {
+            connectionState = .reconnecting(
+                attempt: attempt,
+                nextRetrySeconds: remainingSeconds
+            )
+            try? await Task.sleep(for: .seconds(1))
+            remainingSeconds -= 1
         }
-
-        if case .unauthorized = connectionState {
-            reconnectAttempts = 0
-            return
-        }
-
-        guard !isInBackground && !Task.isCancelled else { return }
-
-        logger.warning("Reconnect probe failed - entering read-only mode", category: .websocket)
-        reconnectAttempts = 0
-        connectionState = .failed(reason: Self.failedAfterExhaustionReason)
     }
 
     /// Deploy-aware reconnection — waits for the server to restart, then reconnects with more patience.
@@ -1119,11 +1139,17 @@ final class EngineConnection {
         await connect(
             openTimeout: Self.manualRetryOpenTimeout,
             stateOnStart: .connecting,
-            stateOnFailure: .failed(reason: Self.failedAfterExhaustionReason)
+            stateOnFailure: .reconnecting(attempt: 0, nextRetrySeconds: 0)
         )
 
         if case .unauthorized = connectionState {
             return
+        }
+
+        if !isConnectedFlag && !isInBackground {
+            reconnectTask = Task { [weak self] in
+                await self?.startReconnection()
+            }
         }
     }
 }

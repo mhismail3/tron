@@ -12,7 +12,8 @@ final class PushNotificationService {
     /// Current authorization status
     private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
 
-    /// Current device token (hex string, 64 chars)
+    /// Current APNs device token as a hex string. APNs token bytes are
+    /// variable-length opaque data, so this must not assume a fixed size.
     private(set) var deviceToken: String?
 
     /// Last error message during registration

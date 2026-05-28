@@ -346,11 +346,11 @@ to `.disconnected` so the next foreground transition can kick a fresh retry. On
 foreground return, the app verifies any apparently connected socket with a
 bounded URLSession WebSocket ping before issuing notification or session-list
 engine refreshes, and manually retries through the same path as the status pill when
-the connection state machine says retrying is appropriate. Normal automatic recovery uses one short
-two-second WebSocket-open probe; if that probe cannot connect, the transport
-parks in the user-retryable failed/not-connected state instead of cycling
-through repeated reconnect windows. Deploy-aware reconnect remains more patient
-because `server.restarting` is an explicit signal that the Mac is expected to
+the connection state machine says retrying is appropriate. Normal automatic recovery uses
+short foreground WebSocket-open probes at a bounded cadence until the server returns,
+the app backgrounds, or authentication fails, so dashboard and chat controls recover
+after dev rebuilds without per-view retry logic. Deploy-aware reconnect remains more
+patient because `server.restarting` is an explicit signal that the Mac is expected to
 come back. New engine WebSocket tasks also stay in
 `.connecting` until URLSession reports that the WebSocket upgrade opened, so a
 sleeping Mac cannot be reported as connected just because a task was resumed.

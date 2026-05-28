@@ -125,15 +125,14 @@ final class PushNotificationServiceTests: XCTestCase {
 
     // MARK: - Token Format Tests
 
-    func test_handleTokenUpdate_acceptsHexString() {
+    func test_handleTokenUpdate_acceptsVariableLengthHexString() {
         let service = PushNotificationService()
-        // Typical APNs token format (64 hex chars)
-        let hexToken = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        let hexToken = String(repeating: "a", count: 160)
 
         service.handleTokenUpdate(hexToken)
 
         XCTAssertEqual(service.deviceToken, hexToken)
-        XCTAssertEqual(service.deviceToken?.count, 64)
+        XCTAssertEqual(service.deviceToken?.count, 160)
     }
 
     func test_handleTokenUpdate_acceptsEmptyString() {

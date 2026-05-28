@@ -371,8 +371,10 @@ Important parity anchors are:
 
 When filesystem capabilities are invoked through the model-facing capability
 primitive, relative paths resolve against the active session working
-directory/worktree carried as engine runtime metadata. Absolute paths retain the
-trusted-local host filesystem behavior described by the filesystem domain docs.
+directory/worktree carried as engine runtime metadata. Absolute paths are
+accepted only when they resolve inside that active working directory; host-wide
+filesystem browsing remains limited to internal/operator picker paths rather
+than model-facing file capabilities.
 When a session acquires an isolated git worktree, Tron seeds that worktree from
 the operator-visible working copy: tracked edits/deletions and untracked
 non-ignored files are overlaid on top of `HEAD`, while ignored files and

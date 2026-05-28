@@ -25,8 +25,9 @@ struct MiscClientTests {
         // If this test fails, the iOS app stopped sending the bundle ID
         // to the server and the relay will revert to its single-bundle
         // default — breaking the Beta scheme.
+        let variableLengthToken = String(repeating: "a", count: 160)
         let params = DeviceTokenRegisterParams(
-            deviceToken: String(repeating: "a", count: 64),
+            deviceToken: variableLengthToken,
             sessionId: nil,
             workspaceId: nil,
             environment: "sandbox",
@@ -37,7 +38,7 @@ struct MiscClientTests {
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         #expect(json?["bundleId"] as? String == "com.tron.mobile.beta")
         #expect(json?["environment"] as? String == "sandbox")
-        #expect(json?["deviceToken"] as? String == String(repeating: "a", count: 64))
+        #expect(json?["deviceToken"] as? String == variableLengthToken)
     }
 
     @Test("DeviceTokenRegisterParams preserves optional session/workspace")

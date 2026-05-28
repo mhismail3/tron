@@ -1736,9 +1736,12 @@ fn redacted_prepared_request_preview(prepared_payload: &Value) -> Value {
 }
 
 fn orchestration_child_invocations(value: &Value) -> Vec<String> {
-    value
-        .get("details")
-        .and_then(|details| details.get("childInvocations"))
+    let Some(details) = value.get("details") else {
+        return Vec::new();
+    };
+    details
+        .get("childInvocations")
+        .or_else(|| details.get("childInvocationIds"))
         .and_then(Value::as_array)
         .map(|values| {
             values

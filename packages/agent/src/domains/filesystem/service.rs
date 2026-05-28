@@ -4,9 +4,10 @@
 //!
 //! These low-level service helpers accept caller-supplied path strings and pass
 //! them straight to `std::fs::*` with **no containment check**. The public
-//! capability path performs grant file-root checks before mutating handlers run;
-//! the helpers stay raw so tests and internal callers can exercise exact host
-//! filesystem behavior. That is a deliberate trade-off, not an oversight:
+//! capability path performs session-working-directory containment for
+//! model/session calls before any handler reaches these helpers; the helpers
+//! stay raw so tests and internal callers can exercise exact host filesystem
+//! behavior. That is a deliberate trade-off, not an oversight:
 //!
 //! * The server is assumed to be reachable only from the user's own
 //!   devices via Tailscale (see the project threat-model in `README.md`

@@ -3,8 +3,9 @@
 //! This module owns canonical function execution for the filesystem namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
 //!
-//! Relative paths are resolved against trusted engine runtime metadata for the
-//! active session working directory before reaching the raw service helpers.
+//! Model/session paths are resolved against trusted engine runtime metadata for
+//! the active session working directory and must remain inside that directory
+//! before reaching the raw service helpers.
 //! `filesystem::apply_patch` owns both exact replacement and explicit append
 //! semantics: `oldString == ""` appends `newString` exactly so the model-facing
 //! execute orchestrator can normalize append requests without first probing a
@@ -29,7 +30,7 @@ use crate::shared::server::params::opt_string;
 use crate::shared::server::params::opt_u64;
 use crate::shared::server::params::require_string_param;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
@@ -46,21 +47,102 @@ pub(crate) fn worker_module(
 
 pub(crate) mod service;
 
-fn resolve_invocation_path(invocation: &Invocation, path: &str) -> String {
-    if Path::new(path).is_absolute() {
-        return path.to_owned();
-    }
+fn resolve_invocation_path(invocation: &Invocation, path: &str) -> Result<String, CapabilityError> {
     let Some(working_directory) = invocation
         .causal_context
         .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
         .filter(|value| !value.trim().is_empty())
     else {
-        return path.to_owned();
+        return Ok(path.to_owned());
     };
-    Path::new(working_directory)
-        .join(path)
-        .to_string_lossy()
-        .into_owned()
+
+    let root = std::fs::canonicalize(working_directory).map_err(|error| {
+        CapabilityError::InvalidParams {
+            message: format!("active working directory is not available: {error}"),
+        }
+    })?;
+    let requested = Path::new(path);
+    let candidate = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        root.join(requested)
+    };
+    let bounded = path_inside_working_directory(&root, &candidate, path)?;
+    Ok(bounded.to_string_lossy().into_owned())
+}
+
+fn path_inside_working_directory(
+    root: &Path,
+    candidate: &Path,
+    original: &str,
+) -> Result<PathBuf, CapabilityError> {
+    if let Ok(canonical) = candidate.canonicalize() {
+        if canonical.starts_with(root) {
+            return Ok(canonical);
+        }
+        return Err(path_outside_working_directory(original));
+    }
+
+    let normalized = normalize_path(candidate)?;
+    if !normalized.starts_with(root) {
+        return Err(path_outside_working_directory(original));
+    }
+    ensure_existing_ancestor_inside_root(root, &normalized, original)?;
+    Ok(normalized)
+}
+
+fn normalize_path(path: &Path) -> Result<PathBuf, CapabilityError> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir | Component::Normal(_) => {
+                normalized.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(CapabilityError::InvalidParams {
+                        message: "path must stay inside the active working directory".to_owned(),
+                    });
+                }
+            }
+        }
+    }
+    Ok(normalized)
+}
+
+fn ensure_existing_ancestor_inside_root(
+    root: &Path,
+    normalized: &Path,
+    original: &str,
+) -> Result<(), CapabilityError> {
+    let mut ancestor = normalized;
+    loop {
+        if ancestor.exists() {
+            let canonical =
+                ancestor
+                    .canonicalize()
+                    .map_err(|error| CapabilityError::InvalidParams {
+                        message: format!("canonicalize path ancestor: {error}"),
+                    })?;
+            if canonical.starts_with(root) {
+                return Ok(());
+            }
+            return Err(path_outside_working_directory(original));
+        }
+        ancestor = ancestor
+            .parent()
+            .ok_or_else(|| CapabilityError::InvalidParams {
+                message: "path must have an existing ancestor inside the active working directory"
+                    .to_owned(),
+            })?;
+    }
+}
+
+fn path_outside_working_directory(path: &str) -> CapabilityError {
+    CapabilityError::InvalidParams {
+        message: format!("path `{path}` is outside the active working directory"),
+    }
 }
 
 async fn filesystem_list_dir_value(
@@ -69,9 +151,14 @@ async fn filesystem_list_dir_value(
 ) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let home = crate::shared::paths::home_dir();
-    let path = opt_string(params, "path")
-        .map(|path| resolve_invocation_path(invocation, &path))
-        .unwrap_or(home);
+    let path = match opt_string(params, "path") {
+        Some(path) => resolve_invocation_path(invocation, &path)?,
+        None => invocation
+            .causal_context
+            .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
+            .map(ToOwned::to_owned)
+            .unwrap_or(home),
+    };
     let show_hidden = opt_bool(params, "showHidden").unwrap_or(false);
     run_blocking_task("filesystem::list_dir", move || {
         filesystem_service::list_dir(&path, show_hidden)
@@ -92,7 +179,7 @@ async fn file_read_value(invocation: &Invocation, _deps: &Deps) -> Result<Value,
     let path = require_string_param(params, "path")?;
     let start_line = optional_line_bound(params, "startLine")?;
     let end_line = optional_line_bound(params, "endLine")?;
-    let path = resolve_invocation_path(invocation, &path);
+    let path = resolve_invocation_path(invocation, &path)?;
     run_blocking_task("filesystem::read_file", move || {
         filesystem_service::read_file_bounded(&path, start_line, end_line)
     })
@@ -122,7 +209,7 @@ async fn filesystem_write_file_value(
 ) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
-    let path = resolve_invocation_path(invocation, &path);
+    let path = resolve_invocation_path(invocation, &path)?;
     let content = require_string_param(params, "content")?;
     let mut value = run_blocking_task("filesystem::write_file", move || {
         filesystem_service::write_file(&path, &content)
@@ -139,7 +226,7 @@ async fn filesystem_edit_file_value(
 ) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
-    let path = resolve_invocation_path(invocation, &path);
+    let path = resolve_invocation_path(invocation, &path)?;
     let path_for_ref = path.clone();
     let old_string = require_string_param(params, "oldString")?;
     let new_string = require_string_param(params, "newString")?;
@@ -163,7 +250,7 @@ async fn filesystem_apply_patch_value(
 ) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
-    let path = resolve_invocation_path(invocation, &path);
+    let path = resolve_invocation_path(invocation, &path)?;
     let path_for_ref = path.clone();
     let old_string = require_string_param(params, "oldString")?;
     let new_string = require_string_param(params, "newString")?;
@@ -316,7 +403,7 @@ async fn filesystem_diff_value(
 ) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
-    let path = resolve_invocation_path(invocation, &path);
+    let path = resolve_invocation_path(invocation, &path)?;
     let new_content = require_string_param(params, "newContent")?;
     run_blocking_task("filesystem::diff", move || {
         filesystem_service::diff_file(&path, &new_content)
@@ -330,9 +417,14 @@ async fn filesystem_find_value(
 ) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let home = crate::shared::paths::home_dir();
-    let path = opt_string(params, "path")
-        .map(|path| resolve_invocation_path(invocation, &path))
-        .unwrap_or(home);
+    let path = match opt_string(params, "path") {
+        Some(path) => resolve_invocation_path(invocation, &path)?,
+        None => invocation
+            .causal_context
+            .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
+            .map(ToOwned::to_owned)
+            .unwrap_or(home),
+    };
     let pattern = require_string_param(params, "pattern")?;
     let type_filter = opt_string(params, "type").unwrap_or_else(|| "all".to_owned());
     let max_depth = match opt_u64(params, "maxDepth", 0) {
@@ -370,9 +462,14 @@ async fn filesystem_search_text_value(
 ) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let home = crate::shared::paths::home_dir();
-    let path = opt_string(params, "path")
-        .map(|path| resolve_invocation_path(invocation, &path))
-        .unwrap_or(home);
+    let path = match opt_string(params, "path") {
+        Some(path) => resolve_invocation_path(invocation, &path)?,
+        None => invocation
+            .causal_context
+            .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
+            .map(ToOwned::to_owned)
+            .unwrap_or(home),
+    };
     let pattern = require_string_param(params, "pattern")?;
     let file_pattern = opt_string(params, "filePattern");
     let context = usize::try_from(opt_u64(params, "context", 0))
@@ -399,7 +496,7 @@ async fn filesystem_create_dir_value(
 ) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let path = require_string_param(params, "path")?;
-    let path = resolve_invocation_path(invocation, &path);
+    let path = resolve_invocation_path(invocation, &path)?;
     let mut value = run_blocking_task("filesystem::create_dir", move || {
         filesystem_service::create_dir(&path)
     })
@@ -435,27 +532,101 @@ mod tests {
 
     #[test]
     fn relative_paths_resolve_against_session_working_directory_metadata() {
-        let invocation = test_invocation(Some("/tmp/tron-workspace"));
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tempdir.path().join("README.md"), "hello").expect("write fixture");
+        let root = tempdir.path().to_string_lossy().into_owned();
+        let invocation = test_invocation(Some(&root));
 
-        let resolved = resolve_invocation_path(&invocation, "README.md");
+        let resolved = resolve_invocation_path(&invocation, "README.md").expect("resolve");
 
-        assert_eq!(resolved, "/tmp/tron-workspace/README.md");
+        assert_eq!(
+            resolved,
+            tempdir
+                .path()
+                .join("README.md")
+                .canonicalize()
+                .expect("canonical path")
+                .to_string_lossy()
+                .into_owned()
+        );
     }
 
     #[test]
-    fn absolute_paths_do_not_use_session_working_directory_metadata() {
-        let invocation = test_invocation(Some("/tmp/tron-workspace"));
+    fn absolute_paths_inside_session_working_directory_are_allowed() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(tempdir.path().join("README.md"), "hello").expect("write fixture");
+        let root = tempdir.path().to_string_lossy().into_owned();
+        let invocation = test_invocation(Some(&root));
+        let absolute = tempdir.path().join("README.md");
 
-        let resolved = resolve_invocation_path(&invocation, "/etc/hosts");
+        let resolved =
+            resolve_invocation_path(&invocation, &absolute.to_string_lossy()).expect("resolve");
 
-        assert_eq!(resolved, "/etc/hosts");
+        assert_eq!(
+            resolved,
+            absolute
+                .canonicalize()
+                .expect("canonical path")
+                .to_string_lossy()
+                .into_owned()
+        );
+    }
+
+    #[test]
+    fn absolute_paths_outside_session_working_directory_are_rejected() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let root = tempdir.path().to_string_lossy().into_owned();
+        let invocation = test_invocation(Some(&root));
+
+        let error = resolve_invocation_path(&invocation, "/etc/passwd").expect_err("reject");
+
+        assert!(
+            error
+                .to_string()
+                .contains("outside the active working directory")
+        );
+    }
+
+    #[test]
+    fn relative_parent_escapes_are_rejected() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let root = tempdir.path().to_string_lossy().into_owned();
+        let invocation = test_invocation(Some(&root));
+
+        let error = resolve_invocation_path(&invocation, "../outside.txt").expect_err("reject");
+
+        assert!(
+            error
+                .to_string()
+                .contains("outside the active working directory")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_escapes_are_rejected() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("outside tempdir");
+        std::fs::write(outside.path().join("secret.txt"), "secret").expect("write outside file");
+        std::os::unix::fs::symlink(outside.path(), tempdir.path().join("linked"))
+            .expect("symlink fixture");
+        let root = tempdir.path().to_string_lossy().into_owned();
+        let invocation = test_invocation(Some(&root));
+
+        let error = resolve_invocation_path(&invocation, "linked/secret.txt").expect_err("reject");
+
+        assert!(
+            error
+                .to_string()
+                .contains("outside the active working directory")
+        );
     }
 
     #[test]
     fn direct_invocations_without_runtime_working_directory_keep_existing_relative_paths() {
         let invocation = test_invocation(None);
 
-        let resolved = resolve_invocation_path(&invocation, "README.md");
+        let resolved = resolve_invocation_path(&invocation, "README.md").expect("resolve");
 
         assert_eq!(resolved, "README.md");
     }

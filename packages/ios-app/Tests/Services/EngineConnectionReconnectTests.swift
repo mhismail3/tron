@@ -3,11 +3,11 @@ import Foundation
 
 @testable import TronMobile
 
-/// Behavioral tests for `EngineConnection`'s normal reconnect probe.
+/// Behavioral tests for `EngineConnection`'s normal reconnect loop.
 ///
 /// These tests avoid real network I/O and lock down the timing contract:
-/// normal reconnect uses one short automatic probe, while the initial open
-/// timeout remains longer for first connect/manual setup paths.
+/// normal reconnect uses short foreground probes at a bounded cadence, while
+/// the initial open timeout remains longer for first connect/manual setup paths.
 @Suite("EngineConnection reconnect integration")
 @MainActor
 struct EngineConnectionReconnectTests {
@@ -16,12 +16,14 @@ struct EngineConnectionReconnectTests {
         EngineConnection(serverURL: URL(string: "ws://127.0.0.1:55555/nonexistent")!)
     }
 
-    @Test("normal reconnect policy uses one two-second probe")
+    @Test("normal reconnect policy uses foreground retries")
     func normalReconnectPolicyMatchesPlan() {
         let expected = ReconnectProbePolicy()
-        #expect(expected.maxAutomaticAttempts == 1)
+        #expect(expected.maxAutomaticAttempts == nil)
         #expect(expected.probeTimeout == 2.0)
+        #expect(expected.retryDelay == 3.0)
         #expect(EngineConnection.automaticReconnectProbeTimeout == expected.probeTimeout)
+        #expect(EngineConnection.automaticReconnectRetryDelay == expected.retryDelay)
     }
 
     @Test("default initial state is .disconnected")
@@ -57,7 +59,7 @@ struct EngineConnectionReconnectTests {
         #expect(EngineConnection.connectionVerificationTimeout < 30.0)
     }
 
-    @Test(".failed reason after probe failure uses tap-to-retry copy")
+    @Test(".failed reason after capped probe exhaustion uses tap-to-retry copy")
     func failedReasonCopy() {
         #expect(EngineConnection.failedAfterExhaustionReason == "Connection lost — tap to retry")
     }

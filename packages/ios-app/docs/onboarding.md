@@ -244,10 +244,10 @@ sticky because the stored credential must be repaired. The banner appears as a
 compact centered pill near the top safe area, sizes to its content up to a
 fixed maximum width, and clears automatically on reconnect. Settings keeps its
 own persistent warning cards so users still see the unavailable state even after
-dismissing the banner. Normal reconnect does one short two-second automatic
-probe before settling into the not-connected/Retry state; only deploy-aware
-server restart handling keeps trying because the server has announced it is
-coming back.
+dismissing the banner. Normal reconnect keeps issuing short foreground probes
+at a bounded cadence until the server returns, the app backgrounds, or
+authentication fails, so dashboard and chat controls recover after a dev-server
+rebuild without requiring every screen to own retry logic.
 The Agent and Context settings sheets follow the same top summary-card pattern
 and divide server settings by ownership. Agent owns execution and lifecycle
 behavior: quick-session defaults, hook model/error/context budgets,

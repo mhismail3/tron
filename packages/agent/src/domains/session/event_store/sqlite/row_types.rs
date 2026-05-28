@@ -204,7 +204,9 @@ pub struct BranchRow {
 pub struct DeviceTokenRow {
     /// Device token registration ID.
     pub id: String,
-    /// APNS device token (64-char hex).
+    /// APNS device token as an even-length hex string. Apple treats token
+    /// bytes as variable-length opaque data, so callers must not hard-code
+    /// a 32-byte/64-char token size.
     pub device_token: String,
     /// Associated session ID.
     pub session_id: Option<String>,

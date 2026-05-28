@@ -364,6 +364,8 @@ struct SourceGuardTests {
         #expect(appEntry.contains("case .notDetermined:"))
         #expect(appEntry.contains("requestAuthorization()"))
         #expect(appEntry.contains("device::register"))
+        #expect(appEntry.contains("inFlightDeviceTokenRegistrationKeys"))
+        #expect(appEntry.contains("Device token registration already in flight; skipping duplicate"))
     }
 
     @Test("iOS runtime contract is iOS 26 only")

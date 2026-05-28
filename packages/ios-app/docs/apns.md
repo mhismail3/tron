@@ -46,6 +46,8 @@ The `TRON_RELAY_SECRET` value must match the secret compiled into the server bui
 
 The APNs environment is determined per device token. The iOS app reads the effective `aps-environment` entitlement from `embedded.mobileprovision` and sends that value with each `device.register` call.
 
+APNs device tokens are opaque variable-length bytes. The iOS app forwards the token as lowercase hex without assuming a 32-byte/64-character length, and `device::register` accepts bounded even-length hex tokens. This matches Apple's `didRegisterForRemoteNotificationsWithDeviceToken` contract and keeps simulator and future APNs token lengths from failing registration.
+
 Each iOS scheme has its own bundle ID: `com.tron.mobile` for production and `com.tron.mobile.beta` for beta. APNs requires the `apns-topic` header to match the bundle that issued each token, so the iOS app also sends `Bundle.main.bundleIdentifier`. The server stores that in `device_tokens.bundle_id` and sends relay batches grouped by `(environment, bundle_id)`.
 
 ## Delivery Model
@@ -76,7 +78,9 @@ Notifications shows `Allow`, `Register`, `Enabled`, or `Settings` based on the
 local OS state. After APNs returns a token, the thin client sends one canonical
 `device::register` engine invocation with the token, bundle ID, and APNs
 environment. The server stores that routing metadata in `device_tokens` and all
-later delivery is engine-owned.
+later delivery is engine-owned. Concurrent APNs callbacks and reconnect-triggered
+permission checks are deduplicated in-flight on the client; durable identity and
+idempotent upsert semantics still live on the server.
 
 Notification handling:
 

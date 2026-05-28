@@ -35,7 +35,7 @@ The “done” bar requires:
 
 ## Current score
 
-Current manual-test substrate confidence: **56/100**.
+Current manual-test substrate confidence: **58/100**.
 
 This score is intentionally conservative. The production codebase can still be
 high quality while this manual substrate exercise remains incomplete; this
@@ -46,13 +46,13 @@ been exercised end-to-end through the app and verified from server logs.
 |---|---:|---:|---|---|
 | Execute ergonomics and correction | 15 | 10 | `process::run` expected-output correction, wrapper/target guidance, `filesystem::apply_patch` append correction tests, live simulator append execution without probe failures, live `needs_selection`/`needs_capability` guardrails, and live `needs_input` guidance with exact missing paths | Stale-plan and provider-shape parity tests |
 | Capability resolution and recipes | 10 | 7 | Engine Console search/inspect flows, resolved explicit `process::run` targets, live intent-only `filesystem::read_file` resolution from `execute` without an explicit target, broad/unknown intent fail-closed as `needs_capability`, filesystem-namespace ambiguity as `needs_selection`, and known-target missing input as `needs_input` | Intent-only resolution across process/web/worker/module, ranking audit, and vector-warmup degradation |
-| Core filesystem/process paths | 15 | 9 | Read-only `process::run`, policy rejection for unsafe read-only commands, sandbox materialized output, live intent-only `filesystem::read_file`, and apply-patch append/replay tests | List/find/search/write/edit failure modes, path roots, timeouts, resource-output replay, and no probe calls |
+| Core filesystem/process paths | 15 | 10 | Read-only `process::run`, policy rejection for unsafe read-only commands, sandbox materialized output, live intent-only `filesystem::read_file`, live missing-file failure, live absolute-path root-bound rejection, and apply-patch append/replay tests | List/find/search/write/edit failure modes, timeouts, resource-output replay, and no probe calls |
 | Approval and freshness | 10 | 5 | Approval-required sandbox command, resume ordering fix, no-approval detail-sheet suppression | Denial, timeout, stale revision, replayed approval, and concurrent approval edge cases |
 | Idempotency and replay | 10 | 5 | Sandbox materialized replay inspection, apply-patch append replay unit/integration tests, and live simulator `filesystem::apply_patch` replay verification | Queue retry, duplicate UI submission, duplicate provider tool call, and cross-session replay |
 | Resource-output substrate | 10 | 5 | Prompt library and voice notes resource conversions, materialized `process::run` output refs, patch proposal refs | Artifact/materialized-file damage, CAS, hash mismatch, discard, and retained evidence under failure |
 | Generated UI/action gateway | 10 | 5 | Prompt management generated surface, action toasts, stale/offline fail-closed renderer behavior | Generic action staleness, malformed input, revoked grant, and target revision drift through live app |
 | Module/worker extensibility | 10 | 2 | Rust module package activation/trust/health tests exist | Live local-process package activation, worker spawn/health/disable/recovery, trust audit, and package UI through app |
-| Observability/log ingestion | 5 | 4 | Server ledger/event queries used during manual testing, auto-ingest path exercised, and live replay test reconstructed from `engine_invocations` plus resource refs without relying on screenshots | Verify ingestion after server restart and standardize the DB query bundle for every scenario |
+| Observability/log ingestion | 5 | 5 | Server ledger/event queries used during manual testing, auto-ingest path exercised, live replay test reconstructed from `engine_invocations` plus resource refs without relying on screenshots, and failed child invocations now remain visible in `execute` orchestration details | Standardize the DB query bundle for every scenario |
 | Provider parity | 5 | 0 | Provider exports are covered by code tests, not manual testing yet | OpenAI, Anthropic, Gemini, Kimi, and Ollama execute-schema parity with identical correction/result behavior |
 
 ## Already exercised and fixed
@@ -71,6 +71,8 @@ been exercised end-to-end through the app and verified from server logs.
 | Namespace ambiguity | Covered | A fresh simulator session called `execute` with intent `filesystem README.md` and empty arguments. The result was `needs_selection`, returned bounded filesystem candidates, and created no child invocation. | DB session `sess_019e6b28-b568-7690-96b3-f1518b48fba7`, payload ref `payload_ref_019e6b29-7131-7d83-8bd0-b0bbf4dc5268` |
 | Missing required input | Covered | A fresh simulator session called `execute` with intent `read a file` and empty arguments. The result selected `filesystem::read_file`, returned `needs_input`, reported missing `arguments.path`, included a concrete corrected example, and created no child invocation. | DB session `sess_019e6bd6-6178-7ca2-be97-5ff962236885`, payload ref `payload_ref_019e6bd6-fc9e-7273-8e6b-da475db81906` |
 | Unknown capability intent | Covered | A fresh simulator session called `execute` with intent `calibrate a quantum pineapple teleporter` and empty arguments. The result was `needs_capability`, included the proposed capability shape, returned bounded low-confidence candidates, and created no child invocation. | DB session `sess_019e6bd8-a9a3-7922-9eee-37775e725f2c` |
+| Model-facing filesystem root bounds | Covered | A simulator guardrail session proved missing files fail cleanly and absolute host paths such as `/etc/passwd` are rejected inside the model-facing filesystem capability path. Relative and allowed absolute paths still resolve against the active session worktree, while raw service helpers remain trusted-local internals only. Failed child invocations now surface in `execute.details.childInvocationIds` and nested orchestration details instead of disappearing from the user-facing result. | `filesystem::*` tests, `capability_execute_reports_failed_child_invocation_lineage`, DB sessions `sess_019e6bde-08d5-7331-8577-c74335d84ada` and `sess_019e6bec-0218-7d51-a211-0fe632f2963a` |
+| iOS reconnect after server rebuild | Covered by focused tests | Dashboard/chat connection state now belongs to the shared `EngineConnection` foreground reconnect loop. Normal reconnect keeps probing at a bounded cadence while foregrounded, so screens recover after dev-server rebuilds without owning retry logic or staying permanently failed until manual tap. | `ReconnectProbePolicyTests`, `EngineConnectionReconnectTests`, `packages/ios-app/docs/architecture.md`, `packages/ios-app/docs/onboarding.md` |
 | Memory auto-retain | Partially covered | Auto-retain runs through engine capabilities and no longer blocks normal testing, but it needs a final regression under the current server build. | Prior server-log review; pending current-build retest |
 
 ## Remaining test matrix
@@ -177,10 +179,11 @@ Move to execute-portal basics under the current build:
 5. DB reconstruction for each case using invocation rows, orchestration
    diagnostics, and capability audit events.
 
-The next checkpoint should move into filesystem substrate breadth:
+The next checkpoint should continue filesystem substrate breadth:
 
-1. `filesystem::read_file` missing file and absolute-path/root-bound behavior;
-2. `filesystem::list_dir`, `filesystem::glob`, and `filesystem::search_text`
+1. `filesystem::list_dir`, `filesystem::glob`, and `filesystem::search_text`
    bounded result behavior;
-3. exact replacement `filesystem::apply_patch` and duplicate idempotency;
-4. failed validation proving no accepted resource refs or child side effects.
+2. exact replacement `filesystem::apply_patch` and duplicate idempotency;
+3. failed validation proving no accepted resource refs or child side effects;
+4. reconnect recovery during a live dev-server rebuild while a dashboard/chat
+   screen is already mounted.

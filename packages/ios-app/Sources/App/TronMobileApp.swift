@@ -9,6 +9,7 @@ struct TronMobileApp: App {
     // Central dependency container - manages all services
     @State private var container = DependencyContainer()
     @State private var isRegisteringPush = false
+    @State private var inFlightDeviceTokenRegistrationKeys: Set<String> = []
 
     // Appearance mode (Light / Dark / Auto)
     @State private var appearanceSettings = AppearanceSettings.shared
@@ -279,6 +280,14 @@ struct TronMobileApp: App {
             TronLogger.shared.debug("Not connected, will register token when connected", category: .notification)
             return
         }
+
+        let registrationKey = "\(container.engineClient.currentSessionId ?? "global"):\(token)"
+        guard !inFlightDeviceTokenRegistrationKeys.contains(registrationKey) else {
+            TronLogger.shared.debug("Device token registration already in flight; skipping duplicate", category: .notification)
+            return
+        }
+        inFlightDeviceTokenRegistrationKeys.insert(registrationKey)
+        defer { inFlightDeviceTokenRegistrationKeys.remove(registrationKey) }
 
         do {
             try await container.engineClient.misc.registerDeviceToken(token, idempotencyKey: .userAction("device.register"))

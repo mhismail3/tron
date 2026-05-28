@@ -258,6 +258,57 @@ async fn capability_execute_apply_patch_append_shape_runs_without_failed_probe()
 }
 
 #[tokio::test]
+async fn capability_execute_reports_failed_child_invocation_lineage() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let missing_path = crate::shared::server::test_support::unique_test_path(
+        "execute-missing-child-lineage",
+        "txt",
+    );
+
+    let failed = handle
+        .invoke(host_invocation(
+            "capability::execute",
+            json!({
+                "intent": "Read a file that does not exist and report the exact engine failure.",
+                "target": "filesystem::read_file",
+                "arguments": {"path": missing_path.to_string_lossy()},
+                "reason": "Validate failed child invocation lineage"
+            }),
+            model_execute_context("execute-failed-child-lineage"),
+        ))
+        .await;
+    assert_eq!(failed.error, None);
+    let value = failed.value.as_ref().unwrap();
+    assert_eq!(value["isError"], true);
+    let details = &value["details"];
+    assert_eq!(details["status"], "run_failed");
+    let child_invocation_ids = details["childInvocationIds"].as_array().unwrap();
+    assert_eq!(
+        child_invocation_ids.len(),
+        1,
+        "failed child execution must remain visible to execute callers"
+    );
+    assert_eq!(
+        details["orchestration"]["childInvocationIds"],
+        details["childInvocationIds"]
+    );
+
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    let child_id = child_invocation_ids[0].as_str().unwrap();
+    let child_record = records
+        .iter()
+        .find(|record| record.invocation_id.as_str() == child_id)
+        .expect("failed child invocation should be persisted");
+    assert_eq!(child_record.function_id.as_str(), "filesystem::read_file");
+    assert_eq!(
+        child_record.parent_invocation_id,
+        Some(failed.invocation_id.clone())
+    );
+    assert!(!child_record.succeeded);
+}
+
+#[tokio::test]
 async fn voice_notes_save_list_and_delete_are_resource_backed() {
     let ctx = crate::shared::server::test_support::make_test_context();
     let handle = ctx.engine_host.clone();

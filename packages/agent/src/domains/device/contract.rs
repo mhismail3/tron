@@ -16,7 +16,7 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["device.events"];
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
         CapabilityContract::new("device::register", "device", EffectClass::ExternalSideEffect, RiskLevel::Medium, Some("device.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"bundleId":{"type":"string"},"deviceToken":{"type":"string"},"environment":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["deviceToken","bundleId"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"bundleId":{"type":"string"},"deviceToken":{"maxLength":512,"minLength":2,"pattern":"^(?:[0-9A-Fa-f]{2})+$","type":"string"},"environment":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["deviceToken","bundleId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"created":{"type":"boolean"},"id":{"type":"string"}},"required":["id","created"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("device", "device:{deviceToken}", 60000))

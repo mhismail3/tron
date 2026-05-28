@@ -39,16 +39,28 @@ use crate::shared::server::params::{opt_string, require_string_param};
 // trusted-local callers, registration must bind bundleId to an authenticated
 // app/device attestation claim before writing it to the event store.
 
-async fn register_token(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
-    let device_token = require_string_param(Some(payload), "deviceToken")?;
-    if device_token.len() != 64 || !device_token.chars().all(|c| c.is_ascii_hexdigit()) {
+const MIN_APNS_TOKEN_HEX_LEN: usize = 2;
+const MAX_APNS_TOKEN_HEX_LEN: usize = 512;
+
+fn validate_apns_token(device_token: &str) -> Result<(), CapabilityError> {
+    let len = device_token.len();
+    if len < MIN_APNS_TOKEN_HEX_LEN
+        || len > MAX_APNS_TOKEN_HEX_LEN
+        || len % 2 != 0
+        || !device_token.chars().all(|c| c.is_ascii_hexdigit())
+    {
         return Err(CapabilityError::InvalidParams {
             message: format!(
-                "Invalid device token: expected 64 hex chars, got {} chars",
-                device_token.len()
+                "Invalid device token: expected an even-length hex APNs token between {MIN_APNS_TOKEN_HEX_LEN} and {MAX_APNS_TOKEN_HEX_LEN} chars, got {len} chars"
             ),
         });
     }
+    Ok(())
+}
+
+async fn register_token(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
+    let device_token = require_string_param(Some(payload), "deviceToken")?;
+    validate_apns_token(&device_token)?;
 
     let session_id = opt_string(Some(payload), "sessionId");
     let workspace_id = opt_string(Some(payload), "workspaceId");
@@ -77,6 +89,27 @@ async fn register_token(payload: &Value, deps: &Deps) -> Result<Value, Capabilit
         }))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_apns_token;
+
+    #[test]
+    fn apns_token_validation_accepts_variable_even_length_hex_tokens() {
+        validate_apns_token(&"a".repeat(64)).expect("historical 32-byte APNs token is valid");
+        validate_apns_token(&"b".repeat(160))
+            .expect("modern/simulator APNs token lengths are variable");
+    }
+
+    #[test]
+    fn apns_token_validation_rejects_malformed_or_unbounded_tokens() {
+        for token in ["", "a", "zz", "abc"] {
+            assert!(validate_apns_token(token).is_err(), "{token:?} should fail");
+        }
+        let too_long = "a".repeat(514);
+        assert!(validate_apns_token(&too_long).is_err());
+    }
 }
 
 async fn unregister_token(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {

@@ -356,7 +356,8 @@ final class EngineClient: EngineTransport {
         return await ws.verifyConnection()
     }
 
-    /// Manual retry triggered from UI — runs one short connection probe immediately.
+    /// Manual retry triggered from UI — runs an immediate probe, then rejoins
+    /// the foreground reconnect loop if the server is still restarting.
     /// Use this when user taps the reconnection pill.
     func manualRetry() async {
         logger.info("Manual retry triggered from UI", category: .engine)
