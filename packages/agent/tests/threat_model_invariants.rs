@@ -1680,6 +1680,8 @@ fn resource_materialization_enforcement_gates_stay_on() {
     );
     let process_worker = std::fs::read_to_string(crate_root.join("src/domains/process/mod.rs"))
         .expect("failed to read process worker");
+    let process_bounds = std::fs::read_to_string(crate_root.join("src/domains/process/bounds.rs"))
+        .expect("failed to read process boundary validation");
     let process_approval =
         std::fs::read_to_string(crate_root.join("src/domains/process/approval.rs"))
             .expect("failed to read process approval policy");
@@ -1690,6 +1692,25 @@ fn resource_materialization_enforcement_gates_stay_on() {
             && process_approval.contains("run_requires_approval(payload)")
             && process_approval.contains("proven low-risk"),
         "process::run read_only execution must use the strict low-risk classifier, not a write-like blacklist"
+    );
+    assert!(
+        process_worker.contains("validate_read_only_process_boundaries")
+            && process_worker.contains("mod bounds")
+            && process_bounds.contains("require_active_session_root")
+            && process_bounds.contains("active_session_root")
+            && process_bounds.contains("bounded_process_path")
+            && process_bounds.contains("uses shell glob or brace expansion")
+            && process_worker.contains(".env_clear()")
+            && process_bounds.contains("safe_process_environment")
+            && process_worker.contains("process_run_requires_active_session_worktree")
+            && process_worker.contains("read_only_process_rejects_paths_outside_session_worktree")
+            && process_worker
+                .contains("read_only_process_rejects_symlink_operands_that_escape_worktree")
+            && process_worker.contains("read_only_process_rejects_shell_glob_path_operands")
+            && process_worker.contains(
+                "sandbox_materialized_absolute_target_path_cannot_escape_session_worktree"
+            ),
+        "process::run must keep model-facing cwd/path/symlink/output target bounds and must not inherit the server environment"
     );
     let capability_operations =
         std::fs::read_to_string(crate_root.join("src/domains/capability/operations/mod.rs"))

@@ -18,18 +18,21 @@
 //! `executionMode = "sandbox_materialized"` with declared expected outputs, then
 //! materialize those outputs through resource capabilities. Relative
 //! materialization targets resolve to the active session worktree so approved
-//! sandbox output never leaks into the server process cwd. If a request omits
-//! `cwd`, direct read-only execution uses the active session worktree when
-//! available, then the session workspace, so common shell checks stay fast
-//! without leaving the capability architecture.
+//! sandbox output never leaks into the server process cwd. Every `process::run`
+//! invocation requires active session worktree truth. Read-only command cwd/path
+//! operands and materialized output targets are bounded to that worktree, and
+//! child processes receive an allowlisted environment instead of inheriting
+//! server secrets. If a request omits `cwd`, direct read-only execution uses the
+//! active session worktree, so common shell checks stay fast without leaving the
+//! capability architecture.
 
 pub(crate) mod approval;
+mod bounds;
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) use deps::Deps;
 
-use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::time::Instant;
@@ -45,6 +48,11 @@ use crate::engine::{
 };
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::{opt_string, opt_u64, require_string_param};
+
+use bounds::{
+    active_session_root, bounded_process_path, opt_env, require_active_session_root,
+    safe_process_environment, validate_process_env, validate_read_only_process_boundaries,
+};
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_OUTPUT_BYTES: usize = 400 * 1024;
@@ -77,6 +85,7 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
             message: format!("unsupported executionMode: {execution_mode}"),
         });
     }
+    let active_root = require_active_session_root(invocation, deps)?;
     let sandbox = if execution_mode == "sandbox_materialized" {
         Some(
             tempfile::tempdir().map_err(|error| CapabilityError::Internal {
@@ -92,20 +101,14 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
         .unwrap_or_else(|| {
             opt_string(params, "cwd").unwrap_or_else(|| default_cwd(invocation, deps))
         });
+    if execution_mode == "read_only" {
+        validate_read_only_process_boundaries(&active_root, &command, &cwd)?;
+    }
     let shell = opt_string(params, "shell").unwrap_or_else(|| "bash".to_owned());
     let timeout_ms = command_timeout_ms(params).clamp(1, 600_000);
     let stdin = opt_string(params, "stdin");
-    let env = params
-        .and_then(|value| value.get("env"))
-        .and_then(Value::as_object)
-        .map(|map| {
-            map.iter()
-                .filter_map(|(key, value)| {
-                    value.as_str().map(|value| (key.clone(), value.to_owned()))
-                })
-                .collect::<HashMap<_, _>>()
-        })
-        .unwrap_or_default();
+    let env = opt_env(params);
+    validate_process_env(&env)?;
 
     let shell_bin = match shell.as_str() {
         "bash" | "zsh" | "sh" => shell,
@@ -120,6 +123,8 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
         .arg("-lc")
         .arg(command)
         .current_dir(cwd)
+        .env_clear()
+        .envs(safe_process_environment())
         .envs(env)
         .stdin(if stdin.is_some() {
             Stdio::piped()
@@ -338,6 +343,9 @@ fn materialized_target_path(
     deps: &Deps,
     target_path: &str,
 ) -> Result<PathBuf, CapabilityError> {
+    if let Some(root) = active_session_root(invocation, deps)? {
+        return bounded_process_path(&root, target_path, "expected output targetPath");
+    }
     let path = Path::new(target_path);
     if path.is_absolute() {
         return Ok(path.to_path_buf());
@@ -681,6 +689,219 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_only_process_rejects_paths_outside_session_worktree() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let cases = [
+            "cat /etc/passwd",
+            "git -C /tmp status --short",
+            "cd /tmp && pwd",
+            "cat ../secret.txt",
+            "cat $HOME/.ssh/id_rsa",
+        ];
+
+        for command in cases {
+            let invocation = invocation(
+                json!({"command": command, "executionMode": "read_only"}),
+                Some(&created.session.id),
+            );
+            let err = process_run_value(&invocation, &deps).await.unwrap_err();
+            assert!(
+                matches!(err, CapabilityError::InvalidParams { ref message } if message.contains("active session worktree")),
+                "{command} should be rejected, got {err:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn read_only_process_allows_search_patterns_but_bounds_search_paths() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("README.md"), "alpha\nneedle\n").unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let allowed = invocation(
+            json!({"command": "grep 'needle$' README.md", "executionMode": "read_only"}),
+            Some(&created.session.id),
+        );
+
+        let value = process_run_value(&allowed, &deps).await.unwrap();
+        assert_eq!(value.get("exitCode").and_then(Value::as_i64), Some(0));
+        assert_eq!(
+            value.get("stdout").and_then(Value::as_str),
+            Some("needle\n")
+        );
+
+        let denied = invocation(
+            json!({"command": "grep needle /etc/passwd", "executionMode": "read_only"}),
+            Some(&created.session.id),
+        );
+        let err = process_run_value(&denied, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("active session worktree"))
+        );
+    }
+
+    #[tokio::test]
+    async fn read_only_process_rejects_shell_glob_path_operands() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("README.md"), "safe\n").unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let denied = invocation(
+            json!({"command": "cat *.md", "executionMode": "read_only"}),
+            Some(&created.session.id),
+        );
+
+        let err = process_run_value(&denied, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("glob or brace expansion"))
+        );
+    }
+
+    #[tokio::test]
+    async fn read_only_find_allows_name_globs_but_bounds_search_roots() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("README.md"), "safe\n").unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let allowed = invocation(
+            json!({"command": "find . -maxdepth 1 -name '*.md'", "executionMode": "read_only"}),
+            Some(&created.session.id),
+        );
+
+        let value = process_run_value(&allowed, &deps).await.unwrap();
+        assert_eq!(value.get("exitCode").and_then(Value::as_i64), Some(0));
+        assert!(
+            value
+                .get("stdout")
+                .and_then(Value::as_str)
+                .is_some_and(|stdout| stdout.contains("README.md"))
+        );
+
+        let denied = invocation(
+            json!({"command": "find /tmp -maxdepth 1 -name '*.md'", "executionMode": "read_only"}),
+            Some(&created.session.id),
+        );
+        let err = process_run_value(&denied, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("active session worktree"))
+        );
+    }
+
+    #[tokio::test]
+    async fn read_only_process_rejects_symlink_operands_that_escape_worktree() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "secret").unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("secret.txt"),
+            tmp.path().join("linked-secret.txt"),
+        )
+        .unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({"command": "cat linked-secret.txt", "executionMode": "read_only"}),
+            Some(&created.session.id),
+        );
+
+        let err = process_run_value(&invocation, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("active session worktree"))
+        );
+    }
+
+    #[test]
+    fn safe_process_environment_is_explicitly_allowlisted() {
+        let env = safe_process_environment();
+
+        assert!(!env.contains_key("OPENAI_API_KEY"));
+        assert!(!env.contains_key("TRON_ENGINE_BEARER_TOKEN"));
+        assert!(env.keys().all(|key| !bounds::secret_like_env_key(key)));
+    }
+
+    #[tokio::test]
+    async fn process_run_rejects_secret_like_env_payloads() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({
+                "command": "printf ok",
+                "executionMode": "read_only",
+                "env": {"API_TOKEN": "secret_ref:test"}
+            }),
+            Some(&created.session.id),
+        );
+
+        let err = process_run_value(&invocation, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("secret-like"))
+        );
+    }
+
+    #[tokio::test]
     async fn unknown_read_only_process_is_rejected_before_execution() {
         let store = event_store();
         let deps = Deps::for_test(store);
@@ -707,11 +928,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sandbox_materialized_process_declared_outputs_become_resources() {
+    async fn process_run_requires_active_session_worktree() {
         let store = event_store();
         let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({"command": "date", "executionMode": "read_only"}),
+            None,
+        );
+
+        let err = process_run_value(&invocation, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("active session worktree"))
+        );
+    }
+
+    #[tokio::test]
+    async fn sandbox_materialized_process_declared_outputs_become_resources() {
+        let store = event_store();
         let tmp = tempfile::tempdir().unwrap();
         let target = tmp.path().join("materialized").join("result.txt");
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
         let invocation = invocation(
             json!({
                 "command": "mkdir -p out && printf 'hello from sandbox' > out/result.txt",
@@ -722,7 +968,7 @@ mod tests {
                 }],
                 "retainOutput": true
             }),
-            Some("session-a"),
+            Some(&created.session.id),
         );
 
         let value = process_run_value(&invocation, &deps).await.unwrap();
@@ -775,7 +1021,7 @@ mod tests {
         );
         let materialized = value["materializedOutputs"].as_array().unwrap();
         assert_eq!(materialized[0]["path"], "result.txt");
-        let expected_target = tmp.path().join("result.txt");
+        let expected_target = tmp.path().join("result.txt").canonicalize().unwrap();
         assert_eq!(
             materialized[0]["targetPath"].as_str(),
             Some(expected_target.to_string_lossy().as_ref())
@@ -822,5 +1068,38 @@ mod tests {
             matches!(err, CapabilityError::InvalidParams { message } if message.contains("must stay inside"))
         );
         assert!(!tmp.path().parent().unwrap().join("escape.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn sandbox_materialized_absolute_target_path_cannot_escape_session_worktree() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let target = outside.path().join("escape.txt");
+        let invocation = invocation(
+            json!({
+                "command": "printf 'escape\n' > result.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "result.txt", "targetPath": target.to_string_lossy()}]
+            }),
+            Some(&created.session.id),
+        );
+
+        let err = process_run_value(&invocation, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("active session worktree"))
+        );
+        assert!(!target.exists());
     }
 }

@@ -407,7 +407,7 @@ mod tests {
             "date +%Y-%m-%d",
             "pwd",
             "git status --short",
-            "git -C /tmp status --short",
+            "git -C . status --short",
             "git --no-pager log --oneline -3",
             "git branch --show-current",
             "git remote -v",
@@ -422,8 +422,7 @@ mod tests {
             "test -f README.md",
             "sed -n '1,3p' README.md",
             "pwd && printf 'hi\n' && test ! -e should_not_exist.txt && test -f README.md && sed -n '1,3p' README.md",
-            "cd /tmp && git status --short && git log --oneline -3",
-            "cd ~/Downloads && pwd",
+            "cd . && git status --short && git log --oneline -3",
         ] {
             assert!(
                 !run_requires_approval(&json!({ "command": command })),
