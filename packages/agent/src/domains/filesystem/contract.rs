@@ -16,7 +16,7 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["filesystem.changes"];
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
         CapabilityContract::new("filesystem::list_dir", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
-            .description("List entries in a directory, optionally including hidden files and bounding the number of returned entries.")
+            .description("List entries in a known directory, optionally including hidden files and bounding the number of returned entries. Use filesystem::find or filesystem::glob before list_dir when a path is only a guessed module or folder name.")
             .tags(vec!["list", "directory", "folder", "ls", "files", "workspace"])
             .request_schema(json!({"additionalProperties":false,"properties":{"maxResults":{"type":"integer"},"path":{"type":"string"},"sessionId":{"type":"string"},"showHidden":{"type":"boolean"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"entries":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"parent":{"type":["string","null"]},"path":{"type":"string"}},"required":["path","parent","entries"],"type":"object"}))
@@ -65,25 +65,28 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::edit_file","payload":{"path":"README.md","oldString":"old text","newString":"new text"},"idempotencyKey":"edit-readme-<turn>","reason":"Replace exact text in README.md."})])
             .build()?,
         CapabilityContract::new("filesystem::find", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
-            .description("Find filesystem entries by glob-style pattern.")
+            .description("Find filesystem entries by glob-style pattern. Prefer this over filesystem::list_dir when locating a module, folder, or file whose exact path is unknown.")
             .tags(vec!["find", "glob", "file names", "paths", "search files", "filesystem"])
             .request_schema(json!({"additionalProperties":false,"properties":{"exclude":{"items":{"type":"string"},"type":"array"},"maxDepth":{"type":"integer"},"maxResults":{"type":"integer"},"path":{"type":"string"},"pattern":{"type":"string"},"sessionId":{"type":"string"},"type":{"enum":["file","directory","all"],"type":"string"},"workspaceId":{"type":"string"}},"required":["pattern"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"matches":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"path":{"type":"string"},"truncated":{"type":"boolean"}},"required":["path","matches","truncated"],"type":"object"}))
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::find","payload":{"pattern":"*.swift","path":"packages/ios-app","maxResults":20},"reason":"Find Swift files in the iOS app."})])
             .build()?,
         CapabilityContract::new("filesystem::glob", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
-            .description("Expand a glob pattern into matching files or directories.")
+            .description("Expand a glob pattern into matching files or directories. Prefer this over filesystem::list_dir when locating a module, folder, or file whose exact path is unknown.")
             .tags(vec!["glob", "find", "pattern", "files", "paths", "filesystem"])
             .request_schema(json!({"additionalProperties":false,"properties":{"exclude":{"items":{"type":"string"},"type":"array"},"maxDepth":{"type":"integer"},"maxResults":{"type":"integer"},"path":{"type":"string"},"pattern":{"type":"string"},"sessionId":{"type":"string"},"type":{"enum":["file","directory","all"],"type":"string"},"workspaceId":{"type":"string"}},"required":["pattern"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"matches":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"path":{"type":"string"},"truncated":{"type":"boolean"}},"required":["path","matches","truncated"],"type":"object"}))
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::glob","payload":{"pattern":"**/*.rs","path":"packages/agent/src","maxResults":50},"reason":"Find Rust source files."})])
             .build()?,
         CapabilityContract::new("filesystem::search_text", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
-            .description("Search file contents by text or regex pattern with optional file filtering and context.")
+            .description("Search file contents by literal text by default, with optional regex mode (`regex: true`), file filtering, and context. Repo-root searches skip generated/heavy directories such as .git, target, node_modules, and .worktrees by default; set path to one of those directories explicitly only when that generated content is the intended target.")
             .tags(vec!["search", "grep", "rg", "text search", "regex", "content", "filesystem"])
-            .request_schema(json!({"additionalProperties":false,"properties":{"context":{"type":"integer"},"filePattern":{"type":"string"},"maxResults":{"type":"integer"},"path":{"type":"string"},"pattern":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["pattern"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"context":{"type":"integer"},"filePattern":{"type":"string"},"maxResults":{"type":"integer"},"path":{"type":"string"},"pattern":{"type":"string"},"regex":{"type":"boolean"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["pattern"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"matches":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"path":{"type":"string"},"truncated":{"type":"boolean"}},"required":["path","matches","truncated"],"type":"object"}))
-            .examples(vec![json!({"mode":"invoke","contractId":"filesystem::search_text","payload":{"pattern":"AgentCapabilityRecipe","path":"packages/agent/src","maxResults":20},"reason":"Search source files for a symbol."})])
+            .examples(vec![
+                json!({"mode":"invoke","contractId":"filesystem::search_text","payload":{"pattern":"AgentCapabilityRecipe","path":"packages/agent/src","maxResults":20},"reason":"Search source files for a literal symbol."}),
+                json!({"mode":"invoke","contractId":"filesystem::search_text","payload":{"pattern":"register_(function|trigger)","regex":true,"path":"packages/agent/src","maxResults":20},"reason":"Search source files with an explicit regex."})
+            ])
             .build()?,
         CapabilityContract::new("filesystem::diff", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
             .description("Preview a unified diff between an existing file and proposed new content without writing.")

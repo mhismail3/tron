@@ -89,18 +89,20 @@ The code layout follows the same boundary:
 
 ## Agent-Native Semantics
 
-Agents receive exactly three stable model-facing primitives: `search`,
-`inspect`, and `execute`. The underlying catalog can change between model
-calls. A newly registered capability appears in `search` once it is visible,
-healthy, schema-bearing, and authorized for the actor; it does not require a
-prompt or provider-schema rewrite. The `/engine` discover/inspect/watch/invoke
-messages remain the worker/client transport protocol and are not exposed as
-model tools.
+Agents receive one stable model-facing primitive: `execute`. The underlying
+catalog can change between model calls. A newly registered capability becomes
+resolvable by `execute` once it is visible, healthy, schema-bearing, and
+authorized for the actor; it does not require a prompt or provider-schema
+rewrite. The `/engine` discover/inspect/watch/invoke messages remain the
+worker/client transport protocol and are not exposed as model tools.
 
-`search` projects live catalog functions as capability contracts and concrete
-implementations. `inspect` returns the full current contract, selected
-implementation, authority, risk, schema digest, and expected revision.
-`execute` delegates through the engine ledger to the selected function.
+`capability::search` projects live catalog functions as capability contracts and
+concrete implementations for operators and internal diagnostics.
+`capability::inspect` returns the full current contract, selected
+implementation, authority, risk, schema digest, and expected revision for
+operator views. Model calls use `execute`, which resolves/searches internally,
+prepares freshness and approval when needed, then delegates through the engine
+ledger to the selected function.
 The projection is owned by `capability::registry`: it builds revisioned
 `CapabilityRegistrySnapshot`s from the live catalog, emits typed contract /
 implementation / binding records, and ranks search results with local lexical

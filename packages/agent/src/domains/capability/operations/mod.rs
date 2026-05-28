@@ -2748,6 +2748,74 @@ mod tests {
     }
 
     #[test]
+    fn orchestrated_execute_normalizes_flattened_target_arguments() {
+        let input = parse_orchestrated_execute_input(&json!({
+            "path": "packages/agent/src",
+            "pattern": "FunctionDefinition",
+            "context": 2,
+            "maxResults": 20,
+            "reason": "Search source for function definitions."
+        }))
+        .expect("flattened target arguments are accepted");
+
+        assert!(input.target_params.is_none());
+        assert_eq!(input.arguments["path"], json!("packages/agent/src"));
+        assert_eq!(input.arguments["pattern"], json!("FunctionDefinition"));
+        assert_eq!(input.arguments["context"], json!(2));
+        assert_eq!(input.arguments["maxResults"], json!(20));
+        assert_eq!(
+            input.reason.as_deref(),
+            Some("Search source for function definitions.")
+        );
+        assert!(
+            input.corrections.iter().any(|correction| {
+                correction["kind"] == json!("top_level_arguments_to_arguments")
+            })
+        );
+    }
+
+    #[test]
+    fn orchestrated_execute_dedupes_identical_flattened_argument_duplicates() {
+        let input = parse_orchestrated_execute_input(&json!({
+            "arguments": {
+                "path": "packages/agent/src/engine/host.rs",
+                "startLine": 2060,
+                "endLine": 2300
+            },
+            "target": "filesystem::read_file",
+            "path": "packages/agent/src/engine/host.rs",
+            "startLine": 2060,
+            "endLine": 2300
+        }))
+        .expect("identical duplicate flattened arguments should be deduped");
+
+        assert_eq!(
+            input.arguments["path"],
+            json!("packages/agent/src/engine/host.rs")
+        );
+        assert_eq!(input.arguments["startLine"], json!(2060));
+        assert_eq!(input.arguments["endLine"], json!(2300));
+        assert!(input.corrections.iter().any(|correction| {
+            correction["kind"] == json!("duplicate_flattened_arguments_deduped")
+        }));
+    }
+
+    #[test]
+    fn orchestrated_execute_rejects_conflicting_flattened_argument_duplicates() {
+        let error = parse_orchestrated_execute_input(&json!({
+            "arguments": {"path": "README.md"},
+            "path": "packages/agent/src"
+        }))
+        .expect_err("conflicting flattened arguments should be explicit");
+
+        assert!(
+            error
+                .to_string()
+                .contains("conflicting values for target argument 'path'")
+        );
+    }
+
+    #[test]
     fn orchestrated_execute_forwards_wrapper_idempotency_when_target_schema_requires_it() {
         let mut function = test_function("ui::submit_action");
         function.request_schema = Some(json!({

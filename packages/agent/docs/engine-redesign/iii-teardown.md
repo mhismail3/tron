@@ -68,7 +68,7 @@ agent autonomy.
 
 | Area | iii baseline | Tron specialization |
 |------|--------------|---------------------|
-| Discovery | Every worker can read the live registry and receive topology notifications. | The live catalog is the agent's primary substrate. Agents get stable model-facing primitives for search, inspection, and execution, and the underlying catalog changes while the agent runs. |
+| Discovery | Every worker can read the live registry and receive topology notifications. | The live catalog is the agent's primary substrate. Agents get one stable model-facing primitive, `execute`; search, inspection, correction, freshness, approval, and execution are internal phases over the changing catalog. |
 | Visibility | Registry availability is mostly a worker/RBAC concern. | Visibility is scoped: session, workspace, system, client, worker, admin. Agent-created capabilities default to session visibility. |
 | Self-modification | Sandbox workers can be added live. | Agents can create session-scoped workers/functions, test them immediately, then request explicit promotion to wider visibility. |
 | Idempotency | Queue retries make delivery concerns visible. | Every mutating agent-visible function must declare an idempotency contract before invocation is allowed. |

@@ -3127,7 +3127,7 @@ pub(crate) fn render_capability_primer(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision
     ));
-    out.push_str("The model-facing primitive is `execute`. Known entries below may use target directly. For unknown work, start with intent alone; add target only from the user, prior execute, or a recipe. Put target-only fields in arguments; wrapper fields stay top-level. Freshness and approval happen inside execute.\n\n");
+    out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Freshness and approval happen inside execute.\n\n");
     for entry in entries.drain(..) {
         let recipe = entry.agent_recipe();
         let mut line = format!(

@@ -35,25 +35,50 @@ The “done” bar requires:
 
 ## Current score
 
-Current manual-test substrate confidence: **77/100**.
+Current manual-test substrate confidence: **78/100**.
 
 This score is intentionally conservative. The production codebase can still be
 high quality while this manual substrate exercise remains incomplete; this
 score measures how much of the live execute/resource/approval/worker path has
 been exercised end-to-end through the app and verified from server logs.
 
-| Axis | Points | Current | Evidence | Remaining proof |
+The axes below intentionally reframe the old subsystem-oriented score into
+real-world use cases. The historical evidence table remains below as the audit
+trail for why the starting score is still `77/100`; new rows in the scenario
+ledger are the only way this score moves.
+
+| Axis | Points | Current | What it proves | Remaining proof |
 |---|---:|---:|---|---|
-| Execute ergonomics and correction | 15 | 13 | `process::run` expected-output correction, wrapper/target guidance, actionable process failure diagnostics, `filesystem::apply_patch` append correction tests, `filesystem::list_dir` `maxEntries` alias correction, live simulator append execution without probe failures, live `needs_selection`/`needs_capability` guardrails, live `needs_input` guidance with exact missing paths, and live wrapper idempotency forwarding for generated UI target schemas | Stale-plan and provider-shape parity tests |
-| Capability resolution and recipes | 10 | 8 | Engine Console search/inspect flows, resolved explicit `process::run` targets across safe/rejected/approval/failure modes, live intent-only `filesystem::read_file` resolution from `execute` without an explicit target, broad/unknown intent fail-closed as `needs_capability`, filesystem-namespace ambiguity as `needs_selection`, and known-target missing input as `needs_input` | Intent-only resolution across web/worker/module, ranking audit, and vector-warmup degradation |
-| Core filesystem/process paths | 15 | 15 | Read-only `process::run`, policy rejection for unsafe read-only commands, process cwd/path/root escape rejection, sandbox materialized output target bounding, process env allowlisting, live intent-only `filesystem::read_file`, live missing-file failure, live absolute-path root-bound rejection, bounded `filesystem::list_dir`/`glob`/`search_text`/`find` through `execute`, exact replacement `apply_patch`, `write_file`, `edit_file`, failed patch validation, process timeout/non-zero/stderr-only behavior, and missing expected sandbox output | Additional write/edit failure modes and broader command classifier edge cases |
-| Approval and freshness | 10 | 8 | Approval-required sandbox command, approval execution/replay for sandbox materialization, denial with no child execution or durable output, double-tap approval resolving exactly once, resume ordering fix, no-approval detail-sheet suppression, and no-approval process failures staying out of the approval plane | Timeout/cancel, stale revision, replayed approval UI edge cases, and reconnect recovery |
-| Idempotency and replay | 10 | 9 | Sandbox materialized replay inspection, live sandbox materialized approval replay with one child invocation, double-tap approval producing one approval resolution and one process child, apply-patch append replay unit/integration tests, live simulator `filesystem::apply_patch` exact replacement replay, and live simulator `filesystem::write_file`/`edit_file` replay with stable refs | Queue retry, duplicate provider tool call, and cross-session replay |
-| Resource-output substrate | 10 | 8 | Prompt library and voice notes resource conversions, materialized `process::run` output refs, patch proposal refs, live simulator filesystem write/edit resource refs, failed patch validation with no accepted refs, missing expected sandbox output with no materialized-file ref, and replayed materialized output refs | Artifact/materialized-file damage, CAS, hash mismatch, discard, and retained evidence under failure |
-| Generated UI/action gateway | 10 | 9 | Prompt management generated surface, action toasts, live `ui::surface_for_target` resource collection authoring, live `ui::submit_action` through stored action coordinates, stale `ui_surface` version rejection before target child invocation, malformed stored-action input rejection before target child invocation, fixed iOS management-sheet create, double-tap suppression through the sheet, and renderer stale/offline fail-closed behavior | Revoked/expired grant and target revision drift beyond surface version drift |
-| Module/worker extensibility | 10 | 2 | Rust module package activation/trust/health tests exist | Live local-process package activation, worker spawn/health/disable/recovery, trust audit, and package UI through app |
-| Observability/log ingestion | 5 | 5 | Server ledger/event queries used during manual testing, auto-ingest path exercised, live replay test reconstructed from `engine_invocations` plus resource refs without relying on screenshots, and failed child invocations now remain visible in `execute` orchestration details | Standardize the DB query bundle for every scenario |
-| Provider parity | 5 | 0 | Provider exports are covered by code tests, not manual testing yet. A direct Anthropic `/engine` retest stopped at `tool_use` without child invocations, so this axis stays blocked until provider loop parity is proven. | OpenAI, Anthropic, Gemini, Kimi, and Ollama execute-schema parity with identical correction/result behavior |
+| Execute portal usability | 12 | 11 | One `execute` tool can resolve, prepare, correct, and run without fragile wrapper guessing. | Stale-plan recovery, vector-warmup degradation, and provider-shape parity. |
+| Core first-party capability usefulness | 12 | 11 | Filesystem and process paths are useful in real tasks, with partial generated UI, prompt, and settings coverage. | Web, browser/display, logs, model, memory, git/worktree, prompt, and settings under real prompts. |
+| Multi-capability orchestration | 14 | 13 | The agent can already chain several filesystem/process/generated-UI flows, including a live repo-understanding architecture pass. | Code-change, web, subagent, memory, and state/queue/stream use cases. |
+| Worker/function/trigger substrate | 12 | 7 | Engine tests cover many primitive contracts and some live function invocation paths. | Live state, queue, stream, trigger, subagent, local-process worker activation, and package disable/recovery. |
+| Resource and durable output truth | 10 | 8 | Prompt library, voice notes, process materialization, and filesystem mutations are resource-backed in covered paths. | Damage/CAS/hash/discard failure paths and resource-backed package evidence under live scenarios. |
+| Safety, grants, and approvals | 10 | 8 | Unsafe read-only commands are rejected; approval, denial, replay, and double-submit are covered. | Approval timeout/cancel, stale revision, reconnect recovery, grant expiry/revocation in UI/gateway paths. |
+| Runtime resilience | 10 | 7 | Reconnect tests and queue/idempotency unit coverage exist; manual process retries are partly covered. | Server restart during session, queue retry, crash/partial-failure recovery, and activation cleanup under live use. |
+| Observability and auditability | 8 | 7 | Manual tests have been reconstructed from invocation, audit, approval, and resource rows. | Standard per-scenario DB query bundle and queue/stream/state reconstruction. |
+| Provider parity | 6 | 0 | Provider boundary tests exist, but manual parity is still blocked. | OpenAI, Anthropic, Gemini, Kimi, and Ollama must expose identical `execute` behavior. |
+| Operator/generated UI | 6 | 6 | Generated UI surfaces, stored action coordinates, stale rejection, and iOS thinness are covered for prompt management. | Keep score only if future generated-UI scenarios preserve server-owned truth. |
+
+## Scenario ledger
+
+Every row is a deterministic eval. Screenshots are secondary evidence; the
+acceptance source is the app result plus `~/.tron/internal/database/tron.sqlite`.
+
+| Scenario ID | Status | Session ID | Prompt | Capabilities expected | Capabilities observed | Resource refs | Approval refs | Failure root cause | Fix commit | Score delta |
+|---|---|---|---|---|---|---|---|---|---|---:|
+| RWO-001 repo-understanding smoke | passed | `sess_019e6daa-a76c-7c90-9bd2-fce540be184a` | Use only `execute`. Inspect this repo enough to explain the engine’s worker/function/trigger architecture, confirm project rules/skills loaded, avoid shell/date, avoid guessed-path listing, list capabilities used, and cite files. | `capability::execute` -> `filesystem::list_dir`, `filesystem::search_text`, `filesystem::read_file` | 21 `capability::execute`; 11 `filesystem::read_file`; 6 `filesystem::search_text`; 4 `filesystem::list_dir`; 0 `process::run`; 0 approvals; 0 failed invocations; project context showed `Loaded 1 rule` and the assistant confirmed available skills were present. | none | none | Prior epsilon exposed brittle regex default for `filesystem::search_text` (`dispatch(` rejected as invalid regex). Fixed by making search literal-by-default with explicit `regex: true`, plus contract/docs/tests. | pending checkpoint | +1 |
+| RWO-002 practical code-change verify | pending | pending | Find the scorecard or docs sandbox, make a harmless idempotent edit, read/search it back, and report resource refs. | `filesystem::search_text`/`read_file`, `filesystem::apply_patch` or `write_file`, verification read/search | pending | pending | pending | pending | pending | 0 |
+| RWO-003 safe process plus filesystem | pending | pending | Run safe read-only repo commands, read `README.md` through filesystem, compare results, and report approval state. | `process::run`, `filesystem::read_file` | pending | pending | pending | pending | pending | 0 |
+| RWO-004 web research | pending | pending | Search official OpenAI model docs through capabilities, fetch one result if available, summarize source. | `web::search`, optional `web::fetch` | pending | pending | pending | pending | pending | 0 |
+| RWO-005 browser/display probe | pending | pending | Discover browser/display capabilities and inspect safe status without arbitrary browsing. | `browser::*` and/or `display::*` status capabilities, or `needs_capability` if unavailable | pending | pending | pending | pending | pending | 0 |
+| RWO-006 state queue stream substrate | pending | pending | Create/read state, enqueue or inspect queue if available, inspect stream/trigger status, report invocation IDs. | `state::*`, `queue::*`, `stream::*` through `execute` | pending | pending | pending | pending | pending | 0 |
+| RWO-007 subagent real use case | pending | pending | Delegate one narrow repo topic to a subagent and report lineage/capabilities. | `agent::spawn_subagent`/status/result or canonical agent path | pending | pending | pending | pending | pending | 0 |
+| RWO-008 memory auto-retain context | pending | pending | Summarize a durable project lesson and observe whether memory auto-retain uses engine capabilities. | `memory::*` background workflow plus visible invocation/event lineage | pending | pending | pending | pending | pending | 0 |
+| RWO-009 high-risk approval boundary | pending | pending | Attempt bounded high-risk mutation, deny once, approve once, and prove child/durable behavior. | approval records plus target child invocation only after approval | pending | pending | pending | pending | pending | 0 |
+| RWO-010 server restart reconnect | pending | pending | Restart dev server during a mounted session and continue after reconnect. | connection events, preserved invocation state, no duplicate turn | pending | pending | pending | pending | pending | 0 |
+| RWO-011 module worker package activation | pending | pending | Run deterministic package activation fixture through canonical capabilities. | `module::*`, `worker::spawn`, health, disable, recovery, grants/resources | pending | pending | pending | pending | pending | 0 |
+| RWO-012 provider parity | pending | pending | Repeat intent-only read, safe process, and `needs_input` on every configured provider. | identical model-visible `execute` schema and child behavior | pending | pending | pending | pending | pending | 0 |
 
 ## Already exercised and fixed
 
@@ -77,6 +102,7 @@ been exercised end-to-end through the app and verified from server logs.
 | Model-facing filesystem root bounds | Covered | A simulator guardrail session proved missing files fail cleanly and absolute host paths such as `/etc/passwd` are rejected inside the model-facing filesystem capability path. Relative and allowed absolute paths still resolve against the active session worktree, while raw service helpers remain trusted-local internals only. Failed child invocations now surface in `execute.details.childInvocationIds` and nested orchestration details instead of disappearing from the user-facing result. | `filesystem::*` tests, `capability_execute_reports_failed_child_invocation_lineage`, DB sessions `sess_019e6bde-08d5-7331-8577-c74335d84ada` and `sess_019e6bec-0218-7d51-a211-0fe632f2963a` |
 | Model-facing process root and env bounds | Covered by focused tests | `process::run` still supports useful read-only workspace checks, but every invocation requires active session worktree truth. Read-only cwd/path operands, symlink/glob operands, and sandbox materialization targets must stay inside that worktree. Child processes receive an allowlisted environment rather than inherited server secrets, and explicit env payloads reject secret-like keys/values. | `process_run_requires_active_session_worktree`, `read_only_process_rejects_paths_outside_session_worktree`, `read_only_process_rejects_symlink_operands_that_escape_worktree`, `read_only_process_rejects_shell_glob_path_operands`, `read_only_find_allows_name_globs_but_bounds_search_roots`, `sandbox_materialized_absolute_target_path_cannot_escape_session_worktree`, `safe_process_environment_is_explicitly_allowlisted`, `process_run_rejects_secret_like_env_payloads` |
 | Bounded filesystem discovery | Covered in simulator and OpenAI path | A live simulator retest asked the model to use only `execute` for `filesystem::list_dir` with `maxEntries`, `filesystem::glob`, and `filesystem::search_text`. The orchestrator normalized `maxEntries` to `maxResults`, selected the correct targets, required no approval, created exactly one child invocation per target, returned no durable refs for pure reads, and recorded the correction in `capability.orchestration` audit diagnostics. A direct OpenAI `/engine` retest covered the same substrate path before the simulator window was available again. | Simulator DB session `sess_019e6ce7-8dc8-7912-9a9b-f7c06f744d39`; child invocations `019e6ce8-9040-7890-a15b-0e471941e28f`, `019e6ce8-9951-7c71-8ea0-865966b321bb`, `019e6ce8-a46f-7031-814e-c838d7830414`; prior `/engine` session `sess_019e6c9a-c3b7-73d1-afad-2b5df04824b8`; `list_dir_honors_max_results_bound`; `orchestrated_execute_normalizes_list_dir_max_entries_alias_before_schema_validation` |
+| Literal-first filesystem content search | Covered in simulator | A repo-understanding simulator pass exposed that `filesystem::search_text` rejected literal code tokens such as `dispatch(` because the capability treated `pattern` as mandatory regex. The capability now searches literal text by default and supports regex only with explicit `regex: true`; the rebuilt-server retest completed with six successful searches, no process calls, no approvals, no failed invocations, and no non-ok capability completions. | Epsilon failure session `sess_019e6d98-3528-73e2-b2a5-74a7afd954e1`; fixed zeta pass `sess_019e6daa-a76c-7c90-9bd2-fce540be184a`; `search_text_treats_pattern_as_literal_by_default`; `search_text_supports_explicit_regex_mode`; `filesystem_contracts_steer_guessy_path_discovery_to_find_or_glob` |
 | Exact replacement patch replay | Covered in simulator | A simulator session called `filesystem::apply_patch` twice with `idempotencyKey=idem-exact-replace-2026-05-28-0450`, then read the file. The first child created one materialized-file ref and one patch-proposal ref; the second child replayed from the first with the same refs; the final worktree file contained the marker exactly once. | DB session `sess_019e6ceb-6eeb-7b91-88b9-2ee810d083cd`; child invocations `019e6cec-5d60-7b50-8efb-e70a101d6a3c` and replay `019e6cec-68f3-77e2-8e96-aa4364889c51`; final file `README.md` contained `exact-replace-2026-05-28-0450` once |
 | Failed patch validation | Covered in simulator | A simulator session attempted `filesystem::apply_patch` with a missing `oldString`, then searched for the proposed marker. The failed child returned `PATTERN_NOT_FOUND`, produced `[]`, created no materialized update or patch proposal, and the search returned zero matches. | DB session `sess_019e6cef-179e-7dc2-9640-577d74ea4f19`; failed child `019e6cf0-b9c3-7121-8221-b93daa15ed1b`; search child `019e6cf0-c4de-7032-871b-4e3092696d3d` |
 | `find`/`write_file`/`edit_file` substrate | Covered in simulator | A simulator continuation ran bounded `filesystem::find`, `filesystem::write_file` twice with one idempotency key, `filesystem::edit_file` twice with one idempotency key, and a final `read_file`. `find` returned exactly two matches with `truncated=true`; second write/edit invocations replayed from their first children with identical resource refs; final file content was `beta\nstable\n`. | DB session `sess_019e6cef-179e-7dc2-9640-577d74ea4f19`; find child `019e6cf3-49fb-7011-8311-fb11ae635727`; write child/replay `019e6cf3-5454-7431-b396-276ac5c08b3c`/`019e6cf3-5f4a-75a2-996a-754910d1105c`; edit child/replay `019e6cf3-6ae2-7361-baa6-2599f07dd1c3`/`019e6cf3-7581-71c2-a07d-2acd1a058c00`; read child `019e6cf3-7e63-7a53-a56a-44bf1147cf75` |
@@ -89,81 +115,249 @@ been exercised end-to-end through the app and verified from server logs.
 | iOS reconnect after server rebuild | Covered by focused tests | Dashboard/chat connection state now belongs to the shared `EngineConnection` foreground reconnect loop. Normal reconnect keeps probing at a bounded cadence while foregrounded, so screens recover after dev-server rebuilds without owning retry logic or staying permanently failed until manual tap. | `ReconnectProbePolicyTests`, `EngineConnectionReconnectTests`, `packages/ios-app/docs/architecture.md`, `packages/ios-app/docs/onboarding.md` |
 | Memory auto-retain | Partially covered | Auto-retain runs through engine capabilities and no longer blocks normal testing, but it needs a final regression under the current server build. | Prior server-log review; pending current-build retest |
 
-## Remaining test matrix
+## Real-world eval blocks
 
-Run these from easiest foundation to highest-level composition. A checkpoint is
-complete only when the app behavior, server ledger, and relevant Rust tests all
-agree.
+Run these as deterministic real sessions. Start each block by reading this
+scorecard, then choose the next pending scenario with the highest substrate
+value. A block is not complete until the iOS result and DB evidence agree.
 
-### 1. Execute portal basics
+### RWO-001 Agent Harness Smoke: Repo Understanding
 
-- Intent-only discovery for known capability: read a file without target.
-- Explicit target execution: `filesystem::read_file` and `process::run`.
-- Ambiguous intent: must return `needs_selection`, no child invocation.
-- Missing required fields: must return `needs_input`, exact fields, no child.
-- Unknown domain: must return `needs_capability`, proposed shape, no child.
-- Wrapper-shape mistakes: nested `payload`, nested `idempotencyKey`, target
-  aliases, process output aliases, and apply-patch append shape must correct or
-  reject deterministically.
+Prompt:
 
-### 2. Filesystem substrate
+```text
+Use only execute. Inspect this repo enough to explain the engine's worker/function/trigger architecture. Do not answer from memory. Read relevant docs/code, list the capabilities used, and cite the files inspected.
+```
 
-- `read_file` with line bounds, missing file, relative path, absolute path.
-- `list_dir`, `find`, `glob`, and `search_text` with bounded results.
-- `write_file`, `edit_file`, and `apply_patch` exact replacement.
-- Append patch via `apply_patch` without a read/probe detour.
-- Duplicate idempotency for each mutating path.
-- Resource refs for every durable mutation; no refs on failed validation.
+Acceptance criteria:
 
-### 3. Process substrate
+- Uses `capability::execute` with filesystem discovery/read children.
+- Uses `filesystem::list_dir`, `filesystem::search_text` or `filesystem::glob`,
+  and `filesystem::read_file` unless it explains a better canonical filesystem
+  path.
+- Creates no approval and no durable target resource refs.
+- Produces no failed probe invocations.
+- Answer correctly describes workers registering functions/triggers and agents
+  using the same capability fabric as the backend.
 
-- Safe `read_only`: `date`, `pwd`, `test -f`, bounded `sed -n`, `git status`.
-- Unsafe `read_only`: redirection, deletion, in-place edit, network mutation.
-- `sandbox_materialized` with one expected output and approval.
-- Duplicate sandbox idempotency: no duplicate materialized output or approval.
-- Timeout, non-zero exit, stderr-only output, and missing expected output.
+### RWO-002 Practical Code Change: Find, Edit, Verify
 
-### 4. Approval and pause/resume
+Prompt:
 
-- Required approval creates one approval record and no child execution before
-  resolution.
-- Approve resumes exactly once and preserves parent/child lineage.
-- Deny leaves no durable output and returns a clear result.
-- Timeout/cancel remains inspectable.
-- No-approval calls never show approval UI.
+```text
+Use only execute. Find the capability-orchestration scorecard, add one harmless note to a scratch test file or docs sandbox, verify it by reading/searching it back, then report resource refs. Use idempotency.
+```
 
-### 5. Resource and generated UI boundaries
+Acceptance criteria:
 
-- Generated UI `surface_for_target` and `submit_action` on a known safe target.
-- Stale surface version fails before child execution.
-- Malformed user input fails before child execution.
-- Revoked/expired grant fails before child execution.
-- Resource CAS/hash/lifecycle errors remain inspectable and never rewrite truth.
+- Searches/reads before editing.
+- Uses `filesystem::apply_patch` or `filesystem::write_file` for the mutation.
+- Reports `materialized_file` and any proposal/output refs from the target
+  child invocation.
+- Reads or searches the edited content back.
+- Replaying the same idempotency key does not duplicate edits or resources.
 
-### 6. Module/package extensibility
+### RWO-003 Safe Process + Filesystem Composition
 
-- Register local digest-pinned package.
-- Configure, activate, health-check, disable, and recover local-process worker.
-- Trust/source verification and policy denial before spawn.
-- Duplicate activation/recovery keys produce no duplicate worker/grant/resource.
-- Generated package surfaces expose only canonical stored actions.
+Prompt:
 
-### 7. Queue, retry, and crash resilience
+```text
+Use only execute. Run safe read-only commands to inspect the repo status, current branch, and first three README lines. Then read README.md through filesystem and compare the first line. Report exact capabilities and whether approval was required.
+```
 
-- Queue retry of transient failure does not duplicate child invocation,
-  resource versions, grants, approvals, or workers.
-- Interrupted activation recovery cleans leaked grants/workers.
-- Scheduled health/trust audit derives due work without a durable scheduler
-  plane.
-- Server restart during app session reconnects and preserves action state.
+Acceptance criteria:
 
-### 8. Provider parity
+- `process::run` read-only calls run without approval when classifier-proven
+  safe.
+- `filesystem::read_file` runs without approval.
+- No durable resource refs are produced.
+- UI and DB execution details make the run path clear.
 
-- OpenAI, Anthropic, Gemini, Kimi, and Ollama expose only `execute`.
-- The same request shapes produce the same target payloads and correction
-  diagnostics across providers.
-- Provider-specific tool-call ids map to stable wrapper idempotency without
-  changing child idempotency.
+### RWO-004 Web Research Through Capabilities
+
+Prompt:
+
+```text
+Use only execute. Search the web for official OpenAI model documentation, fetch one result if available, summarize what source was used, and do not browse outside the capability system.
+```
+
+Acceptance criteria:
+
+- Resolves to `web::search` and optionally `web::fetch`.
+- Returns bounded source URLs/content.
+- Network failures return actionable diagnostics, not hallucinated results.
+- No browser/client-side policy path is used.
+
+### RWO-005 Browser/Display Capability Probe
+
+Prompt:
+
+```text
+Use only execute. Discover whether browser or display capabilities are available. If available, inspect their status and report what they can safely do. Do not open arbitrary sites unless the capability explicitly supports it.
+```
+
+Acceptance criteria:
+
+- Uses `browser::*` or `display::*` status capabilities when available.
+- If not available, returns `needs_capability` or a clear unavailable status.
+- Does not hallucinate browser APIs or perform arbitrary browsing.
+
+### RWO-006 State, Queue, Stream, Trigger Substrate
+
+Prompt:
+
+```text
+Use only execute. Create a small state value, read it back, enqueue a small queue item if the capability is available, inspect queue/drain status, and report every invocation id. Do not use external files.
+```
+
+Acceptance criteria:
+
+- Uses state and queue primitives through `execute`.
+- Demonstrates CAS/idempotency behavior where the capability supports it.
+- Queue enqueue/drain status is traceable from DB rows.
+- No new durable state plane is introduced.
+
+### RWO-007 Subagent Real Use Case
+
+Prompt:
+
+```text
+Use only execute. Spawn or delegate to a subagent to inspect one narrow repo topic, wait for the result, and report the subagent lineage and capabilities involved.
+```
+
+Acceptance criteria:
+
+- Uses the canonical `agent::*` subagent path.
+- Parent/child lineage is reconstructable from events and invocations.
+- Subagent worktree/session isolation is visible.
+- No separate harness bypass is required for the agent to use backend
+  capabilities.
+
+### RWO-008 Memory Auto-Retain and Context
+
+Prompt:
+
+```text
+Use only execute. Ask the agent to summarize a durable project lesson, then observe whether memory auto-retain runs. Report whether memory actions went through engine capabilities.
+```
+
+Acceptance criteria:
+
+- Auto-retain events are visible and bounded.
+- Memory writes use `memory::*` capability paths or a documented internal-only
+  boundary.
+- No endless spinner or hidden client-owned memory policy.
+
+### RWO-009 High-Risk Approval Scenario
+
+Prompt:
+
+```text
+Use only execute. Attempt a high-risk but bounded mutation that requires approval, then wait for user denial. Report whether the child mutation ran and whether any durable output exists.
+```
+
+Acceptance criteria:
+
+- Denial creates one approval and no target child execution.
+- Durable refs remain empty on denial.
+- Follow-up approval/double-tap creates one target child and one durable result.
+- UI ordering remains chronological.
+
+### RWO-010 Server Restart and App Reconnect
+
+Procedure:
+
+1. Start a session and begin a read-only multi-step task.
+2. Restart the server with `./scripts/tron dev -bdt`.
+3. Keep the simulator mounted.
+4. Continue after reconnect.
+
+Acceptance criteria:
+
+- Dashboard and chat reconnect automatically.
+- No duplicate turns or duplicate child invocations.
+- Interrupted invocation state is inspectable.
+- Failed/retried work is explicit, never silent.
+
+### RWO-011 Module/Worker Package Activation
+
+Use a deterministic server-side fixture, not a massive chat-authored manifest.
+
+Acceptance criteria:
+
+- Register digest-pinned local package, verify source, approve source,
+  configure, activate local-process worker, health check, invoke a registered
+  function, disable, and recover/inspect cleanup.
+- Durable truth stays in resources, grants, invocations, evidence, workers, and
+  links.
+- Duplicate activation/recovery creates no duplicate workers or grants.
+- No second worker-spawn path is introduced.
+
+### RWO-012 Provider Parity
+
+Run the same three prompts through every configured provider:
+
+- intent-only read file;
+- safe process command;
+- missing required field returning `needs_input`.
+
+Acceptance criteria:
+
+- Providers expose only model-visible `execute`.
+- Same target selected and same correction classes returned.
+- Provider tool-call IDs do not alter child idempotency.
+
+## Failure protocol
+
+When any scenario fails, freeze the test and record:
+
+- session id and prompt;
+- visible UI result;
+- `engine_invocations` rows for the turn tree;
+- `capability_audit_events` rows for orchestration diagnostics;
+- approvals, resources, queues, streams, state rows, and server logs when
+  relevant.
+
+Classify the layer before fixing:
+
+- model prompt/guidance;
+- execute resolution;
+- schema/recipe;
+- target capability;
+- grant/approval;
+- resource output;
+- queue/retry;
+- iOS rendering;
+- provider runner.
+
+Then add or identify the smallest failing automated test, fix the owning module
+only, remove nearby dead/fallback/compatibility code if found, update
+progressive docs when invariants change, rerun the exact scenario, update the
+scenario ledger, and commit.
+
+No workaround counts as fixed unless DB evidence proves the corrected path uses
+canonical substrate primitives.
+
+## Score update rules
+
+- `+1` for a simulator-tested scenario with DB proof and no code changes
+  required.
+- `+1` to `+2` for a scenario that exposed a bug, received a root-cause fix,
+  and passed retest.
+- `0` for inconclusive tests, prompt-entry errors, or tests that only prove UI
+  screenshots.
+- No axis can reach full points until it has at least one success path, one
+  failure path, one replay/idempotency path where relevant, and one DB
+  reconstruction note.
+
+Target checkpoints:
+
+- `80/100`: real repo-inspection plus code-change orchestration pass.
+- `84/100`: web/browser plus state/queue/stream substrate pass.
+- `88/100`: subagent plus memory auto-retain pass.
+- `92/100`: module/local-process package activation pass.
+- `96/100`: restart/retry/crash resilience pass.
+- `100/100`: provider parity plus no unclassified high-signal foundation gaps.
 
 ## Simulator harness notes
 
@@ -180,58 +374,3 @@ agree.
 - If the macOS Simulator window is not visible to Computer Use but
   `xcrun simctl io booted screenshot` works, label any `/engine` WebSocket
   retest as server-substrate evidence rather than full app UI evidence.
-
-## Next logical checkpoint
-
-Move to execute-portal basics under the current build:
-
-1. intent-only `filesystem::read_file` from a new simulator session, with no
-   explicit target and no approval; **covered on 2026-05-27**
-2. ambiguous intent returning `needs_selection` without a child invocation;
-   **covered on 2026-05-27**
-3. missing required fields returning `needs_input` with exact fields and no
-   child invocation; **covered on 2026-05-27**
-4. unknown domain returning `needs_capability` with a proposed shape and no
-   hallucinated target; **covered on 2026-05-27**
-5. DB reconstruction for each case using invocation rows, orchestration
-   diagnostics, and capability audit events.
-
-The process substrate breadth checkpoint is covered as of 2026-05-28:
-
-1. unsafe `read_only` commands failed before child mutation;
-2. sandbox-materialized output required approval, produced resource refs, and
-   replayed without a duplicate child;
-3. timeout, non-zero exit, stderr-only output, and missing expected output all
-   returned bounded, inspectable results.
-
-The approval denial and duplicate-submission portion of the approval checkpoint
-is covered as of 2026-05-28:
-
-1. denial leaves no child execution or durable output;
-2. double-tap approval resolves exactly once and creates one child process run;
-3. denied and executed approvals are both reconstructable from approval,
-   invocation, resource, and worktree state.
-
-The remaining approval/freshness checkpoint should cover:
-
-1. approval timeout/cancel remains inspectable and resumable only through the
-   canonical approval path;
-2. stale plan/revision fails before child execution;
-3. replayed approval UI state never presents as newly actionable;
-4. reconnect recovery during a live dev-server rebuild while a dashboard/chat
-   screen is already mounted.
-
-The generated UI action-gateway checkpoint is partially covered as of
-2026-05-28:
-
-1. `ui::surface_for_target` authors prompt-snippet `resource_collection`
-   surfaces as `ui_surface` resources;
-2. `ui::submit_action` executes a stored `create-snippet` action and creates
-   prompt-library `artifact` output through the target child invocation;
-3. stale `ui_surface` versions fail before target child execution;
-4. malformed stored-action input fails in `ui::submit_action` before target
-   child execution;
-5. the fixed iOS management sheet creates snippets through `ui::submit_action`
-   and suppresses double-tap duplicate submits;
-6. remaining generated-UI work should cover revoked/expired grants and target
-   revision drift beyond surface version drift.

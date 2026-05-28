@@ -35,6 +35,26 @@ use serde_json::Value;
 
 use crate::shared::server::errors::{self, CapabilityError};
 
+const DEFAULT_WALK_IGNORED_DIRS: &[&str] = &[
+    ".git",
+    ".hg",
+    ".svn",
+    ".worktrees",
+    "target",
+    "node_modules",
+    ".build",
+    ".swiftpm",
+    "DerivedData",
+    ".next",
+    "dist",
+    "build",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".pytest_cache",
+];
+const MAX_TEXT_SEARCH_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
 /// Debug-build-only signal that a filesystem capability received a path
 /// outside the user's home directory. Emits nothing in release.
 ///
@@ -393,7 +413,11 @@ pub(crate) fn find(
 
     let mut matches = Vec::new();
     let mut truncated = false;
-    for entry in walker.into_iter().filter_map(Result::ok) {
+    for entry in walker
+        .into_iter()
+        .filter_entry(|entry| !is_default_ignored_walk_dir(entry))
+        .filter_map(Result::ok)
+    {
         let is_dir = entry.file_type().is_dir();
         match type_filter {
             "file" if is_dir => continue,
@@ -438,11 +462,18 @@ pub(crate) fn search_text(
     file_pattern: Option<&str>,
     context: usize,
     max_results: usize,
+    regex_mode: bool,
 ) -> Result<Value, CapabilityError> {
     trace_out_of_home(path, "search_text");
-    let regex = regex::Regex::new(pattern).map_err(|error| CapabilityError::InvalidParams {
-        message: format!("invalid regex pattern: {error}"),
-    })?;
+    let search_pattern = if regex_mode {
+        pattern.to_owned()
+    } else {
+        regex::escape(pattern)
+    };
+    let regex =
+        regex::Regex::new(&search_pattern).map_err(|error| CapabilityError::InvalidParams {
+            message: format!("invalid regex pattern: {error}"),
+        })?;
     let file_matcher = match file_pattern {
         Some(pattern) => Some(
             globset::GlobBuilder::new(pattern)
@@ -459,12 +490,20 @@ pub(crate) fn search_text(
     let mut truncated = false;
     for entry in walkdir::WalkDir::new(path)
         .into_iter()
+        .filter_entry(|entry| !is_default_ignored_walk_dir(entry))
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_file())
     {
         if let Some(matcher) = &file_matcher
             && !matcher.is_match(entry.path())
             && !matcher.is_match(entry.file_name())
+        {
+            continue;
+        }
+        if entry
+            .metadata()
+            .ok()
+            .is_some_and(|metadata| metadata.len() > MAX_TEXT_SEARCH_FILE_BYTES)
         {
             continue;
         }
@@ -498,6 +537,16 @@ pub(crate) fn search_text(
         "matches": matches,
         "truncated": truncated,
     }))
+}
+
+fn is_default_ignored_walk_dir(entry: &walkdir::DirEntry) -> bool {
+    if entry.depth() == 0 || !entry.file_type().is_dir() {
+        return false;
+    }
+    entry
+        .file_name()
+        .to_str()
+        .is_some_and(|name| DEFAULT_WALK_IGNORED_DIRS.contains(&name))
 }
 
 fn read_text(path: &str) -> Result<String, CapabilityError> {
@@ -609,6 +658,103 @@ mod tests {
                 .to_string()
                 .contains("endLine must be greater than or equal to startLine")
         );
+    }
+
+    #[test]
+    fn search_text_skips_default_heavy_dirs_from_repo_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = tmp.path().join("src");
+        let target = tmp.path().join("target");
+        let worktree = tmp.path().join(".worktrees").join("scratch");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(src.join("lib.rs"), "needle in source\n").unwrap();
+        std::fs::write(target.join("generated.rs"), "needle in generated output\n").unwrap();
+        std::fs::write(worktree.join("copy.rs"), "needle in copied worktree\n").unwrap();
+
+        let result = search_text(tmp.path().to_str().unwrap(), "needle", None, 0, 20, false)
+            .expect("bounded search");
+        let paths = result["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value["path"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].ends_with("src/lib.rs"));
+        assert!(!result["truncated"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn search_text_allows_ignored_dir_when_it_is_the_requested_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("generated.rs"), "needle in generated output\n").unwrap();
+
+        let result = search_text(target.to_str().unwrap(), "needle", None, 0, 20, false)
+            .expect("explicit target search");
+        let matches = result["matches"].as_array().unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert!(
+            matches[0]["path"]
+                .as_str()
+                .unwrap()
+                .ends_with("target/generated.rs")
+        );
+    }
+
+    #[test]
+    fn search_text_treats_pattern_as_literal_by_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("src.rs");
+        std::fs::write(&target, "fn dispatch(trigger: TriggerDefinition) {}\n").unwrap();
+
+        let result = search_text(
+            tmp.path().to_str().unwrap(),
+            "dispatch(",
+            None,
+            0,
+            20,
+            false,
+        )
+        .expect("literal search should not require regex escaping");
+        let matches = result["matches"].as_array().unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0]["line"], 1);
+    }
+
+    #[test]
+    fn search_text_supports_explicit_regex_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("src.rs");
+        std::fs::write(&target, "register_trigger\nregister_worker\n").unwrap();
+
+        let literal = search_text(
+            tmp.path().to_str().unwrap(),
+            "register_(trigger|worker)",
+            None,
+            0,
+            20,
+            false,
+        )
+        .expect("literal search");
+        assert!(literal["matches"].as_array().unwrap().is_empty());
+
+        let regex = search_text(
+            tmp.path().to_str().unwrap(),
+            "register_(trigger|worker)",
+            None,
+            0,
+            20,
+            true,
+        )
+        .expect("regex search");
+        assert_eq!(regex["matches"].as_array().unwrap().len(), 2);
     }
 
     /// `trace_out_of_home` is logging-only and must never panic or

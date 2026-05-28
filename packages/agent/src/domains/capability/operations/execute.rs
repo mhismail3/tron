@@ -23,6 +23,31 @@ use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
 const MIN_UNANCHORED_INTENT_SCORE: f32 = 0.1;
+const EXECUTE_WRAPPER_KEYS: &[&str] = &[
+    "intent",
+    "target",
+    "arguments",
+    "constraints",
+    "payload",
+    "idempotencyKey",
+    "idempotency_key",
+    "reason",
+    "mode",
+    "capabilityId",
+    "contractId",
+    "implementationId",
+    "functionId",
+    "language",
+    "code",
+    "args",
+    "allowedContracts",
+    "allowedImplementations",
+    "timeoutMs",
+    "budget",
+    "expectedRevision",
+    "expectedSchemaDigest",
+    "inspectionHandle",
+];
 
 pub(crate) async fn execute_value(
     invocation: &Invocation,
@@ -58,6 +83,11 @@ fn is_orchestrated_execute_payload(params: &Value) -> bool {
         || params.get("arguments").is_some()
         || params.get("constraints").is_some()
         || (params.get("mode").is_none() && params.get("payload").is_some())
+        || (params.get("mode").is_none()
+            && params
+                .as_object()
+                .is_some_and(|object| object.keys().any(|key| !is_execute_wrapper_key(key))))
+        || (params.get("mode").is_none() && params.as_object().is_some_and(Map::is_empty))
 }
 
 async fn execute_orchestrated_value(
@@ -110,7 +140,11 @@ async fn execute_orchestrated_value(
             search_status: Value::Null,
         },
         None => {
-            let Some(intent) = input.intent.as_deref() else {
+            let has_argument_shape = input
+                .arguments
+                .as_object()
+                .is_some_and(|object| !object.is_empty());
+            let Some(intent) = input.intent.as_deref().or(has_argument_shape.then_some("")) else {
                 let diagnostics = orchestration_details(
                     &orchestration_id,
                     "needs_input",
@@ -509,6 +543,7 @@ pub(super) fn parse_orchestrated_execute_input(
         &mut reason,
         &mut corrections,
     )?;
+    normalize_flattened_target_arguments(params, &mut arguments, &mut corrections)?;
 
     Ok(OrchestratedExecuteInput {
         intent,
@@ -519,6 +554,73 @@ pub(super) fn parse_orchestrated_execute_input(
         reason,
         corrections,
     })
+}
+
+fn is_execute_wrapper_key(key: &str) -> bool {
+    EXECUTE_WRAPPER_KEYS.contains(&key)
+}
+
+fn normalize_flattened_target_arguments(
+    params: &Value,
+    arguments: &mut Value,
+    corrections: &mut Vec<Value>,
+) -> Result<(), CapabilityError> {
+    let Some(params_object) = params.as_object() else {
+        return Ok(());
+    };
+    let Some(arguments_object) = arguments.as_object_mut() else {
+        return Err(CapabilityError::InvalidParams {
+            message: "execute.arguments must be an object".to_owned(),
+        });
+    };
+
+    let flattened = params_object
+        .iter()
+        .filter(|(key, _)| !is_execute_wrapper_key(key))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<Vec<_>>();
+    if flattened.is_empty() {
+        return Ok(());
+    }
+
+    let mut moved = Vec::new();
+    let mut deduped = Vec::new();
+    for (key, value) in flattened {
+        if let Some(existing) = arguments_object.get(&key) {
+            if existing == &value {
+                deduped.push(key);
+                continue;
+            }
+            return Err(CapabilityError::InvalidParams {
+                message: format!(
+                    "execute received conflicting values for target argument '{key}' at the root and inside arguments; keep target arguments inside arguments"
+                ),
+            });
+        }
+        arguments_object.insert(key.clone(), value);
+        moved.push(key);
+    }
+    if !moved.is_empty() {
+        corrections.push(correction_record(
+            "top_level_arguments_to_arguments",
+            format!(
+                "moved flattened target argument fields into arguments: {}",
+                moved.join(", ")
+            ),
+            0.95,
+        ));
+    }
+    if !deduped.is_empty() {
+        corrections.push(correction_record(
+            "duplicate_flattened_arguments_deduped",
+            format!(
+                "ignored duplicate flattened target argument fields already present in arguments: {}",
+                deduped.join(", ")
+            ),
+            1.0,
+        ));
+    }
+    Ok(())
 }
 
 fn object_value(value: &Value, label: &str) -> Result<Value, CapabilityError> {

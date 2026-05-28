@@ -68,6 +68,18 @@ selected target with the missing fields. For dynamic plugins,
 MCP/OpenAPI/session workers, unfamiliar domains, or missing primer entries, call
 `execute` with intent and let the engine resolve, prepare, approve when needed,
 run, and observe.
+For repo understanding, code inspection, and architecture explanations, prefer
+bounded filesystem capabilities (`list_dir`, `glob`, `search_text`,
+`read_file`) before shell commands. Do not run `date`, `git status`, `rg`,
+`grep`, `cat`, `head`, or `sed` unless the user asked for shell behavior or the
+filesystem capability path is unavailable.
+Use `filesystem::list_dir` only for directories you already know exist from a
+prior result or documented path. If a module/file/folder path is a guess, use
+`filesystem::find`, `filesystem::glob`, or `filesystem::search_text` first.
+`filesystem::search_text` uses literal text by default; set `regex: true` only
+when you intentionally need regex matching.
+Do not run `date` as a routine preflight. Use wall-clock process checks only
+when the user asks for time/date or the task truly depends on a timestamp.
 
 Key routing:
 - `filesystem::read_file`, `filesystem::write_file`, `filesystem::edit_file`, `filesystem::apply_patch` for file operations

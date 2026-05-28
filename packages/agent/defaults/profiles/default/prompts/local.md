@@ -19,13 +19,23 @@ use `execute` with an intent and let the engine resolve, prepare, approve when
 needed, run, and observe. Mutating, external, medium/high-risk, plugin, or
 unfamiliar capabilities may pause for freshness or approval before child
 execution.
+For repo understanding, code inspection, and architecture explanations, use
+bounded filesystem capabilities before shell commands. Shell is for explicit
+command tasks, builds, tests, and git workflows, not first-pass file evidence.
+Use `filesystem::list_dir` only for directories you already know exist from a
+prior result or documented path. If a module/file/folder path is a guess, use
+`filesystem::find`, `filesystem::glob`, or `filesystem::search_text` first.
+`filesystem::search_text` uses literal text by default; set `regex: true` only
+when you intentionally need regex matching.
+Do not run `date` as a routine preflight. Use wall-clock process checks only
+when the user asks for time/date or the task truly depends on a timestamp.
 
 | Task | Use | Not |
 |------|-----|-----|
 | Read a file | `execute` target `filesystem::read_file` | ad hoc shell reads |
 | Write a new file | `execute` target `filesystem::write_file` | shell redirects |
 | Edit a file | `execute` target `filesystem::edit_file` or patch capability | stream editors |
-| Find files by name | `execute` target `filesystem::find` / `filesystem::glob` | guessed paths |
+| Find files by name | `execute` target `filesystem::find` / `filesystem::glob` | listing guessed paths |
 | Search file contents | `execute` target `filesystem::search_text` | provider guesses |
 | Fetch a URL | `execute` target `web::fetch` or `web::search` when visible | uninspected commands |
 | Ask for missing direction | interaction capability when visible | guessing |
@@ -46,8 +56,8 @@ Write capabilities create or overwrite. Read first if the file exists. Prefer ed
 Use `process::run` for builds, tests, git, and system commands. Quote paths
 with spaces. Prefer absolute paths. Mutating, destructive, publishing, or
 unfamiliar commands may require approval; simple read-only checks such as
-`date`, `pwd`, `git status`, and test commands may execute directly when policy
-allows.
+`date`, `pwd`, `git status`, and test commands may execute directly when the
+task actually needs that command and policy allows.
 
 Git rules:
 - Never update git config

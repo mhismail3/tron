@@ -347,11 +347,15 @@ expectations instead of bare ids.
 The model-facing contract is intent-first: use `intent` alone for unfamiliar
 tasks or capability matching, add `target` only when the user supplied an exact
 id, a prior `execute` result selected it, or a primed recipe makes it
-unambiguous, and put only target capability fields inside `arguments`. When
+unambiguous, and put target capability fields inside `arguments`. When
 `target` is omitted, the resolver uses both the semantic intent and the supplied
 argument shape against the live catalog, so schema-valid target arguments such
 as `{"command":"date","executionMode":"read_only"}` can select `process::run`
 even if semantic ranking alone would be noisy.
+For resilience across providers, `execute` also accepts flattened target
+argument fields at the execute root and moves them into `arguments` before
+target validation; the correction is audited and never bypasses target schema,
+grant, idempotency, freshness, or approval checks.
 If an intent is too broad but clearly names a known capability namespace, such
 as “do something useful with files,” `execute` returns `needs_selection` with
 bounded top-level candidate summaries. It does not fabricate a target, create a
@@ -379,6 +383,14 @@ When a session acquires an isolated git worktree, Tron seeds that worktree from
 the operator-visible working copy: tracked edits/deletions and untracked
 non-ignored files are overlaid on top of `HEAD`, while ignored files and
 internal worktree directories stay out of the session snapshot.
+`filesystem::search_text` is bounded for repo-scale discovery: `pattern` is
+literal text by default, regex search is opt-in with `regex: true`, and
+repo-root searches skip generated/heavy directories such as `.git`, `target`,
+`node_modules`, and `.worktrees` by default. To inspect those generated
+directories deliberately, make the generated directory the explicit `path`.
+`filesystem::list_dir` is for known directories. Agents should use
+`filesystem::find`, `filesystem::glob`, or `filesystem::search_text` before
+listing a module/file/folder path that is only a guess.
 `filesystem::read_file` accepts optional 1-based `startLine` and `endLine`
 bounds so requests like “read the first 20 lines of README.md” do not require a
 shell command or schema guess.

@@ -617,6 +617,8 @@ mod tests {
         assert!(refreshed.contains("You have one model-facing primitive: `execute`"));
         assert!(refreshed.contains("\"target\":\"process::run\""));
         assert!(refreshed.contains("\"arguments\":{\"command\":\"date\""));
+        assert!(refreshed.contains("Do not run `date` as a routine session preflight"));
+        assert!(!refreshed.contains("At the start of every session, check the current date"));
     }
 
     #[test]

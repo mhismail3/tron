@@ -478,6 +478,7 @@ async fn filesystem_search_text_value(
     };
     let pattern = require_string_param(params, "pattern")?;
     let file_pattern = opt_string(params, "filePattern");
+    let regex_mode = opt_bool(params, "regex").unwrap_or(false);
     let context = usize::try_from(opt_u64(params, "context", 0))
         .unwrap_or(0)
         .min(20);
@@ -491,6 +492,7 @@ async fn filesystem_search_text_value(
             file_pattern.as_deref(),
             context,
             max_results,
+            regex_mode,
         )
     })
     .await
@@ -673,5 +675,39 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0]["name"], json!("a.txt"));
         assert_eq!(entries[1]["name"], json!("b.txt"));
+    }
+
+    #[test]
+    fn filesystem_contracts_steer_guessy_path_discovery_to_find_or_glob() {
+        let specs = crate::domains::filesystem::contract::capabilities().expect("specs");
+        let list_dir = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "filesystem::list_dir")
+            .expect("list_dir spec");
+        let find = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "filesystem::find")
+            .expect("find spec");
+        let glob = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "filesystem::glob")
+            .expect("glob spec");
+        let search_text = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "filesystem::search_text")
+            .expect("search_text spec");
+
+        let list_dir_description = list_dir.description.expect("list_dir description");
+        let find_description = find.description.expect("find description");
+        let glob_description = glob.description.expect("glob description");
+        let search_text_description = search_text.description.expect("search_text description");
+
+        assert!(list_dir_description.contains("known directory"));
+        assert!(list_dir_description.contains("filesystem::find"));
+        assert!(list_dir_description.contains("filesystem::glob"));
+        assert!(find_description.contains("exact path is unknown"));
+        assert!(glob_description.contains("exact path is unknown"));
+        assert!(search_text_description.contains("literal text by default"));
+        assert!(search_text_description.contains("regex: true"));
     }
 }
