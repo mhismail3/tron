@@ -1,6 +1,5 @@
 //! Capability contracts owned by the worktree domain worker.
 
-#[allow(unused_imports)]
 use serde_json::json;
 
 use crate::domains::catalog::CapabilitySpec;
@@ -18,10 +17,14 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("worktree::get_status", "worktree", EffectClass::PureRead, RiskLevel::Low, Some("worktree.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .description("Inspect the current session worktree status, branch, isolation, and uncommitted-change summary.")
+            .tags(vec!["status", "git", "repo", "repository", "branch", "changes", "current session"])
             .build()?,
         CapabilityContract::new("worktree::is_git_repo", "worktree", EffectClass::PureRead, RiskLevel::Low, Some("worktree.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"path":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["path"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .description("Check whether a path, usually the current session working directory, is inside a Git repository.")
+            .tags(vec!["git", "repo", "repository", "worktree", "working directory"])
             .build()?,
         CapabilityContract::new("worktree::commit", "worktree", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
@@ -50,6 +53,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("worktree::get_diff", "worktree", EffectClass::PureRead, RiskLevel::Low, Some("worktree.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"file":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .description("Read the bounded current session worktree diff, optionally limited to one file, without running shell commands.")
+            .tags(vec!["diff", "changes", "git", "repo", "repository", "worktree", "uncommitted", "summary"])
             .build()?,
         CapabilityContract::new("worktree::acquire", "worktree", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("worktree.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))

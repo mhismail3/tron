@@ -1,6 +1,5 @@
 //! Capability contracts owned by the device domain worker.
 
-#[allow(unused_imports)]
 use serde_json::json;
 
 use crate::domains::catalog::CapabilitySpec;

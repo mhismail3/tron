@@ -2,6 +2,7 @@
 
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use super::{
     ResolvedCapabilityTarget, actor_from_invocation, capability_primitive_target_error,
@@ -399,6 +400,12 @@ async fn execute_orchestrated_value(
         );
     }
     normalize_target_arguments(&function, &mut input.arguments, &mut input.corrections);
+    normalize_contextual_target_arguments(
+        &function,
+        invocation,
+        &mut input.arguments,
+        &mut input.corrections,
+    );
     normalize_target_idempotency_argument(
         &function,
         &mut input.arguments,
@@ -874,6 +881,79 @@ pub(super) fn normalize_target_arguments(
     normalize_schema_property_name_aliases(function, arguments, corrections);
 }
 
+pub(super) fn normalize_contextual_target_arguments(
+    function: &FunctionDefinition,
+    invocation: &Invocation,
+    arguments: &mut Value,
+    corrections: &mut Vec<Value>,
+) {
+    let Some(schema) = function.request_schema.as_ref() else {
+        return;
+    };
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+
+    let required = schema_required_property_names(schema);
+    let properties = schema_property_names(schema);
+    if required.contains("sessionId") && !object.contains_key("sessionId") {
+        if let Some(session_id) = invocation
+            .causal_context
+            .session_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            object.insert("sessionId".to_owned(), json!(session_id));
+            corrections.push(correction_record(
+                "runtime_session_id_to_target_argument",
+                format!(
+                    "bound trusted current sessionId into {} arguments",
+                    function.id.as_str()
+                ),
+                1.0,
+            ));
+        }
+    }
+
+    if function.id.as_str() == "worktree::is_git_repo"
+        && required.contains("path")
+        && !object.contains_key("path")
+    {
+        if let Some(working_directory) = invocation
+            .causal_context
+            .runtime_metadata(crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            object.insert("path".to_owned(), json!(working_directory));
+            corrections.push(correction_record(
+                "runtime_working_directory_to_target_path",
+                "bound trusted current session working directory into worktree::is_git_repo path",
+                1.0,
+            ));
+        }
+    }
+
+    if required.contains("sessionId")
+        && !properties.contains("path")
+        && object
+            .get("path")
+            .and_then(Value::as_str)
+            .is_some_and(|path| path_is_current_session_worktree_hint(invocation, path))
+    {
+        object.remove("path");
+        corrections.push(correction_record(
+            "current_worktree_path_hint_removed",
+            format!(
+                "removed path because {} is scoped by trusted current sessionId",
+                function.id.as_str()
+            ),
+            1.0,
+        ));
+    }
+}
+
 pub(super) fn normalize_target_specific_arguments(
     function: &FunctionDefinition,
     arguments: &mut Value,
@@ -976,6 +1056,38 @@ fn normalize_schema_property_key(key: &str) -> String {
         .filter(|ch| ch.is_ascii_alphanumeric())
         .flat_map(|ch| ch.to_lowercase())
         .collect()
+}
+
+fn path_is_current_session_worktree_hint(invocation: &Invocation, path: &str) -> bool {
+    let candidate = path.trim();
+    if candidate == "." {
+        return true;
+    }
+    let Some(working_directory) = invocation
+        .causal_context
+        .runtime_metadata(crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return false;
+    };
+    let candidate = lexical_clean_path(Path::new(candidate));
+    let working_directory = lexical_clean_path(Path::new(working_directory));
+    candidate == working_directory
+}
+
+fn lexical_clean_path(path: &Path) -> PathBuf {
+    let mut cleaned = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                cleaned.pop();
+            }
+            other => cleaned.push(other.as_os_str()),
+        }
+    }
+    cleaned
 }
 
 pub(super) fn normalize_target_idempotency_argument(
@@ -1670,6 +1782,14 @@ pub(super) fn deterministic_intent_route(
     snapshot: &CapabilityRegistrySnapshot,
     constraints: &Value,
 ) -> Result<Option<CapabilityIndexHit>, CapabilityError> {
+    if intent_requests_worktree_diff(intent) {
+        return deterministic_hit_for_function(
+            "worktree::get_diff",
+            snapshot,
+            constraints,
+            "deterministic_worktree_diff",
+        );
+    }
     if intent_requests_filesystem_read(intent, arguments) {
         return deterministic_hit_for_function(
             "filesystem::read_file",
@@ -2017,6 +2137,28 @@ fn intent_requests_filesystem_read(intent: &str, arguments: &Value) -> bool {
     .iter()
     .any(|word| words.contains(*word));
     asks_for_read && !asks_for_write
+}
+
+fn intent_requests_worktree_diff(intent: &str) -> bool {
+    let words = normalized_intent_words(intent);
+    let asks_for_diff = words.contains("diff") || words.contains("difference");
+    let asks_for_changes = words.contains("changes") || words.contains("uncommitted");
+    if !(asks_for_diff || asks_for_changes) {
+        return false;
+    }
+    let strong_worktree_or_git = [
+        "worktree",
+        "git",
+        "repo",
+        "repository",
+        "branch",
+        "uncommitted",
+        "status",
+    ]
+    .iter()
+    .any(|word| words.contains(*word));
+    asks_for_diff && (strong_worktree_or_git || words.contains("current"))
+        || asks_for_changes && strong_worktree_or_git
 }
 
 fn deterministic_hit_for_function(
@@ -2560,6 +2702,37 @@ async fn record_orchestration_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::{ActorId, AuthorityGrantId, CausalContext, FunctionId, TraceId};
+
+    fn test_invocation_with_session_context() -> Invocation {
+        Invocation::new_sync(
+            FunctionId::new("capability::execute").expect("function id"),
+            json!({}),
+            CausalContext::new(
+                ActorId::new("agent:test").expect("actor id"),
+                crate::engine::ActorKind::Agent,
+                AuthorityGrantId::new("grant:test").expect("grant id"),
+                TraceId::new("trace:test").expect("trace id"),
+            )
+            .with_session_id("sess-context")
+            .with_runtime_metadata(
+                crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
+                "/tmp/tron/.worktrees/session/sess-context",
+            ),
+        )
+    }
+
+    fn function_from_capability(function_id: &str) -> FunctionDefinition {
+        let specs = crate::domains::worktree::contract::capabilities()
+            .expect("worktree specs")
+            .into_iter()
+            .chain(crate::domains::git::contract::capabilities().expect("git specs"));
+        let spec = specs
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == function_id)
+            .unwrap_or_else(|| panic!("{function_id} spec"));
+        crate::domains::contract::function_definition_for_capability(&spec)
+    }
 
     #[test]
     fn discovery_only_intent_is_guidance_not_execution() {
@@ -2794,6 +2967,84 @@ mod tests {
             details["orchestration"]["executeInvocationId"],
             json!(invocation.id.as_str())
         );
+    }
+
+    #[test]
+    fn contextual_normalization_binds_current_session_id_for_session_scoped_targets() {
+        let function = function_from_capability("git::list_local_branches");
+        let invocation = test_invocation_with_session_context();
+        let mut arguments = json!({
+            "path": "/tmp/tron/.worktrees/session/sess-context"
+        });
+        let mut corrections = Vec::new();
+
+        normalize_contextual_target_arguments(
+            &function,
+            &invocation,
+            &mut arguments,
+            &mut corrections,
+        );
+
+        assert_eq!(arguments["sessionId"], json!("sess-context"));
+        assert!(arguments.get("path").is_none());
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("runtime_session_id_to_target_argument")
+        }));
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("current_worktree_path_hint_removed")
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function, 391);
+        validate_target_payload(&entry, &arguments)
+            .expect("trusted session binding should make payload schema-valid");
+    }
+
+    #[test]
+    fn contextual_normalization_does_not_hide_arbitrary_path_arguments() {
+        let function = function_from_capability("git::list_local_branches");
+        let invocation = test_invocation_with_session_context();
+        let mut arguments = json!({
+            "path": "/tmp/other-repo"
+        });
+        let mut corrections = Vec::new();
+
+        normalize_contextual_target_arguments(
+            &function,
+            &invocation,
+            &mut arguments,
+            &mut corrections,
+        );
+
+        assert_eq!(arguments["sessionId"], json!("sess-context"));
+        assert_eq!(arguments["path"], json!("/tmp/other-repo"));
+        let entry = CapabilityRegistryEntry::from_function(function, 391);
+        validate_target_payload(&entry, &arguments)
+            .expect_err("non-current path must remain visible to schema validation");
+    }
+
+    #[test]
+    fn contextual_normalization_binds_working_directory_for_git_repo_probe() {
+        let function = function_from_capability("worktree::is_git_repo");
+        let invocation = test_invocation_with_session_context();
+        let mut arguments = json!({});
+        let mut corrections = Vec::new();
+
+        normalize_contextual_target_arguments(
+            &function,
+            &invocation,
+            &mut arguments,
+            &mut corrections,
+        );
+
+        assert_eq!(
+            arguments["path"],
+            json!("/tmp/tron/.worktrees/session/sess-context")
+        );
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("runtime_working_directory_to_target_path")
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function, 391);
+        validate_target_payload(&entry, &arguments)
+            .expect("trusted working directory should make repo probe schema-valid");
     }
 
     #[test]

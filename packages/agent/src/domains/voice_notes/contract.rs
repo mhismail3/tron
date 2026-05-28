@@ -1,6 +1,5 @@
 //! Capability contracts owned by the voice_notes domain worker.
 
-#[allow(unused_imports)]
 use serde_json::json;
 
 use crate::domains::catalog::CapabilitySpec;

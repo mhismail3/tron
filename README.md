@@ -441,6 +441,11 @@ and idempotency preflight
 rejections return structured `isError=true` capability results with no child
 invocation, approval, or resource refs, so expected contract failures stay
 inspectable without becoming engine-level execution failures.
+Session-scoped capabilities do not require the model to invent the active
+session id: `execute` binds trusted causal-context fields such as the current
+`sessionId` into selected target arguments when the target schema requires
+them, records that correction, and leaves conflicting or arbitrary path
+arguments visible so schema validation still fails closed.
 `notifications::send` sends through the first-party notification delegate and
 persists operator-visible notification truth as `notification` resources with
 delivery `evidence`; read and mark-all-read state is stored as `decision`
@@ -544,7 +549,7 @@ logs, compensation attempts, trace id, and final status. Loose program
 `artifacts` are rejected; durable outputs must be created by child resource or
 materialization capabilities.
 
-Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe and stays inside the active session worktree. Mutating or publishing git commands still require execute preparation/freshness and approval, and write-like process commands must run in sandbox materialization mode with declared outputs that materialize through resource refs and bounded `materializedOutputs` summaries.
+Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Read-only worktree and git inspection should use `worktree::get_status`, `worktree::get_diff`, `worktree::is_git_repo`, and `git::list_local_branches` before shell-style checks are considered. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may still run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe and stays inside the active session worktree. Mutating or publishing git commands still require execute preparation/freshness and approval, and write-like process commands must run in sandbox materialization mode with declared outputs that materialize through resource refs and bounded `materializedOutputs` summaries.
 
 The same capability worker also registers operator/admin functions for native
 clients and the Engine Console. These are normal engine catalog functions, not

@@ -76,6 +76,11 @@
 //! against the selected target schema when the match is unique, so harmless
 //! casing/separator mistakes like `functionid` versus `functionId` do not force
 //! a retry; conflicting aliases stay visible and fail schema validation.
+//! Session-scoped targets may also receive trusted causal-context fields such
+//! as the current `sessionId` during prepare. This is current orchestration
+//! behavior, not a client-supplied path override: it lets the model say
+//! “current worktree” without guessing opaque ids, while non-current path
+//! arguments remain visible to the selected target schema and still fail closed.
 //! Intent-only resolution fails closed: if the best match has no lexical/name
 //! anchor, no supplied argument shape, and only a weak semantic score, execute
 //! returns `needs_capability` instead of presenting unrelated low-confidence

@@ -50,14 +50,14 @@ ledger are the only way this score moves.
 | Axis | Points | Current | What it proves | Remaining proof |
 |---|---:|---:|---|---|
 | Execute portal usability | 12 | 12 | One `execute` tool can resolve, prepare, correct, and run without fragile wrapper guessing. RWO-004 proved web search/fetch now run through clean `execute` calls after guidance and alias hardening. | Provider-shape parity, stale-plan recovery, and vector-warmup degradation remain tracked in their dedicated axes. |
-| Core first-party capability usefulness | 12 | 12 | Filesystem, process, web, and browser/display discovery paths are useful in real tasks, with partial generated UI, prompt, and settings coverage. | Logs, model, memory, git/worktree, prompt, and settings under real prompts. |
+| Core first-party capability usefulness | 12 | 12 | Filesystem, process, web, browser/display discovery, and git/worktree inspection paths are useful in real tasks, with partial generated UI, prompt, and settings coverage. | Logs, model, prompt, and settings under real prompts. |
 | Multi-capability orchestration | 14 | 14 | The agent can chain filesystem discovery, resource-backed mutation, replay, and verification in a live isolated app session. | Web, subagent, memory, and state/queue/stream use cases. |
 | Worker/function/trigger substrate | 12 | 12 | Engine tests cover primitive contracts; live state, queue, subagent, and background memory-retain trigger paths now compose through canonical invocations with DB proof. | Local-process worker activation and package disable/recovery remain tracked under runtime/extensibility scenarios. |
 | Resource and durable output truth | 10 | 9 | Prompt library, voice notes, process materialization, and filesystem mutations are resource-backed and idempotent in covered paths. | Damage/CAS/hash/discard failure paths and resource-backed package evidence under live scenarios. |
 | Safety, grants, and approvals | 10 | 10 | Unsafe read-only commands are rejected; safe process/filesystem composition runs autonomously; approval denial, approval execution, replay, and double-submit are covered with DB proof. | Keep this full only if approval timeout/cancel, stale revision, reconnect recovery, and grant expiry/revocation continue to fail closed in later scenarios. |
 | Runtime resilience | 10 | 9 | Reconnect tests, queue/idempotency unit coverage, manual process retries, truthful background auto-retain skip/failure reporting, and mounted-chat reconnect after `tron dev -bdt` restart are covered. | In-flight interruption during restart, queue retry under live load, crash/partial-failure recovery, and activation cleanup under live use. |
 | Observability and auditability | 8 | 8 | Manual tests have been reconstructed from invocation, audit, approval, and resource rows; `execute` now projects both its own invocation id and child invocation ids to the model. | Keep standard per-scenario DB query bundle current as queue, stream, and package scenarios land. |
-| Provider parity | 6 | 0 | Provider boundary tests exist, but manual parity is still blocked. | OpenAI, Anthropic, Gemini, Kimi, and Ollama must expose identical `execute` behavior. |
+| Provider parity | 6 | 0 | Provider boundary tests exist, but manual parity is still blocked. | OpenAI, Anthropic, Gemini, and configured local providers must expose identical `execute` behavior. Kimi is skipped until credentials/subscription are available. |
 | Operator/generated UI | 6 | 6 | Generated UI surfaces, stored action coordinates, stale rejection, and iOS thinness are covered for prompt management. | Keep score only if future generated-UI scenarios preserve server-owned truth. |
 
 ## Scenario ledger
@@ -79,6 +79,7 @@ acceptance source is the app result plus `~/.tron/internal/database/tron.sqlite`
 | RWO-010 server restart reconnect | partial | `sess_019e7067-eed7-7c20-b373-432ba954e05a` | Restarted the dev server with `./scripts/tron dev -bdt` while the `tron` chat was mounted, then sent a read-only reconnect validation prompt. | connection events, preserved invocation state, no duplicate turn | Post-restart chat input was enabled; prompt completed with two `capability::execute` calls and two `filesystem::read_file` children (`019e706d-66b7-78f2-8351-4e52a6ebf3be`, `019e706d-6f66-7e62-bc01-17ff05a511f2`); 0 failed invocations; 0 approvals; `memory::auto_retain_fire` skipped truthfully with `reason=below_threshold`. | none | none | Mounted-session reconnect passed, but in-flight interruption was not exercised because `dev -bdt` completes build/tests before actual takeover; keep the remaining RWO-010 acceptance criteria open. | n/a | +1 |
 | RWO-011 module worker package activation | partial | `sess_019e7099-56ad-7743-9c83-d9bff97f16b9` plus automated fixture | Discovery retest only through simulator: use `execute` with `operation=discover` to find the canonical package lifecycle capabilities and safe sequence without creating resources, spawning workers, running shell commands, or mutating package state. Automated substrate fixture separately exercises the full lifecycle. | Discovery-only `capability::execute` for module package lifecycle capabilities; automated fixture exercises `module::*`, `worker::spawn`, health, disable, recovery, grants/resources. Remaining manual gap: model-orchestrated app activation fixture. | Simulator discovery: 18 `capability::execute` calls; 0 `module::*` child invocations; 0 approvals; 0 worker spawns; no failed engine invocations. Targeted lifecycle calls returned `capability_discovery` for `module::register_package`, `module::verify_source`, `module::inspect_package`, `module::verify_integrity`, `module::disable`, `module::recover_activation`, `module::approve_source`, `module::configure`, `module::activate`, `module::check_health`, and `module::audit_policy`, each with `childInvocationIds=[]` and `resourceRefs=[]`. The only resource writes were normal prompt-history and final agent-result session plumbing. Automated fixture `e2e_local_process_module_activation_health_and_disable_use_real_worker_spawn` passed on 2026-05-28 and covered register, verify source, approve source, configure, two activate/health/disable cycles, worker cleanup, grant revocation, and disabled diagnostics. | none from simulator module/package targets; automated fixture asserts activation/resource refs internally | none in simulator discovery | Initial package discovery exposed that discovery-only intents could be routed into target preparation and return noisy `needs_input` guidance for `module::*` capabilities. Fixed by making `operation=discover` and clear no-mutation discovery intent a first-class execute path that returns recipe/schema guidance without child invocation. Also changed `needs_selection`, `needs_input`, and `needs_capability` orchestration outcomes from runtime errors to guidance states, while policy/invalid-payload denials remain errors. Provider schema portability and retired-term gates caught follow-up issues before server restart. | current checkpoint | 0 |
 | RWO-012 provider parity | pending | pending | Repeat intent-only read, safe process, and `needs_input` on every configured provider. | identical model-visible `execute` schema and child behavior | pending | pending | pending | pending | pending | 0 |
+| RWO-013 git/worktree read-only usefulness | passed | `sess_019e70ae-1630-7592-b7cb-b750ded1022b` | Use only `execute`; report current isolated worktree status, whether this is a git repo, local branches count, and current diff summary; do not run shell/process; no mutations or approvals. | `worktree::get_status`, `worktree::is_git_repo`, `git::list_local_branches`, `worktree::get_diff` | Retest used five `capability::execute` calls: one discovery-only `worktree::get_diff` guidance result plus four target executions. Children were `worktree::get_status` `019e70e5-37e3-7cd1-9cf1-fe360d70c250`, `worktree::is_git_repo` `019e70e5-397a-7790-a2b5-6f54d6f0de3f`, `git::list_local_branches` `019e70e5-3a99-79c1-958a-f848d93e47a1`, and `worktree::get_diff` `019e70e5-3bb2-7af0-93e0-38cf9c3760f1`; 0 failed invocations; 0 `process::run`; 0 approvals. Normal prompt-history and final agent-result resources were the only durable writes. | none from target git/worktree calls | none | Initial attempt exposed that session-scoped worktree/git targets were easy to call with current-path hints instead of opaque `sessionId`, and diff discovery could stop at status only. Fixed with trusted causal-context argument binding for current-session targets, deterministic worktree-diff routing, and clearer git/worktree contract recipes. Arbitrary non-current path arguments still fail closed by focused tests. | current checkpoint | 0 |
 
 ## Already exercised and fixed
 
@@ -301,7 +302,9 @@ Acceptance criteria:
 
 ### RWO-012 Provider Parity
 
-Run the same three prompts through every configured provider:
+Run the same three prompts through every configured provider. Kimi is skipped
+until credentials/subscription are available; record it as `not configured`
+rather than a substrate failure.
 
 - intent-only read file;
 - safe process command;
@@ -312,6 +315,25 @@ Acceptance criteria:
 - Providers expose only model-visible `execute`.
 - Same target selected and same correction classes returned.
 - Provider tool-call IDs do not alter child idempotency.
+
+### RWO-013 Git/Worktree Read-Only Usefulness
+
+Prompt:
+
+```text
+Use only execute. RWO-013 git/worktree read-only usefulness. Do not run shell/process. Discover and use the canonical git/worktree capabilities to report: current isolated worktree status, whether this is a git repo, local branches count if available, and the current diff summary. Report selected capabilities and child invocation ids. No mutations, no approvals.
+```
+
+Acceptance criteria:
+
+- Uses `worktree::get_status`, `worktree::is_git_repo`,
+  `git::list_local_branches`, and `worktree::get_diff` through `execute`.
+- Does not invoke `process::run` or shell out to `git`.
+- Creates no approval and no target durable resource refs.
+- Session-scoped targets are callable from the current conversation without the
+  model guessing opaque ids, while non-current path hints still fail closed.
+- Diff output is discovered through canonical worktree capability metadata, not
+  inferred from status alone.
 
 ## Failure protocol
 

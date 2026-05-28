@@ -3491,6 +3491,28 @@ mod tests {
     }
 
     #[test]
+    fn deterministic_route_prefers_worktree_diff_for_current_diff_intent() {
+        let functions = crate::domains::worktree::contract::capabilities()
+            .expect("worktree specs")
+            .into_iter()
+            .map(|spec| crate::domains::contract::function_definition_for_capability(&spec))
+            .collect::<Vec<_>>();
+        let snapshot = CapabilityRegistrySnapshot::new(functions, 392);
+
+        let hit = deterministic_intent_route(
+            "Report the current git worktree diff summary without shell commands.",
+            &json!({}),
+            &snapshot,
+            &json!({}),
+        )
+        .expect("route")
+        .expect("worktree diff route");
+
+        assert_eq!(hit.function_id, "worktree::get_diff");
+        assert_eq!(hit.matched_by, "deterministic_worktree_diff");
+    }
+
+    #[test]
     fn orchestration_argument_filter_prefers_candidate_that_accepts_supplied_arguments() {
         let functions = crate::domains::filesystem::contract::capabilities()
             .expect("filesystem specs")

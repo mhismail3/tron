@@ -3,7 +3,10 @@
 //! Client protocols reach this worker through engine triggers targeting
 //! canonical `worktree::*` function ids. This root module owns registration and
 //! workflow splits; `operations/` owns status, index, branch, diff, and
-//! destructive worktree command bodies behind narrow `Deps`.
+//! destructive worktree command bodies behind narrow `Deps`. Read-only
+//! inspection contracts are intentionally tagged and described for the
+//! model-facing `capability::execute` resolver, while the trusted current
+//! session binding remains owned by the capability orchestration layer.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

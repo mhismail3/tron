@@ -3,7 +3,9 @@
 //! Client protocols reach these operations through engine triggers targeting
 //! canonical `git::*` function ids. The helpers keep git service behavior
 //! behind engine policy, idempotency, leases, and compensation
-//! metadata.
+//! metadata. Session-scoped read contracts are authored so `capability::execute`
+//! can bind the trusted current session id instead of asking the model to
+//! discover opaque runtime identifiers.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

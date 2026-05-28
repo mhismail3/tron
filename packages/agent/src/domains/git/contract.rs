@@ -1,6 +1,5 @@
 //! Capability contracts owned by the git domain worker.
 
-#[allow(unused_imports)]
 use serde_json::json;
 
 use crate::domains::catalog::CapabilitySpec;
@@ -51,6 +50,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .domain_module("worktree::git_workflow")
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .description("List local Git branches for the current session worktree.")
+            .tags(vec!["local branches", "branches", "git", "repo", "repository", "worktree", "count"])
             .build()?,
         CapabilityContract::new("git::list_remote_branches", "git", EffectClass::PureRead, RiskLevel::Low, Some("git.read"))
             .domain_module("worktree::git_workflow")
