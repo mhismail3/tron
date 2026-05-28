@@ -832,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn reconstructed_capability_history_converts_across_provider_boundaries() {
+    fn reconstructed_capability_history_remains_provider_neutral() {
         let events = vec![
             session_start(),
             ev(
@@ -880,51 +880,20 @@ mod tests {
         ];
 
         let result = reconstruct_from_events(&events);
-        let runtime_messages: Vec<crate::shared::messages::Message> = result
-            .messages_with_event_ids
-            .iter()
-            .map(|entry| {
-                serde_json::from_value(serde_json::to_value(&entry.message).unwrap()).unwrap()
-            })
-            .collect();
+        let msgs = get_messages(&result);
 
-        let anthropic =
-            crate::domains::model::providers::anthropic::message_converter::convert_messages(
-                &runtime_messages,
-            );
-        let anthropic_json = serde_json::to_value(&anthropic).unwrap();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[0].role, "user");
+        assert_eq!(msgs[1].role, "assistant");
+        assert_eq!(msgs[1].content[0]["type"], "capability_invocation");
+        assert_eq!(msgs[1].content[0]["name"], "execute");
         assert_eq!(
-            anthropic_json[1]["content"][0]["type"],
-            "capability_invocation"
+            msgs[1].content[0]["arguments"]["contractId"],
+            "filesystem::read_file"
         );
-        assert_eq!(anthropic_json[1]["content"][0]["name"], "execute");
-        assert_eq!(anthropic_json[2]["content"][0]["type"], "capability_result");
-        assert_eq!(
-            anthropic_json[2]["content"][0]["capability_invocation_id"],
-            "toolu_01capability"
-        );
-
-        let openai =
-            crate::domains::model::providers::openai::message_converter::convert_to_responses_input(
-                &runtime_messages,
-            );
-        let openai_json = serde_json::to_value(&openai).unwrap();
-        let function_call = openai_json
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-            .expect("OpenAI payload should include function_call");
-        let function_output = openai_json
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output"))
-            .expect("OpenAI payload should include function_call_output");
-        let remapped_id = function_call["call_id"].as_str().unwrap();
-        assert!(remapped_id.starts_with("call_"));
-        assert_eq!(function_call["name"], "execute");
-        assert_eq!(function_output["call_id"], remapped_id);
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("toolu_01capability"));
+        assert_eq!(msgs[2].content, "example contents");
     }
 
     // ── Message merging ──────────────────────────────────────────────

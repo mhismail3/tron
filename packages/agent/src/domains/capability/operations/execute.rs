@@ -1,7 +1,7 @@
 //! Single execute orchestrator phases for the model-facing capability primitive.
 
 use serde_json::{Map, Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     ResolvedCapabilityTarget, actor_from_invocation, capability_primitive_target_error,
@@ -54,7 +54,8 @@ pub(crate) async fn execute_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     if is_orchestrated_execute_payload(&invocation.payload) {
-        return execute_orchestrated_value(invocation, deps).await;
+        let result = execute_orchestrated_value(invocation, deps).await?;
+        return attach_execute_invocation_metadata(result, invocation);
     }
     let mode = string_field(&invocation.payload, "mode").unwrap_or_else(|| "invoke".to_owned());
     match mode.as_str() {
@@ -347,7 +348,7 @@ async fn execute_orchestrated_value(
             true,
         );
     }
-    normalize_target_specific_arguments(&function, &mut input.arguments, &mut input.corrections);
+    normalize_target_arguments(&function, &mut input.arguments, &mut input.corrections);
     normalize_target_idempotency_argument(
         &function,
         &mut input.arguments,
@@ -768,6 +769,15 @@ fn normalize_nested_wrapper_shape(
     Ok(())
 }
 
+pub(super) fn normalize_target_arguments(
+    function: &FunctionDefinition,
+    arguments: &mut Value,
+    corrections: &mut Vec<Value>,
+) {
+    normalize_target_specific_arguments(function, arguments, corrections);
+    normalize_schema_property_name_aliases(function, arguments, corrections);
+}
+
 pub(super) fn normalize_target_specific_arguments(
     function: &FunctionDefinition,
     arguments: &mut Value,
@@ -782,6 +792,94 @@ pub(super) fn normalize_target_specific_arguments(
         }
         _ => {}
     }
+}
+
+fn normalize_schema_property_name_aliases(
+    function: &FunctionDefinition,
+    arguments: &mut Value,
+    corrections: &mut Vec<Value>,
+) {
+    let Some(schema) = function.request_schema.as_ref() else {
+        return;
+    };
+    let mut renames = Vec::new();
+    normalize_schema_property_names_for_value(schema, arguments, &mut renames);
+    if renames.is_empty() {
+        return;
+    }
+    corrections.push(correction_record(
+        "schema_property_name_alias",
+        format!(
+            "normalized target argument key casing to {} schema property names: {}",
+            function.id.as_str(),
+            renames.join(", ")
+        ),
+        1.0,
+    ));
+}
+
+fn normalize_schema_property_names_for_value(
+    schema: &Value,
+    value: &mut Value,
+    renames: &mut Vec<String>,
+) {
+    if let (Some(properties), Some(object)) = (
+        schema.get("properties").and_then(Value::as_object),
+        value.as_object_mut(),
+    ) {
+        normalize_object_property_names(properties, object, renames);
+        for (property, property_schema) in properties {
+            if let Some(child) = object.get_mut(property) {
+                normalize_schema_property_names_for_value(property_schema, child, renames);
+            }
+        }
+    }
+
+    if let (Some(items_schema), Some(array)) = (schema.get("items"), value.as_array_mut()) {
+        for item in array {
+            normalize_schema_property_names_for_value(items_schema, item, renames);
+        }
+    }
+}
+
+fn normalize_object_property_names(
+    properties: &Map<String, Value>,
+    object: &mut Map<String, Value>,
+    renames: &mut Vec<String>,
+) {
+    let mut normalized_to_canonical: BTreeMap<String, Option<String>> = BTreeMap::new();
+    for property in properties.keys() {
+        let normalized = normalize_schema_property_key(property);
+        normalized_to_canonical
+            .entry(normalized)
+            .and_modify(|existing| *existing = None)
+            .or_insert_with(|| Some(property.clone()));
+    }
+
+    let keys = object.keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        if properties.contains_key(&key) {
+            continue;
+        }
+        let normalized = normalize_schema_property_key(&key);
+        let Some(Some(canonical)) = normalized_to_canonical.get(&normalized) else {
+            continue;
+        };
+        if object.contains_key(canonical) {
+            continue;
+        }
+        if let Some(value) = object.remove(&key) {
+            object.insert(canonical.clone(), value);
+            renames.push(format!("{key}->{canonical}"));
+        }
+    }
+}
+
+fn normalize_schema_property_key(key: &str) -> String {
+    key.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
 }
 
 pub(super) fn normalize_target_idempotency_argument(
@@ -1698,7 +1796,7 @@ fn argument_schema_promotion_score(
 ) -> Option<f32> {
     let mut normalized_arguments = arguments.clone();
     let mut ignored_corrections = Vec::new();
-    normalize_target_specific_arguments(
+    normalize_target_arguments(
         &entry.function,
         &mut normalized_arguments,
         &mut ignored_corrections,
@@ -1767,7 +1865,7 @@ fn argument_schema_fit_for_hit(
     };
     let mut normalized_arguments = arguments.clone();
     let mut ignored_corrections = Vec::new();
-    normalize_target_specific_arguments(
+    normalize_target_arguments(
         &entry.function,
         &mut normalized_arguments,
         &mut ignored_corrections,
@@ -2132,6 +2230,41 @@ fn attach_orchestration_details(
     capability_result_value(result)
 }
 
+fn attach_execute_invocation_metadata(
+    value: Value,
+    invocation: &Invocation,
+) -> Result<Value, CapabilityError> {
+    let mut result: CapabilityResult =
+        serde_json::from_value(value).map_err(|error| CapabilityError::Internal {
+            message: error.to_string(),
+        })?;
+    let execute_invocation_id = json!(invocation.id.as_str());
+    let mut details = match result.details.take() {
+        Some(Value::Object(object)) => Value::Object(object),
+        Some(value) => json!({ "toolDetails": value }),
+        None => json!({}),
+    };
+    if let Value::Object(object) = &mut details {
+        object.insert(
+            "executeInvocationId".to_owned(),
+            execute_invocation_id.clone(),
+        );
+        object.insert(
+            "primitiveInvocationId".to_owned(),
+            execute_invocation_id.clone(),
+        );
+        if let Some(Value::Object(orchestration)) = object.get_mut("orchestration") {
+            orchestration.insert(
+                "executeInvocationId".to_owned(),
+                execute_invocation_id.clone(),
+            );
+            orchestration.insert("primitiveInvocationId".to_owned(), execute_invocation_id);
+        }
+    }
+    result.details = Some(details);
+    capability_result_value(result)
+}
+
 fn orchestration_result(
     status: &str,
     message: &str,
@@ -2236,10 +2369,20 @@ fn orchestration_failure_status(error: &CapabilityError) -> &'static str {
 async fn record_orchestration_audit(
     deps: &Deps,
     invocation: &Invocation,
-    diagnostics: Value,
+    mut diagnostics: Value,
 ) -> Result<(), CapabilityError> {
     let store = deps.registry_store.clone();
     let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
+    if let Value::Object(object) = &mut diagnostics {
+        object.insert(
+            "executeInvocationId".to_owned(),
+            json!(invocation.id.as_str()),
+        );
+        object.insert(
+            "primitiveInvocationId".to_owned(),
+            json!(invocation.id.as_str()),
+        );
+    }
     run_blocking_task("capability.execute.orchestration_audit", move || {
         let mut store = store.lock().map_err(|_| CapabilityError::Internal {
             message: "capability registry store mutex poisoned".to_owned(),
@@ -2396,6 +2539,55 @@ mod tests {
         assert_eq!(details["childInvocationIds"], json!(["child-read"]));
         assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
         assert_eq!(details["approvalDecision"]["approvalCreated"], json!(false));
+    }
+
+    #[test]
+    fn orchestrated_execute_result_exposes_its_own_invocation_id() {
+        let invocation = Invocation::new_sync(
+            crate::engine::FunctionId::new("capability::execute").expect("function id"),
+            json!({"target": "filesystem::read_file", "arguments": {"path": "README.md"}}),
+            crate::engine::CausalContext::new(
+                crate::engine::ActorId::new("agent:test").expect("actor id"),
+                crate::engine::ActorKind::Agent,
+                crate::engine::AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
+                crate::engine::TraceId::new("trace").expect("trace id"),
+            ),
+        );
+        let result = capability_result_value(CapabilityResult {
+            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                "ok".to_owned(),
+            )]),
+            details: Some(json!({
+                "status": "ok",
+                "orchestration": {
+                    "orchestrationId": "capability-orchestration:test",
+                    "status": "ok",
+                    "childInvocationIds": ["child-read"]
+                }
+            })),
+            is_error: None,
+            stop_turn: None,
+        })
+        .expect("capability result");
+
+        let attached =
+            attach_execute_invocation_metadata(result, &invocation).expect("attached result");
+        let attached: CapabilityResult =
+            serde_json::from_value(attached).expect("capability result");
+        let details = attached.details.expect("details");
+
+        assert_eq!(
+            details["executeInvocationId"],
+            json!(invocation.id.as_str())
+        );
+        assert_eq!(
+            details["primitiveInvocationId"],
+            json!(invocation.id.as_str())
+        );
+        assert_eq!(
+            details["orchestration"]["executeInvocationId"],
+            json!(invocation.id.as_str())
+        );
     }
 
     #[test]

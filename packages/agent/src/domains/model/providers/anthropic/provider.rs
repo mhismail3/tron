@@ -16,7 +16,7 @@ use crate::domains::model::providers::provider::{
 use crate::shared::messages::Context;
 
 use super::cache_pruning::{
-    DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS, is_cache_cold, prune_capability_results_for_recache,
+    DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS, is_cache_cold, prune_tool_results_for_recache,
 };
 use super::message_converter::convert_messages;
 use super::message_sanitizer::sanitize_messages;
@@ -290,11 +290,11 @@ impl AnthropicProvider {
         if self.last_api_call_ms > 0 {
             if is_cache_cold(self.last_api_call_ms, DEFAULT_TTL_MS) {
                 let msg_count = messages.len();
-                messages = prune_capability_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
+                messages = prune_tool_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
                 info!(
                     elapsed_ms = %now_ms().saturating_sub(self.last_api_call_ms),
                     message_count = msg_count,
-                    "[CACHE] Cold — pruned old capability results"
+                    "[CACHE] Cold — pruned old Anthropic tool results"
                 );
             } else {
                 debug!(
@@ -404,7 +404,7 @@ impl Provider for AnthropicProvider {
         let sanitized = sanitize_messages(context.messages.to_vec());
         let mut messages = convert_messages(&sanitized);
         if self.last_api_call_ms > 0 && is_cache_cold(self.last_api_call_ms, DEFAULT_TTL_MS) {
-            messages = prune_capability_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
+            messages = prune_tool_results_for_recache(&messages, DEFAULT_RECENT_TURNS);
         }
         Self::apply_cache_to_last_user_message(&mut messages);
         serde_json::to_value(self.build_request(context, options, messages))

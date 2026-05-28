@@ -620,12 +620,20 @@ fn execute_observation_text(details: Option<&Value>) -> Option<String> {
             "approvalReplayed": false
         })
     });
+    let execute_invocation_id = details
+        .get("executeInvocationId")
+        .or_else(|| details.get("primitiveInvocationId"))
+        .or_else(|| orchestration.get("executeInvocationId"))
+        .or_else(|| orchestration.get("primitiveInvocationId"))
+        .cloned()
+        .unwrap_or(Value::Null);
     let observation = json!({
         "status": details
             .get("status")
             .or_else(|| orchestration.get("status"))
             .and_then(Value::as_str)
             .unwrap_or("unknown"),
+        "executeInvocationId": execute_invocation_id,
         "selectedTarget": selected_target,
         "selectedImplementation": selected_implementation,
         "childInvocationIds": child_invocation_ids,
@@ -847,6 +855,7 @@ mod tests {
             CapabilityResultBody::Text("Testing out a README here.\n".into()),
             json!({
                 "status": "ok",
+                "executeInvocationId": "execute-123",
                 "functionId": "filesystem::read_file",
                 "selectedImplementation": "first_party.filesystem.v1.read_file",
                 "childInvocations": ["child-123"],
@@ -864,6 +873,7 @@ mod tests {
             panic!("expected text projection");
         };
         assert!(text.contains("[execute observation"));
+        assert!(text.contains("\"executeInvocationId\": \"execute-123\""));
         assert!(text.contains("\"selectedTarget\": \"filesystem::read_file\""));
         assert!(text.contains("\"child-123\""));
         assert!(text.contains("\"approval\": \"not_required\""));

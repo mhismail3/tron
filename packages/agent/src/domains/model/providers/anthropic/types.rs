@@ -737,8 +737,8 @@ pub enum SseContentBlock {
         #[serde(default)]
         thinking: String,
     },
-    /// ModelCapability use block.
-    #[serde(rename = "capability_invocation")]
+    /// Anthropic tool-use block.
+    #[serde(rename = "tool_use")]
     CapabilityInvocation {
         /// Capability invocation ID.
         id: String,
@@ -907,27 +907,23 @@ pub fn thinking_block(thinking: &str, signature: &str) -> Value {
     })
 }
 
-/// Build a `capability_invocation` content block.
+/// Build a `tool_use` content block.
 #[must_use]
-pub fn capability_invocation_block(id: &str, name: &str, input: &Map<String, Value>) -> Value {
+pub fn tool_use_block(id: &str, name: &str, input: &Map<String, Value>) -> Value {
     serde_json::json!({
-        "type": "capability_invocation",
+        "type": "tool_use",
         "id": id,
         "name": name,
         "input": input,
     })
 }
 
-/// Build a `capability_result` content block.
+/// Build a `tool_result` content block.
 #[must_use]
-pub fn capability_result_block(
-    capability_invocation_id: &str,
-    content: &[Value],
-    is_error: bool,
-) -> Value {
+pub fn tool_result_block(tool_use_id: &str, content: &[Value], is_error: bool) -> Value {
     let mut block = serde_json::json!({
-        "type": "capability_result",
-        "capability_invocation_id": capability_invocation_id,
+        "type": "tool_result",
+        "tool_use_id": tool_use_id,
         "content": content,
     });
     if is_error {
@@ -1165,11 +1161,11 @@ mod tests {
     }
 
     #[test]
-    fn sse_content_block_start_capability_invocation() {
+    fn sse_content_block_start_tool_use() {
         let json = r#"{
             "type": "content_block_start",
             "index": 1,
-            "content_block": {"type": "capability_invocation", "id": "toolu_01abc", "name": "execute"}
+            "content_block": {"type": "tool_use", "id": "toolu_01abc", "name": "execute", "input": {}}
         }"#;
         let event: AnthropicSseEvent = serde_json::from_str(json).unwrap();
         match event {
@@ -1339,29 +1335,29 @@ mod tests {
     }
 
     #[test]
-    fn capability_invocation_block_builds_correct_json() {
+    fn tool_use_block_builds_correct_json() {
         let mut input = Map::new();
         let _ = input.insert("cmd".into(), serde_json::json!("ls"));
-        let block = capability_invocation_block("toolu_01abc", "execute", &input);
-        assert_eq!(block["type"], "capability_invocation");
+        let block = tool_use_block("toolu_01abc", "execute", &input);
+        assert_eq!(block["type"], "tool_use");
         assert_eq!(block["id"], "toolu_01abc");
         assert_eq!(block["name"], "execute");
         assert_eq!(block["input"]["cmd"], "ls");
     }
 
     #[test]
-    fn capability_result_block_success() {
+    fn tool_result_block_success() {
         let content = vec![text_block("output")];
-        let block = capability_result_block("toolu_01abc", &content, false);
-        assert_eq!(block["type"], "capability_result");
-        assert_eq!(block["capability_invocation_id"], "toolu_01abc");
+        let block = tool_result_block("toolu_01abc", &content, false);
+        assert_eq!(block["type"], "tool_result");
+        assert_eq!(block["tool_use_id"], "toolu_01abc");
         assert!(block.get("is_error").is_none());
     }
 
     #[test]
-    fn capability_result_block_error() {
+    fn tool_result_block_error() {
         let content = vec![text_block("error msg")];
-        let block = capability_result_block("toolu_01abc", &content, true);
+        let block = tool_result_block("toolu_01abc", &content, true);
         assert_eq!(block["is_error"], true);
     }
 

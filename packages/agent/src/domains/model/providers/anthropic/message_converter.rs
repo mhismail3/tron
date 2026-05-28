@@ -2,7 +2,7 @@
 //!
 //! Converts core [`Context`] messages into Anthropic Messages API format.
 //! Handles:
-//! - User/assistant/capability-result message conversion
+//! - User/assistant/internal capability-result message conversion
 //! - Thinking block signature handling (only include with signature)
 //! - Capability invocation ID remapping for cross-provider DTO parity
 //! - System prompt construction with cache breakpoints (all auth types)
@@ -137,8 +137,8 @@ fn merge_consecutive_roles(messages: Vec<AnthropicMessageParam>) -> Vec<Anthropi
 /// Deduplicate tool blocks within messages.
 ///
 /// Handles existing sessions with duplicate tool events stored in the DB:
-/// - In assistant messages: duplicate `capability_invocation` blocks with same `id` → keep last
-/// - In user messages: duplicate `capability_result` blocks with same `capability_invocation_id` → keep last
+/// - In assistant messages: duplicate `tool_use` blocks with same `id` → keep last
+/// - In user messages: duplicate `tool_result` blocks with same `tool_use_id` → keep last
 fn dedup_tool_blocks(messages: Vec<AnthropicMessageParam>) -> Vec<AnthropicMessageParam> {
     messages
         .into_iter()
@@ -146,12 +146,12 @@ fn dedup_tool_blocks(messages: Vec<AnthropicMessageParam>) -> Vec<AnthropicMessa
             let key = if msg.role == "assistant" {
                 "id"
             } else {
-                "capability_invocation_id"
+                "tool_use_id"
             };
             let block_type = if msg.role == "assistant" {
-                "capability_invocation"
+                "tool_use"
             } else {
-                "capability_result"
+                "tool_result"
             };
 
             // Track seen IDs — keep last occurrence by reversing, dedup, then reverse back
@@ -281,7 +281,7 @@ fn convert_assistant_content(
         } => {
             let remapped_id = remap_invocation_id(id, id_mapping);
             Some(json!({
-                "type": "capability_invocation",
+                "type": "tool_use",
                 "id": remapped_id,
                 "name": name,
                 "input": arguments,
@@ -308,8 +308,8 @@ fn convert_capability_result(
     };
 
     let mut block = json!({
-        "type": "capability_result",
-        "capability_invocation_id": remapped_id,
+        "type": "tool_result",
+        "tool_use_id": remapped_id,
         "content": result_content,
     });
 
@@ -592,7 +592,7 @@ mod tests {
         }];
         let id_mapping = HashMap::new();
         let param = convert_assistant_message(&content, &id_mapping);
-        assert_eq!(param.content[0]["type"], "capability_invocation");
+        assert_eq!(param.content[0]["type"], "tool_use");
         assert_eq!(param.content[0]["id"], "toolu_01abc");
         assert_eq!(param.content[0]["name"], "execute");
         assert_eq!(param.content[0]["input"]["cmd"], "ls");
@@ -626,8 +626,8 @@ mod tests {
         let id_mapping = HashMap::new();
         let param = convert_capability_result("toolu_01abc", &content, None, &id_mapping);
         assert_eq!(param.role, "user");
-        assert_eq!(param.content[0]["type"], "capability_result");
-        assert_eq!(param.content[0]["capability_invocation_id"], "toolu_01abc");
+        assert_eq!(param.content[0]["type"], "tool_result");
+        assert_eq!(param.content[0]["tool_use_id"], "toolu_01abc");
         assert_eq!(param.content[0]["content"][0]["text"], "output");
         assert!(param.content[0].get("is_error").is_none());
     }
@@ -867,9 +867,9 @@ mod tests {
         let messages = vec![AnthropicMessageParam {
             role: "assistant".into(),
             content: vec![
-                json!({"type": "capability_invocation", "id": "toolu_remap_1", "name": "execute", "input": {"cmd": "echo old"}}),
+                json!({"type": "tool_use", "id": "toolu_remap_1", "name": "execute", "input": {"cmd": "echo old"}}),
                 json!({"type": "text", "text": "thinking..."}),
-                json!({"type": "capability_invocation", "id": "toolu_remap_1", "name": "execute", "input": {"cmd": "echo new"}}),
+                json!({"type": "tool_use", "id": "toolu_remap_1", "name": "execute", "input": {"cmd": "echo new"}}),
             ],
         }];
         let deduped = dedup_tool_blocks(messages);
@@ -884,22 +884,16 @@ mod tests {
         let messages = vec![AnthropicMessageParam {
             role: "user".into(),
             content: vec![
-                json!({"type": "capability_result", "capability_invocation_id": "toolu_remap_1", "content": [{"type": "text", "text": "old result"}]}),
-                json!({"type": "capability_result", "capability_invocation_id": "toolu_remap_1", "content": [{"type": "text", "text": "new result"}]}),
-                json!({"type": "capability_result", "capability_invocation_id": "toolu_remap_2", "content": [{"type": "text", "text": "unique"}]}),
+                json!({"type": "tool_result", "tool_use_id": "toolu_remap_1", "content": [{"type": "text", "text": "old result"}]}),
+                json!({"type": "tool_result", "tool_use_id": "toolu_remap_1", "content": [{"type": "text", "text": "new result"}]}),
+                json!({"type": "tool_result", "tool_use_id": "toolu_remap_2", "content": [{"type": "text", "text": "unique"}]}),
             ],
         }];
         let deduped = dedup_tool_blocks(messages);
         assert_eq!(deduped[0].content.len(), 2);
-        assert_eq!(
-            deduped[0].content[0]["capability_invocation_id"],
-            "toolu_remap_1"
-        );
+        assert_eq!(deduped[0].content[0]["tool_use_id"], "toolu_remap_1");
         assert_eq!(deduped[0].content[0]["content"][0]["text"], "new result");
-        assert_eq!(
-            deduped[0].content[1]["capability_invocation_id"],
-            "toolu_remap_2"
-        );
+        assert_eq!(deduped[0].content[1]["tool_use_id"], "toolu_remap_2");
     }
 
     #[test]
@@ -908,15 +902,15 @@ mod tests {
             AnthropicMessageParam {
                 role: "assistant".into(),
                 content: vec![
-                    json!({"type": "capability_invocation", "id": "toolu_1", "name": "a", "input": {}}),
-                    json!({"type": "capability_invocation", "id": "toolu_2", "name": "b", "input": {}}),
+                    json!({"type": "tool_use", "id": "toolu_1", "name": "a", "input": {}}),
+                    json!({"type": "tool_use", "id": "toolu_2", "name": "b", "input": {}}),
                 ],
             },
             AnthropicMessageParam {
                 role: "user".into(),
                 content: vec![
-                    json!({"type": "capability_result", "capability_invocation_id": "toolu_1", "content": []}),
-                    json!({"type": "capability_result", "capability_invocation_id": "toolu_2", "content": []}),
+                    json!({"type": "tool_result", "tool_use_id": "toolu_1", "content": []}),
+                    json!({"type": "tool_result", "tool_use_id": "toolu_2", "content": []}),
                 ],
             },
         ];
@@ -933,19 +927,19 @@ mod tests {
             AnthropicMessageParam {
                 role: "user".into(),
                 content: vec![
-                    json!({"type": "capability_result", "capability_invocation_id": "tc-1", "content": [{"type": "text", "text": "out1"}]}),
+                    json!({"type": "tool_result", "tool_use_id": "tc-1", "content": [{"type": "text", "text": "out1"}]}),
                 ],
             },
             AnthropicMessageParam {
                 role: "user".into(),
                 content: vec![
-                    json!({"type": "capability_result", "capability_invocation_id": "tc-2", "content": [{"type": "text", "text": "out2"}]}),
+                    json!({"type": "tool_result", "tool_use_id": "tc-2", "content": [{"type": "text", "text": "out2"}]}),
                 ],
             },
             AnthropicMessageParam {
                 role: "user".into(),
                 content: vec![
-                    json!({"type": "capability_result", "capability_invocation_id": "tc-3", "content": [{"type": "text", "text": "out3"}]}),
+                    json!({"type": "tool_result", "tool_use_id": "tc-3", "content": [{"type": "text", "text": "out3"}]}),
                 ],
             },
         ];
@@ -1038,23 +1032,23 @@ mod tests {
             },
         ];
         let converted = convert_messages(&messages);
-        // Should be: user, assistant, user (3 capability_results merged)
+        // Should be: user, assistant, user (3 tool_result blocks merged)
         assert_eq!(converted.len(), 3);
         assert_eq!(converted[0].role, "user");
         assert_eq!(converted[1].role, "assistant");
         assert_eq!(converted[2].role, "user");
-        // The merged user message has 3 capability_result content blocks
+        // The merged user message has 3 Anthropic tool_result content blocks.
         assert_eq!(converted[2].content.len(), 3);
-        assert_eq!(converted[2].content[0]["type"], "capability_result");
-        assert_eq!(converted[2].content[1]["type"], "capability_result");
-        assert_eq!(converted[2].content[2]["type"], "capability_result");
+        assert_eq!(converted[2].content[0]["type"], "tool_result");
+        assert_eq!(converted[2].content[1]["type"], "tool_result");
+        assert_eq!(converted[2].content[2]["type"], "tool_result");
     }
 
-    // ── End-to-end: cross-provider duplicate capability_result dedup ─────────
+    // ── End-to-end: cross-provider duplicate result dedup ────────────────────
 
     #[test]
     fn full_flow_duplicate_openai_capability_results_deduped_after_remap() {
-        // Simulates the exact bug: OpenAI-format IDs + duplicate capability_results from DB
+        // Simulates OpenAI-format IDs plus duplicate capability results from DB.
         let mut args = Map::new();
         let _ = args.insert("command".into(), json!("ls"));
         let messages = vec![
@@ -1079,7 +1073,7 @@ mod tests {
                 stop_reason: None,
                 thinking: None,
             },
-            // Duplicate capability_results from DB (same invocation_id executed twice)
+            // Duplicate capability results from DB (same invocation_id executed twice).
             Message::CapabilityResult {
                 invocation_id: "call_abc123".into(),
                 content: CapabilityResultMessageContent::Text("first execution".into()),
@@ -1102,27 +1096,23 @@ mod tests {
             },
         ];
         let converted = convert_messages(&messages);
-        // user, assistant, user (merged capability_results)
+        // user, assistant, user (merged tool_result blocks)
         assert_eq!(converted.len(), 3);
         assert_eq!(converted[2].role, "user");
-        // Should have exactly 2 capability_results (one per unique ID), not 4
+        // Should have exactly 2 tool_result blocks (one per unique ID), not 4.
         assert_eq!(
             converted[2].content.len(),
             2,
-            "duplicate capability_results should be deduped to one per capability_invocation_id"
+            "duplicate capability results should be deduped to one per tool_use_id"
         );
-        // Both should be capability_result type
-        assert_eq!(converted[2].content[0]["type"], "capability_result");
-        assert_eq!(converted[2].content[1]["type"], "capability_result");
+        // Both should be Anthropic tool_result blocks.
+        assert_eq!(converted[2].content[0]["type"], "tool_result");
+        assert_eq!(converted[2].content[1]["type"], "tool_result");
         // Verify IDs were remapped (OpenAI → Anthropic format)
-        let id0 = converted[2].content[0]["capability_invocation_id"]
-            .as_str()
-            .unwrap();
-        let id1 = converted[2].content[1]["capability_invocation_id"]
-            .as_str()
-            .unwrap();
+        let id0 = converted[2].content[0]["tool_use_id"].as_str().unwrap();
+        let id1 = converted[2].content[1]["tool_use_id"].as_str().unwrap();
         assert!(id0.starts_with("toolu_remap_"), "should be remapped: {id0}");
         assert!(id1.starts_with("toolu_remap_"), "should be remapped: {id1}");
-        assert_ne!(id0, id1, "two distinct capability_invocation_ids");
+        assert_ne!(id0, id1, "two distinct tool_use_id values");
     }
 }

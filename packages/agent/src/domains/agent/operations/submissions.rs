@@ -11,6 +11,7 @@ use crate::domains::capability::types::{CapabilityPauseRecord, CapabilityRunReco
 use crate::domains::capability_support::implementations::traits::{
     SubagentConfig, SubagentMode, SubagentOps, SubagentSpawner,
 };
+use crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY;
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::{ActorKind, FunctionId, Invocation};
 use crate::shared::content::CapabilityResultContent;
@@ -355,6 +356,60 @@ struct SubagentSpawnRequest {
     max_depth: Option<u32>,
 }
 
+const CURRENT_SESSION_SENTINEL: &str = "current-session";
+
+fn resolve_agent_session_id(
+    requested: &str,
+    invocation: &Invocation,
+) -> Result<String, CapabilityError> {
+    if requested != CURRENT_SESSION_SENTINEL {
+        return Ok(requested.to_owned());
+    }
+    invocation
+        .causal_context
+        .session_id
+        .clone()
+        .filter(|session_id| !session_id.trim().is_empty())
+        .ok_or_else(|| CapabilityError::InvalidParams {
+            message: "sessionId=current-session requires a trusted invocation session context"
+                .to_owned(),
+        })
+}
+
+fn resolve_agent_workspace_id(
+    requested: Option<String>,
+    invocation: &Invocation,
+) -> Option<String> {
+    requested
+        .filter(|workspace_id| !workspace_id.trim().is_empty())
+        .or_else(|| invocation.causal_context.workspace_id.clone())
+}
+
+fn resolve_agent_working_directory(
+    requested: Option<String>,
+    session_working_directory: Option<String>,
+    invocation: &Invocation,
+) -> Result<String, CapabilityError> {
+    requested
+        .filter(|working_directory| !working_directory.trim().is_empty())
+        .or_else(|| {
+            invocation
+                .causal_context
+                .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
+                .filter(|working_directory| !working_directory.trim().is_empty())
+                .map(str::to_owned)
+        })
+        .or_else(|| {
+            session_working_directory
+                .filter(|working_directory| !working_directory.trim().is_empty())
+        })
+        .ok_or_else(|| CapabilityError::InvalidParams {
+            message:
+                "agent::spawn_subagent requires workingDirectory or an active session/worktree context"
+                    .to_owned(),
+        })
+}
+
 pub(crate) async fn spawn_subagent_value(
     params: Option<&Value>,
     invocation: &Invocation,
@@ -377,20 +432,25 @@ pub(crate) async fn spawn_subagent_value(
         .ok_or_else(|| CapabilityError::Internal {
             message: "Subagent manager is not available".to_owned(),
         })?;
-    let working_directory = request.working_directory.unwrap_or_else(|| {
-        deps.session_manager
-            .get_session(&request.session_id)
-            .ok()
-            .flatten()
-            .map(|session| session.working_directory)
-            .unwrap_or_default()
-    });
+    let session_id = resolve_agent_session_id(&request.session_id, invocation)?;
+    let workspace_id = resolve_agent_workspace_id(request.workspace_id.clone(), invocation);
+    let session_working_directory = deps
+        .session_manager
+        .get_session(&session_id)
+        .ok()
+        .flatten()
+        .map(|session| session.working_directory);
+    let working_directory = resolve_agent_working_directory(
+        request.working_directory,
+        session_working_directory,
+        invocation,
+    )?;
     let config = SubagentConfig {
         task: request.task.clone(),
         mode: SubagentMode::InProcess,
         blocking_timeout_ms: request.blocking_timeout_ms.or(Some(0)),
         model: request.model,
-        parent_session_id: Some(request.session_id.clone()),
+        parent_session_id: Some(session_id.clone()),
         system_prompt: request.system_prompt,
         working_directory,
         max_turns: request.max_turns.unwrap_or(6),
@@ -418,8 +478,8 @@ pub(crate) async fn spawn_subagent_value(
         "status": status,
         "kind": "agent",
         "task": request.task,
-        "sessionId": request.session_id,
-        "workspaceId": request.workspace_id,
+        "sessionId": session_id,
+        "workspaceId": workspace_id,
         "handle": handle,
     });
     persist_run_record(
@@ -452,7 +512,7 @@ pub(crate) async fn spawn_subagent_value(
     .await?;
     emit_run_status(
         deps,
-        &request.session_id,
+        &session_id,
         invocation,
         "agent::spawn_subagent",
         payload.clone(),
@@ -465,7 +525,8 @@ pub(crate) async fn subagent_status_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
-    let session_id = require_string_param(params, "sessionId")?;
+    let session_id =
+        resolve_agent_session_id(&require_string_param(params, "sessionId")?, invocation)?;
     let subagent_session_id = require_string_param(params, "subagentSessionId")?;
     if let Some(resource) =
         subagent_result_resource(invocation, deps, &session_id, &subagent_session_id).await?
@@ -496,7 +557,8 @@ pub(crate) async fn subagent_result_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
-    let session_id = require_string_param(params, "sessionId")?;
+    let session_id =
+        resolve_agent_session_id(&require_string_param(params, "sessionId")?, invocation)?;
     let subagent_session_id = require_string_param(params, "subagentSessionId")?;
     if let Some(resource) =
         subagent_result_resource(invocation, deps, &session_id, &subagent_session_id).await?
@@ -679,4 +741,111 @@ pub(crate) async fn cancel_subagent_value(
         "subagentSessionId": subagent_session_id,
         "cancelled": true
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{ActorId, AuthorityGrantId, CausalContext, FunctionId, TraceId};
+
+    fn test_invocation(
+        session_id: Option<&str>,
+        workspace_id: Option<&str>,
+        working_directory: Option<&str>,
+    ) -> Invocation {
+        let mut context = CausalContext::new(
+            ActorId::new("agent:test").unwrap(),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+            TraceId::generate(),
+        );
+        if let Some(session_id) = session_id {
+            context = context.with_session_id(session_id.to_owned());
+        }
+        if let Some(workspace_id) = workspace_id {
+            context = context.with_workspace_id(workspace_id.to_owned());
+        }
+        if let Some(working_directory) = working_directory {
+            context = context.with_runtime_metadata(
+                RUNTIME_METADATA_WORKING_DIRECTORY,
+                working_directory.to_owned(),
+            );
+        }
+        Invocation::new_sync(
+            FunctionId::new("agent::spawn_subagent").unwrap(),
+            json!({}),
+            context,
+        )
+    }
+
+    #[test]
+    fn current_session_resolves_to_trusted_invocation_session() {
+        let invocation = test_invocation(
+            Some("parent-session"),
+            Some("workspace-a"),
+            Some("/repo/.worktrees/session/parent-session"),
+        );
+
+        assert_eq!(
+            resolve_agent_session_id(CURRENT_SESSION_SENTINEL, &invocation).unwrap(),
+            "parent-session"
+        );
+        assert_eq!(
+            resolve_agent_session_id("explicit-session", &invocation).unwrap(),
+            "explicit-session"
+        );
+        assert_eq!(
+            resolve_agent_workspace_id(None, &invocation).as_deref(),
+            Some("workspace-a")
+        );
+    }
+
+    #[test]
+    fn current_session_without_invocation_session_fails_closed() {
+        let invocation = test_invocation(None, None, Some("/repo"));
+        let error = resolve_agent_session_id(CURRENT_SESSION_SENTINEL, &invocation).unwrap_err();
+        assert!(
+            matches!(error, CapabilityError::InvalidParams { .. }),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn subagent_working_directory_uses_trusted_runtime_metadata() {
+        let invocation = test_invocation(
+            Some("parent-session"),
+            None,
+            Some("/repo/.worktrees/session/parent-session"),
+        );
+
+        assert_eq!(
+            resolve_agent_working_directory(
+                None,
+                Some("/stale/session/table/path".to_owned()),
+                &invocation,
+            )
+            .unwrap(),
+            "/repo/.worktrees/session/parent-session"
+        );
+        assert_eq!(
+            resolve_agent_working_directory(
+                Some("/explicit/worktree".to_owned()),
+                Some("/repo".to_owned()),
+                &invocation,
+            )
+            .unwrap(),
+            "/explicit/worktree"
+        );
+    }
+
+    #[test]
+    fn subagent_working_directory_requires_a_real_context() {
+        let invocation = test_invocation(Some("parent-session"), None, None);
+        let error =
+            resolve_agent_working_directory(None, Some(String::new()), &invocation).unwrap_err();
+        assert!(
+            matches!(error, CapabilityError::InvalidParams { .. }),
+            "unexpected error: {error:?}"
+        );
+    }
 }

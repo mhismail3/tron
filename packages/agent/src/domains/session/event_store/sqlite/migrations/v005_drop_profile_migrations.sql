@@ -5,6 +5,5 @@
 -- ledger table and indexes are removed from existing databases. Fresh
 -- databases never create them in v001.
 
-DROP INDEX IF EXISTS idx_profile_migrations_legacy;
 DROP INDEX IF EXISTS idx_profile_migrations_time;
 DROP TABLE IF EXISTS profile_migrations;

@@ -27,7 +27,7 @@ pub struct StreamState {
     pub acc: StreamAccumulator,
     /// Current content block type being accumulated.
     pub current_block_type: Option<BlockType>,
-    /// Capability invocation ID for the current `capability_invocation` block.
+    /// Capability invocation ID for the current Anthropic `tool_use` block.
     pub current_invocation_id: Option<String>,
     /// Cache creation tokens.
     pub cache_creation_tokens: u64,
@@ -678,17 +678,17 @@ mod tests {
     }
 
     #[test]
-    fn message_delta_capability_invocation_stop() {
+    fn message_delta_tool_use_stop() {
         let mut state = create_stream_state();
         let event = AnthropicSseEvent::MessageDelta {
             delta: SseMessageDelta {
-                stop_reason: Some("capability_invocation".into()),
+                stop_reason: Some("tool_use".into()),
             },
             usage: None,
         };
         let events = process_sse_event(&event, &mut state);
         assert!(events.is_empty());
-        assert_eq!(state.stop_reason, Some("capability_invocation".into()));
+        assert_eq!(state.stop_reason, Some("tool_use".into()));
     }
 
     // ── message_stop ────────────────────────────────────────────────────
@@ -1062,11 +1062,11 @@ mod tests {
             _ => panic!("expected CapabilityInvocationDraftEnd"),
         }
 
-        // message_delta with capability_invocation stop reason
+        // message_delta with Anthropic's canonical tool_use stop reason.
         let _ = process_sse_event(
             &AnthropicSseEvent::MessageDelta {
                 delta: SseMessageDelta {
-                    stop_reason: Some("capability_invocation".into()),
+                    stop_reason: Some("tool_use".into()),
                 },
                 usage: Some(SseUsageDelta { output_tokens: 30 }),
             },
@@ -1076,7 +1076,7 @@ mod tests {
         let events = process_sse_event(&AnthropicSseEvent::MessageStop, &mut state);
         match &events[0] {
             StreamEvent::Done { stop_reason, .. } => {
-                assert_eq!(stop_reason, "capability_invocation");
+                assert_eq!(stop_reason, "tool_use");
             }
             _ => panic!("expected Done"),
         }

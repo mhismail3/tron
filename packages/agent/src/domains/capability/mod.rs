@@ -48,9 +48,10 @@
 //! contract rejections that the model must report back to the operator.
 //! Approval-required executions resume through `approval::resolve`, but the
 //! original `capability::execute` result must still project the executed
-//! approval state and resumed child invocation id. The model should not need to
-//! query approval internals to answer whether approval happened or which target
-//! invocation produced the output. The agent turn runner also projects the
+//! approval state, the `execute` engine invocation id, and resumed child
+//! invocation ids. The model should not need to query approval internals or the
+//! DB to answer whether approval happened or which target invocation produced
+//! the output. The agent turn runner also projects the
 //! bounded execute observation metadata into the model-visible tool result
 //! text, because provider APIs only feed the LLM result content, not the
 //! engine-only `details` object used by UI and audit surfaces. That projection
@@ -64,7 +65,10 @@
 //! target schema also declares its own `idempotencyKey` field, `execute` copies
 //! the same top-level key into the target arguments as a deterministic shape
 //! correction instead of forcing the model to learn nested gateway-specific
-//! idempotency placement.
+//! idempotency placement. Target argument property names are canonicalized
+//! against the selected target schema when the match is unique, so harmless
+//! casing/separator mistakes like `functionid` versus `functionId` do not force
+//! a retry; conflicting aliases stay visible and fail schema validation.
 //! Intent-only resolution fails closed: if the best match has no lexical/name
 //! anchor, no supplied argument shape, and only a weak semantic score, execute
 //! returns `needs_capability` instead of presenting unrelated low-confidence

@@ -355,7 +355,11 @@ even if semantic ranking alone would be noisy.
 For resilience across providers, `execute` also accepts flattened target
 argument fields at the execute root and moves them into `arguments` before
 target validation; the correction is audited and never bypasses target schema,
-grant, idempotency, freshness, or approval checks.
+grant, idempotency, freshness, or approval checks. It also canonicalizes target
+argument property names against the selected target schema when the match is
+unique, so harmless casing/separator mistakes such as `functionid` versus
+`functionId` do not force a retry. Conflicting aliases remain visible and fail
+closed in schema validation.
 If an intent is too broad but clearly names a known capability namespace, such
 as “do something useful with files,” `execute` returns `needs_selection` with
 bounded top-level candidate summaries. It does not fabricate a target, create a
@@ -506,9 +510,10 @@ capability worker owns the internal resolve, prepare, approval, run, and observe
 phases. It searches/ranks candidates, records fresh inspection handles when a
 mutating or elevated-risk target needs one, uses supplied `arguments` to prefer
 schema-compatible candidates, validates target arguments, corrects safe
-wrapper-shape mistakes such as `payload` versus `arguments`, and only then
-routes through the same approval and child-invocation substrate. Mutating calls
-still require stable target idempotency. The model-facing wrapper always uses a
+wrapper-shape mistakes such as `payload` versus `arguments` and unique
+schema-property casing aliases, and only then routes through the same approval
+and child-invocation substrate. Mutating calls still require stable target
+idempotency. The model-facing wrapper always uses a
 provider-call-scoped idempotency key so repeated orchestration attempts can
 reach the target capability; the supplied `idempotencyKey` belongs to the
 prepared child invocation and drives target replay, approval replay, and durable

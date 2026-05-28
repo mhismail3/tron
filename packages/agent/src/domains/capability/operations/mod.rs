@@ -62,9 +62,10 @@ pub(crate) use execute::execute_value;
 use execute::{
     apply_argument_schema_fit_filter, apply_deterministic_intent_route,
     clarification_candidates_for_intent, deterministic_intent_route, intent_strongly_matches_hit,
-    lacks_sufficient_intent_resolution_evidence, normalize_target_idempotency_argument,
-    normalize_target_specific_arguments, orchestration_constraints_allow_hit,
-    orchestration_hit_from_entry, parse_orchestrated_execute_input, prepared_execute_payload,
+    lacks_sufficient_intent_resolution_evidence, normalize_target_arguments,
+    normalize_target_idempotency_argument, normalize_target_specific_arguments,
+    orchestration_constraints_allow_hit, orchestration_hit_from_entry,
+    parse_orchestrated_execute_input, prepared_execute_payload,
     promote_argument_schema_fit_candidates, validate_orchestration_constraint_shape,
     validate_orchestration_constraints,
 };
@@ -2868,6 +2869,77 @@ mod tests {
             prepared["payload"]["idempotencyKey"],
             json!("ui-action-submit-key")
         );
+    }
+
+    #[test]
+    fn orchestrated_execute_normalizes_schema_property_name_aliases_before_schema_validation() {
+        let mut function = test_function("queue::enqueue");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "required": ["functionId", "payload", "queue"],
+            "additionalProperties": false,
+            "properties": {
+                "functionId": {"type": "string"},
+                "payload": {"type": "object"},
+                "queue": {"type": "string"},
+                "targetRevision": {"type": "integer"}
+            }
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 81);
+        let mut arguments = json!({
+            "functionid": "state::get",
+            "payload": {"namespace": "rwo-006", "key": "probe", "scope": "session"},
+            "queue": "rwo-006"
+        });
+        let mut corrections = Vec::new();
+
+        normalize_target_arguments(&function, &mut arguments, &mut corrections);
+
+        assert_eq!(arguments["functionId"], json!("state::get"));
+        assert!(arguments.get("functionid").is_none());
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("schema_property_name_alias")
+                && correction["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("functionid->functionId"))
+        }));
+        validate_target_payload(&entry, &arguments)
+            .expect("schema property alias should validate after normalization");
+    }
+
+    #[test]
+    fn orchestrated_execute_does_not_hide_conflicting_schema_property_aliases() {
+        let mut function = test_function("queue::enqueue");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "required": ["functionId", "payload", "queue"],
+            "additionalProperties": false,
+            "properties": {
+                "functionId": {"type": "string"},
+                "payload": {"type": "object"},
+                "queue": {"type": "string"}
+            }
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 82);
+        let mut arguments = json!({
+            "functionId": "state::get",
+            "functionid": "state::set",
+            "payload": {"namespace": "rwo-006", "key": "probe", "scope": "session"},
+            "queue": "rwo-006"
+        });
+        let mut corrections = Vec::new();
+
+        normalize_target_arguments(&function, &mut arguments, &mut corrections);
+
+        assert_eq!(arguments["functionId"], json!("state::get"));
+        assert_eq!(arguments["functionid"], json!("state::set"));
+        assert!(
+            corrections
+                .iter()
+                .all(|correction| { correction["kind"] != json!("schema_property_name_alias") })
+        );
+        validate_target_payload(&entry, &arguments)
+            .expect_err("conflicting alias should remain visible to schema validation");
     }
 
     #[test]
