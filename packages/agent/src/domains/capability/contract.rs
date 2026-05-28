@@ -237,7 +237,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
             "capabilitySchema": {
                 "name": "execute",
-                "description": "Intent-first portal for all Tron capabilities: resolve, prepare, approve when needed, run, and observe one capability. Start with natural-language intent alone when the target is not already known; provide target only when the user supplied an exact capability id, a prior execute result selected it, or a primed recipe makes it unambiguous. Put target capability arguments inside arguments when possible, keep wrapper fields top-level, and never invent targets to satisfy a discovery or shape test. If you accidentally place target argument fields at the execute root, execute may move them into arguments and select the target by schema fit, but arguments is the canonical shape. Do not call separate search or inspect tools; this execute primitive owns discovery, freshness, approval, correction, and child execution. A needs_input result means retry the same selected target with the missing arguments. Harmless shape mistakes may be corrected, but mutating or elevated-risk work still pauses for freshness and approval before child execution.",
+                "description": "Intent-first portal for all Tron capabilities: resolve, prepare, approve when needed, run, and observe one capability. Start with natural-language intent alone when the target is not already known; provide target only when the user supplied an exact capability id, a prior execute result selected it, or a primed recipe makes it unambiguous. Put target capability arguments inside arguments when possible, keep wrapper fields top-level, and never invent targets to satisfy a discovery or shape test. If you accidentally place target argument fields at the execute root, execute may move them into arguments and select the target by schema fit, but arguments is the canonical shape. Do not call separate search or inspect tools; this execute primitive owns discovery, freshness, approval, correction, and child execution. A needs_input result means retry the same selected target with the missing arguments. Harmless shape mistakes may be corrected, but mutating or elevated-risk work still pauses for freshness and approval before child execution. Do not invent constraints such as riskMax for ordinary work; use constraints only when the user explicitly gives a hard bound. Network reads such as web::search and web::fetch are medium-risk pure reads, so riskMax=low intentionally rejects them.",
                 "parameters": execute_model_request_schema()
             }
         }),
@@ -393,12 +393,12 @@ fn execute_model_request_schema() -> serde_json::Value {
                 "type": "object",
                 "additionalProperties": true,
                 "properties": {
-                    "riskMax": {"type": "string", "description": "Optional maximum risk: low, medium, high, or critical."},
+                    "riskMax": {"type": "string", "description": "Optional maximum risk: low, medium, high, or critical. Use only when the user explicitly asks for a hard risk bound; ordinary web searches/fetches are medium-risk pure reads and will be rejected by riskMax=low."},
                     "effect": {"type": "string", "description": "Optional exact effect-class constraint, such as pure_read or external_side_effect."},
                     "allowedContracts": {"type": "array", "items": {"type": "string"}},
                     "allowedNamespaces": {"type": "array", "items": {"type": "string"}}
                 },
-                "description": "Optional v1 bounds for resolution and preparation. Supported fields are riskMax, effect, allowedContracts, and allowedNamespaces. The schema accepts an object so execute can return structured constraints_rejected guidance for unsupported fields instead of failing at provider/schema validation. Constraints never broaden authority; unsupported constraint fields are rejected instead of ignored."
+                "description": "Optional v1 bounds for resolution and preparation. Supported fields are riskMax, effect, allowedContracts, and allowedNamespaces. The schema accepts an object so execute can return structured constraints_rejected guidance for unsupported fields instead of failing at provider/schema validation. Constraints never broaden authority; unsupported constraint fields are rejected instead of ignored. Do not set constraints by default; omit riskMax/effect unless the user specifically asks for that bound."
             },
             "payload": {"type": "object", "description": "Accepted only as a correctable alias for arguments. Prefer arguments; if supplied, the engine records a payload_to_arguments correction."},
             "idempotencyKey": {"type": "string", "description": "Stable caller-chosen key for mutating or resource-producing work. Safe read-only calls may omit it. Keep this top-level; execute forwards it into the prepared child invocation and, for targets whose own schema requires idempotencyKey, safely copies it into target arguments."},
@@ -628,6 +628,8 @@ mod tests {
         assert!(description.contains("Do not call separate search or inspect tools"));
         assert!(description.contains("needs_input"));
         assert!(description.contains("mutating or elevated-risk work still pauses"));
+        assert!(description.contains("Do not invent constraints"));
+        assert!(description.contains("web::search and web::fetch are medium-risk pure reads"));
 
         let schema = execute_model_request_schema();
         assert!(schema["required"].is_null());
@@ -669,6 +671,14 @@ mod tests {
             .as_str()
             .expect("constraints description");
         assert!(constraints_description.contains("constraints_rejected"));
+        assert!(constraints_description.contains("Do not set constraints by default"));
+
+        let risk_max_description =
+            schema["properties"]["constraints"]["properties"]["riskMax"]["description"]
+                .as_str()
+                .expect("riskMax description");
+        assert!(risk_max_description.contains("ordinary web searches/fetches"));
+        assert!(risk_max_description.contains("riskMax=low"));
 
         let idempotency_description = schema["properties"]["idempotencyKey"]["description"]
             .as_str()

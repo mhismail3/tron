@@ -2925,6 +2925,35 @@ mod tests {
     }
 
     #[test]
+    fn orchestrated_execute_normalizes_web_search_result_limit_aliases_before_schema_validation() {
+        let web_search_spec = crate::domains::web::contract::capabilities()
+            .expect("web specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "web::search")
+            .expect("web::search spec");
+        let function =
+            crate::domains::contract::function_definition_for_capability(&web_search_spec);
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 80);
+        let mut arguments = json!({
+            "query": "official OpenAI model docs",
+            "maxResults": 5
+        });
+        let mut corrections = Vec::new();
+
+        normalize_target_specific_arguments(&function, &mut arguments, &mut corrections);
+
+        assert_eq!(arguments["count"], json!(5));
+        assert!(arguments.get("maxResults").is_none());
+        assert!(
+            corrections
+                .iter()
+                .any(|correction| { correction["kind"] == json!("web_search_count_alias") })
+        );
+        validate_target_payload(&entry, &arguments)
+            .expect("normalized web::search payload schema-valid");
+    }
+
+    #[test]
     fn orchestrated_execute_normalizes_apply_patch_append_intent() {
         let apply_patch_spec = crate::domains::filesystem::contract::capabilities()
             .expect("filesystem specs")

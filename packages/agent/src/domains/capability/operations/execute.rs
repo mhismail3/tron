@@ -776,6 +776,7 @@ pub(super) fn normalize_target_specific_arguments(
     match function.id.as_str() {
         "process::run" => normalize_process_run_arguments(arguments, corrections),
         "filesystem::list_dir" => normalize_filesystem_list_dir_arguments(arguments, corrections),
+        "web::search" => normalize_web_search_arguments(arguments, corrections),
         "filesystem::apply_patch" => {
             normalize_filesystem_apply_patch_arguments(arguments, corrections)
         }
@@ -837,6 +838,35 @@ fn normalize_filesystem_list_dir_arguments(arguments: &mut Value, corrections: &
             1.0,
         ));
     }
+}
+
+fn normalize_web_search_arguments(arguments: &mut Value, corrections: &mut Vec<Value>) {
+    let Some(object) = arguments.as_object_mut() else {
+        return;
+    };
+    let alias = ["maxResults", "limit", "numResults"]
+        .into_iter()
+        .find(|alias| object.contains_key(*alias));
+    let Some(alias) = alias else {
+        return;
+    };
+    if !object.contains_key("count")
+        && let Some(value) = object.remove(alias)
+    {
+        object.insert("count".to_owned(), value);
+    } else {
+        object.remove(alias);
+    }
+    for other_alias in ["maxResults", "limit", "numResults"] {
+        if other_alias != alias {
+            object.remove(other_alias);
+        }
+    }
+    corrections.push(correction_record(
+        "web_search_count_alias",
+        "normalized web search result-limit alias to count; web::search uses count to bound ranked results",
+        1.0,
+    ));
 }
 
 fn normalize_process_run_arguments(arguments: &mut Value, corrections: &mut Vec<Value>) {

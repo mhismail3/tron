@@ -174,6 +174,9 @@ pub fn generate_capability_clarification_message(
         unless the user asks for raw details.\n\
         Common contracts include filesystem capabilities for file operations, `process::run` for \
         command execution, and web capabilities for network retrieval when they are visible to the session.\n\
+        Do not add `constraints.riskMax` or `constraints.effect` unless the user explicitly gives that \
+        bound. Web search and fetch are pure reads but medium risk because they touch the network; \
+        `riskMax=low` intentionally rejects them.\n\
         If the user gives an exact contract id and arguments, call that exact target once; do not run \
         warm-up, probe, date, status, or example commands first.\n\
         \n\
@@ -834,6 +837,8 @@ mod tests {
         assert!(result.contains("only target capability arguments inside `arguments`"));
         assert!(result.contains("The engine resolves, prepares"));
         assert!(result.contains("[execute observation]"));
+        assert!(result.contains("Do not add `constraints.riskMax`"));
+        assert!(result.contains("Web search and fetch are pure reads but medium risk"));
     }
 
     #[test]

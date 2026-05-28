@@ -429,7 +429,11 @@ selected target with the missing fields instead of probing an unrelated
 capability. For portability across providers, the exported schema is
 plain object-shaped while still accepting direct target aliases such as
 `contractId`, `capabilityId`, `functionId`, and `implementationId` when the
-caller already knows them. Target schema, policy, and idempotency preflight
+caller already knows them. Agents should omit `constraints` by default; fields
+such as `riskMax` and `effect` are hard bounds, not hints. For example,
+`web::search` and `web::fetch` are pure reads but medium risk because they touch
+the network, so `riskMax=low` intentionally rejects them. Target schema, policy,
+and idempotency preflight
 rejections return structured `isError=true` capability results with no child
 invocation, approval, or resource refs, so expected contract failures stay
 inspectable without becoming engine-level execution failures.
