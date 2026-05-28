@@ -9,7 +9,7 @@ use super::hooks::{
     apply_user_prompt_submit_hook, build_prompt_hooks, fire_session_start_hook,
     fire_worktree_acquired_hook,
 };
-use super::worktree::resolve_prompt_worktree;
+use super::worktree::{emit_prompt_worktree_failure, resolve_prompt_worktree};
 use super::{
     PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, ShutdownCancelForwarder,
     build_user_content_override, build_user_event_payload, collect_pending_skill_payloads,
@@ -138,7 +138,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         }
     };
 
-    let worktree_resolution = resolve_prompt_worktree(
+    let worktree_resolution = match resolve_prompt_worktree(
         is_chat,
         state.worktree_path.as_deref(),
         &worktree_coordinator,
@@ -146,7 +146,14 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         &session_id,
         working_dir,
     )
-    .await;
+    .await
+    {
+        Ok(resolution) => resolution,
+        Err(message) => {
+            emit_prompt_worktree_failure(broadcast.as_ref(), &session_id, &model, message);
+            return;
+        }
+    };
     let worktree_info = worktree_resolution.worktree_info;
     let working_dir = worktree_resolution.working_dir;
     let freshly_acquired_worktree = worktree_resolution.freshly_acquired;

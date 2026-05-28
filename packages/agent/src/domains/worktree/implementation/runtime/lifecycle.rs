@@ -310,6 +310,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_worktree_does_not_run_checkout_hooks() {
+        let dir = tempdir().unwrap();
+        let git = init_repo(dir.path()).await;
+        let hooks_dir = dir.path().join(".githooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        let hook_path = hooks_dir.join("post-checkout");
+        std::fs::write(
+            &hook_path,
+            "#!/bin/sh\necho checkout hook must not run >&2\nexit 123\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        run_cmd(
+            dir.path(),
+            &["git", "config", "core.hooksPath", ".githooks"],
+        )
+        .await;
+        let config = WorktreeConfig::default();
+
+        let info = create("sess-no-hooks", dir.path(), &config, &git)
+            .await
+            .unwrap();
+
+        assert!(info.worktree_path.exists());
+        assert_eq!(info.branch, "session/sess-no-hooks");
+    }
+
+    #[tokio::test]
     async fn create_hydrates_untracked_non_ignored_workspace_files() {
         let dir = tempdir().unwrap();
         let git = init_repo(dir.path()).await;

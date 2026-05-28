@@ -68,6 +68,10 @@ impl GitExecutor {
     }
 
     /// Add a new worktree with a new branch.
+    ///
+    /// Worktree creation is substrate setup, not user code execution. Disable
+    /// checkout hooks so repo-local tooling such as Git LFS cannot make
+    /// session isolation unavailable on machines without that tooling.
     pub async fn worktree_add(
         &self,
         repo: &Path,
@@ -79,7 +83,16 @@ impl GitExecutor {
         let _ = self
             .run(
                 repo,
-                &["worktree", "add", "-b", branch, &path_str, start_point],
+                &[
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "worktree",
+                    "add",
+                    "-b",
+                    branch,
+                    &path_str,
+                    start_point,
+                ],
             )
             .await?;
         Ok(())
