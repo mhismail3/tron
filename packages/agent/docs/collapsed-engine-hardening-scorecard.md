@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **59/100 provisional**
+Current score: **60/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -83,7 +83,7 @@ interruption, and resource failure states.
 | Axis | Points | Current | Full Credit Requires |
 |---|---:|---:|---|
 | Execute portal ergonomics | 10 | 8 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
-| First-party capability usefulness | 10 | 8 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
+| First-party capability usefulness | 10 | 9 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
 | Worker/function/trigger substrate | 14 | 7 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 9 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 7 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
@@ -93,7 +93,7 @@ interruption, and resource failure states.
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **59/100**
+Total: **60/100**
 
 ## Scoring Rules
 
@@ -178,7 +178,7 @@ The evidence note must identify:
 | RWO-N7 | Live worker extensibility | passed_after_fix | +2 | conformance failure: `sess_019e732f-c5e0-7bf3-8130-9da7d39a3deb`; trigger retest with cleanup gap: `sess_019e733b-af69-7f93-bb15-7a717d906aef`; cleanup-fixed retest: `sess_019e7341-8eac-7bb3-97bc-efd16de60757`; trigger-guidance retest: `sess_019e735b-9168-7b43-bb95-56fb6cacca43` | See 2026-05-29 RWO-N7 result note below. Trigger-guidance retest used one `needs_selection` execute row for trigger-id metadata guidance, one successful `capability::execute` row, one successful target `rwo_n7::echo` invocation, catalog revisions 389-394, 0 approvals, 0 `compact.*` events, 0 session logs, and expected post-disconnect `CAPABILITY_NOT_FOUND` cleanup probes after unregister. | `execute_resolution`: session-generated implementations stayed `candidate` and were not binding-selectable. `queue_or_trigger`: visible trigger metadata was not projected through capability discovery. `worker_lifecycle`: stale session-scoped registry plugin/implementation rows stayed healthy after disconnect. `execute_resolution`: explicit trigger-id targets returned generic not-found instead of metadata-only guidance naming the related function target. | `0aabb48a2`; trigger-guidance checkpoint in this commit | Passed after rebuilt dev server PID 63286. Trigger-id target now returns `needs_selection`/`trigger_metadata_target` with suggested target `rwo_n7::echo`, no child invocation, and no trigger-id aliasing. Post-disconnect registry sync removed the session-generated implementation/plugin rows and direct execute returned expected `CAPABILITY_NOT_FOUND`. |
 | RWO-N8 | Module package activation | passed_after_fix | +2 | setup and first retest: `sess_019e7385-341e-7f30-8176-6b93396a6dbc`; final activation retest: `sess_019e7398-5d77-7d01-9c2a-465589dade48` | See 2026-05-29 RWO-N8 result note below. The setup run registered source/package, verified source, approved source, configured, activated, health-checked, disabled, and inspected the deterministic package. The final retest used 6 successful `capability::execute` rows, successful `module::activate`, `worker::spawn`, `module::check_health`, two `rwo_n8_20260529113609::health` invocations, duplicate activation replay, `module::disable`, `sandbox::stop_spawned_worker`, and `module::inspect_package`; 0 failed invocations; 2 executed approvals; disabled activation resource; revoked derived grant; no session logs. | `execute_correction`: nested wrapper cleanup stripped target-owned `arguments.mode` from `module::check_health`. `worker_lifecycle`: worker guide Python blocked in `recv_json` and stopped heartbeating while idle. `execute_resolution`: `worker::spawn` issued `engine_issued` scoped tokens, but binding selection only treated `session_scoped` session-generated functions as healthy. | `ae1b153bf` | Passed after rebuilt dev server PID 76020 with simulator booted. Direct fixture execute `019e7398-b60b-71b1-8e26-1ac35fcad2a1` selected `session_generated.rwo_n8_20260529113609.demo_echo` and invoked child `019e7398-b6f4-7b81-9c42-3acf2736499a`; disable stopped PID 77144 and revoked grant `sandbox-worker:rwo-n8-worker-20260529113609:019e7398-8526-7ff1-bbd5-280708370bf8`. |
 | RWO-N9 | Subagent fan-out/fan-in | passed_after_fix | +2 | failed first run: `sess_019e73a5-c2ae-7fe3-b9b9-86131b2f7156`; passing retest: `sess_019e73ae-4645-7f03-bca5-fad68c3959c4` | See 2026-05-29 RWO-N9 result note below. The passing retest used 10 parent `capability::execute` rows, 2 non-blocking `agent::spawn_subagent` target rows, 4 `agent::subagent_status` rows, 2 `agent::subagent_result` rows, 8 child `capability::execute` rows, 2 deterministic `agent_result:subagent:*` resources, 1 final parent `agent_result`, 0 failed invocations, 0 approvals, 0 `compact.*` events, and 0 session-scoped log rows. | Primary `resource_truth`: completed blocking subagents did not write deterministic `agent_result:subagent:*` resources, so result/status could fall back to in-memory manager state. Secondary `schema_or_recipe`: omitted `blockingTimeoutMs` was coerced into a blocking wait and the contract did not name the result capability, so fan-out models were guided toward sequential work. | this checkpoint | Passed exact prompt after rebuilt dev server PID 83613 with simulator booted. Parent spawned child sessions `sess_019e73ae-7618-7e92-b86a-19a4f50c605a` and `sess_019e73ae-8413-7830-9a49-3c87c98180be` before waiting, status-polled both through `agent::subagent_status`, collected both through `agent::subagent_result`, and reported lineage/capabilities. A model-chosen `process::run sleep 10` was used only as a timer between canonical status polls; no hidden client or runner side channel was used. |
-| RWO-N10 | Memory auto-retain | pending | 0 | | | | | |
+| RWO-N10 | Memory auto-retain | passed | +1 | `sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6` | See 2026-05-29 RWO-N10 result note below. The run used the real dev server and booted simulator evidence, kept the default auto-retain interval of 10, recorded 9 explicit `memory::auto_retain_fire` skips with `reason = below_threshold`, then fired on the tenth user message with `status = retaining`. The terminal `memory.retained` event recorded 4 resource refs: memory journal artifact, session materialized projection, memory-rule artifact, and rule materialized projection. DB evidence shows 0 failed invocations, 0 approvals, 0 `compact.*` events, 10 completed prompt queue drains, and resource versions with hashes/lifecycle state. | none; no code changes required | n/a | Passed without changing settings or using a side channel. Retain truth was engine-owned: `memory.retained` event seq 152, parent auto-retain invocation `019e73bb-209f-7561-912f-909dfe5f6e5a`, trace `019e73ba-fe7e-7511-ab2b-7275bfbecf3b`, and resource refs were produced by `artifact::create`, `materialized_file::update`, and `resource::link` children under that invocation. |
 | RWO-N11 | Resource failure matrix | pending | 0 | | | | | |
 | RWO-N12 | Approval and grant boundary | pending | 0 | | | | | |
 | RWO-N13 | Runtime resilience | pending | 0 | | | | | |
@@ -1124,6 +1124,68 @@ Failure focus:
 - cancellation/retry;
 - client-owned memory truth.
 
+2026-05-29 result: **passed**.
+
+Evidence:
+
+- Harness artifact: `/tmp/rwo_n10_agent_run_20260529053401.json`.
+- Simulator evidence: booted `iPhone 17 Pro` screenshot captured at
+  `/tmp/rwo_n10_simulator_booted.png`; the harness marked all prompt contexts as
+  simulator-backed while driving the real dev server WebSocket.
+- Dev server: real `/engine` WebSocket on `127.0.0.1:9847`; health was `ok`
+  before the run.
+- Parent session: `sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6`.
+- Prompt path: 10 `agent::prompt` invocations, 10 `agent::run_turn`
+  invocations, 10 `agent::prompt_queue_drain` queue rows, all completed.
+- Skip path: first prompt recorded
+  `memory::auto_retain_fire` invocation
+  `019e73ba-45fe-7261-9de5-0aab4453d707`, idempotency key
+  `memory.auto_retain:sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6:019e73ba-2db1-7a01-bd80-e3fa3ea4259c`,
+  `status = skipped`, `reason = below_threshold`,
+  `userMessagesSinceRetain = 1`, and `produced_resource_refs_json = []`.
+- Threshold path: prompts 2 through 9 recorded the same bounded skip with
+  `userMessagesSinceRetain = 2..9`; no retain event or memory resource mutation
+  appeared before the threshold.
+- Retain path: prompt 10 recorded
+  `memory::auto_retain_fire` invocation
+  `019e73bb-209f-7561-912f-909dfe5f6e5a`, idempotency key
+  `memory.auto_retain:sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6:019e73ba-fe81-74a3-b03b-177ec857a797`,
+  `fired = true`, `status = retaining`, `userMessagesSinceRetain = 10`,
+  with trace `019e73ba-fe7e-7511-ab2b-7275bfbecf3b`.
+- Memory lifecycle: `memory.auto_retain_triggered` event seq 150 preceded
+  `memory.retained` event seq 152. There was no
+  `memory.auto_retain_failed` event.
+- Resource truth: `memory.retained` recorded four resource refs:
+  `artifact:memory-journal:sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6:1d8d7683c4a3721548e1867d8161db63`,
+  `materialized_file:memory-session:sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6`,
+  `artifact:memory-rule:tron-architecture:1d8d7683c4a3721548e1867d8161db63`,
+  and `materialized_file:memory-rule:tron-architecture`.
+- Resource versions: all four current versions were `available`; artifacts were
+  `promoted`, materialized projections were `materialized`, and each retained a
+  content hash. The markdown files under `~/.tron/memory/` were projections
+  linked to resource versions, not the source of truth.
+- Child resource invocations: memory artifacts were created by
+  `artifact::create`; projections were written by `materialized_file::update`;
+  artifact-to-projection relationships were recorded by `resource::link`, all
+  parented to the auto-retain invocation.
+- Observability: DB reconstruction found 0 failed invocations, 0 approvals, 0
+  `compact.*` events, 0 session-scoped logs, and stream topics
+  `agent.runtime`, `events.session`, `queue.lifecycle`, and
+  `compensation.records`.
+- Side-channel check: the scenario did not modify settings, did not read or
+  write memory through files directly, did not use a fallback reader, and did
+  not create package/source/policy/trust side tables. Existing engine resource
+  tables remained the substrate for resource truth.
+
+Scoring:
+
+- `+1` for a simulator-backed real-dev-server pass with DB proof and no code
+  changes required.
+- Current score increases to `60/100`.
+- First-party capability usefulness increases to `9/10` because actual
+  memory auto-retain now has live proof through engine-owned memory/resource
+  capabilities.
+
 ### RWO-N11: Resource Failure Matrix
 
 Exercise through `execute` or deterministic fixture:
@@ -1430,58 +1492,63 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N10: Memory Auto-Retain**
+Recommended next scenario: **RWO-N11: Resource Failure Matrix**
 
 Setup:
 
 - Use the currently configured real dev server.
-- Use the iOS simulator for the parent agent prompt unless a deterministic
-  fixture is needed to trigger the below-threshold or retain path reliably.
-- Run one below-threshold memory scenario and one actual retain scenario with a
-  durable project lesson.
-- Keep memory truth engine-owned; do not inspect or mutate memory through a
-  client-owned side channel.
+- Use the iOS simulator for the parent agent prompt when practical; use a
+  deterministic fixture only where the exact damaged-resource state cannot be
+  reached through a model-authored prompt without broad side effects.
+- Exercise stale CAS, missing payload, damaged or missing blob, hash mismatch,
+  discarded resource, idempotency replay, and resource inspection paths through
+  `execute` or engine-owned deterministic fixture calls.
+- Keep resource truth engine-owned; do not inspect or mutate resources through
+  client-owned state or ad hoc filesystem side channels.
 
 Prompt:
 
 ```text
-Use only execute. First, run a short prompt that should be below the memory auto-retain threshold and report the retain status. Then run a second prompt that teaches a durable project lesson worth retaining, wait for auto-retain, and report the memory/resource refs and DB-observable retain status.
+Use only execute. Create or identify a session-scoped resource, prove a normal inspect/update path, then exercise stale-CAS, missing-payload, damaged-or-missing-blob, hash-mismatch, discarded-resource, and idempotency-replay behavior. Report each resource id, version id, error class, and DB-observable lifecycle state.
 ```
 
 Procedure:
 
 1. Start a fresh simulator-backed session on the real dev server.
-2. Send the below-threshold memory prompt and let the turn complete.
-3. Confirm `memory::auto_retain_fire` reports an explicit bounded skip.
-4. Send the retain-worthy lesson prompt and let the turn plus auto-retain
-   complete.
-5. Confirm the retain path writes through engine-owned memory/resource
-   capability records.
+2. Create a session-scoped resource through the resource or materialized-file
+   capability path and record its current version/hash.
+3. Exercise a normal inspect/update/read path first so the success baseline is
+   reconstructable.
+4. Trigger each failure class with the smallest deterministic mutation or
+   capability request that owns that failure mode.
+5. Confirm each failure returns a bounded typed error and leaves resource
+   lifecycle/version state correct.
 6. Inspect DB resource, invocation, queue, stream, event, log, and failure
    evidence before scoring.
 
 After completion, inspect:
 
-- session ids, run ids, prompt invocations, and `memory::auto_retain_fire`
-  invocations for both turns;
-- skip reason, retain decision, memory/resource ids, produced resource refs,
-  and idempotency keys;
-- resource versions, hashes, lifecycle state, links, and any memory-specific
-  event payloads;
-- queue rows and stream topics emitted for prompt completion and memory retain
+- session ids, run ids, prompt invocations, target capability invocations, and
+  parent/child invocation ids;
+- resource ids, version ids, content hashes, lifecycle state, links, discarded
+  markers, damaged-state markers, and idempotency keys;
+- stale CAS, missing payload, missing blob, hash mismatch, discarded read/update,
+  and replay results;
+- queue rows and stream topics emitted for prompt completion and resource
   lifecycle;
 - failed invocations, if any;
 - approval records, if any;
-- logs mentioning memory retain, queue, stream, resource, or provider failures.
+- logs mentioning resource, blob, queue, stream, or provider failures.
 
 Pass criteria:
 
-- The below-threshold path records an explicit skip without an endless spinner
-  or hidden mutation.
-- The retain path writes durable memory through the engine-owned
-  memory/resource substrate and returns/records resource refs.
-- Retain decisions, resource versions, and any failures are reconstructable from
-  DB invocation/event/log/resource/queue/stream records.
+- The normal success path records durable resource refs, versions, and hashes.
+- Every requested failure path is bounded, typed, reconstructable, and leaves no
+  invalid current version.
+- Replay/idempotency proves the same logical operation does not duplicate or
+  silently mutate resource truth.
+- Resource decisions, versions, and failures are reconstructable from DB
+  invocation/event/log/resource/queue/stream records.
 - No client-owned policy, alternate worker-spawn path, fallback reader,
   compatibility layer, or product-state side channel is used.
 
