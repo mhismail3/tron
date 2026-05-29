@@ -260,7 +260,7 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| RWO-N1 | Repo understanding and discovery |",
         "## Structural Cleanup Backlog",
         "## Static Gates To Add Or Strengthen",
-        "Recommended next scenario: **RWO-N",
+        "Recommended next scenario: **SCB-S1:",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
