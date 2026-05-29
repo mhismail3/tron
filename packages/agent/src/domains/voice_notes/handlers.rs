@@ -8,7 +8,7 @@ operation_bindings! {
     hidden = [];
     bindings = [
         "list" => |invocation, deps| {
-            list(&invocation.payload, deps).await
+            list(invocation, deps).await
         },
         "save" => |invocation, deps| {
             save(invocation, deps).await

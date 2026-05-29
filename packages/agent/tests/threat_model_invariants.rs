@@ -263,7 +263,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| SCB-S1 | `capability::execute` ownership decomposition audit |",
         "| SCB-S1b | Deterministic route and decomposition ownership audit |",
         "| SCB-S2 | Capability registry ownership split audit |",
-        "Recommended next scenario: **SCB-S3:",
+        "| SCB-S3 | Canonical bounded resource projection audit |",
+        "Recommended next scenario: **SCB-S4:",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
@@ -350,6 +351,7 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "provider_tool_terms_stay_inside_protocol_boundaries",
         "modular_substrate_has_no_raw_scope_or_worker_token_authority_fallbacks",
         "resource_native_orchestration_and_control_plane_gates_stay_on",
+        "bounded_resource_projection_summaries_stay_canonical",
         "generated_ui_resource_and_renderer_gates_stay_on",
         "module_package_activation_gates_stay_on",
         "external_workers_and_sandbox_spawn_are_first_class_engine_surfaces",
@@ -2197,6 +2199,75 @@ fn resource_native_orchestration_and_control_plane_gates_stay_on() {
             && !control.contains("control::act"),
         "control plane must be read/projection-only; mutations must remain canonical capabilities"
     );
+}
+
+#[test]
+fn bounded_resource_projection_summaries_stay_canonical() {
+    let crate_root = crate_root();
+
+    let domains_mod =
+        std::fs::read_to_string(crate_root.join("src/domains/mod.rs")).expect("read domains mod");
+    let projection = std::fs::read_to_string(crate_root.join("src/domains/resource_projection.rs"))
+        .expect("read domain resource projection helper");
+    assert!(
+        domains_mod.contains("pub(crate) mod resource_projection;")
+            && projection.contains("MAX_RESOURCE_COLLECTION_LIMIT: usize = 500")
+            && projection.contains("current_payloads_by_prefix")
+            && projection.contains("resource_ids_by_prefix")
+            && projection.contains("limit.clamp(1, MAX_RESOURCE_COLLECTION_LIMIT)")
+            && projection.contains("\"resource::list\"")
+            && projection.contains("\"resource::inspect\""),
+        "domain resource collection summaries must stay on the bounded resource projection helper"
+    );
+
+    for (label, rel) in [
+        ("prompt_library", "src/domains/prompt_library/mod.rs"),
+        ("voice_notes", "src/domains/voice_notes/mod.rs"),
+    ] {
+        let content = std::fs::read_to_string(crate_root.join(rel))
+            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
+        assert!(
+            content.contains("current_payloads_by_prefix")
+                && content.contains("ResourceCollectionQuery")
+                && content.contains("MAX_RESOURCE_COLLECTION_LIMIT")
+                && !content.contains("\"limit\": 10_000")
+                && !content.contains("limit: 10_000"),
+            "{label} resource collection projection must stay bounded through domains/resource_projection.rs"
+        );
+    }
+
+    let generated_ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
+        .expect("read generated UI primitive");
+    let generated_ui_authoring = read_generated_ui_authoring_tree(&crate_root);
+    assert!(
+        generated_ui.contains("RESOURCE_COLLECTION_SCAN_LIMIT: usize = 500")
+            && generated_ui_authoring.contains("current_resource_payloads_by_prefix")
+            && generated_ui_authoring.contains("limit: RESOURCE_COLLECTION_SCAN_LIMIT")
+            && !generated_ui_authoring.contains("limit: 10_000"),
+        "generated UI resource collection authoring must use its bounded primitive-host projection helper"
+    );
+
+    let control = std::fs::read_to_string(crate_root.join("src/engine/primitives/control.rs"))
+        .expect("read control primitive");
+    assert!(
+        control.contains("limit.clamp(1, 500)") && control.contains("limit: 500"),
+        "control projections must keep bounded resource access"
+    );
+
+    for rel in [
+        "src/engine/primitives/module/trust_audit.rs",
+        "src/engine/primitives/module/source_trust.rs",
+    ] {
+        let content = std::fs::read_to_string(crate_root.join(rel))
+            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
+        assert!(
+            content.contains("list_resources(ListResources")
+                && content.contains("inspect_resource")
+                && content.contains("limit: 500")
+                && !content.contains("limit: 10_000"),
+            "{rel} module trust/audit projections must stay resource-native and bounded"
+        );
+    }
 }
 
 #[test]

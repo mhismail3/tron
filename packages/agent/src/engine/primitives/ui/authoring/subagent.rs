@@ -43,27 +43,16 @@ pub(super) fn subagent_resource_rows(
     host: &dyn PrimitiveRuntimeHost,
     request: &SurfaceAuthoringRequest,
 ) -> Result<Vec<Value>> {
-    let resources = host.list_resources(ListResources {
-        kind: Some("agent_result".to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: 10_000,
-    })?;
     let mut rows = Vec::new();
-    for resource in resources.into_iter().filter(|resource| {
-        resource
-            .resource_id
-            .starts_with(SUBAGENT_RESULT_RESOURCE_PREFIX)
-            && !matches!(resource.lifecycle.as_str(), "discarded" | "archived")
-            && resource.current_version_id.is_some()
-    }) {
-        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-            continue;
-        };
-        let Some(payload) = current_payload(&inspection) else {
-            continue;
-        };
-        if let Some(row) = subagent_resource_row(&inspection, &payload, request) {
+    for projection in current_resource_payloads_by_prefix(
+        host,
+        "agent_result",
+        SUBAGENT_RESULT_RESOURCE_PREFIX,
+        &["discarded", "archived"],
+    )? {
+        if let Some(row) =
+            subagent_resource_row(&projection.inspection, &projection.payload, request)
+        {
             rows.push(row);
         }
     }

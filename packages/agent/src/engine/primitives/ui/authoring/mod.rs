@@ -577,27 +577,16 @@ fn resource_collection_projection(
         )));
     }
 
-    let resources = host.list_resources(ListResources {
-        kind: Some("artifact".to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: 10_000,
-    })?;
     let mut rows = Vec::new();
-    for resource in resources.into_iter().filter(|resource| {
-        resource.resource_id.starts_with(prefix)
-            && resource.lifecycle != "discarded"
-            && resource.current_version_id.is_some()
-    }) {
-        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-            continue;
-        };
-        let Some(payload) = current_payload(&inspection) else {
-            continue;
-        };
+    for projection in current_resource_payloads_by_prefix(host, "artifact", prefix, &["discarded"])?
+    {
         let row = match row_kind {
-            "snippet" => prompt_snippet_collection_row(&inspection, &payload, request),
-            "history" => prompt_history_collection_row(&inspection, &payload, request),
+            "snippet" => {
+                prompt_snippet_collection_row(&projection.inspection, &projection.payload, request)
+            }
+            "history" => {
+                prompt_history_collection_row(&projection.inspection, &projection.payload, request)
+            }
             _ => None,
         };
         if let Some(row) = row {
@@ -643,6 +632,45 @@ fn resource_collection_projection(
             }
         }),
     })
+}
+
+pub(super) struct CurrentResourcePayload {
+    pub(super) inspection: EngineResourceInspection,
+    pub(super) payload: Value,
+}
+
+pub(super) fn current_resource_payloads_by_prefix(
+    host: &dyn PrimitiveRuntimeHost,
+    kind: &str,
+    resource_id_prefix: &str,
+    excluded_lifecycles: &[&str],
+) -> Result<Vec<CurrentResourcePayload>> {
+    let resources = host.list_resources(ListResources {
+        kind: Some(kind.to_owned()),
+        scope: None,
+        lifecycle: None,
+        limit: RESOURCE_COLLECTION_SCAN_LIMIT,
+    })?;
+    let mut projections = Vec::new();
+    for resource in resources.into_iter().filter(|resource| {
+        resource.resource_id.starts_with(resource_id_prefix)
+            && !excluded_lifecycles
+                .iter()
+                .any(|lifecycle| resource.lifecycle.as_str() == *lifecycle)
+            && resource.current_version_id.is_some()
+    }) {
+        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
+            continue;
+        };
+        let Some(payload) = current_payload(&inspection) else {
+            continue;
+        };
+        projections.push(CurrentResourcePayload {
+            inspection,
+            payload,
+        });
+    }
+    Ok(projections)
 }
 
 pub(super) fn bounded_text_preview(text: &str, max_preview_bytes: usize) -> String {

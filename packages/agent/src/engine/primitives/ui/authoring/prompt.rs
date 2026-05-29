@@ -324,38 +324,30 @@ pub(super) fn prompt_history_collection_actions(
 }
 
 fn prompt_collection_rows(host: &dyn PrimitiveRuntimeHost, prefix: &str) -> Result<Vec<Value>> {
-    let resources = host.list_resources(ListResources {
-        kind: Some("artifact".to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: 10_000,
-    })?;
     let mut rows = Vec::new();
-    for resource in resources.into_iter().filter(|resource| {
-        resource.resource_id.starts_with(prefix)
-            && resource.lifecycle != "discarded"
-            && resource.current_version_id.is_some()
-    }) {
-        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-            continue;
-        };
-        let Some(payload) = current_payload(&inspection) else {
-            continue;
-        };
-        let id = payload
+    for projection in current_resource_payloads_by_prefix(host, "artifact", prefix, &["discarded"])?
+    {
+        let id = projection
+            .payload
             .get("id")
             .and_then(Value::as_str)
-            .or_else(|| inspection.resource.resource_id.strip_prefix(prefix))
+            .or_else(|| {
+                projection
+                    .inspection
+                    .resource
+                    .resource_id
+                    .strip_prefix(prefix)
+            })
             .unwrap_or_default()
             .to_owned();
         rows.push(json!({
             "id": id,
-            "resourceId": inspection.resource.resource_id,
-            "sortKey": payload
+            "resourceId": projection.inspection.resource.resource_id,
+            "sortKey": projection.payload
                 .get("updatedAt")
                 .and_then(Value::as_str)
-                .or_else(|| payload.get("lastUsedAt").and_then(Value::as_str))
-                .or_else(|| payload.get("createdAt").and_then(Value::as_str))
+                .or_else(|| projection.payload.get("lastUsedAt").and_then(Value::as_str))
+                .or_else(|| projection.payload.get("createdAt").and_then(Value::as_str))
                 .unwrap_or_default(),
         }));
     }

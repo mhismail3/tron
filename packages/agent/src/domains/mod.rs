@@ -13,6 +13,7 @@
 //! | `capability` | Single model-facing `execute` orchestrator over the live catalog |
 //! | `contract` | Method-agnostic builders for domain-owned `contract.rs` records |
 //! | `registration` | Startup loop that registers worker modules returned by domains |
+//! | `resource_projection` | Bounded helpers for domain-owned resource collection projections over `resource::list` and `resource::inspect` |
 //! | `worker` | Shared setup-only domain worker module and function registration types |
 //! | domain modules | Engine-owned behavior for agent, settings, capability support, MCP, git/worktree, session, cron, and the rest of Tron |
 //!
@@ -72,6 +73,7 @@ pub mod program;
 pub mod prompt_library;
 pub mod registration;
 pub mod repo;
+pub(crate) mod resource_projection;
 pub mod sandbox;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;

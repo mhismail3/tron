@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **79/100 provisional**
+Current score: **80/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -91,9 +91,9 @@ interruption, and resource failure states.
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 6 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
-| Code modularity and simplification | 10 | 5 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
+| Code modularity and simplification | 10 | 6 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **79/100**
+Total: **80/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -269,6 +269,20 @@ least one visible capability entry before truncating. Module docs and
 `threat_model_invariants` now enforce the split. Code modularity and
 simplification increases to `5/10`, and the banked score is now `79/100`.
 
+Resolved checkpoint note, 2026-05-29: SCB-S3 canonical resource projections
+passed after root-cause cleanup. Prompt library and voice notes now use the
+shared bounded domain projection helper in
+`packages/agent/src/domains/resource_projection.rs`; generated UI collection
+authoring now uses a bounded primitive-host projection helper; control and
+module trust/audit projections remain bounded resource substrate projections.
+The first prompt-library retest exposed a `resource_projection` regression:
+default prompt-history pruning tried to count against a 10,000-entry retention
+cap using a bounded 500-resource projection, causing an unnecessary extra
+inspect. The fix skips that non-prunable default path and keeps pruning scans
+only for retention rules that can act within the bounded projection. Code
+modularity and simplification increases to `6/10`, and the banked score is now
+`80/100`.
+
 ## Scoring Rules
 
 - `+1` for a simulator-tested scenario with DB proof and no code changes needed.
@@ -402,6 +416,7 @@ do not let screenshot state override the engine ledger.
 | SCB-S1 | `capability::execute` ownership decomposition audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_arguments.rs` now owns target argument affordances; `threat_model_invariants` rejects target-specific affordance function bodies in `execute.rs`; focused unit tests passed for intent argument normalization and deterministic routing. | Code modularity: target-specific argument normalization and intent/resource/path affordances lived in the central execute orchestrator. | this checkpoint | Passed `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
 | SCB-S1b | Deterministic route and decomposition ownership audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_resolution.rs` now owns deterministic routing, namespace clarification, execute constraints, argument-schema fit promotion/filtering, low-confidence intent evidence checks, candidate summaries, and target-specific decomposition guidance. `execute.rs` dropped from 4153 lines to 3300 lines and remains the parse/resolve/prepare/run/observe spine. | `code_ownership`: deterministic route, decomposition, namespace clarification, and argument-schema fit logic still lived in the central execute orchestrator after SCB-S1. | this checkpoint | Passed `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test orchestration_argument --lib -- --nocapture`, `cargo test decomposition --lib -- --nocapture`, `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test capability_ --lib -- --nocapture` (451 passed), `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
 | SCB-S2 | Capability registry ownership split audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | `registry/index.rs` now owns hybrid search, lexical/vector ranking, document identity, vector-fusion helpers, and degraded-index status. `registry/primer.rs` owns context-primer policy, visible primer selection, and model-facing primer rendering. `registry/recipes.rs` remains recipe-owned. The registry root now documents the submodule split and keeps catalog projection plus store implementations. | `primer_rendering`: under tight token budgets, primer rendering could emit only the long header and omit the first core capability. `code_ownership`: ranking/indexing and primer rendering lived in the central registry root beside store/SQLite behavior. | this checkpoint | Failed first `cargo test registry --lib -- --nocapture` at `primer_respects_core_policy`; after the root fix, passed `cargo test primer_respects_core_policy --lib -- --nocapture` and `cargo test registry --lib -- --nocapture` (195 passed). |
+| SCB-S3 | Canonical bounded resource projection audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | Prompt library and voice notes now compose list/inspect summaries through `domains/resource_projection.rs`; generated UI authoring now composes collection summaries through `current_resource_payloads_by_prefix` with `RESOURCE_COLLECTION_SCAN_LIMIT = 500`; control and module trust/audit projections are statically required to stay bounded. | `resource_projection`: generated UI prompt/notification/subagent authoring still had `limit: 10_000` scans, and prompt-history pruning briefly inspected an extra resource because default 10,000-entry pruning cannot be proven through a 500-resource bounded projection. | this checkpoint | Failed first `cargo test prompt_library_resources --lib -- --nocapture` at `prompt_history_record_skips_prune_scan_when_default_limits_cannot_prune`; after the root fix, passed the same command, `cargo test domain_outputs --lib -- --nocapture`, `cargo test generated_ui --lib -- --nocapture`, and `cargo test --test threat_model_invariants bounded_resource_projection_summaries_stay_canonical -- --nocapture`. |
 
 ## Scenario Details
 
@@ -2456,6 +2471,32 @@ Acceptance criteria:
 - Public schemas remain stable unless a root-cause defect requires a narrow
   additive change.
 
+SCB-S3 checkpoint, 2026-05-29:
+
+- Added `packages/agent/src/domains/resource_projection.rs` as the bounded
+  domain helper for collection summaries and resource-id cleanup traversals that
+  need canonical `resource::list` plus optional `resource::inspect` composition
+  without a fallback reader.
+- Prompt library and voice notes now use that helper for artifact-backed
+  collection summaries. Prompt-history pruning skips the default 10,000-entry
+  retention path because a bounded 500-resource projection cannot prove that
+  default cap needs pruning.
+- Generated UI prompt, notification, and subagent collection authoring now uses
+  a bounded primitive-host helper with `RESOURCE_COLLECTION_SCAN_LIMIT = 500`
+  instead of local `limit: 10_000` scans.
+- Added `bounded_resource_projection_summaries_stay_canonical` in
+  `packages/agent/tests/threat_model_invariants.rs` to keep prompt library,
+  voice notes, generated UI, control, and module trust/audit projections on
+  bounded resource access.
+- Deferred inventory: `domains/cron/implementation/domain/truth.rs`,
+  `domains/notifications/inbox.rs`, and
+  `domains/agent/runtime/service/context.rs` still contain 10,000-shaped
+  `resource::list` requests. They are behavior-coupled truth reconstruction or
+  hidden-side-effect context paths, not the collection-summary slice closed by
+  SCB-S3. Classify and harden them under SCB-S5 or an explicit SCB-S3 follow-up
+  before awarding full hidden-side-effect robustness.
+- No public schemas changed.
+
 ### 4. Classify Provider Normalization
 
 Problem:
@@ -2495,6 +2536,9 @@ Acceptance criteria:
 - Prompt-history scenario passes.
 - No endless spinner.
 - No client-owned memory or prompt truth.
+- Deferred from SCB-S3: classify and harden remaining 10,000-shaped resource
+  scans in cron truth reconstruction, notification read-state decisions, and
+  retained-memory context loading without introducing side-channel state.
 
 ### 6. Continue Test Decomposition
 
@@ -2588,6 +2632,9 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
 - Capability registry ranking/indexing stays in `registry/index.rs`, primer
   rendering stays in `registry/primer.rs`, and recipe authoring stays in
   `registry/recipes.rs`; the registry root must not re-absorb those concerns.
+- Prompt library, voice notes, and generated UI resource collection summaries
+  stay on canonical bounded projection helpers; generated UI authoring must not
+  reintroduce `limit: 10_000` resource scans.
 - Simulator deep-link harness instructions stay present in this scorecard and
   `packages/ios-app/docs/development.md`.
 - Simulator deep-link evidence records chat parity checks for user prompt
@@ -2635,20 +2682,21 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **SCB-S3: Canonicalize Resource Projections**
+Recommended next scenario: **SCB-S4: Classify Provider Normalization**
 
 Setup:
 
-- SCB-S1, SCB-S1b, and SCB-S2 completed the first execute and registry
-  ownership cleanup passes. Do not rerun provider parity unless the resource
-  projection cleanup changes live execute/search behavior.
-- Continue Structural Cleanup Backlog item 3 from this scorecard. This is a
-  deterministic Rust/static-gate scenario unless a refactor changes live
-  resource listing, inspection, prompt-library projection, generated UI
-  projection, module trust/audit projection, or control-plane output.
-- Focus on repeated list-and-inspect resource traversal and any unbounded
-  resource scans that domains still own independently. Keep behavior identical
-  unless a focused test exposes a root-cause projection bug.
+- SCB-S1, SCB-S1b, SCB-S2, and SCB-S3 completed the first execute, registry,
+  and bounded resource projection cleanup passes. Do not rerun broad provider
+  parity unless provider normalization code changes live request/response
+  behavior.
+- Continue Structural Cleanup Backlog item 4 from this scorecard. Start as a
+  deterministic Rust/static-gate audit: identify provider-specific protocol
+  terms, classify active normalization versus legacy compatibility, and ensure
+  provider schema details do not leak into engine/capability core.
+- If the audit removes or changes live provider normalization, run the smallest
+  provider-backed scenario needed to prove the wire behavior, then inspect DB
+  invocation/event/log truth before updating this scorecard.
 - Do not add fallback readers, compatibility aliases, alternate worker-spawn
   paths, client-owned policy, product-state side channels, package/source/policy/
   trust/audit tables, or central branches that make new capabilities require
@@ -2656,43 +2704,42 @@ Setup:
 
 Procedure:
 
-1. Inventory domains that perform resource list-and-inspect traversal,
-   especially prompt library, voice notes, generated UI, module trust/audit,
-   control projections, and capability output summaries.
-2. Classify each finding as legitimate low-level resource substrate access,
-   extraction candidate, behavior-coupled code that should stay, dead/legacy
-   code, or deferred large-file cleanup.
-3. Add or strengthen the smallest static or unit test proving that the selected
-   projection boundary cannot collapse back into ad hoc unbounded scans.
-4. Move one coherent resource projection slice only if the audit identifies a
-   clear behavior-preserving cleanup with local tests.
+1. Inventory provider-specific schema, tool-call, response-shape, and error
+   normalization code in provider/protocol modules and in engine/capability
+   core.
+2. Classify each finding as active provider API normalization, shared provider
+   protocol utility, malformed-input diagnostic, dead legacy compatibility, or
+   misplaced core knowledge.
+3. Add or strengthen the smallest static or unit test proving provider-specific
+   terms stay in provider/protocol ownership boundaries.
+4. Remove true backward-compatibility aliases or misplaced core branches only
+   after a focused test captures the intended current provider behavior.
 5. Remove dead/fallback/legacy/compatibility code found nearby.
-6. Run focused resource/projection tests plus
+6. Run focused provider/capability tests plus
    `cargo test --test threat_model_invariants -- --nocapture`, then update this
    scorecard with the exact files, tests, and ownership decision.
 
 After completion, inspect:
 
-- resource projection call sites discovered during the inventory;
-- resource substrate modules under `packages/agent/src/engine/resources/` and
-  `packages/agent/src/engine/primitives/resource.rs` if a canonical helper is
-  added or reused;
+- provider/protocol modules discovered during the inventory;
+- `capability::execute` request/response projection code touched by the audit;
 - `packages/agent/tests/threat_model_invariants.rs`;
 - module docs for any moved ownership boundary.
 
 Pass criteria:
 
-- The selected resource projection slice is either moved to focused ownership
-  or explicitly classified as behavior-coupled with a test-backed reason.
-- Resource listing, inspection, and covered domain projections stay compatible
-  for covered scenarios.
-- Static gates fail on future unclassified unbounded resource-scan regression.
+- Provider-specific normalization is either kept in focused provider/protocol
+  ownership with tests or removed as legacy compatibility.
+- Engine and capability core do not contain provider API schema spellings except
+  where a documented shared protocol boundary explicitly requires them.
+- Malformed tool arguments fail closed with useful diagnostics.
+- Static gates fail on future unclassified provider schema leakage.
 - Docs explain any new ownership boundary.
 - Focused tests pass, and `cargo test --test threat_model_invariants -- --nocapture`
   passes.
 
 If it fails, classify the primary layer as `code_ownership`,
-`resource_projection`, `resource_truth`, `schema_or_recipe`, or
+`provider_runner`, `schema_or_recipe`, `model_guidance`, or
 `execute_resolution`, then stop broad cleanup until the exact ownership failure
 is fixed and retested.
 

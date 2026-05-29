@@ -7,7 +7,8 @@
 //! without constructing target functions, payload templates, grants, or
 //! stale-state policy locally. The authoring folder is split by target family:
 //! prompt-library collections, notifications, subagent lineage, source-control,
-//! and AgentControl.
+//! and AgentControl. Resource-collection authoring uses bounded projections
+//! over `PrimitiveRuntimeHost::list_resources` and `inspect_resource`.
 
 mod authoring;
 mod validation;
@@ -65,6 +66,7 @@ const PROMPT_HISTORY_RESOURCE_PREFIX: &str = "artifact:prompt-history:";
 const PROMPT_SNIPPET_LAYOUT_PROFILE: &str = "prompt_library.snippets.v1";
 const PROMPT_HISTORY_LAYOUT_PROFILE: &str = "prompt_library.history.v1";
 const PROMPT_COLLECTION_LIMIT: usize = 25;
+const RESOURCE_COLLECTION_SCAN_LIMIT: usize = 500;
 const NOTIFICATION_COLLECTION_TARGET: &str = "notification";
 const NOTIFICATION_RESOURCE_PREFIX: &str = "notification:";
 const NOTIFICATION_INBOX_LAYOUT_PROFILE: &str = "notifications.inbox.v1";

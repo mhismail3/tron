@@ -22,6 +22,10 @@ use uuid::Uuid;
 use crate::domains::prompt_library::implementation::normalize::{
     hash_hex, is_blank, normalize_for_hash,
 };
+use crate::domains::resource_projection::{
+    CurrentResourceProjection, MAX_RESOURCE_COLLECTION_LIMIT, ResourceCollectionQuery,
+    current_payloads_by_prefix, resource_ids_by_prefix,
+};
 use crate::domains::worker::DomainRegistrationContext;
 use crate::domains::worker::DomainWorkerModule;
 use crate::engine::{
@@ -52,9 +56,10 @@ const HISTORY_RESOURCE_PREFIX: &str = "artifact:prompt-history:";
 const SNIPPET_RESOURCE_PREFIX: &str = "artifact:prompt-snippet:";
 
 async fn prompt_history_list_value(
-    params: Option<&Value>,
+    invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    let params = Some(&invocation.payload);
     let limit_raw =
         usize::try_from(opt_u64(params, "limit", DEFAULT_LIST_LIMIT as u64)).unwrap_or(usize::MAX);
     if limit_raw > MAX_LIST_LIMIT {
@@ -75,7 +80,7 @@ async fn prompt_history_list_value(
         .filter(|query| !query.is_empty())
         .map(str::to_lowercase);
 
-    let mut items = history_items(deps).await?;
+    let mut items = history_items(deps, Some(invocation)).await?;
     if let Some(query) = query_lower {
         items.retain(|item| {
             item.get("text")
@@ -222,25 +227,21 @@ async fn prompt_history_clear_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
-    let histories = history_resources(deps).await?;
     let mut refs = Vec::new();
     let mut deleted_count = 0_u64;
-    for resource in histories {
-        if resource["lifecycle"] == "discarded" {
-            continue;
-        }
-        let Some(resource_id) = resource.get("resourceId").and_then(Value::as_str) else {
-            continue;
-        };
-        let discarded = discard_artifact(deps, invocation, resource_id).await?;
+    for resource_id in history_resource_ids(deps, Some(invocation)).await? {
+        let discarded = discard_artifact(deps, invocation, &resource_id).await?;
         refs.extend(resource_refs(&discarded));
         deleted_count += 1;
     }
     Ok(json!({"deletedCount": deleted_count, "resourceRefs": refs}))
 }
 
-async fn prompt_snippet_list_value(deps: &Deps) -> Result<Value, CapabilityError> {
-    Ok(json!({ "items": snippet_items(deps).await? }))
+async fn prompt_snippet_list_value(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    Ok(json!({ "items": snippet_items(deps, Some(invocation)).await? }))
 }
 
 async fn prompt_snippet_get_value(
@@ -386,19 +387,13 @@ async fn prompt_snippet_delete_value(
     Ok(json!({"deleted": true, "resourceRefs": resource_refs(&discarded)}))
 }
 
-async fn history_items(deps: &Deps) -> Result<Vec<Value>, CapabilityError> {
+async fn history_items(
+    deps: &Deps,
+    parent: Option<&Invocation>,
+) -> Result<Vec<Value>, CapabilityError> {
     let mut items = Vec::new();
-    for resource in history_resources(deps).await? {
-        if resource["lifecycle"] == "discarded" {
-            continue;
-        }
-        let Some(resource_id) = resource.get("resourceId").and_then(Value::as_str) else {
-            continue;
-        };
-        if let Some(inspection) = inspect_resource(deps, None, resource_id).await?
-            && let Ok(payload) = current_payload(&inspection)
-            && let Some(item) = history_from_payload(&payload)
-        {
+    for projection in history_projections(deps, parent).await? {
+        if let Some(item) = history_from_payload(&projection.payload) {
             items.push(item);
         }
     }
@@ -406,19 +401,13 @@ async fn history_items(deps: &Deps) -> Result<Vec<Value>, CapabilityError> {
     Ok(items)
 }
 
-async fn snippet_items(deps: &Deps) -> Result<Vec<Value>, CapabilityError> {
+async fn snippet_items(
+    deps: &Deps,
+    parent: Option<&Invocation>,
+) -> Result<Vec<Value>, CapabilityError> {
     let mut items = Vec::new();
-    for resource in snippet_resources(deps).await? {
-        if resource["lifecycle"] == "discarded" {
-            continue;
-        }
-        let Some(resource_id) = resource.get("resourceId").and_then(Value::as_str) else {
-            continue;
-        };
-        if let Some(inspection) = inspect_resource(deps, None, resource_id).await?
-            && let Ok(payload) = current_payload(&inspection)
-            && let Some(item) = snippet_from_payload(&payload)
-        {
+    for projection in snippet_projections(deps, parent).await? {
+        if let Some(item) = snippet_from_payload(&projection.payload) {
             items.push(item);
         }
     }
@@ -426,35 +415,66 @@ async fn snippet_items(deps: &Deps) -> Result<Vec<Value>, CapabilityError> {
     Ok(items)
 }
 
-async fn history_resources(deps: &Deps) -> Result<Vec<Value>, CapabilityError> {
-    prefixed_artifacts(deps, HISTORY_RESOURCE_PREFIX).await
+async fn history_projections(
+    deps: &Deps,
+    parent: Option<&Invocation>,
+) -> Result<Vec<CurrentResourceProjection>, CapabilityError> {
+    prefixed_artifact_projections(deps, parent, HISTORY_RESOURCE_PREFIX).await
 }
 
-async fn snippet_resources(deps: &Deps) -> Result<Vec<Value>, CapabilityError> {
-    prefixed_artifacts(deps, SNIPPET_RESOURCE_PREFIX).await
+async fn history_resource_ids(
+    deps: &Deps,
+    parent: Option<&Invocation>,
+) -> Result<Vec<String>, CapabilityError> {
+    prefixed_artifact_resource_ids(deps, parent, HISTORY_RESOURCE_PREFIX).await
 }
 
-async fn prefixed_artifacts(deps: &Deps, prefix: &str) -> Result<Vec<Value>, CapabilityError> {
-    let listed = invoke_resource_capability(
-        deps,
-        None,
-        "resource::list",
-        json!({"kind": "artifact", "limit": 10_000}),
-        prefix,
-        "resource.read",
+async fn snippet_projections(
+    deps: &Deps,
+    parent: Option<&Invocation>,
+) -> Result<Vec<CurrentResourceProjection>, CapabilityError> {
+    prefixed_artifact_projections(deps, parent, SNIPPET_RESOURCE_PREFIX).await
+}
+
+async fn prefixed_artifact_projections(
+    deps: &Deps,
+    parent: Option<&Invocation>,
+    prefix: &str,
+) -> Result<Vec<CurrentResourceProjection>, CapabilityError> {
+    current_payloads_by_prefix(
+        &deps.engine_host,
+        parent,
+        prompt_artifact_projection_query(prefix),
     )
-    .await?;
-    Ok(listed["resources"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|resource| {
-            resource["resourceId"]
-                .as_str()
-                .is_some_and(|id| id.starts_with(prefix))
-        })
-        .collect())
+    .await
+}
+
+async fn prefixed_artifact_resource_ids(
+    deps: &Deps,
+    parent: Option<&Invocation>,
+    prefix: &str,
+) -> Result<Vec<String>, CapabilityError> {
+    resource_ids_by_prefix(
+        &deps.engine_host,
+        parent,
+        prompt_artifact_projection_query(prefix),
+    )
+    .await
+}
+
+fn prompt_artifact_projection_query(prefix: &str) -> ResourceCollectionQuery<'_> {
+    ResourceCollectionQuery {
+        kind: "artifact",
+        resource_id_prefix: prefix,
+        limit: MAX_RESOURCE_COLLECTION_LIMIT,
+        actor_id: "system:prompt_library",
+        default_trace_id: "prompt-library-resource",
+        default_session_id: "prompt-library",
+        default_workspace_id: "prompt-library",
+        idempotency_namespace: "prompt_library:resource_projection",
+        read_scope: "resource.read",
+        error_code: "PROMPT_LIBRARY_RESOURCE_OPERATION_FAILED",
+    }
 }
 
 async fn inspect_resource(
@@ -505,27 +525,17 @@ async fn prune_history_resources(
     if max_entries.is_none() && cutoff.is_none() {
         return Ok(Vec::new());
     }
-    let active_resources: Vec<String> = history_resources(deps)
-        .await?
-        .into_iter()
-        .filter(|resource| resource["lifecycle"] != "discarded")
-        .filter_map(|resource| {
-            resource
-                .get("resourceId")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        })
-        .collect();
-    if cutoff.is_none() && max_entries.is_some_and(|max| active_resources.len() <= max) {
+    if cutoff.is_none() && max_entries.is_some_and(|max| max >= MAX_RESOURCE_COLLECTION_LIMIT) {
+        return Ok(Vec::new());
+    }
+    let active_history = history_projections(deps, Some(parent)).await?;
+    if cutoff.is_none() && max_entries.is_some_and(|max| active_history.len() <= max) {
         return Ok(Vec::new());
     }
     let mut histories = Vec::new();
-    for resource_id in active_resources {
-        if let Some(inspection) = inspect_resource(deps, Some(parent), &resource_id).await?
-            && let Ok(payload) = current_payload(&inspection)
-            && let Some(item) = history_from_payload(&payload)
-        {
-            histories.push((resource_id, item));
+    for projection in active_history {
+        if let Some(item) = history_from_payload(&projection.payload) {
+            histories.push((projection.resource_id, item));
         }
     }
     histories.sort_by(|(_, left), (_, right)| compare_history_items(left, right));

@@ -35,58 +35,39 @@ pub(crate) mod service;
 use base64::Engine;
 use uuid::Uuid;
 
+use crate::domains::resource_projection::{
+    MAX_RESOURCE_COLLECTION_LIMIT, ResourceCollectionQuery, current_payloads_by_prefix,
+};
 use crate::domains::voice_notes::service as voice_notes_service;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
 };
 use crate::shared::server::params::{opt_string, opt_u64, require_string_param};
 
-async fn list(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
+async fn list(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
+    let payload = &invocation.payload;
     let limit = usize::try_from(opt_u64(Some(payload), "limit", 50)).unwrap_or(usize::MAX);
     let offset = usize::try_from(opt_u64(Some(payload), "offset", 0)).unwrap_or(0);
-    let listed = invoke_resource_capability(
-        deps,
-        None,
-        "resource::list",
-        json!({"kind": "artifact", "limit": 10_000}),
-        "voice_notes:list",
-        "resource.read",
+    let mut notes = Vec::new();
+    let projections = current_payloads_by_prefix(
+        &deps.engine_host,
+        Some(invocation),
+        ResourceCollectionQuery {
+            kind: "artifact",
+            resource_id_prefix: "artifact:voice-note:",
+            limit: MAX_RESOURCE_COLLECTION_LIMIT,
+            actor_id: "system:voice_notes",
+            default_trace_id: "voice-notes-resource",
+            default_session_id: "voice-notes",
+            default_workspace_id: "voice-notes",
+            idempotency_namespace: "voice_notes:resource_projection",
+            read_scope: "resource.read",
+            error_code: "VOICE_NOTE_RESOURCE_OPERATION_FAILED",
+        },
     )
     .await?;
-    let mut notes = Vec::new();
-    for resource in listed["resources"].as_array().cloned().unwrap_or_default() {
-        if resource["lifecycle"] == "discarded" {
-            continue;
-        }
-        let Some(resource_id) = resource.get("resourceId").and_then(Value::as_str) else {
-            continue;
-        };
-        if !resource_id.starts_with("artifact:voice-note:") {
-            continue;
-        }
-        let inspection = invoke_resource_capability(
-            deps,
-            None,
-            "resource::inspect",
-            json!({"resourceId": resource_id}),
-            &format!("voice_notes:list:{resource_id}"),
-            "resource.read",
-        )
-        .await?;
-        let payload = inspection
-            .pointer("/inspection/versions")
-            .and_then(Value::as_array)
-            .and_then(|versions| {
-                let current = inspection
-                    .pointer("/inspection/resource/currentVersionId")
-                    .and_then(Value::as_str)?;
-                versions
-                    .iter()
-                    .find(|version| version["versionId"] == current)
-            })
-            .and_then(|version| version.get("payload"))
-            .unwrap_or(&Value::Null);
-        if let Some(note) = voice_notes_service::note_projection_from_payload(payload) {
+    for projection in projections {
+        if let Some(note) = voice_notes_service::note_projection_from_payload(&projection.payload) {
             notes.push(note);
         }
     }

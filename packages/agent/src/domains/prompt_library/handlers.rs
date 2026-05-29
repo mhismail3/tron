@@ -15,7 +15,7 @@ operation_bindings! {
             prompt_history_record_value(invocation, deps).await
         },
         "history_list" => |invocation, deps| {
-            prompt_history_list_value(Some(&invocation.payload), deps).await
+            prompt_history_list_value(invocation, deps).await
         },
         "history_delete" => |invocation, deps| {
             prompt_history_delete_value(invocation, deps).await
@@ -23,8 +23,8 @@ operation_bindings! {
         "history_clear" => |invocation, deps| {
             prompt_history_clear_value(invocation, deps).await
         },
-        "snippet_list" => |_invocation, deps| {
-            prompt_snippet_list_value(deps).await
+        "snippet_list" => |invocation, deps| {
+            prompt_snippet_list_value(invocation, deps).await
         },
         "snippet_get" => |invocation, deps| {
             prompt_snippet_get_value(Some(&invocation.payload), deps).await

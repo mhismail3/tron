@@ -12,27 +12,18 @@ pub(super) fn notification_collection_projection(
         )));
     }
     let read_decisions = notification_read_decisions(host)?;
-    let resources = host.list_resources(ListResources {
-        kind: Some("notification".to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: 10_000,
-    })?;
     let mut rows = Vec::new();
-    for resource in resources.into_iter().filter(|resource| {
-        resource
-            .resource_id
-            .starts_with(NOTIFICATION_RESOURCE_PREFIX)
-            && !matches!(resource.lifecycle.as_str(), "discarded" | "archived")
-            && resource.current_version_id.is_some()
-    }) {
-        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-            continue;
-        };
-        let Some(payload) = current_payload(&inspection) else {
-            continue;
-        };
-        if let Some(row) = notification_collection_row(&inspection, &payload, &read_decisions) {
+    for projection in current_resource_payloads_by_prefix(
+        host,
+        "notification",
+        NOTIFICATION_RESOURCE_PREFIX,
+        &["discarded", "archived"],
+    )? {
+        if let Some(row) = notification_collection_row(
+            &projection.inspection,
+            &projection.payload,
+            &read_decisions,
+        ) {
             rows.push(row);
         }
     }
@@ -147,23 +138,14 @@ impl NotificationReadDecision {
 fn notification_read_decisions(
     host: &dyn PrimitiveRuntimeHost,
 ) -> Result<Vec<NotificationReadDecision>> {
-    let decisions = host.list_resources(ListResources {
-        kind: Some("decision".to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: 10_000,
-    })?;
     let mut out = Vec::new();
-    for decision in decisions {
-        if matches!(decision.lifecycle.as_str(), "archived" | "discarded") {
-            continue;
-        }
-        let Some(inspection) = host.inspect_resource(&decision.resource_id)? else {
-            continue;
-        };
-        let Some(payload) = current_payload(&inspection) else {
-            continue;
-        };
+    for projection in current_resource_payloads_by_prefix(
+        host,
+        "decision",
+        "decision:notification-",
+        &["discarded", "archived"],
+    )? {
+        let payload = &projection.payload;
         let Some(metadata) = payload.get("metadata") else {
             continue;
         };
@@ -316,27 +298,16 @@ pub(super) fn notification_collection_actions(
 
 fn notification_collection_rows(host: &dyn PrimitiveRuntimeHost) -> Result<Vec<Value>> {
     let decisions = notification_read_decisions(host)?;
-    let resources = host.list_resources(ListResources {
-        kind: Some("notification".to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: 10_000,
-    })?;
     let mut rows = Vec::new();
-    for resource in resources.into_iter().filter(|resource| {
-        resource
-            .resource_id
-            .starts_with(NOTIFICATION_RESOURCE_PREFIX)
-            && !matches!(resource.lifecycle.as_str(), "discarded" | "archived")
-            && resource.current_version_id.is_some()
-    }) {
-        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-            continue;
-        };
-        let Some(payload) = current_payload(&inspection) else {
-            continue;
-        };
-        if let Some(row) = notification_collection_row(&inspection, &payload, &decisions) {
+    for projection in current_resource_payloads_by_prefix(
+        host,
+        "notification",
+        NOTIFICATION_RESOURCE_PREFIX,
+        &["discarded", "archived"],
+    )? {
+        if let Some(row) =
+            notification_collection_row(&projection.inspection, &projection.payload, &decisions)
+        {
             rows.push(row);
         }
     }
