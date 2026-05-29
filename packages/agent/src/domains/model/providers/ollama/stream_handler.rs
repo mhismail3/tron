@@ -15,7 +15,7 @@
 //! - No SSE `data:` prefix — raw JSON per line (NDJSON)
 //! - Thinking: `message.thinking` (not `reasoning` or `reasoning_content`)
 //! - Content: `message.content` (not `choices[].delta.content`)
-//! - Capability invocations arrive complete in a single chunk (not streamed across chunks)
+//! - Tool calls arrive complete in a single chunk (not streamed across chunks)
 //! - Done: `"done": true` + `"done_reason"` (not `finish_reason`)
 //! - Usage: `prompt_eval_count` / `eval_count` in the final chunk
 
@@ -56,11 +56,12 @@ pub struct OllamaMessage {
     pub content: String,
     /// Thinking/reasoning content delta.
     pub thinking: Option<String>,
-    /// Capability invocations (arrive complete in a single chunk).
+    /// Tool calls (arrive complete in a single chunk).
+    #[serde(default, alias = "tool_calls")]
     pub capability_invocations: Option<Vec<OllamaCapabilityInvocationDraft>>,
 }
 
-/// A capability invocation from the native API (arrives complete, not streamed).
+/// A tool call from the native API (arrives complete, not streamed).
 #[derive(Debug, Deserialize)]
 pub struct OllamaCapabilityInvocationDraft {
     /// Capability invocation ID.
@@ -473,6 +474,37 @@ mod tests {
             assert_eq!(capability_invocation.name, "execute");
             assert_eq!(capability_invocation.arguments["command"], "ls");
         }
+    }
+
+    #[test]
+    fn native_tool_calls_field_deserializes_to_capability_invocation() {
+        let chunk: OllamaChatChunk = serde_json::from_value(serde_json::json!({
+            "message": {
+                "tool_calls": [
+                    {
+                        "id": "call_abc123",
+                        "function": {
+                            "index": 0,
+                            "name": "execute",
+                            "arguments": {
+                                "intent": "Read README.md"
+                            }
+                        }
+                    }
+                ]
+            },
+            "done": false
+        }))
+        .expect("native ollama tool call chunk");
+
+        let calls = chunk
+            .message
+            .capability_invocations
+            .expect("tool calls should map to internal capability invocations");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id.as_deref(), Some("call_abc123"));
+        assert_eq!(calls[0].function.name, "execute");
+        assert_eq!(calls[0].function.arguments["intent"], "Read README.md");
     }
 
     #[test]
