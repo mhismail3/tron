@@ -146,10 +146,9 @@ async fn local_external_worker_rejects_visible_functions_without_capability_meta
         grant("external-grant"),
     )
     .with_namespace_claim("invalid_local");
-    runtime
-        .hello(super::WorkerHello::loopback(worker))
-        .await
-        .unwrap();
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.session_id = Some("session-a".to_owned());
+    runtime.hello(hello).await.unwrap();
     let error = runtime
         .register_function(super::RegisterFunction {
             definition: FunctionDefinition::new(
@@ -203,6 +202,94 @@ async fn local_external_worker_rejects_metadata_outside_scoped_token() {
         EngineError::PolicyViolation(message)
             if message.contains("does not match scoped token plugin")
     ));
+}
+
+#[tokio::test]
+async fn local_external_worker_rejects_trust_tier_outside_scoped_token() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker_id = wid("local-trust-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("trust_local");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.session_id = Some("session-a".to_owned());
+    runtime.hello(hello).await.unwrap();
+    let mut function = external_visible_function(FunctionDefinition::new(
+        fid("trust_local::echo"),
+        worker_id,
+        "token bounded external function",
+        VisibilityScope::Session,
+        EffectClass::PureRead,
+    ));
+    function.metadata["trustTier"] = json!("first_party_signed");
+    let error = runtime
+        .register_function(super::RegisterFunction {
+            definition: function,
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("does not match scoped token trust")
+    ));
+}
+
+#[tokio::test]
+async fn local_external_worker_stamps_capability_policy_metadata_from_scoped_token() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("local-policy-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("policy_local");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.session_id = Some("session-a".to_owned());
+    runtime.hello(hello).await.unwrap();
+    let mut function = external_visible_function(FunctionDefinition::new(
+        fid("policy_local::echo"),
+        worker_id,
+        "policy stamped external function",
+        VisibilityScope::Session,
+        EffectClass::PureRead,
+    ));
+    function.metadata["conformanceState"] = json!("disabled");
+    function.metadata["signatureStatus"] = json!("valid");
+    runtime
+        .register_function(super::RegisterFunction {
+            definition: function,
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+
+    let stored = handle
+        .inspect_function(
+            &fid("policy_local::echo"),
+            Some(
+                &ActorContext::new(actor("agent"), ActorKind::Agent, grant("agent-grant"))
+                    .with_session_id("session-a"),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stored.metadata["trustTier"], json!("session_generated"));
+    assert_eq!(
+        stored.metadata["pluginId"],
+        json!("session_generated.local-policy-worker")
+    );
+    assert_eq!(stored.metadata["signatureStatus"], json!("session_scoped"));
+    assert_eq!(stored.metadata["conformanceState"], json!("healthy"));
 }
 
 #[tokio::test]

@@ -736,10 +736,12 @@ def main():
         "defaultVisibility": ENGINE_VISIBILITY,
     })
     last_heartbeat = 0
+    heartbeat_sequence = 0
     while True:
         now = time.monotonic()
         if now - last_heartbeat > 2.5:
-            send_json(sock, {"type": "heartbeat", "workerId": WORKER_ID, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
+            heartbeat_sequence += 1
+            send_json(sock, {"type": "heartbeat", "workerId": WORKER_ID, "sequence": heartbeat_sequence})
             last_heartbeat = now
         message = recv_json(sock)
         if message.get("type") == "invoke":

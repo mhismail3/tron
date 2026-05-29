@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use super::{
     ResolvedCapabilityTarget, actor_from_invocation, capability_primitive_target_error,
     capability_result_value, effect_class_from_str, effect_field, index_status_needs_vector_warmup,
-    is_capability_primitive, registry_metadata_sync_policy, registry_store_error,
-    requires_fresh_revision_for_payload, resolve_target, risk_field, risk_level_from_str, run,
-    schedule_vector_warmup, validate_target_payload,
+    is_capability_primitive, registry_metadata_sync_policy, registry_snapshot_for_functions,
+    registry_store_error, requires_fresh_revision_for_payload, resolve_target, risk_field,
+    risk_level_from_str, run, schedule_vector_warmup, validate_target_payload,
 };
 use crate::domains::capability::Deps;
 use crate::domains::capability::registry::{
@@ -1494,8 +1494,7 @@ async fn resolve_intent_target(
             ..FunctionQuery::default()
         })
         .await;
-    let catalog_revision = deps.engine_host.catalog_revision().await;
-    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
+    let snapshot = registry_snapshot_for_functions(deps, actor, functions).await;
     let store = deps.registry_store.clone();
     let embedding_provider = deps.embedding_provider.clone();
     let policy = CapabilitySearchPolicy::default();
@@ -3046,6 +3045,7 @@ fn discovery_phase_details(
 ) -> Value {
     let inspection = target.entry.inspection(target.binding_decision.clone());
     let recipe = serde_json::to_value(&inspection.recipe).unwrap_or(Value::Null);
+    let related_triggers = related_triggers_metadata(&target.entry);
     json!({
         "phase": "discover",
         "resolveMode": resolve.mode,
@@ -3065,6 +3065,7 @@ fn discovery_phase_details(
         "executionRequirements": inspection.execution_requirements,
         "docs": {
             "summary": target.entry.function.description.as_str(),
+            "relatedTriggers": related_triggers,
         }
     })
 }
@@ -3081,14 +3082,46 @@ fn discovery_message(target: &ResolvedCapabilityTarget) -> String {
     } else {
         recipe.optional_payload.join("; ")
     };
+    let related_trigger_ids = related_trigger_ids(&target.entry);
+    let trigger_clause = if related_trigger_ids.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " Related triggers visible as metadata: {}; invoke this capability by function id, not by trigger id.",
+            related_trigger_ids.join(", ")
+        )
+    };
     format!(
-        "Capability discovery for {}. Required arguments: {}. Optional arguments: {}. Effect/risk: {:?}/{:?}. No child invocation was created.",
+        "Capability discovery for {}. Required arguments: {}. Optional arguments: {}. Effect/risk: {:?}/{:?}.{} No child invocation was created.",
         target.entry.contract_id,
         required,
         optional,
         target.entry.function.effect_class,
-        target.entry.function.risk_level
+        target.entry.function.risk_level,
+        trigger_clause
     )
+}
+
+fn related_triggers_metadata(entry: &CapabilityRegistryEntry) -> Value {
+    entry
+        .function
+        .metadata
+        .get("relatedTriggers")
+        .cloned()
+        .unwrap_or_else(|| json!([]))
+}
+
+fn related_trigger_ids(entry: &CapabilityRegistryEntry) -> Vec<String> {
+    entry
+        .function
+        .metadata
+        .get("relatedTriggers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|trigger| trigger.get("triggerId").and_then(Value::as_str))
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 pub(super) fn lacks_sufficient_intent_resolution_evidence(
@@ -3513,6 +3546,7 @@ async fn record_orchestration_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::capability::types::CapabilityBindingDecision;
     use crate::engine::{ActorId, AuthorityGrantId, CausalContext, FunctionId, TraceId};
 
     fn test_invocation_with_session_context() -> Invocation {
@@ -3569,6 +3603,44 @@ mod tests {
                 "limit": {"type": "integer"}
             }
         }))
+    }
+
+    #[test]
+    fn discovery_message_surfaces_related_trigger_metadata() {
+        let mut function = FunctionDefinition::new(
+            FunctionId::new("rwo_n7::echo").expect("function id"),
+            crate::engine::WorkerId::new("rwo-n7-worker").expect("worker id"),
+            "RWO-N7 fixture",
+            crate::engine::VisibilityScope::System,
+            crate::engine::EffectClass::PureRead,
+        );
+        function.metadata = json!({
+            "relatedTriggers": [{
+                "triggerId": "manual:rwo_n7.echo",
+                "triggerType": "manual",
+                "targetFunction": "rwo_n7::echo"
+            }]
+        });
+        let entry = CapabilityRegistryEntry::from_function(function, 7);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: CapabilityBindingDecision {
+                decision_id: "decision-test".to_owned(),
+                contract_id: entry.contract_id.clone(),
+                selected_implementation: entry.implementation_id.clone(),
+                selected_function_id: entry.function_id.clone(),
+                selection_policy: "test".to_owned(),
+                rejected_candidates: Vec::new(),
+                catalog_revision: entry.catalog_revision,
+                schema_digest: entry.schema_digest.clone(),
+            },
+            entry,
+        };
+
+        let message = discovery_message(&target);
+
+        assert!(message.contains("manual:rwo_n7.echo"));
+        assert!(message.contains("visible as metadata"));
+        assert!(message.contains("not by trigger id"));
     }
 
     fn observability_metrics_function() -> FunctionDefinition {

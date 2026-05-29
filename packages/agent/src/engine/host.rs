@@ -583,6 +583,11 @@ impl EngineHostHandle {
         self.inner.lock().await.catalog.inspect_trigger(id)
     }
 
+    /// List triggers visible to an actor through the host boundary.
+    pub async fn visible_triggers(&self, actor: &ActorContext) -> Vec<TriggerDefinition> {
+        self.inner.lock().await.visible_triggers(actor)
+    }
+
     /// Inspect a trigger type through the host boundary.
     pub async fn inspect_trigger_type(&self, id: &TriggerTypeId) -> Result<TriggerTypeDefinition> {
         self.inner.lock().await.catalog.inspect_trigger_type(id)

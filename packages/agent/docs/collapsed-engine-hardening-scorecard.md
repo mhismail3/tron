@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **53/100 provisional**
+Current score: **55/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -84,7 +84,7 @@ calls, runtime interruption, and resource failure states.
 |---|---:|---:|---|
 | Execute portal ergonomics | 10 | 8 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
 | First-party capability usefulness | 10 | 8 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
-| Worker/function/trigger substrate | 14 | 4 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
+| Worker/function/trigger substrate | 14 | 6 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 8 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 6 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 5 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
@@ -93,7 +93,7 @@ calls, runtime interruption, and resource failure states.
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **53/100**
+Total: **55/100**
 
 ## Scoring Rules
 
@@ -175,7 +175,7 @@ The evidence note must identify:
 | RWO-N4 | Web research capability | passed | +1 | `sess_019e7301-b34f-7240-99aa-ea6d6cdac1c2` | See 2026-05-29 RWO-N4 result note below. The run used 2 successful `capability::execute` invocations, 1 successful `web::search`, 1 successful `web::fetch`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; source returned an HTTP 403 Cloudflare/JS challenge through the web fetch capability and the agent reported it without fallback browsing | n/a | Passed exact prompt on the real dev server. Search returned official `https://platform.openai.com/docs/models`; fetch targeted that URL through `first_party.web.v1.fetch`; no browser/client-owned path was used. |
 | RWO-N5 | Browser and display capability probe | passed | +1 | `sess_019e7308-762f-7691-987e-ea33f8eac543` | See 2026-05-29 RWO-N5 result note below. The run used 6 successful `capability::execute` invocations, 1 successful `browser::get_status`, 2 successful `capability::inspect`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. `browser::get_status` returned `hasBrowser = false` and `isStreaming = false`; `display::stop_stream` was inspected but not invoked; no browser/client-owned action path was used. |
 | RWO-N6 | State, queue, stream, trigger chain | passed | +1 | `sess_019e730c-0b78-7b73-8598-80a75810a394` | See 2026-05-29 RWO-N6 result note below. The run used 21 successful `capability::execute` invocations, 7 successful `capability::inspect`, 1 successful `state::set`, 1 successful `state::get`, 1 successful `queue::enqueue`, 1 successful `queue::list`, 1 successful `stream::subscribe`, 1 successful `stream::poll`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one ready `agent.test` queue row, one session-scoped state row, one `agent.test.execute` stream subscription, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. State write/read matched revision 1; queue enqueue/list returned the ready queued item; stream subscribe/poll succeeded and found no events; publish capability was not found. |
-| RWO-N7 | Live worker extensibility | pending | 0 | | | | | |
+| RWO-N7 | Live worker extensibility | passed_after_fix | +2 | conformance failure: `sess_019e732f-c5e0-7bf3-8130-9da7d39a3deb`; trigger retest with cleanup gap: `sess_019e733b-af69-7f93-bb15-7a717d906aef`; final cleanup-fixed retest: `sess_019e7341-8eac-7bb3-97bc-efd16de60757` | See 2026-05-29 RWO-N7 result note below. Final retest used 4 successful `capability::execute` rows, 1 successful target `rwo_n7::echo` invocation, catalog revisions 389-394, 0 approvals, 0 `compact.*` events, 0 session logs, one final `agent_result`, one completed agent queue row, and worker lifecycle stream rows for connect/register/disconnect/unregister. | `execute_resolution`: session-generated implementations stayed `candidate` and were not binding-selectable. `queue_or_trigger`: visible trigger metadata was not projected through capability discovery. `worker_lifecycle`: stale session-scoped registry plugin/implementation rows stayed healthy after disconnect. | this checkpoint | Passed after rebuilt dev server PID 56952. Post-disconnect registry sync removed the session-generated implementation/plugin rows and direct execute returned `CAPABILITY_NOT_FOUND`. |
 | RWO-N8 | Module package activation | pending | 0 | | | | | |
 | RWO-N9 | Subagent fan-out/fan-in | pending | 0 | | | | | |
 | RWO-N10 | Memory auto-retain | pending | 0 | | | | | |
@@ -759,6 +759,82 @@ Failure focus:
 - disconnect cleanup;
 - stale function visibility.
 
+2026-05-29 result:
+
+- Deterministic fixture:
+  `packages/agent/tests/fixtures/rwo_n7_live_worker_fixture.py` connected to the
+  real dev server `/engine/workers` transport and registered worker
+  `rwo-n7-fixture-worker`, function `rwo_n7::echo`, and trigger
+  `manual:rwo_n7.echo`. The final retest fixture log is
+  `/tmp/rwo_n7_live_worker_fixture_cleanupfix.jsonl`.
+- First failure root cause was `execute_resolution`. The worker function and
+  trigger reached the live catalog, but `capability::execute` refused
+  `rwo_n7::echo` because the durable capability implementation was projected as
+  `conformanceState = candidate`, so binding selection treated
+  `session_generated.rwo_n7.rwo_n7_echo` as not selectable. The fix engine-stamps
+  external worker capability policy metadata from the scoped token, rejects
+  trust-tier overclaims, marks healthy session-scoped workers as `healthy`, and
+  allows authoritative registry resync to promote stale `candidate` rows.
+- Second failure root cause was `queue_or_trigger`. The function invocation
+  passed after the conformance fix, but the agent could not see trigger metadata
+  through `execute` discovery and reported trigger metadata as not visible. The
+  fix projects visible related triggers into capability registry function
+  metadata and discovery messages, while preserving the invariant that trigger
+  ids are metadata and function ids are executable targets.
+- Third failure root cause was `worker_lifecycle`. After disconnect, the live
+  catalog removed the worker/function/trigger, and direct `execute` no longer
+  exposed `rwo_n7::echo`, but `capability_implementations` and
+  `capability_plugins` still contained healthy session-generated rows. The fix
+  removes stale `session_generated`/`session_scoped` plugin and implementation
+  projections during registry snapshot sync when they are absent from the live
+  catalog.
+- Focused regression coverage added:
+  `local_external_worker_rejects_trust_tier_outside_scoped_token`,
+  `local_external_worker_stamps_capability_policy_metadata_from_scoped_token`,
+  `registry_promotes_candidate_conformance_on_authoritative_resync`,
+  `registry_snapshot_projects_related_triggers_into_function_metadata`,
+  `discovery_message_surfaces_related_trigger_metadata`,
+  `registry_sync_removes_stale_session_generated_projection`, and a protocol
+  guide assertion that heartbeat examples include a `sequence`.
+- Final exact retest session:
+  `sess_019e7341-8eac-7bb3-97bc-efd16de60757`, prompt invocation
+  `019e7341-8eb2-7f01-916d-d1cc9c920919`, run
+  `019e7341-8eb4-7122-b977-12a6ba1ff69e`. Discovery execute invocation
+  `019e7341-a398-7a11-ae54-3fdb7ec49e13` surfaced
+  `Related triggers visible as metadata: manual:rwo_n7.echo; invoke this
+  capability by function id, not by trigger id.`
+- The model still made two documented trigger-target detours:
+  `019e7341-b780-7bd2-9042-4ea75eaaf895` returned a `needs_selection` style
+  discovery response, and `019e7341-ca5c-7fb3-b0a1-59761e853524` returned
+  `CAPABILITY_NOT_FOUND` for target `manual:rwo_n7.echo`. These did not create
+  child target invocations and are retained as guidance evidence for later
+  trigger ergonomics work.
+- Successful function invocation:
+  `capability::execute` `019e7341-d9b1-7f53-a053-f71ffbabe7b2` selected
+  implementation `session_generated.rwo_n7.rwo_n7_echo` under policy
+  `approved_external_or_session_healthy` and invoked target
+  `rwo_n7::echo` invocation `019e7341-da9c-74d1-9f73-da6356a7cb3d`.
+  Fixture result fields matched the requested payload:
+  `message = rwo-n7 live worker test`, `nonce = rwo-n7-2026-05-29`,
+  `rwoN7Fixture = true`, `workerId = rwo-n7-fixture-worker`.
+- Cleanup proof: catalog changes recorded `WorkerRegistered`/`FunctionRegistered`
+  /`TriggerRegistered` at revisions 389-391 and
+  `FunctionUnregistered`/`TriggerUnregistered`/`WorkerUnregistered` at revisions
+  392-394. `worker.lifecycle` stream events recorded connected,
+  function_registered, trigger_registered, disconnected, and unregistered for
+  `rwo-n7-fixture-worker`.
+- Post-disconnect registry snapshot proof: direct `execute` target
+  `rwo_n7::echo` returned `CAPABILITY_NOT_FOUND`, and DB counts were
+  `capability_implementations(function_id = rwo_n7::echo) = 0` and
+  `capability_plugins(plugin_id = session_generated.rwo-n7-fixture-worker) = 0`.
+- DB reconstruction for the final retest: 31 events, 6 messages, 5 turns, 4
+  successful `capability::execute`, 1 successful `rwo_n7::echo`, 0 approvals, 0
+  `compact.*` events, 0 session logs, one final `agent_result` resource
+  `res_019e7342-28bd-7032-8ea8-90f29e5f718e`, one completed `agent` queue row,
+  and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows.
+- The scenario passes with score delta `+2`. Current score is 55/100. The next
+  scenario is RWO-N8.
+
 ### RWO-N8: Module Package Activation
 
 Use a deterministic local package fixture.
@@ -1142,26 +1218,26 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N7: Live Worker Extensibility**
+Recommended next scenario: **RWO-N8: Module Package Activation**
 
 Setup:
 
-- Use a deterministic local worker fixture, not an ad hoc model-authored worker.
+- Use a deterministic local package fixture, not an ad hoc model-authored
+  package.
 - Use the currently configured real dev server.
-- Use the iOS simulator only for the agent discovery/invocation step after the
-  fixture is connected and visible in the live catalog.
+- Use the iOS simulator for the agent activation and invocation step after the
+  fixture package/source is prepared.
 
 Procedure:
 
-1. Start the worker fixture.
-2. Confirm the worker connects through the `/engine/workers` transport.
-3. Confirm the worker function and trigger registration appear in the live
-   catalog without a server restart.
-4. Ask the agent through a new simulator session to discover and invoke the new
-   function through `execute`.
-5. Stop the worker.
-6. Confirm heartbeat/disconnect cleanup and catalog removal or unhealthy
-   projection.
+1. Register the package/source through canonical engine capabilities.
+2. Verify the source.
+3. Approve the source if required by the capability contract.
+4. Configure and activate the local-process worker through the engine substrate.
+5. Check health and invoke the registered function through `execute`.
+6. Disable the package.
+7. Confirm no package/source/policy/trust table was introduced and no worker or
+   grant leaked after disable.
 
 After completion, inspect:
 

@@ -5,13 +5,13 @@ use serde_json::{Value, json};
 use super::{
     actor_from_invocation, admin_vector_ready, allows_degraded_vector_search,
     capability_result_value, degraded_search_status, effect_field, registry_metadata_sync_policy,
-    registry_needs_metadata_sync, registry_store_error, render_search_summary, risk_field,
-    schedule_vector_warmup, search_policy_from_runtime, search_results_need_vector_warmup,
+    registry_needs_metadata_sync, registry_snapshot_for_functions, registry_store_error,
+    render_search_summary, risk_field, schedule_vector_warmup, search_policy_from_runtime,
+    search_results_need_vector_warmup,
 };
 use crate::domains::capability::Deps;
 use crate::domains::capability::registry::{
-    CapabilityIndexSearchResult, CapabilityRegistrySnapshot, CapabilitySearchFilters, bool_field,
-    string_field, u64_field,
+    CapabilityIndexSearchResult, CapabilitySearchFilters, bool_field, string_field, u64_field,
 };
 use crate::engine::Invocation;
 use crate::shared::content::CapabilityResultContent;
@@ -49,11 +49,10 @@ pub(crate) async fn search_value(
     let actor = actor_from_invocation(invocation)?;
     let functions = deps
         .engine_host
-        .discover(&filters.function_query(actor))
+        .discover(&filters.function_query(actor.clone()))
         .await;
 
-    let catalog_revision = deps.engine_host.catalog_revision().await;
-    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
+    let snapshot = registry_snapshot_for_functions(deps, &actor, functions).await;
     let policy = search_policy_from_runtime(invocation)?;
     let allow_degraded_vector_search = allows_degraded_vector_search(&policy);
     let warmup_snapshot = if policy.local_vector {
@@ -67,7 +66,7 @@ pub(crate) async fn search_value(
     let embedding_provider = deps.embedding_provider.clone();
     let trace_id = invocation.causal_context.trace_id.as_str().to_owned();
     let filters_for_index = filters.clone();
-    let catalog_revision_value = catalog_revision.0;
+    let catalog_revision_value = snapshot.catalog_revision;
     let search_result = run_blocking_task("capability.search.index", move || {
         let mut store = store.lock().map_err(|_| CapabilityError::Internal {
             message: "capability registry store mutex poisoned".to_owned(),
@@ -149,7 +148,7 @@ pub(crate) async fn search_value(
     {
         schedule_vector_warmup(snapshot, deps);
     }
-    render_search_result_value(search_results, catalog_revision.0, cursor_offset, limit)
+    render_search_result_value(search_results, catalog_revision_value, cursor_offset, limit)
 }
 
 pub(super) fn search_queries(params: &Value) -> Result<Vec<String>, CapabilityError> {

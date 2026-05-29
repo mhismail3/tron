@@ -250,6 +250,7 @@ impl EngineExternalWorkerRuntime {
             &worker.namespace_claims,
             &connection.worker_token,
         )?;
+        stamp_external_capability_metadata(&mut definition, &connection.worker_token);
         let handler = self.invokers.get(&worker_id).map(|invoker| {
             Arc::new(ExternalFunctionProxyHandler {
                 invoker: invoker.clone(),
@@ -759,9 +760,9 @@ fn validate_external_capability_metadata(
             definition.id, token.plugin_id
         )));
     }
-    if trust_rank(trust_tier) > trust_rank(&token.trust_tier) {
+    if trust_tier != token.trust_tier {
         return Err(EngineError::PolicyViolation(format!(
-            "external visible function {} trustTier {trust_tier} exceeds scoped token trust {}",
+            "external visible function {} trustTier {trust_tier} does not match scoped token trust {}",
             definition.id, token.trust_tier
         )));
     }
@@ -786,6 +787,49 @@ fn validate_external_capability_metadata(
     Ok(())
 }
 
+fn stamp_external_capability_metadata(
+    definition: &mut FunctionDefinition,
+    token: &ScopedWorkerToken,
+) {
+    if !definition.visibility.is_agent_visible() {
+        return;
+    }
+    let conformance_state = external_conformance_state(definition, token);
+    let Some(metadata) = definition.metadata.as_object_mut() else {
+        return;
+    };
+    metadata.insert(
+        "pluginId".to_owned(),
+        Value::String(token.plugin_id.clone()),
+    );
+    metadata.insert(
+        "trustTier".to_owned(),
+        Value::String(token.trust_tier.clone()),
+    );
+    metadata.insert(
+        "signatureStatus".to_owned(),
+        Value::String(token.signature_status.clone()),
+    );
+    metadata.insert(
+        "conformanceState".to_owned(),
+        Value::String(conformance_state.to_owned()),
+    );
+}
+
+fn external_conformance_state(
+    definition: &FunctionDefinition,
+    token: &ScopedWorkerToken,
+) -> &'static str {
+    if definition.health == FunctionHealth::Healthy
+        && token.trust_tier == "session_generated"
+        && token.signature_status == "session_scoped"
+    {
+        "healthy"
+    } else {
+        "candidate"
+    }
+}
+
 fn token_claims_namespace(claims: &[String], value: &str) -> bool {
     claims.iter().any(|claim| {
         value == claim || value.starts_with(&format!("{claim}::")) || value.contains(claim)
@@ -797,19 +841,6 @@ fn visibility_rank(visibility: &WorkerVisibility) -> u8 {
         WorkerVisibility::Session => 0,
         WorkerVisibility::Workspace => 1,
         WorkerVisibility::System => 2,
-    }
-}
-
-fn trust_rank(tier: &str) -> u8 {
-    match tier {
-        "first_party_signed" => 0,
-        "trusted_signed" => 1,
-        "user_installed" => 2,
-        "session_generated" => 3,
-        "external_mcp" => 4,
-        "external_openapi" => 5,
-        "untrusted" => 6,
-        _ => u8::MAX,
     }
 }
 

@@ -27,6 +27,7 @@ use super::types::{
 };
 use crate::engine::{
     ActorContext, EffectClass, FunctionDefinition, FunctionHealth, FunctionQuery, RiskLevel,
+    TriggerDefinition,
 };
 
 const TRUST_ORDER: &[&str] = &[
@@ -443,9 +444,20 @@ pub(crate) struct CapabilityRegistrySnapshot {
 }
 
 impl CapabilityRegistrySnapshot {
+    #[cfg(test)]
     pub(crate) fn new(functions: Vec<FunctionDefinition>, catalog_revision: u64) -> Self {
+        Self::with_triggers(functions, Vec::new(), catalog_revision)
+    }
+
+    pub(crate) fn with_triggers(
+        functions: Vec<FunctionDefinition>,
+        triggers: Vec<TriggerDefinition>,
+        catalog_revision: u64,
+    ) -> Self {
+        let triggers_by_target = triggers_by_target_function(triggers);
         let mut entries = functions
             .into_iter()
+            .map(|function| attach_related_trigger_metadata(function, &triggers_by_target))
             .map(|function| CapabilityRegistryEntry::from_function(function, catalog_revision))
             .collect::<Vec<_>>();
         entries.sort_by(|a, b| a.function_id.cmp(&b.function_id));
@@ -509,6 +521,56 @@ impl CapabilityRegistrySnapshot {
         });
         entries
     }
+}
+
+fn triggers_by_target_function(
+    triggers: Vec<TriggerDefinition>,
+) -> BTreeMap<String, Vec<TriggerDefinition>> {
+    let mut by_target = BTreeMap::<String, Vec<TriggerDefinition>>::new();
+    for trigger in triggers {
+        by_target
+            .entry(trigger.target_function.as_str().to_owned())
+            .or_default()
+            .push(trigger);
+    }
+    for triggers in by_target.values_mut() {
+        triggers.sort_by(|a, b| a.id.as_str().cmp(b.id.as_str()));
+    }
+    by_target
+}
+
+fn attach_related_trigger_metadata(
+    mut function: FunctionDefinition,
+    triggers_by_target: &BTreeMap<String, Vec<TriggerDefinition>>,
+) -> FunctionDefinition {
+    let Some(triggers) = triggers_by_target.get(function.id.as_str()) else {
+        return function;
+    };
+    if triggers.is_empty() {
+        return function;
+    }
+    let mut metadata = function.metadata.as_object().cloned().unwrap_or_default();
+    metadata.insert(
+        "relatedTriggers".to_owned(),
+        Value::Array(triggers.iter().map(related_trigger_metadata).collect()),
+    );
+    function.metadata = Value::Object(metadata);
+    function
+}
+
+fn related_trigger_metadata(trigger: &TriggerDefinition) -> Value {
+    json!({
+        "triggerId": trigger.id.as_str(),
+        "triggerType": trigger.trigger_type.as_str(),
+        "targetFunction": trigger.target_function.as_str(),
+        "targetRevision": trigger.target_revision.as_ref().map(|revision| revision.0),
+        "ownerWorker": trigger.owner_worker.as_str(),
+        "revision": trigger.revision.0,
+        "visibility": trigger.visibility.as_str(),
+        "deliveryMode": &trigger.delivery_mode,
+        "authorityGrantId": trigger.authority_grant.as_str(),
+        "config": trigger.config.clone(),
+    })
 }
 
 /// Search index document.
@@ -707,6 +769,7 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
         for entry in &snapshot.entries {
             let state = prior_conformance
                 .get(&entry.implementation_id)
+                .filter(|state| preserve_existing_conformance_state(state))
                 .cloned()
                 .unwrap_or_else(|| conformance_state(&entry.function, &entry.trust_tier));
             let _ = self
@@ -718,6 +781,7 @@ impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore {
                 .get(&entry.plugin_id)
                 .and_then(|plugin| plugin.get("conformanceState"))
                 .and_then(Value::as_str)
+                .filter(|state| preserve_existing_conformance_state(state))
             {
                 manifest_value["conformanceState"] = json!(existing_state);
             }
@@ -1491,6 +1555,22 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
         let mut status = ready_index_status(policy, embedding_provider);
         let documents = snapshot.index_documents();
         let keys = documents.iter().map(document_key).collect::<BTreeSet<_>>();
+        let live_implementation_ids = snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.implementation_id.clone())
+            .collect::<BTreeSet<_>>();
+        let live_plugin_ids = snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.plugin_id.clone())
+            .collect::<BTreeSet<_>>();
+        let live_implementation_ids_json =
+            serde_json::to_string(&live_implementation_ids.iter().collect::<Vec<_>>())
+                .map_err(|error| format!("serialize live implementation ids: {error}"))?;
+        let live_plugin_ids_json =
+            serde_json::to_string(&live_plugin_ids.iter().collect::<Vec<_>>())
+                .map_err(|error| format!("serialize live plugin ids: {error}"))?;
         let tx = self
             .conn
             .transaction()
@@ -1507,7 +1587,7 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
                     trust_tier = excluded.trust_tier,
                     signature_status = excluded.signature_status,
                     conformance_state = CASE
-                      WHEN capability_plugins.conformance_state IN ('candidate', 'degraded', 'quarantined', 'disabled')
+                      WHEN capability_plugins.conformance_state IN ('degraded', 'quarantined', 'disabled')
                       THEN capability_plugins.conformance_state
                       ELSE excluded.conformance_state
                     END,
@@ -1542,7 +1622,7 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
                     health = excluded.health,
                     visibility = excluded.visibility,
                     conformance_state = CASE
-                      WHEN capability_implementations.conformance_state IN ('candidate', 'degraded', 'quarantined', 'disabled')
+                      WHEN capability_implementations.conformance_state IN ('degraded', 'quarantined', 'disabled')
                       THEN capability_implementations.conformance_state
                       ELSE excluded.conformance_state
                     END,
@@ -1569,6 +1649,23 @@ impl CapabilityRegistryStore for SqliteCapabilityRegistryStore {
             )
             .map_err(|error| format!("upsert capability implementation: {error}"))?;
         }
+        tx.execute(
+            "DELETE FROM capability_implementations
+             WHERE trust_tier = 'session_generated'
+               AND signature_status = 'session_scoped'
+               AND implementation_id NOT IN (SELECT value FROM json_each(?1))",
+            params![live_implementation_ids_json],
+        )
+        .map_err(|error| format!("delete stale session capability implementations: {error}"))?;
+        tx.execute(
+            "DELETE FROM capability_plugins
+             WHERE trust_tier = 'session_generated'
+               AND signature_status = 'session_scoped'
+               AND plugin_id NOT IN (SELECT value FROM json_each(?1))
+               AND plugin_id NOT IN (SELECT DISTINCT plugin_id FROM capability_implementations)",
+            params![live_plugin_ids_json],
+        )
+        .map_err(|error| format!("delete stale session capability plugins: {error}"))?;
         tx.commit()
             .map_err(|error| format!("commit capability registry sync: {error}"))?;
 
@@ -3810,6 +3907,10 @@ fn conformance_state(function: &FunctionDefinition, trust_tier: &str) -> String 
     })
 }
 
+fn preserve_existing_conformance_state(state: &str) -> bool {
+    matches!(state, "degraded" | "quarantined" | "disabled")
+}
+
 fn signature_status(function: &FunctionDefinition, trust_tier: &str) -> String {
     string_metadata(function, "signatureStatus").unwrap_or_else(|| match trust_tier {
         "first_party_signed" | "trusted_signed" => "valid".to_owned(),
@@ -3966,7 +4067,9 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::engine::{FunctionId, VisibilityScope, WorkerId};
+    use crate::engine::{
+        AuthorityGrantId, FunctionId, TriggerId, TriggerTypeId, VisibilityScope, WorkerId,
+    };
 
     struct FailingEmbeddingProvider;
 
@@ -4044,6 +4147,70 @@ mod tests {
         }))
     }
 
+    fn session_generated_function(id: &str, worker: &str) -> FunctionDefinition {
+        let namespace = id
+            .split_once("::")
+            .map(|(namespace, _)| namespace)
+            .unwrap_or(id);
+        let local_name = id.split_once("::").map(|(_, local)| local).unwrap_or(id);
+        let mut function = FunctionDefinition::new(
+            FunctionId::new(id).expect("function id"),
+            WorkerId::new(worker).expect("worker id"),
+            "Live external worker function",
+            VisibilityScope::System,
+            EffectClass::PureRead,
+        )
+        .with_request_schema(json!({
+            "type": "object",
+            "additionalProperties": true
+        }))
+        .with_response_schema(json!({
+            "type": "object",
+            "additionalProperties": true
+        }));
+        function.metadata = json!({
+            "contractId": id,
+            "implementationId": format!("session_generated.{namespace}.{local_name}"),
+            "pluginId": format!("session_generated.{worker}"),
+            "trustTier": "session_generated",
+            "contextPrimerLevel": "catalog",
+            "runtimeRequirements": {
+                "workerKind": "external",
+                "deliveryModes": ["Sync"]
+            },
+            "signatureStatus": "session_scoped",
+            "conformanceState": "healthy"
+        });
+        function
+    }
+
+    fn manual_trigger(id: &str, worker: &str, target: &str) -> TriggerDefinition {
+        let mut trigger = TriggerDefinition::new(
+            TriggerId::new(id).expect("trigger id"),
+            WorkerId::new(worker).expect("worker id"),
+            TriggerTypeId::new("manual").expect("trigger type"),
+            FunctionId::new(target).expect("target function"),
+            AuthorityGrantId::new("external-grant").expect("authority grant"),
+        );
+        trigger.visibility = VisibilityScope::System;
+        trigger
+    }
+
+    fn sync_without_vectors(
+        store: &mut dyn CapabilityRegistryStore,
+        snapshot: &CapabilityRegistrySnapshot,
+    ) {
+        let policy = CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        };
+        let provider = HashEmbeddingProvider::new(64);
+        store
+            .sync_snapshot(snapshot, &provider, &policy)
+            .expect("sync snapshot");
+    }
+
     #[test]
     fn registry_entry_defaults_to_first_party_metadata() {
         let entry =
@@ -4057,6 +4224,29 @@ mod tests {
         assert_eq!(entry.trust_tier, "first_party_signed");
         assert_eq!(entry.context_primer_level, "core");
         assert!(!entry.schema_digest.is_empty());
+    }
+
+    #[test]
+    fn registry_snapshot_projects_related_triggers_into_function_metadata() {
+        let snapshot = CapabilityRegistrySnapshot::with_triggers(
+            vec![session_generated_function("rwo_n7::echo", "rwo-n7-worker")],
+            vec![manual_trigger(
+                "manual:rwo_n7.echo",
+                "rwo-n7-worker",
+                "rwo_n7::echo",
+            )],
+            7,
+        );
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.function_id == "rwo_n7::echo")
+            .expect("entry");
+        assert_eq!(
+            entry.function.metadata["relatedTriggers"][0]["triggerId"],
+            json!("manual:rwo_n7.echo")
+        );
+        assert!(entry.search_text.contains("manual:rwo_n7.echo"));
     }
 
     #[test]
@@ -4760,6 +4950,110 @@ mod tests {
                 .implementation_conformance_state("first_party.filesystem.v1.read_file")
                 .expect("state"),
             Some("disabled".to_owned())
+        );
+    }
+
+    #[test]
+    fn registry_promotes_candidate_conformance_on_authoritative_resync() {
+        let function = session_generated_function("rwo_n7::echo", "rwo-n7-worker");
+        let snapshot = CapabilityRegistrySnapshot::new(vec![function], 1);
+        let implementation_id = "session_generated.rwo_n7.echo";
+
+        let mut memory_store = InMemoryCapabilityRegistryStore::default();
+        sync_without_vectors(&mut memory_store, &snapshot);
+        memory_store
+            .set_implementation_state(implementation_id, "candidate")
+            .expect("set candidate");
+        sync_without_vectors(&mut memory_store, &snapshot);
+        assert_eq!(
+            memory_store
+                .implementation_conformance_state(implementation_id)
+                .expect("memory state"),
+            Some("healthy".to_owned())
+        );
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut sqlite_store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        sync_without_vectors(&mut sqlite_store, &snapshot);
+        sqlite_store
+            .set_implementation_state(implementation_id, "candidate")
+            .expect("set candidate");
+        sync_without_vectors(&mut sqlite_store, &snapshot);
+        assert_eq!(
+            sqlite_store
+                .implementation_conformance_state(implementation_id)
+                .expect("sqlite state"),
+            Some("healthy".to_owned())
+        );
+    }
+
+    #[test]
+    fn registry_sync_removes_stale_session_generated_projection() {
+        let snapshot = CapabilityRegistrySnapshot::new(
+            vec![session_generated_function("rwo_n7::echo", "rwo-n7-worker")],
+            1,
+        );
+        let empty_snapshot = CapabilityRegistrySnapshot::new(Vec::<FunctionDefinition>::new(), 2);
+        let implementation_id = "session_generated.rwo_n7.echo";
+        let plugin_id = "session_generated.rwo-n7-worker";
+
+        let mut memory_store = InMemoryCapabilityRegistryStore::default();
+        sync_without_vectors(&mut memory_store, &snapshot);
+        assert_eq!(
+            memory_store
+                .implementation_conformance_state(implementation_id)
+                .expect("memory state"),
+            Some("healthy".to_owned())
+        );
+        assert!(
+            memory_store
+                .plugin_inspect(plugin_id)
+                .expect("memory plugin inspect")
+                .is_some()
+        );
+        sync_without_vectors(&mut memory_store, &empty_snapshot);
+        assert_eq!(
+            memory_store
+                .implementation_conformance_state(implementation_id)
+                .expect("memory state"),
+            None
+        );
+        assert!(
+            memory_store
+                .plugin_inspect(plugin_id)
+                .expect("memory plugin inspect")
+                .is_none()
+        );
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("tron.sqlite");
+        let mut sqlite_store = SqliteCapabilityRegistryStore::open(&path).expect("store");
+        sync_without_vectors(&mut sqlite_store, &snapshot);
+        assert_eq!(
+            sqlite_store
+                .implementation_conformance_state(implementation_id)
+                .expect("sqlite state"),
+            Some("healthy".to_owned())
+        );
+        assert!(
+            sqlite_store
+                .plugin_inspect(plugin_id)
+                .expect("sqlite plugin inspect")
+                .is_some()
+        );
+        sync_without_vectors(&mut sqlite_store, &empty_snapshot);
+        assert_eq!(
+            sqlite_store
+                .implementation_conformance_state(implementation_id)
+                .expect("sqlite state"),
+            None
+        );
+        assert!(
+            sqlite_store
+                .plugin_inspect(plugin_id)
+                .expect("sqlite plugin inspect")
+                .is_none()
         );
     }
 

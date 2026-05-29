@@ -615,14 +615,25 @@ pub(crate) async fn render_capability_primer(
     }
     let functions = engine_host
         .discover(&FunctionQuery {
-            actor: Some(actor),
+            actor: Some(actor.clone()),
             health: Some(FunctionHealth::Healthy),
             ..FunctionQuery::default()
         })
         .await;
     let revision = engine_host.catalog_revision().await;
-    let snapshot = CapabilityRegistrySnapshot::new(functions, revision.0);
+    let triggers = engine_host.visible_triggers(&actor).await;
+    let snapshot = CapabilityRegistrySnapshot::with_triggers(functions, triggers, revision.0);
     Ok(render_primer_from_snapshot(&snapshot, policy))
+}
+
+pub(super) async fn registry_snapshot_for_functions(
+    deps: &Deps,
+    actor: &ActorContext,
+    functions: Vec<FunctionDefinition>,
+) -> CapabilityRegistrySnapshot {
+    let catalog_revision = deps.engine_host.catalog_revision().await;
+    let triggers = deps.engine_host.visible_triggers(actor).await;
+    CapabilityRegistrySnapshot::with_triggers(functions, triggers, catalog_revision.0)
 }
 
 struct ResolvedCapabilityTarget {
@@ -649,8 +660,7 @@ async fn resolve_target(
             ..FunctionQuery::default()
         })
         .await;
-    let catalog_revision = deps.engine_host.catalog_revision().await;
-    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision.0);
+    let snapshot = registry_snapshot_for_functions(deps, actor, functions).await;
     let candidates = snapshot.find_candidates(&target);
     let store = deps.registry_store.clone();
     let embedding_provider = deps.embedding_provider.clone();
@@ -1005,12 +1015,12 @@ async fn sync_registry_for_admin(
     let functions = deps
         .engine_host
         .discover(&FunctionQuery {
-            actor: Some(actor),
+            actor: Some(actor.clone()),
             ..FunctionQuery::default()
         })
         .await;
-    let catalog_revision = deps.engine_host.catalog_revision().await.0;
-    let snapshot = CapabilityRegistrySnapshot::new(functions, catalog_revision);
+    let snapshot = registry_snapshot_for_functions(deps, &actor, functions).await;
+    let catalog_revision = snapshot.catalog_revision;
     let warmup_snapshot = snapshot.clone();
     let store = deps.registry_store.clone();
     let embedding_provider = deps.embedding_provider.clone();
