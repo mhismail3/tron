@@ -833,8 +833,7 @@ fn discovery_only_text(value: Option<&str>) -> bool {
         return false;
     };
     let normalized = value.to_ascii_lowercase();
-    let discovery_terms = [
-        "discover",
+    let explicit_discovery_terms = [
         "discovery only",
         "required fields",
         "required arguments",
@@ -847,11 +846,40 @@ fn discovery_only_text(value: Option<&str>) -> bool {
         "dry-run",
         "do not execute",
         "don't execute",
-        "do not mutate",
-        "no mutations",
-        "without mutating",
+        "no child invocation",
+        "without executing",
     ];
-    discovery_terms.iter().any(|term| normalized.contains(term))
+    if explicit_discovery_terms
+        .iter()
+        .any(|term| normalized.contains(term))
+    {
+        return true;
+    }
+    let words = normalized_intent_words(value);
+    let asks_to_discover = words.contains("discover") || words.contains("discovery");
+    let asks_to_use_result = [
+        "use",
+        "run",
+        "invoke",
+        "execute",
+        "get",
+        "read",
+        "list",
+        "query",
+        "report",
+        "show",
+        "return",
+        "fetch",
+        "count",
+        "current",
+        "status",
+        "summary",
+        "available",
+        "recent",
+    ]
+    .iter()
+    .any(|word| words.contains(*word));
+    asks_to_discover && !asks_to_use_result
 }
 
 fn target_params_from_hint(value: Option<&Value>) -> Result<Option<Value>, CapabilityError> {
@@ -1967,6 +1995,9 @@ pub(super) fn deterministic_intent_route(
             "deterministic_worktree_diff",
         );
     }
+    if let Some(hit) = deterministic_operator_status_route(intent, snapshot, constraints)? {
+        return Ok(Some(hit));
+    }
     if intent_requests_resource_inventory(intent, arguments) {
         return deterministic_hit_for_function(
             "resource::list",
@@ -2094,6 +2125,16 @@ fn namespace_aliases(namespace: &str) -> &'static [&'static str] {
         "grant" => &["grant", "grants", "permission", "permissions"],
         "approval" => &["approval", "approvals"],
         "module" => &["module", "modules", "package", "packages"],
+        "settings" => &[
+            "setting",
+            "settings",
+            "preference",
+            "preferences",
+            "profile",
+        ],
+        "model" => &["model", "models", "provider", "providers"],
+        "logs" => &["log", "logs", "event", "events"],
+        "observability" => &["metric", "metrics", "trace", "traces", "span", "spans"],
         _ => &[],
     }
 }
@@ -2331,6 +2372,87 @@ fn intent_requests_resource_inventory(intent: &str, arguments: &Value) -> bool {
         .and_then(Value::as_str)
         .is_some_and(|kind| !kind.trim().is_empty())
         || !intent_resource_kind_requests(intent).is_empty()
+}
+
+fn deterministic_operator_status_route(
+    intent: &str,
+    snapshot: &CapabilityRegistrySnapshot,
+    constraints: &Value,
+) -> Result<Option<CapabilityIndexHit>, CapabilityError> {
+    for function_id in intent_operator_status_targets(intent) {
+        if let Some(hit) = deterministic_hit_for_function(
+            function_id,
+            snapshot,
+            constraints,
+            "deterministic_operator_status",
+        )? {
+            return Ok(Some(hit));
+        }
+    }
+    Ok(None)
+}
+
+fn intent_operator_status_targets(intent: &str) -> Vec<&'static str> {
+    let words = normalized_intent_words(intent);
+    if words.is_empty() {
+        return Vec::new();
+    }
+    let status_words = [
+        "current",
+        "status",
+        "summary",
+        "available",
+        "list",
+        "inspect",
+        "report",
+        "count",
+        "recent",
+    ];
+    if !status_words.iter().any(|word| words.contains(*word)) {
+        return Vec::new();
+    }
+
+    let mut targets = Vec::new();
+    if ["model", "models", "provider", "providers"]
+        .iter()
+        .any(|word| words.contains(*word))
+    {
+        targets.push("model::list");
+    }
+    if [
+        "setting",
+        "settings",
+        "preference",
+        "preferences",
+        "profile",
+        "configuration",
+        "config",
+    ]
+    .iter()
+    .any(|word| words.contains(*word))
+    {
+        targets.push("settings::get");
+    }
+    if ["log", "logs"].iter().any(|word| words.contains(*word)) {
+        targets.push("logs::recent");
+    }
+    if [
+        "metric",
+        "metrics",
+        "server",
+        "engine",
+        "invocation",
+        "invocations",
+        "trace",
+        "traces",
+    ]
+    .iter()
+    .any(|word| words.contains(*word))
+        || (words.contains("event") || words.contains("events")) && words.contains("count")
+    {
+        targets.push("observability::metrics_snapshot");
+    }
+    targets
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3393,7 +3515,10 @@ mod tests {
             .expect("filesystem specs")
             .into_iter()
             .chain(crate::domains::worktree::contract::capabilities().expect("worktree specs"))
-            .chain(crate::domains::git::contract::capabilities().expect("git specs"));
+            .chain(crate::domains::git::contract::capabilities().expect("git specs"))
+            .chain(crate::domains::settings::contract::capabilities().expect("settings specs"))
+            .chain(crate::domains::model::contract::capabilities().expect("model specs"))
+            .chain(crate::domains::logs::contract::capabilities().expect("logs specs"));
         let spec = specs
             .into_iter()
             .find(|spec| spec.function_id.as_str() == function_id)
@@ -3420,6 +3545,21 @@ mod tests {
                 "lifecycle": {"type": "string"},
                 "limit": {"type": "integer"}
             }
+        }))
+    }
+
+    fn observability_metrics_function() -> FunctionDefinition {
+        FunctionDefinition::new(
+            FunctionId::new("observability::metrics_snapshot").expect("function id"),
+            crate::engine::WorkerId::new("observability").expect("worker id"),
+            "return a local metrics snapshot for engine primitives",
+            crate::engine::VisibilityScope::System,
+            crate::engine::EffectClass::PureRead,
+        )
+        .with_request_schema(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {}
         }))
     }
 
@@ -3482,6 +3622,32 @@ mod tests {
         }))
         .expect_err("invalid operation");
         assert!(invalid.to_string().contains("execute.operation"));
+    }
+
+    #[test]
+    fn safety_constraints_do_not_make_pure_read_targets_discovery_only() {
+        let input = parse_orchestrated_execute_input(&json!({
+            "intent": "Get recent server/event/log counts from a pure-read observability metrics snapshot. Do not mutate anything and do not use shell/process.",
+            "target": "observability::metrics_snapshot",
+            "arguments": {},
+            "constraints": {"effect": "pure_read"}
+        }))
+        .expect("input");
+
+        assert!(!input.discovery_only());
+    }
+
+    #[test]
+    fn current_status_discovery_wording_still_runs_pure_read_target() {
+        let input = parse_orchestrated_execute_input(&json!({
+            "intent": "Discover current model/provider status.",
+            "target": "model::list",
+            "arguments": {},
+            "constraints": {"effect": "pure_read"}
+        }))
+        .expect("input");
+
+        assert!(!input.discovery_only());
     }
 
     #[test]
@@ -3869,6 +4035,46 @@ mod tests {
 
         assert_eq!(hit.function_id, "resource::list");
         assert_eq!(hit.matched_by, "deterministic_resource_inventory");
+    }
+
+    #[test]
+    fn deterministic_intent_route_prefers_operator_status_targets() {
+        let snapshot = CapabilityRegistrySnapshot::new(
+            vec![
+                function_from_capability("filesystem::read_file"),
+                function_from_capability("model::list"),
+                function_from_capability("settings::get"),
+                function_from_capability("logs::recent"),
+                observability_metrics_function(),
+            ],
+            391,
+        );
+
+        let cases = [
+            (
+                "Report the current model/provider status without running shell or mutating anything.",
+                "model::list",
+            ),
+            (
+                "Report the current settings summary without mutating settings.",
+                "settings::get",
+            ),
+            (
+                "Report the recent server/event/log count from pure-read capabilities.",
+                "logs::recent",
+            ),
+            (
+                "Report the current engine metrics count from pure-read observability.",
+                "observability::metrics_snapshot",
+            ),
+        ];
+        for (intent, expected) in cases {
+            let hit = deterministic_intent_route(intent, &json!({}), &snapshot, &json!({}))
+                .expect("route check")
+                .unwrap_or_else(|| panic!("expected route for {intent}"));
+            assert_eq!(hit.function_id, expected);
+            assert_eq!(hit.matched_by, "deterministic_operator_status");
+        }
     }
 
     #[test]
