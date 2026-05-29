@@ -882,8 +882,26 @@ impl InProcessFunctionHandler for ExternalFunctionProxyHandler {
             })
             .await?;
         if let Some(error) = result.error {
+            if worker_result_error_code(&error) == Some("WORKER_DISCONNECTED") {
+                return Err(EngineError::WorkerTransportFailure {
+                    code: "WORKER_DISCONNECTED".to_owned(),
+                    message: worker_result_error_message(&error),
+                });
+            }
             return Err(EngineError::HandlerFailed(error.to_string()));
         }
         Ok(result.result.unwrap_or(Value::Null))
     }
+}
+
+fn worker_result_error_code(error: &Value) -> Option<&str> {
+    error.get("code").and_then(Value::as_str)
+}
+
+fn worker_result_error_message(error: &Value) -> String {
+    error
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| error.to_string())
 }

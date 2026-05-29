@@ -168,6 +168,15 @@ pub enum EngineError {
         details: Option<serde_json::Value>,
     },
 
+    /// The transport to a worker failed before the engine received a function result.
+    #[error("worker transport failed with {code}: {message}")]
+    WorkerTransportFailure {
+        /// Stable transport failure code.
+        code: String,
+        /// Transport failure detail.
+        message: String,
+    },
+
     /// The handler returned an application failure.
     #[error("handler failed: {0}")]
     HandlerFailed(String),

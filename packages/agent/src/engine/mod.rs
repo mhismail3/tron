@@ -65,8 +65,11 @@
 //!   through `stream::publish`, cleans volatile workers on disconnect, marks
 //!   durable disconnected workers unhealthy, treats engine-issued scoped
 //!   worker tokens from `worker::spawn` as selectable session-generated
-//!   implementations once healthy, and supplies the sandbox-created worker path
-//!   used by `worker::spawn`.
+//!   implementations once healthy, classifies socket loss separately from
+//!   application handler failures, and supplies the sandbox-created worker path
+//!   used by `worker::spawn`;
+//! - queued non-mutating worker transport failures retry through queue
+//!   lifecycle truth without committing a failed target invocation row.
 //!
 //! # INVARIANT: one production execution shape
 //!

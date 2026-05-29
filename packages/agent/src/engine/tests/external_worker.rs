@@ -1,4 +1,5 @@
 use super::*;
+use crate::engine::{EnqueueInvocation, QueueItemStatus};
 
 #[test]
 fn external_worker_protocol_roundtrips_local_session_default_messages() {
@@ -447,6 +448,22 @@ impl super::external::ExternalWorkerInvoker for EchoExternalInvoker {
     }
 }
 
+struct DisconnectExternalInvoker;
+
+#[async_trait]
+impl super::external::ExternalWorkerInvoker for DisconnectExternalInvoker {
+    async fn invoke(&self, invoke: super::WorkerInvoke) -> Result<super::WorkerInvocationResult> {
+        Ok(super::WorkerInvocationResult {
+            invocation_id: invoke.invocation_id,
+            result: None,
+            error: Some(json!({
+                "code": "WORKER_DISCONNECTED",
+                "message": "test disconnect before worker result"
+            })),
+        })
+    }
+}
+
 #[tokio::test]
 async fn local_external_worker_runtime_registers_executable_proxy_handler() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
@@ -496,6 +513,137 @@ async fn local_external_worker_runtime_registers_executable_proxy_handler() {
     assert_eq!(
         result.value.as_ref().unwrap()["payload"],
         json!({"hello": "worker"})
+    );
+}
+
+#[tokio::test]
+async fn queued_external_worker_disconnect_records_queue_retry_not_failed_target_invocation() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("local-queue-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("local_queue");
+    runtime
+        .hello(super::WorkerHello::loopback(worker))
+        .await
+        .unwrap();
+    runtime
+        .attach_invoker(worker_id.clone(), Arc::new(DisconnectExternalInvoker))
+        .unwrap();
+    runtime
+        .register_function(super::RegisterFunction {
+            definition: external_visible_function(
+                FunctionDefinition::new(
+                    fid("local_queue::echo"),
+                    worker_id,
+                    "queue disconnect external function",
+                    VisibilityScope::Session,
+                    EffectClass::PureRead,
+                )
+                .with_allowed_delivery_modes(vec![DeliveryMode::Sync, DeliveryMode::Enqueue])
+                .with_provenance(Provenance::system().with_session_id("session-a")),
+            ),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+    handle
+        .subscribe_stream(
+            "queue-disconnect-sub".to_owned(),
+            "queue.lifecycle".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some("session-a".to_owned()),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let item = handle
+        .enqueue_invocation(EnqueueInvocation {
+            queue: "default".to_owned(),
+            function_id: fid("local_queue::echo"),
+            target_revision: None,
+            payload: json!({"message": "retry"}),
+            actor_id: actor("agent"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: grant("agent-grant"),
+            authority_scopes: Vec::new(),
+            trace_id: trace("queue-disconnect"),
+            parent_invocation_id: None,
+            trigger_id: None,
+            session_id: Some("session-a".to_owned()),
+            workspace_id: None,
+            idempotency_key: None,
+        })
+        .await
+        .unwrap();
+
+    let drained = EngineQueueDrainer::drain_receipt(&handle, &item.receipt_id, "worker-a")
+        .await
+        .unwrap()
+        .expect("queued item should produce a retryable delivery failure");
+    assert!(matches!(
+        drained.error,
+        Some(EngineError::WorkerTransportFailure { ref code, .. })
+            if code == "WORKER_DISCONNECTED"
+    ));
+    let updated = handle
+        .get_queue_item(&item.receipt_id)
+        .await
+        .unwrap()
+        .expect("queue item should remain inspectable");
+    assert_eq!(updated.status, QueueItemStatus::Ready);
+    assert_eq!(updated.attempts, 1);
+
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    assert!(
+        !records.iter().any(|record| {
+            record.function_id == fid("local_queue::echo")
+                && record.delivery_mode == DeliveryMode::Sync
+        }),
+        "transport disconnect before a pure-read queue result should not be stored as a failed target invocation"
+    );
+
+    let page = handle
+        .poll_stream(
+            "queue-disconnect-sub",
+            Some(StreamCursor(0)),
+            10,
+            &StreamActorScope::scoped(Some("session-a".to_owned()), None),
+        )
+        .await
+        .unwrap();
+    let fail_event = page
+        .events
+        .iter()
+        .find(|event| {
+            event.payload["type"] == "queue.fail" && event.payload["receiptId"] == item.receipt_id
+        })
+        .expect("queue failure event should be published");
+    assert_eq!(fail_event.payload["status"], "ready");
+    assert_eq!(fail_event.payload["attempts"], 1);
+    assert!(
+        fail_event.payload["deliveryInvocationId"]
+            .as_str()
+            .is_some(),
+        "queue delivery attempt id should stay visible even without a target invocation row"
+    );
+    assert!(
+        fail_event.payload["resultInvocationId"].is_null(),
+        "queue delivery failure must not point resultInvocationId at an unrecorded invocation"
+    );
+    assert!(
+        fail_event
+            .payload
+            .get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("WORKER_DISCONNECTED"))
     );
 }
 

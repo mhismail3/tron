@@ -168,23 +168,26 @@ impl crate::engine::external::ExternalWorkerInvoker for SocketWorkerInvoker {
         })?;
         if self.outgoing.send(Message::Text(text.into())).is_err() {
             let _ = self.pending.lock().await.remove(&invocation_id);
-            return Err(EngineError::HandlerFailed(
-                "external worker connection is closed".to_owned(),
-            ));
+            return Err(EngineError::WorkerTransportFailure {
+                code: "WORKER_CONNECTION_CLOSED".to_owned(),
+                message: "external worker connection is closed".to_owned(),
+            });
         }
         match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(result)) => Ok(result),
             Ok(Err(_)) => {
                 let _ = self.pending.lock().await.remove(&invocation_id);
-                Err(EngineError::HandlerFailed(format!(
-                    "external worker invocation {invocation_id} was cancelled"
-                )))
+                Err(EngineError::WorkerTransportFailure {
+                    code: "WORKER_INVOCATION_CANCELLED".to_owned(),
+                    message: format!("external worker invocation {invocation_id} was cancelled"),
+                })
             }
             Err(_) => {
                 let _ = self.pending.lock().await.remove(&invocation_id);
-                Err(EngineError::HandlerFailed(format!(
-                    "external worker invocation {invocation_id} timed out"
-                )))
+                Err(EngineError::WorkerTransportFailure {
+                    code: "WORKER_INVOCATION_TIMEOUT".to_owned(),
+                    message: format!("external worker invocation {invocation_id} timed out"),
+                })
             }
         }
     }

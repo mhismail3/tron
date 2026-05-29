@@ -8,6 +8,9 @@
 //! handler failure does not turn into a permanent replay result. Queue failure
 //! lifecycle events are emitted from the post-fail item state, so stream
 //! subscribers see the authoritative retry/dead-letter status and attempt count.
+//! Worker transport loss before a non-mutating queued target returns is treated
+//! as delivery failure: the queue publishes retry state, but the target
+//! invocation ledger does not record an application-level handler failure.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -393,17 +396,31 @@ impl EngineQueueRuntime {
         let mut invocation =
             Invocation::new_sync(item.function_id.clone(), item.payload.clone(), context);
         invocation.expected_function_revision = item.target_revision;
-        let result = handle.invoke(invocation).await;
+        let target = handle.invoke_queue_target(invocation).await;
+        let recorded_invocation = target.recorded_invocation;
+        let result = target.result;
         if result.error.is_some() {
             handle.fail_queue_item(&item.receipt_id, 3, 1_000).await?;
             let updated = handle
                 .get_queue_item(&item.receipt_id)
                 .await?
                 .unwrap_or_else(|| item.clone());
-            publish_queue_lifecycle_event(handle, "fail", &updated, Some(&result)).await;
+            publish_queue_lifecycle_event(
+                handle,
+                "fail",
+                &updated,
+                Some((&result, recorded_invocation)),
+            )
+            .await;
         } else {
             handle.complete_queue_item(&item.receipt_id).await?;
-            publish_queue_lifecycle_event(handle, "complete", &item, Some(&result)).await;
+            publish_queue_lifecycle_event(
+                handle,
+                "complete",
+                &item,
+                Some((&result, recorded_invocation)),
+            )
+            .await;
         }
         Ok(result)
     }
@@ -883,7 +900,7 @@ pub async fn publish_queue_lifecycle_event(
     handle: &EngineHostHandle,
     event_type: &str,
     item: &EngineQueueItem,
-    result: Option<&InvocationResult>,
+    result: Option<(&InvocationResult, bool)>,
 ) {
     let status = match event_type {
         "enqueue" => "ready",
@@ -904,8 +921,13 @@ pub async fn publish_queue_lifecycle_event(
                 "functionId": &item.function_id,
                 "status": status,
                 "attempts": item.attempts,
-                "resultInvocationId": result.map(|value| value.invocation_id.to_string()),
-                "error": result.and_then(|value| value.error.as_ref()).map(ToString::to_string),
+                "deliveryInvocationId": result.map(|(value, _)| value.invocation_id.to_string()),
+                "resultInvocationId": result.and_then(|(value, recorded)| {
+                    recorded.then(|| value.invocation_id.to_string())
+                }),
+                "error": result
+                    .and_then(|(value, _)| value.error.as_ref())
+                    .map(ToString::to_string),
             }),
             visibility: super::types::VisibilityScope::Session,
             session_id: item.session_id.clone(),

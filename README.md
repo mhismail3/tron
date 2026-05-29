@@ -711,12 +711,14 @@ existing `module` queue. Scheduled trust audits are derived from active
 `module_trust_audit_schedule` decision resources and enqueued through the same
 queue/invocation substrate. Queue items keep their logical idempotency key, but
 retry attempts execute with attempt-scoped target keys so a transient handler
-failure can be retried without becoming a permanent replay result. The host
-queue projection uses module-owned due-bucket helpers, enqueues at most the
-current bucket, skips queued or completed buckets, and surfaces missed buckets
-through `module::trust_audit_status` rather than backfilling mutation work.
-There is no package, health, policy, conformance, trust, audit, or recovery
-table.
+failure can be retried without becoming a permanent replay result. Worker
+transport loss before a non-mutating queued target returns is classified as
+queue delivery failure, so `queue.lifecycle` carries the retry state without
+storing a failed target invocation row. The host queue projection uses
+module-owned due-bucket helpers, enqueues at most the current bucket, skips
+queued or completed buckets, and surfaces missed buckets through
+`module::trust_audit_status` rather than backfilling mutation work. There is no
+package, health, policy, conformance, trust, audit, or recovery table.
 
 ---
 

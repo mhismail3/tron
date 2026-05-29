@@ -84,6 +84,17 @@ enum PreparedDelegatedInvocationDecision {
     Finished(Box<InvocationResult>),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum InvocationRecordingPolicy {
+    RecordAll,
+    SkipRetryableQueueDeliveryFailure,
+}
+
+pub(in crate::engine) struct QueueTargetInvocation {
+    pub result: InvocationResult,
+    pub recorded_invocation: bool,
+}
+
 /// Host for the in-process live capability engine.
 pub struct EngineHost {
     catalog: LiveCatalog,
@@ -659,6 +670,49 @@ impl EngineHostHandle {
         self.execute_prepared_regular(*prepared).await
     }
 
+    /// Invoke a target claimed by the engine queue runtime.
+    ///
+    /// Retryable non-mutating worker transport failures return an error result
+    /// without committing a target invocation row; the queue lifecycle event is
+    /// the durable truth for that delivery attempt.
+    pub(in crate::engine) async fn invoke_queue_target(
+        &self,
+        invocation: Invocation,
+    ) -> QueueTargetInvocation {
+        if invocation.function_id.as_str() == INVOKE_FUNCTION
+            || invocation.function_id.as_str() == APPROVAL_REQUEST_FUNCTION
+            || invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION
+            || invocation.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION
+            || invocation.function_id.namespace() == ENGINE_WORKER_ID
+            || is_host_dispatched_primitive_function(&invocation.function_id)
+        {
+            return QueueTargetInvocation {
+                result: self.invoke(invocation).await,
+                recorded_invocation: true,
+            };
+        }
+
+        let prepared = {
+            let mut host = self.inner.lock().await;
+            host.catalog.prepare_sync_invocation(invocation)
+        };
+        let prepared = match prepared {
+            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
+            PreparedSyncInvocationDecision::Finished(result) => {
+                return QueueTargetInvocation {
+                    result: *result,
+                    recorded_invocation: true,
+                };
+            }
+        };
+
+        self.execute_prepared_regular_with_recording_policy(
+            *prepared,
+            InvocationRecordingPolicy::SkipRetryableQueueDeliveryFailure,
+        )
+        .await
+    }
+
     async fn invoke_approval_request_unlocked(&self, invocation: Invocation) -> InvocationResult {
         let prepared = {
             let mut host = self.inner.lock().await;
@@ -709,6 +763,19 @@ impl EngineHostHandle {
     }
 
     async fn execute_prepared_regular(&self, prepared: PreparedSyncInvocation) -> InvocationResult {
+        self.execute_prepared_regular_with_recording_policy(
+            prepared,
+            InvocationRecordingPolicy::RecordAll,
+        )
+        .await
+        .result
+    }
+
+    async fn execute_prepared_regular_with_recording_policy(
+        &self,
+        prepared: PreparedSyncInvocation,
+        recording_policy: InvocationRecordingPolicy,
+    ) -> QueueTargetInvocation {
         let compensation_contract = prepared.function.compensation.clone();
         let compensation_invocation = prepared.invocation.clone();
         let lease_result = self.acquire_prepared_resource_lease(&prepared).await;
@@ -722,6 +789,20 @@ impl EngineHostHandle {
             Ok(None) => self.invoke_prepared_handler(&prepared).await,
             Err(error) => Err(error),
         };
+        if recording_policy == InvocationRecordingPolicy::SkipRetryableQueueDeliveryFailure
+            && let Some(error) = queue_retryable_delivery_failure(&prepared, &handler_result)
+        {
+            return QueueTargetInvocation {
+                result: InvocationResult::error(
+                    &prepared.invocation,
+                    prepared.function.owner_worker.clone(),
+                    prepared.function.revision,
+                    prepared.invocation.causal_context.catalog_revision,
+                    error,
+                ),
+                recorded_invocation: false,
+            };
+        }
         let compensation_status = prepared
             .function
             .compensation
@@ -745,7 +826,10 @@ impl EngineHostHandle {
             lease_ids,
         )
         .await;
-        result
+        QueueTargetInvocation {
+            result,
+            recorded_invocation: true,
+        }
     }
 
     async fn invoke_prepared_handler(&self, prepared: &PreparedSyncInvocation) -> Result<Value> {
@@ -1457,6 +1541,20 @@ fn release_after_primary(
             );
             Err(error)
         }
+    }
+}
+
+fn queue_retryable_delivery_failure(
+    prepared: &PreparedSyncInvocation,
+    handler_result: &Result<Value>,
+) -> Option<EngineError> {
+    match handler_result {
+        Err(error @ EngineError::WorkerTransportFailure { .. })
+            if !prepared.function.effect_class.is_mutating() && prepared.idempotency.is_none() =>
+        {
+            Some(error.clone())
+        }
+        _ => None,
     }
 }
 
