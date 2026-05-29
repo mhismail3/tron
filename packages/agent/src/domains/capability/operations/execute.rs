@@ -1824,6 +1824,29 @@ fn normalized_intent_words(value: &str) -> std::collections::BTreeSet<String> {
     normalized_identifier_words(value).into_iter().collect()
 }
 
+fn positive_intent_words(value: &str) -> std::collections::BTreeSet<String> {
+    value
+        .split(|character| matches!(character, '.' | ';' | '\n' | ','))
+        .flat_map(|clause| {
+            let words = normalized_identifier_words(clause);
+            if negative_guard_clause(&words) {
+                Vec::new()
+            } else {
+                words
+            }
+        })
+        .collect()
+}
+
+fn negative_guard_clause(words: &[String]) -> bool {
+    let Some(first) = words.first().map(String::as_str) else {
+        return false;
+    };
+    matches!(first, "avoid" | "never" | "without" | "no" | "dont")
+        || (first == "don" && words.get(1).map(String::as_str) == Some("t"))
+        || (first == "do" && words.get(1).map(String::as_str) == Some("not"))
+}
+
 pub(super) fn prepared_execute_payload(
     target_params: &Value,
     input: &OrchestratedExecuteInput,
@@ -2393,7 +2416,7 @@ fn deterministic_operator_status_route(
 }
 
 fn intent_operator_status_targets(intent: &str) -> Vec<&'static str> {
-    let words = normalized_intent_words(intent);
+    let words = positive_intent_words(intent);
     if words.is_empty() {
         return Vec::new();
     }
@@ -4061,6 +4084,10 @@ mod tests {
             ),
             (
                 "Report the recent server/event/log count from pure-read capabilities.",
+                "logs::recent",
+            ),
+            (
+                "Do not mutate settings, state, resources, files, prompts, or memory. Use the canonical pure-read logs capability to fetch recent server/app logs.",
                 "logs::recent",
             ),
             (
