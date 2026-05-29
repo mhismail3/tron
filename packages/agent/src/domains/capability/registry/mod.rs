@@ -5,6 +5,16 @@
 //! and invocation; this module gives the capability primitives a stable
 //! contract/implementation vocabulary, search index boundary, and durable audit
 //! records for binding, inspection, execution, and program runs.
+//!
+//! | Submodule | Ownership |
+//! |---|---|
+//! | `index` | Document identity, lexical ranking, local vector ranking, degraded-index status, and hybrid fusion |
+//! | `primer` | Context-primer policy, visible-primer entry selection, and model-facing primer rendering |
+//! | `recipes` | Capability recipe authoring for resolve/prepare guidance |
+//!
+//! The root module owns catalog projection records plus the store trait and
+//! concrete persistence implementations. Ranking and primer text stay outside the store
+//! boundary so persistence code cannot grow model-guidance policy by accident.
 
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -14,6 +24,20 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+mod index;
+mod primer;
+mod recipes;
+
+pub(crate) use index::{CapabilityIndexSearchResult, HybridLocalCapabilityIndex};
+use index::{
+    document_key, document_requires_inspect, document_text_hash, lexical_score, ready_index_status,
+    register_sqlite_vec_extension, risk_rank, search_sqlite_documents, snippet, trust_boost,
+    trust_rank,
+};
+use primer::is_core_context_capability;
+pub(crate) use primer::{CapabilityContextPrimerPolicy, render_capability_primer};
+use recipes::agent_recipe_for_entry;
 
 use super::embeddings::EmbeddingProvider;
 #[cfg(test)]
@@ -29,46 +53,6 @@ use crate::engine::{
     ActorContext, EffectClass, FunctionDefinition, FunctionHealth, FunctionQuery, RiskLevel,
     TriggerDefinition,
 };
-
-const TRUST_ORDER: &[&str] = &[
-    "first_party_signed",
-    "trusted_signed",
-    "user_installed",
-    "session_generated",
-    "external_mcp",
-    "external_openapi",
-    "untrusted",
-];
-
-const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
-    "capability::execute",
-    "filesystem::list_dir",
-    "filesystem::read_file",
-    "filesystem::write_file",
-    "filesystem::edit_file",
-    "filesystem::find",
-    "filesystem::glob",
-    "filesystem::search_text",
-    "filesystem::diff",
-    "filesystem::apply_patch",
-    "process::run",
-    "web::search",
-    "web::fetch",
-    "notifications::send",
-    "agent::ask_user",
-    "agent::status",
-    "agent::submit_answers",
-    "agent::spawn_subagent",
-    "agent::subagent_status",
-    "agent::subagent_result",
-    "agent::cancel_subagent",
-    "job::wait",
-    "job::stream_output",
-    "worker::spawn",
-    "sandbox::list_spawned_workers",
-    "sandbox::stop_spawned_worker",
-    "worker::protocol_guide",
-];
 
 /// Profile-controlled search policy.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -91,29 +75,6 @@ impl Default for CapabilitySearchPolicy {
             max_results: 50,
             require_local_vector: false,
             allow_lexical_only_when_degraded: true,
-        }
-    }
-}
-
-/// Profile-controlled context primer policy.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub(crate) struct CapabilityContextPrimerPolicy {
-    pub(crate) enabled: bool,
-    pub(crate) mode: String,
-    pub(crate) max_tokens: usize,
-    pub(crate) include_examples: bool,
-    pub(crate) include_compact_schemas: bool,
-}
-
-impl Default for CapabilityContextPrimerPolicy {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            mode: "coreFirstParty".to_owned(),
-            max_tokens: 2600,
-            include_examples: true,
-            include_compact_schemas: true,
         }
     }
 }
@@ -479,32 +440,6 @@ impl CapabilityRegistrySnapshot {
             .collect::<Vec<_>>();
         candidates.sort_by(compare_candidates);
         candidates
-    }
-
-    pub(crate) fn visible_primer_entries(
-        &self,
-        policy: &CapabilityContextPrimerPolicy,
-    ) -> Vec<CapabilityRegistryEntry> {
-        if !policy.enabled {
-            return Vec::new();
-        }
-        let all_visible = policy.mode == "allVisibleCompact";
-        let mut entries = self
-            .entries
-            .iter()
-            .filter(|entry| {
-                all_visible
-                    || entry.context_primer_level == "core"
-                    || CORE_CONTEXT_CAPABILITIES.contains(&entry.function_id.as_str())
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        entries.sort_by(|a, b| {
-            primer_rank(a)
-                .cmp(&primer_rank(b))
-                .then_with(|| a.function_id.cmp(&b.function_id))
-        });
-        entries
     }
 }
 
@@ -1160,53 +1095,6 @@ pub(crate) struct SqliteCapabilityRegistryStore {
 struct DocumentUpsert {
     rowid: i64,
     vector_stale: bool,
-}
-
-fn search_sqlite_documents(
-    store: &SqliteCapabilityRegistryStore,
-    query: &str,
-    documents: Vec<CapabilityIndexDocument>,
-    policy: &CapabilitySearchPolicy,
-    limit: usize,
-    embedding_provider: &dyn EmbeddingProvider,
-) -> Result<CapabilityIndexSearchResult, String> {
-    let mut lexical_hits = if policy.lexical {
-        lexical_rank(query, &documents)
-    } else {
-        Vec::new()
-    };
-    let mut status = ready_index_status(policy, embedding_provider);
-    if policy.local_vector && !query.trim().is_empty() && !documents.is_empty() {
-        let vector_hits = store.vector_search(query, &documents, limit, embedding_provider);
-        match vector_hits {
-            Ok(hits) => {
-                lexical_hits = fuse_hits(lexical_hits, hits, &documents);
-            }
-            Err(error) => {
-                status.state = if is_vector_indexing_error(&error) {
-                    "indexing".to_owned()
-                } else {
-                    "unavailable".to_owned()
-                };
-                status.degraded_reason = Some(error.clone());
-                if policy.require_local_vector
-                    && !policy.allow_lexical_only_when_degraded
-                    && !is_vector_indexing_error(&error)
-                {
-                    return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
-                }
-            }
-        }
-    }
-    lexical_hits.truncate(limit.min(policy.max_results.max(1)));
-    Ok(CapabilityIndexSearchResult {
-        hits: lexical_hits,
-        status,
-    })
-}
-
-fn is_vector_indexing_error(error: &str) -> bool {
-    error.starts_with("CAPABILITY_INDEX_INDEXING:")
 }
 
 impl SqliteCapabilityRegistryStore {
@@ -3037,78 +2925,6 @@ CREATE INDEX IF NOT EXISTS idx_capability_runs_status
   ON capability_runs(status);
 "#;
 
-/// Hybrid local index.
-#[derive(Clone, Default)]
-pub(crate) struct HybridLocalCapabilityIndex {
-    policy: CapabilitySearchPolicy,
-}
-
-impl HybridLocalCapabilityIndex {
-    pub(crate) fn new(policy: CapabilitySearchPolicy) -> Self {
-        Self { policy }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn search(
-        &self,
-        query: &str,
-        documents: Vec<CapabilityIndexDocument>,
-        limit: usize,
-    ) -> Result<CapabilityIndexSearchResult, String> {
-        let provider = HashEmbeddingProvider::new(64);
-        self.search_with_provider(query, documents, limit, &provider)
-    }
-
-    pub(crate) fn search_with_provider(
-        &self,
-        query: &str,
-        documents: Vec<CapabilityIndexDocument>,
-        limit: usize,
-        embedding_provider: &dyn EmbeddingProvider,
-    ) -> Result<CapabilityIndexSearchResult, String> {
-        let mut lexical_hits = lexical_rank(query, &documents);
-        let mut status = CapabilityIndexStatus {
-            lexical: self.policy.lexical,
-            local_vector: self.policy.local_vector,
-            cloud_embeddings: false,
-            vector_store: "sqlite-vec:vec0".to_owned(),
-            embedding_model: embedding_provider.model_id().to_owned(),
-            state: "ready".to_owned(),
-            degraded_reason: None,
-        };
-
-        if self.policy.local_vector && !query.trim().is_empty() && !documents.is_empty() {
-            match vector_rank_with_provider(query, &documents, embedding_provider) {
-                Ok(vector_hits) => {
-                    lexical_hits = fuse_hits(lexical_hits, vector_hits, &documents);
-                }
-                Err(error) => {
-                    status.state = "unavailable".to_owned();
-                    status.degraded_reason = Some(error.clone());
-                    if self.policy.require_local_vector
-                        && !self.policy.allow_lexical_only_when_degraded
-                    {
-                        return Err(format!("CAPABILITY_INDEX_UNAVAILABLE: {error}"));
-                    }
-                }
-            }
-        }
-
-        lexical_hits.truncate(limit.min(self.policy.max_results.max(1)));
-        Ok(CapabilityIndexSearchResult {
-            hits: lexical_hits,
-            status,
-        })
-    }
-}
-
-/// Search result from the local index.
-#[derive(Clone, Debug)]
-pub(crate) struct CapabilityIndexSearchResult {
-    pub(crate) hits: Vec<CapabilityIndexHit>,
-    pub(crate) status: CapabilityIndexStatus,
-}
-
 /// Target supplied to inspect/execute.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CapabilityTarget {
@@ -3196,82 +3012,6 @@ pub(crate) fn parse_target(params: &Value) -> Option<CapabilityTarget> {
     None
 }
 
-pub(crate) fn render_capability_primer(
-    snapshot: &CapabilityRegistrySnapshot,
-    policy: &CapabilityContextPrimerPolicy,
-) -> Option<String> {
-    let mut entries = snapshot.visible_primer_entries(policy);
-    if entries.is_empty() {
-        return None;
-    }
-    let mut out = String::from("# Capability Primer\n\n");
-    out.push_str(&format!(
-        "Catalog revision: {}.\n\n",
-        snapshot.catalog_revision
-    ));
-    out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with executionMode=sandbox_materialized and expectedOutputs, not filesystem::write_file; the command must write the same relative sandbox path declared in expectedOutputs. Nested declared output paths are allowed, but do not write absolute, home-relative, shell-expanded, parent-escaping, or undeclared command output paths. Freshness and approval happen inside execute. Approved execute results include idempotencyKey; reuse that exact top-level key to replay the approved command without creating another child.\n\n");
-    for entry in entries.drain(..) {
-        let recipe = entry.agent_recipe();
-        let mut line = format!(
-            "- `{}` — {}. Use when: {}",
-            recipe.contract_id, recipe.display_name, recipe.use_when
-        );
-        if policy.include_compact_schemas {
-            if !recipe.required_payload.is_empty() {
-                line.push_str(&format!(
-                    " Required arguments: {}",
-                    recipe.required_payload.join("; ")
-                ));
-            }
-            if !recipe.optional_payload.is_empty() {
-                let optional = recipe
-                    .optional_payload
-                    .iter()
-                    .take(6)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                line.push_str(&format!(" Optional: {}", optional.join("; ")));
-            }
-        }
-        if policy.include_examples
-            && let Ok(example) = serde_json::to_string(&recipe.execute_template)
-        {
-            line.push_str(&format!(" Execute: {example}"));
-            if let Some(risky_example) = risky_direct_recipe_example(&recipe)
-                && let Ok(example) = serde_json::to_string(risky_example)
-            {
-                line.push_str(&format!(" Risky execute: {example}"));
-            }
-        }
-        if recipe.inspect_required {
-            line.push_str(" Execute prepares freshness before elevated-risk work.");
-        } else if recipe.approval_behavior != "none" {
-            line.push_str(&format!(" Approval: {}.", recipe.approval_behavior));
-        } else if recipe.direct_execution == "conditional_safe_direct" {
-            line.push_str(" Safe payloads run directly; risky payloads may pause for approval.");
-        }
-        line.push('\n');
-        if estimated_tokens(out.len() + line.len()) > policy.max_tokens {
-            out.push_str(
-                "- Additional capabilities are available through the same `execute` primitive; provide intent or a target hint and the engine resolves the catalog entry.\n",
-            );
-            break;
-        }
-        out.push_str(&line);
-    }
-    Some(out)
-}
-
-fn risky_direct_recipe_example(recipe: &AgentCapabilityRecipe) -> Option<&Value> {
-    if recipe.direct_execution != "conditional_safe_direct" {
-        return None;
-    }
-    recipe.examples.iter().find(|example| {
-        example["arguments"]["executionMode"] == "sandbox_materialized"
-            && example["arguments"]["expectedOutputs"].is_array()
-    })
-}
-
 pub(crate) fn requires_fresh_revision(function: &FunctionDefinition) -> bool {
     function.effect_class.is_mutating() || function.risk_level >= RiskLevel::Medium
 }
@@ -3306,16 +3046,6 @@ pub(crate) fn risk_name(risk: RiskLevel) -> &'static str {
     }
 }
 
-fn risk_rank(risk: &str) -> usize {
-    match risk.to_ascii_lowercase().as_str() {
-        "low" => 0,
-        "medium" => 1,
-        "high" => 2,
-        "critical" => 3,
-        _ => usize::MAX,
-    }
-}
-
 pub(crate) fn string_field(params: &Value, key: &str) -> Option<String> {
     params
         .get(key)
@@ -3331,36 +3061,6 @@ pub(crate) fn u64_field(params: &Value, key: &str) -> Option<u64> {
 
 pub(crate) fn bool_field(params: &Value, key: &str) -> Option<bool> {
     params.get(key).and_then(Value::as_bool)
-}
-
-fn document_key(document: &CapabilityIndexDocument) -> String {
-    format!("{}:{}", document.kind, document.capability_id)
-}
-
-fn document_text_hash(document: &CapabilityIndexDocument) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(document.text.as_bytes());
-    if let Some(recipe) = &document.recipe
-        && let Ok(serialized) = serde_json::to_vec(recipe)
-    {
-        hasher.update(serialized);
-    }
-    format!("{:x}", hasher.finalize())
-}
-
-fn ready_index_status(
-    policy: &CapabilitySearchPolicy,
-    embedding_provider: &dyn EmbeddingProvider,
-) -> CapabilityIndexStatus {
-    CapabilityIndexStatus {
-        lexical: policy.lexical,
-        local_vector: policy.local_vector,
-        cloud_embeddings: false,
-        vector_store: "sqlite-vec:vec0".to_owned(),
-        embedding_model: embedding_provider.model_id().to_owned(),
-        state: "ready".to_owned(),
-        degraded_reason: None,
-    }
 }
 
 fn binding_scope_parts(
@@ -3522,288 +3222,6 @@ fn plugin_manifest_for_entry(entry: &CapabilityRegistryEntry) -> CapabilityPlugi
     }
 }
 
-fn lexical_rank(query: &str, documents: &[CapabilityIndexDocument]) -> Vec<CapabilityIndexHit> {
-    let mut hits = documents
-        .iter()
-        .map(|document| {
-            let lexical_score = lexical_score(document, query);
-            CapabilityIndexHit {
-                kind: document.kind.clone(),
-                capability_id: document.capability_id.clone(),
-                contract_id: document.contract_id.clone(),
-                implementation_id: document.implementation_id.clone(),
-                plugin_id: document.plugin_id.clone(),
-                worker_id: document.worker_id.clone(),
-                function_id: document.function_id.clone(),
-                catalog_revision: document.catalog_revision,
-                schema_digest: document.schema_digest.clone(),
-                trust_tier: document.trust_tier.clone(),
-                health: document.health.clone(),
-                visibility: document.visibility.clone(),
-                effect_class: document.effect_class.clone(),
-                risk_level: document.risk_level.clone(),
-                lexical_score,
-                vector_score: None,
-                fused_score: lexical_score + trust_boost(&document.trust_tier),
-                matched_by: "local_lexical".to_owned(),
-                snippet: snippet(&document.text, query),
-                requires_inspect: document_requires_inspect(document),
-                recipe: document.recipe.clone(),
-            }
-        })
-        .filter(|hit| query.trim().is_empty() || hit.lexical_score > 0.0)
-        .collect::<Vec<_>>();
-    hits.sort_by(|a, b| {
-        b.fused_score
-            .partial_cmp(&a.fused_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.function_id.cmp(&b.function_id))
-    });
-    hits
-}
-
-fn document_requires_inspect(document: &CapabilityIndexDocument) -> bool {
-    document
-        .recipe
-        .as_ref()
-        .map(|recipe| recipe.inspect_required)
-        .unwrap_or_else(|| document.kind == "implementation" || document.kind == "contract")
-}
-
-fn vector_rank_with_provider(
-    query: &str,
-    documents: &[CapabilityIndexDocument],
-    embedding_provider: &dyn EmbeddingProvider,
-) -> Result<Vec<CapabilityIndexHit>, String> {
-    let texts = std::iter::once(query.to_owned())
-        .chain(documents.iter().map(|document| document.text.clone()))
-        .collect::<Vec<_>>();
-    let embeddings = embedding_provider.embed(&texts)?;
-    let Some((query_embedding, doc_embeddings)) = embeddings.split_first() else {
-        return Ok(Vec::new());
-    };
-    let ranked = sqlite_vec_rank(query_embedding, doc_embeddings)?;
-    let mut hits = ranked
-        .into_iter()
-        .filter_map(|(document_index, distance)| {
-            let document = documents.get(document_index)?;
-            let score = 1.0 / (1.0 + distance.max(0.0));
-            Some(CapabilityIndexHit {
-                kind: document.kind.clone(),
-                capability_id: document.capability_id.clone(),
-                contract_id: document.contract_id.clone(),
-                implementation_id: document.implementation_id.clone(),
-                plugin_id: document.plugin_id.clone(),
-                worker_id: document.worker_id.clone(),
-                function_id: document.function_id.clone(),
-                catalog_revision: document.catalog_revision,
-                schema_digest: document.schema_digest.clone(),
-                trust_tier: document.trust_tier.clone(),
-                health: document.health.clone(),
-                visibility: document.visibility.clone(),
-                effect_class: document.effect_class.clone(),
-                risk_level: document.risk_level.clone(),
-                lexical_score: lexical_score(document, query),
-                vector_score: Some(score),
-                fused_score: score + trust_boost(&document.trust_tier),
-                matched_by: "local_vector".to_owned(),
-                snippet: snippet(&document.text, query),
-                requires_inspect: document_requires_inspect(document),
-                recipe: document.recipe.clone(),
-            })
-        })
-        .collect::<Vec<_>>();
-    hits.sort_by(|a, b| {
-        b.fused_score
-            .partial_cmp(&a.fused_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.function_id.cmp(&b.function_id))
-    });
-    Ok(hits)
-}
-
-fn sqlite_vec_rank(
-    query_embedding: &[f32],
-    doc_embeddings: &[Vec<f32>],
-) -> Result<Vec<(usize, f32)>, String> {
-    if query_embedding.is_empty() || doc_embeddings.is_empty() {
-        return Ok(Vec::new());
-    }
-    let dimensions = query_embedding.len();
-    if doc_embeddings
-        .iter()
-        .any(|embedding| embedding.len() != dimensions)
-    {
-        return Err("fastembed returned inconsistent vector dimensions".to_owned());
-    }
-    register_sqlite_vec_extension()?;
-    let db = rusqlite::Connection::open_in_memory()
-        .map_err(|error| format!("sqlite-vec connection failed: {error}"))?;
-    db.execute(
-        &format!(
-            "create virtual table capability_vectors using vec0(document_id integer primary key, embedding float[{dimensions}] distance_metric=cosine)"
-        ),
-        [],
-    )
-    .map_err(|error| format!("sqlite-vec virtual table init failed: {error}"))?;
-    {
-        let mut insert = db
-            .prepare("insert into capability_vectors(document_id, embedding) values (?1, ?2)")
-            .map_err(|error| format!("sqlite-vec insert prepare failed: {error}"))?;
-        for (index, embedding) in doc_embeddings.iter().enumerate() {
-            insert
-                .execute(rusqlite::params![
-                    index as i64,
-                    bytemuck::cast_slice::<f32, u8>(embedding)
-                ])
-                .map_err(|error| format!("sqlite-vec insert failed: {error}"))?;
-        }
-    }
-    let query_bytes = bytemuck::cast_slice::<f32, u8>(query_embedding);
-    let mut stmt = db
-        .prepare(
-            "select document_id, distance from capability_vectors where embedding match ?1 and k = ?2",
-        )
-        .map_err(|error| format!("sqlite-vec query prepare failed: {error}"))?;
-    let rows = stmt
-        .query_map(
-            rusqlite::params![query_bytes, doc_embeddings.len() as i64],
-            |row| {
-                let document_id: i64 = row.get(0)?;
-                let distance: f32 = row.get(1)?;
-                Ok((document_id as usize, distance))
-            },
-        )
-        .map_err(|error| format!("sqlite-vec query failed: {error}"))?;
-    rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|error| format!("sqlite-vec row decode failed: {error}"))
-}
-
-#[allow(unsafe_code)]
-fn register_sqlite_vec_extension() -> Result<(), String> {
-    static SQLITE_VEC_REGISTERED: std::sync::OnceLock<Result<(), String>> =
-        std::sync::OnceLock::new();
-    SQLITE_VEC_REGISTERED
-        .get_or_init(|| {
-            // SAFETY: this follows sqlite-vec's official Rust integration:
-            // register the statically linked extension with SQLite once before
-            // opening the ephemeral in-memory vector index connection.
-            let rc = unsafe {
-                let init = std::mem::transmute::<
-                    *const (),
-                    rusqlite::auto_extension::RawAutoExtension,
-                >(sqlite_vec::sqlite3_vec_init as *const ());
-                rusqlite::ffi::sqlite3_auto_extension(Some(init))
-            };
-            if rc == rusqlite::ffi::SQLITE_OK {
-                Ok(())
-            } else {
-                Err(format!("sqlite3_auto_extension returned {rc}"))
-            }
-        })
-        .clone()
-}
-
-fn fuse_hits(
-    lexical_hits: Vec<CapabilityIndexHit>,
-    vector_hits: Vec<CapabilityIndexHit>,
-    documents: &[CapabilityIndexDocument],
-) -> Vec<CapabilityIndexHit> {
-    let mut ranks: BTreeMap<String, (Option<usize>, Option<usize>, CapabilityIndexHit)> =
-        BTreeMap::new();
-    for (rank, hit) in lexical_hits.into_iter().enumerate() {
-        ranks.insert(hit.function_id.clone(), (Some(rank + 1), None, hit));
-    }
-    for (rank, hit) in vector_hits.into_iter().enumerate() {
-        ranks
-            .entry(hit.function_id.clone())
-            .and_modify(|(_, vector_rank, existing)| {
-                *vector_rank = Some(rank + 1);
-                existing.vector_score = hit.vector_score;
-            })
-            .or_insert((None, Some(rank + 1), hit));
-    }
-    let ids = documents
-        .iter()
-        .map(|doc| (doc.function_id.as_str(), doc))
-        .collect::<BTreeMap<_, _>>();
-    let mut hits = ranks
-        .into_iter()
-        .map(|(function_id, (lex_rank, vec_rank, mut hit))| {
-            let lexical_rrf = lex_rank.map_or(0.0, |rank| 1.0 / (60.0 + rank as f32));
-            let vector_rrf = vec_rank.map_or(0.0, |rank| 1.0 / (60.0 + rank as f32));
-            let trust = ids
-                .get(function_id.as_str())
-                .map(|doc| trust_boost(&doc.trust_tier))
-                .unwrap_or(0.0);
-            hit.fused_score = lexical_rrf + vector_rrf + trust;
-            hit.matched_by = if vec_rank.is_some() && lex_rank.is_some() {
-                "hybrid_local".to_owned()
-            } else if vec_rank.is_some() {
-                "local_vector".to_owned()
-            } else {
-                "local_lexical".to_owned()
-            };
-            hit
-        })
-        .collect::<Vec<_>>();
-    hits.sort_by(|a, b| {
-        b.fused_score
-            .partial_cmp(&a.fused_score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.function_id.cmp(&b.function_id))
-    });
-    hits
-}
-
-fn lexical_score(document: &CapabilityIndexDocument, query: &str) -> f32 {
-    if query.trim().is_empty() {
-        return trust_boost(&document.trust_tier);
-    }
-    let tokens = search_tokens(query);
-    if tokens.is_empty() {
-        return 0.0;
-    }
-    let mut score = 0.0;
-    let haystack = document.text.to_ascii_lowercase();
-    for token in &tokens {
-        let function_id = document.function_id.to_ascii_lowercase();
-        let contract_id = document.contract_id.to_ascii_lowercase();
-        if function_id == *token {
-            score += 100.0;
-        } else if identifier_matches_token(&function_id, token) {
-            score += 50.0;
-        } else if contract_id == *token || identifier_matches_token(&contract_id, token) {
-            score += 40.0;
-        } else if haystack.contains(token) {
-            score += 10.0;
-        }
-    }
-    score / tokens.len() as f32
-}
-
-fn identifier_matches_token(identifier: &str, token: &str) -> bool {
-    identifier
-        .split("::")
-        .flat_map(|component| {
-            std::iter::once(component)
-                .chain(component.split('_'))
-                .filter(|part| !part.is_empty())
-        })
-        .any(|part| part == token)
-}
-
-fn trust_boost(tier: &str) -> f32 {
-    match tier {
-        "first_party_signed" => 0.060,
-        "trusted_signed" => 0.050,
-        "user_installed" => 0.035,
-        "session_generated" => 0.025,
-        "external_mcp" | "external_openapi" => 0.015,
-        _ => 0.0,
-    }
-}
-
 fn compare_candidates(
     a: &CapabilityRegistryEntry,
     b: &CapabilityRegistryEntry,
@@ -3828,27 +3246,6 @@ fn candidate_rank(entry: &CapabilityRegistryEntry) -> (u8, u8, u8) {
             0
         },
     )
-}
-
-fn primer_rank(entry: &CapabilityRegistryEntry) -> (u8, u8, u8) {
-    let primitive = if entry.is_capability_primitive() {
-        0
-    } else {
-        1
-    };
-    let core = if entry.context_primer_level == "core" {
-        0
-    } else {
-        1
-    };
-    (primitive, core, trust_rank(&entry.trust_tier))
-}
-
-fn trust_rank(tier: &str) -> u8 {
-    TRUST_ORDER
-        .iter()
-        .position(|candidate| *candidate == tier)
-        .unwrap_or(TRUST_ORDER.len()) as u8
 }
 
 fn default_implementation_id(function: &FunctionDefinition) -> String {
@@ -3888,9 +3285,7 @@ fn trust_tier(function: &FunctionDefinition) -> String {
 }
 
 fn default_context_primer_level(function: &FunctionDefinition, trust_tier: &str) -> String {
-    if CORE_CONTEXT_CAPABILITIES.contains(&function.id.as_str())
-        && trust_tier == "first_party_signed"
-    {
+    if is_core_context_capability(function.id.as_str()) && trust_tier == "first_party_signed" {
         "core".to_owned()
     } else {
         "catalog".to_owned()
@@ -3988,27 +3383,6 @@ fn metadata_value_is_searchable(value: &Value) -> bool {
     }
 }
 
-fn search_tokens(text: &str) -> Vec<String> {
-    text.split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != ':')
-        .filter(|token| !token.trim().is_empty())
-        .map(|token| token.to_ascii_lowercase())
-        .collect()
-}
-
-fn snippet(text: &str, query: &str) -> String {
-    if query.trim().is_empty() {
-        return text.chars().take(160).collect();
-    }
-    let lower = text.to_ascii_lowercase();
-    for token in search_tokens(query) {
-        if let Some(index) = lower.find(&token) {
-            let start = index.saturating_sub(40);
-            return text.chars().skip(start).take(180).collect();
-        }
-    }
-    text.chars().take(160).collect()
-}
-
 fn string_metadata(function: &FunctionDefinition, key: &str) -> Option<String> {
     function
         .metadata
@@ -4051,9 +3425,6 @@ fn display_name(function: &FunctionDefinition) -> String {
         .unwrap_or_else(|| function.id.as_str().to_owned())
 }
 
-mod recipes;
-use recipes::agent_recipe_for_entry;
-
 fn is_capability_primitive(function: &FunctionDefinition) -> bool {
     function
         .metadata
@@ -4087,10 +3458,6 @@ fn compact_description(description: &str) -> String {
         text.push_str("...");
     }
     text
-}
-
-fn estimated_tokens(chars: usize) -> usize {
-    chars / 4
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

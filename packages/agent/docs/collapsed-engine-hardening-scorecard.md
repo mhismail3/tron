@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **78/100 provisional**
+Current score: **79/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -91,9 +91,9 @@ interruption, and resource failure states.
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 6 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
-| Code modularity and simplification | 10 | 4 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
+| Code modularity and simplification | 10 | 5 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **78/100**
+Total: **79/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -256,6 +256,19 @@ because this checkpoint changed ownership boundaries without changing live
 execute behavior. Code modularity and simplification increases to `4/10`, and
 the banked score is now `78/100`.
 
+Resolved checkpoint note, 2026-05-29: SCB-S2 capability registry ownership
+split passed after a focused root-cause primer fix. Registry search/index
+ranking moved into
+`packages/agent/src/domains/capability/registry/index.rs`, primer policy and
+rendering moved into
+`packages/agent/src/domains/capability/registry/primer.rs`, and recipes remain
+in `registry/recipes.rs`. The first focused registry run exposed a
+`primer_rendering` bug where a tight token budget could emit only the primer
+header and omit the first core capability; `primer.rs` now always renders at
+least one visible capability entry before truncating. Module docs and
+`threat_model_invariants` now enforce the split. Code modularity and
+simplification increases to `5/10`, and the banked score is now `79/100`.
+
 ## Scoring Rules
 
 - `+1` for a simulator-tested scenario with DB proof and no code changes needed.
@@ -388,6 +401,7 @@ do not let screenshot state override the engine ledger.
 | RWO-N14-F1 | Process sandbox command-output boundary follow-up | passed_after_fix | +1 | failed simulator session `sess_019e74d4-7e0a-7c72-81e7-cb7e15c26be6`; Google retest `sess_019e7523-4c24-7b02-9ff7-08b896c05c74`; direct exact-payload probe `sess_019e7523-ffb5-7601-acdf-8bf36461824a` | Google P5 retest on rebuilt dev server PID `57422` used run log `/tmp/rwo_n14_p5_provider_parity_20260529120827.json`, final simulator screenshot `/tmp/rwo_n14_p5_google_final_simulator_20260529120827.png`, one executed `process::run` approval, one setup `process::run` child, one replay `capability::execute`, `approvalReplayed=true`, `childInvocationCreated=false`, zero new approvals, zero new process children, zero failed invocations, and zero `compact.*` events. Direct exact-payload probe returned `target_policy_rejected` with `approvalCreated=false`, `childInvocationCreated=false`, zero approval rows, zero `process::run` child rows, and no host leak at `~/.tron/workspace/reports/exact-home-leak-20260529120914.txt`. | `target_capability` / `process_sandbox`: sandbox-materialized command write targets were not bounded to declared relative expected outputs before approval, nested expected-output parents were not prepared inside the sandbox, and sandbox commands inherited host `HOME`/`TMPDIR`. | this checkpoint | Passed `cargo test sandbox_materialized --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, `git diff --check`, Google simulator-backed P5 retest, and direct exact-payload live probe. |
 | SCB-S1 | `capability::execute` ownership decomposition audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_arguments.rs` now owns target argument affordances; `threat_model_invariants` rejects target-specific affordance function bodies in `execute.rs`; focused unit tests passed for intent argument normalization and deterministic routing. | Code modularity: target-specific argument normalization and intent/resource/path affordances lived in the central execute orchestrator. | this checkpoint | Passed `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
 | SCB-S1b | Deterministic route and decomposition ownership audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_resolution.rs` now owns deterministic routing, namespace clarification, execute constraints, argument-schema fit promotion/filtering, low-confidence intent evidence checks, candidate summaries, and target-specific decomposition guidance. `execute.rs` dropped from 4153 lines to 3300 lines and remains the parse/resolve/prepare/run/observe spine. | `code_ownership`: deterministic route, decomposition, namespace clarification, and argument-schema fit logic still lived in the central execute orchestrator after SCB-S1. | this checkpoint | Passed `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test orchestration_argument --lib -- --nocapture`, `cargo test decomposition --lib -- --nocapture`, `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test capability_ --lib -- --nocapture` (451 passed), `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
+| SCB-S2 | Capability registry ownership split audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | `registry/index.rs` now owns hybrid search, lexical/vector ranking, document identity, vector-fusion helpers, and degraded-index status. `registry/primer.rs` owns context-primer policy, visible primer selection, and model-facing primer rendering. `registry/recipes.rs` remains recipe-owned. The registry root now documents the submodule split and keeps catalog projection plus store implementations. | `primer_rendering`: under tight token budgets, primer rendering could emit only the long header and omit the first core capability. `code_ownership`: ranking/indexing and primer rendering lived in the central registry root beside store/SQLite behavior. | this checkpoint | Failed first `cargo test registry --lib -- --nocapture` at `primer_respects_core_policy`; after the root fix, passed `cargo test primer_respects_core_policy --lib -- --nocapture` and `cargo test registry --lib -- --nocapture` (195 passed). |
 
 ## Scenario Details
 
@@ -2404,6 +2418,23 @@ Acceptance criteria:
 - Module docs explain ownership.
 - Tests continue to prove search/ranking/discovery parity.
 
+SCB-S2 checkpoint, 2026-05-29:
+
+- Moved hybrid search/index behavior, lexical and local-vector ranking, document
+  identity/hashing, vector-fusion helpers, and degraded-index status projection
+  into `packages/agent/src/domains/capability/registry/index.rs`.
+- Moved context-primer policy, visible primer entry selection, and model-facing
+  primer rendering into
+  `packages/agent/src/domains/capability/registry/primer.rs`.
+- Kept recipe authoring in
+  `packages/agent/src/domains/capability/registry/recipes.rs` and documented
+  the split in the registry root module table.
+- Added a static gate that rejects ranking/indexing, primer rendering, and
+  recipe authoring bodies if they move back into `registry/mod.rs`.
+- Fixed the focused primer rendering failure found by the registry test:
+  tight token budgets now still render the first visible capability entry before
+  truncating additional entries.
+
 ### 3. Canonicalize Resource Projections
 
 Problem:
@@ -2554,6 +2585,9 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
 - Provider-specific schema terms do not leak outside provider/protocol modules.
 - New target-specific execute behavior must be capability-owned, not
   central-spaghetti owned.
+- Capability registry ranking/indexing stays in `registry/index.rs`, primer
+  rendering stays in `registry/primer.rs`, and recipe authoring stays in
+  `registry/recipes.rs`; the registry root must not re-absorb those concerns.
 - Simulator deep-link harness instructions stay present in this scorecard and
   `packages/ios-app/docs/development.md`.
 - Simulator deep-link evidence records chat parity checks for user prompt
@@ -2601,20 +2635,20 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **SCB-S2: Capability Registry Ownership Split Audit**
+Recommended next scenario: **SCB-S3: Canonicalize Resource Projections**
 
 Setup:
 
-- SCB-S1 and SCB-S1b completed the first `capability::execute` decomposition
-  passes. Do not rerun provider parity unless the registry cleanup changes live
-  execute/search behavior.
-- Continue Structural Cleanup Backlog item 2 from this scorecard. This is a
+- SCB-S1, SCB-S1b, and SCB-S2 completed the first execute and registry
+  ownership cleanup passes. Do not rerun provider parity unless the resource
+  projection cleanup changes live execute/search behavior.
+- Continue Structural Cleanup Backlog item 3 from this scorecard. This is a
   deterministic Rust/static-gate scenario unless a refactor changes live
-  capability search, registry sync, recipe projection, or primer rendering.
-- Focus on `packages/agent/src/domains/capability/registry/mod.rs`, which still
-  mixes store behavior, SQLite persistence, ranking/indexing, recipes, plugin
-  manifests, primer rendering, and projection logic. Keep behavior identical;
-  split only an ownership boundary with local tests and static gates.
+  resource listing, inspection, prompt-library projection, generated UI
+  projection, module trust/audit projection, or control-plane output.
+- Focus on repeated list-and-inspect resource traversal and any unbounded
+  resource scans that domains still own independently. Keep behavior identical
+  unless a focused test exposes a root-cause projection bug.
 - Do not add fallback readers, compatibility aliases, alternate worker-spawn
   paths, client-owned policy, product-state side channels, package/source/policy/
   trust/audit tables, or central branches that make new capabilities require
@@ -2622,46 +2656,45 @@ Setup:
 
 Procedure:
 
-1. Inventory registry responsibilities that remain in `registry/mod.rs`,
-   especially SQLite schema/store access, search ranking/indexing, recipes,
-   plugin manifest projection, primer rendering, and binding projection.
-2. Classify each finding as legitimate registry store ownership, extraction
-   candidate, behavior-coupled code that should stay, dead/legacy code, or
-   deferred large-file cleanup.
+1. Inventory domains that perform resource list-and-inspect traversal,
+   especially prompt library, voice notes, generated UI, module trust/audit,
+   control projections, and capability output summaries.
+2. Classify each finding as legitimate low-level resource substrate access,
+   extraction candidate, behavior-coupled code that should stay, dead/legacy
+   code, or deferred large-file cleanup.
 3. Add or strengthen the smallest static or unit test proving that the selected
-   ownership boundary cannot collapse back into `registry/mod.rs` unnoticed.
-4. Move one coherent registry slice only if the audit identifies a clear
-   behavior-preserving cleanup with local tests. Prefer an existing-adjacent
-   boundary such as recipes, ranking/indexing, or primer projection over a broad
-   rewrite.
+   projection boundary cannot collapse back into ad hoc unbounded scans.
+4. Move one coherent resource projection slice only if the audit identifies a
+   clear behavior-preserving cleanup with local tests.
 5. Remove dead/fallback/legacy/compatibility code found nearby.
-6. Run focused capability registry/search/ranking/discovery tests plus
+6. Run focused resource/projection tests plus
    `cargo test --test threat_model_invariants -- --nocapture`, then update this
    scorecard with the exact files, tests, and ownership decision.
 
 After completion, inspect:
 
-- `packages/agent/src/domains/capability/registry/mod.rs`;
-- `packages/agent/src/domains/capability/registry/*.rs`;
-- `packages/agent/src/domains/capability/operations/search.rs` and
-  `operations/inspect.rs` if search/discovery projections are touched;
+- resource projection call sites discovered during the inventory;
+- resource substrate modules under `packages/agent/src/engine/resources/` and
+  `packages/agent/src/engine/primitives/resource.rs` if a canonical helper is
+  added or reused;
 - `packages/agent/tests/threat_model_invariants.rs`;
 - module docs for any moved ownership boundary.
 
 Pass criteria:
 
-- The selected registry slice is either moved to focused ownership or explicitly
-  classified as behavior-coupled with a test-backed reason.
-- Registry search, ranking, discovery, recipe, binding, and primer behavior stay
-  compatible for covered scenarios.
-- Static gates fail on future unclassified registry ownership regression.
+- The selected resource projection slice is either moved to focused ownership
+  or explicitly classified as behavior-coupled with a test-backed reason.
+- Resource listing, inspection, and covered domain projections stay compatible
+  for covered scenarios.
+- Static gates fail on future unclassified unbounded resource-scan regression.
 - Docs explain any new ownership boundary.
 - Focused tests pass, and `cargo test --test threat_model_invariants -- --nocapture`
   passes.
 
-If it fails, classify the primary layer as `code_ownership`, `registry_store`,
-`schema_or_recipe`, `execute_resolution`, or `provider_runner`, then stop broad
-cleanup until the exact ownership failure is fixed and retested.
+If it fails, classify the primary layer as `code_ownership`,
+`resource_projection`, `resource_truth`, `schema_or_recipe`, or
+`execute_resolution`, then stop broad cleanup until the exact ownership failure
+is fixed and retested.
 
 ## Acceptance Criteria For This Planning Checkpoint
 

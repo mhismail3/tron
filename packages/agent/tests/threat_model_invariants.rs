@@ -262,7 +262,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "## Static Gates To Add Or Strengthen",
         "| SCB-S1 | `capability::execute` ownership decomposition audit |",
         "| SCB-S1b | Deterministic route and decomposition ownership audit |",
-        "Recommended next scenario: **SCB-S2:",
+        "| SCB-S2 | Capability registry ownership split audit |",
+        "Recommended next scenario: **SCB-S3:",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
@@ -1357,6 +1358,86 @@ fn capability_registry_authority_stays_deleted() {
         assert!(
             !capability_executor_source.contains(retired_runtime_term),
             "agent capability executor must not reintroduce the retired runtime path"
+        );
+    }
+}
+
+#[test]
+fn capability_registry_ownership_stays_split() {
+    let crate_root = crate_root();
+    let registry_mod =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/mod.rs"))
+            .expect("read capability registry root");
+    let index =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/index.rs"))
+            .expect("read capability registry index module");
+    let primer =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/primer.rs"))
+            .expect("read capability registry primer module");
+    let recipes =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/recipes.rs"))
+            .expect("read capability registry recipes module");
+
+    for required in [
+        "mod index;",
+        "mod primer;",
+        "mod recipes;",
+        "| `index` | Document identity, lexical ranking",
+        "| `primer` | Context-primer policy",
+        "| `recipes` | Capability recipe authoring",
+    ] {
+        assert!(
+            registry_mod.contains(required),
+            "registry root must document and declare ownership marker `{required}`"
+        );
+    }
+    for forbidden in [
+        "pub(crate) struct HybridLocalCapabilityIndex",
+        "fn lexical_rank(",
+        "fn vector_rank_with_provider(",
+        "fn render_capability_primer(",
+        "pub(crate) struct CapabilityContextPrimerPolicy",
+        "fn recipe_payload_fields(",
+    ] {
+        assert!(
+            !registry_mod.contains(forbidden),
+            "registry root must not re-own split registry concern `{forbidden}`"
+        );
+    }
+    for required in [
+        "pub(crate) struct HybridLocalCapabilityIndex",
+        "pub(super) fn search_sqlite_documents(",
+        "pub(super) fn document_text_hash(",
+        "pub(super) fn lexical_rank(",
+        "fn vector_rank_with_provider(",
+        "fn sqlite_vec_rank(",
+        "pub(super) fn trust_rank(",
+    ] {
+        assert!(
+            index.contains(required),
+            "registry/index.rs must own search/index marker `{required}`"
+        );
+    }
+    for required in [
+        "pub(crate) struct CapabilityContextPrimerPolicy",
+        "impl CapabilityRegistrySnapshot",
+        "pub(crate) fn render_capability_primer(",
+        "rendered_entries > 0",
+        "CORE_CONTEXT_CAPABILITIES",
+    ] {
+        assert!(
+            primer.contains(required),
+            "registry/primer.rs must own primer marker `{required}`"
+        );
+    }
+    for required in [
+        "pub(super) fn agent_recipe_for_entry(",
+        "fn recipe_payload_fields(",
+        "fn recipe_execute_template(",
+    ] {
+        assert!(
+            recipes.contains(required),
+            "registry/recipes.rs must own recipe marker `{required}`"
         );
     }
 }
