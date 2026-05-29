@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **63/100 provisional**
+Current score: **64/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -87,13 +87,13 @@ interruption, and resource failure states.
 | Worker/function/trigger substrate | 14 | 7 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 9 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 9 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
-| Safety, grants, and approvals | 10 | 7 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
+| Safety, grants, and approvals | 10 | 8 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 5 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 5 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **63/100**
+Total: **64/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -103,6 +103,13 @@ may proceed to RWO-N12.
 Resolved checkpoint note, 2026-05-29: RWO-N12 passed its live approval-flow
 portion and focused grant-rejection fixture with no code changes. The banked
 score is now `63/100`; broad testing may proceed to RWO-N13.
+
+Resolved checkpoint note, 2026-05-29: the RWO-N12 direct public
+`capability::execute` follow-up exposed and fixed a server-owned policy
+projection gap. Direct public execute now derives active-profile execution
+policy scopes/runtime metadata on the server, rejects client-authored execute
+policy context, and passed the exact approval/denial/replay retest. The banked
+score is now `64/100`; broad testing may proceed to RWO-N13.
 
 ## Scoring Rules
 
@@ -189,7 +196,7 @@ The evidence note must identify:
 | RWO-N9 | Subagent fan-out/fan-in | passed_after_fix | +2 | failed first run: `sess_019e73a5-c2ae-7fe3-b9b9-86131b2f7156`; passing retest: `sess_019e73ae-4645-7f03-bca5-fad68c3959c4` | See 2026-05-29 RWO-N9 result note below. The passing retest used 10 parent `capability::execute` rows, 2 non-blocking `agent::spawn_subagent` target rows, 4 `agent::subagent_status` rows, 2 `agent::subagent_result` rows, 8 child `capability::execute` rows, 2 deterministic `agent_result:subagent:*` resources, 1 final parent `agent_result`, 0 failed invocations, 0 approvals, 0 `compact.*` events, and 0 session-scoped log rows. | Primary `resource_truth`: completed blocking subagents did not write deterministic `agent_result:subagent:*` resources, so result/status could fall back to in-memory manager state. Secondary `schema_or_recipe`: omitted `blockingTimeoutMs` was coerced into a blocking wait and the contract did not name the result capability, so fan-out models were guided toward sequential work. | `5c79bf677` | Passed exact prompt after rebuilt dev server PID 83613 with simulator booted. Parent spawned child sessions `sess_019e73ae-7618-7e92-b86a-19a4f50c605a` and `sess_019e73ae-8413-7830-9a49-3c87c98180be` before waiting, status-polled both through `agent::subagent_status`, collected both through `agent::subagent_result`, and reported lineage/capabilities. A model-chosen `process::run sleep 10` was used only as a timer between canonical status polls; no hidden client or runner side channel was used. |
 | RWO-N10 | Memory auto-retain | passed | +1 | `sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6` | See 2026-05-29 RWO-N10 result note below. The run used the real dev server and booted simulator evidence, kept the default auto-retain interval of 10, recorded 9 explicit `memory::auto_retain_fire` skips with `reason = below_threshold`, then fired on the tenth user message with `status = retaining`. The terminal `memory.retained` event recorded 4 resource refs: memory journal artifact, session materialized projection, memory-rule artifact, and rule materialized projection. DB evidence shows 0 failed invocations, 0 approvals, 0 `compact.*` events, 10 completed prompt queue drains, and resource versions with hashes/lifecycle state. | none; no code changes required | n/a | Passed without changing settings or using a side channel. Retain truth was engine-owned: `memory.retained` event seq 152, parent auto-retain invocation `019e73bb-209f-7561-912f-909dfe5f6e5a`, trace `019e73ba-fe7e-7511-ab2b-7275bfbecf3b`, and resource refs were produced by `artifact::create`, `materialized_file::update`, and `resource::link` children under that invocation. |
 | RWO-N11 | Resource failure matrix | passed_after_fix | +2 | first failed run: `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2`; resource-truth retest: `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6`; execute-guidance retest: `sess_019e73eb-f65c-7ce3-a621-aa8b0d078494` | See 2026-05-29 RWO-N11 result note below. Final retest used 17 `capability::execute` rows, 6 `materialized_file::update`, 2 `materialized_file::hash_verify`, 2 `materialized_file::read`, 2 `materialized_file::inspect`, 3 `resource::create`, 1 `materialized_file::discard`, 0 approvals, 0 `compact.*` events, 0 session logs, damaged truth for missing-bytes and hash-mismatch fixtures, discarded lifecycle for the discarded fixture, replay of step 4, and 0 `target_payload_invalid` execute rows. | Primary fixed root cause was `resource_truth`: missing canonical bytes returned an opaque handler failure without damaged resource truth, and discarded materialized files remained readable/updatable through operational wrappers. Follow-up fixed `schema_or_recipe`: lifecycle CAS guidance now teaches `expectedCurrentVersionId`, not `versionId`, before the model calls lifecycle targets. | `c8a230983`; `9069323a1` | Passed after rebuilt dev server PID 98981 with simulator booted. Step 14 first attempted `materialized_file::discard` with `expectedCurrentVersionId = ver_019e73ed-1591-7cb3-8693-b0f2121f40fc` and succeeded without a pre-child validation failure. |
-| RWO-N12 | Approval and grant boundary | passed | +1 | unscored direct policy probe: `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0`; approval session: `sess_019e73fd-ba7a-7521-bbdf-6dca81b5855c` | See 2026-05-29 RWO-N12 result note below. The approval session used 3 `capability::execute` rows, 2 approval records, 3 `approval::resolve` rows, 1 `process::run` child, 1 `materialized_file::update`, 3 `resource::create`, 2 completed prompt queue drains, 0 failed invocations, and 0 `compact.*` events. Denial created approval `019e73fd-d912-71c2-a037-bbc558170399`, resolve `019e73fd-da58-7690-9b35-18aa9a50ff92`, no `process::run` child, and no target resource refs. Approval created approval `019e73ff-c83e-7550-b53a-2ee28391ced1`, process child `019e73ff-c9cf-7f30-959e-53f7902ebf57`, materialized file `materialized_file:b5fbc3a59de2a4b7bff6df4832568956c37c69e9a474fa0169c1263af109703a` version `ver_019e73ff-c9f3-7210-b034-83dccbfd02cf`, and execution output `res_019e73ff-c9f5-78c3-afeb-42c7a8274c3f` version `ver_019e73ff-c9f6-7391-a494-d442d20ffa16`. Duplicate approval resolve `019e73ff-ca00-7142-b515-620ae0b38fbc` replayed from `019e73ff-c9cd-71e1-bde1-0bfca469ddd1`. Replay execute `019e73ff-dc53-7b82-9ac3-839fc47f1029` reported `approvalReplayed=true`, `childInvocationCreated=false`, and the original process child id. Focused tests `rejected_grants_fail_before_handler_execution_or_successful_resource_refs` and `terminal_approval_replay_does_not_publish_fresh_pending_event` passed. | none; the unscored direct probe omitted model-session execution-policy scopes and correctly failed before approval, so it was not used as scenario evidence. Revoked/expired grant attempts are covered by the owning engine grant fixture because arbitrary grant ids are not a public client input. | n/a | Passed on real dev server PID 98981 with simulator booted. Approval and grant truth remained engine-owned: public model work used `capability::execute`; decisions used `approval::resolve`; grant rejection was verified in the engine grant owner test; no direct DB mutation, alternate worker-spawn path, or product-state side channel was used. |
+| RWO-N12 | Approval and grant boundary | passed_after_fix | +2 | failed direct policy probe: `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0`; approval session: `sess_019e73fd-ba7a-7521-bbdf-6dca81b5855c`; direct retest: `sess_019e7410-98a1-7472-a8b8-475bc8229055` | See 2026-05-29 RWO-N12 result note below. The live approval-flow session used 3 `capability::execute` rows, 2 approval records, 3 `approval::resolve` rows, 1 `process::run` child, 1 `materialized_file::update`, 3 `resource::create`, 2 completed prompt queue drains, 0 failed invocations, and 0 `compact.*` events. The direct retest used 3 `capability::execute`, 3 `approval::resolve`, 1 `process::run`, 1 `materialized_file::update`, 1 `resource::create`, 6 `engine::invoke`, 2 approval records, 8 stream rows, 0 failed invocations, and 0 `compact.*` events. Denial created approval `019e7410-996b-7431-afa9-f9e3da8e5c9c`, no child, and no target refs; approval created approval `019e7410-9b17-7673-b14c-c55da8e669c2`, child `019e7410-9b42-7ab0-a09f-73660aff8cad`, materialized file `materialized_file:2d5d7cc3d635bdaed7de5dd104b243c4e8640b393b8c1b4f1345093ebfe555f0`, and output `res_019e7410-9b4d-7fa1-93da-67dd1c38cda3`; replay execute `019e7410-9c24-71d0-b87c-ac8216df447a` reported `approvalReplayed=true` and `childInvocationCreated=false`. | `execute_resolution`: public `/engine` direct `capability::execute` used transport/client audit scopes but did not project active-profile execution policy scopes/runtime metadata, so direct execute failed with `CAPABILITY_DENIED` before approval. The root fix derives execute policy on the server from the active profile and rejects client-authored `contract.*`, `implementation.*`, `plugin.*`, and `capability.*` policy context. | pending current checkpoint | Passed after rebuilt dev server PID 7070 with simulator booted. DB evidence proves policy scopes stayed server-owned, the denied mutation created no `process::run` child or target refs, the approved mutation created exactly one child and resource chain, duplicate approval resolve replayed, and direct public execute no longer requires client-supplied policy. |
 | RWO-N13 | Runtime resilience | pending | 0 | | | | | |
 | RWO-N14 | Provider full parity | pending | 0 | | | | | |
 
@@ -1379,11 +1386,12 @@ Failure focus:
   `/engine` `agent::prompt` path and DB reconstruction instead of a screenshot
   as acceptance evidence.
 - An earlier direct `capability::execute` probe
-  `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0` was intentionally unscored: it
-  omitted the model-session execution-policy scopes and therefore failed
-  prepare with `CAPABILITY_DENIED` before approval. That was a harness-context
-  mismatch, not a product failure, and produced no approval, child invocation,
-  or durable target refs.
+  `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0` failed prepare with
+  `CAPABILITY_DENIED` before approval. DB evidence showed the public transport
+  path supplied only client/transport audit scopes, not the active-profile
+  execution-policy scopes/runtime metadata used by the model-session path. That
+  failure is now classified as an `execute_resolution` bug rather than scenario
+  evidence.
 - Denied mutation: `capability::execute`
   `019e73fd-d82a-72c2-8e24-fd7e82bbc9d6` requested `process::run` with
   idempotency key `rwo-n12-agent-denied-20260529064748`. The engine created
@@ -1422,8 +1430,45 @@ Failure focus:
   test covers missing, revoked, expired, subject-mismatch, selector, file-root,
   budget, raw-scope, and risk rejection before handler execution, with no
   successful resource refs.
-- Classification: `passed`; no code change required. Safety, grants, and
-  approvals increases to `7/10`; current score increases to `63/100`.
+- Direct public execute follow-up fix: `/engine` `invoke(capability::execute)`
+  now derives execution policy scopes and runtime metadata from the active
+  profile inside the server transport dispatch path. The build path rejects
+  client-supplied execute policy scopes (`contract.*`, `implementation.*`,
+  `plugin.*`) and `capability.*` runtime metadata so direct clients cannot own
+  policy.
+- Exact direct retest:
+  `sess_019e7410-98a1-7472-a8b8-475bc8229055`, run log
+  `/tmp/rwo_n12_approval_run_20260529070825.json`, against rebuilt dev server
+  PID 7070 with the iOS simulator booted. DB reconstruction found 6
+  `engine::invoke`, 3 `capability::execute`, 3 `approval::resolve`, 1
+  `process::run`, 1 `materialized_file::update`, 1 `resource::create`, 2
+  approval records, 8 stream rows across `approvals`, `compensation.records`,
+  `events.session`, and `resource.leases`, 0 failed invocations, and 0
+  `compact.*` events.
+- Direct denial retest: `capability::execute`
+  `019e7410-98a8-7c63-9487-632ebb2bea63` carried server-derived
+  `contract.allow:*`, `implementation.allow:*`, and `plugin.allow:*` scopes,
+  created approval `019e7410-996b-7431-afa9-f9e3da8e5c9c`, was resolved denied,
+  created no `process::run` child, and produced no target refs.
+- Direct approval retest: `capability::execute`
+  `019e7410-9a6b-7ff1-ada4-5f3ec5fe8b83` created approval
+  `019e7410-9b17-7673-b14c-c55da8e669c2`, process child
+  `019e7410-9b42-7ab0-a09f-73660aff8cad`, materialized file
+  `materialized_file:2d5d7cc3d635bdaed7de5dd104b243c4e8640b393b8c1b4f1345093ebfe555f0`
+  version `ver_019e7410-9b4b-79d0-bd8c-3ce03b7251e4`, file content hash
+  `473efa4235162c1a5be716b82b61d0b887b17aad84e1c463ba8bd356d99caef4`,
+  execution output `res_019e7410-9b4d-7fa1-93da-67dd1c38cda3`, and output
+  version `ver_019e7410-9b4d-7fa1-93da-67f72656dad8`.
+- Direct replay retest: `capability::execute`
+  `019e7410-9c24-71d0-b87c-ac8216df447a` reported
+  `approvalReplayed=true`, `childInvocationCreated=false`, and reused original
+  process child `019e7410-9b42-7ab0-a09f-73660aff8cad`.
+- Focused transport tests:
+  `capability_execute_invoke_rejects_client_owned_policy_scopes`,
+  `capability_execute_invoke_rejects_client_owned_policy_metadata`, and
+  `active_profile_execute_context_supplies_policy_scopes_and_metadata`.
+- Classification: `passed_after_fix`. Safety, grants, and approvals increases
+  to `8/10`; current score increases to `64/100`.
 
 ### RWO-N13: Runtime Resilience
 

@@ -743,6 +743,13 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 `agent::prompt`, or `settings::get`. Mutating calls must include an explicit
 idempotency key. Message ids are correlation ids only.
 
+When Engine Console or test clients invoke `capability::execute` directly, the
+server derives capability execution scopes and capability runtime metadata from
+the active profile. Clients may pass session, workspace, trace, and ordinary
+target context, but `contract.allow:*`, `implementation.allow:*`,
+`plugin.allow:*`, and `capability.*` runtime metadata are rejected so execute
+policy remains server-owned.
+
 Hidden functions remain in the engine catalog for queue, cron, runtime, and
 domain side effects such as agent apply/run-turn, prompt-history capture, and
 auto-retain. Normal discovery excludes them and the public transport cannot

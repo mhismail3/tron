@@ -95,21 +95,6 @@ impl Default for CapabilitySearchPolicy {
     }
 }
 
-impl CapabilitySearchPolicy {
-    pub(crate) fn from_profile(
-        policy: &crate::shared::profile::CapabilitySearchPolicySpec,
-    ) -> Self {
-        Self {
-            lexical: policy.lexical,
-            local_vector: policy.local_vector,
-            cloud_embeddings: policy.cloud_embeddings,
-            max_results: policy.max_results,
-            require_local_vector: policy.require_local_vector,
-            allow_lexical_only_when_degraded: policy.allow_lexical_only_when_degraded,
-        }
-    }
-}
-
 /// Profile-controlled context primer policy.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]

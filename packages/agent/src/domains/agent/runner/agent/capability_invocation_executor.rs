@@ -8,10 +8,9 @@ use crate::domains::agent::runner::context::local_policy;
 use crate::domains::agent::runner::guardrails::{EvaluationContext, GuardrailEngine};
 use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::domains::agent::runner::hooks::types::{HookAction, HookContext};
-use crate::domains::capability::registry::CapabilitySearchPolicy;
 use crate::domains::capability_support::implementations::primitive_surface::{
     EngineCapabilityTarget, PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
-    capability_execution_policy_scopes,
+    capability_execution_policy_scopes, capability_execution_runtime_metadata,
 };
 use crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY;
 use crate::engine::{
@@ -798,42 +797,12 @@ fn primitive_runtime_metadata(
         .ok_or_else(|| {
             format!("missing capability execution policy '{capability_execution_policy_id}'")
         })?;
-    let search_policy_id = capability_execution_policy
-        .search_policy
-        .as_deref()
-        .unwrap_or("hybridLocal");
-    let search_policy = spec
-        .capability_search_policy(search_policy_id)
-        .ok_or_else(|| format!("missing capability search policy '{search_policy_id}'"))?;
-    let context_primer_policy_id = capability_execution_policy
-        .context_primer_policy
-        .as_deref()
-        .unwrap_or("coreFirstParty");
-    let serialized_search_policy =
-        serde_json::to_string(&CapabilitySearchPolicy::from_profile(search_policy))
-            .map_err(|error| format!("serialize capability search policy: {error}"))?;
-    let mut metadata = vec![
-        (
-            "capability.executionPolicyId".to_owned(),
-            capability_execution_policy_id.to_owned(),
-        ),
-        (
-            "capability.searchPolicyId".to_owned(),
-            search_policy_id.to_owned(),
-        ),
-        (
-            "capability.contextPrimerPolicyId".to_owned(),
-            context_primer_policy_id.to_owned(),
-        ),
-        (
-            "capability.searchPolicy".to_owned(),
-            serialized_search_policy,
-        ),
-    ];
-    if let Some(hash) = ctx.profile_spec_hash {
-        metadata.push(("capability.profileSpecHash".to_owned(), hash.to_owned()));
-    }
-    Ok(metadata)
+    capability_execution_runtime_metadata(
+        spec,
+        capability_execution_policy_id,
+        capability_execution_policy,
+        ctx.profile_spec_hash,
+    )
 }
 
 fn with_agent_working_directory_metadata(

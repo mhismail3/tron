@@ -162,6 +162,46 @@ pub(crate) fn capability_execution_policy_scopes(
     scopes
 }
 
+pub(crate) fn capability_execution_runtime_metadata(
+    spec: &crate::shared::profile::AgentExecutionSpec,
+    policy_id: &str,
+    policy: &crate::shared::profile::CapabilityExecutionPolicySpec,
+    profile_spec_hash: Option<&str>,
+) -> Result<Vec<(String, String)>, String> {
+    let search_policy_id = policy.search_policy.as_deref().unwrap_or("hybridLocal");
+    let search_policy = spec
+        .capability_search_policy(search_policy_id)
+        .ok_or_else(|| format!("missing capability search policy '{search_policy_id}'"))?;
+    let context_primer_policy_id = policy
+        .context_primer_policy
+        .as_deref()
+        .unwrap_or("coreFirstParty");
+    let serialized_search_policy = serde_json::to_string(search_policy)
+        .map_err(|error| format!("serialize capability search policy: {error}"))?;
+    let mut metadata = vec![
+        (
+            "capability.executionPolicyId".to_owned(),
+            policy_id.to_owned(),
+        ),
+        (
+            "capability.searchPolicyId".to_owned(),
+            search_policy_id.to_owned(),
+        ),
+        (
+            "capability.contextPrimerPolicyId".to_owned(),
+            context_primer_policy_id.to_owned(),
+        ),
+        (
+            "capability.searchPolicy".to_owned(),
+            serialized_search_policy,
+        ),
+    ];
+    if let Some(hash) = profile_spec_hash {
+        metadata.push(("capability.profileSpecHash".to_owned(), hash.to_owned()));
+    }
+    Ok(metadata)
+}
+
 fn push_policy_scopes(scopes: &mut Vec<String>, prefix: &str, allowed: Option<&[String]>) {
     match allowed {
         Some(values) => scopes.extend(values.iter().map(|value| format!("{prefix}{value}"))),
