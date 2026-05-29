@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **49/100 provisional**
+Current score: **51/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -83,9 +83,9 @@ calls, runtime interruption, and resource failure states.
 | Axis | Points | Current | Full Credit Requires |
 |---|---:|---:|---|
 | Execute portal ergonomics | 10 | 8 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
-| First-party capability usefulness | 10 | 6 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
+| First-party capability usefulness | 10 | 7 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
 | Worker/function/trigger substrate | 14 | 4 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
-| Multi-capability orchestration | 12 | 6 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
+| Multi-capability orchestration | 12 | 7 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 6 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 5 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 5 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
@@ -93,7 +93,7 @@ calls, runtime interruption, and resource failure states.
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **49/100**
+Total: **51/100**
 
 ## Scoring Rules
 
@@ -170,9 +170,9 @@ The evidence note must identify:
 | Scenario | Name | Status | Score Delta | Session Id | DB Evidence | Failure Root Cause | Fix Commit | Retest |
 |---|---|---|---:|---|---|---|---|---|
 | RWO-N1 | Repo understanding and discovery | passed_after_fix | +2 | compaction failure: `sess_019e728b-bfa5-7a03-98e7-5b5f5940fc78`; path-guidance failure: `sess_019e72a5-eda3-7f51-8628-bc043336296d`; passing retest: `sess_019e72b6-7237-7391-a178-c669e7d09cf5` | See 2026-05-29 result note below. Passing retest used 48 `capability::execute` child invocations; target functions were `filesystem::list_dir` (7), `filesystem::read_file` (24), and `filesystem::search_text` (17). Zero failed invocations, zero approvals, zero `compact.*` events, no session-scoped server log rows, and only substrate prompt-history plus final `agent_result` resource refs. | Fixed `stream_or_state`: no-op compaction no longer persists boundaries or injects notices. Fixed `model_guidance`: execute metadata/schema now tells models to list only known directories and locate uncertain filesystem paths with `find`, `glob`, or `search_text` before listing/reading. | `1c76b7bd1` | Passed exact prompt after rebuilt dev server PID 4541; DB reconstruction matches simulator UI and final answer cited real worker/function/trigger files. |
-| RWO-N2 | Practical code change workflow | passed_after_fix | +2 | first failure: `sess_019e72c3-e190-7ba2-b447-8debb4e36054`; exact retest pass: `sess_019e72e6-88a4-71c1-bc85-787e86df0235`; replay failure: `sess_019e72ea-c4e7-7842-82bb-654538fa3ce5`; replay retest pass: `sess_019e72f3-ee99-7a91-84ef-e3f47604a2ff` | See 2026-05-29 RWO-N2 result notes below. Exact retest passed with 3 target `capability::execute` calls, `filesystem::write_file` 1, `filesystem::read_file` 1, `materialized_file::update` 1, `resource::create` 1, and 0 failed invocations/approvals/compact events/log rows. Replay retest passed with 2 `filesystem::write_file` rows under session-scoped `rwontwoalpha`, one `filesystem::read_file`, one materialized file resource/version, 0 failed invocations, 0 approvals, 0 compact events, 0 logs, 1 completed queue drain, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | Fixed `schema_or_recipe`: new-file guidance/search now prefers `filesystem::write_file` over missing-file `apply_patch`. Fixed `stream_or_state`: runtime event persistence advances from DB sequence truth before preassigned events. Fixed `resource_truth`: file-content mutations use session-scoped idempotency so the same key cannot replay another isolated worktree path. | this RWO-N2 checkpoint commit | Passed exact prompt after rebuilt dev server PID 22402 and passed replay subcheck after rebuilt dev server PID 27362. DB reconstruction matches simulator UI and proves the replay reused one resource/version inside the active session. |
-| RWO-N3 | Safe process plus filesystem composition | pending | 0 | | | | | |
-| RWO-N4 | Web research capability | pending | 0 | | | | | |
+| RWO-N2 | Practical code change workflow | passed_after_fix | +2 | first failure: `sess_019e72c3-e190-7ba2-b447-8debb4e36054`; exact retest pass: `sess_019e72e6-88a4-71c1-bc85-787e86df0235`; replay failure: `sess_019e72ea-c4e7-7842-82bb-654538fa3ce5`; replay retest pass: `sess_019e72f3-ee99-7a91-84ef-e3f47604a2ff` | See 2026-05-29 RWO-N2 result notes below. Exact retest passed with 3 target `capability::execute` calls, `filesystem::write_file` 1, `filesystem::read_file` 1, `materialized_file::update` 1, `resource::create` 1, and 0 failed invocations/approvals/compact events/log rows. Replay retest passed with 2 `filesystem::write_file` rows under session-scoped `rwontwoalpha`, one `filesystem::read_file`, one materialized file resource/version, 0 failed invocations, 0 approvals, 0 compact events, 0 logs, 1 completed queue drain, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | Fixed `schema_or_recipe`: new-file guidance/search now prefers `filesystem::write_file` over missing-file `apply_patch`. Fixed `stream_or_state`: runtime event persistence advances from DB sequence truth before preassigned events. Fixed `resource_truth`: file-content mutations use session-scoped idempotency so the same key cannot replay another isolated worktree path. | `87f368dd6` | Passed exact prompt after rebuilt dev server PID 22402 and passed replay subcheck after rebuilt dev server PID 27362. DB reconstruction matches simulator UI and proves the replay reused one resource/version inside the active session. |
+| RWO-N3 | Safe process plus filesystem composition | passed | +1 | `sess_019e72fd-5e00-75d1-b58f-a9853a621daa` | See 2026-05-29 RWO-N3 result note below. The run used 2 successful `capability::execute` invocations, 1 successful `process::run`, 1 successful `filesystem::read_file`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. `process::run` used `executionMode = read_only`; README first line matched the filesystem read. |
+| RWO-N4 | Web research capability | passed | +1 | `sess_019e7301-b34f-7240-99aa-ea6d6cdac1c2` | See 2026-05-29 RWO-N4 result note below. The run used 2 successful `capability::execute` invocations, 1 successful `web::search`, 1 successful `web::fetch`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; source returned an HTTP 403 Cloudflare/JS challenge through the web fetch capability and the agent reported it without fallback browsing | n/a | Passed exact prompt on the real dev server. Search returned official `https://platform.openai.com/docs/models`; fetch targeted that URL through `first_party.web.v1.fetch`; no browser/client-owned path was used. |
 | RWO-N5 | Browser and display capability probe | pending | 0 | | | | | |
 | RWO-N6 | State, queue, stream, trigger chain | pending | 0 | | | | | |
 | RWO-N7 | Live worker extensibility | pending | 0 | | | | | |
@@ -485,6 +485,41 @@ Failure focus:
 - README path or worktree confusion;
 - approval requested for safe read-only work.
 
+2026-05-29 result:
+
+- Simulator session `sess_019e72fd-5e00-75d1-b58f-a9853a621daa` ran the exact
+  RWO-N3 prompt against the real dev server. The UI completed with one
+  `process::run` and one `filesystem::read_file` capability card and reported
+  no approval requirement.
+- Parent runtime invocation: `agent::run_turn`
+  `019e72fd-a041-77e0-beab-6157f5410084`.
+- `process::run` child invocation `019e72fd-b827-7d61-b7c6-10b4727d9948`
+  executed through parent `capability::execute`
+  `019e72fd-b71f-74c2-b1aa-fe4f2685739c`. The corrected request used
+  `executionMode = "read_only"` with command
+  `git status --short --branch && printf '\nBRANCH:\n' && git branch
+  --show-current && printf '\nREADME_FIRST_THREE:\n' && sed -n '1,3p'
+  README.md`; it exited 0 and returned the session branch plus the first three
+  README lines.
+- `filesystem::read_file` child invocation
+  `019e72fd-c29b-7080-ba2e-0e8783ecc134` executed through parent
+  `capability::execute` `019e72fd-c186-7670-8166-2be7f8716add` with
+  `path = README.md`, `startLine = 1`, and `endLine = 3`.
+- DB reconstruction: 21 events, 4 messages, 3 turns, 2 successful
+  `capability::execute` invocations, 1 successful `process::run`, 1 successful
+  `filesystem::read_file`, 0 failed invocations, 0 approvals, 0 `compact.*`
+  events, and 0 session-scoped logs. Queue evidence was one completed
+  `agent::prompt_queue_drain`; stream evidence was `agent.runtime`,
+  `events.session`, and `queue.lifecycle`.
+- Resource refs were substrate-owned only:
+  `artifact:prompt-history:86f9751d156f98cca8d16d578ccb0cc1197441048ad4cd0ad79eb9749809fc7f`
+  version `ver_019e72fd-a045-7fc1-986f-fd86973c8384`, and final
+  `agent_result` resource `res_019e72fd-d304-7fb0-b999-6990728b588d` version
+  `ver_019e72fd-d304-7fb0-b999-69b8588badc3`.
+- The process output and filesystem read both returned README first line
+  `# Tron`; the scenario passes with score delta `+1`. Current score is
+  50/100. The next scenario is RWO-N4.
+
 ### RWO-N4: Web Research Capability
 
 Prompt:
@@ -506,6 +541,48 @@ Failure focus:
 - payload shape unclear;
 - opaque network errors;
 - provider returns unsupported browsing path.
+
+2026-05-29 result:
+
+- Simulator session `sess_019e7301-b34f-7240-99aa-ea6d6cdac1c2` ran the exact
+  RWO-N4 prompt against the real dev server. The UI completed with one
+  `Search Web` capability card and one `Fetch Web Page` capability card, then
+  reported that it did not browse outside the capability system.
+- Parent runtime invocation: `agent::run_turn`
+  `019e7301-e572-7883-bad6-2778677fca9e`.
+- `web::search` child invocation `019e7301-f526-7a30-be8a-4dba0d5fab5a`
+  executed through parent `capability::execute`
+  `019e7301-f442-7af0-b308-90897e4849ed`. The corrected request targeted
+  `web::search` with query
+  `site:platform.openai.com/docs/models OpenAI models documentation official`,
+  normalized the result limit to `count = 5`, selected
+  `first_party.web.v1.search`, and required no approval.
+- Search result 1 was official OpenAI documentation:
+  `https://platform.openai.com/docs/models`, title `Models | OpenAI API`. The
+  result snippet was the source the final answer summarized.
+- `web::fetch` child invocation `019e7302-0260-7bb3-b026-e2c8f545f383`
+  executed through parent `capability::execute`
+  `019e7302-0169-7923-840e-2b851d98d7b5`. The corrected request targeted
+  `web::fetch` for `https://platform.openai.com/docs/models`, selected
+  `first_party.web.v1.fetch`, and required no approval.
+- The fetch invocation succeeded at the engine/capability layer and returned an
+  HTTP `403` `text/html` Cloudflare/JavaScript challenge page from
+  `platform.openai.com`. The agent surfaced that source-side fetch limit
+  explicitly and did not invoke browser/display or any client-owned browsing
+  path.
+- DB reconstruction: 21 events, 4 messages, 3 turns, 2 successful
+  `capability::execute` invocations, 1 successful `web::search`, 1 successful
+  `web::fetch`, 0 failed invocations, 0 approvals, 0 `compact.*` events, and 0
+  session-scoped logs. Queue evidence was one completed
+  `agent::prompt_queue_drain`; stream evidence was `agent.runtime`,
+  `events.session`, and `queue.lifecycle`.
+- Resource refs were substrate-owned only:
+  `artifact:prompt-history:e202cf50c93122156273e8d146033318c0ddf1a97ad9287f5bddaf97c21fb170`
+  version `ver_019e7301-e573-7082-95c4-b3a97fb1f34e`, and final
+  `agent_result` resource `res_019e7302-16b6-7b71-9bcd-e8f2033dc2a6` version
+  `ver_019e7302-16b7-7981-9f65-81ebe671c385`.
+- The scenario passes with score delta `+1`. Current score is 51/100. The next
+  scenario is RWO-N5.
 
 ### RWO-N5: Browser And Display Capability Probe
 
@@ -929,16 +1006,16 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
 For scorecard-only changes:
 
 ```bash
-cd /Users/moose/Downloads/projects/tron/packages/agent
+cd <repo>/packages/agent
 cargo test --test threat_model_invariants -- --nocapture
-cd /Users/moose/Downloads/projects/tron
+cd <repo>
 git diff --check
 ```
 
 For Rust capability or engine changes:
 
 ```bash
-cd /Users/moose/Downloads/projects/tron/packages/agent
+cd <repo>/packages/agent
 cargo test capability_ --lib -- --nocapture
 cargo test resource_ --lib -- --nocapture
 cargo test generated_ui --lib -- --nocapture
@@ -949,21 +1026,21 @@ cargo test --test threat_model_invariants -- --nocapture
 For broad Rust/server changes:
 
 ```bash
-cd /Users/moose/Downloads/projects/tron
+cd <repo>
 scripts/tron ci fmt check clippy test
 ```
 
 For iOS changes:
 
 ```bash
-cd /Users/moose/Downloads/projects/tron/packages/ios-app
+cd <repo>/packages/ios-app
 xcodegen generate
 xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:<targeted-test>
 ```
 
 ## Next Test
 
-Recommended next scenario: **RWO-N3: Safe Process Plus Filesystem Composition**
+Recommended next scenario: **RWO-N5: Browser And Display Capability Probe**
 
 Session:
 
@@ -974,7 +1051,7 @@ Session:
 Prompt:
 
 ```text
-Use only execute. Run safe read-only commands to inspect repo status, current branch, and the first three README lines. Then read README.md through filesystem and compare the first line. Report exact capabilities and whether approval was required.
+Use only execute. Discover whether browser or display capabilities are available. If available, inspect their status and report what they can safely do. Do not open arbitrary sites unless the capability explicitly supports it.
 ```
 
 After completion, inspect:
@@ -983,23 +1060,25 @@ After completion, inspect:
 - model provider;
 - parent invocation;
 - all child `capability::execute` invocations;
-- target process/filesystem capabilities used;
+- target browser/display capabilities used, or the exact unavailable status;
 - failed invocations, if any;
-- approvals, expected none for safe read-only commands and bounded file reads;
+- approvals, expected none unless browser/display policy explicitly requires one;
 - resource refs from substrate-owned prompt-history or final `agent_result`
   records;
 - queue/stream/state evidence if present;
-- logs mentioning process read-only classification, path, or approval failures.
+- logs mentioning discovery, browser/display, capability selection, or approval
+  failures.
 
 Pass criteria:
 
-- `process::run` uses `executionMode = "read_only"` for safe commands.
-- `filesystem::read_file` reads README.md through the canonical filesystem
-  capability.
-- The reported first README line matches the process output.
+- Browser/display discovery resolves through `capability::execute`.
+- Available capabilities are accurately reported, or missing capabilities return
+  `needs_capability` or a clear unavailable status.
+- The answer reports what the capability can safely do without opening
+  arbitrary sites.
 - No failed probe calls.
-- No approval is required.
-- No filesystem mutation or process write side effect occurs.
+- No client-owned browser action path is used.
+- No approval is required unless explicitly required by policy.
 - DB reconstruction matches the UI.
 
 If it fails, classify the primary failure layer and stop broader testing until
