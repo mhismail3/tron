@@ -435,6 +435,18 @@ test and makes the screenshot reproducible.
 
 ```bash
 xcrun simctl bootstatus booted
+
+# If iOS code changed, build and install the current simulator app before
+# collecting evidence. A green iOS test run does not update the app already
+# mounted in Simulator.
+cd packages/ios-app
+xcodebuild -scheme 'Tron Beta' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath /tmp/tron-ios-beta-derived \
+  build
+xcrun simctl terminate booted com.tron.mobile.beta || true
+xcrun simctl install booted /tmp/tron-ios-beta-derived/Build/Products/Beta-iphonesimulator/TronMobile.app
+
 xcrun simctl launch booted com.tron.mobile.beta
 xcrun simctl openurl booted "tron://session/<session_id>"
 xcrun simctl io booted screenshot /tmp/<scenario>-simulator.png
@@ -450,6 +462,11 @@ the deep link. If the simulator stops at the iOS "Open in Tron?" confirmation
 sheet, record the screenshot as UI context only and keep DB
 invocation/event/log/resource/approval/queue/stream evidence canonical for
 pass/fail classification.
+
+If the scenario depends on iOS rendering code changed in the current checkpoint,
+record the installed app build path or build command with the screenshot. A
+simulator screenshot from a stale app binary is invalid parity evidence, even if
+the server DB is terminal and focused iOS tests passed.
 
 Deep-link evidence is not complete until the visible chat state is compared
 against engine truth for the same session id. The screenshot or simulator state
@@ -2404,15 +2421,37 @@ Use only execute. Inspect this repo enough to summarize the worker/function/trig
     `childInvocationCreated=false`, no approval rows, no `process::run` child,
     no failed invocation rows, no `compact.*` events, and no file at
     `/Users/moose/.tron/workspace/reports/exact-home-leak-20260529120914.txt`.
+- Continuation audit after SCB-S8, 2026-05-29: the latest failed invocation rows
+  in the production DB were still the historical
+  `sess_019e74d4-7e0a-7c72-81e7-cb7e15c26be6` sandbox failures above, not the
+  SCB-S8 session. A Google-only P5 rerun against dev server PID `26801`
+  initially reproduced stale visible approval-sheet state only because the
+  simulator was still running the pre-SCB-S8 app binary. After rebuilding and
+  installing `Tron Beta` from
+  `/tmp/tron-ios-beta-derived/Build/Products/Beta-iphonesimulator/TronMobile.app`,
+  the exact Google P5 rerun passed in
+  `sess_019e75ba-470a-7671-b1a3-4b90e1ed871c` with run log
+  `/tmp/rwo_n14_p5_provider_parity_20260529145322.json`, final screenshot
+  `/tmp/rwo_n14_p5_google_final_simulator_20260529145322.png`, approval
+  `019e75ba-5c6a-7583-80c0-265a32c07032` executed, one `process::run` child,
+  one replayed `capability::execute`, no new approval or child on replay, zero
+  failed invocations, zero pending approvals, zero `compact.*` events, and no
+  stale approval sheet visible in the installed app. A follow-up app-path smoke
+  check reopened the same session through `tron://session/sess_019e75ba-470a-7671-b1a3-4b90e1ed871c`
+  and captured `/tmp/rwo_n14_p5_google_current_app_path_smoke.png`; DB evidence
+  for that exact session still showed zero failed invocations, zero pending
+  approvals, zero `compact.*` events, and zero open queue items.
 - Score impact: Safety, grants, and approvals reaches `10/10`; current score
   increased to `77/100` at that checkpoint, and broad testing moved to SCB-S1b
   structural decomposition before the deferred simulator/chat parity work.
 
 Deferred simulator/chat parity follow-up:
 
-- Formalize the simulator deep-link harness process so future scorecard tests
-  can reproducibly open `tron://session/<session_id>`, wait for terminal DB
-  state, and capture final screenshots after engine truth settles.
+- Simulator deep-link harness process is now formalized in this scorecard and
+  `packages/ios-app/docs/development.md`: future scorecard tests open
+  `tron://session/<session_id>`, wait for terminal DB state, capture final
+  screenshots after engine truth settles, and rebuild/install the current app
+  binary before claiming parity for changed iOS code.
 - Formalize the RWO-N14 P4/P5 harness vocabulary and procedure. In this
   scorecard, a "P5 harness" means the provider-parity harness that first seeds
   an approval-gated `process::run`, resolves the approval through engine truth,

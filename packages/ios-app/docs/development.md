@@ -113,8 +113,20 @@ The app registers `tron` and `tron-mobile` URL schemes, and
 `tron://session/<session_id>`.
 
 ```bash
-# Ensure a simulator is booted, then launch the local beta app.
+# Ensure a simulator is booted.
 xcrun simctl bootstatus booted
+
+# If iOS code changed, build and install the current beta app before collecting
+# app-path evidence. Unit tests alone do not update the running simulator app.
+cd packages/ios-app
+xcodebuild -scheme 'Tron Beta' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath /tmp/tron-ios-beta-derived \
+  build
+xcrun simctl terminate booted com.tron.mobile.beta || true
+xcrun simctl install booted /tmp/tron-ios-beta-derived/Build/Products/Beta-iphonesimulator/TronMobile.app
+
+# Launch the installed local beta app.
 xcrun simctl launch booted com.tron.mobile.beta
 
 # Open the exact server session in the app.

@@ -354,6 +354,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "Generated UI action presentation semantics stay server-owned",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
+        "xcrun simctl install booted",
+        "stale app binary is invalid parity evidence",
         "chat parity drift",
         "no pending approvals for the session\nfamily",
         "No fallback readers, compatibility aliases, client-authored generated UI",
