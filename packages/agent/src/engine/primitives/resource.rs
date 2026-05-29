@@ -1568,6 +1568,7 @@ fn create_materialized_file(
     let existing = store.inspect(&resource_id)?;
     let update_expected = if let Some(inspection) = &existing {
         ensure_resource_kind(&inspection, "materialized_file")?;
+        ensure_materialized_file_operational(&inspection, "updated")?;
         if !allow_update {
             return Err(EngineError::PolicyViolation(format!(
                 "materialized file resource {resource_id} already exists"
@@ -1679,6 +1680,7 @@ fn materialized_file_read_response(
             id: resource_id.to_owned(),
         })?;
     ensure_resource_kind(&inspection, "materialized_file")?;
+    ensure_materialized_file_operational(&inspection, "read")?;
     let payload = current_payload(&inspection)?;
     let content = payload
         .get("content")
@@ -1700,6 +1702,7 @@ fn materialized_file_hash_verify_response(
             id: resource_id.clone(),
         })?;
     ensure_resource_kind(&inspection, "materialized_file")?;
+    ensure_materialized_file_operational(&inspection, "verified")?;
     let current = current_version_for_inspection(&inspection)?;
     let payload = current.payload.clone();
     let canonical = payload
@@ -1708,8 +1711,20 @@ fn materialized_file_hash_verify_response(
         .ok_or_else(|| {
             EngineError::PolicyViolation("materialized file has no canonicalPath".to_owned())
         })?;
-    let bytes = std::fs::read(canonical)
-        .map_err(|error| EngineError::HandlerFailed(format!("read materialized file: {error}")))?;
+    let bytes = match std::fs::read(canonical) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return damaged_materialized_file_response(
+                store,
+                invocation,
+                &inspection,
+                &current,
+                &payload,
+                format!("materialized file bytes are missing or unreadable: {error}"),
+                None,
+            );
+        }
+    };
     let actual_hash = sha256_hex(&bytes);
     let expected_hash = payload
         .get("contentHash")
@@ -1722,11 +1737,44 @@ fn materialized_file_hash_verify_response(
             "resourceRefs": [resource_ref],
         }));
     }
+    damaged_materialized_file_response(
+        store,
+        invocation,
+        &inspection,
+        &current,
+        &payload,
+        "file bytes do not match contentHash",
+        Some(actual_hash),
+    )
+}
+
+fn ensure_materialized_file_operational(
+    inspection: &EngineResourceInspection,
+    operation: &str,
+) -> Result<()> {
+    if inspection.resource.lifecycle == "discarded" {
+        return Err(EngineError::PolicyViolation(format!(
+            "materialized file resource {} is discarded and cannot be {operation}",
+            inspection.resource.resource_id
+        )));
+    }
+    Ok(())
+}
+
+fn damaged_materialized_file_response(
+    store: &mut super::ResourceStoreBackend,
+    invocation: &Invocation,
+    inspection: &EngineResourceInspection,
+    current: &EngineResourceVersion,
+    payload: &Value,
+    damage_reason: impl Into<String>,
+    actual_hash: Option<String>,
+) -> Result<Value> {
     let mut damaged_payload = payload.clone();
-    damaged_payload["actualContentHash"] = json!(actual_hash);
-    damaged_payload["damageReason"] = json!("file bytes do not match contentHash");
+    damaged_payload["actualContentHash"] = actual_hash.map_or(Value::Null, Value::String);
+    damaged_payload["damageReason"] = json!(damage_reason.into());
     let version = store.update(UpdateResource {
-        resource_id: resource_id.clone(),
+        resource_id: inspection.resource.resource_id.clone(),
         expected_current_version_id: inspection.resource.current_version_id.clone(),
         lifecycle: Some("damaged".to_owned()),
         payload: damaged_payload,

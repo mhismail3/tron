@@ -7,7 +7,10 @@
 //! local `runtime` module.
 //! `grant::*` is the engine-owned authority surface; `resource::*` plus the
 //! artifact/goal/claim/evidence/decision wrappers form the durable output
-//! substrate. `ui::*` stores fixed-catalog generated UI as `ui_surface`
+//! substrate. Materialized-file wrappers keep file bytes tied to resource
+//! versions, record damaged truth through the resource store, and block
+//! operational reads or rewrites after discard while leaving inspection
+//! available. `ui::*` stores fixed-catalog generated UI as `ui_surface`
 //! resources, authors deterministic target surfaces from substrate projections,
 //! validates/refreshes/expires generated versions, and routes submitted actions
 //! back through canonical capability invocations. Stored-surface/action

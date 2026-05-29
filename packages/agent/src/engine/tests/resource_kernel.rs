@@ -303,6 +303,199 @@ async fn materialized_file_invalid_scope_does_not_touch_target_file() {
 }
 
 #[tokio::test]
+async fn materialized_file_hash_verify_marks_missing_bytes_as_damaged_truth() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let missing = tmp.path().join("missing.txt");
+
+    let created = handle
+        .invoke(host_invocation(
+            "resource::create",
+            json!({
+                "resourceId": "materialized_file:missing-bytes-test",
+                "kind": "materialized_file",
+                "scope": "session",
+                "lifecycle": "materialized",
+                "payload": {
+                    "canonicalPath": missing.to_string_lossy(),
+                    "relativePath": "missing.txt",
+                    "entryType": "file",
+                    "content": "expected bytes",
+                    "contentHash": "expected-hash",
+                    "sizeBytes": 14,
+                    "mimeType": "text/plain",
+                    "metadata": {"fixture": "missing-bytes"}
+                },
+                "locations": [{
+                    "kind": "file",
+                    "uri": missing.to_string_lossy(),
+                    "mimeType": "text/plain",
+                    "sizeBytes": 14
+                }]
+            }),
+            mutating_causal("materialized-file-missing-create").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let original_current = created.value.as_ref().unwrap()["resource"]["currentVersionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let verified = handle
+        .invoke(host_invocation(
+            "materialized_file::hash_verify",
+            json!({"resourceId": "materialized_file:missing-bytes-test"}),
+            mutating_causal("materialized-file-missing-verify").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(verified.error, None);
+    let value = verified.value.as_ref().unwrap();
+    assert_eq!(value["version"]["state"], "damaged");
+    assert_eq!(value["resourceRefs"][0]["role"], "damaged");
+    assert!(value["version"]["payload"]["actualContentHash"].is_null());
+    assert!(
+        value["version"]["payload"]["damageReason"]
+            .as_str()
+            .unwrap()
+            .contains("missing or unreadable")
+    );
+
+    let inspected = handle
+        .invoke(host_invocation(
+            "resource::inspect",
+            json!({"resourceId": "materialized_file:missing-bytes-test"}),
+            causal().with_scope("resource.read"),
+        ))
+        .await;
+    assert_eq!(inspected.error, None);
+    let inspection = &inspected.value.as_ref().unwrap()["inspection"];
+    assert_eq!(inspection["resource"]["lifecycle"], "damaged");
+    assert_eq!(inspection["resource"]["currentVersionId"], original_current);
+    assert_eq!(inspection["versions"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn materialized_file_read_rejects_discarded_resource_but_inspect_remains_available() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("discarded.txt");
+    let resource_id = "materialized_file:discarded-read-test";
+
+    let created = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "resourceId": resource_id,
+                "path": target.to_string_lossy(),
+                "content": "discard me",
+                "scope": "session"
+            }),
+            mutating_causal("materialized-file-discarded-create").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let current = created.value.as_ref().unwrap()["version"]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let discarded = handle
+        .invoke(host_invocation(
+            "materialized_file::discard",
+            json!({
+                "resourceId": resource_id,
+                "expectedCurrentVersionId": current
+            }),
+            mutating_causal("materialized-file-discarded-discard").with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(discarded.error, None);
+
+    let inspected = handle
+        .invoke(host_invocation(
+            "materialized_file::inspect",
+            json!({"resourceId": resource_id}),
+            causal().with_scope("resource.read"),
+        ))
+        .await;
+    assert_eq!(inspected.error, None);
+    assert_eq!(
+        inspected.value.as_ref().unwrap()["inspection"]["resource"]["lifecycle"],
+        "discarded"
+    );
+
+    let read = handle
+        .invoke(host_invocation(
+            "materialized_file::read",
+            json!({"resourceId": resource_id}),
+            causal().with_scope("resource.read"),
+        ))
+        .await;
+    assert!(matches!(
+        read.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("discarded")
+    ));
+}
+
+#[tokio::test]
+async fn materialized_file_update_rejects_discarded_resource_without_touching_bytes() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("discarded-update.txt");
+    let resource_id = "materialized_file:discarded-update-test";
+
+    let created = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "resourceId": resource_id,
+                "path": target.to_string_lossy(),
+                "content": "discard me",
+                "scope": "session"
+            }),
+            mutating_causal("materialized-file-discarded-update-create")
+                .with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let current = created.value.as_ref().unwrap()["version"]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let discarded = handle
+        .invoke(host_invocation(
+            "materialized_file::discard",
+            json!({
+                "resourceId": resource_id,
+                "expectedCurrentVersionId": current
+            }),
+            mutating_causal("materialized-file-discarded-update-discard")
+                .with_scope("resource.write"),
+        ))
+        .await;
+    assert_eq!(discarded.error, None);
+
+    let rejected = handle
+        .invoke(host_invocation(
+            "materialized_file::update",
+            json!({
+                "resourceId": resource_id,
+                "path": target.to_string_lossy(),
+                "content": "revived bytes"
+            }),
+            mutating_causal("materialized-file-discarded-update-reject")
+                .with_scope("resource.write"),
+        ))
+        .await;
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("discarded")
+    ));
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "discard me");
+}
+
+#[tokio::test]
 async fn patch_proposal_omits_absent_optional_string_fields() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
 

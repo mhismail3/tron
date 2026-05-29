@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **60/100 provisional**
+Current score: **62/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -86,14 +86,14 @@ interruption, and resource failure states.
 | First-party capability usefulness | 10 | 9 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
 | Worker/function/trigger substrate | 14 | 7 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 9 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
-| Resource truth and durability | 10 | 7 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
+| Resource truth and durability | 10 | 9 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 6 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 5 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 5 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **60/100**
+Total: **62/100**
 
 ## Scoring Rules
 
@@ -179,7 +179,7 @@ The evidence note must identify:
 | RWO-N8 | Module package activation | passed_after_fix | +2 | setup and first retest: `sess_019e7385-341e-7f30-8176-6b93396a6dbc`; final activation retest: `sess_019e7398-5d77-7d01-9c2a-465589dade48` | See 2026-05-29 RWO-N8 result note below. The setup run registered source/package, verified source, approved source, configured, activated, health-checked, disabled, and inspected the deterministic package. The final retest used 6 successful `capability::execute` rows, successful `module::activate`, `worker::spawn`, `module::check_health`, two `rwo_n8_20260529113609::health` invocations, duplicate activation replay, `module::disable`, `sandbox::stop_spawned_worker`, and `module::inspect_package`; 0 failed invocations; 2 executed approvals; disabled activation resource; revoked derived grant; no session logs. | `execute_correction`: nested wrapper cleanup stripped target-owned `arguments.mode` from `module::check_health`. `worker_lifecycle`: worker guide Python blocked in `recv_json` and stopped heartbeating while idle. `execute_resolution`: `worker::spawn` issued `engine_issued` scoped tokens, but binding selection only treated `session_scoped` session-generated functions as healthy. | `ae1b153bf` | Passed after rebuilt dev server PID 76020 with simulator booted. Direct fixture execute `019e7398-b60b-71b1-8e26-1ac35fcad2a1` selected `session_generated.rwo_n8_20260529113609.demo_echo` and invoked child `019e7398-b6f4-7b81-9c42-3acf2736499a`; disable stopped PID 77144 and revoked grant `sandbox-worker:rwo-n8-worker-20260529113609:019e7398-8526-7ff1-bbd5-280708370bf8`. |
 | RWO-N9 | Subagent fan-out/fan-in | passed_after_fix | +2 | failed first run: `sess_019e73a5-c2ae-7fe3-b9b9-86131b2f7156`; passing retest: `sess_019e73ae-4645-7f03-bca5-fad68c3959c4` | See 2026-05-29 RWO-N9 result note below. The passing retest used 10 parent `capability::execute` rows, 2 non-blocking `agent::spawn_subagent` target rows, 4 `agent::subagent_status` rows, 2 `agent::subagent_result` rows, 8 child `capability::execute` rows, 2 deterministic `agent_result:subagent:*` resources, 1 final parent `agent_result`, 0 failed invocations, 0 approvals, 0 `compact.*` events, and 0 session-scoped log rows. | Primary `resource_truth`: completed blocking subagents did not write deterministic `agent_result:subagent:*` resources, so result/status could fall back to in-memory manager state. Secondary `schema_or_recipe`: omitted `blockingTimeoutMs` was coerced into a blocking wait and the contract did not name the result capability, so fan-out models were guided toward sequential work. | this checkpoint | Passed exact prompt after rebuilt dev server PID 83613 with simulator booted. Parent spawned child sessions `sess_019e73ae-7618-7e92-b86a-19a4f50c605a` and `sess_019e73ae-8413-7830-9a49-3c87c98180be` before waiting, status-polled both through `agent::subagent_status`, collected both through `agent::subagent_result`, and reported lineage/capabilities. A model-chosen `process::run sleep 10` was used only as a timer between canonical status polls; no hidden client or runner side channel was used. |
 | RWO-N10 | Memory auto-retain | passed | +1 | `sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6` | See 2026-05-29 RWO-N10 result note below. The run used the real dev server and booted simulator evidence, kept the default auto-retain interval of 10, recorded 9 explicit `memory::auto_retain_fire` skips with `reason = below_threshold`, then fired on the tenth user message with `status = retaining`. The terminal `memory.retained` event recorded 4 resource refs: memory journal artifact, session materialized projection, memory-rule artifact, and rule materialized projection. DB evidence shows 0 failed invocations, 0 approvals, 0 `compact.*` events, 10 completed prompt queue drains, and resource versions with hashes/lifecycle state. | none; no code changes required | n/a | Passed without changing settings or using a side channel. Retain truth was engine-owned: `memory.retained` event seq 152, parent auto-retain invocation `019e73bb-209f-7561-912f-909dfe5f6e5a`, trace `019e73ba-fe7e-7511-ab2b-7275bfbecf3b`, and resource refs were produced by `artifact::create`, `materialized_file::update`, and `resource::link` children under that invocation. |
-| RWO-N11 | Resource failure matrix | pending | 0 | | | | | |
+| RWO-N11 | Resource failure matrix | passed_after_fix | +2 | first failed run: `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2`; clean retest: `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6` | See 2026-05-29 RWO-N11 result note below. Clean retest used 18 `capability::execute` rows, 6 `materialized_file::update`, 2 `materialized_file::hash_verify`, 2 `materialized_file::read`, 2 `materialized_file::inspect`, 3 `resource::create`, 1 `materialized_file::discard`, 0 approvals, 0 `compact.*` events, and resource lifecycle/version rows for normal, stale-CAS, missing payload, missing bytes, hash mismatch, discard, and replay paths. | `resource_truth`: missing canonical bytes returned an opaque handler failure without damaged resource truth, and discarded materialized files remained readable/updatable through operational wrappers. | this checkpoint | Passed after rebuilt dev server PID 90819 with simulator booted. Missing bytes and hash mismatch both produced damaged versions, stale CAS and declared hash mismatch failed before mutation, step 4/5 idempotency replay reused child `019e73d2-95a3-7fe1-a305-f3638a22a9c2`, and discarded read failed closed with no client-owned side channel. |
 | RWO-N12 | Approval and grant boundary | pending | 0 | | | | | |
 | RWO-N13 | Runtime resilience | pending | 0 | | | | | |
 | RWO-N14 | Provider full parity | pending | 0 | | | | | |
@@ -1212,6 +1212,78 @@ Failure focus:
 - idempotency;
 - silent repair or fallback reader.
 
+2026-05-29 result:
+
+- First simulator-backed real-server run
+  `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2` completed the matrix and exposed
+  two `resource_truth` failures. `materialized_file::hash_verify` on a
+  materialized-file resource whose canonical bytes were missing failed with
+  `handler_failed: read materialized file: No such file or directory` and left
+  the resource lifecycle `materialized` with no damaged version. A discarded
+  materialized file remained readable: step 16 returned the stored content
+  `discard me` even though the resource lifecycle was `discarded`.
+- Root cause was in `packages/agent/src/engine/primitives/resource.rs`:
+  materialized-file operational wrappers did not enforce the discarded lifecycle
+  boundary, and hash verification mapped unreadable canonical bytes to a handler
+  error instead of recording engine-owned damaged truth.
+- Focused regression coverage added:
+  `materialized_file_hash_verify_marks_missing_bytes_as_damaged_truth`,
+  `materialized_file_read_rejects_discarded_resource_but_inspect_remains_available`,
+  and
+  `materialized_file_update_rejects_discarded_resource_without_touching_bytes`.
+  These failed before the fix and pass after it.
+- Fix: `materialized_file::hash_verify` now records a damaged version with
+  `actualContentHash = null` and a missing/unreadable damage reason when the
+  canonical file cannot be read. `materialized_file::read`,
+  `materialized_file::update`, and `materialized_file::hash_verify` now fail
+  closed for discarded resources while `materialized_file::inspect` remains
+  available.
+- Clean retest `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6` ran against rebuilt
+  dev server PID `90819` with booted simulator evidence at
+  `/tmp/rwo_n11_retest_simulator.png`. Parent `agent::run_turn` invocation was
+  `019e73d2-0e51-7bb1-80eb-4f20028d84f9`, trace
+  `019e73d2-0e4e-7f32-a956-88b90fb23602`.
+- Clean retest DB proof: 18 `capability::execute` invocations, 6
+  `materialized_file::update`, 2 `materialized_file::hash_verify`, 2
+  `materialized_file::read`, 2 `materialized_file::inspect`, 3
+  `resource::create`, 1 `materialized_file::discard`, 1 final
+  `agent_result`, 0 approvals, 0 `compact.*` events, 1 completed
+  `agent::prompt_queue_drain`, and stream topics `agent.runtime`,
+  `compensation.records`, `events.session`, and `queue.lifecycle`.
+- Normal path and replay proof:
+  `materialized_file:rwo-n11-agent-primary-20260529060006` created
+  `ver_019e73d2-486e-7c23-88d9-f88c1e228673`, updated to
+  `ver_019e73d2-95a4-7ef0-8802-d6b753b0c14d`, and the duplicate step 4/5 key
+  replayed child invocation `019e73d2-95a3-7fe1-a305-f3638a22a9c2` without a
+  third version.
+- Failure path proof: stale CAS failed as `policy_violation` in
+  `019e73d2-cdc6-7f50-a293-380a446914fc`; missing payload was rejected by
+  `execute` as `needs_input` before creating a `resource::update` child;
+  declared hash mismatch failed as `policy_violation` in
+  `019e73d2-f30c-7e82-810a-328344bb1c90`; missing bytes created damaged version
+  `ver_019e73d3-20c8-7e92-86fc-0aaf4239e07e`; hash mismatch fixture created
+  damaged version `ver_019e73d3-4eaa-7d22-9ecc-b799d3a548c6`; discarded read
+  failed closed as `policy_violation` in
+  `019e73d3-c078-7b22-b485-97d1723243a2`.
+- Resource lifecycle proof: the final DB rows show the primary resource
+  `materialized`, missing-bytes fixture `damaged`, hash-mismatch fixture
+  `damaged`, and discarded fixture `discarded`. The damaged versions did not
+  advance invalid current content; the available baseline versions remained
+  reconstructable through `engine_resource_versions` and
+  `engine_resource_events`.
+- No package/source/policy/trust/audit side-table probe hits were found after
+  excluding canonical `engine_resource*` tables, and no client-owned policy,
+  alternate worker-spawn path, fallback reader, compatibility layer, or
+  product-state side channel was used.
+
+Scoring:
+
+- `+2` for a simulator-backed real-dev-server scenario that exposed
+  resource-truth bugs, received focused root-cause fixes, and passed a clean
+  retest with DB reconstruction.
+- Current score increases to `62/100`.
+- Resource truth and durability increases to `9/10`.
+
 ### RWO-N12: Approval And Grant Boundary
 
 Run:
@@ -1492,63 +1564,66 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N11: Resource Failure Matrix**
+Recommended next scenario: **RWO-N12: Approval And Grant Boundary**
 
 Setup:
 
 - Use the currently configured real dev server.
 - Use the iOS simulator for the parent agent prompt when practical; use a
-  deterministic fixture only where the exact damaged-resource state cannot be
+  deterministic fixture only where exact grant/approval timing cannot be
   reached through a model-authored prompt without broad side effects.
-- Exercise stale CAS, missing payload, damaged or missing blob, hash mismatch,
-  discarded resource, idempotency replay, and resource inspection paths through
-  `execute` or engine-owned deterministic fixture calls.
-- Keep resource truth engine-owned; do not inspect or mutate resources through
-  client-owned state or ad hoc filesystem side channels.
+- Exercise denied high-risk mutation, approved high-risk mutation, approval
+  double-submit/replay, and revoked or expired grant attempts through `execute`
+  or engine-owned deterministic fixture calls.
+- Keep approval and grant truth engine-owned; do not use client-owned policy,
+  direct DB mutation, alternate worker-spawn paths, or product-state side
+  channels.
 
 Prompt:
 
 ```text
-Use only execute. Create or identify a session-scoped resource, prove a normal inspect/update path, then exercise stale-CAS, missing-payload, damaged-or-missing-blob, hash-mismatch, discarded-resource, and idempotency-replay behavior. Report each resource id, version id, error class, and DB-observable lifecycle state.
+Use only execute. Exercise the approval and grant boundary: attempt a denied high-risk mutation, an approved high-risk mutation, a double-submit or replay of the same approval decision, and a revoked-or-expired grant attempt. Report each approval id, grant id, parent invocation id, child invocation id if any, decision status, and DB-observable side effects.
 ```
 
 Procedure:
 
 1. Start a fresh simulator-backed session on the real dev server.
-2. Create a session-scoped resource through the resource or materialized-file
-   capability path and record its current version/hash.
-3. Exercise a normal inspect/update/read path first so the success baseline is
-   reconstructable.
-4. Trigger each failure class with the smallest deterministic mutation or
-   capability request that owns that failure mode.
-5. Confirm each failure returns a bounded typed error and leaves resource
-   lifecycle/version state correct.
-6. Inspect DB resource, invocation, queue, stream, event, log, and failure
-   evidence before scoring.
+2. Trigger a high-risk mutation and deny the approval before any child handler
+   executes.
+3. Trigger a comparable high-risk mutation and approve it once.
+4. Replay or double-submit the same approval decision and prove it does not
+   duplicate child execution or durable side effects.
+5. Attempt execution with a revoked or expired grant and prove the handler is
+   not entered.
+6. Inspect DB invocation, approval, grant, queue, stream, event, log, and
+   resource evidence before scoring.
 
 After completion, inspect:
 
 - session ids, run ids, prompt invocations, target capability invocations, and
   parent/child invocation ids;
-- resource ids, version ids, content hashes, lifecycle state, links, discarded
-  markers, damaged-state markers, and idempotency keys;
-- stale CAS, missing payload, missing blob, hash mismatch, discarded read/update,
-  and replay results;
+- approval ids, status transitions, decision invocations, child invocation ids,
+  and approval replay/double-submit records;
+- grant ids, authority scopes, expiry or revocation records, and rejected
+  grant-attempt errors;
+- resource ids, version ids, content hashes, lifecycle state, and idempotency
+  keys for any approved mutation side effects;
 - queue rows and stream topics emitted for prompt completion and resource
-  lifecycle;
+  approval/grant lifecycle;
 - failed invocations, if any;
 - approval records, if any;
-- logs mentioning resource, blob, queue, stream, or provider failures.
+- logs mentioning approval, grant, queue, stream, or provider failures.
 
 Pass criteria:
 
-- The normal success path records durable resource refs, versions, and hashes.
-- Every requested failure path is bounded, typed, reconstructable, and leaves no
-  invalid current version.
-- Replay/idempotency proves the same logical operation does not duplicate or
+- Denial creates no child execution and no durable side effects.
+- Approval creates exactly one authorized child execution and expected durable
+  refs when the target mutates state.
+- Replay/double-submit is bounded, typed, and does not duplicate execution or
   silently mutate resource truth.
-- Resource decisions, versions, and failures are reconstructable from DB
-  invocation/event/log/resource/queue/stream records.
+- Revoked or expired grants fail before handler execution.
+- Approval and grant decisions are reconstructable from DB
+  invocation/event/log/resource/approval/queue/stream records.
 - No client-owned policy, alternate worker-spawn path, fallback reader,
   compatibility layer, or product-state side channel is used.
 
