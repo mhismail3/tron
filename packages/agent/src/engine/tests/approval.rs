@@ -250,6 +250,66 @@ async fn terminal_approval_replay_does_not_publish_fresh_pending_event() {
 }
 
 #[tokio::test]
+async fn approval_idempotency_is_scoped_to_session() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let first = handle
+        .request_approval(crate::engine::EngineApprovalRequest {
+            function_id: fid("danger::write"),
+            payload: json!({"value": 1}),
+            causal_context: mutating_causal("shared-approval-key").with_scope("danger.write"),
+            delivery_mode: DeliveryMode::Sync,
+        })
+        .await
+        .unwrap();
+    let second = handle
+        .request_approval(crate::engine::EngineApprovalRequest {
+            function_id: fid("danger::write"),
+            payload: json!({"value": 2}),
+            causal_context: mutating_causal("shared-approval-key")
+                .with_scope("danger.write")
+                .with_session_id("session-b"),
+            delivery_mode: DeliveryMode::Sync,
+        })
+        .await
+        .unwrap();
+
+    assert_ne!(first.approval_id, second.approval_id);
+    assert_eq!(first.idempotency_key, second.idempotency_key);
+    assert_eq!(first.session_id.as_deref(), Some("session-a"));
+    assert_eq!(second.session_id.as_deref(), Some("session-b"));
+
+    let records = handle.list_approvals(None, None, 10).await.unwrap();
+    assert_eq!(records.len(), 2);
+}
+
+#[tokio::test]
+async fn approval_idempotency_still_conflicts_within_session() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .request_approval(crate::engine::EngineApprovalRequest {
+            function_id: fid("danger::write"),
+            payload: json!({"value": 1}),
+            causal_context: mutating_causal("session-scoped-conflict").with_scope("danger.write"),
+            delivery_mode: DeliveryMode::Sync,
+        })
+        .await
+        .unwrap();
+    let result = handle
+        .request_approval(crate::engine::EngineApprovalRequest {
+            function_id: fid("danger::write"),
+            payload: json!({"value": 2}),
+            causal_context: mutating_causal("session-scoped-conflict").with_scope("danger.write"),
+            delivery_mode: DeliveryMode::Sync,
+        })
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(EngineError::IdempotencyConflict { key, .. }) if key == "session-scoped-conflict"
+    ));
+}
+
+#[tokio::test]
 async fn approval_resolution_rejects_agent_even_with_resolve_scope() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let request_context = mutating_causal("approval-agent-deny-key").with_scope("approval.request");

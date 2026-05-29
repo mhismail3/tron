@@ -125,21 +125,28 @@ xcrun simctl io booted screenshot /tmp/<scenario>-simulator.png
 ```
 
 Record the session id, run log, screenshot path, dev-server PID or health
-snapshot, and the matching database evidence together. If iOS shows the system
-"Open in Tron?" confirmation instead of immediately navigating, capture that
-screenshot but do not treat it as pass evidence by itself; the canonical result
-still comes from engine DB reconstruction for the same session id.
+snapshot, and the matching database evidence together. A screenshot captured
+right after `simctl openurl` is navigation evidence only. For chat parity
+evidence, reopen the same deep link and capture a final screenshot after the DB
+has no pending approvals, no later `stream.turn_start` after the selected
+terminal event, and stable invocation/resource/queue/stream rows. Later
+non-turn hook rows such as `hook.llm_result` should not keep a terminal session
+open by themselves. If iOS shows the system "Open in Tron?" confirmation
+instead of immediately navigating, capture that screenshot but do not treat it
+as pass evidence by itself; the canonical result still comes from engine DB
+reconstruction for the same session id.
 
 Use deep-link screenshots as a parity check, not just a navigation shortcut.
 For each harnessed session, compare the visible chat against the engine DB:
 the submitted `message.user` prompt should appear in the transcript, the latest
 assistant content should match the latest completed or paused engine turn,
 approval sheets should reflect the current `engine_approvals.status`, and any
-sheet for an approval or generated action should disappear once the engine has
-resolved it or moved past it. If the chat omits the user prompt, starts at agent
-content, leaves a stale confirmation/action sheet mounted, or otherwise
-disagrees with events/invocations/approvals/resources, record that as chat
-parity drift while keeping DB evidence canonical for the scenario result.
+sheet for an approval or generated action should either disappear or become a
+clearly non-actionable approved/denied historical marker once the engine has
+resolved it or moved past it. If the chat omits the user prompt, starts at
+agent content, leaves a stale actionable confirmation/action sheet mounted, or
+otherwise disagrees with events/invocations/approvals/resources, record that as
+chat parity drift while keeping DB evidence canonical for the scenario result.
 
 Harnesses should not classify a session immediately after the first
 `stream.turn_end`. Before collecting final evidence, wait until the session

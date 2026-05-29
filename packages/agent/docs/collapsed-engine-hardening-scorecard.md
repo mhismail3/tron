@@ -157,6 +157,20 @@ retest passed on real dev server PID `99393` with simulator deep links for
 Anthropic, OpenAI Codex, Gemini, and Ollama. The banked score is now `72/100`;
 broad RWO-N14 testing may proceed only to P5 idempotency replay.
 
+Resolved follow-up note, 2026-05-29: the P4 clean run still contained
+simulator-visible failed-looking `capability::execute` cards caused by two
+engine issues: repairable sandbox output path shape errors were returned as
+`isError=true`, and approval idempotency keys were globally unique instead of
+scoped to the target function/session/workspace. The root fix scopes approval
+idempotency through the approval substrate and classifies sandbox output path
+shape repairs as `needs_input` with `isError=false`. The exact P4 rerun on real
+dev server PID `10586` produced no `isError=true` capability completions.
+Anthropic, OpenAI Codex, and Gemini passed; Ollama with small local
+`gemma4:e4b` reached a correct non-error `needs_input` result but did not plan
+the concrete high-risk command, so it is recorded as a small-local-model
+capability limitation rather than an engine blocker. The banked score remains
+`72/100`; broad RWO-N14 testing may proceed only to P5 idempotency replay.
+
 ## Scoring Rules
 
 - `+1` for a simulator-tested scenario with DB proof and no code changes needed.
@@ -242,26 +256,31 @@ xcrun simctl io booted screenshot /tmp/<scenario>-simulator.png
 ```
 
 Each scenario note must store the session id, run log, screenshot path,
-dev-server PID or health snapshot, and DB reconstruction together. The URL route
-contains only the session id; do not put tokens, provider credentials, user
-paths, or prompt contents into the deep link. If the simulator stops at the iOS
-"Open in Tron?" confirmation sheet, record the screenshot as UI context only and
-keep DB invocation/event/log/resource/approval/queue/stream evidence canonical
-for pass/fail classification.
+dev-server PID or health snapshot, and DB reconstruction together. A screenshot
+captured immediately after opening the session is navigation evidence only; for
+chat parity evidence, reopen the same deep link and capture a final screenshot
+after the DB reaches the terminal state. The URL route contains only the session
+id; do not put tokens, provider credentials, user paths, or prompt contents into
+the deep link. If the simulator stops at the iOS "Open in Tron?" confirmation
+sheet, record the screenshot as UI context only and keep DB
+invocation/event/log/resource/approval/queue/stream evidence canonical for
+pass/fail classification.
 
 Deep-link evidence is not complete until the visible chat state is compared
 against engine truth for the same session id. The screenshot or simulator state
 must show, or the scenario must explicitly record as an `ios_rendering`
 follow-up, whether the submitted user prompt is present in the transcript, the
 assistant turn matches the latest engine events, any approval sheet reflects the
-current approval row status, and stale approval or action sheets disappear after
+current approval row status, and approval or action sheets either disappear or
+become clearly non-actionable historical approved/denied state after
 `approval::resolve` or later engine progress. A harness must wait for a stable
 terminal state before classification: no pending approvals for the session
 family, no later `stream.turn_start` after the selected terminal event, and a DB
 reconstruction pass that includes invocations, approvals, resources, queues,
-streams, events, and logs. If those checks disagree, classify the result from
-DB truth and file the UI mismatch as chat parity drift; do not let screenshot
-state override the engine ledger.
+streams, events, and logs. Later non-turn hook events such as `hook.llm_result`
+must not by themselves keep a completed session open. If those checks disagree,
+classify the result from DB truth and file the UI mismatch as chat parity drift;
+do not let screenshot state override the engine ledger.
 
 ## Scenario Ledger
 
@@ -280,7 +299,7 @@ state override the engine ledger.
 | RWO-N11 | Resource failure matrix | passed_after_fix | +2 | first failed run: `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2`; resource-truth retest: `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6`; execute-guidance retest: `sess_019e73eb-f65c-7ce3-a621-aa8b0d078494` | See 2026-05-29 RWO-N11 result note below. Final retest used 17 `capability::execute` rows, 6 `materialized_file::update`, 2 `materialized_file::hash_verify`, 2 `materialized_file::read`, 2 `materialized_file::inspect`, 3 `resource::create`, 1 `materialized_file::discard`, 0 approvals, 0 `compact.*` events, 0 session logs, damaged truth for missing-bytes and hash-mismatch fixtures, discarded lifecycle for the discarded fixture, replay of step 4, and 0 `target_payload_invalid` execute rows. | Primary fixed root cause was `resource_truth`: missing canonical bytes returned an opaque handler failure without damaged resource truth, and discarded materialized files remained readable/updatable through operational wrappers. Follow-up fixed `schema_or_recipe`: lifecycle CAS guidance now teaches `expectedCurrentVersionId`, not `versionId`, before the model calls lifecycle targets. | `c8a230983`; `9069323a1` | Passed after rebuilt dev server PID 98981 with simulator booted. Step 14 first attempted `materialized_file::discard` with `expectedCurrentVersionId = ver_019e73ed-1591-7cb3-8693-b0f2121f40fc` and succeeded without a pre-child validation failure. |
 | RWO-N12 | Approval and grant boundary | passed_after_fix | +2 | failed direct policy probe: `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0`; approval session: `sess_019e73fd-ba7a-7521-bbdf-6dca81b5855c`; direct retest: `sess_019e7410-98a1-7472-a8b8-475bc8229055` | See 2026-05-29 RWO-N12 result note below. The live approval-flow session used 3 `capability::execute` rows, 2 approval records, 3 `approval::resolve` rows, 1 `process::run` child, 1 `materialized_file::update`, 3 `resource::create`, 2 completed prompt queue drains, 0 failed invocations, and 0 `compact.*` events. The direct retest used 3 `capability::execute`, 3 `approval::resolve`, 1 `process::run`, 1 `materialized_file::update`, 1 `resource::create`, 6 `engine::invoke`, 2 approval records, 8 stream rows, 0 failed invocations, and 0 `compact.*` events. Denial created approval `019e7410-996b-7431-afa9-f9e3da8e5c9c`, no child, and no target refs; approval created approval `019e7410-9b17-7673-b14c-c55da8e669c2`, child `019e7410-9b42-7ab0-a09f-73660aff8cad`, materialized file `materialized_file:2d5d7cc3d635bdaed7de5dd104b243c4e8640b393b8c1b4f1345093ebfe555f0`, and output `res_019e7410-9b4d-7fa1-93da-67dd1c38cda3`; replay execute `019e7410-9c24-71d0-b87c-ac8216df447a` reported `approvalReplayed=true` and `childInvocationCreated=false`. | `execute_resolution`: public `/engine` direct `capability::execute` used transport/client audit scopes but did not project active-profile execution policy scopes/runtime metadata, so direct execute failed with `CAPABILITY_DENIED` before approval. The root fix derives execute policy on the server from the active profile and rejects client-authored `contract.*`, `implementation.*`, `plugin.*`, and `capability.*` policy context. | `704fb8041` | Passed after rebuilt dev server PID 7070 with simulator booted. DB evidence proves policy scopes stayed server-owned, the denied mutation created no `process::run` child or target refs, the approved mutation created exactly one child and resource chain, duplicate approval resolve replayed, and direct public execute no longer requires client-supplied policy. |
 | RWO-N13 | Runtime resilience | passed | +1 | runtime pass: `sess_019e7422-7fb7-7423-a63c-16c473d6917e`; unscored harness attempt: `sess_019e741e-8b87-7f72-94f7-b98b3be63eb3` | See 2026-05-29 RWO-N13 result note below. Runtime log `/tmp/rwo_n13_runtime_run_20260529072756.json` and approval-pause log `/tmp/rwo_n13_approval_pause_run_20260529073320.json` reconstruct the scenario. Baseline prompt used `agent::prompt`, a completed `agent::prompt_queue_drain`, `filesystem::read_file`, and `process::run`; `./scripts/tron dev -bdt` moved PID `81779` to `47488` and passed the configured dev tests. The long read-only process acquired lease cursor `80311`, was interrupted by `./scripts/tron dev -d` moving PID `47488` to `48287`, persisted child `019e7424-1af7-7f91-9f27-d75c64927fb7` with exitCode `-1`, released lease `019e7424-1af7-7f91-9f27-d7682abb77bf`, and recorded compensation `019e7424-1e4e-76b2-a31c-fc97ad20efef`. Post-reconnect `process::run` child `019e7424-558d-7d51-b3d9-59df726a0642` exited `0`. Approval `019e7427-6989-7d90-829e-89f5d0689c07` stayed pending across `./scripts/tron dev -d` moving PID `48287` to `49356`, then executed child `019e7427-96ad-76d1-bf34-658c13775af3`, materialized file `materialized_file:10068ee46d1ca50c3c732f08a867d15e361ae22cc6c46e6ef492721428e67920`, and output `res_019e7427-96c5-7553-a106-bae7e50dbd4c`. No scenario idempotency key duplicated; only internal `engine::invoke` rows have blank idempotency keys. There were 0 failed invocations, 0 `compact.*` events, no session-scoped logs, and stream topics included `agent.runtime`, `events.session`, `queue.lifecycle`, `approvals`, `resource.leases`, and `compensation.records`. | none; first harness attempt waited for a `process::run` invocation row before completion even though active process truth is exposed through `resource.leases`. Simulator URL deep-link screenshots stopped at the iOS "Open in Tron?" confirmation, but the dashboard remained mounted/not onboarding and DB/session-stream reconstruction proved continuity. | n/a | Passed on the real dev server with the iOS simulator booted. Exact retest used the corrected lease-based harness, proved interrupted invocation visibility, approval-pause survival, queue/idempotency correctness, and successful post-reconnect execution. |
-| RWO-N14 | Provider full parity | partial_p4_passed_after_fix | +7 | clean P1 run: Anthropic `sess_019e7433-bd1f-79f0-8d6f-e037f2d07448`, OpenAI Codex `sess_019e7433-de30-7d51-8022-b15d5fc95b62`, Gemini `sess_019e7433-fb83-74e1-973b-281c617ca83b`, Ollama failed `sess_019e7434-10b9-7c73-8d44-e43af8017059`; wire-shape retest still failed `sess_019e743c-e359-7ea0-aa4d-42d7de3852d1`; final Ollama P1 retest passed `sess_019e7441-5e8b-7d91-8c14-b4352d6e1887`; clean P2 run: Anthropic `sess_019e7447-d814-7d02-b90d-a8dbc5998d6e`, OpenAI Codex `sess_019e7447-fda8-71e0-a427-99d9d9dd868d`, Gemini `sess_019e7448-1b59-74c3-b655-38b574ca2aee`, Ollama `sess_019e7448-34cd-7171-bab4-2e643ffec97e`; P3 failure: Ollama `sess_019e7450-983c-7033-8965-85f8daab139c`; clean P3 retest: Anthropic `sess_019e7466-2bd2-7d72-b17d-37ca53fe0993`, OpenAI Codex `sess_019e7466-58e5-7360-b0f5-1507d6e7d3c9`, Gemini `sess_019e7466-71ed-7bf3-a5b3-b425f9c41dc1`, Ollama `sess_019e7466-82f0-7e02-830e-5989c1bb896c`; clean P4 retest: Anthropic `sess_019e749e-8539-7591-a146-5ee38152b03a`, OpenAI Codex `sess_019e749f-2500-7240-a1b9-9b3295bdb853`, Gemini `sess_019e749f-a5b4-7471-b129-91d2ef9ce105`, Ollama `sess_019e749f-e321-7451-8392-1f742fd840d4` | See 2026-05-29 RWO-N14 P1, P2, P3, and P4 result notes below. P4 clean retest used real dev server PID `99393`, run log `/tmp/rwo_n14_p4_provider_parity_20260529094326.json`, one executed `process::run` approval per provider, one successful sandbox-materialized process child per provider, materialized-file plus execution-output refs per provider, zero failed invocations, zero `compact.*` events, no session/trace logs, completed prompt queue drains, and `agent.runtime`, `approvals`, `events.session`, `queue.lifecycle`, `resource.leases`, and `compensation.records` stream rows. | Primary P1 `model_guidance`: execute text output appeared after metadata, and local Ollama reported a generic success sentence instead of the exact line. Provider-boundary cleanup also fixed stale outbound Ollama native field names and removed the inbound compatibility alias. P2 had no failure. Primary P3 `schema_or_recipe`: `process::run` did not express non-empty command in schema, the target guard allowed blank commands, and execute did not classify null required fields as missing input. Primary P4 `model_guidance`: approval-gated write commands were under-taught and could target `filesystem::write_file` or `approval::request` instead of `process::run`. Primary P4 `target_capability`: sandbox expected output paths were validated too late and allowed absolute or home-relative host paths to fail only after approval. P4 harness `observability_gap`: simulator collection returned after an early turn end while a later approval was still pending. | P1 fix `9616a9b64`; P2 n/a; P3 fix `8da05af18`; P4 fix current checkpoint | P4 passed on rebuilt dev server PID `99393`; RWO-N14 remains active and must continue with P5 idempotency replay. |
+| RWO-N14 | Provider full parity | partial_p4_followup_fixed | +7 | clean P1 run: Anthropic `sess_019e7433-bd1f-79f0-8d6f-e037f2d07448`, OpenAI Codex `sess_019e7433-de30-7d51-8022-b15d5fc95b62`, Gemini `sess_019e7433-fb83-74e1-973b-281c617ca83b`, Ollama failed `sess_019e7434-10b9-7c73-8d44-e43af8017059`; wire-shape retest still failed `sess_019e743c-e359-7ea0-aa4d-42d7de3852d1`; final Ollama P1 retest passed `sess_019e7441-5e8b-7d91-8c14-b4352d6e1887`; clean P2 run: Anthropic `sess_019e7447-d814-7d02-b90d-a8dbc5998d6e`, OpenAI Codex `sess_019e7447-fda8-71e0-a427-99d9d9dd868d`, Gemini `sess_019e7448-1b59-74c3-b655-38b574ca2aee`, Ollama `sess_019e7448-34cd-7171-bab4-2e643ffec97e`; P3 failure: Ollama `sess_019e7450-983c-7033-8965-85f8daab139c`; clean P3 retest: Anthropic `sess_019e7466-2bd2-7d72-b17d-37ca53fe0993`, OpenAI Codex `sess_019e7466-58e5-7360-b0f5-1507d6e7d3c9`, Gemini `sess_019e7466-71ed-7bf3-a5b3-b425f9c41dc1`, Ollama `sess_019e7466-82f0-7e02-830e-5989c1bb896c`; clean P4 retest: Anthropic `sess_019e749e-8539-7591-a146-5ee38152b03a`, OpenAI Codex `sess_019e749f-2500-7240-a1b9-9b3295bdb853`, Gemini `sess_019e749f-a5b4-7471-b129-91d2ef9ce105`, Ollama `sess_019e749f-e321-7451-8392-1f742fd840d4`; P4 failed-card follow-up rerun: Anthropic `sess_019e74b7-b9bc-7de0-9c59-8cab92fffd77`, OpenAI Codex `sess_019e74b8-127f-72d2-865c-99de12e8ed1b`, Gemini `sess_019e74b8-4ff2-76c1-92d6-cae741f593f4`, Ollama/Gemma inconclusive `sess_019e74b8-7d7f-7400-94c7-8de99d917761` | See 2026-05-29 RWO-N14 P1, P2, P3, P4, and P4 follow-up result notes below. The P4 follow-up rerun used real dev server PID `10586`, run log `/tmp/rwo_n14_p4_provider_parity_20260529101057.json`, final simulator screenshots under `/tmp/rwo_n14_p4_*_final_simulator_20260529101057.png`, zero failed invocations, zero `compact.*` events, and zero `isError=true` capability completions. Anthropic, OpenAI Codex, and Gemini each created one executed `process::run` approval, one successful sandbox-materialized process child, materialized-file refs, execution-output refs, completed prompt queue drains, and no session/trace logs. Ollama/Gemma returned a non-error `needs_input` execute result without creating an approval or child. | Primary P1 `model_guidance`: execute text output appeared after metadata, and local Ollama reported a generic success sentence instead of the exact line. Provider-boundary cleanup also fixed stale outbound Ollama native field names and removed the inbound compatibility alias. P2 had no failure. Primary P3 `schema_or_recipe`: `process::run` did not express non-empty command in schema, the target guard allowed blank commands, and execute did not classify null required fields as missing input. Primary P4 `model_guidance`: approval-gated write commands were under-taught and could target `filesystem::write_file` or `approval::request` instead of `process::run`. Primary P4 `target_capability`: sandbox expected output paths were validated too late and allowed absolute or home-relative host paths to fail only after approval. P4 harness `observability_gap`: simulator collection returned after an early turn end while a later approval was still pending. P4 follow-up fixed primary `grant_or_approval` and execute preflight classification: approval idempotency was globally scoped, and repairable sandbox path mistakes were projected as failed cards instead of `needs_input`. The remaining Ollama/Gemma result is `provider_runner`/small-local-model capability, not an engine substrate failure. | P1 fix `9616a9b64`; P2 n/a; P3 fix `8da05af18`; P4 fix `ea6806937`; P4 failed-card follow-up current checkpoint | P4 passed on rebuilt dev server PID `99393`; the failed-card follow-up rerun on PID `10586` verified no `isError=true` execute completions. RWO-N14 remains active and must continue with P5 idempotency replay; later local-provider parity should try a larger Ollama model before treating Gemma 4 E4B as substrate evidence. |
 
 ## Scenario Details
 
@@ -1922,6 +1941,84 @@ Failure focus:
 - Score impact: Safety, grants, and approvals increases to `9/10`; runtime
   resilience increases to `7/10`; current score increases to `72/100`; and
   RWO-N14 remains active for P5 idempotency replay.
+
+2026-05-29 P4 failed-card follow-up:
+
+- Trigger: simulator review of the prior P4 clean pass showed red
+  `capability::execute` cards before the final successful approval turns even
+  though the final engine invocation count was clean.
+- DB root cause:
+  - Anthropic and OpenAI Codex first produced `target_policy_rejected`
+    `capability::execute` results for absolute or home-relative
+    `expectedOutputs[].path` values. These were repairable argument-shape
+    errors, but execute projected them with `isError=true`.
+  - Anthropic and OpenAI Codex also hit `IDEMPOTENCY_CONFLICT` rows when a
+    model-chosen approval idempotency key collided with an earlier session.
+    Approval idempotency was keyed globally instead of by the same
+    function/session/workspace scope used by the engine ledger.
+- Root-cause fixes: approval idempotency now scopes by function id, session id,
+  workspace id, and idempotency key in both in-memory and SQLite approval
+  stores; the SQLite approval table migrates away from the prior global
+  `idempotency_key TEXT UNIQUE` column into a scoped unique index; and
+  `process::run` sandbox output path preflight returns repairable
+  `needs_input` details with `isError=false` instead of a failed-card result.
+- Focused coverage added:
+  `approval_idempotency_is_scoped_to_session`,
+  `approval_idempotency_still_conflicts_within_session`,
+  `sqlite_approval_idempotency_is_scoped_after_global_migration`,
+  `sqlite_approval_idempotency_still_conflicts_within_scope`, and
+  `process_run_sandbox_output_path_shape_is_repairable_preflight`.
+- Exact rerun: `/tmp/rwo_n14_p4_provider_parity_20260529101057.json`; real dev
+  server PID `10586`; health stayed OK from uptime 205 seconds before the run
+  to 317 seconds after the run. Final deep-link screenshots:
+  `/tmp/rwo_n14_p4_anthropic_final_simulator_20260529101057.png`,
+  `/tmp/rwo_n14_p4_openai-codex_final_simulator_20260529101057.png`,
+  `/tmp/rwo_n14_p4_google_final_simulator_20260529101057.png`, and
+  `/tmp/rwo_n14_p4_ollama_final_simulator_20260529101057.png`.
+- Provider evidence:
+  - Anthropic `claude-sonnet-4-6` passed in
+    `sess_019e74b7-b9bc-7de0-9c59-8cab92fffd77`; approval
+    `019e74b7-df11-7043-9a59-99a2e4d099c2`; process child
+    `019e74b7-e2a3-7243-83c0-18142528737f`; refs
+    `materialized_file:b5e42323e87f106ffce662260479fb5b397048eee8c05d76677d390042c01cb1`
+    and `res_019e74b7-e2c1-7471-a97f-daf4f4524b95`.
+  - OpenAI Codex `gpt-5.5` passed in
+    `sess_019e74b8-127f-72d2-865c-99de12e8ed1b`; approval
+    `019e74b8-2e99-70a0-8ddb-681a47112ba1`; process child
+    `019e74b8-2fd8-7221-9b17-f1eaa3667723`; refs
+    `materialized_file:9e1d56273678169d999c036d8f9fe70938b9aff42e9030ad555dbaf4232688ed`
+    and `res_019e74b8-2ff5-7700-9e59-575f9c9d0244`.
+  - Gemini `gemini-2.5-flash` passed in
+    `sess_019e74b8-4ff2-76c1-92d6-cae741f593f4`; approval
+    `019e74b8-6882-7d91-a0ff-dc0b315d3bf2`; process child
+    `019e74b8-6947-7240-95fd-e8ab3d4bd0dd`; refs
+    `materialized_file:e970f1456b215d957d9701cd905200c79c0903646cde916028612a527fe15b82`
+    and `res_019e74b8-6969-79d0-9954-dea4a2a24370`.
+  - Ollama `gemma4:e4b` was inconclusive in
+    `sess_019e74b8-7d7f-7400-94c7-8de99d917761`; it selected
+    `process::run` but supplied empty arguments, so execute returned
+    `status = needs_input`, `isError = false`, no approval, and no child. This
+    is tracked as a small-local-model limitation; later local-provider parity
+    should retry with a larger Ollama model before treating the result as
+    substrate evidence.
+- Resource, approval, queue, stream, and log evidence: the three passed
+  providers each created one executed approval, one `approval::resolve`, one
+  successful sandbox-materialized process child, materialized-file and
+  execution-output resources, one completed prompt queue drain, zero failed
+  invocations, zero `compact.*` events, zero `isError=true` capability
+  completions, and no session/trace log rows. Stream rows included
+  `agent.runtime`, `approvals`, `events.session`, `queue.lifecycle`,
+  `resource.leases`, and `compensation.records`.
+- Chat parity evidence: final deep-link screenshots show the submitted user
+  prompt in the transcript for Gemini and Ollama. Gemini shows an approved
+  non-actionable approval card and no pending confirmation sheet after DB
+  approval status reached `executed`. This confirms the harness must collect
+  final screenshots after terminal DB state, not only immediately after
+  session creation. Any future stale actionable approval sheet remains an
+  `ios_rendering` follow-up even when DB truth is canonical.
+- Score impact: no additional score is awarded because P4 had already banked
+  its scenario points. The follow-up removes a simulator-visible failed-card
+  regression and keeps current score at `72/100`.
 
 ## Structural Cleanup Backlog
 

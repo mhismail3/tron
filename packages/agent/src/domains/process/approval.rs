@@ -41,6 +41,11 @@ pub(crate) fn validate_run_payload_before_approval(payload: &Value) -> Result<()
     Ok(())
 }
 
+/// Stable policy message for sandbox output path shape errors.
+pub(crate) fn sandbox_output_path_relative_message() -> &'static str {
+    SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE
+}
+
 /// Return true when a validated `process::run` payload should pause for approval.
 pub(crate) fn run_execution_requires_approval(payload: &Value) -> bool {
     validate_run_payload_before_approval(payload).is_ok()

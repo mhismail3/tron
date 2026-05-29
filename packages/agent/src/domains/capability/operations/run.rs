@@ -120,7 +120,8 @@ pub(super) async fn execute_invoke_value(
         return preflight_rejection_result(&function, &target, error, status);
     }
     if let Err(error) = validate_target_policy_before_approval(&function, &payload) {
-        return preflight_rejection_result(&function, &target, error, "target_policy_rejected");
+        let status = policy_preflight_status(&error);
+        return preflight_rejection_result(&function, &target, error, status);
     }
     let idempotency_key = match child_idempotency_key(
         invocation,
@@ -316,6 +317,14 @@ pub(super) fn preflight_rejection_result(
         .get("missingArgumentPaths")
         .cloned()
         .unwrap_or_else(|| json!([]));
+    let invalid_fields = guidance
+        .get("invalidFields")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let invalid_argument_paths = guidance
+        .get("invalidArgumentPaths")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
     capability_result_value(CapabilityResult {
         content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
             preflight_message(function, status, &message),
@@ -341,7 +350,9 @@ pub(super) fn preflight_rejection_result(
             "approvalCreated": false,
             "resourceRefs": [],
             "missingFields": missing_fields,
-            "missingArgumentPaths": missing_argument_paths
+            "missingArgumentPaths": missing_argument_paths,
+            "invalidFields": invalid_fields,
+            "invalidArgumentPaths": invalid_argument_paths
         })),
         is_error: (status != "needs_input").then_some(true),
         stop_turn: None,
@@ -349,11 +360,28 @@ pub(super) fn preflight_rejection_result(
 }
 
 pub(super) fn payload_preflight_status(error: &CapabilityError) -> &'static str {
-    if is_missing_required_argument_error(error) {
+    if is_needs_input_error(error) {
         "needs_input"
     } else {
         "target_payload_invalid"
     }
+}
+
+pub(super) fn policy_preflight_status(error: &CapabilityError) -> &'static str {
+    if is_needs_input_error(error) {
+        "needs_input"
+    } else {
+        "target_policy_rejected"
+    }
+}
+
+fn is_needs_input_error(error: &CapabilityError) -> bool {
+    error.details().is_some_and(|details| {
+        details
+            .get("validationKind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| matches!(kind, "missing_required_argument" | "repairable_argument"))
+    })
 }
 
 pub(super) fn is_missing_required_argument_error(error: &CapabilityError) -> bool {
@@ -391,11 +419,27 @@ fn preflight_guidance(status: &str, details: Option<&Value>) -> Value {
         .and_then(|details| details.get("missingArgumentPaths"))
         .cloned()
         .unwrap_or_else(|| json!([]));
+    let invalid_fields = details
+        .and_then(|details| details.get("invalidFields"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let invalid_argument_paths = details
+        .and_then(|details| details.get("invalidArgumentPaths"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    let has_invalid_arguments = invalid_fields
+        .as_array()
+        .is_some_and(|fields| !fields.is_empty())
+        || invalid_argument_paths
+            .as_array()
+            .is_some_and(|paths| !paths.is_empty());
     json!({
-        "kind": "provide_missing_arguments",
-        "message": "Re-run execute with the same selected target and provide the missing fields inside execute.arguments.",
+        "kind": if has_invalid_arguments { "correct_arguments" } else { "provide_missing_arguments" },
+        "message": "Re-run execute with the same selected target and provide or correct the named fields inside execute.arguments.",
         "missingFields": missing_fields,
         "missingArgumentPaths": argument_paths,
+        "invalidFields": invalid_fields,
+        "invalidArgumentPaths": invalid_argument_paths,
     })
 }
 

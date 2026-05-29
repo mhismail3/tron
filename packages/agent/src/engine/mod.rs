@@ -37,8 +37,9 @@
 //!   scoped outside the production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution,
-//!   while `approval::resolve` remains a user/client-owned primitive routed
-//!   through `EngineHostHandle` so the stored invocation resumes in one trace;
+//!   idempotency is scoped by target function/session/workspace/caller key, and
+//!   `approval::resolve` remains a user/client-owned primitive routed through
+//!   `EngineHostHandle` so the stored invocation resumes in one trace;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   high-risk shared-state mutations, so the host can acquire/release one
 //!   domain resource from payload fields plus causal context such as `sessionId`,

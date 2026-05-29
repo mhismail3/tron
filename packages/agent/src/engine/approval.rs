@@ -4,7 +4,9 @@
 //! invocations. A pending approval stores the original invocation intent,
 //! idempotency key, trace, actor, authority scopes, and payload fingerprint so
 //! resolution can resume the same causal action instead of creating a second,
-//! unrelated command path.
+//! unrelated command path. Approval idempotency is scoped by function, session,
+//! and workspace, matching the engine ledger instead of treating model-chosen
+//! keys as globally unique across unrelated sessions.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -204,7 +206,12 @@ impl InMemoryEngineApprovalStore {
     ) -> Result<EngineApprovalRequestOutcome> {
         let fingerprint = approval_fingerprint(&request.function_id, &request.payload);
         if let Some(key) = request.causal_context.idempotency_key.as_deref() {
-            if let Some(existing_id) = self.by_idempotency.get(key) {
+            let scoped_key = approval_idempotency_scope_for_context(
+                &request.function_id,
+                &request.causal_context,
+                key,
+            );
+            if let Some(existing_id) = self.by_idempotency.get(&scoped_key) {
                 let existing = self.records.get(existing_id).cloned().ok_or_else(|| {
                     EngineError::LedgerFailure {
                         operation: "approval.request",
@@ -248,8 +255,8 @@ impl InMemoryEngineApprovalStore {
             created_at: now,
             updated_at: now,
         };
-        if let Some(key) = record.idempotency_key.as_ref() {
-            self.by_idempotency.insert(key.clone(), approval_id.clone());
+        if let Some(scoped_key) = approval_idempotency_scope_for_record(&record) {
+            self.by_idempotency.insert(scoped_key, approval_id.clone());
         }
         self.records.insert(approval_id, record.clone());
         Ok(EngineApprovalRequestOutcome::created(record))
@@ -378,7 +385,7 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
   trigger_id TEXT,
   session_id TEXT,
   workspace_id TEXT,
-  idempotency_key TEXT UNIQUE,
+  idempotency_key TEXT,
   delivery_mode TEXT NOT NULL,
   status TEXT NOT NULL,
   decision_actor_id TEXT,
@@ -390,7 +397,87 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
 );
 "#,
             )
-            .map_err(|err| sqlite_err("approval.init", err.to_string()))
+            .map_err(|err| sqlite_err("approval.init", err.to_string()))?;
+        self.migrate_approval_idempotency_scope()?;
+        self.conn
+            .execute_batch(
+                r#"
+CREATE UNIQUE INDEX IF NOT EXISTS idx_engine_approvals_idempotency_scope
+ON engine_approvals (
+  function_id,
+  COALESCE(session_id, ''),
+  COALESCE(workspace_id, ''),
+  idempotency_key
+)
+WHERE idempotency_key IS NOT NULL;
+"#,
+            )
+            .map_err(|err| sqlite_err("approval.init.indexes", err.to_string()))
+    }
+
+    fn migrate_approval_idempotency_scope(&self) -> Result<()> {
+        let table_sql: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'engine_approvals'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|err| sqlite_err("approval.migrate.inspect", err.to_string()))?;
+        if !table_sql
+            .as_deref()
+            .is_some_and(|sql| sql.contains("idempotency_key TEXT UNIQUE"))
+        {
+            return Ok(());
+        }
+
+        self.conn
+            .execute_batch(
+                r#"
+ALTER TABLE engine_approvals RENAME TO engine_approvals_global_idempotency_migration;
+CREATE TABLE engine_approvals (
+  approval_id TEXT PRIMARY KEY,
+  function_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  payload_fingerprint TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  actor_kind TEXT NOT NULL,
+  authority_grant_id TEXT NOT NULL,
+  authority_scopes_json TEXT NOT NULL,
+  trace_id TEXT NOT NULL,
+  parent_invocation_id TEXT,
+  trigger_id TEXT,
+  session_id TEXT,
+  workspace_id TEXT,
+  idempotency_key TEXT,
+  delivery_mode TEXT NOT NULL,
+  status TEXT NOT NULL,
+  decision_actor_id TEXT,
+  decided_at TEXT,
+  result_json TEXT,
+  error_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+INSERT INTO engine_approvals (
+  approval_id, function_id, payload_json, payload_fingerprint,
+  actor_id, actor_kind, authority_grant_id, authority_scopes_json,
+  trace_id, parent_invocation_id, trigger_id, session_id, workspace_id,
+  idempotency_key, delivery_mode, status, decision_actor_id, decided_at,
+  result_json, error_json, created_at, updated_at
+)
+SELECT
+  approval_id, function_id, payload_json, payload_fingerprint,
+  actor_id, actor_kind, authority_grant_id, authority_scopes_json,
+  trace_id, parent_invocation_id, trigger_id, session_id, workspace_id,
+  idempotency_key, delivery_mode, status, decision_actor_id, decided_at,
+  result_json, error_json, created_at, updated_at
+FROM engine_approvals_global_idempotency_migration;
+DROP TABLE engine_approvals_global_idempotency_migration;
+"#,
+            )
+            .map_err(|err| sqlite_err("approval.migrate.scope", err.to_string()))
     }
 
     /// Create or replay an approval request.
@@ -400,7 +487,12 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
     ) -> Result<EngineApprovalRequestOutcome> {
         let fingerprint = approval_fingerprint(&request.function_id, &request.payload);
         if let Some(key) = request.causal_context.idempotency_key.as_deref()
-            && let Some(existing) = self.get_by_idempotency_key(key)?
+            && let Some(existing) = self.get_by_idempotency_key(
+                &request.function_id,
+                request.causal_context.session_id.as_deref(),
+                request.causal_context.workspace_id.as_deref(),
+                key,
+            )?
         {
             if existing.payload_fingerprint != fingerprint {
                 return Err(EngineError::IdempotencyConflict {
@@ -452,11 +544,28 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
             .map_err(|err| sqlite_err("approval.get", err.to_string()))
     }
 
-    fn get_by_idempotency_key(&self, key: &str) -> Result<Option<EngineApprovalRecord>> {
+    fn get_by_idempotency_key(
+        &self,
+        function_id: &FunctionId,
+        session_id: Option<&str>,
+        workspace_id: Option<&str>,
+        key: &str,
+    ) -> Result<Option<EngineApprovalRecord>> {
         self.conn
             .query_row(
-                "SELECT * FROM engine_approvals WHERE idempotency_key = ?1",
-                params![key],
+                "SELECT * FROM engine_approvals
+                 WHERE function_id = ?1
+                   AND COALESCE(session_id, '') = ?2
+                   AND COALESCE(workspace_id, '') = ?3
+                   AND idempotency_key = ?4
+                 ORDER BY created_at ASC
+                 LIMIT 1",
+                params![
+                    function_id.as_str(),
+                    session_id.unwrap_or_default(),
+                    workspace_id.unwrap_or_default(),
+                    key
+                ],
                 |row| row_to_record(&self.conn, row),
             )
             .optional()
@@ -752,6 +861,45 @@ pub fn approval_fingerprint(function_id: &FunctionId, payload: &Value) -> String
     hex::encode(hasher.finalize())
 }
 
+fn approval_idempotency_scope_for_context(
+    function_id: &FunctionId,
+    context: &CausalContext,
+    key: &str,
+) -> String {
+    approval_idempotency_scope(
+        function_id,
+        context.session_id.as_deref(),
+        context.workspace_id.as_deref(),
+        key,
+    )
+}
+
+fn approval_idempotency_scope_for_record(record: &EngineApprovalRecord) -> Option<String> {
+    record.idempotency_key.as_deref().map(|key| {
+        approval_idempotency_scope(
+            &record.function_id,
+            record.session_id.as_deref(),
+            record.workspace_id.as_deref(),
+            key,
+        )
+    })
+}
+
+fn approval_idempotency_scope(
+    function_id: &FunctionId,
+    session_id: Option<&str>,
+    workspace_id: Option<&str>,
+    key: &str,
+) -> String {
+    [
+        function_id.as_str(),
+        session_id.unwrap_or_default(),
+        workspace_id.unwrap_or_default(),
+        key,
+    ]
+    .join("\u{0}")
+}
+
 fn parse_status(value: &str) -> Result<ApprovalStatus> {
     match value {
         "pending" => Ok(ApprovalStatus::Pending),
@@ -809,4 +957,119 @@ fn storage_err(err: anyhow::Error) -> EngineError {
 
 fn storage_to_sql_err(err: anyhow::Error) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(err.to_string())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    fn request_for_session(session_id: &str, key: &str, payload: Value) -> EngineApprovalRequest {
+        EngineApprovalRequest {
+            function_id: FunctionId::new("danger::write").unwrap(),
+            payload,
+            causal_context: CausalContext::new(
+                ActorId::new("agent").unwrap(),
+                ActorKind::Agent,
+                AuthorityGrantId::new("grant").unwrap(),
+                TraceId::generate(),
+            )
+            .with_scope("danger.write")
+            .with_session_id(session_id)
+            .with_workspace_id("workspace-a")
+            .with_idempotency_key(key),
+            delivery_mode: DeliveryMode::Sync,
+        }
+    }
+
+    #[test]
+    fn sqlite_approval_idempotency_is_scoped_after_global_migration() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("approvals.sqlite");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                r#"
+CREATE TABLE engine_approvals (
+  approval_id TEXT PRIMARY KEY,
+  function_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  payload_fingerprint TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  actor_kind TEXT NOT NULL,
+  authority_grant_id TEXT NOT NULL,
+  authority_scopes_json TEXT NOT NULL,
+  trace_id TEXT NOT NULL,
+  parent_invocation_id TEXT,
+  trigger_id TEXT,
+  session_id TEXT,
+  workspace_id TEXT,
+  idempotency_key TEXT UNIQUE,
+  delivery_mode TEXT NOT NULL,
+  status TEXT NOT NULL,
+  decision_actor_id TEXT,
+  decided_at TEXT,
+  result_json TEXT,
+  error_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+"#,
+            )
+            .unwrap();
+
+        let mut store = SqliteEngineApprovalStore::open(&path).unwrap();
+        let first = store
+            .request(request_for_session(
+                "session-a",
+                "shared-approval-key",
+                json!({"value": 1}),
+            ))
+            .unwrap();
+        let second = store
+            .request(request_for_session(
+                "session-b",
+                "shared-approval-key",
+                json!({"value": 2}),
+            ))
+            .unwrap();
+
+        assert_ne!(first.record.approval_id, second.record.approval_id);
+        assert_eq!(first.record.idempotency_key, second.record.idempotency_key);
+        let table_sql: String = store
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'engine_approvals'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(!table_sql.contains("idempotency_key TEXT UNIQUE"));
+    }
+
+    #[test]
+    fn sqlite_approval_idempotency_still_conflicts_within_scope() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("approvals.sqlite");
+        let mut store = SqliteEngineApprovalStore::open(&path).unwrap();
+        store
+            .request(request_for_session(
+                "session-a",
+                "session-conflict",
+                json!({"value": 1}),
+            ))
+            .unwrap();
+        let result = store.request(request_for_session(
+            "session-a",
+            "session-conflict",
+            json!({"value": 2}),
+        ));
+
+        assert!(matches!(
+            result,
+            Err(EngineError::IdempotencyConflict { key, .. }) if key == "session-conflict"
+        ));
+    }
 }

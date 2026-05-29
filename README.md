@@ -929,6 +929,10 @@ is resolved, denied, failed, or timed out, then return that outcome to the model
 as the original `execute` result; executed approvals include explicit
 `approvalRequired`/`approvalExecuted` details and the resumed child invocation id
 so the agent can report lineage without consulting a separate approval surface.
+Approval idempotency uses the same causal scope as the engine ledger: target
+function, session, workspace, and caller key. A replay inside that scope returns
+the original approval record, while the same model-chosen key in another session
+does not collide with unrelated approval work.
 Broad first-party capabilities may declare a
 conditional approval contract: for example, `process::run` allows read-only
 checks such as `date`, `pwd`, `test -f`, `sed -n` printing, `git status`,

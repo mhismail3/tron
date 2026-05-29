@@ -76,7 +76,7 @@ pub(crate) use inspect::{inspect_value, status_value};
 use run::{
     approval_child_invocation_ids_from_records, approval_was_replayed_for_invocation,
     approved_execution_result, child_execute_causal_context, payload_preflight_status,
-    preflight_rejection_result,
+    policy_preflight_status, preflight_rejection_result,
 };
 pub(crate) use search::search_value;
 #[cfg(test)]
@@ -1957,6 +1957,17 @@ fn validate_target_policy_before_approval(
         && let Err(message) =
             crate::domains::process::approval::validate_run_payload_before_approval(payload)
     {
+        if message == crate::domains::process::approval::sandbox_output_path_relative_message() {
+            return Err(CapabilityError::Custom {
+                code: "INVALID_PARAMS".to_owned(),
+                message: message.to_owned(),
+                details: Some(json!({
+                    "validationKind": "repairable_argument",
+                    "invalidFields": ["expectedOutputs[].path"],
+                    "invalidArgumentPaths": ["arguments.expectedOutputs[].path"]
+                })),
+            });
+        }
         return Err(CapabilityError::InvalidParams {
             message: message.to_owned(),
         });
@@ -2770,6 +2781,55 @@ mod tests {
                 .to_string()
                 .contains("relative path inside the process sandbox")
         );
+        assert_eq!(policy_preflight_status(&error), "needs_input");
+        let details = error.details().expect("repairable details");
+        assert_eq!(details["validationKind"], json!("repairable_argument"));
+        assert_eq!(
+            details["invalidArgumentPaths"],
+            json!(["arguments.expectedOutputs[].path"])
+        );
+    }
+
+    #[test]
+    fn process_run_sandbox_output_path_shape_is_repairable_preflight() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry,
+        };
+        let payload = json!({
+            "command": "printf hi > /tmp/out.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "/tmp/out.txt"}]
+        });
+        let error =
+            validate_target_policy_before_approval(&function, &payload).expect_err("policy error");
+        let status = policy_preflight_status(&error);
+        assert_eq!(status, "needs_input");
+
+        let value = preflight_rejection_result(&function, &target, error, status)
+            .expect("structured result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        assert_eq!(result.is_error, None);
+        let details = result.details.expect("details");
+        assert_eq!(details["status"], json!("needs_input"));
+        assert_eq!(
+            details["error"]["details"]["validationKind"],
+            json!("repairable_argument")
+        );
+        assert_eq!(details["guidance"]["kind"], json!("correct_arguments"));
+        assert_eq!(
+            details["invalidArgumentPaths"],
+            json!(["arguments.expectedOutputs[].path"])
+        );
+        assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["approvalCreated"], json!(false));
     }
 
     #[test]
