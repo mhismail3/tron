@@ -32,16 +32,22 @@ struct ChatSheetModifier: ViewModifier {
             .onChange(of: viewModel.userInteractionState.showSheet) { _, show in
                 if show, sheetCoordinator.activeSheet == nil {
                     sheetCoordinator.showUserInteraction()
+                } else if !show {
+                    sheetCoordinator.dismissIfActive(.userInteraction)
                 }
             }
             .onChange(of: viewModel.engineApprovalState.showSheet) { _, show in
                 if show, sheetCoordinator.activeSheet == nil {
                     sheetCoordinator.showEngineApproval()
+                } else if !show {
+                    sheetCoordinator.dismissIfActive(.engineApproval)
                 }
             }
             .onChange(of: viewModel.subagentState.showDetailSheet) { _, show in
                 if show, sheetCoordinator.activeSheet == nil {
                     sheetCoordinator.showSubagentDetail()
+                } else if !show {
+                    sheetCoordinator.dismissIfActive(.subagentDetail)
                 }
             }
     }

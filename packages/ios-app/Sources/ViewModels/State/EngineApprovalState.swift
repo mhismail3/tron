@@ -30,4 +30,17 @@ final class EngineApprovalState {
         currentData = nil
         pendingSubmission = nil
     }
+
+    /// Clear the open sheet if it is showing the approval that just reached a
+    /// terminal engine state.
+    func clearSheetIfShowingApproval(_ approvalId: String) {
+        guard currentData?.engineApprovalId == approvalId
+            || currentData?.invocationId == "engine-approval:\(approvalId)"
+        else {
+            return
+        }
+        showSheet = false
+        currentData = nil
+        pendingSubmission = nil
+    }
 }

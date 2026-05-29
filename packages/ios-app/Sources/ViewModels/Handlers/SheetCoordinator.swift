@@ -47,6 +47,12 @@ final class SheetCoordinator {
         onDismiss = nil
     }
 
+    /// Dismiss only when the requested sheet is currently presented.
+    func dismissIfActive(_ sheet: ChatSheet) {
+        guard activeSheet == sheet else { return }
+        dismiss()
+    }
+
     // MARK: - Convenience Presenters
 
     /// Show settings sheet

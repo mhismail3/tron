@@ -172,8 +172,11 @@ session catch-up. The same session-scoped subscription setup also subscribes to
 the engine `approvals` topic so high-risk capability gates surface from the
 approval primitive worker instead of through a separate UI-only approval path.
 User decisions invoke canonical `approval::resolve`; iOS does not mutate approval
-state locally. ACKs are coalesced to the latest cursor per subscription so
-bursts do not turn into one engine request per event.
+state locally. When a live approval event reaches a terminal status, the chat
+chip updates from the engine record and any matching approval sheet is dismissed
+so stale local UI cannot remain actionable after server truth advances. ACKs are
+coalesced to the latest cursor per subscription so bursts do not turn into one
+engine request per event.
 The local `EventDatabase` is a projection/cache. If Documents storage is
 unavailable at launch, the app uses `temporaryFallback` cache mode rather than
 crashing, logs that mode, includes it in diagnostics bundles, and shows it in

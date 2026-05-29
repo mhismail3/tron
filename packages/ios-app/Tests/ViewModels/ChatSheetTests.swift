@@ -296,6 +296,26 @@ struct SheetCoordinatorTests {
         #expect(coordinator.activeSheet == nil)
     }
 
+    @Test("Dismiss if active clears matching sheet")
+    func testDismissIfActiveClearsMatchingSheet() {
+        let coordinator = SheetCoordinator()
+        coordinator.showEngineApproval()
+
+        coordinator.dismissIfActive(.engineApproval)
+
+        #expect(coordinator.activeSheet == nil)
+    }
+
+    @Test("Dismiss if active leaves other sheets alone")
+    func testDismissIfActiveLeavesOtherSheetsAlone() {
+        let coordinator = SheetCoordinator()
+        coordinator.showSettings()
+
+        coordinator.dismissIfActive(.engineApproval)
+
+        #expect(coordinator.activeSheet == .settings)
+    }
+
     @Test("Dismiss does not clear onDismiss callback")
     func testDismissCallsAndClearsOnDismissCallback() {
         let coordinator = SheetCoordinator()

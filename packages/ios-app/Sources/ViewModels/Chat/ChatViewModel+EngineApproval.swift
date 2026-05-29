@@ -81,6 +81,7 @@ extension ChatViewModel {
         } else {
             appendToMessages(ChatMessage(role: .assistant, content: .engineApproval(data)))
         }
+        engineApprovalState.clearSheetIfShowingApproval(result.approvalId)
         logInfo("Engine approval resolved approvalId=\(result.approvalId) status=\(result.approval.status.rawValue)")
     }
 

@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **84/100 provisional**
+Current score: **85/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -89,11 +89,11 @@ interruption, and resource failure states.
 | Resource truth and durability | 10 | 10 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 10 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
-| Observability and auditability | 8 | 7 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
+| Observability and auditability | 8 | 8 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 9 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **84/100**
+Total: **85/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -341,6 +341,21 @@ server PID `18521`; screenshot:
 `/tmp/scb_s7_app_path_smoke_20260529.png`. Code modularity and simplification
 increases to `9/10`, and the banked score is now `84/100`.
 
+Resolved checkpoint note, 2026-05-29: SCB-S8 chat/engine state parity passed
+after fixing an iOS approval-sheet drift path. A resolved engine approval now
+clears the matching open approval sheet state, and the single-sheet coordinator
+dismisses active approval/user-interaction/subagent sheets when their
+server-owned view-model flags become false. The exact app-path retest used real
+dev server PID `26801`, booted iPhone 17 Pro simulator, session
+`sess_019e7523-4c24-7b02-9ff7-08b896c05c74`, screenshots
+`/tmp/scb_s8_parity_terminal_session_20260529.png` and
+`/tmp/scb_s8_parity_relaunch_deeplink_20260529.png`, two DB `message.user`
+events, four assistant messages, two started/completed execute cards, one
+executed `process::run` approval, zero pending approvals, zero failed
+invocations, completed agent queues, zero session logs, and no
+`compact.*` events. Observability and auditability increases to `8/8`, and the
+banked score is now `85/100`.
+
 ## Scoring Rules
 
 - `+1` for a simulator-tested scenario with DB proof and no code changes needed.
@@ -479,6 +494,7 @@ do not let screenshot state override the engine ledger.
 | SCB-S5 | Hidden side-effect boundedness audit | passed_after_fix | +1 | static-gate scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Retained-memory context loading, notification inbox/read-state reconstruction, and cron schedule/run truth now use named 500-resource scan limits tied to `resource_projection::MAX_RESOURCE_COLLECTION_LIMIT`. The resource store already enforced the 500-row cap, so the root issue was an unclassified contract shape rather than an actual unbounded read. DB smoke for the deep-linked session showed 22 events, 39 successful invocation rows grouped under engine/resource/session/agent/capability/memory/notification/process functions, 1 executed approval, 4 resource rows, 2 completed queues, stream rows on `agent.runtime`, `approvals`, `compensation.records`, `events.session`, `queue.lifecycle`, and `resource.leases`, 0 session logs, and 0 `compact.*` events. Simulator screenshot `/tmp/scb_s5_app_path_smoke_20260529.png` showed the user prompt and assistant content in the app route. | `resource_projection`: hidden side-effect truth reconstruction still requested `limit: 10_000` in retained-memory context, notification read decisions/inbox listing, and cron schedule/run reconstruction even though the resource primitive clamped results. | this checkpoint | Passed `cargo test --test threat_model_invariants hidden_side_effect_resource_scans_stay_bounded_and_observable -- --nocapture`, `cargo test retained_memory_context_reads_resource_artifacts --lib -- --nocapture`, `cargo test notification_ --lib -- --nocapture`, `cargo test cron_ --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, and simulator deep-link smoke against real dev server PID `2214`. |
 | SCB-S6 | Test decomposition and large-file ownership audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | `src/engine/tests/module_activation.rs` dropped from 1,950 lines to 873 lines and now owns shared fixtures plus declarations only. New child modules own package registration, local-process activation, and operator-surface tests. Remaining Rust test files over 1,000 lines are explicitly audited below with owner/reason markers and enforced line budgets. | `code_ownership`: module-activation registration, activation runtime, grant-boundary, and operator-surface tests lived in the shared fixture root; remaining large test files had no enforced scorecard audit row or line budget. | this checkpoint | Passed `cargo test module_activation --lib -- --nocapture`, `cargo test --test threat_model_invariants rust_test_ownership_stays_code_adjacent -- --nocapture`, `cargo test --test threat_model_invariants large_rust_test_files_have_scorecard_ownership_audit -- --nocapture`, and `cargo test --test threat_model_invariants -- --nocapture`. |
 | SCB-S7 | Capability presentation ownership audit | passed_after_fix | +1 | static/unit scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Generated UI action presentation is now authored by `engine::primitives::action_summary` and stored on action payloads/summaries as `presentation.buttonRole` and `presentation.icon`; `ui::inspect_surface` and control UI refs project it without exposing templates in control. iOS decodes `UiActionPresentationDTO`, renders stored button role/icon data, and retains coordinate-only `UiActionSubmissionDTO`. DB smoke for the deep-linked session showed 22 session events, 47 successful invocations grouped under agent/approval/capability/device/engine/materialized-file/memory/notification/process/prompt/resource/session/skills functions, 1 executed `process::run` approval, 4 resources created by session invocations (`agent_result` 2, `execution_output` 1, `materialized_file` 1), stream rows on `agent.runtime`, `approvals`, `events.session`, and `queue.lifecycle`, 0 session logs, and 0 `compact.*` events. Simulator screenshot `/tmp/scb_s7_app_path_smoke_20260529.png` showed the deep-linked app route with user and agent content visible. | `code_ownership`: the generated UI renderer inferred destructive/refresh/create semantics and SF Symbols from action labels/ids through local `isDestructive`, `actionSymbol`, and `humanizedActionLabel` logic even though the server already owned action targets/templates/consequences. | this checkpoint | Passed `cargo test --manifest-path packages/agent/Cargo.toml generated_ui --lib -- --nocapture`, `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants generated_ui_resource_and_renderer_gates_stay_on -- --nocapture`, `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`, `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, `cd packages/ios-app && xcodegen generate`, targeted `xcodebuild test` for `GeneratedUIDTOTests`, `GeneratedUIRendererTests`, and `SourceGuardTests` on iPhone 17 Pro, and simulator deep-link smoke against real dev server PID `18521`. |
+| SCB-S8 | Chat and engine state parity | passed_after_fix | +1 | terminal approval parity session `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | The app-path retest used real dev server PID `26801`, iPhone 17 Pro simulator, screenshots `/tmp/scb_s8_parity_terminal_session_20260529.png` and `/tmp/scb_s8_parity_relaunch_deeplink_20260529.png`, and DB truth for the same session: two `message.user` events, four `message.assistant` events, two started/completed execute cards, one executed `process::run` approval, zero pending approvals, zero failed invocations, two completed `agent` queue rows, no session logs, and zero `compact.*` events. The visible chat shows the harness-submitted replay prompt before the assistant replay answer, and no actionable approval sheet remains mounted after terminal approval state. | `ios_rendering`: live `approval.resolved` updated the engine approval chip but left matching `engineApprovalState.currentData`/`showSheet` alive, and the single-sheet modifier only presented sheets when flags became true without dismissing the active sheet when a server-owned flag became false. | this checkpoint | Passed `cd packages/ios-app && xcodegen generate`, targeted `xcodebuild test` for `EngineApprovalStateTests` and `ChatSheetTests` on iPhone 17 Pro, simulator deep-link smoke against real dev server PID `26801`, `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`, and `git diff --check`. |
 
 ## Scenario Details
 
@@ -2778,6 +2794,39 @@ Acceptance criteria:
 - Visual polish starts only after this parity gate passes, so presentation work
   cannot substitute for engine-truth reconciliation.
 
+SCB-S8 checkpoint, 2026-05-29:
+
+- Classified the stale confirmation sheet as `ios_rendering`: iOS already
+  received terminal engine approval state and updated the chip, but the matching
+  sheet state stayed mounted and actionable because `engineApprovalState` did
+  not clear the current approval after `approval.resolved`, and the shared
+  sheet modifier did not dismiss active sheets when their server-owned
+  presentation flags flipped false.
+- Fixed the owner layer only. `EngineApprovalState` now clears a matching open
+  approval sheet when the approval id reaches terminal server state,
+  `ChatViewModel.handleApprovalResolved` invokes that reconciliation, and
+  `SheetCoordinator.dismissIfActive` lets `ChatSheetModifier` remove approval,
+  user-interaction, and subagent sheets when the corresponding view-model flag
+  becomes false.
+- Kept the client thin: no product-state side channel, fallback reader,
+  compatibility alias, policy ownership, or alternate approval path was added.
+  User approval decisions still invoke canonical `approval::resolve`, and
+  historical approval chips still render from engine records.
+- Focused iOS tests now cover matching terminal approval sheet cleanup,
+  non-matching approval preservation, resolved-event wiring through
+  `ChatViewModel`, and targeted sheet-coordinator dismissal.
+- App-path retest opened
+  `tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` on the booted
+  iPhone 17 Pro simulator against real dev server PID `26801`; then the app was
+  terminated, relaunched, and deep-linked to the same session again. Screenshots
+  `/tmp/scb_s8_parity_terminal_session_20260529.png` and
+  `/tmp/scb_s8_parity_relaunch_deeplink_20260529.png` show the harness user
+  prompt and assistant replay answer with no actionable approval sheet.
+- DB truth for the same session contained two `message.user` events, four
+  `message.assistant` events, two started/completed execute cards, one executed
+  `process::run` approval, zero pending approvals, zero failed invocations, two
+  completed `agent` queue rows, no session logs, and zero `compact.*` events.
+
 ## Static Gates To Add Or Strengthen
 
 Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
@@ -2869,20 +2918,16 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **SCB-S8: Prove Chat/Engine State Parity**
+Recommended next scenario: **RWO-N15: Live Worker Queue/Trigger/Stream Robustness**
 
 Setup:
 
-- SCB-S1, SCB-S1b, SCB-S2, SCB-S3, SCB-S4, and SCB-S5 completed the execute,
-  registry, bounded resource projection, provider-normalization, and hidden
-  side-effect cleanup passes. SCB-S6 split the mixed module-activation test root
-  and added an enforced large-test-file audit. SCB-S7 moved generated UI action
-  presentation semantics to server-owned action payloads/summaries and kept iOS
-  as a thin renderer.
-- Continue Structural Cleanup Backlog item 8 from this scorecard. Start by
-  reproducing the known visible parity risks: harness-submitted user prompts can
-  be absent from chat while agent responses render, and approval/action sheets
-  can remain visible after terminal engine state advances.
+- RWO-N7 proved a live session worker can register, invoke, trigger, and clean
+  up. RWO-N13 proved broad restart and approval-pause resilience. SCB-S8 proved
+  simulator chat parity for terminal approval state. The remaining weakness is
+  the lower-level collapsed substrate under live worker churn: queued trigger
+  delivery, stream visibility, resource production, heartbeat/disconnect, retry,
+  and cleanup must compose through one engine path without hidden sidecars.
 - Use a real dev server and the iPhone 17 Pro simulator. The simulator
   deep-link harness instructions in this scorecard and
   `packages/ios-app/docs/development.md` are the canonical procedure.
@@ -2893,53 +2938,58 @@ Setup:
 
 Procedure:
 
-1. Choose or create the smallest deterministic session that has one
-   harness-submitted user prompt, one assistant response, and one terminal
-   approval/action state transition.
-2. Open `tron://session/<session_id>` in the booted simulator only after the DB
-   terminal state is stable.
-3. Capture simulator evidence and query session DB truth for events,
-   invocations, approvals, resources, queues, streams, and logs.
-4. Compare visible chat/user prompt/assistant response/approval sheet state to
-   canonical DB truth for the same session id.
-5. If there is drift, classify the owner as `ios_rendering` or
-   `stream_or_state`, add or identify the smallest focused test, fix only the
-   owning module, remove nearby dead/fallback/legacy/compat code, and rerun the
-   exact scenario.
-6. Run focused Rust/iOS tests plus
+1. Create or reuse the smallest deterministic live worker that registers one
+   function, one trigger, a queue consumer path, and a stream event producer.
+2. Drive it through a real session using `capability::execute` only. The
+   session should enqueue trigger-driven work, produce a resource version,
+   publish stream evidence, and return an assistant-visible summary.
+3. Interrupt the worker or dev server at the narrowest useful point, then prove
+   the engine records heartbeat/disconnect, retry or terminal failure, resource
+   lease cleanup, queue state, and stream visibility without a restart-only
+   side path.
+4. Open `tron://session/<session_id>` in the booted simulator after terminal DB
+   state is stable and capture app-path evidence for the same session.
+5. Query `~/.tron/internal/database/tron.sqlite` for events, invocations,
+   approvals, resources, queues, streams, grants, leases, compensation, and
+   logs. Classify every non-success row as expected, fixed, blocked, or failed.
+6. If any layer fails, stop broad testing, isolate the exact owner, add or
+   identify the smallest focused test, fix only that module, remove nearby
+   dead/fallback/legacy/compat code, and rerun the exact scenario.
+7. Run focused Rust/iOS tests plus
    `cargo test --test threat_model_invariants -- --nocapture`, then update this
    scorecard with exact files, tests, screenshots, and DB evidence.
 
 After completion, inspect:
 
-- `packages/agent/src/domains/session/event_store/` event reconstruction paths;
-- `packages/agent/src/engine/primitives/approval.rs` and action-state streams;
-- iOS chat reconstruction and deep-link handling files under
-  `packages/ios-app/Sources/ViewModels/Chat/`,
-  `packages/ios-app/Sources/Views/Chat/`, and
-  `packages/ios-app/Sources/Services/Network/DeepLinkRouter.swift`;
-- iOS approval/action sheet dismissal paths;
+- `packages/agent/src/engine/queue.rs`, `stream.rs`, `worker.rs`,
+  `triggers.rs`, `invocation.rs`, `resources/`, and `leases` behavior;
+- `packages/agent/src/domains/capability/registry/` live implementation
+  discovery and cleanup paths;
+- `packages/agent/src/domains/agent/runner/` live-session event and prompt
+  orchestration paths;
+- worker protocol guides and sandbox worker lifecycle tests;
 - `packages/agent/tests/threat_model_invariants.rs`;
-- relevant iOS tests and focused simulator screenshots.
+- relevant simulator screenshots and focused Rust/iOS tests.
 
 Pass criteria:
 
-- Harness-submitted user prompts, assistant content, capability result cards,
-  approval/action state, and terminal errors visible in chat match DB truth for
-  the same session id.
-- Approval/action sheets disappear or become inert when terminal engine status
-  makes them non-actionable.
-- No product-state side channel is introduced to make parity appear correct.
-- Static or focused iOS tests fail on future visible drift where practical.
-- Docs explain the simulator parity harness and any engine/UI projection
-  boundary changed.
+- Worker registration, trigger delivery, queue transition, stream publication,
+  invocation lineage, resource/version production, grant/lease ownership, and
+  cleanup are reconstructable from DB truth.
+- The simulator chat route shows the same terminal state as the engine ledger.
+- Retry or cancellation behavior is explicit; no orphaned ready/running queue
+  rows, stale stream subscriptions, unreleased leases, or healthy dead workers
+  remain after terminal state.
+- No product-state side channel, alternate worker-spawn path, or compatibility
+  fallback is introduced.
 - Focused tests pass, and `cargo test --test threat_model_invariants -- --nocapture`
   passes.
 
 If it fails, classify the primary layer as `code_ownership`,
-`ios_rendering`, `stream_or_state`, `schema_or_recipe`, `model_guidance`, or
-`execute_resolution`, then stop broad cleanup until the exact parity failure is
-fixed and retested.
+`worker_lifecycle`, `queue_or_trigger`, `stream_or_state`, `resource_truth`,
+`grant_or_approval`, `schema_or_recipe`, `model_guidance`, or
+`execute_resolution`, then stop broad testing until the exact failure is fixed
+and retested.
 
 ## Acceptance Criteria For This Planning Checkpoint
 
