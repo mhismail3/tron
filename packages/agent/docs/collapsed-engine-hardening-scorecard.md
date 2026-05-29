@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **52/100 provisional**
+Current score: **53/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -85,7 +85,7 @@ calls, runtime interruption, and resource failure states.
 | Execute portal ergonomics | 10 | 8 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
 | First-party capability usefulness | 10 | 8 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
 | Worker/function/trigger substrate | 14 | 4 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
-| Multi-capability orchestration | 12 | 7 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
+| Multi-capability orchestration | 12 | 8 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 6 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 5 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 5 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
@@ -93,7 +93,7 @@ calls, runtime interruption, and resource failure states.
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **52/100**
+Total: **53/100**
 
 ## Scoring Rules
 
@@ -174,7 +174,7 @@ The evidence note must identify:
 | RWO-N3 | Safe process plus filesystem composition | passed | +1 | `sess_019e72fd-5e00-75d1-b58f-a9853a621daa` | See 2026-05-29 RWO-N3 result note below. The run used 2 successful `capability::execute` invocations, 1 successful `process::run`, 1 successful `filesystem::read_file`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. `process::run` used `executionMode = read_only`; README first line matched the filesystem read. |
 | RWO-N4 | Web research capability | passed | +1 | `sess_019e7301-b34f-7240-99aa-ea6d6cdac1c2` | See 2026-05-29 RWO-N4 result note below. The run used 2 successful `capability::execute` invocations, 1 successful `web::search`, 1 successful `web::fetch`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; source returned an HTTP 403 Cloudflare/JS challenge through the web fetch capability and the agent reported it without fallback browsing | n/a | Passed exact prompt on the real dev server. Search returned official `https://platform.openai.com/docs/models`; fetch targeted that URL through `first_party.web.v1.fetch`; no browser/client-owned path was used. |
 | RWO-N5 | Browser and display capability probe | passed | +1 | `sess_019e7308-762f-7691-987e-ea33f8eac543` | See 2026-05-29 RWO-N5 result note below. The run used 6 successful `capability::execute` invocations, 1 successful `browser::get_status`, 2 successful `capability::inspect`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. `browser::get_status` returned `hasBrowser = false` and `isStreaming = false`; `display::stop_stream` was inspected but not invoked; no browser/client-owned action path was used. |
-| RWO-N6 | State, queue, stream, trigger chain | pending | 0 | | | | | |
+| RWO-N6 | State, queue, stream, trigger chain | passed | +1 | `sess_019e730c-0b78-7b73-8598-80a75810a394` | See 2026-05-29 RWO-N6 result note below. The run used 21 successful `capability::execute` invocations, 7 successful `capability::inspect`, 1 successful `state::set`, 1 successful `state::get`, 1 successful `queue::enqueue`, 1 successful `queue::list`, 1 successful `stream::subscribe`, 1 successful `stream::poll`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one ready `agent.test` queue row, one session-scoped state row, one `agent.test.execute` stream subscription, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. State write/read matched revision 1; queue enqueue/list returned the ready queued item; stream subscribe/poll succeeded and found no events; publish capability was not found. |
 | RWO-N7 | Live worker extensibility | pending | 0 | | | | | |
 | RWO-N8 | Module package activation | pending | 0 | | | | | |
 | RWO-N9 | Subagent fan-out/fan-in | pending | 0 | | | | | |
@@ -674,6 +674,61 @@ Failure focus:
 - missing queue/stream audit trail;
 - side-channel state.
 
+2026-05-29 result:
+
+- Simulator session `sess_019e730c-0b78-7b73-8598-80a75810a394` ran the exact
+  RWO-N6 prompt against the real dev server. The UI completed with execute
+  cards for state, queue, and stream capability surfaces and reported every
+  invocation id used.
+- Parent runtime invocation: `agent::run_turn`
+  `019e730c-55c8-7453-985f-dfe9583360b6`.
+- Discovery and inspection stayed inside `capability::execute`. The run
+  produced 21 successful `capability::execute` invocations and 7 successful
+  `capability::inspect` child invocations, including inspections for
+  `state::compare_and_set`, `state::set`, `state::get`, `queue::enqueue`,
+  `queue::list`, `stream::subscribe`, and `stream::poll`.
+- State write/read proof: `state::set` child invocation
+  `019e730c-d29f-7d30-8f75-facb8557d7ae` executed through parent
+  `capability::execute` `019e730c-d1c4-7e41-9576-7a9edfc6c6b0`; `state::get`
+  child invocation `019e730c-e46d-7af2-a2ff-eb3405c887a5` executed through
+  parent `capability::execute` `019e730c-e37b-75b0-891b-2250a38da7a1`. Both
+  referenced session-scoped state `agent.test/execute-state-queue-stream`,
+  revision `1`, value `{"message":"small state value","source":"user-request"}`.
+- Queue proof: `queue::enqueue` child invocation
+  `019e730d-2e5d-7ff2-a2c7-236d774223f3` executed through parent
+  `capability::execute` `019e730d-2d73-73d0-a0d6-eba165be9fee` and created
+  receipt `019e730d-2e5d-7ff2-a2c7-23798c8c2eab` in queue `agent.test`,
+  function `state::get`, status `ready`. `queue::list` child invocation
+  `019e730d-3879-7030-b073-f545adc0e233` executed through parent
+  `capability::execute` `019e730d-377f-72e1-ac94-079874d9efb4` and returned
+  that ready queue item.
+- Stream proof: stream publish discovery did not find a publish capability, so
+  the agent exercised available stream read capability instead.
+  `stream::subscribe` child invocation
+  `019e730d-85fc-7dd0-b163-1547b31ca70a` executed through parent
+  `capability::execute` `019e730d-8528-7df3-b31a-630feea8bef7`, creating
+  subscription `019e730d-860a-7c72-b293-c8a430971098` on topic
+  `agent.test.execute`. `stream::poll` child invocation
+  `019e730d-934f-7e63-925a-3645e38be4d0` executed through parent
+  `capability::execute` `019e730d-9254-7e22-bf1d-b5d3ecbe6b53` and returned
+  `events = []`, `hasMore = false`, `nextCursor = 0`.
+- DB reconstruction: 116 events, 23 messages, 22 turns, 21 successful
+  `capability::execute`, 7 successful `capability::inspect`, 1 successful
+  `state::set`, 1 successful `state::get`, 1 successful `queue::enqueue`, 1
+  successful `queue::list`, 1 successful `stream::subscribe`, 1 successful
+  `stream::poll`, 0 failed invocations, 0 approvals, 0 `compact.*` events, and
+  0 session-scoped logs. Queue rows included the ready `agent.test` item and
+  one completed `agent::prompt_queue_drain`; stream rows included
+  `agent.runtime`, `events.session`, and `queue.lifecycle`, plus the
+  `engine_stream_subscriptions` row for `agent.test.execute`.
+- Resource refs were substrate-owned only:
+  `artifact:prompt-history:31b318477f7835dba466570fa9d35729f13ab34fa5d3d892c89caed2dfc40f9f`
+  version `ver_019e730c-55c9-7792-b9ce-8ce447507829`, and final
+  `agent_result` resource `res_019e730d-de13-7171-a97d-2f4621beb54a` version
+  `ver_019e730d-de13-7171-a97d-2f69a26ebfb0`.
+- The scenario passes with score delta `+1`. Current score is 53/100. The next
+  scenario is RWO-N7.
+
 ### RWO-N7: Live Worker Extensibility
 
 Use a deterministic local worker fixture, not an ad hoc model-authored worker.
@@ -1087,50 +1142,54 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N6: State, Queue, Stream, Trigger Chain**
+Recommended next scenario: **RWO-N7: Live Worker Extensibility**
 
-Session:
+Setup:
 
-- Use a new simulator session in the `tron` workspace.
-- Use the currently configured primary provider unless provider parity testing is
-  the active goal.
+- Use a deterministic local worker fixture, not an ad hoc model-authored worker.
+- Use the currently configured real dev server.
+- Use the iOS simulator only for the agent discovery/invocation step after the
+  fixture is connected and visible in the live catalog.
 
-Prompt:
+Procedure:
 
-```text
-Use only execute. Create a small state value, read it back, enqueue related work if queue capabilities are available, inspect or drain the queue, publish or read a stream event if available, and report every invocation id.
-```
+1. Start the worker fixture.
+2. Confirm the worker connects through the `/engine/workers` transport.
+3. Confirm the worker function and trigger registration appear in the live
+   catalog without a server restart.
+4. Ask the agent through a new simulator session to discover and invoke the new
+   function through `execute`.
+5. Stop the worker.
+6. Confirm heartbeat/disconnect cleanup and catalog removal or unhealthy
+   projection.
 
 After completion, inspect:
 
-- session id;
-- model provider;
-- parent invocation;
-- all child `capability::execute` invocations;
-- target state, queue, and stream capabilities used, or the exact unavailable
-  status for each missing substrate surface;
+- worker connection, heartbeat, disconnect, and catalog-change rows/events;
+- function and trigger definitions registered by the fixture;
+- simulator session id and model provider;
+- parent invocation and all child `capability::execute` invocations;
+- target fixture capability/function invocation ids;
 - failed invocations, if any;
-- approvals, expected none unless a target capability policy explicitly requires
-  one;
+- approvals, expected none unless fixture policy explicitly requires one;
 - resource refs from substrate-owned prompt-history or final `agent_result`
   records;
-- queue rows, stream rows, and state rows created or read by the scenario;
-- logs mentioning state, queue, stream, capability selection, or approval
-  failures.
+- queue/stream/state rows emitted by worker lifecycle or invocation;
+- logs mentioning worker transport, catalog propagation, invocation, heartbeat,
+  or cleanup failures.
 
 Pass criteria:
 
-- State is written and read through engine state primitives, or the missing
-  state capability returns `needs_capability` or a clear unavailable status.
-- Queue action is traceable through queue substrate rows, or the missing queue
-  capability returns `needs_capability` or a clear unavailable status.
-- Stream action is traceable through stream substrate rows, or the missing
-  stream capability returns `needs_capability` or a clear unavailable status.
-- The answer reports every invocation id used.
-- No failed probe calls.
-- No side-channel state, queue, or stream path is used.
-- No approval is required unless explicitly required by target policy.
-- DB reconstruction matches the UI.
+- Worker connects without server restart.
+- Live catalog exposes the fixture function and trigger metadata.
+- Simulator agent discovers and invokes the fixture function through
+  `capability::execute`.
+- Heartbeat/disconnect is observable.
+- After stop, catalog state reflects removal or unhealthy projection; no leaked
+  volatile worker remains.
+- No alternate worker-spawn path, package/source/policy/trust/audit table, or
+  client-owned policy path is used.
+- DB reconstruction matches the UI and fixture logs.
 
 If it fails, classify the primary failure layer and stop broader testing until
 the exact scenario passes.
