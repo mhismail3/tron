@@ -348,6 +348,7 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| SCB-S6 | Test decomposition and large-file ownership audit |",
         "| SCB-S7 | Capability presentation ownership audit |",
         "| SCB-S8 | Chat and engine state parity |",
+        "| RWO-N15-F1 | Harness terminal-state guard |",
         "**RWO-N16: Pre-terminal Worker Failure/Retry/Cancellation Robustness**",
         "hidden_side_effect_resource_scans_stay_bounded_and_observable",
         "large_rust_test_files_have_scorecard_ownership_audit",
@@ -359,6 +360,7 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "chat parity drift",
         "no pending approvals for the session\nfamily",
         "Do not treat `stream.turn_end` with `stopReason = \"tool_use\"` as terminal",
+        "packages/agent/tests/fixtures/session_terminal_guard.py",
         "No fallback readers, compatibility aliases, client-authored generated UI",
         "package/source/policy/trust/audit tables",
         "alternate worker-spawn paths",
@@ -406,8 +408,28 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
             && ios_development.contains("com.tron.mobile.beta")
             && ios_development.contains("parity drift")
             && ios_development.contains("engine_approvals.status")
-            && ios_development.contains("no pending approvals"),
+            && ios_development.contains("no pending approvals")
+            && ios_development.contains("stopReason = \"tool_use\"")
+            && ios_development.contains("session_terminal_guard.py"),
         "iOS development docs must preserve the simulator session deep-link harness procedure"
+    );
+
+    let terminal_guard = std::fs::read_to_string(
+        repo_root
+            .join("packages")
+            .join("agent")
+            .join("tests")
+            .join("fixtures")
+            .join("session_terminal_guard.py"),
+    )
+    .expect("read session terminal guard fixture");
+    assert!(
+        terminal_guard.contains("TERMINAL_STOP_REASON = \"end_turn\"")
+            && terminal_guard.contains("no_end_turn")
+            && terminal_guard.contains("open_queue_items")
+            && terminal_guard.contains("pending_approvals")
+            && terminal_guard.contains("stream.turn_start"),
+        "session terminal guard must reject tool-use boundaries and pending engine work"
     );
 
     let capability_mod = std::fs::read_to_string(crate_root.join("src/domains/capability/mod.rs"))

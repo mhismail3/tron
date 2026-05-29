@@ -161,12 +161,18 @@ otherwise disagrees with events/invocations/approvals/resources, record that as
 chat parity drift while keeping DB evidence canonical for the scenario result.
 
 Harnesses should not classify a session immediately after the first
-`stream.turn_end`. Before collecting final evidence, wait until the session
-family has no pending approvals, no later `stream.turn_start` exists after the
-terminal event being used, and the DB rows for invocations, approvals,
-resources, queues, streams, events, and logs are stable. This prevents approval
-pause/resume tests from being marked inconclusive while the engine is still
-waiting for approval or continuing into the next turn.
+`stream.turn_end`. A `stream.turn_end` with `stopReason = "tool_use"` is not
+terminal; it only means the provider yielded for engine tool execution and the
+assistant turn may continue after the tool result. Before collecting final
+evidence, wait for `stopReason = "end_turn"`, then verify the session family has
+no pending approvals, no later `stream.turn_start` exists after the terminal
+event being used, and the DB rows for invocations, approvals, resources, queues,
+resource versions, streams, events, and logs are stable. Use
+`packages/agent/tests/fixtures/session_terminal_guard.py` for simulator or
+live-worker harnesses that need a repeatable DB-backed terminal-state gate.
+This prevents approval pause/resume tests and multi-tool worker tests from
+being marked complete while the engine is still waiting for approval or
+continuing into the next turn.
 
 ### Xcode
 
