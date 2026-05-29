@@ -21,6 +21,18 @@ fn model_execute_context(key: &str) -> CausalContext {
         .with_scope("plugin.allow:*")
 }
 
+fn filesystem_write_context(session_id: &str, key: &str, working_directory: &str) -> CausalContext {
+    causal()
+        .with_session_id(session_id)
+        .with_workspace_id("workspace-a")
+        .with_idempotency_key(key)
+        .with_scope("filesystem.write")
+        .with_runtime_metadata(
+            crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
+            working_directory,
+        )
+}
+
 async fn voice_note_resources(handle: &EngineHostHandle, kind: &str) -> Vec<Value> {
     let listed = handle
         .invoke(host_invocation(
@@ -53,6 +65,109 @@ async fn inspect_resource(handle: &EngineHostHandle, resource_id: &str) -> Value
         .await;
     assert_eq!(inspected.error, None);
     inspected.value.unwrap()["inspection"].clone()
+}
+
+#[tokio::test]
+async fn filesystem_write_file_idempotency_is_session_scoped_for_isolated_worktrees() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let session_a_root = tempfile::tempdir().unwrap();
+    let session_b_root = tempfile::tempdir().unwrap();
+    let session_a_path = std::fs::canonicalize(session_a_root.path()).unwrap();
+    let session_b_path = std::fs::canonicalize(session_b_root.path()).unwrap();
+    let relative_path = "packages/agent/docs/rwontwoidempotencyscratch.md";
+    for root in [&session_a_path, &session_b_path] {
+        std::fs::create_dir_all(root.join("packages/agent/docs")).unwrap();
+    }
+    let payload = json!({
+        "path": relative_path,
+        "content": "replay check through execute only."
+    });
+    let key = "rwontwoalpha";
+
+    let first = handle
+        .invoke(host_invocation(
+            "filesystem::write_file",
+            payload.clone(),
+            filesystem_write_context(
+                "session-rwo-a",
+                key,
+                session_a_path.to_string_lossy().as_ref(),
+            ),
+        ))
+        .await;
+    assert_eq!(first.error, None);
+
+    let second = handle
+        .invoke(host_invocation(
+            "filesystem::write_file",
+            payload.clone(),
+            filesystem_write_context(
+                "session-rwo-b",
+                key,
+                session_b_path.to_string_lossy().as_ref(),
+            ),
+        ))
+        .await;
+    assert_eq!(second.error, None);
+    assert_eq!(
+        second.replayed_from, None,
+        "same caller key in a different isolated session must not replay another session path"
+    );
+
+    let first_path = first.value.as_ref().unwrap()["path"].as_str().unwrap();
+    let second_path = second.value.as_ref().unwrap()["path"].as_str().unwrap();
+    assert!(first_path.starts_with(session_a_path.to_string_lossy().as_ref()));
+    assert!(second_path.starts_with(session_b_path.to_string_lossy().as_ref()));
+    assert_ne!(first_path, second_path);
+    assert_eq!(
+        std::fs::read_to_string(session_b_path.join(relative_path)).unwrap(),
+        "replay check through execute only."
+    );
+
+    let replay = handle
+        .invoke(host_invocation(
+            "filesystem::write_file",
+            payload,
+            filesystem_write_context(
+                "session-rwo-b",
+                key,
+                session_b_path.to_string_lossy().as_ref(),
+            ),
+        ))
+        .await;
+    assert_eq!(replay.error, None);
+    assert_eq!(replay.replayed_from, Some(second.invocation_id.clone()));
+    assert_eq!(
+        replay.value.as_ref().unwrap()["path"].as_str(),
+        Some(second_path)
+    );
+
+    let records = handle.invocation_records().await;
+    let writes = records
+        .iter()
+        .filter(|record| {
+            record.function_id.as_str() == "filesystem::write_file"
+                && record.idempotency_key.as_deref() == Some(key)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(writes.len(), 3);
+    assert_eq!(
+        writes[0].idempotency_scope,
+        Some(IdempotencyScope::new("session", "session-rwo-a"))
+    );
+    assert_eq!(
+        writes[1].idempotency_scope,
+        Some(IdempotencyScope::new("session", "session-rwo-b"))
+    );
+    assert_eq!(
+        writes[2].idempotency_scope,
+        Some(IdempotencyScope::new("session", "session-rwo-b"))
+    );
+    assert_eq!(
+        writes[2].replayed_from,
+        Some(writes[1].invocation_id.clone())
+    );
 }
 
 #[tokio::test]

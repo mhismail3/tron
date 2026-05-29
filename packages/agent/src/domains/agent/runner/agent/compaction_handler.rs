@@ -737,14 +737,12 @@ impl CompactionHandler {
                         "summary": summary_text.clone().unwrap_or_default(),
                         "timestamp": staging_timestamp,
                     });
-                    let staging_seq =
-                        sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                     if let Err(error) = persister
-                        .append_with_sequence(
+                        .append_with_runtime_sequence(
                             session_id,
                             crate::domains::session::event_store::EventType::CompactSummaryStaging,
                             staging_payload,
-                            staging_seq,
+                            sequence_counter,
                         )
                         .await
                     {
@@ -772,13 +770,12 @@ impl CompactionHandler {
                             "summarizedTurns": compaction_result.summarized_turns,
                             "preservedMessages": compaction_result.preserved_messages,
                         });
-                        let seq = sequence_counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                         if let Err(error) = persister
-                            .append_with_sequence(
+                            .append_with_runtime_sequence(
                                 session_id,
                                 crate::domains::session::event_store::EventType::CompactBoundary,
                                 payload,
-                                seq,
+                                sequence_counter,
                             )
                             .await
                         {

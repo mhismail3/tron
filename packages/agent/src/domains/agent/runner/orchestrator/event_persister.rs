@@ -1,6 +1,7 @@
 //! Event persister — linearized event writes via MPSC serialization.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Instant;
 
 use crate::domains::session::event_store::sqlite::row_types::EventRow;
@@ -87,6 +88,51 @@ impl EventPersister {
             .map_err(|_| RuntimeError::Persistence("Persist reply dropped".into()))?
     }
 
+    /// Append an event whose live runtime has a shared sequence counter.
+    ///
+    /// Runtime turns mostly pre-assign sequence numbers so persisted rows and
+    /// live broadcasts stay ordered. Background hooks and worktree events can
+    /// still append through the DB allocator while a turn is running. Before
+    /// reserving a runtime sequence, sync the counter to DB truth; if another
+    /// writer wins the same slot between sync and append, retry from the new
+    /// DB max instead of failing the turn with a `(session_id, sequence)`
+    /// collision.
+    pub async fn append_with_runtime_sequence(
+        &self,
+        session_id: &str,
+        event_type: EventType,
+        payload: Value,
+        sequence_counter: Option<&AtomicI64>,
+    ) -> Result<EventRow, RuntimeError> {
+        let Some(counter) = sequence_counter else {
+            return self.append(session_id, event_type, payload).await;
+        };
+
+        let mut last_error = None;
+        for _ in 0..3 {
+            self.advance_counter_to_db_max(session_id, counter)?;
+            let sequence = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            match self
+                .append_with_sequence(session_id, event_type, payload.clone(), Some(sequence))
+                .await
+            {
+                Ok(row) => {
+                    advance_counter_at_least(counter, row.sequence);
+                    return Ok(row);
+                }
+                Err(error) if is_sequence_collision(&error) => {
+                    last_error = Some(error);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| {
+            RuntimeError::Persistence("sequence allocation retry exhausted".to_owned())
+        }))
+    }
+
     /// Queue an event for background persistence without waiting for the write result.
     ///
     /// This still applies backpressure when the queue is full so events are not
@@ -157,6 +203,19 @@ impl EventPersister {
         }
     }
 
+    fn advance_counter_to_db_max(
+        &self,
+        session_id: &str,
+        counter: &AtomicI64,
+    ) -> Result<(), RuntimeError> {
+        let floor = self
+            .event_store
+            .get_max_sequence(session_id)
+            .map_err(|error| RuntimeError::Persistence(error.to_string()))?;
+        advance_counter_at_least(counter, floor);
+        Ok(())
+    }
+
     fn new_with_capacity_and_gate(
         event_store: Arc<EventStore>,
         capacity: usize,
@@ -200,6 +259,23 @@ impl EventPersister {
     ) -> Self {
         Self::new_with_capacity_and_gate(event_store, capacity, worker_start_gate)
     }
+}
+
+fn advance_counter_at_least(counter: &AtomicI64, floor: i64) {
+    let mut current = counter.load(Ordering::SeqCst);
+    while current < floor {
+        match counter.compare_exchange(current, floor, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => break,
+            Err(next) => current = next,
+        }
+    }
+}
+
+fn is_sequence_collision(error: &RuntimeError) -> bool {
+    let RuntimeError::Persistence(message) = error else {
+        return false;
+    };
+    message.contains("UNIQUE constraint failed: events.session_id, events.sequence")
 }
 
 /// Background worker that processes persist requests sequentially.
@@ -547,6 +623,45 @@ mod tests {
             event.sequence, 42,
             "persisted event should use pre-assigned sequence"
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_sequence_syncs_after_background_auto_append() {
+        let store = make_event_store();
+        let session = store
+            .create_session("test-model", "/tmp", Some("test"), None, None, None)
+            .expect("Failed to create session");
+
+        let persister = EventPersister::new(store.clone());
+        let sid = &session.session.id;
+        let counter = AtomicI64::new(0);
+
+        let background = store
+            .append(&crate::domains::session::event_store::AppendOptions {
+                session_id: sid,
+                event_type: EventType::LlmHookResult,
+                payload: serde_json::json!({"hookId": "builtin:title-gen"}),
+                parent_id: None,
+                sequence: None,
+            })
+            .unwrap();
+        assert_eq!(background.sequence, 1);
+
+        let event = persister
+            .append_with_runtime_sequence(
+                sid,
+                EventType::MessageAssistant,
+                serde_json::json!({"content": []}),
+                Some(&counter),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            event.sequence, 2,
+            "runtime append must skip DB-allocated hook sequence"
+        );
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

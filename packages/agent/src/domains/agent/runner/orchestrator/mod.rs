@@ -29,6 +29,10 @@
 //! threaded through: `Orchestrator → AgentRunner → TronAgent → TurnRunner →
 //! StreamProcessor / CapabilityInvocationExecutor`. All emitted events carry `sequence` in both
 //! the `TronEvent` (via `BaseEvent.sequence`) and server stream event sequence fields.
+//! Runtime-persisted events that pre-assign from the counter must go through
+//! `EventPersister::append_with_runtime_sequence`: it advances the counter from
+//! DB truth and retries sequence collisions caused by background hooks or
+//! worktree events that use the event-store allocator directly.
 //!
 //! ## Streaming Journal (Crash Recovery)
 //!

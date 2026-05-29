@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::AtomicI64;
 
 use crate::domains::capability_support::implementations::primitive_surface::{
     PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
@@ -192,9 +192,6 @@ pub(super) async fn execute_capability_invocation_phase(
     let mut persist_failed = false;
     for capability_invocation in &params.stream_result.capability_invocations {
         if let Some(persister) = params.persister {
-            let seq = params
-                .sequence_counter
-                .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
             let mut payload = json!({
                 "invocationId": capability_invocation.id,
                 "name": capability_invocation.name,
@@ -219,11 +216,11 @@ pub(super) async fn execute_capability_invocation_phase(
                 payload.extend(identity);
             }
             if let Err(error) = persister
-                .append_with_sequence(
+                .append_with_runtime_sequence(
                     params.session_id,
                     EventType::CapabilityInvocationStarted,
                     payload,
-                    seq,
+                    params.sequence_counter,
                 )
                 .await
             {
@@ -326,9 +323,6 @@ pub(super) async fn execute_capability_invocation_phase(
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
                         let is_error = result.result.is_error.unwrap_or(false);
-                        let seq = params
-                            .sequence_counter
-                            .map(|c| c.fetch_add(1, Ordering::SeqCst) + 1);
                         let base_identity = target_identity_json(
                             &capability_invocation.name,
                             params.primitive_surface,
@@ -360,11 +354,11 @@ pub(super) async fn execute_capability_invocation_phase(
                             payload.extend(identity);
                         }
                         if let Err(error) = persister
-                            .append_with_sequence(
+                            .append_with_runtime_sequence(
                                 params.session_id,
                                 EventType::CapabilityInvocationCompleted,
                                 payload,
-                                seq,
+                                params.sequence_counter,
                             )
                             .await
                         {

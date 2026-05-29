@@ -3670,17 +3670,30 @@ fn lexical_score(document: &CapabilityIndexDocument, query: &str) -> f32 {
     let mut score = 0.0;
     let haystack = document.text.to_ascii_lowercase();
     for token in &tokens {
-        if document.function_id.to_ascii_lowercase() == *token {
+        let function_id = document.function_id.to_ascii_lowercase();
+        let contract_id = document.contract_id.to_ascii_lowercase();
+        if function_id == *token {
             score += 100.0;
-        } else if document.function_id.to_ascii_lowercase().contains(token) {
+        } else if identifier_matches_token(&function_id, token) {
             score += 50.0;
-        } else if document.contract_id.to_ascii_lowercase().contains(token) {
+        } else if contract_id == *token || identifier_matches_token(&contract_id, token) {
             score += 40.0;
         } else if haystack.contains(token) {
             score += 10.0;
         }
     }
     score / tokens.len() as f32
+}
+
+fn identifier_matches_token(identifier: &str, token: &str) -> bool {
+    identifier
+        .split("::")
+        .flat_map(|component| {
+            std::iter::once(component)
+                .chain(component.split('_'))
+                .filter(|part| !part.is_empty())
+        })
+        .any(|part| part == token)
 }
 
 fn trust_boost(tier: &str) -> f32 {
@@ -4995,6 +5008,71 @@ mod tests {
                 .any(|field| field.starts_with("path:"))
         );
         assert_eq!(read.approval_behavior, "none");
+    }
+
+    #[test]
+    fn filesystem_recipes_separate_new_file_creation_from_existing_patch() {
+        let specs = crate::domains::filesystem::contract::capabilities().expect("filesystem specs");
+        let entries = specs
+            .iter()
+            .map(|spec| {
+                CapabilityRegistryEntry::from_function(
+                    crate::domains::contract::function_definition_for_capability(spec),
+                    17,
+                )
+            })
+            .collect::<Vec<_>>();
+        let by_contract = entries
+            .iter()
+            .map(|entry| (entry.contract_id.as_str(), entry.agent_recipe()))
+            .collect::<BTreeMap<_, _>>();
+
+        let write = by_contract
+            .get("filesystem::write_file")
+            .expect("write file recipe");
+        assert!(
+            write.use_when.contains("new file"),
+            "write_file recipe must advertise new-file creation"
+        );
+        assert!(
+            write.use_when.contains("scratch"),
+            "write_file recipe must cover scratch/docs-sandbox file creation"
+        );
+
+        let apply_patch = by_contract
+            .get("filesystem::apply_patch")
+            .expect("apply patch recipe");
+        assert!(
+            apply_patch.use_when.contains("existing"),
+            "apply_patch recipe must say it targets an existing file"
+        );
+        assert!(
+            apply_patch.use_when.contains("filesystem::write_file"),
+            "apply_patch recipe must direct new-file creation to write_file"
+        );
+        assert!(
+            apply_patch
+                .required_payload
+                .iter()
+                .any(|field| field.contains("existing file")),
+            "apply_patch required path summary must mention an existing file"
+        );
+
+        let documents = entries
+            .into_iter()
+            .map(|entry| entry.search_document())
+            .collect::<Vec<_>>();
+        let search = HybridLocalCapabilityIndex::new(CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        })
+        .search("create scratch docs note file", documents, 8)
+        .expect("filesystem search");
+        assert_eq!(
+            search.hits[0].contract_id, "filesystem::write_file",
+            "new scratch-file searches should prefer write_file over patch"
+        );
     }
 
     #[test]

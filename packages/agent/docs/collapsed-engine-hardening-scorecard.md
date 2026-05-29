@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **47/100 provisional**
+Current score: **49/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -83,17 +83,17 @@ calls, runtime interruption, and resource failure states.
 | Axis | Points | Current | Full Credit Requires |
 |---|---:|---:|---|
 | Execute portal ergonomics | 10 | 8 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
-| First-party capability usefulness | 10 | 5 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
+| First-party capability usefulness | 10 | 6 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
 | Worker/function/trigger substrate | 14 | 4 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 6 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
-| Resource truth and durability | 10 | 5 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
+| Resource truth and durability | 10 | 6 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 5 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 5 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 5 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **47/100**
+Total: **49/100**
 
 ## Scoring Rules
 
@@ -169,8 +169,8 @@ The evidence note must identify:
 
 | Scenario | Name | Status | Score Delta | Session Id | DB Evidence | Failure Root Cause | Fix Commit | Retest |
 |---|---|---|---:|---|---|---|---|---|
-| RWO-N1 | Repo understanding and discovery | passed_after_fix | +2 | compaction failure: `sess_019e728b-bfa5-7a03-98e7-5b5f5940fc78`; path-guidance failure: `sess_019e72a5-eda3-7f51-8628-bc043336296d`; passing retest: `sess_019e72b6-7237-7391-a178-c669e7d09cf5` | See 2026-05-29 result note below. Passing retest used 48 `capability::execute` child invocations; target functions were `filesystem::list_dir` (7), `filesystem::read_file` (24), and `filesystem::search_text` (17). Zero failed invocations, zero approvals, zero `compact.*` events, no session-scoped server log rows, and only substrate prompt-history plus final `agent_result` resource refs. | Fixed `stream_or_state`: no-op compaction no longer persists boundaries or injects notices. Fixed `model_guidance`: execute metadata/schema now tells models to list only known directories and locate uncertain filesystem paths with `find`, `glob`, or `search_text` before listing/reading. | RWO-N1 checkpoint commit | Passed exact prompt after rebuilt dev server PID 4541; DB reconstruction matches simulator UI and final answer cited real worker/function/trigger files. |
-| RWO-N2 | Practical code change workflow | failed | 0 | first attempt: `sess_019e72c3-e190-7ba2-b447-8debb4e36054` | See 2026-05-29 RWO-N2 result note below. The run recovered with `filesystem::write_file` and verified the note, but DB contains one failed `filesystem::apply_patch` against nonexistent `docs-sandbox-note.txt`, so pass criteria are not met. | `schema_or_recipe`: filesystem create-vs-patch guidance did not prevent the model from choosing append-style `apply_patch` for a file that did not exist. Target capability failed closed correctly with `FILE_NOT_FOUND`. | pending | Not passed. Stop broad RWO-N2 testing until create-vs-patch guidance or focused correction is fixed, then rerun the exact prompt with 0 failed invocations. |
+| RWO-N1 | Repo understanding and discovery | passed_after_fix | +2 | compaction failure: `sess_019e728b-bfa5-7a03-98e7-5b5f5940fc78`; path-guidance failure: `sess_019e72a5-eda3-7f51-8628-bc043336296d`; passing retest: `sess_019e72b6-7237-7391-a178-c669e7d09cf5` | See 2026-05-29 result note below. Passing retest used 48 `capability::execute` child invocations; target functions were `filesystem::list_dir` (7), `filesystem::read_file` (24), and `filesystem::search_text` (17). Zero failed invocations, zero approvals, zero `compact.*` events, no session-scoped server log rows, and only substrate prompt-history plus final `agent_result` resource refs. | Fixed `stream_or_state`: no-op compaction no longer persists boundaries or injects notices. Fixed `model_guidance`: execute metadata/schema now tells models to list only known directories and locate uncertain filesystem paths with `find`, `glob`, or `search_text` before listing/reading. | `1c76b7bd1` | Passed exact prompt after rebuilt dev server PID 4541; DB reconstruction matches simulator UI and final answer cited real worker/function/trigger files. |
+| RWO-N2 | Practical code change workflow | passed_after_fix | +2 | first failure: `sess_019e72c3-e190-7ba2-b447-8debb4e36054`; exact retest pass: `sess_019e72e6-88a4-71c1-bc85-787e86df0235`; replay failure: `sess_019e72ea-c4e7-7842-82bb-654538fa3ce5`; replay retest pass: `sess_019e72f3-ee99-7a91-84ef-e3f47604a2ff` | See 2026-05-29 RWO-N2 result notes below. Exact retest passed with 3 target `capability::execute` calls, `filesystem::write_file` 1, `filesystem::read_file` 1, `materialized_file::update` 1, `resource::create` 1, and 0 failed invocations/approvals/compact events/log rows. Replay retest passed with 2 `filesystem::write_file` rows under session-scoped `rwontwoalpha`, one `filesystem::read_file`, one materialized file resource/version, 0 failed invocations, 0 approvals, 0 compact events, 0 logs, 1 completed queue drain, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | Fixed `schema_or_recipe`: new-file guidance/search now prefers `filesystem::write_file` over missing-file `apply_patch`. Fixed `stream_or_state`: runtime event persistence advances from DB sequence truth before preassigned events. Fixed `resource_truth`: file-content mutations use session-scoped idempotency so the same key cannot replay another isolated worktree path. | this RWO-N2 checkpoint commit | Passed exact prompt after rebuilt dev server PID 22402 and passed replay subcheck after rebuilt dev server PID 27362. DB reconstruction matches simulator UI and proves the replay reused one resource/version inside the active session. |
 | RWO-N3 | Safe process plus filesystem composition | pending | 0 | | | | | |
 | RWO-N4 | Web research capability | pending | 0 | | | | | |
 | RWO-N5 | Browser and display capability probe | pending | 0 | | | | | |
@@ -388,6 +388,80 @@ Failure focus:
   proving new-file creation guidance points models to `filesystem::write_file`
   and that `filesystem::apply_patch` is only selected for existing files or
   exact replacement/append operations on known paths.
+
+2026-05-29 exact retest after create-vs-patch fix:
+
+- Focused tests covered the owning guidance layer:
+  `filesystem_recipes_separate_new_file_creation_from_existing_patch`,
+  `first_party_recipe_parity_covers_common_direct_capabilities`, and
+  `lexical_search_returns_recipes_for_common_first_party_queries`. The registry
+  lexical scorer now treats identifier parts as parts instead of matching
+  `file` inside `filesystem`, which keeps `filesystem::write_file` ahead of
+  `filesystem::create_dir` for scratch-file creation requests.
+- Simulator session `sess_019e72e6-88a4-71c1-bc85-787e86df0235` reran the exact
+  RWO-N2 prompt after rebuilt dev server PID `22402`. DB evidence: 26 events, 5
+  messages, 4 turns, 3 successful `capability::execute` invocations,
+  `filesystem::find` 1, `filesystem::write_file` 1, `filesystem::read_file` 1,
+  `materialized_file::update` 1, `resource::create` 1, 0 failed invocations, 0
+  approvals, 0 `compact.*` events, and 0 session-scoped server log rows.
+- The written scratch note used idempotency key
+  `2026-05-29-collapsed-engine-scorecard-scratch-note-write` and produced
+  `materialized_file:f1facb4d99a42a1a9a1eec5d24c76c88b085584647de34eeda4e2b611481a5eb`
+  version `ver_019e72e7-2bfc-7ca2-baa3-71d1a6b423d5`, content hash
+  `0b39f7bad10240a6c1243b39a327628d89ae56b5c6b02dc2df9ea61547a7ce87`.
+  The final assistant message cited the resource ref/version/hash and confirmed
+  the read-back.
+
+2026-05-29 replay/idempotency subchecks:
+
+- Simulator session `sess_019e72da-a3c1-7923-b37f-36d539f43ddd` exposed a
+  runtime persistence failure while replay testing: after the first
+  `filesystem::write_file`, a background hook/worktree auto-event advanced the
+  DB sequence and a runtime-persisted assistant event reused an old in-memory
+  sequence, producing `UNIQUE constraint failed: events.session_id,
+  events.sequence`. Focused test
+  `runtime_sequence_syncs_after_background_auto_append` now proves
+  runtime-preassigned events call `EventPersister::append_with_runtime_sequence`,
+  which syncs from DB max and retries sequence collisions.
+- A simulator prompt-entry mistake corrupted a numeric idempotency key in one
+  unscored replay attempt. It is treated as invalid prompt-entry evidence, not
+  engine behavior.
+- Simulator session `sess_019e72ea-c4e7-7842-82bb-654538fa3ce5` then exposed a
+  real replay failure layer: the same `rwontwoalpha` key in a new isolated
+  session replayed old invocation `019e72db-239a-76d3-9d02-77460eca4135` from a
+  different session worktree and returned that old materialized path. The active
+  session could not read the old path, so subsequent `filesystem::read_file` and
+  `process::run` recovery attempts correctly failed scoped path checks. Primary
+  failure layer: `resource_truth`; `filesystem::write_file` idempotency was
+  system-scoped even though relative paths are session-worktree materializations.
+- Focused regression
+  `filesystem_write_file_idempotency_is_session_scoped_for_isolated_worktrees`
+  now proves the same key/payload/path does not replay across isolated sessions,
+  but does replay inside the same session without creating a duplicate
+  materialized version. `filesystem::write_file`, `filesystem::edit_file`, and
+  `filesystem::apply_patch` now use session-scoped engine-ledger idempotency;
+  `filesystem::create_dir` stays system-scoped because the iOS workspace picker
+  can create folders before a chat session exists.
+- Passing replay retest: simulator session
+  `sess_019e72f3-ee99-7a91-84ef-e3f47604a2ff` after rebuilt dev server PID
+  `27362`. DB evidence: 26 events, 5 messages, 4 turns, 3 successful
+  `capability::execute` invocations, `filesystem::write_file` 2 with
+  `idempotency_scope_kind = session` and
+  `idempotency_scope_value = sess_019e72f3-ee99-7a91-84ef-e3f47604a2ff`,
+  second write `replayed_from = 019e72f4-5fbd-70a3-bcf6-4a47018b3b74`,
+  `filesystem::read_file` 1, `materialized_file::update` 1, `resource::create`
+  1, 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped
+  logs, one completed `agent::prompt_queue_drain`, and stream rows for
+  `agent.runtime`, `events.session`, and `queue.lifecycle`.
+- Replay resource proof:
+  `materialized_file:e6369e848ad94cdc101929e802b7a347ce3b3dea3609208bfc0db64f8c9fb8c2`
+  has one version, `ver_019e72f4-5fbe-7a80-8637-2be6734aa7f7`, content hash
+  `774a50e85956ac66c78a1eeaeb03b07ac9e02ccf34adfb0ffb27a38d5104d858`, scoped
+  to the passing session. Final assistant message sequence 254 reported the
+  content read back and confirmed the duplicate write reused the same
+  resource/version.
+- Score impact: RWO-N2 earns `+2` after root-cause fixes and exact/replay
+  retests. Current score is 49/100. The next scenario is RWO-N3.
 
 ### RWO-N3: Safe Process Plus Filesystem Composition
 
@@ -889,7 +963,7 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N2: Practical Code Change Workflow**
+Recommended next scenario: **RWO-N3: Safe Process Plus Filesystem Composition**
 
 Session:
 
@@ -900,7 +974,7 @@ Session:
 Prompt:
 
 ```text
-Use only execute. Find the collapsed-engine hardening scorecard, add one harmless scratch note to a docs sandbox or scratch file, verify it by reading it back, and report resource refs. Use idempotency.
+Use only execute. Run safe read-only commands to inspect repo status, current branch, and the first three README lines. Then read README.md through filesystem and compare the first line. Report exact capabilities and whether approval was required.
 ```
 
 After completion, inspect:
@@ -909,24 +983,23 @@ After completion, inspect:
 - model provider;
 - parent invocation;
 - all child `capability::execute` invocations;
-- target filesystem/resource capabilities used;
+- target process/filesystem capabilities used;
 - failed invocations, if any;
-- approvals, expected none for the harmless bounded edit unless the target
-  policy explicitly requires one;
-- resource refs from the mutation and from substrate-owned prompt-history or
-  final `agent_result` records;
-- queue/stream/state evidence for the write and verification read if present;
-- logs mentioning idempotency, resource-ref, path, or model-guidance failures.
+- approvals, expected none for safe read-only commands and bounded file reads;
+- resource refs from substrate-owned prompt-history or final `agent_result`
+  records;
+- queue/stream/state evidence if present;
+- logs mentioning process read-only classification, path, or approval failures.
 
 Pass criteria:
 
-- The scorecard is found through execute-backed discovery.
-- The scratch note is written through the canonical mutation path.
-- The verification read sees the written note.
-- Idempotency is supplied and does not create duplicate logical edits.
-- Resource refs are reported and match DB rows.
+- `process::run` uses `executionMode = "read_only"` for safe commands.
+- `filesystem::read_file` reads README.md through the canonical filesystem
+  capability.
+- The reported first README line matches the process output.
 - No failed probe calls.
-- No unexpected mutation occurs outside the intended scratch note.
+- No approval is required.
+- No filesystem mutation or process write side effect occurs.
 - DB reconstruction matches the UI.
 
 If it fails, classify the primary failure layer and stop broader testing until

@@ -36,11 +36,6 @@ fn emit_maybe_sequenced(emitter: &EventEmitter, event: TronEvent, counter: Optio
     }
 }
 
-/// Get next sequence value from counter, or None.
-fn next_seq(counter: Option<&AtomicI64>) -> Option<i64> {
-    counter.map(|c| c.fetch_add(1, Ordering::SeqCst) + 1)
-}
-
 fn advance_counter_at_least(counter: Option<&AtomicI64>, floor: i64) {
     let Some(counter) = counter else {
         return;
@@ -140,9 +135,13 @@ pub(super) async fn persist_interrupted_message(
     sequence_counter: Option<&AtomicI64>,
 ) {
     if let (Some(persister), Some(payload)) = (persister, payload) {
-        let seq = next_seq(sequence_counter);
         if let Err(error) = persister
-            .append_with_sequence(session_id, EventType::MessageAssistant, payload, seq)
+            .append_with_runtime_sequence(
+                session_id,
+                EventType::MessageAssistant,
+                payload,
+                sequence_counter,
+            )
             .await
         {
             error!(
@@ -333,9 +332,13 @@ pub(super) async fn persist_completed_assistant_message(
     let Some(persister) = persister else {
         return Ok(());
     };
-    let seq = next_seq(sequence_counter);
     persister
-        .append_with_sequence(session_id, EventType::MessageAssistant, payload, seq)
+        .append_with_runtime_sequence(
+            session_id,
+            EventType::MessageAssistant,
+            payload,
+            sequence_counter,
+        )
         .await
         .map(|_| ())
         .inspect_err(|error| {
@@ -364,9 +367,8 @@ pub(super) async fn persist_rules_activated(
     let Some(persister) = persister else {
         return Ok(());
     };
-    let seq = next_seq(sequence_counter);
     persister
-        .append_with_sequence(
+        .append_with_runtime_sequence(
             session_id,
             EventType::RulesActivated,
             json!({
@@ -376,7 +378,7 @@ pub(super) async fn persist_rules_activated(
                 })).collect::<Vec<_>>(),
                 "totalActivated": total_activated,
             }),
-            seq,
+            sequence_counter,
         )
         .await
         .map(|_| ())
@@ -436,9 +438,13 @@ pub(super) async fn emit_turn_end(
             payload["cost"] = json!(cost);
         }
 
-        let seq = next_seq(sequence_counter);
         if let Err(error) = persister
-            .append_with_sequence(session_id, EventType::StreamTurnEnd, payload, seq)
+            .append_with_runtime_sequence(
+                session_id,
+                EventType::StreamTurnEnd,
+                payload,
+                sequence_counter,
+            )
             .await
         {
             warn!(

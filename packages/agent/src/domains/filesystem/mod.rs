@@ -6,10 +6,13 @@
 //! Model/session paths are resolved against trusted engine runtime metadata for
 //! the active session working directory and must remain inside that directory
 //! before reaching the raw service helpers.
-//! `filesystem::apply_patch` owns both exact replacement and explicit append
-//! semantics: `oldString == ""` appends `newString` exactly so the model-facing
-//! execute orchestrator can normalize append requests without first probing a
-//! guaranteed-failing replacement.
+//! File-content mutation idempotency is scoped to the session because the same
+//! relative payload points at different isolated worktrees across sessions.
+//! `filesystem::write_file` owns new-file creation and exact overwrite writes.
+//! `filesystem::apply_patch` owns exact replacement and explicit append
+//! semantics for existing files only: `oldString == ""` appends `newString`
+//! exactly so the model-facing execute orchestrator can normalize append
+//! requests without first probing a guaranteed-failing replacement.
 //! Directory discovery stays bounded at the target contract (`maxResults`),
 //! while the execute orchestrator owns harmless alias normalization such as
 //! `maxEntries`.

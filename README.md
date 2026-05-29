@@ -385,6 +385,9 @@ directory/worktree carried as engine runtime metadata. Absolute paths are
 accepted only when they resolve inside that active working directory; host-wide
 filesystem browsing remains limited to internal/operator picker paths rather
 than model-facing file capabilities.
+File-content mutation idempotency (`write_file`, `edit_file`, `apply_patch`)
+is session-scoped so the same caller key cannot replay a materialized path from
+another isolated worktree.
 When a session acquires an isolated git worktree, Tron seeds that worktree from
 the operator-visible working copy: tracked edits/deletions and untracked
 non-ignored files are overlaid on top of `HEAD`, while ignored files and
@@ -400,11 +403,16 @@ listing a module/file/folder path that is only a guess.
 `filesystem::read_file` accepts optional 1-based `startLine` and `endLine`
 bounds so requests like “read the first 20 lines of README.md” do not require a
 shell command or schema guess.
+`filesystem::write_file` creates new files and overwrites exact file contents.
+Agents should use it for new scratch or docs-sandbox files, and should read or
+diff before overwriting important existing files.
 `filesystem::apply_patch` accepts exact replacement patches with `oldString`
-and `newString`. For intentional append-only edits, pass `oldString: ""` and
-the exact bytes to append in `newString`; the orchestrator also normalizes a
-missing `oldString` plus non-empty `newString` into that append shape before
-target validation so the agent does not need to probe with a failing call.
+and `newString` on an existing file. For intentional append-only edits to an
+existing file, pass `oldString: ""` and the exact bytes to append in
+`newString`; the orchestrator also normalizes a missing `oldString` plus
+non-empty `newString` into that append shape before target validation so the
+agent does not need to probe with a failing call. New files must use
+`filesystem::write_file`.
 
 `process::run` and `notifications::send` both have direct, low-overhead paths
 for safe/default use. `process::run` requires `executionMode`: classifier-
