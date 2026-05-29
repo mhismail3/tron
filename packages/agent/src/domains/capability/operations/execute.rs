@@ -14,7 +14,7 @@ use super::{
 use crate::domains::capability::Deps;
 use crate::domains::capability::registry::{
     CapabilityRegistryEntry, CapabilityRegistrySnapshot, CapabilitySearchFilters,
-    CapabilitySearchPolicy, parse_target, requires_fresh_revision, string_field,
+    CapabilitySearchPolicy, CapabilityTarget, parse_target, requires_fresh_revision, string_field,
 };
 use crate::domains::capability::types::CapabilityIndexHit;
 use crate::engine::{ActorContext, FunctionDefinition, FunctionHealth, FunctionQuery, Invocation};
@@ -399,6 +399,27 @@ async fn execute_orchestrated_value(
             false,
         );
     }
+    if let Some(decomposition) =
+        decomposition_phase_details(&resolve, &target, input.intent.as_deref(), &input.arguments)
+    {
+        let message = decomposition_result_message(&decomposition);
+        let diagnostics = orchestration_details(
+            &orchestration_id,
+            "needs_decomposition",
+            input.intent.as_deref(),
+            Some(corrected_orchestrated_request(&input)),
+            &input,
+            decomposition,
+            Vec::new(),
+        );
+        record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+        return orchestration_result(
+            "needs_decomposition",
+            &message,
+            diagnostics,
+            orchestration_status_is_error("needs_decomposition"),
+        );
+    }
     normalize_target_arguments(&function, &mut input.arguments, &mut input.corrections);
     normalize_intent_target_arguments(
         &function,
@@ -610,6 +631,7 @@ pub(super) fn parse_orchestrated_execute_input(
         &mut reason,
         &mut corrections,
     )?;
+    normalize_execute_self_target(&mut target_params, &mut corrections);
     normalize_flattened_target_arguments(params, &mut arguments, &mut corrections)?;
 
     Ok(OrchestratedExecuteInput {
@@ -714,6 +736,34 @@ fn normalize_execute_operation(value: &str) -> Result<String, CapabilityError> {
                 "Unsupported execute.operation '{value}'; use discover, run, or omit it for auto"
             ),
         }),
+    }
+}
+
+fn normalize_execute_self_target(target_params: &mut Option<Value>, corrections: &mut Vec<Value>) {
+    let Some(target) = target_params.as_ref() else {
+        return;
+    };
+    if !is_execute_self_target(target) {
+        return;
+    }
+    *target_params = None;
+    corrections.push(correction_record(
+        "execute_self_target_removed",
+        "removed target=capability::execute so execute can resolve the real capability from intent",
+        1.0,
+    ));
+}
+
+fn is_execute_self_target(target: &Value) -> bool {
+    match parse_target(target) {
+        Some(CapabilityTarget::Function(id))
+        | Some(CapabilityTarget::Contract(id))
+        | Some(CapabilityTarget::Capability(id)) => id == "capability::execute",
+        Some(CapabilityTarget::Implementation(id)) => {
+            id == "function:capability::execute"
+                || (id.starts_with("first_party.capability.v") && id.ends_with(".execute"))
+        }
+        None => false,
     }
 }
 
@@ -904,8 +954,11 @@ pub(super) fn normalize_intent_target_arguments(
     };
 
     if !object.contains_key("path") {
-        if let Some(path) = intent_file_path_candidate(intent) {
-            object.insert("path".to_owned(), json!(path));
+        let requests = intent_file_read_requests(intent);
+        if requests.len() == 1 {
+            let request = &requests[0];
+            object.insert("path".to_owned(), json!(request.path));
+            apply_intent_line_bounds(object, request.start_line, request.end_line, corrections);
             corrections.push(correction_record(
                 "intent_file_path_to_target_argument",
                 "bound safe relative file path from execute intent into filesystem::read_file arguments",
@@ -915,21 +968,8 @@ pub(super) fn normalize_intent_target_arguments(
     }
 
     if object.contains_key("path") {
-        if let Some(line_count) = intent_first_line_count(intent) {
-            if !object.contains_key("startLine") {
-                object.insert("startLine".to_owned(), json!(1));
-            }
-            if !object.contains_key("endLine") {
-                object.insert("endLine".to_owned(), json!(line_count));
-            }
-            corrections.push(correction_record(
-                "intent_first_lines_to_target_arguments",
-                format!(
-                    "bound first {line_count} line{} from execute intent into filesystem::read_file arguments",
-                    if line_count == 1 { "" } else { "s" }
-                ),
-                0.9,
-            ));
+        if let Some((start_line, end_line)) = intent_line_bounds(intent) {
+            apply_intent_line_bounds(object, Some(start_line), Some(end_line), corrections);
         }
     }
 }
@@ -2190,14 +2230,190 @@ fn intent_requests_filesystem_read(intent: &str, arguments: &Value) -> bool {
         .get("path")
         .and_then(Value::as_str)
         .is_some_and(|path| !path.trim().is_empty())
-        || intent_file_path_candidate(intent).is_some()
+        || !intent_file_read_requests(intent).is_empty()
 }
 
-fn intent_file_path_candidate(intent: &str) -> Option<String> {
-    intent.split_whitespace().find_map(|token| {
-        let token = clean_intent_path_token(token)?;
-        safe_relative_intent_path(&token).then_some(token)
-    })
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IntentFileReadRequest {
+    path: String,
+    start_line: Option<u64>,
+    end_line: Option<u64>,
+}
+
+fn decomposition_phase_details(
+    resolve: &OrchestrationResolve,
+    target: &ResolvedCapabilityTarget,
+    intent: Option<&str>,
+    arguments: &Value,
+) -> Option<Value> {
+    if target.entry.function.id.as_str() != "filesystem::read_file" {
+        return None;
+    }
+    if arguments
+        .get("path")
+        .and_then(Value::as_str)
+        .is_some_and(|path| !path.trim().is_empty())
+    {
+        return None;
+    }
+    let requests = intent_file_read_requests(intent?);
+    if requests.len() <= 1 {
+        return None;
+    }
+    let suggested_calls = requests
+        .iter()
+        .map(|request| {
+            let mut arguments = json!({ "path": request.path });
+            if let Some(object) = arguments.as_object_mut() {
+                if let Some(start_line) = request.start_line {
+                    object.insert("startLine".to_owned(), json!(start_line));
+                }
+                if let Some(end_line) = request.end_line {
+                    object.insert("endLine".to_owned(), json!(end_line));
+                }
+            }
+            json!({
+                "intent": format!("Read {}", request.path),
+                "target": "filesystem::read_file",
+                "arguments": arguments
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(json!({
+        "phase": "prepare",
+        "resolveMode": resolve.mode,
+        "candidates": resolve.candidates,
+        "rejectedCandidates": resolve.rejected_candidates,
+        "searchStatus": resolve.search_status,
+        "selectedTarget": {
+            "contractId": target.entry.contract_id.as_str(),
+            "implementationId": target.entry.implementation_id.as_str(),
+            "functionId": target.entry.function.id.as_str(),
+            "catalogRevision": target.entry.catalog_revision,
+            "schemaDigest": target.entry.schema_digest.as_str(),
+        },
+        "decomposition": {
+            "reason": "multiple_files_for_single_target",
+            "targetCount": requests.len(),
+        },
+        "guidance": {
+            "kind": "one_target_per_execute",
+            "message": "filesystem::read_file reads one path per execute call. The suggested calls are guidance, not automatic retries. If the user still wants the reads performed, call execute separately for each suggested request so every child invocation is explicit and auditable; if the user asked only to report the decomposition, stop and report this result.",
+            "suggestedCalls": suggested_calls,
+        },
+        "suggestedCalls": suggested_calls,
+    }))
+}
+
+fn decomposition_result_message(details: &Value) -> String {
+    let mut message = "execute needs decomposition before child execution: the selected capability accepts one target per call. No child invocation was created. Suggested calls are available for a follow-up only if the user wants the work performed.".to_owned();
+    let Some(calls) = details.get("suggestedCalls").and_then(Value::as_array) else {
+        return message;
+    };
+    if calls.is_empty() {
+        return message;
+    }
+    message.push_str("\nSuggested execute calls:");
+    for (index, call) in calls.iter().take(5).enumerate() {
+        let target = call
+            .get("target")
+            .and_then(Value::as_str)
+            .unwrap_or("<target>");
+        let arguments = call.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        message.push_str(&format!(
+            "\n{}. target={} arguments={}",
+            index + 1,
+            target,
+            compact_json(&arguments)
+        ));
+    }
+    if calls.len() > 5 {
+        message.push_str(&format!(
+            "\n... {} additional calls omitted",
+            calls.len() - 5
+        ));
+    }
+    message
+}
+
+fn compact_json(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "{}".to_owned())
+}
+
+fn intent_file_read_requests(intent: &str) -> Vec<IntentFileReadRequest> {
+    let mut requests = Vec::new();
+    let mut seen = BTreeSet::new();
+    for clause in intent_read_clauses(intent) {
+        let line_bounds = intent_line_bounds(&clause);
+        for path in intent_file_path_candidates(&clause) {
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            requests.push(IntentFileReadRequest {
+                path,
+                start_line: line_bounds.map(|bounds| bounds.0),
+                end_line: line_bounds.map(|bounds| bounds.1),
+            });
+        }
+    }
+    requests
+}
+
+fn intent_read_clauses(intent: &str) -> Vec<String> {
+    let mut clauses = Vec::new();
+    for clause in intent.split(|character: char| matches!(character, ',' | ';' | '\n')) {
+        clauses.extend(split_read_clause_connectors(clause));
+    }
+    clauses
+}
+
+fn split_read_clause_connectors(clause: &str) -> Vec<String> {
+    let lower = clause.to_ascii_lowercase();
+    let markers = [
+        (" and read ", 5usize),
+        (" and open ", 5usize),
+        (" and cat ", 5usize),
+        (" then read ", 6usize),
+        (" then open ", 6usize),
+        (" then cat ", 6usize),
+        (" also read ", 6usize),
+        (" plus read ", 6usize),
+    ];
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    loop {
+        let Some((marker_start, marker_offset)) = markers
+            .iter()
+            .filter_map(|(marker, verb_offset)| {
+                lower[start..]
+                    .find(marker)
+                    .map(|index| (start + index, *verb_offset))
+            })
+            .min_by_key(|(index, _)| *index)
+        else {
+            break;
+        };
+        let before = clause[start..marker_start].trim();
+        if !before.is_empty() {
+            parts.push(before.to_owned());
+        }
+        start = marker_start + marker_offset;
+    }
+    let tail = clause[start..].trim();
+    if !tail.is_empty() {
+        parts.push(tail.to_owned());
+    }
+    parts
+}
+
+fn intent_file_path_candidates(intent: &str) -> Vec<String> {
+    intent
+        .split_whitespace()
+        .filter_map(|token| {
+            let token = clean_intent_path_token(token)?;
+            safe_relative_intent_path(&token).then_some(token)
+        })
+        .collect()
 }
 
 fn clean_intent_path_token(token: &str) -> Option<String> {
@@ -2230,6 +2446,9 @@ fn safe_relative_intent_path(path: &str) -> bool {
         || path.starts_with('/')
         || path.starts_with('~')
         || path.contains("://")
+        || !path
+            .chars()
+            .any(|character| character.is_ascii_alphabetic())
         || path.chars().any(|character| {
             !(character.is_ascii_alphanumeric() || matches!(character, '.' | '/' | '_' | '-' | '@'))
         })
@@ -2256,8 +2475,33 @@ fn is_common_file_name(file_name: &str) -> bool {
     )
 }
 
-fn intent_first_line_count(intent: &str) -> Option<u64> {
+fn intent_line_bounds(intent: &str) -> Option<(u64, u64)> {
     let words = normalized_identifier_words(intent);
+    for (index, word) in words.iter().enumerate() {
+        if word != "line" && word != "lines" {
+            continue;
+        }
+        let Some(start) = words
+            .get(index + 1)
+            .and_then(|word| intent_number_word(word))
+        else {
+            continue;
+        };
+        let separator = words.get(index + 2).map(String::as_str);
+        let Some(end) = words
+            .get(index + 3)
+            .and_then(|word| intent_number_word(word))
+        else {
+            continue;
+        };
+        if matches!(separator, Some("through" | "thru" | "to" | "until" | "and")) && start <= end {
+            return Some((start, end));
+        }
+    }
+    intent_first_line_count_from_words(&words).map(|count| (1, count))
+}
+
+fn intent_first_line_count_from_words(words: &[String]) -> Option<u64> {
     for (index, word) in words.iter().enumerate() {
         if word != "first" {
             continue;
@@ -2279,6 +2523,29 @@ fn intent_first_line_count(intent: &str) -> Option<u64> {
         }
     }
     None
+}
+
+fn apply_intent_line_bounds(
+    object: &mut Map<String, Value>,
+    start_line: Option<u64>,
+    end_line: Option<u64>,
+    corrections: &mut Vec<Value>,
+) {
+    let Some(end_line) = end_line else {
+        return;
+    };
+    let start_line = start_line.unwrap_or(1);
+    if !object.contains_key("startLine") {
+        object.insert("startLine".to_owned(), json!(start_line));
+    }
+    if !object.contains_key("endLine") {
+        object.insert("endLine".to_owned(), json!(end_line));
+    }
+    corrections.push(correction_record(
+        "intent_line_bounds_to_target_arguments",
+        format!("bound line range {start_line} through {end_line} from execute intent into filesystem::read_file arguments"),
+        0.9,
+    ));
 }
 
 fn intent_number_word(word: &str) -> Option<u64> {
@@ -2743,7 +3010,11 @@ fn orchestration_result(
 fn orchestration_status_is_error(status: &str) -> bool {
     !matches!(
         status,
-        "capability_discovery" | "needs_input" | "needs_selection" | "needs_capability"
+        "capability_discovery"
+            | "needs_input"
+            | "needs_selection"
+            | "needs_capability"
+            | "needs_decomposition"
     )
 }
 
@@ -2770,6 +3041,8 @@ fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Va
             "selectedTarget",
             "error",
             "guidance",
+            "decomposition",
+            "suggestedCalls",
             "recipe",
             "executionRequirements",
             "docs",
@@ -3135,6 +3408,33 @@ mod tests {
     }
 
     #[test]
+    fn orchestrated_execute_removes_self_target_before_resolution() {
+        for target in [
+            json!("capability::execute"),
+            json!({"functionId": "capability::execute"}),
+            json!({"capabilityId": "capability::execute"}),
+            json!({"implementationId": "function:capability::execute"}),
+            json!({"implementationId": "first_party.capability.v1.execute"}),
+        ] {
+            let input = parse_orchestrated_execute_input(&json!({
+                "intent": "read README.md lines 1 through 5",
+                "target": target
+            }))
+            .expect("parse execute input");
+
+            assert!(
+                input.target_params.is_none(),
+                "self-target should be removed before resolve"
+            );
+            assert!(
+                input.corrections.iter().any(|correction| {
+                    correction["kind"] == json!("execute_self_target_removed")
+                })
+            );
+        }
+    }
+
+    #[test]
     fn contextual_normalization_binds_current_session_id_for_session_scoped_targets() {
         let function = function_from_capability("git::list_local_branches");
         let invocation = test_invocation_with_session_context();
@@ -3232,11 +3532,136 @@ mod tests {
             correction["kind"] == json!("intent_file_path_to_target_argument")
         }));
         assert!(corrections.iter().any(|correction| {
-            correction["kind"] == json!("intent_first_lines_to_target_arguments")
+            correction["kind"] == json!("intent_line_bounds_to_target_arguments")
         }));
         let entry = CapabilityRegistryEntry::from_function(function, 391);
         validate_target_payload(&entry, &arguments)
             .expect("intent binding should make read_file payload schema-valid");
+    }
+
+    #[test]
+    fn intent_argument_normalization_binds_explicit_line_range() {
+        let function = function_from_capability("filesystem::read_file");
+        let mut arguments = json!({});
+        let mut corrections = Vec::new();
+
+        normalize_intent_target_arguments(
+            &function,
+            Some(
+                "Read packages/agent/docs/capability-orchestration-test-scorecard.md lines 1 through 20.",
+            ),
+            &mut arguments,
+            &mut corrections,
+        );
+
+        assert_eq!(
+            arguments["path"],
+            json!("packages/agent/docs/capability-orchestration-test-scorecard.md")
+        );
+        assert_eq!(arguments["startLine"], json!(1));
+        assert_eq!(arguments["endLine"], json!(20));
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("intent_line_bounds_to_target_arguments")
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function, 391);
+        validate_target_payload(&entry, &arguments)
+            .expect("explicit line range should make read_file payload schema-valid");
+    }
+
+    #[test]
+    fn multi_file_read_intent_requires_decomposition_instead_of_partial_binding() {
+        let function = function_from_capability("filesystem::read_file");
+        let intent = "Read packages/agent/docs/capability-orchestration-test-scorecard.md lines 1 through 20, read README.md lines 1 through 5.";
+        let requests = intent_file_read_requests(intent);
+
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[0],
+            IntentFileReadRequest {
+                path: "packages/agent/docs/capability-orchestration-test-scorecard.md".to_owned(),
+                start_line: Some(1),
+                end_line: Some(20),
+            }
+        );
+        assert_eq!(
+            requests[1],
+            IntentFileReadRequest {
+                path: "README.md".to_owned(),
+                start_line: Some(1),
+                end_line: Some(5),
+            }
+        );
+
+        let mut arguments = json!({});
+        let mut corrections = Vec::new();
+        normalize_intent_target_arguments(
+            &function,
+            Some(intent),
+            &mut arguments,
+            &mut corrections,
+        );
+
+        assert_eq!(
+            arguments,
+            json!({}),
+            "multi-target intent must not silently bind only the first path"
+        );
+        assert!(corrections.is_empty());
+        assert!(!orchestration_status_is_error("needs_decomposition"));
+    }
+
+    #[test]
+    fn multi_file_read_intent_splits_conjunction_line_bounds_per_target() {
+        let intent = "Read packages/agent/docs/capability-orchestration-test-scorecard.md lines 1 through 20 and read README.md lines 1 through 5.";
+        let requests = intent_file_read_requests(intent);
+
+        assert_eq!(
+            requests,
+            vec![
+                IntentFileReadRequest {
+                    path: "packages/agent/docs/capability-orchestration-test-scorecard.md"
+                        .to_owned(),
+                    start_line: Some(1),
+                    end_line: Some(20),
+                },
+                IntentFileReadRequest {
+                    path: "README.md".to_owned(),
+                    start_line: Some(1),
+                    end_line: Some(5),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn decomposition_result_message_surfaces_suggested_calls_in_content() {
+        let details = json!({
+            "suggestedCalls": [
+                {
+                    "target": "filesystem::read_file",
+                    "arguments": {
+                        "path": "packages/agent/docs/capability-orchestration-test-scorecard.md",
+                        "startLine": 1,
+                        "endLine": 20
+                    }
+                },
+                {
+                    "target": "filesystem::read_file",
+                    "arguments": {
+                        "path": "README.md",
+                        "startLine": 1,
+                        "endLine": 5
+                    }
+                }
+            ]
+        });
+
+        let message = decomposition_result_message(&details);
+
+        assert!(message.contains("Suggested execute calls:"));
+        assert!(message.contains("target=filesystem::read_file"));
+        assert!(message.contains("\"path\":\"README.md\""));
+        assert!(message.contains("\"endLine\":5"));
     }
 
     #[test]
@@ -3394,14 +3819,14 @@ mod tests {
     }
 
     #[test]
-    fn terminal_orchestration_result_promotes_guidance_for_invalid_target() {
+    fn terminal_orchestration_result_promotes_guidance_for_invalid_capability_primitive_target() {
         let diagnostics = json!({
             "orchestrationId": "capability-orchestration:test",
             "status": "request_invalid",
-            "intent": "wrap execute",
+            "intent": "wrap capability search",
             "correctedRequest": {
-                "intent": "wrap execute",
-                "target": "capability::execute",
+                "intent": "wrap capability search",
+                "target": "capability::search",
                 "arguments": {}
             },
             "correctionsApplied": [],
@@ -3409,11 +3834,11 @@ mod tests {
             "phaseDetails": {
                 "phase": "prepare",
                 "selectedTarget": {
-                    "functionId": "capability::execute"
+                    "functionId": "capability::search"
                 },
                 "error": {
                     "code": "INVALID_PARAMS",
-                    "message": "execute cannot target capability::execute because it is a capability primitive"
+                    "message": "execute cannot target capability::search because it is a capability primitive"
                 },
                 "guidance": {
                     "kind": "target_real_capability",
@@ -3439,12 +3864,67 @@ mod tests {
         assert_eq!(details["status"], json!("request_invalid"));
         assert_eq!(
             details["selectedTarget"]["functionId"],
-            json!("capability::execute")
+            json!("capability::search")
         );
         assert_eq!(details["guidance"]["kind"], json!("target_real_capability"));
         assert_eq!(details["childInvocationIds"], json!([]));
         assert_eq!(details["approvalDecision"]["status"], json!("not_required"));
         assert_eq!(details["resourceRefs"], json!([]));
+    }
+
+    #[test]
+    fn terminal_orchestration_result_promotes_decomposition_guidance() {
+        let diagnostics = json!({
+            "orchestrationId": "capability-orchestration:test",
+            "status": "needs_decomposition",
+            "intent": "read two files",
+            "correctedRequest": {
+                "intent": "read two files",
+                "target": {"functionId": "filesystem::read_file"},
+                "arguments": {}
+            },
+            "correctionsApplied": [],
+            "correctionConfidence": 1.0,
+            "phaseDetails": {
+                "phase": "prepare",
+                "decomposition": {
+                    "reason": "multiple_files_for_single_target",
+                    "targetCount": 2
+                },
+                "guidance": {
+                    "kind": "one_target_per_execute",
+                    "suggestedCalls": [
+                        {"target": "filesystem::read_file", "arguments": {"path": "README.md"}},
+                        {"target": "filesystem::read_file", "arguments": {"path": "packages/agent/README.md"}}
+                    ]
+                },
+                "suggestedCalls": [
+                    {"target": "filesystem::read_file", "arguments": {"path": "README.md"}},
+                    {"target": "filesystem::read_file", "arguments": {"path": "packages/agent/README.md"}}
+                ]
+            },
+            "childInvocationIds": []
+        });
+
+        let result = orchestration_result(
+            "needs_decomposition",
+            "execute needs decomposition before child execution.",
+            diagnostics,
+            orchestration_status_is_error("needs_decomposition"),
+        )
+        .expect("orchestration result");
+        let result: CapabilityResult = serde_json::from_value(result).expect("capability result");
+        let details = result.details.expect("details");
+
+        assert_eq!(details["status"], json!("needs_decomposition"));
+        assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["childInvocationIds"], json!([]));
+        assert_eq!(details["decomposition"]["targetCount"], json!(2));
+        assert_eq!(
+            details["suggestedCalls"][0]["arguments"]["path"],
+            json!("README.md")
+        );
+        assert_eq!(details["isError"], Value::Null);
     }
 
     #[test]

@@ -162,13 +162,17 @@ pub fn generate_capability_clarification_message(
         {tool_list}\n\
         \n\
         ## Capability Execution\n\
-        Use `execute` for every capability task. It is intent-first: if you do not already know the \
+        Use `execute` for every capability task. It is intent-first and each call runs at most one target capability invocation: if you do not already know the \
         exact capability, call `execute` with intent only (and optional constraints). Do not invent a \
         target for discovery, matching, or shape tests. Use `target` only when the user supplied an \
         exact id, a prior `execute` result selected it, or a primed recipe makes it unambiguous. Put \
         only target capability arguments inside `arguments`; wrapper fields such as `target`, \
-        `idempotencyKey`, `reason`, and `constraints` stay top-level. The engine resolves, prepares, \
-        checks freshness, requests approval when needed, runs, and observes. `execute` results include \
+        `idempotencyKey`, `reason`, and `constraints` stay top-level. Never set `target` to `execute` \
+        or `capability::execute`; `execute` is already the portal and will resolve the real target from intent. The engine resolves, prepares, \
+        checks freshness, requests approval when needed, runs, and observes. For multi-step work, make \
+        one `execute` call per selected capability/target; if a result returns `needs_decomposition`, \
+        follow its suggested calls only when the user still wants the underlying work performed, and report \
+        the decomposition result without running suggestions when the user asked only to test or inspect decomposition. `execute` results include \
         an `[execute observation]` metadata block for reasoning; use it to answer selected target, child \
         invocation, approval, correction, and resource-ref questions, but do not quote the metadata block \
         unless the user asks for raw details.\n\
@@ -185,11 +189,12 @@ pub fn generate_capability_clarification_message(
         2. You MUST provide ALL known required target parameters when invoking a selected capability - never call with empty arguments after a target is selected\n\
         3. Never execute sample/example capability payloads as exploratory calls; examples are templates only\n\
         4. When `execute` returns `needs_input`, retry only the same selected target with the missing required parameters, not an unrelated probe\n\
-        5. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
-        6. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
-        7. Be helpful, accurate, and efficient when working with code\n\
-        8. Inspect/read existing files through capabilities before changing them\n\
-        9. Make targeted, minimal edits rather than rewriting entire files",
+        5. When `execute` returns `needs_decomposition`, make the suggested `execute` calls one by one only if the user still wants the underlying work performed; otherwise report the decomposition result\n\
+        6. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
+        7. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
+        8. Be helpful, accurate, and efficient when working with code\n\
+        9. Inspect/read existing files through capabilities before changing them\n\
+        10. Make targeted, minimal edits rather than rewriting entire files",
         tool_list = tool_descriptions.join("\n")
     )
 }
@@ -836,6 +841,7 @@ mod tests {
         assert!(result.contains("target for discovery"));
         assert!(result.contains("only target capability arguments inside `arguments`"));
         assert!(result.contains("The engine resolves, prepares"));
+        assert!(result.contains("one `execute` call per selected capability/target"));
         assert!(result.contains("[execute observation]"));
         assert!(result.contains("Do not add `constraints.riskMax`"));
         assert!(result.contains("Web search and fetch are pure reads but medium risk"));
@@ -853,6 +859,8 @@ mod tests {
         assert!(result.contains("examples are templates only"));
         assert!(result.contains("When `execute` returns `needs_input`"));
         assert!(result.contains("retry only the same selected target"));
+        assert!(result.contains("When `execute` returns `needs_decomposition`"));
+        assert!(result.contains("make the suggested `execute` calls one by one"));
     }
 
     // ── normalize_schema_for_openai ──────────────────────────────────

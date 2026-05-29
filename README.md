@@ -422,15 +422,28 @@ bounded timeout fields in milliseconds. The
 model-facing `capability::execute` primitive is the only
 provider-visible capability tool: callers provide a natural-language `intent`,
 an optional `target` such as `process::run`, target-only `arguments`, optional
-constraints, and `idempotencyKey` for mutating work. The engine resolves the
-catalog entry, prepares freshness when required, corrects harmless shape
-mistakes, and routes through the same approval/child-invocation/resource-output
-path. Recipe examples are templates only: agents must not run
+constraints, and `idempotencyKey` for mutating work. Each `execute` call
+prepares at most one canonical target invocation; multi-step work is expressed
+as multiple `execute` calls so each child invocation remains explicit in the
+ledger. If an intent spans multiple target invocations, `execute` returns
+`needs_decomposition` with suggested calls instead of silently running a partial
+request. The engine resolves the catalog entry, prepares freshness when
+required, corrects harmless shape mistakes, and routes through the same
+approval/child-invocation/resource-output path. If a provider or model
+accidentally sets `target` to `capability::execute` itself, the execute boundary
+records a correction, removes that self-target, and resolves the real target
+from intent; it never recursively wraps another execute call. Recipe examples
+are templates
+only: agents must not run
 warm-up/probe/example commands such as `date` or `git status` unless that is the
 requested action, and an exact user-supplied target argument payload should be
 invoked exactly once. If a call returns `needs_input`, agents retry the same
 selected target with the missing fields instead of probing an unrelated
-capability. For portability across providers, the exported schema is
+capability. If a call returns `needs_decomposition`, agents follow the suggested
+calls one by one when the user still wants the underlying work performed; if
+the user asked only to test or report decomposition, the agent reports the
+decomposition result without running the suggestions. For portability across
+providers, the exported schema is
 plain object-shaped while still accepting direct target aliases such as
 `contractId`, `capabilityId`, `functionId`, and `implementationId` when the
 caller already knows them. Agents should omit `constraints` by default; fields

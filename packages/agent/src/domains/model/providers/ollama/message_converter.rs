@@ -27,9 +27,12 @@ use crate::shared::model_capabilities::ModelCapability;
 pub struct ChatMessage {
     /// Message role: `"system"`, `"user"`, `"assistant"`, or `"tool"`.
     pub role: String,
-    /// Message content (text or multimodal blocks).
+    /// Text content for Ollama's native `/api/chat` endpoint.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<Value>,
+    pub content: Option<String>,
+    /// Base64-encoded image payloads for multimodal Ollama models.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<Vec<String>>,
     /// Capability invocations made by the assistant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability_invocations: Option<Vec<ChatCapabilityInvocationDraft>>,
@@ -116,49 +119,48 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
     match content {
         UserMessageContent::Text(text) => ChatMessage {
             role: "user".into(),
-            content: Some(Value::String(text.clone())),
+            content: Some(text.clone()),
+            images: None,
             capability_invocations: None,
             model_primitive_name: None,
         },
         UserMessageContent::Blocks(blocks) => {
-            let parts: Vec<Value> = blocks
-                .iter()
-                .filter_map(|block| convert_user_block(block, supports_images))
-                .collect();
+            let mut text_parts = Vec::new();
+            let mut images = Vec::new();
+            for block in blocks {
+                match convert_user_block(block, supports_images) {
+                    ConvertedUserBlock::Text(text) => text_parts.push(text),
+                    ConvertedUserBlock::Image(data) => images.push(data),
+                    ConvertedUserBlock::None => {}
+                }
+            }
 
-            // Collapse to simple string if only text
-            if parts.len() == 1 && parts[0].get("type").and_then(Value::as_str) == Some("text") {
-                ChatMessage {
-                    role: "user".into(),
-                    content: Some(parts[0]["text"].clone()),
-                    capability_invocations: None,
-                    model_primitive_name: None,
-                }
-            } else {
-                ChatMessage {
-                    role: "user".into(),
-                    content: Some(Value::Array(parts)),
-                    capability_invocations: None,
-                    model_primitive_name: None,
-                }
+            ChatMessage {
+                role: "user".into(),
+                content: Some(text_parts.join("\n\n")),
+                images: (!images.is_empty()).then_some(images),
+                capability_invocations: None,
+                model_primitive_name: None,
             }
         }
     }
 }
 
+enum ConvertedUserBlock {
+    Text(String),
+    Image(String),
+    None,
+}
+
 /// Convert a single user content block.
-fn convert_user_block(block: &UserContent, supports_images: bool) -> Option<Value> {
+fn convert_user_block(block: &UserContent, supports_images: bool) -> ConvertedUserBlock {
     match block {
-        UserContent::Text { text } => Some(serde_json::json!({"type": "text", "text": text})),
-        UserContent::Image { data, mime_type } => {
+        UserContent::Text { text } => ConvertedUserBlock::Text(text.clone()),
+        UserContent::Image { data, mime_type: _ } => {
             if !supports_images {
-                return None;
+                return ConvertedUserBlock::None;
             }
-            let data_uri = format!("data:{mime_type};base64,{data}");
-            Some(serde_json::json!({
-                "type": "image_url",
-                "image_url": {"url": data_uri}
-            }))
+            ConvertedUserBlock::Image(data.clone())
         }
         UserContent::Document {
             file_name,
@@ -167,14 +169,10 @@ fn convert_user_block(block: &UserContent, supports_images: bool) -> Option<Valu
         } => {
             let name = file_name.as_deref().unwrap_or("document");
             match extracted_text {
-                Some(text) => Some(serde_json::json!({
-                    "type": "text",
-                    "text": format!("--- Document: {name} ---\n{text}")
-                })),
-                None => Some(serde_json::json!({
-                    "type": "text",
-                    "text": format!("[Document: {name} — content not available for this model]")
-                })),
+                Some(text) => ConvertedUserBlock::Text(format!("--- Document: {name} ---\n{text}")),
+                None => ConvertedUserBlock::Text(format!(
+                    "[Document: {name} — content not available for this model]"
+                )),
             }
         }
     }
@@ -217,7 +215,7 @@ fn convert_assistant_message(
     let text = if text_parts.is_empty() {
         None
     } else {
-        Some(Value::String(text_parts.join("")))
+        Some(text_parts.join(""))
     };
 
     let capability_invocations_opt = if capability_invocations.is_empty() {
@@ -233,6 +231,7 @@ fn convert_assistant_message(
     Some(ChatMessage {
         role: "assistant".into(),
         content: text,
+        images: None,
         capability_invocations: capability_invocations_opt,
         model_primitive_name: None,
     })
@@ -262,7 +261,8 @@ fn convert_capability_result(
     };
     ChatMessage {
         role: "tool".into(),
-        content: Some(Value::String(text)),
+        content: Some(text),
+        images: None,
         capability_invocations: None,
         model_primitive_name: Some(model_primitive_name.to_string()),
     }
@@ -356,7 +356,61 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "user");
-        assert_eq!(result[0].content, Some(Value::String("Hello".into())));
+        assert_eq!(result[0].content, Some("Hello".into()));
+    }
+
+    #[test]
+    fn multi_block_user_message_serializes_native_content_as_string() {
+        let messages = vec![Message::User {
+            content: UserMessageContent::Blocks(vec![
+                UserContent::Text {
+                    text: "Compacted summary".into(),
+                },
+                UserContent::Document {
+                    file_name: Some("scorecard.md".into()),
+                    data: String::new(),
+                    mime_type: "text/markdown".into(),
+                    extracted_text: Some("Scenario evidence".into()),
+                },
+            ]),
+            timestamp: None,
+        }];
+
+        let result = convert_messages(&messages, true);
+        let wire = serde_json::to_value(&result[0]).unwrap();
+        assert!(
+            wire["content"].is_string(),
+            "Ollama content must be a string"
+        );
+        assert!(
+            wire["content"]
+                .as_str()
+                .unwrap()
+                .contains("Compacted summary")
+        );
+        assert!(wire["content"].as_str().unwrap().contains("scorecard.md"));
+        assert!(wire.get("images").is_none());
+    }
+
+    #[test]
+    fn image_user_message_uses_native_images_field() {
+        let messages = vec![Message::User {
+            content: UserMessageContent::Blocks(vec![
+                UserContent::Text {
+                    text: "Describe this image".into(),
+                },
+                UserContent::Image {
+                    data: "base64data".into(),
+                    mime_type: "image/png".into(),
+                },
+            ]),
+            timestamp: None,
+        }];
+
+        let result = convert_messages(&messages, true);
+        let wire = serde_json::to_value(&result[0]).unwrap();
+        assert_eq!(wire["content"], "Describe this image");
+        assert_eq!(wire["images"][0], "base64data");
     }
 
     #[test]
@@ -365,7 +419,7 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "assistant");
-        assert_eq!(result[0].content, Some(Value::String("Hi there".into())));
+        assert_eq!(result[0].content, Some("Hi there".into()));
         assert!(result[0].capability_invocations.is_none());
     }
 
@@ -413,10 +467,7 @@ mod tests {
         }];
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 1);
-        assert_eq!(
-            result[0].content,
-            Some(Value::String("The answer is 42".into()))
-        );
+        assert_eq!(result[0].content, Some("The answer is 42".into()));
     }
 
     #[test]
@@ -459,10 +510,7 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 2);
         assert_eq!(result[1].role, "tool");
-        assert_eq!(
-            result[1].content,
-            Some(Value::String("command output".into()))
-        );
+        assert_eq!(result[1].content, Some("command output".into()));
         // Native Ollama API: capability results use model_primitive_name, not invocation_id
         assert_eq!(result[1].model_primitive_name, Some("execute".into()));
     }
@@ -496,10 +544,11 @@ mod tests {
             mime_type: "text/markdown".into(),
             extracted_text: Some("# Hello".into()),
         };
-        let v = convert_user_block(&block, true).unwrap();
-        assert_eq!(v["type"], "text");
-        assert!(v["text"].as_str().unwrap().contains("readme.md"));
-        assert!(v["text"].as_str().unwrap().contains("# Hello"));
+        let ConvertedUserBlock::Text(text) = convert_user_block(&block, true) else {
+            panic!("document should flatten to text");
+        };
+        assert!(text.contains("readme.md"));
+        assert!(text.contains("# Hello"));
     }
 
     #[test]
@@ -510,13 +559,10 @@ mod tests {
             mime_type: "application/pdf".into(),
             extracted_text: None,
         };
-        let v = convert_user_block(&block, true).unwrap();
-        assert!(
-            v["text"]
-                .as_str()
-                .unwrap()
-                .contains("content not available")
-        );
+        let ConvertedUserBlock::Text(text) = convert_user_block(&block, true) else {
+            panic!("document should flatten to text");
+        };
+        assert!(text.contains("content not available"));
     }
 
     #[test]
@@ -525,7 +571,10 @@ mod tests {
             data: "base64data".into(),
             mime_type: "image/png".into(),
         };
-        assert!(convert_user_block(&block, false).is_none());
+        assert!(matches!(
+            convert_user_block(&block, false),
+            ConvertedUserBlock::None
+        ));
     }
 
     #[test]
@@ -534,14 +583,10 @@ mod tests {
             data: "base64data".into(),
             mime_type: "image/png".into(),
         };
-        let v = convert_user_block(&block, true).unwrap();
-        assert_eq!(v["type"], "image_url");
-        assert!(
-            v["image_url"]["url"]
-                .as_str()
-                .unwrap()
-                .starts_with("data:image/png;base64,")
-        );
+        let ConvertedUserBlock::Image(data) = convert_user_block(&block, true) else {
+            panic!("image should convert to native Ollama image bytes");
+        };
+        assert_eq!(data, "base64data");
     }
 
     #[test]
@@ -796,10 +841,7 @@ mod tests {
         ];
         let result = convert_messages(&messages, true);
         assert_eq!(result[1].model_primitive_name, Some("search".into()));
-        assert_eq!(
-            result[1].content,
-            Some(Value::String("line1\nline2".into()))
-        );
+        assert_eq!(result[1].content, Some("line1\nline2".into()));
     }
 
     #[test]
@@ -827,10 +869,7 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result[1].role, "tool");
         assert_eq!(result[1].model_primitive_name, Some("execute".into()));
-        assert_eq!(
-            result[1].content,
-            Some(Value::String("Error: permission denied".into()))
-        );
+        assert_eq!(result[1].content, Some("Error: permission denied".into()));
     }
 
     #[test]
@@ -989,10 +1028,7 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 1);
         // Thinking is dropped
-        assert_eq!(
-            result[0].content,
-            Some(Value::String("I'll search for that.".into()))
-        );
+        assert_eq!(result[0].content, Some("I'll search for that.".into()));
         // Capability invocation preserved with object arguments
         let tc = result[0].capability_invocations.as_ref().unwrap();
         assert_eq!(tc[0].function.name, "search");
