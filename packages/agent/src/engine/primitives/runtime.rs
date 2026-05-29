@@ -524,6 +524,7 @@ import base64
 import hashlib
 import json
 import os
+import select
 import socket
 import ssl
 import struct
@@ -743,6 +744,9 @@ def main():
             heartbeat_sequence += 1
             send_json(sock, {"type": "heartbeat", "workerId": WORKER_ID, "sequence": heartbeat_sequence})
             last_heartbeat = now
+        ready, _, _ = select.select([sock], [], [], 0.25)
+        if not ready:
+            continue
         message = recv_json(sock)
         if message.get("type") == "invoke":
             invocation_id = message["invocationId"]

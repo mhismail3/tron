@@ -293,6 +293,50 @@ async fn local_external_worker_stamps_capability_policy_metadata_from_scoped_tok
 }
 
 #[tokio::test]
+async fn local_external_worker_engine_issued_token_is_binding_selectable() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let worker_id = wid("engine-issued-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("engine_issued");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.session_id = Some("session-a".to_owned());
+    hello.worker_token.signature_status = "engine_issued".to_owned();
+    runtime.hello(hello).await.unwrap();
+    runtime
+        .register_function(super::RegisterFunction {
+            definition: external_visible_function(FunctionDefinition::new(
+                fid("engine_issued::echo"),
+                worker_id,
+                "engine-issued external function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+
+    let stored = handle
+        .inspect_function(
+            &fid("engine_issued::echo"),
+            Some(
+                &ActorContext::new(actor("agent"), ActorKind::Agent, grant("agent-grant"))
+                    .with_session_id("session-a"),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stored.metadata["signatureStatus"], json!("engine_issued"));
+    assert_eq!(stored.metadata["conformanceState"], json!("healthy"));
+}
+
+#[tokio::test]
 async fn local_external_worker_lifecycle_events_publish_through_streams_and_traces() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let subscribe = handle

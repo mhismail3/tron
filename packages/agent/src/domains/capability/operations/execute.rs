@@ -1041,23 +1041,6 @@ fn normalize_nested_wrapper_shape(
         ));
     }
 
-    for key in [
-        "mode",
-        "inspectionHandle",
-        "inspection_handle",
-        "expectedRevision",
-        "expectedSchemaDigest",
-        "expected_schema_digest",
-    ] {
-        if object.remove(key).is_some() {
-            corrections.push(correction_record(
-                "nested_wrapper_field_removed",
-                format!("removed wrapper field {key} from arguments"),
-                1.0,
-            ));
-        }
-    }
-
     if let Some(payload) = object.remove("payload") {
         if !payload.is_object() {
             return Err(CapabilityError::InvalidParams {
@@ -4094,6 +4077,34 @@ mod tests {
         .expect("input");
 
         assert!(!input.discovery_only());
+    }
+
+    #[test]
+    fn nested_target_arguments_preserve_target_owned_mode_field() {
+        let input = parse_orchestrated_execute_input(&json!({
+            "target": "module::check_health",
+            "operation": "run",
+            "arguments": {
+                "activationResourceId": "activation:system:demo-tools",
+                "activationVersionId": "ver_demo",
+                "expectedCurrentVersionId": "ver_demo",
+                "mode": "on_demand"
+            },
+            "idempotencyKey": "module-health-demo"
+        }))
+        .expect("input");
+
+        assert_eq!(
+            input.arguments["mode"],
+            json!("on_demand"),
+            "execute must not strip target-owned fields that happen to share wrapper names"
+        );
+        assert!(
+            input
+                .corrections
+                .iter()
+                .all(|correction| { correction["kind"] != json!("nested_wrapper_field_removed") })
+        );
     }
 
     #[test]

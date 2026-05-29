@@ -294,6 +294,8 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
     );
     let template = guide_value["pythonTemplate"].as_str().unwrap();
     assert!(template.contains("Authorization: Bearer"));
+    assert!(template.contains("import select"));
+    assert!(template.contains("select.select([sock], [], [], 0.25)"));
     assert!(template.contains("\"type\": \"register_function\""));
     assert!(template.contains("\"output_contract\": {\"kind\": \"none\"}"));
     assert!(template.contains("\"sequence\": heartbeat_sequence"));

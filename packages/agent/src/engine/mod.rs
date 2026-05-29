@@ -62,8 +62,10 @@
 //! - the local external-worker runtime speaks the `/engine/workers` loopback
 //!   protocol, registers scoped functions/triggers, publishes streams only
 //!   through `stream::publish`, cleans volatile workers on disconnect, marks
-//!   durable disconnected workers unhealthy, and supplies the sandbox-created
-//!   worker path used by `worker::spawn`.
+//!   durable disconnected workers unhealthy, treats engine-issued scoped
+//!   worker tokens from `worker::spawn` as selectable session-generated
+//!   implementations once healthy, and supplies the sandbox-created worker path
+//!   used by `worker::spawn`.
 //!
 //! # INVARIANT: one production execution shape
 //!

@@ -70,13 +70,13 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **55/100 provisional**
+Current score: **57/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
 end-to-end proof across live workers, trigger composition, stream behavior,
-module activation, actual memory retain, provider parity beyond simple tool
-calls, runtime interruption, and resource failure states.
+actual memory retain, provider parity beyond simple tool calls, runtime
+interruption, and resource failure states.
 
 ### Axis Scores
 
@@ -84,16 +84,16 @@ calls, runtime interruption, and resource failure states.
 |---|---:|---:|---|
 | Execute portal ergonomics | 10 | 8 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
 | First-party capability usefulness | 10 | 8 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
-| Worker/function/trigger substrate | 14 | 6 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
+| Worker/function/trigger substrate | 14 | 7 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 8 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 6 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
-| Safety, grants, and approvals | 10 | 5 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
+| Safety, grants, and approvals | 10 | 6 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 5 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 5 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **55/100**
+Total: **57/100**
 
 ## Scoring Rules
 
@@ -176,7 +176,7 @@ The evidence note must identify:
 | RWO-N5 | Browser and display capability probe | passed | +1 | `sess_019e7308-762f-7691-987e-ea33f8eac543` | See 2026-05-29 RWO-N5 result note below. The run used 6 successful `capability::execute` invocations, 1 successful `browser::get_status`, 2 successful `capability::inspect`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. `browser::get_status` returned `hasBrowser = false` and `isStreaming = false`; `display::stop_stream` was inspected but not invoked; no browser/client-owned action path was used. |
 | RWO-N6 | State, queue, stream, trigger chain | passed | +1 | `sess_019e730c-0b78-7b73-8598-80a75810a394` | See 2026-05-29 RWO-N6 result note below. The run used 21 successful `capability::execute` invocations, 7 successful `capability::inspect`, 1 successful `state::set`, 1 successful `state::get`, 1 successful `queue::enqueue`, 1 successful `queue::list`, 1 successful `stream::subscribe`, 1 successful `stream::poll`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one ready `agent.test` queue row, one session-scoped state row, one `agent.test.execute` stream subscription, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. State write/read matched revision 1; queue enqueue/list returned the ready queued item; stream subscribe/poll succeeded and found no events; publish capability was not found. |
 | RWO-N7 | Live worker extensibility | passed_after_fix | +2 | conformance failure: `sess_019e732f-c5e0-7bf3-8130-9da7d39a3deb`; trigger retest with cleanup gap: `sess_019e733b-af69-7f93-bb15-7a717d906aef`; cleanup-fixed retest: `sess_019e7341-8eac-7bb3-97bc-efd16de60757`; trigger-guidance retest: `sess_019e735b-9168-7b43-bb95-56fb6cacca43` | See 2026-05-29 RWO-N7 result note below. Trigger-guidance retest used one `needs_selection` execute row for trigger-id metadata guidance, one successful `capability::execute` row, one successful target `rwo_n7::echo` invocation, catalog revisions 389-394, 0 approvals, 0 `compact.*` events, 0 session logs, and expected post-disconnect `CAPABILITY_NOT_FOUND` cleanup probes after unregister. | `execute_resolution`: session-generated implementations stayed `candidate` and were not binding-selectable. `queue_or_trigger`: visible trigger metadata was not projected through capability discovery. `worker_lifecycle`: stale session-scoped registry plugin/implementation rows stayed healthy after disconnect. `execute_resolution`: explicit trigger-id targets returned generic not-found instead of metadata-only guidance naming the related function target. | `0aabb48a2`; trigger-guidance checkpoint in this commit | Passed after rebuilt dev server PID 63286. Trigger-id target now returns `needs_selection`/`trigger_metadata_target` with suggested target `rwo_n7::echo`, no child invocation, and no trigger-id aliasing. Post-disconnect registry sync removed the session-generated implementation/plugin rows and direct execute returned expected `CAPABILITY_NOT_FOUND`. |
-| RWO-N8 | Module package activation | pending | 0 | | | | | |
+| RWO-N8 | Module package activation | passed_after_fix | +2 | setup and first retest: `sess_019e7385-341e-7f30-8176-6b93396a6dbc`; final activation retest: `sess_019e7398-5d77-7d01-9c2a-465589dade48` | See 2026-05-29 RWO-N8 result note below. The setup run registered source/package, verified source, approved source, configured, activated, health-checked, disabled, and inspected the deterministic package. The final retest used 6 successful `capability::execute` rows, successful `module::activate`, `worker::spawn`, `module::check_health`, two `rwo_n8_20260529113609::health` invocations, duplicate activation replay, `module::disable`, `sandbox::stop_spawned_worker`, and `module::inspect_package`; 0 failed invocations; 2 executed approvals; disabled activation resource; revoked derived grant; no session logs. | `execute_correction`: nested wrapper cleanup stripped target-owned `arguments.mode` from `module::check_health`. `worker_lifecycle`: worker guide Python blocked in `recv_json` and stopped heartbeating while idle. `execute_resolution`: `worker::spawn` issued `engine_issued` scoped tokens, but binding selection only treated `session_scoped` session-generated functions as healthy. | this checkpoint | Passed after rebuilt dev server PID 76020 with simulator booted. Direct fixture execute `019e7398-b60b-71b1-8e26-1ac35fcad2a1` selected `session_generated.rwo_n8_20260529113609.demo_echo` and invoked child `019e7398-b6f4-7b81-9c42-3acf2736499a`; disable stopped PID 77144 and revoked grant `sandbox-worker:rwo-n8-worker-20260529113609:019e7398-8526-7ff1-bbd5-280708370bf8`. |
 | RWO-N9 | Subagent fan-out/fan-in | pending | 0 | | | | | |
 | RWO-N10 | Memory auto-retain | pending | 0 | | | | | |
 | RWO-N11 | Resource failure matrix | pending | 0 | | | | | |
@@ -910,8 +910,9 @@ Failure focus:
 
 2026-05-29 preparation checkpoint:
 
-- RWO-N8 remains `pending` with no score delta until the simulator/dev-server
-  scenario is executed and DB evidence is recorded.
+- RWO-N8 was formalized as the next deterministic module activation scenario
+  before execution. The simulator/dev-server scenario is now passed after
+  root-cause fixes and exact activation retest evidence.
 - The next-test checklist is now module-specific rather than copied from the
   live-worker scenario. It requires package/source registration, source
   verification, source approval, configuration, activation, health check,
@@ -927,6 +928,96 @@ Failure focus:
   fixture invocation, queue, stream, state, log, grant, resource-version, and
   approval evidence. It also keeps the negative checks for alternate worker
   spawn paths and package/source/policy/trust/audit tables.
+
+2026-05-29 result:
+
+- Fresh setup/retest session
+  `sess_019e7385-341e-7f30-8176-6b93396a6dbc` ran against the real dev server
+  with the iOS simulator booted. It prepared the local-process Python fixture
+  from `worker::protocol_guide`, materialized
+  `/tmp/tron-rwo-n8-20260529113609/rwo_n8_worker.py`, registered source and
+  package `rwo-n8-runtime-20260529113609`, verified and approved the digest,
+  configured the package, activated worker
+  `rwo-n8-worker-20260529113609`, health-checked through
+  `module::check_health`, disabled, and inspected final package diagnostics.
+- That setup run exposed three root causes before RWO-N8 could pass. First,
+  `execute` treated nested target argument keys named `mode`,
+  `inspectionHandle`, and related wrapper vocabulary as wrapper cleanup even
+  when the selected target schema owned those fields; `module::check_health`
+  therefore lost required `arguments.mode`. Second, the Python worker template
+  emitted by `worker::protocol_guide` blocked indefinitely in `recv_json`, so
+  idle local-process workers stopped heartbeating before later invocation.
+  Third, `worker::spawn` correctly issued `engine_issued` scoped worker tokens,
+  but external-worker conformance classified only `session_scoped`
+  session-generated functions as `healthy`, so a health check could invoke the
+  function while a later direct model-facing `execute` returned
+  `needs_capability`.
+- Focused regression coverage added:
+  `nested_target_arguments_preserve_target_owned_mode_field`,
+  `primitive_catalog_worker_and_observability_functions_share_engine_path`,
+  `local_external_worker_stamps_capability_policy_metadata_from_scoped_token`,
+  and `local_external_worker_engine_issued_token_is_binding_selectable`.
+- Final retest session
+  `sess_019e7398-5d77-7d01-9c2a-465589dade48` ran after rebuilt dev server PID
+  76020, with the simulator still booted (`iPhone 17 Pro`,
+  `267F6468-09AE-471D-9157-29144173EB82`). It reused the verified package from
+  the setup run and reran the exact failed activation leg: activate, health
+  check, direct fixture invocation, duplicate activation retry, disable, and
+  inspect. The run log is
+  `/tmp/rwo_n8_agent_retest_20260529045705.json`.
+- Retest invocation proof: `module::activate`
+  `019e7398-8526-7ff1-bbd5-280708370bf8` created activation version
+  `ver_019e7398-85a7-76c3-9ed3-a9e01a8078bc`; child `worker::spawn`
+  `019e7398-852c-77f0-a1d9-14b6172caece` registered
+  `rwo_n8_20260529113609::health`; `module::check_health`
+  `019e7398-a1de-7911-a0bb-74705b5cbeda` invoked health child
+  `019e7398-a1df-7282-b0c6-adada0155327` and wrote activation version
+  `ver_019e7398-a1e1-7530-b7e6-b5bbdc26b7e2`; direct fixture execute
+  `019e7398-b60b-71b1-8e26-1ac35fcad2a1` selected binding
+  `binding_decision_019e7398-b6f4-7b81-9c42-3aa322bc8724` under
+  `approved_external_or_session_healthy` and invoked child
+  `019e7398-b6f4-7b81-9c42-3acf2736499a`; duplicate activation replayed the
+  original target result; `module::disable`
+  `019e7398-fc56-7651-bafb-306242f5d7ff` stopped spawned process PID 77144 via
+  `sandbox::stop_spawned_worker`
+  `019e7398-fc58-7ae3-b59e-9adbc4ee5905`; `module::inspect_package`
+  `019e7399-1496-78b1-be30-83bda5eee586` returned disabled diagnostics.
+- Registry proof: the session-generated implementation
+  `session_generated.rwo_n8_20260529113609.demo_echo` carried
+  `trust_tier = session_generated`, `signature_status = engine_issued`,
+  `conformance_state = healthy`, `visibility = system`, and
+  `health = Healthy` during selection. Catalog changes recorded
+  `FunctionRegistered` at revision 390 and `FunctionUnregistered` at revision
+  391 for the retest worker.
+- Safety/resource proof: approvals
+  `019e7398-8326-7052-b1e3-25a5515ee4fd` (`module::activate`) and
+  `019e7398-f970-7c10-b30d-26a69a580613` (`module::disable`) both ended
+  `executed`. Derived grant
+  `sandbox-worker:rwo-n8-worker-20260529113609:019e7398-8526-7ff1-bbd5-280708370bf8`
+  ended `revoked` at revision 2 with allowed capability
+  `rwo_n8_20260529113609::health`. Package resource
+  `worker-package:rwo-n8-runtime-20260529113609` remains `available`, config
+  resource `module-config:system:rwo-n8-runtime-20260529113609` remains
+  `active`, and activation resource
+  `activation:system:rwo-n8-runtime-20260529113609` ended `disabled` at version
+  `ver_019e7398-fc6a-7631-9549-ad4949d36696`.
+- Observability proof: the final retest recorded 0 failed engine invocations,
+  0 session log rows, 1 completed `agent::prompt_queue_drain`, and stream rows
+  on `agent.runtime`, `approvals`, `compensation.records`, `events.session`,
+  `queue.lifecycle`, `resource.leases`, `sandbox.lifecycle`, and
+  `worker.lifecycle`. The negative table probe found only pre-existing audit
+  and engine resource tables:
+  `capability_audit_events`, `constitution_home_audit`,
+  `constitution_resolution_audit`, `engine_resource_events`,
+  `engine_resource_leases`, `engine_resource_links`,
+  `engine_resource_type_definitions`, `engine_resource_versions`, and
+  `engine_resources`; there are still no package/source/policy/trust tables.
+- Score impact: RWO-N8 earns `+2`. Worker/function/trigger substrate increases
+  to 7/14 because a module package now proves local-process worker spawn,
+  registration, direct invocation, heartbeat, and cleanup. Safety, grants, and
+  approvals increases to 6/10 because activation/disable approvals, grant
+  derivation, duplicate activation replay, and grant revocation are all
+  DB-reconstructable.
 
 ### RWO-N9: Subagent Fan-Out/Fan-In
 
@@ -1280,69 +1371,66 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N8: Module Package Activation**
+Recommended next scenario: **RWO-N9: Subagent Fan-Out/Fan-In**
 
 Setup:
 
-- Use a deterministic local package fixture, not an ad hoc model-authored
-  package.
 - Use the currently configured real dev server.
-- Use the iOS simulator for the agent activation and invocation step after the
-  fixture package/source is prepared.
+- Use the iOS simulator for the parent agent prompt.
+- Keep the task narrow: two subagents should inspect separate repo topics and
+  the parent should wait for both before comparing results.
+- Do not let the parent do the child inspection work itself unless the scenario
+  fails and is being isolated.
+
+Prompt:
+
+```text
+Use only execute. Spawn two subagents to inspect separate narrow repo topics, wait for both, compare the results, and report parent/child lineage and capabilities involved.
+```
 
 Procedure:
 
-1. Register the package/source through canonical engine capabilities.
-2. Verify the source.
-3. Approve the source if required by the capability contract.
-4. Configure and activate the local-process worker through the engine substrate.
-5. Check health and invoke the registered function through `execute`.
-6. Disable the package.
-7. Confirm no package/source/policy/trust table was introduced and no worker or
-   grant leaked after disable.
+1. Start a fresh simulator-backed session on the real dev server.
+2. Send the RWO-N9 prompt with only the model-facing `execute` primitive
+   available.
+3. Confirm the parent invokes `agent::spawn_subagent` twice through
+   `capability::execute`.
+4. Confirm each child session uses `execute` for its assigned repo inspection.
+5. Confirm the parent waits for both child results through canonical
+   job/subagent result capabilities before comparing them.
+6. Inspect DB lineage and queue/stream/resource evidence before scoring.
 
 After completion, inspect:
 
-- package, config, source trust, approval, activation, health, and disable
-  resource refs and versions;
-- module lifecycle invocations and their child `worker::spawn`,
-  `sandbox::stop_spawned_worker`, health-function, grant, queue, and stream
-  records;
-- worker connection, heartbeat, disconnect, and catalog-change rows/events for
-  the local-process fixture worker;
-- function and trigger definitions registered by the activated package fixture,
-  if the package declares triggers;
-- simulator session id and model provider;
-- parent invocation and all child `capability::execute` invocations;
-- target module lifecycle and fixture capability/function invocation ids;
+- parent session id, run id, prompt invocation, and all parent
+  `capability::execute` rows;
+- `agent::spawn_subagent` child invocation ids and child session ids;
+- child session events, child `capability::execute` rows, and target filesystem
+  read/search/list invocations;
+- job/subagent status/result invocations used by the parent to wait and gather
+  outputs;
+- parent/child lineage fields in events, invocations, traces, and resources;
+- queue rows and stream topics emitted for subagent lifecycle and result
+  delivery;
+- resource refs from substrate-owned prompt-history, child outputs, and final
+  parent `agent_result` records;
 - failed invocations, if any;
-- approval records for high-risk package/source/activation operations, including
-  denial/replay rows if they occur;
-- resource refs from substrate-owned prompt-history or final `agent_result`
-  records;
-- queue/stream/state rows emitted by module lifecycle, worker lifecycle, or
-  invocation;
-- logs mentioning worker transport, package policy, activation, catalog
-  propagation, invocation, heartbeat, or cleanup failures.
+- approval records, if any;
+- logs mentioning subagent spawn, wait, child execution, queue, stream, or
+  lineage failures.
 
 Pass criteria:
 
-- Package/source registration, source verification, source approval,
-  configuration, activation, health check, fixture invocation, duplicate
-  activation/retry check, and disable all compose through canonical
-  `module::*`, `worker::spawn`, grant, resource, queue, and stream substrate.
-- Local-process worker spawn occurs only through the activation child
-  `worker::spawn` invocation.
-- Live catalog exposes the package fixture function after activation, and the
-  simulator agent invokes it through `capability::execute`.
-- Heartbeat/disconnect or spawned-worker lifecycle is observable.
-- Duplicate activation does not duplicate live worker/grant state.
-- Disable revokes the derived grant, stops or disconnects the worker through
-  canonical lifecycle APIs, and leaves no leaked volatile worker.
-- No alternate worker-spawn path, package/source/policy/trust/audit table, or
-  client-owned policy path is used.
-- DB reconstruction matches the UI, fixture logs, resource versions, approvals,
-  grants, invocations, queues, and streams.
+- Parent and both child agents use only `capability::execute` for model-facing
+  work.
+- Subagent creation, waiting, and result collection compose through the engine
+  substrate rather than hidden client or runner side channels.
+- Parent final answer reports parent/child lineage and the capabilities used by
+  each participant.
+- Child outputs remain reconstructable from DB events/resources/invocations.
+- Queue/stream records prove lifecycle and completion delivery.
+- No client-owned policy, alternate worker-spawn path, fallback reader,
+  compatibility layer, or product-state side channel is used.
 
 If it fails, classify the primary failure layer and stop broader testing until
 the exact scenario passes.

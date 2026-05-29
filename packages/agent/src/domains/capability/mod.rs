@@ -75,7 +75,10 @@
 //! idempotency placement. Target argument property names are canonicalized
 //! against the selected target schema when the match is unique, so harmless
 //! casing/separator mistakes like `functionid` versus `functionId` do not force
-//! a retry; conflicting aliases stay visible and fail schema validation.
+//! a retry; conflicting aliases stay visible and fail schema validation. Fields
+//! inside `arguments` belong to the selected target schema even when their names
+//! overlap execute wrapper vocabulary, so module health payloads keep their
+//! target-owned `mode` instead of having it stripped as a wrapper field.
 //! Session-scoped targets may also receive trusted causal-context fields such
 //! as the current `sessionId` during prepare. This is current orchestration
 //! behavior, not a client-supplied path override: it lets the model say

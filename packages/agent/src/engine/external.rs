@@ -822,7 +822,10 @@ fn external_conformance_state(
 ) -> &'static str {
     if definition.health == FunctionHealth::Healthy
         && token.trust_tier == "session_generated"
-        && token.signature_status == "session_scoped"
+        && matches!(
+            token.signature_status.as_str(),
+            "session_scoped" | "engine_issued"
+        )
     {
         "healthy"
     } else {
