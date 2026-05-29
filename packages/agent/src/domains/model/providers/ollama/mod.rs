@@ -1,7 +1,7 @@
 //! Ollama provider — local LLM inference via Ollama's native `/api/chat` endpoint.
 //!
 //! Ollama runs locally and requires no authentication. Models: Gemma 4 family
-//! (E4B validation, 26B MoE production). Supports thinking, capability invocationing, and vision.
+//! (E4B validation, 26B MoE production). Supports thinking, tool calling, and vision.
 //!
 //! # Why native API, not OpenAI-compatible?
 //!

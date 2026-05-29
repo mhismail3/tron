@@ -1,10 +1,10 @@
 //! Message format conversion: Tron messages → Ollama native `/api/chat` format.
 //!
 //! Ollama's native API is similar to OpenAI chat completions but differs in two
-//! key ways for capability invocationing:
+//! key ways for tool calling:
 //!
-//! - **Capability invocation arguments** are JSON objects, not JSON-encoded strings.
-//! - **Capability result messages** use `model_primitive_name` (function name) instead of `invocation_id`.
+//! - **Tool call arguments** are JSON objects, not JSON-encoded strings.
+//! - **Tool result messages** use `tool_name` (function name) instead of `invocation_id`.
 //!
 //! This module converts Tron's internal message types to the native wire format.
 
@@ -33,21 +33,21 @@ pub struct ChatMessage {
     /// Base64-encoded image payloads for multimodal Ollama models.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<String>>,
-    /// Capability invocations made by the assistant.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub capability_invocations: Option<Vec<ChatCapabilityInvocationDraft>>,
-    /// Capability name (for capability result messages).
+    /// Tool calls made by the assistant.
+    #[serde(rename = "tool_calls", skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ChatCapabilityInvocationDraft>>,
+    /// Tool name (for tool result messages).
     ///
-    /// Ollama's native `/api/chat` uses `model_primitive_name` (the function name) to match
+    /// Ollama's native `/api/chat` uses `tool_name` (the function name) to match
     /// results to calls, not `invocation_id` like OpenAI's API.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_primitive_name: Option<String>,
+    #[serde(rename = "tool_name", skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
 }
 
-/// A capability invocation in Ollama's native format.
+/// A tool call in Ollama's native format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatCapabilityInvocationDraft {
-    /// Unique capability invocation ID.
+    /// Unique tool call ID.
     pub id: String,
     /// Always `"function"`.
     #[serde(rename = "type")]
@@ -56,7 +56,7 @@ pub struct ChatCapabilityInvocationDraft {
     pub function: ChatFunction,
 }
 
-/// Function name + arguments in a capability invocation.
+/// Function name + arguments in a tool call.
 ///
 /// Uses `Value` (not `String`) for `arguments` because Ollama's native `/api/chat`
 /// endpoint expects a JSON object, not a JSON-encoded string like OpenAI's API.
@@ -91,7 +91,7 @@ pub struct ChatFunctionDef {
 
 // ─── Conversion functions ────────────────────────────────────────────────────
 
-/// Build a capability invocation ID mapping for all messages (Anthropic → OpenAI format).
+/// Build a tool call ID mapping for all messages (Anthropic → OpenAI format).
 fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
     let mut ids = Vec::new();
 
@@ -121,8 +121,8 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
             role: "user".into(),
             content: Some(text.clone()),
             images: None,
-            capability_invocations: None,
-            model_primitive_name: None,
+            tool_calls: None,
+            tool_name: None,
         },
         UserMessageContent::Blocks(blocks) => {
             let mut text_parts = Vec::new();
@@ -139,8 +139,8 @@ fn convert_user_message(content: &UserMessageContent, supports_images: bool) -> 
                 role: "user".into(),
                 content: Some(text_parts.join("\n\n")),
                 images: (!images.is_empty()).then_some(images),
-                capability_invocations: None,
-                model_primitive_name: None,
+                tool_calls: None,
+                tool_name: None,
             }
         }
     }
@@ -184,7 +184,7 @@ fn convert_assistant_message(
     id_mapping: &HashMap<String, String>,
 ) -> Option<ChatMessage> {
     let mut text_parts = Vec::new();
-    let mut capability_invocations = Vec::new();
+    let mut tool_calls = Vec::new();
 
     for block in content {
         match block {
@@ -198,7 +198,7 @@ fn convert_assistant_message(
                 ..
             } => {
                 let remapped_id = remap_invocation_id(id, id_mapping).to_string();
-                capability_invocations.push(ChatCapabilityInvocationDraft {
+                tool_calls.push(ChatCapabilityInvocationDraft {
                     id: remapped_id,
                     call_type: "function".into(),
                     function: ChatFunction {
@@ -218,13 +218,13 @@ fn convert_assistant_message(
         Some(text_parts.join(""))
     };
 
-    let capability_invocations_opt = if capability_invocations.is_empty() {
+    let tool_calls_opt = if tool_calls.is_empty() {
         None
     } else {
-        Some(capability_invocations)
+        Some(tool_calls)
     };
 
-    if text.is_none() && capability_invocations_opt.is_none() {
+    if text.is_none() && tool_calls_opt.is_none() {
         return None;
     }
 
@@ -232,17 +232,17 @@ fn convert_assistant_message(
         role: "assistant".into(),
         content: text,
         images: None,
-        capability_invocations: capability_invocations_opt,
-        model_primitive_name: None,
+        tool_calls: tool_calls_opt,
+        tool_name: None,
     })
 }
 
-/// Convert a capability result to chat format.
+/// Convert a tool result to chat format.
 ///
-/// Ollama's native `/api/chat` matches capability results to calls via `model_primitive_name`
+/// Ollama's native `/api/chat` matches tool results to calls via `tool_name`
 /// (the function name), not `invocation_id` like OpenAI's API.
 fn convert_capability_result(
-    model_primitive_name: &str,
+    tool_name: &str,
     content: &CapabilityResultMessageContent,
 ) -> ChatMessage {
     let text = match content {
@@ -263,16 +263,16 @@ fn convert_capability_result(
         role: "tool".into(),
         content: Some(text),
         images: None,
-        capability_invocations: None,
-        model_primitive_name: Some(model_primitive_name.to_string()),
+        tool_calls: None,
+        tool_name: Some(tool_name.to_string()),
     }
 }
 
-/// Build a mapping from capability invocation IDs (both original and remapped) to function names.
+/// Build a mapping from tool call IDs (both original and remapped) to function names.
 ///
-/// Ollama's native API uses `model_primitive_name` on result messages, so we need to recover
+/// Ollama's native API uses `tool_name` on result messages, so we need to recover
 /// the function name for each `ToolResult` by scanning the preceding assistant messages.
-fn build_model_primitive_name_mapping(
+fn build_tool_name_mapping(
     messages: &[Message],
     id_mapping: &HashMap<String, String>,
 ) -> HashMap<String, String> {
@@ -296,7 +296,7 @@ fn build_model_primitive_name_mapping(
 /// Convert Tron messages to Ollama native `/api/chat` messages.
 pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<ChatMessage> {
     let id_mapping = build_id_mapping(messages);
-    let model_primitive_name_mapping = build_model_primitive_name_mapping(messages, &id_mapping);
+    let tool_name_mapping = build_tool_name_mapping(messages, &id_mapping);
     let mut result = Vec::new();
 
     for msg in messages {
@@ -314,11 +314,11 @@ pub fn convert_messages(messages: &[Message], supports_images: bool) -> Vec<Chat
                 content,
                 ..
             } => {
-                let model_primitive_name = model_primitive_name_mapping
+                let tool_name = tool_name_mapping
                     .get(invocation_id.as_str())
                     .cloned()
                     .unwrap_or_else(|| "unknown".to_string());
-                result.push(convert_capability_result(&model_primitive_name, content));
+                result.push(convert_capability_result(&tool_name, content));
             }
         }
     }
@@ -420,11 +420,11 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "assistant");
         assert_eq!(result[0].content, Some("Hi there".into()));
-        assert!(result[0].capability_invocations.is_none());
+        assert!(result[0].tool_calls.is_none());
     }
 
     #[test]
-    fn convert_assistant_with_capability_invocations() {
+    fn convert_assistant_with_tool_calls() {
         let mut args = serde_json::Map::new();
         let _ = args.insert("path".into(), json!("/tmp/test"));
         let messages = vec![Message::Assistant {
@@ -442,7 +442,10 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "assistant");
-        let tc = result[0].capability_invocations.as_ref().unwrap();
+        let wire = serde_json::to_value(&result[0]).unwrap();
+        assert!(wire["tool_calls"].is_array());
+        assert!(wire.get("capability_invocations").is_none());
+        let tc = result[0].tool_calls.as_ref().unwrap();
         assert_eq!(tc.len(), 1);
         assert_eq!(tc[0].function.name, "read_file");
         assert!(tc[0].id.starts_with("call_"));
@@ -511,8 +514,8 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert_eq!(result[1].role, "tool");
         assert_eq!(result[1].content, Some("command output".into()));
-        // Native Ollama API: capability results use model_primitive_name, not invocation_id
-        assert_eq!(result[1].model_primitive_name, Some("execute".into()));
+        // Native Ollama API: tool results use tool_name, not invocation_id
+        assert_eq!(result[1].tool_name, Some("execute".into()));
     }
 
     #[test]
@@ -590,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_text_and_capability_invocations_preserved() {
+    fn mixed_text_and_tool_calls_preserved() {
         let mut args = serde_json::Map::new();
         let _ = args.insert("q".into(), json!("test"));
         let messages = vec![Message::Assistant {
@@ -611,8 +614,8 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].content.is_some());
-        assert!(result[0].capability_invocations.is_some());
-        assert_eq!(result[0].capability_invocations.as_ref().unwrap().len(), 1);
+        assert!(result[0].tool_calls.is_some());
+        assert_eq!(result[0].tool_calls.as_ref().unwrap().len(), 1);
     }
 
     // ── Phase 1: Arguments serialize as JSON objects ─────────────────────
@@ -637,7 +640,7 @@ mod tests {
 
         // Serialize the whole message to JSON and verify arguments is an object
         let wire = serde_json::to_value(&result[0]).unwrap();
-        let wire_args = &wire["capability_invocations"][0]["function"]["arguments"];
+        let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
         assert!(
             wire_args.is_object(),
             "arguments must be a JSON object on the wire, got: {wire_args}"
@@ -661,7 +664,7 @@ mod tests {
         }];
         let result = convert_messages(&messages, true);
         let wire = serde_json::to_value(&result[0]).unwrap();
-        let wire_args = &wire["capability_invocations"][0]["function"]["arguments"];
+        let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
         assert!(wire_args.is_object());
         assert_eq!(wire_args.as_object().unwrap().len(), 0);
     }
@@ -687,7 +690,7 @@ mod tests {
         }];
         let result = convert_messages(&messages, true);
         let wire = serde_json::to_value(&result[0]).unwrap();
-        let wire_args = &wire["capability_invocations"][0]["function"]["arguments"];
+        let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
         assert!(wire_args.is_object());
         assert_eq!(wire_args["config"]["nested"]["deep"], true);
     }
@@ -713,13 +716,13 @@ mod tests {
         }];
         let result = convert_messages(&messages, true);
         let wire = serde_json::to_value(&result[0]).unwrap();
-        let wire_args = &wire["capability_invocations"][0]["function"]["arguments"];
+        let wire_args = &wire["tool_calls"][0]["function"]["arguments"];
         assert!(wire_args.is_object());
         assert_eq!(wire_args["command"], "echo \"hello\\nworld\" | grep 'test'");
     }
 
     #[test]
-    fn multiple_capability_invocations_arguments_all_objects() {
+    fn multiple_tool_calls_arguments_all_objects() {
         let mut args1 = serde_json::Map::new();
         let _ = args1.insert("path".into(), json!("/tmp/a"));
         let mut args2 = serde_json::Map::new();
@@ -746,12 +749,7 @@ mod tests {
         }];
         let result = convert_messages(&messages, true);
         let wire = serde_json::to_value(&result[0]).unwrap();
-        for (i, tc) in wire["capability_invocations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .enumerate()
-        {
+        for (i, tc) in wire["tool_calls"].as_array().unwrap().iter().enumerate() {
             assert!(
                 tc["function"]["arguments"].is_object(),
                 "capability_invocation[{i}] arguments must be a JSON object"
@@ -759,10 +757,10 @@ mod tests {
         }
     }
 
-    // ── Phase 2: Capability results use model_primitive_name ─────────────────────────────
+    // ── Phase 2: Tool results use tool_name ─────────────────────────────
 
     #[test]
-    fn capability_result_has_model_primitive_name() {
+    fn capability_result_has_tool_name() {
         let messages = vec![
             Message::Assistant {
                 content: vec![AssistantContent::CapabilityInvocation {
@@ -784,13 +782,14 @@ mod tests {
         ];
         let result = convert_messages(&messages, true);
         let wire = serde_json::to_value(&result[1]).unwrap();
-        assert_eq!(wire["model_primitive_name"], "execute");
+        assert_eq!(wire["tool_name"], "execute");
         assert!(wire.get("invocation_id").is_none());
+        assert!(wire.get("model_primitive_name").is_none());
     }
 
     #[test]
     fn capability_result_after_provider_switch() {
-        // Anthropic-origin IDs (toolu_*) must still resolve to model_primitive_name
+        // Anthropic-origin IDs (toolu_*) must still resolve to tool_name
         let messages = vec![
             Message::Assistant {
                 content: vec![AssistantContent::CapabilityInvocation {
@@ -811,7 +810,7 @@ mod tests {
             },
         ];
         let result = convert_messages(&messages, true);
-        assert_eq!(result[1].model_primitive_name, Some("read_file".into()));
+        assert_eq!(result[1].tool_name, Some("read_file".into()));
     }
 
     #[test]
@@ -840,7 +839,7 @@ mod tests {
             },
         ];
         let result = convert_messages(&messages, true);
-        assert_eq!(result[1].model_primitive_name, Some("search".into()));
+        assert_eq!(result[1].tool_name, Some("search".into()));
         assert_eq!(result[1].content, Some("line1\nline2".into()));
     }
 
@@ -868,7 +867,7 @@ mod tests {
         ];
         let result = convert_messages(&messages, true);
         assert_eq!(result[1].role, "tool");
-        assert_eq!(result[1].model_primitive_name, Some("execute".into()));
+        assert_eq!(result[1].tool_name, Some("execute".into()));
         assert_eq!(result[1].content, Some("Error: permission denied".into()));
     }
 
@@ -909,23 +908,25 @@ mod tests {
         // User message
         assert_eq!(wire[0]["role"], "user");
 
-        // Assistant message with capability invocation — arguments is an object
+        // Assistant message with tool call — arguments is an object
         assert_eq!(wire[1]["role"], "assistant");
-        assert!(wire[1]["capability_invocations"][0]["function"]["arguments"].is_object());
+        assert!(wire[1]["tool_calls"][0]["function"]["arguments"].is_object());
+        assert!(wire[1].get("capability_invocations").is_none());
         assert_eq!(
-            wire[1]["capability_invocations"][0]["function"]["arguments"]["command"],
+            wire[1]["tool_calls"][0]["function"]["arguments"]["command"],
             "echo hello"
         );
 
-        // Capability result — uses model_primitive_name, no invocation_id
+        // Tool result — uses tool_name, no invocation_id
         assert_eq!(wire[2]["role"], "tool");
-        assert_eq!(wire[2]["model_primitive_name"], "execute");
+        assert_eq!(wire[2]["tool_name"], "execute");
         assert_eq!(wire[2]["content"], "hello");
         assert!(wire[2].get("invocation_id").is_none());
+        assert!(wire[2].get("model_primitive_name").is_none());
     }
 
     #[test]
-    fn multiple_capability_invocations_multiple_results() {
+    fn multiple_tool_calls_multiple_results() {
         let mut args1 = serde_json::Map::new();
         let _ = args1.insert("path".into(), json!("/a"));
         let mut args2 = serde_json::Map::new();
@@ -964,26 +965,26 @@ mod tests {
         ];
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 3);
-        assert_eq!(result[1].model_primitive_name, Some("read_file".into()));
-        assert_eq!(result[2].model_primitive_name, Some("execute".into()));
+        assert_eq!(result[1].tool_name, Some("read_file".into()));
+        assert_eq!(result[2].tool_name, Some("execute".into()));
     }
 
     #[test]
     fn capability_result_orphaned_id_unknown_marker() {
-        // ToolResult with no matching assistant capability invocation → mark as "unknown".
+        // ToolResult with no matching assistant tool call → mark as "unknown".
         let messages = vec![Message::CapabilityResult {
             invocation_id: "orphan_id".into(),
             content: CapabilityResultMessageContent::Text("result".into()),
             is_error: None,
         }];
         let result = convert_messages(&messages, true);
-        assert_eq!(result[0].model_primitive_name, Some("unknown".into()));
+        assert_eq!(result[0].tool_name, Some("unknown".into()));
     }
 
     // ── Phase 3: Edge case verification ─────────────────────────────────
 
     #[test]
-    fn assistant_only_capability_invocations_no_text() {
+    fn assistant_only_tool_calls_no_text() {
         let messages = vec![Message::Assistant {
             content: vec![AssistantContent::CapabilityInvocation {
                 id: "call_abc".into(),
@@ -999,11 +1000,11 @@ mod tests {
         let result = convert_messages(&messages, true);
         assert_eq!(result.len(), 1);
         assert!(result[0].content.is_none());
-        assert!(result[0].capability_invocations.is_some());
+        assert!(result[0].tool_calls.is_some());
     }
 
     #[test]
-    fn assistant_thinking_text_and_capability_invocations() {
+    fn assistant_thinking_text_and_tool_calls() {
         let mut args = serde_json::Map::new();
         let _ = args.insert("q".into(), json!("rust"));
         let messages = vec![Message::Assistant {
@@ -1029,15 +1030,15 @@ mod tests {
         assert_eq!(result.len(), 1);
         // Thinking is dropped
         assert_eq!(result[0].content, Some("I'll search for that.".into()));
-        // Capability invocation preserved with object arguments
-        let tc = result[0].capability_invocations.as_ref().unwrap();
+        // Tool call preserved with object arguments
+        let tc = result[0].tool_calls.as_ref().unwrap();
         assert_eq!(tc[0].function.name, "search");
         assert_eq!(tc[0].function.arguments, json!({"q": "rust"}));
     }
 
     #[test]
     fn invocation_id_already_openai_format() {
-        // IDs already in OpenAI format → no remapping needed, model_primitive_name still resolves
+        // IDs already in OpenAI format → no remapping needed, tool_name still resolves
         let messages = vec![
             Message::Assistant {
                 content: vec![AssistantContent::CapabilityInvocation {
@@ -1060,10 +1061,10 @@ mod tests {
         let result = convert_messages(&messages, true);
         // ID passed through unchanged
         assert_eq!(
-            result[0].capability_invocations.as_ref().unwrap()[0].id,
+            result[0].tool_calls.as_ref().unwrap()[0].id,
             "call_already_openai"
         );
-        // model_primitive_name still resolved correctly
-        assert_eq!(result[1].model_primitive_name, Some("execute".into()));
+        // tool_name still resolved correctly
+        assert_eq!(result[1].tool_name, Some("execute".into()));
     }
 }

@@ -575,7 +575,16 @@ fn extract_result_content(
 
 fn prefix_execute_observation(observation: Option<&str>, text: &str) -> String {
     match observation {
-        Some(observation) if !text.is_empty() => format!("{observation}\n\n{text}"),
+        Some(observation) if !text.is_empty() => {
+            let mut result =
+                format!("[execute result - exact target output or status text]\n{text}");
+            if !text.ends_with('\n') {
+                result.push('\n');
+            }
+            result.push_str("[/execute result]\n\n");
+            result.push_str(observation);
+            result
+        }
         Some(observation) => observation.to_owned(),
         None => text.to_owned(),
     }
@@ -643,7 +652,7 @@ fn execute_observation_text(details: Option<&Value>) -> Option<String> {
     });
     let observation = serde_json::to_string_pretty(&observation).ok()?;
     Some(format!(
-        "[execute observation - metadata for reasoning, not user output]\n{observation}\n[/execute observation]"
+        "[execute observation - metadata for reasoning]\n{observation}\n[/execute observation]"
     ))
 }
 
@@ -866,12 +875,20 @@ mod tests {
         let CapabilityResultMessageContent::Text(text) = content else {
             panic!("expected text projection");
         };
+        assert!(text.starts_with("[execute result - exact target output or status text]\n"));
+        let output_pos = text
+            .find("Testing out a README here.\n")
+            .expect("exact output should be visible");
+        let observation_pos = text
+            .find("[execute observation")
+            .expect("metadata observation should be visible");
+        assert!(output_pos < observation_pos);
+        assert!(text.contains("[/execute result]"));
         assert!(text.contains("[execute observation"));
         assert!(text.contains("\"executeInvocationId\": \"execute-123\""));
         assert!(text.contains("\"selectedTarget\": \"filesystem::read_file\""));
         assert!(text.contains("\"child-123\""));
         assert!(text.contains("\"approval\": \"not_required\""));
-        assert!(text.ends_with("Testing out a README here.\n"));
     }
 
     #[test]

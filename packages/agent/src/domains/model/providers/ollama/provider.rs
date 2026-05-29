@@ -1,7 +1,7 @@
 //! Ollama provider implementing the [`Provider`] trait.
 //!
-//! Uses Ollama's `OpenAI` chat completions-compatible endpoint for streaming, with
-//! a pre-flight request via the native `/api/chat` endpoint to set the context window.
+//! Uses Ollama's native `/api/chat` endpoint for streaming so the provider can
+//! control context size and preserve native tool-call history.
 //!
 //! # Context Window (`num_ctx`)
 //!
@@ -10,11 +10,10 @@
 //! Without this, Ollama defaults to a 4K context window, silently truncating
 //! Tron's ~12K system prompt + capabilities, which destroys reasoning/thinking output.
 //!
-//! We solve this by sending a lightweight non-streaming request to `/api/chat`
-//! with the desired `num_ctx` before the first streaming request. This forces
-//! Ollama to (re)load the model with the correct KV cache size. Subsequent
-//! requests via the OpenAI endpoint inherit this context size until Ollama
-//! unloads the model.
+//! Every Ollama request goes through `/api/chat` with the desired `num_ctx`.
+//! This keeps the model loaded with the correct KV cache size and avoids
+//! mixing OpenAI-compatible request history with Ollama-native `tool_calls` and
+//! `tool_name` messages.
 //!
 //! No authentication required — Ollama runs locally. Provides graceful error
 //! messages when Ollama is not running or the model is not pulled.

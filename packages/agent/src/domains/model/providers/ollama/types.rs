@@ -1,6 +1,6 @@
 //! Ollama model registry and config types.
 //!
-//! Ollama runs local models via an `OpenAI` chat completions-compatible API.
+//! Ollama runs local models through the native `/api/chat` API.
 //! No authentication required. Models: Gemma 4 family (E4B, 26B MoE).
 
 use std::collections::HashMap;

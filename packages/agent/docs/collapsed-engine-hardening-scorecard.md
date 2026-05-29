@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **65/100 provisional**
+Current score: **67/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -90,10 +90,10 @@ interruption, and resource failure states.
 | Safety, grants, and approvals | 10 | 8 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 6 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 5 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
-| Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
-| Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
+| Provider parity | 6 | 4 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
+| Code modularity and simplification | 10 | 2 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **65/100**
+Total: **67/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -116,6 +116,15 @@ live-server scenario with the iOS simulator booted. The dev server survived
 `./scripts/tron dev -bdt`, an in-flight long `process::run` interruption during
 `./scripts/tron dev -d`, and an approval pause across a second no-build dev
 restart. The banked score is now `65/100`; broad testing may proceed to RWO-N14.
+
+Resolved checkpoint note, 2026-05-29: RWO-N14 P1 provider intent-read parity
+passed after a root-cause fix. Anthropic, OpenAI Codex, and Gemini passed the
+clean four-provider run; Ollama initially executed `filesystem::read_file` but
+did not report the returned `# Tron` line. The fix removed stale Ollama native
+wire spellings, removed the inbound compatibility alias, and projected text
+execute results before metadata so local models see exact target output first.
+The banked score is now `67/100`; broad RWO-N14 testing may proceed only to the
+next parity prompt, P2 safe read-only process.
 
 ## Scoring Rules
 
@@ -204,7 +213,7 @@ The evidence note must identify:
 | RWO-N11 | Resource failure matrix | passed_after_fix | +2 | first failed run: `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2`; resource-truth retest: `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6`; execute-guidance retest: `sess_019e73eb-f65c-7ce3-a621-aa8b0d078494` | See 2026-05-29 RWO-N11 result note below. Final retest used 17 `capability::execute` rows, 6 `materialized_file::update`, 2 `materialized_file::hash_verify`, 2 `materialized_file::read`, 2 `materialized_file::inspect`, 3 `resource::create`, 1 `materialized_file::discard`, 0 approvals, 0 `compact.*` events, 0 session logs, damaged truth for missing-bytes and hash-mismatch fixtures, discarded lifecycle for the discarded fixture, replay of step 4, and 0 `target_payload_invalid` execute rows. | Primary fixed root cause was `resource_truth`: missing canonical bytes returned an opaque handler failure without damaged resource truth, and discarded materialized files remained readable/updatable through operational wrappers. Follow-up fixed `schema_or_recipe`: lifecycle CAS guidance now teaches `expectedCurrentVersionId`, not `versionId`, before the model calls lifecycle targets. | `c8a230983`; `9069323a1` | Passed after rebuilt dev server PID 98981 with simulator booted. Step 14 first attempted `materialized_file::discard` with `expectedCurrentVersionId = ver_019e73ed-1591-7cb3-8693-b0f2121f40fc` and succeeded without a pre-child validation failure. |
 | RWO-N12 | Approval and grant boundary | passed_after_fix | +2 | failed direct policy probe: `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0`; approval session: `sess_019e73fd-ba7a-7521-bbdf-6dca81b5855c`; direct retest: `sess_019e7410-98a1-7472-a8b8-475bc8229055` | See 2026-05-29 RWO-N12 result note below. The live approval-flow session used 3 `capability::execute` rows, 2 approval records, 3 `approval::resolve` rows, 1 `process::run` child, 1 `materialized_file::update`, 3 `resource::create`, 2 completed prompt queue drains, 0 failed invocations, and 0 `compact.*` events. The direct retest used 3 `capability::execute`, 3 `approval::resolve`, 1 `process::run`, 1 `materialized_file::update`, 1 `resource::create`, 6 `engine::invoke`, 2 approval records, 8 stream rows, 0 failed invocations, and 0 `compact.*` events. Denial created approval `019e7410-996b-7431-afa9-f9e3da8e5c9c`, no child, and no target refs; approval created approval `019e7410-9b17-7673-b14c-c55da8e669c2`, child `019e7410-9b42-7ab0-a09f-73660aff8cad`, materialized file `materialized_file:2d5d7cc3d635bdaed7de5dd104b243c4e8640b393b8c1b4f1345093ebfe555f0`, and output `res_019e7410-9b4d-7fa1-93da-67dd1c38cda3`; replay execute `019e7410-9c24-71d0-b87c-ac8216df447a` reported `approvalReplayed=true` and `childInvocationCreated=false`. | `execute_resolution`: public `/engine` direct `capability::execute` used transport/client audit scopes but did not project active-profile execution policy scopes/runtime metadata, so direct execute failed with `CAPABILITY_DENIED` before approval. The root fix derives execute policy on the server from the active profile and rejects client-authored `contract.*`, `implementation.*`, `plugin.*`, and `capability.*` policy context. | `704fb8041` | Passed after rebuilt dev server PID 7070 with simulator booted. DB evidence proves policy scopes stayed server-owned, the denied mutation created no `process::run` child or target refs, the approved mutation created exactly one child and resource chain, duplicate approval resolve replayed, and direct public execute no longer requires client-supplied policy. |
 | RWO-N13 | Runtime resilience | passed | +1 | runtime pass: `sess_019e7422-7fb7-7423-a63c-16c473d6917e`; unscored harness attempt: `sess_019e741e-8b87-7f72-94f7-b98b3be63eb3` | See 2026-05-29 RWO-N13 result note below. Runtime log `/tmp/rwo_n13_runtime_run_20260529072756.json` and approval-pause log `/tmp/rwo_n13_approval_pause_run_20260529073320.json` reconstruct the scenario. Baseline prompt used `agent::prompt`, a completed `agent::prompt_queue_drain`, `filesystem::read_file`, and `process::run`; `./scripts/tron dev -bdt` moved PID `81779` to `47488` and passed the configured dev tests. The long read-only process acquired lease cursor `80311`, was interrupted by `./scripts/tron dev -d` moving PID `47488` to `48287`, persisted child `019e7424-1af7-7f91-9f27-d75c64927fb7` with exitCode `-1`, released lease `019e7424-1af7-7f91-9f27-d7682abb77bf`, and recorded compensation `019e7424-1e4e-76b2-a31c-fc97ad20efef`. Post-reconnect `process::run` child `019e7424-558d-7d51-b3d9-59df726a0642` exited `0`. Approval `019e7427-6989-7d90-829e-89f5d0689c07` stayed pending across `./scripts/tron dev -d` moving PID `48287` to `49356`, then executed child `019e7427-96ad-76d1-bf34-658c13775af3`, materialized file `materialized_file:10068ee46d1ca50c3c732f08a867d15e361ae22cc6c46e6ef492721428e67920`, and output `res_019e7427-96c5-7553-a106-bae7e50dbd4c`. No scenario idempotency key duplicated; only internal `engine::invoke` rows have blank idempotency keys. There were 0 failed invocations, 0 `compact.*` events, no session-scoped logs, and stream topics included `agent.runtime`, `events.session`, `queue.lifecycle`, `approvals`, `resource.leases`, and `compensation.records`. | none; first harness attempt waited for a `process::run` invocation row before completion even though active process truth is exposed through `resource.leases`. Simulator URL deep-link screenshots stopped at the iOS "Open in Tron?" confirmation, but the dashboard remained mounted/not onboarding and DB/session-stream reconstruction proved continuity. | n/a | Passed on the real dev server with the iOS simulator booted. Exact retest used the corrected lease-based harness, proved interrupted invocation visibility, approval-pause survival, queue/idempotency correctness, and successful post-reconnect execution. |
-| RWO-N14 | Provider full parity | pending | 0 | | | | | |
+| RWO-N14 | Provider full parity | partial_p1_passed_after_fix | +2 | clean P1 run: Anthropic `sess_019e7433-bd1f-79f0-8d6f-e037f2d07448`, OpenAI Codex `sess_019e7433-de30-7d51-8022-b15d5fc95b62`, Gemini `sess_019e7433-fb83-74e1-973b-281c617ca83b`, Ollama failed `sess_019e7434-10b9-7c73-8d44-e43af8017059`; wire-shape retest still failed `sess_019e743c-e359-7ea0-aa4d-42d7de3852d1`; final Ollama retest passed `sess_019e7441-5e8b-7d91-8c14-b4352d6e1887` | See 2026-05-29 RWO-N14 P1 result note below. The final retest used one `capability::execute`, one `filesystem::read_file`, no `process::run`, no approvals, zero failed invocations, zero `compact.*` events, one completed prompt queue drain, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | Primary `model_guidance`: execute text output appeared after metadata, and local Ollama reported a generic success sentence instead of the exact line. Provider-boundary cleanup also fixed stale outbound Ollama native field names and removed the inbound compatibility alias. | current checkpoint | P1 passed on rebuilt dev server PID `56373`; RWO-N14 remains active and must continue with P2 safe process parity. |
 
 ## Scenario Details
 
@@ -1577,6 +1586,81 @@ Failure focus:
 - pause/resume handling;
 - provider-specific fallback.
 
+2026-05-29 P1 result:
+
+- Prompt:
+  `Use only execute. RWO-N14 provider parity subtest P1/intent-read. Read the first line of README.md by intent, without guessing an absolute path. Do not use shell/process and do not answer from memory. Report the target capability, invocation ids if visible, and the exact first line.`
+- Availability evidence: redacted auth/profile inspection showed Anthropic OAuth
+  account `mhismail3`, OpenAI Codex OAuth account `mhismail3`, Google API key
+  label `Default`, and reachable local Ollama model `gemma4:e4b` from
+  `model::list` and Ollama `/api/tags`. The active profile/user setting still
+  defaulted to OpenAI Codex `gpt-5.5`, while the Ollama retests explicitly used
+  profile `local`, provider `ollama`, model `gemma4:e4b`.
+- Clean four-provider run:
+  `/tmp/rwo_n14_provider_parity_20260529074645.json`; simulator screenshot
+  `/tmp/rwo_n14_simulator_20260529074645.png`. Anthropic
+  `claude-sonnet-4-6` passed in
+  `sess_019e7433-bd1f-79f0-8d6f-e037f2d07448`; OpenAI Codex `gpt-5.5`
+  passed in `sess_019e7433-de30-7d51-8022-b15d5fc95b62`; Gemini
+  `gemini-2.5-flash` passed in
+  `sess_019e7433-fb83-74e1-973b-281c617ca83b`.
+- First Ollama P1 run `sess_019e7434-10b9-7c73-8d44-e43af8017059` executed
+  `capability::execute` `019e7434-7a6f-7330-a663-6d11c2466e45`, selected
+  `filesystem::read_file`, and created child
+  `019e7434-7bdb-7d00-abea-96c2ea88275a`. The child result was
+  `{"content":"# Tron\n","path":"/Users/moose/Downloads/projects/tron/README.md","startLine":1,"endLine":1}`.
+  There were zero failed invocations, zero approvals, zero `compact.*` events,
+  and a completed prompt queue drain. Final assistant text did not include
+  `# Tron`, so P1 was classified failed for Ollama before continuing broader
+  parity testing.
+- Isolation evidence: provider payload audit for the failed Ollama second turn
+  included the `# Tron` content, proving the target capability, invocation
+  ledger, DB event store, and provider-payload audit were not the failing
+  layers. The same payload also showed stale Ollama-native request history
+  fields (`capability_invocations`, `model_primitive_name`) and an execute
+  result projection that placed exact text output after metadata labeled as not
+  user output.
+- Focused fixes: `domains/model/providers/ollama/message_converter.rs` now
+  serializes prior assistant tool calls and tool results as native
+  `tool_calls` and `tool_name`; `domains/model/providers/ollama/stream_handler.rs`
+  no longer accepts the retired `capability_invocations` response spelling;
+  `domains/agent/runner/agent/turn_runner/capability_invocations.rs` projects
+  text result content first in an `[execute result - exact target output or
+  status text]` block, followed by structured observation metadata.
+- Focused coverage added or updated:
+  `convert_assistant_with_tool_calls`, `capability_result_has_tool_name`,
+  `full_roundtrip_conversation`,
+  `native_tool_calls_field_deserializes_to_capability_invocation`, and
+  `extract_result_content_projects_execute_observation_for_model`.
+- Intermediate rebuilt-server retest
+  `/tmp/rwo_n14_provider_parity_ollama_retest_20260529075645.json`,
+  `sess_019e743c-e359-7ea0-aa4d-42d7de3852d1`, proved the native
+  `tool_calls`/`tool_name` wire shape reached Ollama but the final answer still
+  omitted `# Tron`; broad testing remained stopped.
+- Final rebuilt-server retest
+  `/tmp/rwo_n14_provider_parity_ollama_retest_20260529080138.json`, simulator
+  screenshot `/tmp/rwo_n14_simulator_20260529080138.png`, passed on dev server
+  PID `56373` in `sess_019e7441-5e8b-7d91-8c14-b4352d6e1887`. DB evidence:
+  `agent::prompt` idempotency key `rwo-n14-intent_read-ollama-20260529080138`,
+  parent run invocation `019e7441-5eef-7203-b7d4-09142f7f811d`, execute
+  invocation `019e7441-870c-72e0-874c-734ab8287e33`, child read
+  `019e7441-87ff-78a3-b440-ba3f6486f7cf`, final agent result
+  `res_019e7441-8efc-7603-b40b-ac69900a8797` version
+  `ver_019e7441-8efd-70a1-92b8-945982fcce82`, zero failed invocations, zero
+  approvals, zero `compact.*` events, one completed queue drain
+  `019e7441-8f0e-7bd3-9eb6-0bbcbfd44f5c`, and stream topics
+  `agent.runtime`, `events.session`, `queue.lifecycle`, and
+  `compensation.records`.
+- Final assistant output in the passing Ollama retest reported target
+  `filesystem::read_file` and exact first line ``# Tron``. The model said no
+  invocation ids were visible even though DB evidence has them; this is tracked
+  as prose weakness, not a P1 substrate failure, because the canonical
+  invocation lineage is present in the DB and provider payload.
+- Score impact: Provider parity increases to `4/6`; code modularity and
+  simplification increases to `2/10` for removing the Ollama compatibility
+  alias and keeping native wire ownership inside the provider module. Current
+  score increases to `67/100`.
+
 ## Structural Cleanup Backlog
 
 ### 1. Decompose `capability::execute`
@@ -1781,14 +1865,17 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N14: Provider Full Parity**
+Recommended next scenario: **RWO-N14 P2: Safe Read-Only Process Provider Parity**
 
 Setup:
 
 - Use the currently configured real dev server.
 - Keep the iOS simulator launched and record the visible provider/result state.
-- Run the same core prompts through OpenAI, Anthropic, Gemini, and Ollama when
-  the local profile has credentials or a reachable local provider.
+- Continue RWO-N14 from the already passed P1 intent-read checkpoint. The next
+  prompt is the safe read-only process command; do not restart broad provider
+  testing from P1 unless investigating a regression.
+- Run the same P2 prompt through OpenAI, Anthropic, Gemini, and Ollama when the
+  local profile has credentials or a reachable local provider.
 - Do not add fallback provider paths. If a provider is unavailable, record the
   blocked provider with the credential/health evidence and continue only with
   providers that can execute through the real engine substrate.
@@ -1797,13 +1884,21 @@ Setup:
   approval semantics, resource/idempotency behavior, and provider-specific
   leakage into engine semantics.
 
-Prompts:
+Completed P1 context:
 
 ```text
 Use only execute. Read the first line of README.md by intent, without guessing an absolute path. Report the target capability and invocation ids.
+```
 
+Next prompt, P2:
+
+```text
 Use only execute. Run a safe read-only date command. Report the target capability, execution mode, parent invocation id, and child invocation id.
+```
 
+Remaining prompts after P2:
+
+```text
 Use only execute. Attempt a process run with a deliberately missing required command field, then report the correction or validation class without inventing a workaround.
 
 Use only execute. Start a high-risk write command that requires approval, pause for approval, then resume after approval and report the approval id, child invocation id, and resource refs.
@@ -1818,8 +1913,8 @@ Procedure:
 1. Start a fresh simulator-backed session for the first available provider.
 2. Record provider availability from profile credentials, configured defaults,
    local Ollama health, and server/model settings without exposing secret values.
-3. Run each prompt through every available provider using the same real engine
-   substrate and the same scorecard evidence checklist.
+3. Run the P2 prompt through every available provider using the same real
+   engine substrate and the same scorecard evidence checklist.
 4. For unavailable providers, record `blocked` provider evidence in the RWO-N14
    row without awarding parity credit for that provider.
 5. After each provider run, inspect DB invocation, approval, queue, stream,

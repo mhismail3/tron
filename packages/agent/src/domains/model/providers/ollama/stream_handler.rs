@@ -2,7 +2,7 @@
 //!
 //! Deserializes Ollama's native `/api/chat` streaming format (newline-delimited
 //! JSON, NOT SSE) and maps chunks to Tron's `StreamEvent` types. Handles text,
-//! thinking content, and capability invocations.
+//! thinking content, and tool calls.
 //!
 //! # Why native API, not OpenAI-compatible?
 //!
@@ -57,20 +57,20 @@ pub struct OllamaMessage {
     /// Thinking/reasoning content delta.
     pub thinking: Option<String>,
     /// Tool calls (arrive complete in a single chunk).
-    #[serde(default, alias = "tool_calls")]
-    pub capability_invocations: Option<Vec<OllamaCapabilityInvocationDraft>>,
+    #[serde(default)]
+    pub tool_calls: Option<Vec<OllamaCapabilityInvocationDraft>>,
 }
 
 /// A tool call from the native API (arrives complete, not streamed).
 #[derive(Debug, Deserialize)]
 pub struct OllamaCapabilityInvocationDraft {
-    /// Capability invocation ID.
+    /// Tool call ID.
     pub id: Option<String>,
     /// Function details.
     pub function: OllamaCapabilityInvocationDraftFunction,
 }
 
-/// Function details within a native API capability invocation.
+/// Function details within a native API tool call.
 #[derive(Debug, Deserialize)]
 pub struct OllamaCapabilityInvocationDraftFunction {
     /// Function name.
@@ -129,7 +129,7 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
         info!(
             thinking = ?chunk.message.thinking.as_deref().map(|s| &s[..s.len().min(50)]),
             content_preview = ?content_preview,
-            has_capability_invocations = chunk.message.capability_invocations.is_some(),
+            has_tool_calls = chunk.message.tool_calls.is_some(),
             "ollama: first chunk received"
         );
     }
@@ -174,9 +174,9 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
         });
     }
 
-    // Process capability invocations (arrive complete in native API)
-    if let Some(ref capability_invocations) = chunk.message.capability_invocations {
-        // End thinking/text blocks before capability invocations
+    // Process tool calls (arrive complete in native API)
+    if let Some(ref tool_calls) = chunk.message.tool_calls {
+        // End thinking/text blocks before tool calls
         if state.in_thinking {
             state.in_thinking = false;
             let thinking = std::mem::take(&mut state.thinking_text);
@@ -199,7 +199,7 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
             });
         }
 
-        for tc in capability_invocations {
+        for tc in tool_calls {
             let id = tc
                 .id
                 .clone()
@@ -243,7 +243,7 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
         }
 
         let stop_reason = map_done_reason(chunk.done_reason.as_deref());
-        // Check if capability invocations were emitted — override stop reason
+        // Check if tool calls were emitted — override stop reason
         let has_tools = state
             .content_blocks
             .iter()
@@ -261,7 +261,7 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
     events
 }
 
-/// Generate a simple random ID for capability invocations without an ID.
+/// Generate a simple random ID for tool calls without an ID.
 fn rand_id() -> u32 {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
@@ -349,7 +349,7 @@ mod tests {
             message: OllamaMessage {
                 content: content.into(),
                 thinking: None,
-                capability_invocations: None,
+                tool_calls: None,
             },
             done: false,
             done_reason: None,
@@ -363,7 +363,7 @@ mod tests {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: Some(thinking.into()),
-                capability_invocations: None,
+                tool_calls: None,
             },
             done: false,
             done_reason: None,
@@ -377,7 +377,7 @@ mod tests {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: None,
-                capability_invocations: None,
+                tool_calls: None,
             },
             done: true,
             done_reason: Some(reason.into()),
@@ -391,7 +391,7 @@ mod tests {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: None,
-                capability_invocations: None,
+                tool_calls: None,
             },
             done: true,
             done_reason: Some("stop".into()),
@@ -437,7 +437,7 @@ mod tests {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: None,
-                capability_invocations: Some(vec![OllamaCapabilityInvocationDraft {
+                tool_calls: Some(vec![OllamaCapabilityInvocationDraft {
                     id: Some("call_abc123".into()),
                     function: OllamaCapabilityInvocationDraftFunction {
                         name: "execute".into(),
@@ -499,8 +499,8 @@ mod tests {
 
         let calls = chunk
             .message
-            .capability_invocations
-            .expect("tool calls should map to internal capability invocations");
+            .tool_calls
+            .expect("tool calls should map to internal tool calls");
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].id.as_deref(), Some("call_abc123"));
         assert_eq!(calls[0].function.name, "execute");
@@ -508,13 +508,13 @@ mod tests {
     }
 
     #[test]
-    fn multiple_capability_invocations_in_one_chunk() {
+    fn multiple_tool_calls_in_one_chunk() {
         let mut state = OllamaStreamState::new();
         let chunk = OllamaChatChunk {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: None,
-                capability_invocations: Some(vec![
+                tool_calls: Some(vec![
                     OllamaCapabilityInvocationDraft {
                         id: Some("call_1".into()),
                         function: OllamaCapabilityInvocationDraftFunction {
@@ -581,14 +581,14 @@ mod tests {
     }
 
     #[test]
-    fn done_with_capability_invocations_overrides_stop_reason() {
+    fn done_with_tool_calls_overrides_stop_reason() {
         let mut state = OllamaStreamState::new();
-        // Emit capability invocations first
+        // Emit tool calls first
         let tc_chunk = OllamaChatChunk {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: None,
-                capability_invocations: Some(vec![OllamaCapabilityInvocationDraft {
+                tool_calls: Some(vec![OllamaCapabilityInvocationDraft {
                     id: Some("call_1".into()),
                     function: OllamaCapabilityInvocationDraftFunction {
                         name: "execute".into(),
@@ -602,7 +602,7 @@ mod tests {
             eval_count: None,
         };
         let _ = process_chunk(&tc_chunk, &mut state);
-        // Ollama sends done_reason: "stop" even for capability invocations
+        // Ollama sends done_reason: "stop" even for tool calls
         let events = process_chunk(&done_chunk("stop", 100, 50), &mut state);
         if let Some(StreamEvent::Done { stop_reason, .. }) = events
             .iter()
@@ -615,14 +615,14 @@ mod tests {
     }
 
     #[test]
-    fn thinking_plus_capability_invocations() {
+    fn thinking_plus_tool_calls() {
         let mut state = OllamaStreamState::new();
         let _ = process_chunk(&thinking_chunk("planning..."), &mut state);
         let chunk = OllamaChatChunk {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: None,
-                capability_invocations: Some(vec![OllamaCapabilityInvocationDraft {
+                tool_calls: Some(vec![OllamaCapabilityInvocationDraft {
                     id: Some("call_1".into()),
                     function: OllamaCapabilityInvocationDraftFunction {
                         name: "execute".into(),
@@ -650,7 +650,7 @@ mod tests {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: None,
-                capability_invocations: None,
+                tool_calls: None,
             },
             done: false,
             done_reason: None,
@@ -668,7 +668,7 @@ mod tests {
             message: OllamaMessage {
                 content: String::new(),
                 thinking: Some(String::new()),
-                capability_invocations: None,
+                tool_calls: None,
             },
             done: false,
             done_reason: None,
@@ -763,9 +763,9 @@ mod tests {
 
     #[test]
     fn deserialization_capability_invocation_chunk() {
-        let json = r#"{"model":"gemma4:e4b","created_at":"2026-04-10T21:37:18.864432Z","message":{"role":"assistant","content":"","capability_invocations":[{"id":"call_ba7d6wq8","function":{"index":0,"name":"get_weather","arguments":{"location":"San Francisco"}}}]},"done":false}"#;
+        let json = r#"{"model":"gemma4:e4b","created_at":"2026-04-10T21:37:18.864432Z","message":{"role":"assistant","content":"","tool_calls":[{"id":"call_ba7d6wq8","function":{"index":0,"name":"get_weather","arguments":{"location":"San Francisco"}}}]},"done":false}"#;
         let chunk: OllamaChatChunk = serde_json::from_str(json).unwrap();
-        let tc = chunk.message.capability_invocations.as_ref().unwrap();
+        let tc = chunk.message.tool_calls.as_ref().unwrap();
         assert_eq!(tc.len(), 1);
         assert_eq!(tc[0].function.name, "get_weather");
         assert_eq!(tc[0].function.arguments["location"], "San Francisco");
