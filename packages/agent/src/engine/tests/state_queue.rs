@@ -192,6 +192,120 @@ async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
 }
 
 #[tokio::test]
+async fn trigger_dispatch_primitive_enqueues_and_drains_triggered_invocation() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    let mut trigger_type = TriggerTypeDefinition::new(
+        TriggerTypeId::new("manual").unwrap(),
+        wid("alpha"),
+        "manual",
+    );
+    trigger_type.allowed_delivery_modes = vec![DeliveryMode::Sync, DeliveryMode::Enqueue];
+    handle
+        .register_trigger_type_for_setup(trigger_type, false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("alpha::queued", "alpha")
+                .with_allowed_delivery_modes(vec![DeliveryMode::Sync, DeliveryMode::Enqueue])
+                .with_required_authority(AuthorityRequirement::scope("queue.test")),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+    let trigger_id = TriggerId::new("manual:alpha.queued").unwrap();
+    handle
+        .register_trigger_for_setup(
+            TriggerDefinition::new(
+                trigger_id.clone(),
+                wid("alpha"),
+                TriggerTypeId::new("manual").unwrap(),
+                fid("alpha::queued"),
+                grant("manual-grant"),
+            )
+            .with_delivery_mode(DeliveryMode::Enqueue),
+            false,
+        )
+        .unwrap();
+
+    let dispatched = handle
+        .invoke(host_invocation(
+            "trigger::dispatch",
+            json!({
+                "triggerId": trigger_id.as_str(),
+                "payload": {"queued": true},
+                "deliveryMode": "enqueue",
+                "targetIdempotencyKey": "trigger-queued-target"
+            }),
+            mutating_causal("trigger-dispatch-1")
+                .with_scope("trigger.dispatch")
+                .with_scope("queue.test"),
+        ))
+        .await;
+    assert_eq!(dispatched.error, None);
+    assert_eq!(dispatched.value.as_ref().unwrap()["dispatched"], true);
+    assert_eq!(dispatched.value.as_ref().unwrap()["queued"], true);
+    let receipt = dispatched.value.as_ref().unwrap()["receiptId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let drained = EngineQueueDrainer::drain_once(&handle, "default", "worker-a")
+        .await
+        .unwrap()
+        .expect("queued item should drain");
+    assert_eq!(drained.error, None);
+    assert_eq!(
+        drained.value.as_ref().unwrap()["echo"],
+        json!({"queued": true})
+    );
+
+    let host = handle.lock().await;
+    let dispatch_record = host
+        .catalog()
+        .invocations()
+        .iter()
+        .find(|record| record.function_id == fid("trigger::dispatch"))
+        .expect("dispatch invocation should be recorded");
+    let enqueued_record = host
+        .catalog()
+        .invocations()
+        .iter()
+        .find(|record| {
+            record.function_id == fid("alpha::queued")
+                && record.delivery_mode == DeliveryMode::Enqueue
+        })
+        .expect("trigger enqueue handoff should be recorded");
+    assert_eq!(enqueued_record.trigger_id, Some(trigger_id.clone()));
+    assert_eq!(
+        enqueued_record.parent_invocation_id.as_ref(),
+        Some(&dispatch_record.invocation_id)
+    );
+    assert_eq!(enqueued_record.authority_grant_id, grant("manual-grant"));
+    assert!(host.catalog().invocations().iter().any(|record| {
+        record.result_value.as_ref().is_some_and(|value| {
+            value.get("receiptId").and_then(Value::as_str) == Some(receipt.as_str())
+        })
+    }));
+    let drained_record = host
+        .catalog()
+        .invocations()
+        .iter()
+        .rev()
+        .find(|record| {
+            record.function_id == fid("alpha::queued") && record.delivery_mode == DeliveryMode::Sync
+        })
+        .expect("drained target invocation should be recorded");
+    assert_eq!(drained_record.trigger_id, Some(trigger_id));
+    assert_eq!(
+        drained_record.idempotency_key.as_deref(),
+        Some("trigger-queued-target")
+    );
+}
+
+#[tokio::test]
 async fn sqlite_primitive_stores_persist_stream_state_and_queue_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("tron.sqlite");

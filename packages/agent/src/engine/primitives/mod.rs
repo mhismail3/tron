@@ -10,10 +10,13 @@
 //! substrate. Materialized-file wrappers keep file bytes tied to resource
 //! versions, record damaged truth through the resource store, and block
 //! operational reads or rewrites after discard while leaving inspection
-//! available. `ui::*` stores fixed-catalog generated UI as `ui_surface`
-//! resources, authors deterministic target surfaces from substrate projections,
-//! validates/refreshes/expires generated versions, and routes submitted actions
-//! back through canonical capability invocations. Stored-surface/action
+//! available. `trigger::*` dispatches registered triggers back through the
+//! same trigger runtime used by transports and schedules, so queued trigger
+//! delivery is not a harness-only path. `ui::*` stores fixed-catalog generated
+//! UI as `ui_surface` resources, authors deterministic target surfaces from
+//! substrate projections, validates/refreshes/expires generated versions, and
+//! routes submitted actions back through canonical capability invocations.
+//! Stored-surface/action
 //! validation is owned by the UI primitive's validation submodule so authoring
 //! and execution checks do not blur together. Operator action summaries and
 //! consequence projections are shaped by the local `action_summary` helper so
@@ -89,6 +92,7 @@ pub(in crate::engine) mod runtime;
 pub(crate) mod state;
 pub(crate) mod storage;
 pub(crate) mod stream;
+pub(crate) mod trigger;
 pub(crate) mod ui;
 pub(crate) mod worker;
 
@@ -96,6 +100,7 @@ pub(crate) const STREAM_WORKER_ID: &str = "stream";
 pub(crate) const STATE_WORKER_ID: &str = "state";
 pub(crate) const QUEUE_WORKER_ID: &str = "queue";
 pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
+pub(crate) const TRIGGER_WORKER_ID: &str = "trigger";
 pub(crate) const GRANT_WORKER_ID: &str = "grant";
 pub(crate) const APPROVAL_WORKER_ID: &str = "approval";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
@@ -713,6 +718,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(STATE_WORKER_ID, WorkerKind::State)?,
         primitive_worker(QUEUE_WORKER_ID, WorkerKind::Queue)?,
         resource_worker,
+        primitive_worker(TRIGGER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(GRANT_WORKER_ID, WorkerKind::System)?,
         primitive_worker(APPROVAL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
@@ -733,6 +739,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(state::registrations(stores)?);
     registrations.extend(queue::registrations(stores)?);
     registrations.extend(resource::registrations(stores)?);
+    registrations.extend(trigger::registrations(stores)?);
     registrations.extend(grant::registrations(stores)?);
     registrations.extend(approval::registrations(stores)?);
     registrations.extend(catalog::registrations()?);

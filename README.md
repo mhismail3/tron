@@ -802,9 +802,10 @@ catalog search/inspect views remain available for debugging, but they are not
 separate model tools.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
-`queue::*`, `resource::*`, `grant::*`, and `approval::*` preserve the runtime
-semantics for delivery, projection state, queued handoff, typed durable objects,
-engine-owned authority, and human approval. `artifact::*`, `goal::*`,
+`queue::*`, `trigger::*`, `resource::*`, `grant::*`, and `approval::*` preserve
+the runtime semantics for delivery, projection state, queued handoff, trigger
+dispatch, typed durable objects, engine-owned authority, and human approval.
+`artifact::*`, `goal::*`,
 `claim::*`, `evidence::*`, and `decision::*` are wrapper capabilities that
 compose the generic resource kernel; they do not create separate stores.
 `catalog::*`, `worker::*`, `control::*`, and `observability::*` expose live

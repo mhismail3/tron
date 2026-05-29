@@ -122,14 +122,14 @@ pub(crate) fn engine_ws_trigger_type() -> EngineResult<TriggerTypeDefinition> {
     Ok(definition)
 }
 
-/// Manual in-process trigger type used by tests and internal capabilities.
+/// Manual in-process trigger type used by tests and canonical trigger dispatch.
 pub(crate) fn manual_trigger_type() -> EngineResult<TriggerTypeDefinition> {
     let mut definition = TriggerTypeDefinition::new(
         TriggerTypeId::new("manual")?,
         worker_id("engine")?,
-        "Manual in-process dispatch for tests and future agent capabilities",
+        "Manual in-process dispatch through trigger::dispatch",
     );
-    definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
+    definition.allowed_delivery_modes = vec![DeliveryMode::Sync, DeliveryMode::Enqueue];
     definition.visibility = VisibilityScope::Internal;
     Ok(definition)
 }
@@ -193,5 +193,20 @@ fn authority_for(effect: EffectClass) -> &'static str {
         "engine.promote.workspace"
     } else {
         "engine.read"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manual_trigger_type_supports_sync_and_enqueue_dispatch() {
+        let trigger_type = manual_trigger_type().expect("manual trigger type");
+
+        assert_eq!(
+            trigger_type.allowed_delivery_modes,
+            vec![DeliveryMode::Sync, DeliveryMode::Enqueue]
+        );
     }
 }
