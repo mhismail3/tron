@@ -21,6 +21,7 @@
 //! been hardened out of existence (e.g. real rate limiting replaces
 //! the L7 documentation).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Sites that must document a trusted-local trust boundary.
@@ -47,6 +48,84 @@ const TRUST_BOUNDARY_SITES: &[(&str, &str)] = &[
 const TRUST_BOUNDARY_REPO_SITES: &[(&str, &str)] = &[
     // L3 — launchd plist is user-writable
     ("scripts/tron", "trusted-local"),
+];
+
+const LARGE_TEST_FILE_LIMIT_LINES: usize = 1_000;
+
+/// Rust test files that intentionally remain above the large-file threshold.
+///
+/// Format: `(repo-relative path, scorecard reason marker, maximum expected lines)`.
+const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
+    (
+        "packages/agent/tests/threat_model_invariants.rs",
+        "cross-cutting static architecture gates",
+        5_200,
+    ),
+    (
+        "packages/agent/tests/integration/tests.rs",
+        "transport e2e suite with shared WebSocket harness",
+        3_300,
+    ),
+    (
+        "packages/agent/src/domains/session/event_store/store/tests.rs",
+        "single event-store API matrix",
+        3_300,
+    ),
+    (
+        "packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs",
+        "worktree coordinator lifecycle matrix",
+        2_900,
+    ),
+    (
+        "packages/agent/src/engine/tests/generated_ui.rs",
+        "single generated-UI primitive matrix",
+        2_050,
+    ),
+    (
+        "packages/agent/src/domains/agent/runner/guardrails/tests.rs",
+        "guardrail rule-pattern matrix",
+        1_850,
+    ),
+    (
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs",
+        "SQLite event repository query matrix",
+        1_750,
+    ),
+    (
+        "packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests.rs",
+        "subagent manager orchestration matrix",
+        1_700,
+    ),
+    (
+        "packages/agent/src/engine/tests/module_activation/source_trust.rs",
+        "module source-trust scenario matrix",
+        1_500,
+    ),
+    (
+        "packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs",
+        "rebase-on-main conflict/recovery matrix",
+        1_400,
+    ),
+    (
+        "packages/agent/src/engine/tests/resource_kernel.rs",
+        "single resource-kernel matrix",
+        1_400,
+    ),
+    (
+        "packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs",
+        "stream processor event-shape matrix",
+        1_350,
+    ),
+    (
+        "packages/agent/src/domains/agent/runner/context/context_manager_tests.rs",
+        "context manager policy/rules matrix",
+        1_350,
+    ),
+    (
+        "packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs",
+        "compaction engine scenario matrix",
+        1_300,
+    ),
 ];
 
 fn crate_root() -> PathBuf {
@@ -266,8 +345,10 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| SCB-S3 | Canonical bounded resource projection audit |",
         "| SCB-S4 | Provider normalization classification |",
         "| SCB-S5 | Hidden side-effect boundedness audit |",
-        "Recommended next scenario: **SCB-S6:",
+        "| SCB-S6 | Test decomposition and large-file ownership audit |",
+        "Recommended next scenario: **SCB-S7:",
         "hidden_side_effect_resource_scans_stay_bounded_and_observable",
+        "large_rust_test_files_have_scorecard_ownership_audit",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
@@ -458,6 +539,34 @@ fn rust_test_ownership_stays_code_adjacent() {
         !engine_tests_mod.contains("#[test]") && !engine_tests_mod.contains("#[tokio::test]"),
         "engine/tests/mod.rs must contain declarations only, not test bodies"
     );
+    let module_activation_path = crate_root.join("src/engine/tests/module_activation.rs");
+    let module_activation_root = std::fs::read_to_string(&module_activation_path)
+        .unwrap_or_else(|error| panic!("failed to read {module_activation_path:?}: {error}"));
+    for module in [
+        "health_integrity",
+        "local_process_activation",
+        "operator_surfaces",
+        "package_registration",
+        "source_trust",
+        "trust_review",
+    ] {
+        assert!(
+            module_activation_root.contains(&format!("mod {module};")),
+            "module_activation.rs must declare concern module `{module}`"
+        );
+        assert!(
+            crate_root
+                .join("src/engine/tests/module_activation")
+                .join(format!("{module}.rs"))
+                .is_file(),
+            "module activation test concern module {module}.rs must exist"
+        );
+    }
+    assert!(
+        !module_activation_root.contains("#[test]")
+            && !module_activation_root.contains("#[tokio::test]"),
+        "module_activation.rs must contain shared fixtures and declarations only"
+    );
 
     for (old_file, new_root, modules) in [
         (
@@ -529,6 +638,60 @@ fn rust_test_ownership_stays_code_adjacent() {
                 path.strip_prefix(&repo_root).unwrap_or(&path).display()
             );
         }
+    }
+}
+
+#[test]
+fn large_rust_test_files_have_scorecard_ownership_audit() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+    let scorecard_path =
+        repo_root.join("packages/agent/docs/collapsed-engine-hardening-scorecard.md");
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+
+    let mut test_files = files_with_extensions(&repo_root.join("packages/agent/tests"), &["rs"]);
+    test_files.extend(
+        files_with_extensions(&crate_root.join("src"), &["rs"])
+            .into_iter()
+            .filter(|path| is_src_rust_test_file(path)),
+    );
+
+    let mut large_files = BTreeMap::new();
+    for path in test_files {
+        let line_count = line_count(&path);
+        if line_count > LARGE_TEST_FILE_LIMIT_LINES {
+            let relative = path
+                .strip_prefix(&repo_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            large_files.insert(relative, line_count);
+        }
+    }
+
+    let audited = LARGE_TEST_FILE_AUDIT
+        .iter()
+        .map(|(path, _reason, _max_lines)| (*path).to_owned())
+        .collect::<BTreeSet<_>>();
+    let discovered = large_files.keys().cloned().collect::<BTreeSet<_>>();
+    assert_eq!(
+        discovered, audited,
+        "every Rust test file over {LARGE_TEST_FILE_LIMIT_LINES} lines must be split or explicitly audited in SCB-S6"
+    );
+
+    for (path, reason, max_lines) in LARGE_TEST_FILE_AUDIT {
+        let line_count = large_files
+            .get(*path)
+            .unwrap_or_else(|| panic!("{path} should be discovered as a large Rust test file"));
+        assert!(
+            *line_count <= *max_lines,
+            "{path} has grown to {line_count} lines; split it or raise the audited budget with a scorecard reason"
+        );
+        assert!(
+            scorecard.contains(path) && scorecard.contains(reason),
+            "SCB-S6 scorecard audit must include {path} with reason marker `{reason}`"
+        );
     }
 }
 
@@ -4804,6 +4967,27 @@ fn rust_files_under(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     visit_rust_files(root, &mut files);
     files
+}
+
+fn is_src_rust_test_file(path: &Path) -> bool {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if file_name == "tests.rs"
+        || file_name.ends_with("_tests.rs")
+        || file_name.starts_with("tests_")
+    {
+        return true;
+    }
+    path.components()
+        .any(|component| component.as_os_str().to_str() == Some("tests"))
+}
+
+fn line_count(path: &Path) -> usize {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+        .lines()
+        .count()
 }
 
 fn read_generated_ui_authoring_tree(crate_root: &Path) -> String {

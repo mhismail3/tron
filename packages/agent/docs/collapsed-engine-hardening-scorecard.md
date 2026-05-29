@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **82/100 provisional**
+Current score: **83/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -91,9 +91,9 @@ interruption, and resource failure states.
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 7 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
-| Code modularity and simplification | 10 | 7 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
+| Code modularity and simplification | 10 | 8 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **82/100**
+Total: **83/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -317,6 +317,17 @@ server PID `2214`; screenshot:
 `/tmp/scb_s5_app_path_smoke_20260529.png`. Observability and auditability
 increases to `7/8`, and the banked score is now `82/100`.
 
+Resolved checkpoint note, 2026-05-29: SCB-S6 test decomposition passed after
+splitting the mixed module-activation engine test root. Shared activation
+fixtures remain in `src/engine/tests/module_activation.rs`; package
+registration, local-process activation, and generated operator-surface tests now
+live in child modules beside the existing source-trust, health/integrity, and
+trust-review modules. `large_rust_test_files_have_scorecard_ownership_audit`
+now discovers every Rust test file over 1,000 lines, requires an SCB-S6
+scorecard row with an owner/reason marker, and enforces per-file line budgets so
+future broad catch-all growth fails statically. Code modularity and
+simplification increases to `8/10`, and the banked score is now `83/100`.
+
 ## Scoring Rules
 
 - `+1` for a simulator-tested scenario with DB proof and no code changes needed.
@@ -453,6 +464,7 @@ do not let screenshot state override the engine ledger.
 | SCB-S3 | Canonical bounded resource projection audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | Prompt library and voice notes now compose list/inspect summaries through `domains/resource_projection.rs`; generated UI authoring now composes collection summaries through `current_resource_payloads_by_prefix` with `RESOURCE_COLLECTION_SCAN_LIMIT = 500`; control and module trust/audit projections are statically required to stay bounded. | `resource_projection`: generated UI prompt/notification/subagent authoring still had `limit: 10_000` scans, and prompt-history pruning briefly inspected an extra resource because default 10,000-entry pruning cannot be proven through a 500-resource bounded projection. | this checkpoint | Failed first `cargo test prompt_library_resources --lib -- --nocapture` at `prompt_history_record_skips_prune_scan_when_default_limits_cannot_prune`; after the root fix, passed the same command, `cargo test domain_outputs --lib -- --nocapture`, `cargo test generated_ui --lib -- --nocapture`, and `cargo test --test threat_model_invariants bounded_resource_projection_summaries_stay_canonical -- --nocapture`. |
 | SCB-S4 | Provider normalization classification | passed_after_fix | +1 | static-gate scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Provider-specific schema terms remain confined to provider/protocol modules. Provider capability argument parsing now returns `Result`, and OpenAI, Anthropic/shared stream accumulation, Google, and Kimi route malformed or non-object arguments to `StreamEvent::Error` without emitting a canonical capability invocation or `Done` event. Ollama already deserializes arguments as a typed object at the provider boundary. Light simulator smoke opened `tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` against dev server PID `57422` and rendered the existing P5 chat path; screenshot `/tmp/scb_s4_app_path_smoke_20260529.png`. | `provider_runner`: streamed or completed provider arguments could fail open as `{}` in `provider_protocol::capability_parsing`, shared stream accumulation, Kimi, and OpenAI; Google non-object function-call args could also become empty canonical arguments. | this checkpoint | Passed `cargo test capability_parsing --lib -- --nocapture`, `cargo test stream_common --lib -- --nocapture`, `cargo test openai::stream_handler --lib -- --nocapture`, `cargo test google::stream_handler --lib -- --nocapture`, `cargo test kimi::stream_handler --lib -- --nocapture`, and `cargo test --test threat_model_invariants provider_argument_normalization_fails_closed -- --nocapture`. |
 | SCB-S5 | Hidden side-effect boundedness audit | passed_after_fix | +1 | static-gate scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Retained-memory context loading, notification inbox/read-state reconstruction, and cron schedule/run truth now use named 500-resource scan limits tied to `resource_projection::MAX_RESOURCE_COLLECTION_LIMIT`. The resource store already enforced the 500-row cap, so the root issue was an unclassified contract shape rather than an actual unbounded read. DB smoke for the deep-linked session showed 22 events, 39 successful invocation rows grouped under engine/resource/session/agent/capability/memory/notification/process functions, 1 executed approval, 4 resource rows, 2 completed queues, stream rows on `agent.runtime`, `approvals`, `compensation.records`, `events.session`, `queue.lifecycle`, and `resource.leases`, 0 session logs, and 0 `compact.*` events. Simulator screenshot `/tmp/scb_s5_app_path_smoke_20260529.png` showed the user prompt and assistant content in the app route. | `resource_projection`: hidden side-effect truth reconstruction still requested `limit: 10_000` in retained-memory context, notification read decisions/inbox listing, and cron schedule/run reconstruction even though the resource primitive clamped results. | this checkpoint | Passed `cargo test --test threat_model_invariants hidden_side_effect_resource_scans_stay_bounded_and_observable -- --nocapture`, `cargo test retained_memory_context_reads_resource_artifacts --lib -- --nocapture`, `cargo test notification_ --lib -- --nocapture`, `cargo test cron_ --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, and simulator deep-link smoke against real dev server PID `2214`. |
+| SCB-S6 | Test decomposition and large-file ownership audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | `src/engine/tests/module_activation.rs` dropped from 1,950 lines to 873 lines and now owns shared fixtures plus declarations only. New child modules own package registration, local-process activation, and operator-surface tests. Remaining Rust test files over 1,000 lines are explicitly audited below with owner/reason markers and enforced line budgets. | `code_ownership`: module-activation registration, activation runtime, grant-boundary, and operator-surface tests lived in the shared fixture root; remaining large test files had no enforced scorecard audit row or line budget. | this checkpoint | Passed `cargo test module_activation --lib -- --nocapture`, `cargo test --test threat_model_invariants rust_test_ownership_stays_code_adjacent -- --nocapture`, `cargo test --test threat_model_invariants large_rust_test_files_have_scorecard_ownership_audit -- --nocapture`, and `cargo test --test threat_model_invariants -- --nocapture`. |
 
 ## Scenario Details
 
@@ -2649,6 +2661,41 @@ Acceptance criteria:
 - No new broad catch-all test files.
 - Static gates record intentional exceptions.
 
+SCB-S6 checkpoint, 2026-05-29:
+
+- Split `packages/agent/src/engine/tests/module_activation.rs` into a fixture
+  parent plus focused child modules:
+  `module_activation/package_registration.rs`,
+  `module_activation/local_process_activation.rs`, and
+  `module_activation/operator_surfaces.rs`.
+- Kept existing child modules for `source_trust`, `health_integrity`, and
+  `trust_review`. The parent now declares modules and shared fixtures only, and
+  `rust_test_ownership_stays_code_adjacent` rejects future test bodies in that
+  parent.
+- Added `large_rust_test_files_have_scorecard_ownership_audit`, which discovers
+  Rust test files over 1,000 lines under `packages/agent/tests/` and
+  `packages/agent/src/**/tests*`/`tests/`, requires each remaining large file to
+  appear in the audit table below, and enforces a line budget.
+
+Large-file audit after SCB-S6:
+
+| File | Lines | Classification | Owner/Reason Marker | Enforced Budget |
+|---|---:|---|---|---:|
+| `packages/agent/tests/threat_model_invariants.rs` | 5,082 | intentional exception | cross-cutting static architecture gates | 5,200 |
+| `packages/agent/tests/integration/tests.rs` | 3,108 | intentional exception | transport e2e suite with shared WebSocket harness | 3,300 |
+| `packages/agent/src/domains/session/event_store/store/tests.rs` | 3,083 | intentional exception | single event-store API matrix | 3,300 |
+| `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2,712 | intentional exception | worktree coordinator lifecycle matrix | 2,900 |
+| `packages/agent/src/engine/tests/generated_ui.rs` | 1,859 | intentional exception | single generated-UI primitive matrix | 2,050 |
+| `packages/agent/src/domains/agent/runner/guardrails/tests.rs` | 1,695 | intentional exception | guardrail rule-pattern matrix | 1,850 |
+| `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1,571 | intentional exception | SQLite event repository query matrix | 1,750 |
+| `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests.rs` | 1,545 | intentional exception | subagent manager orchestration matrix | 1,700 |
+| `packages/agent/src/engine/tests/module_activation/source_trust.rs` | 1,364 | intentional exception | module source-trust scenario matrix | 1,500 |
+| `packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs` | 1,239 | intentional exception | rebase-on-main conflict/recovery matrix | 1,400 |
+| `packages/agent/src/engine/tests/resource_kernel.rs` | 1,207 | intentional exception | single resource-kernel matrix | 1,400 |
+| `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | 1,177 | intentional exception | stream processor event-shape matrix | 1,350 |
+| `packages/agent/src/domains/agent/runner/context/context_manager_tests.rs` | 1,164 | intentional exception | context manager policy/rules matrix | 1,350 |
+| `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | 1,127 | intentional exception | compaction engine scenario matrix | 1,300 |
+
 ### 7. Move Capability Presentation Toward Server Ownership
 
 Problem:
@@ -2742,6 +2789,9 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
   terminal DB state.
 - Large-file audit rows exist for files over 1k lines that remain intentionally
   large.
+- `large_rust_test_files_have_scorecard_ownership_audit` keeps the SCB-S6
+  large-file audit exact: new files over 1,000 lines or audited files exceeding
+  budget must split or update this scorecard with a new owner/reason.
 
 ## Verification Commands
 
@@ -2782,20 +2832,22 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **SCB-S6: Continue Test Decomposition**
+Recommended next scenario: **SCB-S7: Move Capability Presentation Toward Server Ownership**
 
 Setup:
 
 - SCB-S1, SCB-S1b, SCB-S2, SCB-S3, SCB-S4, and SCB-S5 completed the execute,
   registry, bounded resource projection, provider-normalization, and hidden
-  side-effect cleanup passes.
-- Continue Structural Cleanup Backlog item 6 from this scorecard. Start by
-  inventorying Rust test files over 1k lines and any generated or fixture-heavy
-  test files that remain intentionally large.
-- Prefer deterministic Rust/static-gate fixtures for ownership and file-size
-  exceptions. A simulator run is not required unless test decomposition changes
-  live app or server behavior; if it does, use the simulator deep-link protocol
-  and DB reconstruction checklist.
+  side-effect cleanup passes. SCB-S6 split the mixed module-activation test root
+  and added an enforced large-test-file audit.
+- Continue Structural Cleanup Backlog item 7 from this scorecard. Start by
+  inventorying iOS and server presentation paths for capability cards, detail
+  sheets, generated UI action rendering, action summaries, icons, colors,
+  labels, status text, and consequence text.
+- Prefer deterministic static/unit tests for ownership. If any iOS rendering
+  behavior changes, run the smallest simulator deep-link scenario that proves
+  the app renders server-owned presentation truth without constructing policy or
+  action targets locally.
 - Do not add fallback readers, compatibility aliases, alternate worker-spawn
   paths, client-owned policy, product-state side channels, package/source/policy/
   trust/audit tables, or central branches that make new capabilities require
@@ -2803,36 +2855,40 @@ Setup:
 
 Procedure:
 
-1. Inventory `packages/agent/tests/*.rs` and `packages/agent/src/**/tests*.rs`
-   files over 1k lines.
-2. Classify each large file as single-concern but fixture-heavy, generated/
-   snapshot-heavy, or mixed-concern and worth splitting.
-3. For any mixed-concern file, add or identify the smallest focused test target
-   before moving code, then split into ownership-local modules without changing
-   behavior.
-4. For files that should remain large, record an explicit static-gate exception
-   with the owning concern and reason.
-5. Remove nearby dead/fallback/legacy/compatibility test scaffolding only after
-   focused coverage proves it is no longer needed.
-6. Run the affected focused test filters plus
+1. Inventory capability presentation code in Rust metadata/action-summary/
+   generated-UI authoring and iOS capability cards/detail sheets/generated UI
+   renderers.
+2. Classify each presentation decision as server-owned metadata, server-owned
+   generated UI payload, pure visual rendering, or client-owned semantic guess.
+3. Add or strengthen the smallest static/unit tests proving iOS does not
+   construct capability policy, grants, action target ids, payload templates, or
+   semantic consequence text locally.
+4. Move presentation hints to server-owned capability metadata or stored
+   generated UI payloads where practical; keep iOS as a thin renderer.
+5. Remove dead/fallback/legacy/compatibility presentation paths found nearby.
+6. Run focused Rust/iOS tests plus
    `cargo test --test threat_model_invariants -- --nocapture`, then update this
-   scorecard with file counts, splits, exceptions, and test evidence.
+   scorecard with exact files, tests, and ownership decisions.
 
 After completion, inspect:
 
-- large Rust test files discovered during the inventory;
-- owning module docs for any moved test boundary;
+- `packages/agent/src/domains/capability/` metadata and action-summary paths;
+- `packages/agent/src/engine/primitives/ui/` generated UI authoring paths;
+- iOS capability card/detail/generated UI rendering files;
 - `packages/agent/tests/threat_model_invariants.rs`;
-- this scorecard's large-file/static-gate notes.
+- relevant iOS tests or focused simulator evidence if rendering changes.
 
 Pass criteria:
 
-- Tests land near the owning concern rather than broad catch-all files.
-- Files over 1k lines have either been split or have explicit, enforced
-  justification.
-- Static gates fail on future broad catch-all test growth without an ownership
-  exception.
-- Docs explain any new ownership boundary if tests move across modules.
+- Capability presentation hints that imply semantics, actions, consequence, or
+  status are server-owned where practical.
+- iOS submits only stored generated UI coordinates and user input for generated
+  UI actions.
+- iOS does not construct policy, grants, action targets, or capability semantics
+  from local guesses.
+- Static gates fail on future client-owned presentation policy or generated UI
+  action target construction.
+- Docs explain any moved presentation ownership boundary.
 - Focused tests pass, and `cargo test --test threat_model_invariants -- --nocapture`
   passes.
 
