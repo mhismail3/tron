@@ -21,8 +21,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::High,
             Some("process.run"),
         )
-        .description("Run a bounded shell command in the active session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. process::run requires active session worktree truth. Read-only commands run directly with executionMode=read_only only when their cwd/path operands stay inside the active session worktree, including composed inspection checks such as pwd && test -f README.md && sed -n '1,3p' README.md. Child processes receive an allowlisted environment rather than inherited server secrets. Write-like commands must run with executionMode=sandbox_materialized and declared expected outputs. Sandbox output paths are collected from the isolated process sandbox; omitted or relative targetPath values materialize into the active session worktree by default and are summarized in materializedOutputs for exact verification. If cwd is omitted, Tron uses the active session worktree.")
-        .tags(vec!["shell", "bash", "zsh", "command", "terminal", "date", "git status", "test", "build", "process"])
+        .description("Run a bounded shell command in the active session worktree with policy classification, output caps, trace/audit records, and approval only for risky commands. Use process::run for approval-gated high-risk write commands, approval pause/resume workflows, shell redirection, and sandbox-materialized command output. process::run requires active session worktree truth. Read-only commands run directly with executionMode=read_only only when their cwd/path operands stay inside the active session worktree, including composed inspection checks such as pwd && test -f README.md && sed -n '1,3p' README.md. Child processes receive an allowlisted environment rather than inherited server secrets. Write-like commands must run with executionMode=sandbox_materialized and declared expected outputs. expectedOutputs[].path must be a relative path created inside the isolated process sandbox, not an absolute or home-relative host path; targetPath is the optional materialization destination under the active session worktree. Omitted or relative targetPath values materialize into the active session worktree by default and are summarized in materializedOutputs for exact verification. If cwd is omitted, Tron uses the active session worktree.")
+        .tags(vec!["shell", "bash", "zsh", "command", "terminal", "date", "git status", "test", "build", "process", "write command", "high-risk", "approval", "approval pause", "approval resume", "sandbox materialized"])
         .request_schema(json!({
             "additionalProperties": false,
             "properties": {
@@ -30,13 +30,14 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "executionMode": {"type": "string", "enum": ["read_only", "sandbox_materialized"]},
                 "expectedOutputs": {
                     "type": "array",
+                    "description": "Declared files that the sandbox command creates. Each path must be relative to the isolated process sandbox; do not use absolute or home-relative host paths. Use targetPath only when choosing the materialized destination under the active session worktree.",
                     "items": {
                         "type": "object",
                         "required": ["path"],
                         "additionalProperties": false,
                         "properties": {
-                            "path": {"type": "string"},
-                            "targetPath": {"type": "string"}
+                            "path": {"type": "string", "description": "Relative path inside the process sandbox, for example result.txt. The command must write this relative path; absolute and home-relative host paths escape the sandbox and are rejected."},
+                            "targetPath": {"type": "string", "description": "Optional materialization destination under the active session worktree. Omit this to materialize to the same relative path."}
                         }
                     }
                 },

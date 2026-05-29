@@ -263,6 +263,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "Recommended next scenario: **RWO-N",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
+        "chat parity drift",
+        "no pending approvals for the session\nfamily",
         "No fallback readers, compatibility aliases, client-authored generated UI",
         "package/source/policy/trust/audit tables",
         "alternate worker-spawn paths",
@@ -307,7 +309,10 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         ios_development.contains("### Simulator Deep-Link Harnessing")
             && ios_development.contains("tron://session/<session_id>")
             && ios_development.contains("xcrun simctl openurl booted")
-            && ios_development.contains("com.tron.mobile.beta"),
+            && ios_development.contains("com.tron.mobile.beta")
+            && ios_development.contains("parity drift")
+            && ios_development.contains("engine_approvals.status")
+            && ios_development.contains("no pending approvals"),
         "iOS development docs must preserve the simulator session deep-link harness procedure"
     );
 
@@ -1793,7 +1798,8 @@ fn resource_materialization_enforcement_gates_stay_on() {
         "capability::execute model schema must teach complete target argument requirements"
     );
     assert!(
-        capability_contract_source.contains("Do not call separate search or inspect tools")
+        capability_contract_source
+            .contains("Do not call separate search, inspect, or approval::request tools")
             && capability_contract_source.contains("Start with natural-language intent alone")
             && capability_contract_source.contains("provide target only when")
             && capability_contract_source.contains("mutating or elevated-risk work still pauses")

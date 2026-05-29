@@ -2748,6 +2748,31 @@ mod tests {
     }
 
     #[test]
+    fn process_run_sandbox_rejects_absolute_output_paths_before_approval() {
+        let process_spec = crate::domains::process::contract::capabilities()
+            .expect("process specs")
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .expect("process::run spec");
+        let function = crate::domains::contract::function_definition_for_capability(&process_spec);
+        let error = validate_target_policy_before_approval(
+            &function,
+            &json!({
+                "command": "printf hi > /tmp/out.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "/tmp/out.txt"}]
+            }),
+        )
+        .expect_err("absolute expected output path rejected before approval");
+
+        assert!(
+            error
+                .to_string()
+                .contains("relative path inside the process sandbox")
+        );
+    }
+
+    #[test]
     fn orchestrated_execute_normalizes_common_shape_mistakes() {
         let input = parse_orchestrated_execute_input(&json!({
             "intent": "write a sandboxed output file",

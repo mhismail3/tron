@@ -17,9 +17,13 @@
 //! rejecting `sed -i`, sed write scripts, redirection, and unknown snippets.
 //! Commands outside the low-risk set must use
 //! `executionMode = "sandbox_materialized"` with declared expected outputs, then
-//! materialize those outputs through resource capabilities. Relative
-//! materialization targets resolve to the active session worktree so approved
-//! sandbox output never leaks into the server process cwd. Every `process::run`
+//! materialize those outputs through resource capabilities. Each
+//! `expectedOutputs[].path` is a relative path inside the isolated process
+//! sandbox; absolute, home-relative, and parent-escaping paths are rejected
+//! before approval so an impossible host path cannot pause for approval and
+//! fail only after execution. Relative materialization targets resolve to the
+//! active session worktree so approved sandbox output never leaks into the
+//! server process cwd. Every `process::run`
 //! invocation requires active session worktree truth. Read-only command cwd/path
 //! operands and materialized output targets are bounded to that worktree, and
 //! child processes receive an allowlisted environment instead of inheriting

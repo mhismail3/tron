@@ -7,9 +7,11 @@
 //! used by `capability::execute` before dispatching to the process worker.
 
 use serde_json::Value;
+use std::path::{Component, Path};
 
 const READ_ONLY_LOW_RISK_MESSAGE: &str = "process::run read_only commands must be proven low-risk by the classifier; use executionMode=sandbox_materialized with expectedOutputs for mutating or unknown commands. To verify sandbox materialized output, use the returned materializedOutputs summary or read the returned materialized file path/resource instead of running an unknown interpreter";
 const SANDBOX_OUTPUTS_REQUIRED_MESSAGE: &str = "process::run sandbox_materialized commands require expectedOutputs: [{\"path\":\"<relative-output-path>\"}] before approval";
+const SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE: &str = "process::run sandbox_materialized expectedOutputs[].path must be a relative path inside the process sandbox; do not use absolute host paths, home-relative paths, or parent-directory escapes";
 
 /// Return true when a `process::run` payload should pause for user approval.
 pub(crate) fn run_requires_approval(payload: &Value) -> bool {
@@ -35,6 +37,7 @@ pub(crate) fn validate_run_payload_before_approval(payload: &Value) -> Result<()
     {
         return Err(SANDBOX_OUTPUTS_REQUIRED_MESSAGE);
     }
+    validate_sandbox_output_paths(payload)?;
     Ok(())
 }
 
@@ -77,6 +80,42 @@ fn command_requires_approval(command: &str) -> bool {
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
         .all(segment_is_low_risk)
+}
+
+fn validate_sandbox_output_paths(payload: &Value) -> Result<(), &'static str> {
+    if payload.get("executionMode").and_then(Value::as_str) != Some("sandbox_materialized") {
+        return Ok(());
+    }
+    let Some(outputs) = payload.get("expectedOutputs").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for output in outputs {
+        let Some(path) = output
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        else {
+            return Err(SANDBOX_OUTPUTS_REQUIRED_MESSAGE);
+        };
+        let path = Path::new(path);
+        if path_text_is_home_relative(path.to_string_lossy().as_ref())
+            || path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    Component::ParentDir | Component::Prefix(_) | Component::RootDir
+                )
+            })
+        {
+            return Err(SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE);
+        }
+    }
+    Ok(())
+}
+
+fn path_text_is_home_relative(path: &str) -> bool {
+    path.starts_with('~')
 }
 
 fn has_redirection_or_mutating_pipe(command: &str) -> bool {
@@ -499,6 +538,45 @@ mod tests {
 
         let err = validate_run_payload_before_approval(&payload).unwrap_err();
         assert!(err.contains("expectedOutputs"));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_absolute_output_path_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "echo hi > /tmp/result.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "/tmp/result.txt"}]
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("relative path inside the process sandbox"));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_home_relative_output_path_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "echo hi > ~/.tron/result.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "~/.tron/result.txt"}]
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("home-relative paths"));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_parent_output_path_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "echo hi > ../result.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "../result.txt"}]
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("parent-directory escapes"));
         assert!(!run_execution_requires_approval(&payload));
     }
 

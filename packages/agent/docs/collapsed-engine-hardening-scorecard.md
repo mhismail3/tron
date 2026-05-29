@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **70/100 provisional**
+Current score: **72/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -87,13 +87,13 @@ interruption, and resource failure states.
 | Worker/function/trigger substrate | 14 | 7 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 9 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 9 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
-| Safety, grants, and approvals | 10 | 8 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
-| Runtime resilience | 10 | 6 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
+| Safety, grants, and approvals | 10 | 9 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
+| Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 5 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 2 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **70/100**
+Total: **72/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -146,6 +146,16 @@ the execute-layer `missing_required_argument` needs-input class. The clean
 four-provider retest passed on real dev server PID `68590` with the iOS
 simulator deep-linked into each session. The banked score is now `70/100`;
 broad RWO-N14 testing may proceed only to P4 high-risk approval pause/resume.
+
+Resolved checkpoint note, 2026-05-29: RWO-N14 P4 high-risk approval
+pause/resume provider parity passed after root-cause fixes and harness
+hardening. The first P4 attempts exposed wrong target guidance for approval
+gated writes, late post-approval failures for absolute and home-relative
+`expectedOutputs[].path` values, and a premature simulator harness
+classification while an approval was still pending. The clean four-provider
+retest passed on real dev server PID `99393` with simulator deep links for
+Anthropic, OpenAI Codex, Gemini, and Ollama. The banked score is now `72/100`;
+broad RWO-N14 testing may proceed only to P5 idempotency replay.
 
 ## Scoring Rules
 
@@ -239,6 +249,20 @@ paths, or prompt contents into the deep link. If the simulator stops at the iOS
 keep DB invocation/event/log/resource/approval/queue/stream evidence canonical
 for pass/fail classification.
 
+Deep-link evidence is not complete until the visible chat state is compared
+against engine truth for the same session id. The screenshot or simulator state
+must show, or the scenario must explicitly record as an `ios_rendering`
+follow-up, whether the submitted user prompt is present in the transcript, the
+assistant turn matches the latest engine events, any approval sheet reflects the
+current approval row status, and stale approval or action sheets disappear after
+`approval::resolve` or later engine progress. A harness must wait for a stable
+terminal state before classification: no pending approvals for the session
+family, no later `stream.turn_start` after the selected terminal event, and a DB
+reconstruction pass that includes invocations, approvals, resources, queues,
+streams, events, and logs. If those checks disagree, classify the result from
+DB truth and file the UI mismatch as chat parity drift; do not let screenshot
+state override the engine ledger.
+
 ## Scenario Ledger
 
 | Scenario | Name | Status | Score Delta | Session Id | DB Evidence | Failure Root Cause | Fix Commit | Retest |
@@ -256,7 +280,7 @@ for pass/fail classification.
 | RWO-N11 | Resource failure matrix | passed_after_fix | +2 | first failed run: `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2`; resource-truth retest: `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6`; execute-guidance retest: `sess_019e73eb-f65c-7ce3-a621-aa8b0d078494` | See 2026-05-29 RWO-N11 result note below. Final retest used 17 `capability::execute` rows, 6 `materialized_file::update`, 2 `materialized_file::hash_verify`, 2 `materialized_file::read`, 2 `materialized_file::inspect`, 3 `resource::create`, 1 `materialized_file::discard`, 0 approvals, 0 `compact.*` events, 0 session logs, damaged truth for missing-bytes and hash-mismatch fixtures, discarded lifecycle for the discarded fixture, replay of step 4, and 0 `target_payload_invalid` execute rows. | Primary fixed root cause was `resource_truth`: missing canonical bytes returned an opaque handler failure without damaged resource truth, and discarded materialized files remained readable/updatable through operational wrappers. Follow-up fixed `schema_or_recipe`: lifecycle CAS guidance now teaches `expectedCurrentVersionId`, not `versionId`, before the model calls lifecycle targets. | `c8a230983`; `9069323a1` | Passed after rebuilt dev server PID 98981 with simulator booted. Step 14 first attempted `materialized_file::discard` with `expectedCurrentVersionId = ver_019e73ed-1591-7cb3-8693-b0f2121f40fc` and succeeded without a pre-child validation failure. |
 | RWO-N12 | Approval and grant boundary | passed_after_fix | +2 | failed direct policy probe: `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0`; approval session: `sess_019e73fd-ba7a-7521-bbdf-6dca81b5855c`; direct retest: `sess_019e7410-98a1-7472-a8b8-475bc8229055` | See 2026-05-29 RWO-N12 result note below. The live approval-flow session used 3 `capability::execute` rows, 2 approval records, 3 `approval::resolve` rows, 1 `process::run` child, 1 `materialized_file::update`, 3 `resource::create`, 2 completed prompt queue drains, 0 failed invocations, and 0 `compact.*` events. The direct retest used 3 `capability::execute`, 3 `approval::resolve`, 1 `process::run`, 1 `materialized_file::update`, 1 `resource::create`, 6 `engine::invoke`, 2 approval records, 8 stream rows, 0 failed invocations, and 0 `compact.*` events. Denial created approval `019e7410-996b-7431-afa9-f9e3da8e5c9c`, no child, and no target refs; approval created approval `019e7410-9b17-7673-b14c-c55da8e669c2`, child `019e7410-9b42-7ab0-a09f-73660aff8cad`, materialized file `materialized_file:2d5d7cc3d635bdaed7de5dd104b243c4e8640b393b8c1b4f1345093ebfe555f0`, and output `res_019e7410-9b4d-7fa1-93da-67dd1c38cda3`; replay execute `019e7410-9c24-71d0-b87c-ac8216df447a` reported `approvalReplayed=true` and `childInvocationCreated=false`. | `execute_resolution`: public `/engine` direct `capability::execute` used transport/client audit scopes but did not project active-profile execution policy scopes/runtime metadata, so direct execute failed with `CAPABILITY_DENIED` before approval. The root fix derives execute policy on the server from the active profile and rejects client-authored `contract.*`, `implementation.*`, `plugin.*`, and `capability.*` policy context. | `704fb8041` | Passed after rebuilt dev server PID 7070 with simulator booted. DB evidence proves policy scopes stayed server-owned, the denied mutation created no `process::run` child or target refs, the approved mutation created exactly one child and resource chain, duplicate approval resolve replayed, and direct public execute no longer requires client-supplied policy. |
 | RWO-N13 | Runtime resilience | passed | +1 | runtime pass: `sess_019e7422-7fb7-7423-a63c-16c473d6917e`; unscored harness attempt: `sess_019e741e-8b87-7f72-94f7-b98b3be63eb3` | See 2026-05-29 RWO-N13 result note below. Runtime log `/tmp/rwo_n13_runtime_run_20260529072756.json` and approval-pause log `/tmp/rwo_n13_approval_pause_run_20260529073320.json` reconstruct the scenario. Baseline prompt used `agent::prompt`, a completed `agent::prompt_queue_drain`, `filesystem::read_file`, and `process::run`; `./scripts/tron dev -bdt` moved PID `81779` to `47488` and passed the configured dev tests. The long read-only process acquired lease cursor `80311`, was interrupted by `./scripts/tron dev -d` moving PID `47488` to `48287`, persisted child `019e7424-1af7-7f91-9f27-d75c64927fb7` with exitCode `-1`, released lease `019e7424-1af7-7f91-9f27-d7682abb77bf`, and recorded compensation `019e7424-1e4e-76b2-a31c-fc97ad20efef`. Post-reconnect `process::run` child `019e7424-558d-7d51-b3d9-59df726a0642` exited `0`. Approval `019e7427-6989-7d90-829e-89f5d0689c07` stayed pending across `./scripts/tron dev -d` moving PID `48287` to `49356`, then executed child `019e7427-96ad-76d1-bf34-658c13775af3`, materialized file `materialized_file:10068ee46d1ca50c3c732f08a867d15e361ae22cc6c46e6ef492721428e67920`, and output `res_019e7427-96c5-7553-a106-bae7e50dbd4c`. No scenario idempotency key duplicated; only internal `engine::invoke` rows have blank idempotency keys. There were 0 failed invocations, 0 `compact.*` events, no session-scoped logs, and stream topics included `agent.runtime`, `events.session`, `queue.lifecycle`, `approvals`, `resource.leases`, and `compensation.records`. | none; first harness attempt waited for a `process::run` invocation row before completion even though active process truth is exposed through `resource.leases`. Simulator URL deep-link screenshots stopped at the iOS "Open in Tron?" confirmation, but the dashboard remained mounted/not onboarding and DB/session-stream reconstruction proved continuity. | n/a | Passed on the real dev server with the iOS simulator booted. Exact retest used the corrected lease-based harness, proved interrupted invocation visibility, approval-pause survival, queue/idempotency correctness, and successful post-reconnect execution. |
-| RWO-N14 | Provider full parity | partial_p3_passed_after_fix | +5 | clean P1 run: Anthropic `sess_019e7433-bd1f-79f0-8d6f-e037f2d07448`, OpenAI Codex `sess_019e7433-de30-7d51-8022-b15d5fc95b62`, Gemini `sess_019e7433-fb83-74e1-973b-281c617ca83b`, Ollama failed `sess_019e7434-10b9-7c73-8d44-e43af8017059`; wire-shape retest still failed `sess_019e743c-e359-7ea0-aa4d-42d7de3852d1`; final Ollama P1 retest passed `sess_019e7441-5e8b-7d91-8c14-b4352d6e1887`; clean P2 run: Anthropic `sess_019e7447-d814-7d02-b90d-a8dbc5998d6e`, OpenAI Codex `sess_019e7447-fda8-71e0-a427-99d9d9dd868d`, Gemini `sess_019e7448-1b59-74c3-b655-38b574ca2aee`, Ollama `sess_019e7448-34cd-7171-bab4-2e643ffec97e`; P3 failure: Ollama `sess_019e7450-983c-7033-8965-85f8daab139c`; clean P3 retest: Anthropic `sess_019e7466-2bd2-7d72-b17d-37ca53fe0993`, OpenAI Codex `sess_019e7466-58e5-7360-b0f5-1507d6e7d3c9`, Gemini `sess_019e7466-71ed-7bf3-a5b3-b425f9c41dc1`, Ollama `sess_019e7466-82f0-7e02-830e-5989c1bb896c` | See 2026-05-29 RWO-N14 P1, P2, and P3 result notes below. P3 clean retest used one `capability::execute` per provider, selected `process::run`, returned `needs_input` with `validationKind = missing_required_argument`, reported `missingArgumentPaths` for `arguments.command` on every provider, created zero `process::run` children, zero process leases, zero target resource refs, zero approvals, zero failed invocations, zero `compact.*` events, no session/trace logs, completed one prompt queue drain per session, and emitted `agent.runtime`, `events.session`, and `queue.lifecycle` stream rows. | Primary P1 `model_guidance`: execute text output appeared after metadata, and local Ollama reported a generic success sentence instead of the exact line. Provider-boundary cleanup also fixed stale outbound Ollama native field names and removed the inbound compatibility alias. P2 had no failure. Primary P3 `schema_or_recipe`: `process::run` did not express non-empty command in schema, the target guard allowed blank commands, and execute did not classify null required fields as missing input. | P1 fix `9616a9b64`; P2 n/a; P3 fix `8da05af18` | P3 passed on rebuilt dev server PID `68590`; RWO-N14 remains active and must continue with P4 high-risk approval pause/resume. |
+| RWO-N14 | Provider full parity | partial_p4_passed_after_fix | +7 | clean P1 run: Anthropic `sess_019e7433-bd1f-79f0-8d6f-e037f2d07448`, OpenAI Codex `sess_019e7433-de30-7d51-8022-b15d5fc95b62`, Gemini `sess_019e7433-fb83-74e1-973b-281c617ca83b`, Ollama failed `sess_019e7434-10b9-7c73-8d44-e43af8017059`; wire-shape retest still failed `sess_019e743c-e359-7ea0-aa4d-42d7de3852d1`; final Ollama P1 retest passed `sess_019e7441-5e8b-7d91-8c14-b4352d6e1887`; clean P2 run: Anthropic `sess_019e7447-d814-7d02-b90d-a8dbc5998d6e`, OpenAI Codex `sess_019e7447-fda8-71e0-a427-99d9d9dd868d`, Gemini `sess_019e7448-1b59-74c3-b655-38b574ca2aee`, Ollama `sess_019e7448-34cd-7171-bab4-2e643ffec97e`; P3 failure: Ollama `sess_019e7450-983c-7033-8965-85f8daab139c`; clean P3 retest: Anthropic `sess_019e7466-2bd2-7d72-b17d-37ca53fe0993`, OpenAI Codex `sess_019e7466-58e5-7360-b0f5-1507d6e7d3c9`, Gemini `sess_019e7466-71ed-7bf3-a5b3-b425f9c41dc1`, Ollama `sess_019e7466-82f0-7e02-830e-5989c1bb896c`; clean P4 retest: Anthropic `sess_019e749e-8539-7591-a146-5ee38152b03a`, OpenAI Codex `sess_019e749f-2500-7240-a1b9-9b3295bdb853`, Gemini `sess_019e749f-a5b4-7471-b129-91d2ef9ce105`, Ollama `sess_019e749f-e321-7451-8392-1f742fd840d4` | See 2026-05-29 RWO-N14 P1, P2, P3, and P4 result notes below. P4 clean retest used real dev server PID `99393`, run log `/tmp/rwo_n14_p4_provider_parity_20260529094326.json`, one executed `process::run` approval per provider, one successful sandbox-materialized process child per provider, materialized-file plus execution-output refs per provider, zero failed invocations, zero `compact.*` events, no session/trace logs, completed prompt queue drains, and `agent.runtime`, `approvals`, `events.session`, `queue.lifecycle`, `resource.leases`, and `compensation.records` stream rows. | Primary P1 `model_guidance`: execute text output appeared after metadata, and local Ollama reported a generic success sentence instead of the exact line. Provider-boundary cleanup also fixed stale outbound Ollama native field names and removed the inbound compatibility alias. P2 had no failure. Primary P3 `schema_or_recipe`: `process::run` did not express non-empty command in schema, the target guard allowed blank commands, and execute did not classify null required fields as missing input. Primary P4 `model_guidance`: approval-gated write commands were under-taught and could target `filesystem::write_file` or `approval::request` instead of `process::run`. Primary P4 `target_capability`: sandbox expected output paths were validated too late and allowed absolute or home-relative host paths to fail only after approval. P4 harness `observability_gap`: simulator collection returned after an early turn end while a later approval was still pending. | P1 fix `9616a9b64`; P2 n/a; P3 fix `8da05af18`; P4 fix current checkpoint | P4 passed on rebuilt dev server PID `99393`; RWO-N14 remains active and must continue with P5 idempotency replay. |
 
 ## Scenario Details
 
@@ -1814,6 +1838,91 @@ Failure focus:
   increases to `9/10`, current score increases to `70/100`, and RWO-N14 remains
   active for P4 high-risk approval pause/resume.
 
+2026-05-29 P4 result:
+
+- Prompt:
+  `Use only execute. RWO-N14 provider parity subtest P4/high-risk-approval. Start a high-risk write command that requires approval, pause for approval, then resume after approval and report the approval id, child invocation id, and resource refs.`
+- Initial Anthropic run `sess_019e7480-6ef5-7363-84a5-0232f6b64f5e`
+  targeted `filesystem::write_file` for an absolute host path, then attempted
+  approval discovery; no approval or process child was created. The failure
+  layer was `model_guidance`.
+- Next Anthropic run `sess_019e748b-670d-76f0-9318-04bc0a3ac297`
+  selected `process::run` and created approval state, but the first child
+  failed after approval because `expectedOutputs[].path` was an absolute host
+  path. A later OpenAI run
+  `sess_019e7494-65b5-7321-82b3-dbf6c4c2209d` exposed the same late-failure
+  class for a home-relative `~/.tron/...` expected output path. Broad testing
+  stayed stopped while the process owner was fixed.
+- Root-cause fixes: execute schema/model metadata and the capability primer now
+  teach approval-gated write commands to target `process::run` with
+  `executionMode = sandbox_materialized` and `expectedOutputs`, not
+  `filesystem::write_file` or `approval::request`; capability registry search
+  now indexes effect/risk names without letting null metadata keys dominate
+  intent ranking; `process::run` contract/docs now state that
+  `expectedOutputs[].path` is relative to the isolated process sandbox; and the
+  process approval preflight rejects empty, absolute, home-relative, root,
+  prefix, and parent-escaping expected output paths before any approval is
+  created.
+- Focused coverage added or used:
+  `approval_write_command_query_prefers_process_run_recipe`,
+  `primer_guides_approval_gated_write_commands_to_process_run`,
+  `execute_schema_teaches_target_call_shape_and_complete_payloads`,
+  `sandbox_materialized_absolute_output_path_is_invalid_before_approval`,
+  `sandbox_materialized_home_relative_output_path_is_invalid_before_approval`,
+  `sandbox_materialized_parent_output_path_is_invalid_before_approval`, and
+  `process_run_sandbox_rejects_absolute_output_paths_before_approval`.
+- Simulator harness evidence was also tightened. Google session
+  `sess_019e7498-6835-7672-a13f-e247006cf7f4` proved that a harness could stop
+  after an early rejected turn while the engine had already continued to a
+  later pending approval. The active scorecard and iOS development docs now
+  require stable terminal DB state plus chat parity checks for the user prompt,
+  assistant turn, approval sheet lifecycle, and stale action sheets before
+  screenshot evidence is treated as complete.
+- Clean four-provider retest:
+  `/tmp/rwo_n14_p4_provider_parity_20260529094326.json`; real dev server PID
+  `99393` stayed healthy from uptime 461 seconds before the run to 614 seconds
+  after the run. Simulator screenshots:
+  `/tmp/rwo_n14_p4_anthropic_simulator_20260529094326.png`,
+  `/tmp/rwo_n14_p4_openai-codex_simulator_20260529094326.png`,
+  `/tmp/rwo_n14_p4_google_simulator_20260529094326.png`, and
+  `/tmp/rwo_n14_p4_ollama_simulator_20260529094326.png`.
+- Provider evidence:
+  - Anthropic `claude-sonnet-4-6` passed in
+    `sess_019e749e-8539-7591-a146-5ee38152b03a`; approval
+    `019e749e-e2e1-7671-bc2e-3fe38720cb9e`; process child
+    `019e749e-e52e-7952-bf4a-ce8a5c156fa2`; refs
+    `materialized_file:9e1d56273678169d999c036d8f9fe70938b9aff42e9030ad555dbaf4232688ed`
+    and `res_019e749e-e559-7572-9e5b-8db5b65c7aa3`.
+  - OpenAI Codex `gpt-5.5` passed in
+    `sess_019e749f-2500-7240-a1b9-9b3295bdb853`; approval
+    `019e749f-7ba8-79e3-a402-db425392c18f`; process child
+    `019e749f-7d9d-7212-bfdb-383b1400b8a6`; refs
+    `materialized_file:a5311344ef40a8b0b01f901b4032abd46b6048c7cc9b306089e3b77504cd9879`
+    and `res_019e749f-7dbc-70c1-a6e3-71bb2de00be3`.
+  - Gemini `gemini-2.5-flash` passed in
+    `sess_019e749f-a5b4-7471-b129-91d2ef9ce105`; approval
+    `019e749f-c558-75f1-afdb-dceec2a2fbf2`; process child
+    `019e749f-cae1-7591-81f9-56045a3e1506`; refs
+    `materialized_file:ecfacc788781bc378252eb8176e7075140fbb166607aad27623415a9beaaad9a`
+    and `res_019e749f-cb0a-7a12-a886-0941157d3e70`.
+  - Ollama `gemma4:e4b` passed in
+    `sess_019e749f-e321-7451-8392-1f742fd840d4`; approval
+    `019e74a0-73dc-7d83-b001-230b455a6c54`; process child
+    `019e74a0-771b-7272-ae8b-cc6c0203a09c`; refs
+    `materialized_file:07ac9c9b9c376b9fbe1cd50d9f8e8e9b170848fc5788e162de66544b0adcc8a7`
+    and `res_019e74a0-774a-7432-86a3-01b0c513b0ba`.
+- Resource, approval, queue, stream, and log evidence: each provider created
+  exactly one executed `process::run` approval, one `approval::resolve`, one
+  successful sandbox-materialized `process::run` child, one materialized file
+  resource, and one execution-output resource. There were zero failed
+  invocations, zero `compact.*` events, no filesystem or web target rows, no
+  session/trace log rows, one completed prompt queue drain per provider, and
+  stream rows on `agent.runtime`, `approvals`, `events.session`,
+  `queue.lifecycle`, `resource.leases`, and `compensation.records`.
+- Score impact: Safety, grants, and approvals increases to `9/10`; runtime
+  resilience increases to `7/10`; current score increases to `72/100`; and
+  RWO-N14 remains active for P5 idempotency replay.
+
 ## Structural Cleanup Backlog
 
 ### 1. Decompose `capability::execute`
@@ -1979,6 +2088,9 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
   central-spaghetti owned.
 - Simulator deep-link harness instructions stay present in this scorecard and
   `packages/ios-app/docs/development.md`.
+- Simulator deep-link evidence records chat parity checks for user prompt
+  visibility, assistant turn state, approval sheet lifecycle, and stable
+  terminal DB state.
 - Large-file audit rows exist for files over 1k lines that remain intentionally
   large.
 
@@ -2021,7 +2133,7 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N14 P4: High-Risk Approval Pause/Resume Provider Parity**
+Recommended next scenario: **RWO-N14 P5: Approval Idempotency Replay Provider Parity**
 
 Setup:
 
@@ -2029,11 +2141,12 @@ Setup:
 - Keep the iOS simulator launched and record the visible provider/result state.
 - Use the simulator deep-link evidence protocol to open each created session
   with `tron://session/<session_id>` and capture the screenshot artifact.
-- Continue RWO-N14 from the already passed P1 intent-read, P2 safe-process, and
-  P3 missing-required-field checkpoints. The next prompt is the high-risk
-  approval pause/resume case; do not restart broad provider testing from earlier
-  subtests unless investigating a regression.
-- Run the same P4 prompt through OpenAI, Anthropic, Gemini, and Ollama when the
+- Continue RWO-N14 from the already passed P1 intent-read, P2 safe-process, P3
+  missing-required-field, and P4 high-risk approval pause/resume checkpoints.
+  The next prompt is the approved-command idempotency replay case; do not
+  restart broad provider testing from earlier subtests unless investigating a
+  regression.
+- Run the same P5 prompt through OpenAI, Anthropic, Gemini, and Ollama when the
   local profile has credentials or a reachable local provider.
 - Do not add fallback provider paths. If a provider is unavailable, record the
   blocked provider with the credential/health evidence and continue only with
@@ -2061,17 +2174,21 @@ Completed P3 context:
 Use only execute. RWO-N14 provider parity subtest P3/missing-required-field. Attempt a process run with a deliberately missing required command field, then report the correction or validation class without inventing a workaround.
 ```
 
-Next prompt, P4:
+Completed P4 context:
 
 ```text
 Use only execute. RWO-N14 provider parity subtest P4/high-risk-approval. Start a high-risk write command that requires approval, pause for approval, then resume after approval and report the approval id, child invocation id, and resource refs.
 ```
 
-Remaining prompts after P4:
+Next prompt, P5:
 
 ```text
 Use only execute. Replay the approved command with the same idempotency key and report whether a new child invocation was created.
+```
 
+Remaining prompt after P5:
+
+```text
 Use only execute. Inspect this repo enough to summarize the worker/function/trigger architecture. Do not answer from memory. Cite files inspected and list every capability used.
 ```
 
@@ -2080,7 +2197,7 @@ Procedure:
 1. Start a fresh simulator-backed session for the first available provider.
 2. Record provider availability from profile credentials, configured defaults,
    local Ollama health, and server/model settings without exposing secret values.
-3. Run the P4 prompt through every available provider using the same real
+3. Run the P5 prompt through every available provider using the same real
    engine substrate and the same scorecard evidence checklist.
 4. For unavailable providers, record `blocked` provider evidence in the RWO-N14
    row without awarding parity credit for that provider.

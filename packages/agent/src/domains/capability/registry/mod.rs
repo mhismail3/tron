@@ -3209,7 +3209,7 @@ pub(crate) fn render_capability_primer(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision
     ));
-    out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Freshness and approval happen inside execute.\n\n");
+    out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with executionMode=sandbox_materialized and expectedOutputs, not filesystem::write_file. Freshness and approval happen inside execute.\n\n");
     for entry in entries.drain(..) {
         let recipe = entry.agent_recipe();
         let mut line = format!(
@@ -3237,6 +3237,11 @@ pub(crate) fn render_capability_primer(
             && let Ok(example) = serde_json::to_string(&recipe.execute_template)
         {
             line.push_str(&format!(" Execute: {example}"));
+            if let Some(risky_example) = risky_direct_recipe_example(&recipe)
+                && let Ok(example) = serde_json::to_string(risky_example)
+            {
+                line.push_str(&format!(" Risky execute: {example}"));
+            }
         }
         if recipe.inspect_required {
             line.push_str(" Execute prepares freshness before elevated-risk work.");
@@ -3255,6 +3260,16 @@ pub(crate) fn render_capability_primer(
         out.push_str(&line);
     }
     Some(out)
+}
+
+fn risky_direct_recipe_example(recipe: &AgentCapabilityRecipe) -> Option<&Value> {
+    if recipe.direct_execution != "conditional_safe_direct" {
+        return None;
+    }
+    recipe.examples.iter().find(|example| {
+        example["arguments"]["executionMode"] == "sandbox_materialized"
+            && example["arguments"]["expectedOutputs"].is_array()
+    })
 }
 
 pub(crate) fn requires_fresh_revision(function: &FunctionDefinition) -> bool {
@@ -3920,9 +3935,11 @@ fn schema_digest(function: &FunctionDefinition) -> String {
 fn searchable_text(function: &FunctionDefinition) -> String {
     let mut text = [
         function.id.as_str().to_owned(),
+        effect_name(function.effect_class).to_owned(),
+        risk_name(function.risk_level).to_owned(),
         function.description.clone(),
         function.tags.join(" "),
-        function.metadata.to_string(),
+        searchable_metadata_text(&function.metadata),
         function
             .request_schema
             .as_ref()
@@ -3932,6 +3949,43 @@ fn searchable_text(function: &FunctionDefinition) -> String {
     .join(" ");
     text.make_ascii_lowercase();
     text
+}
+
+fn searchable_metadata_text(metadata: &Value) -> String {
+    let mut terms = Vec::new();
+    append_searchable_metadata_terms(metadata, &mut terms);
+    terms.join(" ")
+}
+
+fn append_searchable_metadata_terms(value: &Value, terms: &mut Vec<String>) {
+    match value {
+        Value::Null => {}
+        Value::Bool(flag) => terms.push(flag.to_string()),
+        Value::Number(number) => terms.push(number.to_string()),
+        Value::String(text) => terms.push(text.clone()),
+        Value::Array(values) => {
+            for value in values {
+                append_searchable_metadata_terms(value, terms);
+            }
+        }
+        Value::Object(map) => {
+            for (key, value) in map {
+                if metadata_value_is_searchable(value) {
+                    terms.push(key.clone());
+                    append_searchable_metadata_terms(value, terms);
+                }
+            }
+        }
+    }
+}
+
+fn metadata_value_is_searchable(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Array(values) => values.iter().any(metadata_value_is_searchable),
+        Value::Object(map) => map.values().any(metadata_value_is_searchable),
+        _ => true,
+    }
 }
 
 fn search_tokens(text: &str) -> Vec<String> {
@@ -5173,6 +5227,44 @@ mod tests {
     }
 
     #[test]
+    fn primer_guides_approval_gated_write_commands_to_process_run() {
+        let specs = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
+            .into_iter()
+            .chain(crate::domains::process::contract::capabilities().expect("process specs"))
+            .filter(|spec| {
+                matches!(
+                    spec.function_id.as_str(),
+                    "filesystem::write_file" | "process::run"
+                )
+            })
+            .map(|spec| crate::domains::contract::function_definition_for_capability(&spec))
+            .collect::<Vec<_>>();
+        let snapshot = CapabilityRegistrySnapshot::new(specs, 19);
+        let text = render_capability_primer(
+            &snapshot,
+            &CapabilityContextPrimerPolicy {
+                max_tokens: 1400,
+                include_compact_schemas: true,
+                include_examples: true,
+                ..Default::default()
+            },
+        )
+        .expect("primer");
+
+        assert!(text.contains("do not target approval::request directly"));
+        assert!(text.contains("Approval-gated write commands use process::run"));
+        assert!(text.contains("not filesystem::write_file"));
+        assert!(text.contains("\"executionMode\":\"sandbox_materialized\""));
+        assert!(text.contains("\"expectedOutputs\""));
+        assert!(text.contains("Each path must be relative"));
+        assert!(
+            text.contains("Use when: Create a new file or overwrite an existing file"),
+            "write_file must keep its scratch-file recipe while the primer header disambiguates approval workflows"
+        );
+    }
+
+    #[test]
     fn notification_send_is_core_searchable_and_primed() {
         let notification_spec = crate::domains::notifications::contract::capabilities()
             .expect("notification specs")
@@ -5443,6 +5535,59 @@ mod tests {
                 .required_payload
                 .iter()
                 .any(|field| field.starts_with("path:"))
+        );
+    }
+
+    #[test]
+    fn approval_write_command_query_prefers_process_run_recipe() {
+        let specs = crate::domains::filesystem::contract::capabilities()
+            .expect("filesystem specs")
+            .into_iter()
+            .chain(crate::domains::process::contract::capabilities().expect("process specs"))
+            .collect::<Vec<_>>();
+        let documents = specs
+            .into_iter()
+            .map(|spec| {
+                CapabilityRegistryEntry::from_function(
+                    crate::domains::contract::function_definition_for_capability(&spec),
+                    19,
+                )
+                .search_document()
+            })
+            .collect::<Vec<_>>();
+        let index = HybridLocalCapabilityIndex::new(CapabilitySearchPolicy {
+            local_vector: false,
+            require_local_vector: false,
+            ..CapabilitySearchPolicy::default()
+        });
+
+        let search = index
+            .search(
+                "high-risk write command approval pause resume",
+                documents,
+                8,
+            )
+            .expect("approval command search");
+        let ranked = search
+            .hits
+            .iter()
+            .map(|hit| format!("{}={:.2}", hit.contract_id, hit.lexical_score))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert_eq!(
+            search.hits[0].contract_id, "process::run",
+            "approval-gated write command prompts should prefer process::run; ranked hits: {ranked}"
+        );
+        let process_recipe = search.hits[0].recipe.as_ref().expect("process recipe");
+        assert!(
+            process_recipe
+                .examples
+                .iter()
+                .any(
+                    |example| example["arguments"]["executionMode"] == "sandbox_materialized"
+                        && example["arguments"]["expectedOutputs"].is_array()
+                ),
+            "process recipe should include a sandbox_materialized approval-shaped example"
         );
     }
 }

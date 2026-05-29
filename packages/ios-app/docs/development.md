@@ -130,6 +130,25 @@ snapshot, and the matching database evidence together. If iOS shows the system
 screenshot but do not treat it as pass evidence by itself; the canonical result
 still comes from engine DB reconstruction for the same session id.
 
+Use deep-link screenshots as a parity check, not just a navigation shortcut.
+For each harnessed session, compare the visible chat against the engine DB:
+the submitted `message.user` prompt should appear in the transcript, the latest
+assistant content should match the latest completed or paused engine turn,
+approval sheets should reflect the current `engine_approvals.status`, and any
+sheet for an approval or generated action should disappear once the engine has
+resolved it or moved past it. If the chat omits the user prompt, starts at agent
+content, leaves a stale confirmation/action sheet mounted, or otherwise
+disagrees with events/invocations/approvals/resources, record that as chat
+parity drift while keeping DB evidence canonical for the scenario result.
+
+Harnesses should not classify a session immediately after the first
+`stream.turn_end`. Before collecting final evidence, wait until the session
+family has no pending approvals, no later `stream.turn_start` exists after the
+terminal event being used, and the DB rows for invocations, approvals,
+resources, queues, streams, events, and logs are stable. This prevents approval
+pause/resume tests from being marked inconclusive while the engine is still
+waiting for approval or continuing into the next turn.
+
 ### Xcode
 
 1. Open `TronMobile.xcodeproj`
