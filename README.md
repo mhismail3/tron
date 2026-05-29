@@ -415,8 +415,9 @@ agent does not need to probe with a failing call. New files must use
 `filesystem::write_file`.
 
 `process::run` and `notifications::send` both have direct, low-overhead paths
-for safe/default use. `process::run` requires `executionMode`: classifier-
-approved read-only checks such as `date`, `pwd`, `test -f`, bounded `sed -n`
+for safe/default use. `process::run` requires a non-empty `command` and an
+`executionMode`: classifier-approved read-only checks such as `date`, `pwd`,
+`test -f`, bounded `sed -n`
 printing, `git status`, and `git log` run directly with
 `executionMode = "read_only"`, while write-like commands must use
 `executionMode = "sandbox_materialized"` with declared `expectedOutputs` that

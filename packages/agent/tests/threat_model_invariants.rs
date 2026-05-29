@@ -255,11 +255,14 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "Total: **",
         "## Scoring Rules",
         "## Failure Layer Taxonomy",
+        "## Simulator Deep-Link Evidence Protocol",
         "## Scenario Ledger",
         "| RWO-N1 | Repo understanding and discovery |",
         "## Structural Cleanup Backlog",
         "## Static Gates To Add Or Strengthen",
         "Recommended next scenario: **RWO-N",
+        "tron://session/<session_id>",
+        "xcrun simctl openurl booted",
         "No fallback readers, compatibility aliases, client-authored generated UI",
         "package/source/policy/trust/audit tables",
         "alternate worker-spawn paths",
@@ -290,6 +293,22 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
             && readme.contains("active\n  collapsed-engine hardening scorecard")
             && readme.contains("historical covered-path evidence"),
         "README living-doc map must distinguish the active scorecard from historical evidence"
+    );
+
+    let ios_development = std::fs::read_to_string(
+        repo_root
+            .join("packages")
+            .join("ios-app")
+            .join("docs")
+            .join("development.md"),
+    )
+    .expect("read iOS development docs");
+    assert!(
+        ios_development.contains("### Simulator Deep-Link Harnessing")
+            && ios_development.contains("tron://session/<session_id>")
+            && ios_development.contains("xcrun simctl openurl booted")
+            && ios_development.contains("com.tron.mobile.beta"),
+        "iOS development docs must preserve the simulator session deep-link harness procedure"
     );
 
     let capability_mod = std::fs::read_to_string(crate_root.join("src/domains/capability/mod.rs"))

@@ -26,7 +26,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .request_schema(json!({
             "additionalProperties": false,
             "properties": {
-                "command": {"type": "string", "description": "Shell command to run, for example date, git status --short --branch, cargo test, or rg term path."},
+                "command": {"type": "string", "minLength": 1, "description": "Non-empty shell command to run, for example date, git status --short --branch, cargo test, or rg term path."},
                 "executionMode": {"type": "string", "enum": ["read_only", "sandbox_materialized"]},
                 "expectedOutputs": {
                     "type": "array",

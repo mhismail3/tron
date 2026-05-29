@@ -104,6 +104,32 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+### Simulator Deep-Link Harnessing
+
+Use the simulator deep-link path when a server-side harness creates or drives a
+real session and the test needs visible iOS evidence for that exact session.
+The app registers `tron` and `tron-mobile` URL schemes, and
+`DeepLinkRouter` handles session routes in the form
+`tron://session/<session_id>`.
+
+```bash
+# Ensure a simulator is booted, then launch the local beta app.
+xcrun simctl bootstatus booted
+xcrun simctl launch booted com.tron.mobile.beta
+
+# Open the exact server session in the app.
+xcrun simctl openurl booted "tron://session/<session_id>"
+
+# Capture the visible state as a test artifact.
+xcrun simctl io booted screenshot /tmp/<scenario>-simulator.png
+```
+
+Record the session id, run log, screenshot path, dev-server PID or health
+snapshot, and the matching database evidence together. If iOS shows the system
+"Open in Tron?" confirmation instead of immediately navigating, capture that
+screenshot but do not treat it as pass evidence by itself; the canonical result
+still comes from engine DB reconstruction for the same session id.
+
 ### Xcode
 
 1. Open `TronMobile.xcodeproj`
@@ -325,7 +351,7 @@ See `docs/events.md` for the complete event handling guide.
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| DeepLinkRouter URL parsing | Bug | Host vs path confusion |
+| Simulator deep-link confirmation | Platform prompt | Some `simctl openurl` runs stop at the iOS "Open in Tron?" confirmation; keep DB evidence canonical. |
 | StreamingManager timing test | Flaky | `testRapidDeltasGetBatched` |
 
 ## Performance

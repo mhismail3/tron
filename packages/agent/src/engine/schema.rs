@@ -106,6 +106,19 @@ fn validate_schema_node(
         }
     }
 
+    if let Some(min_length) = object.get("minLength") {
+        match min_length.as_u64() {
+            Some(_) => {}
+            None => {
+                return Err(invalid_schema(
+                    function_id,
+                    direction,
+                    format!("{path}.minLength must be a non-negative integer"),
+                ));
+            }
+        }
+    }
+
     if let Some(enum_values) = object.get("enum") {
         if !enum_values.is_array() {
             return Err(invalid_schema(
@@ -197,6 +210,18 @@ fn validate_payload_node(
                 "value is not in enum".to_owned(),
             ));
         }
+    }
+
+    if let Some(min_length) = object.get("minLength").and_then(Value::as_u64)
+        && let Some(text) = payload.as_str()
+        && text.chars().count() < min_length as usize
+    {
+        return Err(schema_violation(
+            function_id,
+            direction,
+            path,
+            format!("string shorter than minLength {min_length}"),
+        ));
     }
 
     if let Some(required) = object.get("required").and_then(Value::as_array) {
@@ -345,5 +370,49 @@ fn schema_violation(
         direction,
         path: path.to_owned(),
         message,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn function_id() -> FunctionId {
+        FunctionId::new("test::schema").unwrap()
+    }
+
+    #[test]
+    fn min_length_rejects_short_strings() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "minLength": 1}
+            },
+            "required": ["command"]
+        });
+
+        let err = validate_payload(&function_id(), "request", &schema, &json!({"command": ""}))
+            .unwrap_err();
+
+        assert!(err.to_string().contains("minLength 1"));
+        validate_payload(
+            &function_id(),
+            "request",
+            &schema,
+            &json!({"command": "date"}),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn min_length_keyword_must_be_non_negative_integer() {
+        let schema = json!({"type": "string", "minLength": "1"});
+        let err = validate_schema_definition(&function_id(), "request", &schema).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("minLength must be a non-negative integer")
+        );
     }
 }

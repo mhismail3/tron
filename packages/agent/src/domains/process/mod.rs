@@ -8,7 +8,8 @@
 //! blanket approval bit. Payload-sensitive approval classification lives in
 //! [`approval`], including the pre-approval check that rejects write-like
 //! commands submitted as `executionMode = "read_only"`. Schema validation,
-//! idempotency, lease, audit, and actual execution remain on the normal
+//! including rejection of empty commands, idempotency, lease, audit, and actual
+//! execution remain on the normal
 //! engine/capability path. The same classifier also lets low-risk first-party
 //! read/check commands such as `date`, `pwd`, `git status`, and test/build
 //! checks skip an extra inspect turn. It also permits composed read-only file
@@ -71,6 +72,11 @@ pub(crate) fn worker_module(
 async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityError> {
     let params = Some(&invocation.payload);
     let command = require_string_param(params, "command")?;
+    if command.trim().is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "process::run requires non-empty command".to_owned(),
+        });
+    }
     let execution_mode =
         opt_string(params, "executionMode").ok_or_else(|| CapabilityError::InvalidParams {
             message: "process::run requires executionMode".to_owned(),
@@ -640,6 +646,39 @@ mod tests {
             }),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn process_request_schema_rejects_empty_command() {
+        let spec = contract::capabilities()
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.function_id.as_str() == "process::run")
+            .unwrap();
+        let err = crate::engine::schema::validate_payload(
+            &spec.function_id,
+            "request",
+            spec.request_schema.as_ref().unwrap(),
+            &json!({"command": "", "executionMode": "read_only"}),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("minLength 1"));
+    }
+
+    #[tokio::test]
+    async fn blank_process_command_is_rejected_before_execution() {
+        let store = event_store();
+        let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({"command": "   ", "executionMode": "read_only"}),
+            None,
+        );
+        let err = process_run_value(&invocation, &deps).await.unwrap_err();
+
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("non-empty command"))
+        );
     }
 
     #[tokio::test]

@@ -1715,8 +1715,49 @@ fn schema_violation_details(
         details["validationKind"] = json!("missing_required_argument");
         details["missingFields"] = json!(missing_fields);
         details["missingArgumentPaths"] = json!(missing_argument_paths);
+    } else if (message.starts_with("string shorter than minLength ")
+        && required_string_field_is_empty(schema, payload, path).unwrap_or(false))
+        || (message.starts_with("expected type ")
+            && required_field_is_null(schema, payload, path).unwrap_or(false))
+    {
+        let field = schema_path_leaf(path);
+        details["validationKind"] = json!("missing_required_argument");
+        details["missingFields"] = json!([field.clone()]);
+        details["missingArgumentPaths"] = json!([schema_path_to_argument_path(path)]);
     }
     Some(details)
+}
+
+fn required_string_field_is_empty(
+    schema: Option<&Value>,
+    payload: Option<&Value>,
+    path: &str,
+) -> Option<bool> {
+    let parent_path = schema_path_parent(path);
+    let field = schema_path_leaf(path);
+    let schema_parent = schema_node_at_path(schema?, &parent_path)?;
+    let required = schema_parent.get("required")?.as_array()?;
+    if !required.iter().any(|item| item.as_str() == Some(&field)) {
+        return Some(false);
+    }
+    let payload_value = payload_node_at_path(payload?, path)?;
+    Some(payload_value.as_str().is_some_and(str::is_empty))
+}
+
+fn required_field_is_null(
+    schema: Option<&Value>,
+    payload: Option<&Value>,
+    path: &str,
+) -> Option<bool> {
+    let parent_path = schema_path_parent(path);
+    let field = schema_path_leaf(path);
+    let schema_parent = schema_node_at_path(schema?, &parent_path)?;
+    let required = schema_parent.get("required")?.as_array()?;
+    if !required.iter().any(|item| item.as_str() == Some(&field)) {
+        return Some(false);
+    }
+    let payload_value = payload_node_at_path(payload?, path)?;
+    Some(payload_value.is_null())
 }
 
 fn missing_required_arguments(
@@ -3798,6 +3839,82 @@ mod tests {
                 .expect("message")
                 .contains("Required arguments: command")
         );
+    }
+
+    #[test]
+    fn execute_empty_required_string_is_needs_input_result() {
+        let mut function = test_function("process::run");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command"],
+            "properties": {
+                "command": {"type": "string", "minLength": 1}
+            }
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry: entry.clone(),
+        };
+        let error =
+            validate_target_payload(&entry, &json!({"command": ""})).expect_err("payload error");
+        assert_eq!(payload_preflight_status(&error), "needs_input");
+
+        let value = preflight_rejection_result(&function, &target, error, "needs_input")
+            .expect("structured result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        let details = result.details.expect("details");
+
+        assert_eq!(details["status"], json!("needs_input"));
+        assert_eq!(
+            details["error"]["details"]["validationKind"],
+            json!("missing_required_argument")
+        );
+        assert_eq!(
+            details["missingArgumentPaths"],
+            json!(["arguments.command"])
+        );
+        assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["resourceRefs"], json!([]));
+    }
+
+    #[test]
+    fn execute_null_required_field_is_needs_input_result() {
+        let mut function = test_function("process::run");
+        function.request_schema = Some(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["command"],
+            "properties": {
+                "command": {"type": "string", "minLength": 1}
+            }
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry: entry.clone(),
+        };
+        let error =
+            validate_target_payload(&entry, &json!({"command": null})).expect_err("payload error");
+        assert_eq!(payload_preflight_status(&error), "needs_input");
+
+        let value = preflight_rejection_result(&function, &target, error, "needs_input")
+            .expect("structured result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        let details = result.details.expect("details");
+
+        assert_eq!(details["status"], json!("needs_input"));
+        assert_eq!(
+            details["error"]["details"]["validationKind"],
+            json!("missing_required_argument")
+        );
+        assert_eq!(details["missingFields"], json!(["command"]));
+        assert_eq!(
+            details["missingArgumentPaths"],
+            json!(["arguments.command"])
+        );
+        assert_eq!(details["childInvocationCreated"], json!(false));
     }
 
     #[test]
