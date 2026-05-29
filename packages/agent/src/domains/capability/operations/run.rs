@@ -582,6 +582,7 @@ pub(super) fn approved_execution_result(
         "status": approval.status,
         "functionId": function.id.as_str(),
         "traceId": approval.trace_id.as_str(),
+        "idempotencyKey": approval.idempotency_key,
         "childInvocationId": child_invocation_id,
         "childInvocationIds": child_invocations.clone()
     });
@@ -614,6 +615,7 @@ pub(super) fn approved_execution_result(
     details["approvalExecuted"] =
         json!(!replayed_approval && approval.status == ApprovalStatus::Executed);
     details["approvalReplayed"] = json!(replayed_approval);
+    details["idempotencyKey"] = json!(approval.idempotency_key);
     details["childInvocationCreated"] =
         json!(!replayed_approval && !record.child_invocations.is_empty());
     if replayed_approval {
@@ -653,7 +655,8 @@ fn approval_details(
             "approvalId": approval.approval_id,
             "status": approval.status,
             "functionId": function.id.as_str(),
-            "traceId": approval.trace_id.as_str()
+            "traceId": approval.trace_id.as_str(),
+            "idempotencyKey": approval.idempotency_key
         },
         "selectedImplementation": target.binding_decision.selected_implementation,
         "bindingDecision": target.binding_decision

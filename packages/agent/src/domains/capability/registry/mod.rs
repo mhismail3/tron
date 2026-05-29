@@ -3209,7 +3209,7 @@ pub(crate) fn render_capability_primer(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision
     ));
-    out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with executionMode=sandbox_materialized and expectedOutputs, not filesystem::write_file; the command must write the same relative sandbox path declared in expectedOutputs. Freshness and approval happen inside execute.\n\n");
+    out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with executionMode=sandbox_materialized and expectedOutputs, not filesystem::write_file; the command must write the same relative sandbox path declared in expectedOutputs. Freshness and approval happen inside execute. Approved execute results include idempotencyKey; reuse that exact top-level key to replay the approved command without creating another child.\n\n");
     for entry in entries.drain(..) {
         let recipe = entry.agent_recipe();
         let mut line = format!(

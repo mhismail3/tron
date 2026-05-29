@@ -10,7 +10,8 @@
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
 //! - **Event factory**: Scoped event creation with auto-generated IDs and timestamps
 //! - **Event chain builder**: Automates `parent_id` threading across sequential events
-//! - **Message reconstructor**: Two-pass algorithm for rebuilding messages from event history
+//! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
+//!   history, preserving separate client display text and model-facing capability result text
 //! - **Migrations**: Version-tracked SQL schema evolution
 //!
 //! ## Module Position

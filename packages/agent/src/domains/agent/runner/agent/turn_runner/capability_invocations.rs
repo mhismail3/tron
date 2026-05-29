@@ -9,7 +9,7 @@ use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::events::ActivatedRuleInfo;
 use crate::shared::messages::{CapabilityResultMessageContent, Message};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
 
@@ -322,6 +322,7 @@ pub(super) async fn execute_capability_invocation_phase(
                     // visible while keeping the change surgical.
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
+                        let model_context_content = extract_model_context_result_text(&result);
                         let is_error = result.result.is_error.unwrap_or(false);
                         let base_identity = target_identity_json(
                             &capability_invocation.name,
@@ -341,6 +342,14 @@ pub(super) async fn execute_capability_invocation_phase(
                             "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
                             "catalogRevision": params.primitive_surface.catalog_revision.0,
                         });
+                        if model_context_content != result_text
+                            && let Some(payload) = payload.as_object_mut()
+                        {
+                            payload.insert(
+                                "modelContextContent".to_owned(),
+                                json!(model_context_content),
+                            );
+                        }
                         if let (Some(payload), Some(identity)) = (
                             payload.as_object_mut(),
                             result_identity_json(
@@ -524,6 +533,22 @@ fn extract_result_text(exec_result: &CapabilityInvocationExecutionResult) -> Str
     }
 }
 
+fn extract_model_context_result_text(exec_result: &CapabilityInvocationExecutionResult) -> String {
+    match extract_result_content(exec_result) {
+        CapabilityResultMessageContent::Text(text) => text,
+        CapabilityResultMessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                crate::shared::content::CapabilityResultContent::Text { text } => {
+                    Some(text.as_str())
+                }
+                crate::shared::content::CapabilityResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
 /// Extract full content from a capability result, preserving image blocks for the LLM.
 ///
 /// If no images are present, flattens to `Text` for efficiency.
@@ -630,29 +655,69 @@ fn execute_observation_text(details: Option<&Value>) -> Option<String> {
         .or_else(|| orchestration.get("primitiveInvocationId"))
         .cloned()
         .unwrap_or(Value::Null);
-    let observation = json!({
-        "status": details
-            .get("status")
-            .or_else(|| orchestration.get("status"))
-            .and_then(Value::as_str)
-            .unwrap_or("unknown"),
-        "executeInvocationId": execute_invocation_id,
-        "selectedTarget": selected_target,
-        "selectedImplementation": selected_implementation,
-        "childInvocationIds": child_invocation_ids,
-        "approval": approval,
-        "approvalDecision": approval_decision,
-        "resourceRefs": resource_refs,
-        "correctionsApplied": details
+    let replay_idempotency_key = details
+        .get("idempotencyKey")
+        .or_else(|| approval_decision.get("idempotencyKey"))
+        .or_else(|| details.pointer("/approvalState/idempotencyKey"))
+        .or_else(|| details.pointer("/approvalReplay/idempotencyKey"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
+    let mut observation = Map::new();
+    observation.insert(
+        "status".to_owned(),
+        json!(
+            details
+                .get("status")
+                .or_else(|| orchestration.get("status"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+        ),
+    );
+    if let Some(idempotency_key) = replay_idempotency_key.as_deref() {
+        observation.insert("idempotencyKey".to_owned(), json!(idempotency_key));
+        observation.insert(
+            "replay".to_owned(),
+            json!({
+                "idempotencyKey": idempotency_key,
+                "topLevelExecuteField": "idempotencyKey",
+                "reuseExactly": true,
+                "expectedChildInvocationCreated": false
+            }),
+        );
+    }
+    observation.insert("executeInvocationId".to_owned(), execute_invocation_id);
+    observation.insert("selectedTarget".to_owned(), json!(selected_target));
+    observation.insert(
+        "selectedImplementation".to_owned(),
+        json!(selected_implementation),
+    );
+    observation.insert("childInvocationIds".to_owned(), child_invocation_ids);
+    observation.insert("approval".to_owned(), json!(approval));
+    observation.insert("approvalDecision".to_owned(), approval_decision);
+    observation.insert("resourceRefs".to_owned(), resource_refs);
+    observation.insert(
+        "correctionsApplied".to_owned(),
+        details
             .get("correctionsApplied")
             .or_else(|| orchestration.get("correctionsApplied"))
             .cloned()
             .unwrap_or_else(|| json!([])),
-        "guidance": execute_guidance_summary(details),
-    });
+    );
+    observation.insert("guidance".to_owned(), execute_guidance_summary(details));
+    let observation = Value::Object(observation);
     let observation = serde_json::to_string_pretty(&observation).ok()?;
+    let replay_hint = replay_idempotency_key.map(|idempotency_key| {
+        format!(
+            "[execute replay - use this exact top-level execute idempotencyKey]\n\
+idempotencyKey: {idempotency_key}\n\
+topLevelExecuteField: idempotencyKey\n\
+expectedChildInvocationCreated: false\n\
+[/execute replay]\n"
+        )
+    });
     Some(format!(
-        "[execute observation - metadata for reasoning]\n{observation}\n[/execute observation]"
+        "[execute observation - metadata for reasoning]\n{}{observation}\n[/execute observation]",
+        replay_hint.unwrap_or_default()
     ))
 }
 
@@ -997,6 +1062,88 @@ mod tests {
         assert!(text.contains("\"approval\": \"pending\""));
         assert!(text.contains("\"approvalDecision\""));
         assert!(text.contains("\"status\": \"pending\""));
+    }
+
+    #[test]
+    fn execute_observation_projects_replay_idempotency_key_for_model() {
+        let exec = make_exec_result_with_details(
+            CapabilityResultBody::Text("Approved command output.".into()),
+            json!({
+                "status": "ok",
+                "functionId": "process::run",
+                "selectedImplementation": "first_party.process.v1.run",
+                "executeInvocationId": "execute-approved",
+                "idempotencyKey": "approved-child-key",
+                "approvalDecision": {
+                    "status": "executed",
+                    "approvalRequired": true,
+                    "approvalCreated": true,
+                    "approvalExecuted": true,
+                    "approvalReplayed": false,
+                    "childInvocationId": "child-approved",
+                    "childInvocationIds": ["child-approved"],
+                    "functionId": "process::run",
+                    "idempotencyKey": "approved-child-key"
+                },
+                "childInvocationIds": ["child-approved"],
+                "resourceRefs": [],
+                "orchestration": {
+                    "status": "ok",
+                    "childInvocationIds": ["child-approved"],
+                    "correctionsApplied": []
+                }
+            }),
+        );
+
+        let content = extract_result_content(&exec);
+
+        let CapabilityResultMessageContent::Text(text) = content else {
+            panic!("expected text projection");
+        };
+        assert!(text.contains("\"idempotencyKey\": \"approved-child-key\""));
+        assert!(text.contains("\"replay\""));
+        assert!(
+            text.contains("[execute replay - use this exact top-level execute idempotencyKey]")
+        );
+        assert!(text.contains("idempotencyKey: approved-child-key"));
+        assert!(text.contains("topLevelExecuteField: idempotencyKey"));
+        assert!(text.contains("expectedChildInvocationCreated: false"));
+        assert!(text.contains("\"topLevelExecuteField\": \"idempotencyKey\""));
+        assert!(text.contains("\"reuseExactly\": true"));
+        assert!(text.contains("\"expectedChildInvocationCreated\": false"));
+    }
+
+    #[test]
+    fn model_context_result_text_preserves_execute_observation_for_reconstruction() {
+        let exec = make_exec_result_with_details(
+            CapabilityResultBody::Text("Approved command output.".into()),
+            json!({
+                "status": "ok",
+                "functionId": "process::run",
+                "idempotencyKey": "approved-child-key",
+                "approvalDecision": {
+                    "status": "executed",
+                    "approvalRequired": true,
+                    "approvalCreated": true,
+                    "approvalExecuted": true,
+                    "approvalReplayed": false,
+                    "idempotencyKey": "approved-child-key"
+                },
+                "orchestration": {
+                    "status": "ok",
+                    "childInvocationIds": [],
+                    "correctionsApplied": []
+                }
+            }),
+        );
+
+        let display_text = extract_result_text(&exec);
+        let model_context_text = extract_model_context_result_text(&exec);
+
+        assert_eq!(display_text, "Approved command output.");
+        assert!(model_context_text.contains("Approved command output."));
+        assert!(model_context_text.contains("[execute observation - metadata for reasoning]"));
+        assert!(model_context_text.contains("idempotencyKey: approved-child-key"));
     }
 
     #[test]

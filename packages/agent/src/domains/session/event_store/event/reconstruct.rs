@@ -233,7 +233,8 @@ fn handle_capability_result(event: &SessionEvent, st: &mut BuildState) {
         .to_string();
     let content = event
         .payload
-        .get("content")
+        .get("modelContextContent")
+        .or_else(|| event.payload.get("content"))
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
@@ -683,6 +684,53 @@ mod tests {
         assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_123"));
         assert_eq!(msgs[2].content, "Capability output");
         assert_eq!(msgs[2].is_error, Some(false));
+    }
+
+    #[test]
+    fn capability_result_reconstruction_uses_model_context_content() {
+        let events = vec![
+            session_start(),
+            ev(
+                EventType::MessageUser,
+                serde_json::json!({"content": "Use execute"}),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [
+                        {"type": "capability_invocation", "id": "call_123", "name": "execute", "arguments": {}}
+                    ],
+                    "turn": 1,
+                }),
+            ),
+            ev(
+                EventType::CapabilityInvocationCompleted,
+                serde_json::json!({
+                    "invocationId": "call_123",
+                    "content": "display-only target output",
+                    "modelContextContent": "display-only target output\n[execute observation - metadata for reasoning]\nidempotencyKey: replay-key\n[/execute observation]",
+                    "isError": false,
+                }),
+            ),
+            ev(
+                EventType::MessageAssistant,
+                serde_json::json!({
+                    "content": [{"type": "text", "text": "Done"}],
+                    "turn": 2,
+                }),
+            ),
+        ];
+
+        let result = reconstruct_from_events(&events);
+        let msgs = get_messages(&result);
+
+        assert_eq!(msgs.len(), 4);
+        assert_eq!(msgs[2].role, "capabilityResult");
+        assert_eq!(msgs[2].invocation_id.as_deref(), Some("call_123"));
+        assert_eq!(
+            msgs[2].content,
+            "display-only target output\n[execute observation - metadata for reasoning]\nidempotencyKey: replay-key\n[/execute observation]"
+        );
     }
 
     #[test]

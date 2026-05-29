@@ -138,6 +138,11 @@ pub struct CapabilityInvocationCompletedPayload {
     pub invocation_id: String,
     /// Result content.
     pub content: String,
+    /// Model-facing reconstruction content. When present, active clients keep
+    /// rendering `content`, while session reconstruction feeds this richer
+    /// content back to providers for the next turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_context_content: Option<String>,
     /// Whether the capability invocation errored.
     pub is_error: bool,
     /// Duration in milliseconds.
@@ -216,6 +221,7 @@ mod tests {
         let p = CapabilityInvocationCompletedPayload {
             invocation_id: "call-1".into(),
             content: "ok".into(),
+            model_context_content: Some("ok\nmetadata".into()),
             is_error: false,
             duration: 42,
             affected_files: None,
@@ -226,6 +232,7 @@ mod tests {
         };
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["invocationId"], "call-1");
+        assert_eq!(v["modelContextContent"], "ok\nmetadata");
         assert_eq!(v["modelPrimitiveName"], "execute");
         assert_eq!(v["contractId"], "filesystem::read_file");
         assert_eq!(v["bindingDecisionId"], "binding-test");

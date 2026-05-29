@@ -2003,8 +2003,8 @@ fn child_idempotency_key(
         });
         let serialized = serde_json::to_vec(&material).unwrap_or_default();
         return Ok(Some(format!(
-            "capability-execute:v1:{}",
-            sha256_hex(&serialized)
+            "capability-execute:v2:{}",
+            sha256_hex_128(&serialized)
         )));
     }
     if required {
@@ -2352,10 +2352,10 @@ fn effect_class_from_str(value: &str, label: &str) -> Result<EffectClass, Capabi
     }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+fn sha256_hex_128(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
-    hex::encode(hasher.finalize())
+    hex::encode(&hasher.finalize()[..16])
 }
 
 #[cfg(test)]
@@ -2690,7 +2690,8 @@ mod tests {
         let key = child_idempotency_key(&invocation, &function, &json!({"path": "a"}), true)
             .expect("key")
             .expect("derived key");
-        assert!(key.starts_with("capability-execute:v1:"));
+        assert!(key.starts_with("capability-execute:v2:"));
+        assert_eq!("capability-execute:v2:".len() + 32, key.len());
     }
 
     #[test]
@@ -4234,9 +4235,14 @@ mod tests {
         assert_eq!(details["approvalCreated"], json!(true));
         assert_eq!(details["approvalExecuted"], json!(true));
         assert_eq!(details["childInvocationCreated"], json!(true));
+        assert_eq!(details["idempotencyKey"], json!("approved-child-key"));
         assert_eq!(
             details["childInvocations"],
             json!([child_invocation_id.as_str()])
+        );
+        assert_eq!(
+            details["approvalState"]["idempotencyKey"],
+            json!("approved-child-key")
         );
         assert_eq!(
             details["approvalState"]["childInvocationId"],
@@ -4301,10 +4307,15 @@ mod tests {
         assert_eq!(details["approvalExecuted"], json!(false));
         assert_eq!(details["approvalReplayed"], json!(true));
         assert_eq!(details["childInvocationCreated"], json!(false));
+        assert_eq!(details["idempotencyKey"], json!("approved-child-key"));
         assert!(details["approvalState"].is_null());
         assert_eq!(
             details["approvalReplay"]["approvalId"],
             json!(approval.approval_id)
+        );
+        assert_eq!(
+            details["approvalReplay"]["idempotencyKey"],
+            json!("approved-child-key")
         );
         assert_eq!(
             details["approvalReplay"]["childInvocationIds"],
