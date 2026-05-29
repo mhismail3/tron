@@ -10,7 +10,7 @@
 //! | `stream_state` | Accumulator struct + event handlers for stream processing |
 //! | `capability_invocation_executor` | Execute capability invocations with policy/hooks/cancellation, derive stable engine idempotency from model-facing `execute.idempotencyKey` when supplied, then route actual execution through canonical engine functions; production fails closed if the live catalog target is unavailable |
 //! | `event_emitter` | Broadcast channel wrapper for agent lifecycle events |
-//! | `compaction_handler` | Post-turn compaction trigger and subagent summarizer |
+//! | `compaction_handler` | Pre-turn compaction trigger and subagent summarizer |
 //!
 //! ## Data Flow
 //!

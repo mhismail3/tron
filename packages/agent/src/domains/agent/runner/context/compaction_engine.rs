@@ -10,8 +10,9 @@
 //! 1. Walk toward the start counting real user turns (skip compaction summaries).
 //! 2. Stop when `preserve_recent_turns` reached or token budget exceeded.
 //! 3. Apply orphaned-CapabilityResult fixup at the split boundary.
-//! 4. Summarize older messages, replace with summary user + assistant ack.
-//! 5. Report token counts and turn statistics.
+//! 4. Skip if no older messages are eligible for summarization.
+//! 5. Summarize older messages, replace with summary user + assistant ack.
+//! 6. Report token counts and turn statistics.
 //!
 //! ## Compaction message format
 //!
@@ -185,6 +186,17 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         ratio >= self.threshold
     }
 
+    /// Check whether the current message list has an older compaction window.
+    ///
+    /// A token threshold alone is not enough: during a long single turn the
+    /// current turn must remain verbatim, so there may be nothing safe to
+    /// summarize even when the context is large.
+    #[must_use]
+    pub fn has_summarizable_messages(&self) -> bool {
+        let messages = self.deps.get_messages();
+        self.compute_split_point(&messages) > 0
+    }
+
     /// Generate a compaction preview without modifying state.
     #[instrument(skip_all)]
     pub async fn preview(
@@ -197,6 +209,20 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         let split = self.compute_split_point(&messages);
         let to_summarize = &messages[..split];
         let preserved = &messages[split..];
+
+        if to_summarize.is_empty() {
+            return Ok(CompactionPreview {
+                tokens_before,
+                tokens_after: tokens_before,
+                compression_ratio: 1.0,
+                preserved_messages: preserved.len(),
+                summarized_messages: 0,
+                preserved_turns: Self::count_real_turns(preserved),
+                summarized_turns: 0,
+                summary: String::new(),
+                extracted_data: None,
+            });
+        }
 
         let summary_result = summarizer.summarize(to_summarize).await?;
 
@@ -242,14 +268,14 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         let to_summarize = &messages[..split];
         let preserved = &messages[split..];
 
-        // Nothing to summarize — conversation fits within preserve window
+        // Nothing to summarize — conversation fits within preserve window.
         if to_summarize.is_empty() {
             trace!(
                 total_messages = messages.len(),
                 "Compaction skipped: all messages within preserve window"
             );
             return Ok(CompactionResult {
-                success: true,
+                success: false,
                 tokens_before,
                 tokens_after: tokens_before,
                 compression_ratio: 1.0,
@@ -317,6 +343,27 @@ impl<D: CompactionDeps> CompactionEngine<D> {
         } else {
             1.0
         };
+
+        if tokens_after >= tokens_before {
+            trace!(
+                tokens_before,
+                tokens_after,
+                preserved_turns,
+                summarized_turns,
+                "Compaction skipped: estimated output would not reduce context"
+            );
+            return Ok(CompactionResult {
+                success: false,
+                tokens_before,
+                tokens_after,
+                compression_ratio,
+                preserved_turns,
+                summarized_turns,
+                preserved_messages: preserved.len(),
+                summary: String::new(),
+                extracted_data: None,
+            });
+        }
 
         // Update state
         self.deps.set_messages(new_messages);

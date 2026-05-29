@@ -353,6 +353,16 @@ impl CompactionHandler {
             return Ok(false);
         }
 
+        if !context_manager.has_summarizable_compaction_window() {
+            debug!(
+                reason = %trigger_result.reason,
+                session_id,
+                "compaction trigger suppressed: no older messages are eligible for summarization"
+            );
+            counter!("compaction_total", "status" => "noop").increment(1);
+            return Ok(false);
+        }
+
         // Determine reason from trigger: token ratio triggers report a percentage,
         // progress signals report "commit" or "progress signal".
         let reason = if trigger_result.reason.contains("token ratio") {
@@ -451,16 +461,19 @@ impl CompactionHandler {
         let result =
             Self::run_summarizer(context_manager, session_id, self.subagent_manager.as_ref()).await;
 
-        // Append a policy-aware skill notice to the compaction ack message.
-        // This ensures the model sees explicit guidance about skill availability
-        // right after the compaction summary in the conversation history.
-        if result.is_ok() {
+        let effective_result = result
+            .as_ref()
+            .is_ok_and(Self::is_effective_compaction_result);
+
+        // Append a policy-aware skill notice only after a real summary + ack
+        // was inserted. A skipped/no-op compaction has no ack slot to mutate.
+        if effective_result {
             Self::inject_skill_notice_into_ack(context_manager);
         }
 
         let tokens_after = context_manager.get_current_tokens();
 
-        if tokens_after >= tokens_before && result.is_ok() {
+        if tokens_after >= tokens_before && effective_result {
             warn!(
                 session_id,
                 tokens_before, tokens_after, "compaction did not reduce token count"
@@ -480,6 +493,12 @@ impl CompactionHandler {
             sequence_counter,
         )
         .await)
+    }
+
+    fn is_effective_compaction_result(
+        result: &crate::domains::agent::runner::context::types::CompactionResult,
+    ) -> bool {
+        result.success && result.summarized_turns > 0 && result.tokens_after < result.tokens_before
     }
 
     /// Execute `PreCompact` hooks; returns `false` if hooks blocked compaction.
@@ -653,6 +672,21 @@ impl CompactionHandler {
     ) -> bool {
         match result {
             Ok(compaction_result) => {
+                if !Self::is_effective_compaction_result(&compaction_result) {
+                    counter!("compaction_total", "status" => "noop").increment(1);
+                    warn!(
+                        session_id,
+                        result_success = compaction_result.success,
+                        summarized_turns = compaction_result.summarized_turns,
+                        result_tokens_before = compaction_result.tokens_before,
+                        result_tokens_after = compaction_result.tokens_after,
+                        tokens_before,
+                        tokens_after,
+                        "compaction produced no durable reduction; suppressing boundary"
+                    );
+                    return false;
+                }
+
                 counter!("compaction_total", "status" => "success").increment(1);
                 histogram!("compaction_duration_seconds")
                     .record(compaction_start.elapsed().as_secs_f64());
@@ -1132,6 +1166,56 @@ mod tests {
         assert!(
             !events.iter().any(|e| e.event_type == "compact.boundary"),
             "failed compaction must not persist boundary"
+        );
+    }
+
+    /// A no-op compaction is not a committed boundary. This covers long
+    /// single-turn sessions that cross the token trigger before any older turn
+    /// is safe to summarize.
+    #[tokio::test]
+    async fn noop_compaction_persists_neither_event() {
+        let (persister, store, session_id) = make_persister_and_session().await;
+        let emitter = make_event_emitter_for_test();
+
+        let result = Ok(
+            crate::domains::agent::runner::context::types::CompactionResult {
+                success: true,
+                tokens_before: 100,
+                tokens_after: 100,
+                compression_ratio: 1.0,
+                preserved_turns: 1,
+                summarized_turns: 0,
+                preserved_messages: 20,
+                summary: String::new(),
+                extracted_data: None,
+            },
+        );
+
+        let persist_ok = CompactionHandler::emit_compaction_events(
+            result,
+            std::time::Instant::now(),
+            100,
+            100,
+            &session_id,
+            &emitter,
+            CompactionReason::ThresholdExceeded,
+            Some(&persister),
+            None,
+        )
+        .await;
+        assert!(!persist_ok, "no-op compaction returns false");
+
+        let opts = crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions::default();
+        let events = store.get_events_by_session(&session_id, &opts).unwrap();
+        assert!(
+            !events
+                .iter()
+                .any(|e| e.event_type == "compact.summary_staging"),
+            "no-op compaction must not persist staging"
+        );
+        assert!(
+            !events.iter().any(|e| e.event_type == "compact.boundary"),
+            "no-op compaction must not persist boundary"
         );
     }
 

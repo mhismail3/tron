@@ -667,6 +667,18 @@ impl ContextManager {
         ratio >= self.config.compaction.threshold
     }
 
+    /// Whether compaction has older messages that can be summarized.
+    #[must_use]
+    pub fn has_summarizable_compaction_window(&self) -> bool {
+        let deps = ManagerCompactionDeps::from_manager(self);
+        let engine = CompactionEngine::new(
+            self.config.compaction.threshold,
+            self.config.compaction.preserve_recent_turns,
+            deps,
+        );
+        engine.has_summarizable_messages()
+    }
+
     /// Preview compaction without modifying state.
     pub async fn preview_compaction(
         &self,

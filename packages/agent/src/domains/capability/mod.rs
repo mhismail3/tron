@@ -91,6 +91,10 @@
 //! catalog before applying ambiguity checks. This keeps `execute` usable when
 //! semantic ranking is noisy while still failing closed for empty or
 //! non-matching argument sets.
+//! Filesystem repo discovery must stay path-evidence-driven at the model
+//! contract boundary: `list_dir` and `read_file` should receive known paths,
+//! while uncertain module, file, or extensionless names are first located with
+//! `find`, `glob`, or `search_text`.
 //! Vague intents that name a known capability namespace fail closed as
 //! `needs_selection`, not `needs_capability`: the result includes bounded
 //! top-level candidate summaries and the same list in orchestration diagnostics

@@ -92,8 +92,10 @@ Current living entry points:
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
 - `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`,
   registry, recipes, and provider export.
-- `packages/agent/docs/capability-orchestration-test-scorecard.md`: manual
-  and automated substrate testing scorecard for the single `execute` portal.
+- `packages/agent/docs/collapsed-engine-hardening-scorecard.md`: active
+  collapsed-engine hardening scorecard and scenario ledger.
+- `packages/agent/docs/capability-orchestration-test-scorecard.md`:
+  historical covered-path evidence for the single `execute` portal.
 - `packages/agent/src/domains/cron/implementation/mod.rs`: decision-backed
   schedule truth and scheduler-cache boundary.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.

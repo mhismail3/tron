@@ -329,7 +329,7 @@ pub struct CompactionPreview {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactionResult {
-    /// Whether compaction was successful.
+    /// Whether compaction replaced older messages with a summary.
     pub success: bool,
     /// Message-only tokens before compaction.
     pub tokens_before: u64,

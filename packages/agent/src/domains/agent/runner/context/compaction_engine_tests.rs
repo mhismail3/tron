@@ -105,6 +105,18 @@ impl Summarizer for MockSummarizer {
     }
 }
 
+struct PanicSummarizer;
+
+#[async_trait::async_trait]
+impl Summarizer for PanicSummarizer {
+    async fn summarize(
+        &self,
+        _messages: &[Message],
+    ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>> {
+        panic!("summarizer must not be called when no messages are summarizable");
+    }
+}
+
 fn default_messages() -> Vec<Message> {
     vec![
         Message::user("First message"),
@@ -179,6 +191,22 @@ fn should_compact_zero_limit() {
     let deps = MockDeps::new(default_messages()).with_tokens(80_000, 0);
     let engine = CompactionEngine::new(0.70, 5, deps);
     assert!(!engine.should_compact());
+}
+
+#[test]
+fn has_summarizable_messages_false_for_single_preserved_turn() {
+    let deps = MockDeps::new(vec![Message::user("Hi"), Message::assistant("Hello")]);
+    let engine = CompactionEngine::new(0.70, 3, deps);
+
+    assert!(!engine.has_summarizable_messages());
+}
+
+#[test]
+fn has_summarizable_messages_true_when_older_turn_exists() {
+    let deps = MockDeps::new(default_messages());
+    let engine = CompactionEngine::new(0.70, 2, deps);
+
+    assert!(engine.has_summarizable_messages());
 }
 
 // ========================================================================
@@ -658,11 +686,12 @@ async fn preview_with_extracted_data() {
 async fn preview_empty_messages() {
     let deps = MockDeps::new(vec![]);
     let engine = CompactionEngine::new(0.70, 2, deps);
-    let summarizer = MockSummarizer::new("");
+    let summarizer = PanicSummarizer;
 
     let preview = engine.preview(&summarizer).await.unwrap();
     assert_eq!(preview.preserved_messages, 0);
     assert_eq!(preview.summarized_messages, 0);
+    assert_eq!(preview.summary, "");
 }
 
 // ========================================================================
@@ -808,15 +837,31 @@ async fn execute_preserve_zero() {
 #[tokio::test]
 async fn execute_skips_when_all_within_preserve_window() {
     let msgs = vec![Message::user("Hi"), Message::assistant("Hello")];
-    let deps = MockDeps::new(msgs);
+    let deps = MockDeps::new(msgs.clone());
     let engine = CompactionEngine::new(0.70, 5, deps);
-    let summarizer = MockSummarizer::new("Should not be called");
+    let summarizer = PanicSummarizer;
 
     let result = engine.execute(&summarizer, None).await.unwrap();
 
-    assert!(result.success);
+    assert!(!result.success);
     assert!(result.summary.is_empty());
     assert_eq!(result.tokens_before, result.tokens_after);
+    assert_eq!(engine.deps.get_messages(), msgs);
+}
+
+#[tokio::test]
+async fn execute_skips_when_summary_would_not_reduce_context() {
+    let msgs = default_messages();
+    let deps = MockDeps::new(msgs.clone()).with_tokens(1_700, 100_000);
+    let engine = CompactionEngine::new(0.70, 2, deps);
+    let summarizer = MockSummarizer::new("Summary");
+
+    let result = engine.execute(&summarizer, None).await.unwrap();
+
+    assert!(!result.success);
+    assert!(result.tokens_after >= result.tokens_before);
+    assert!(result.summary.is_empty());
+    assert_eq!(engine.deps.get_messages(), msgs);
 }
 
 #[tokio::test]

@@ -6,7 +6,7 @@
 //! |--------|---------|
 //! | `context_manager` | Entry point — owns context lifecycle, compaction triggers |
 //! | `context_snapshot_builder` | Builds context snapshots (stable + volatile breakdown) via `SnapshotDeps` |
-//! | `compaction_engine` | Executes compaction: summarize old messages, trim context |
+//! | `compaction_engine` | Executes compaction: summarize older eligible messages, trim context |
 //! | `llm_summarizer` | Subagent-based summarization for compaction |
 //! | `summarizer` | Summarizer trait and recovery implementations |
 //! | `message_store` | In-memory message buffer with compaction boundary tracking |
@@ -32,7 +32,9 @@
 //! `ProfileRuntime` session/process plans. Context state consumes that snapshot;
 //! it does not resolve active profile files or use embedded defaults.
 //! Compaction uses a multi-signal trigger (token threshold, progress signals,
-//! turn count recovery signal) to decide when to compact context.
+//! turn count recovery signal) to decide when to compact context, but a trigger
+//! only commits when an older message window can be summarized and the result
+//! reduces the durable context.
 
 pub mod compaction_engine;
 pub mod compaction_trigger;

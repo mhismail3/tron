@@ -234,6 +234,127 @@ fn architecture_documentation_stays_code_adjacent() {
 }
 
 #[test]
+fn collapsed_engine_hardening_scorecard_stays_formalized() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+    let scorecard_path = repo_root
+        .join("packages")
+        .join("agent")
+        .join("docs")
+        .join("collapsed-engine-hardening-scorecard.md");
+    assert!(
+        scorecard_path.is_file(),
+        "active collapsed-engine hardening scorecard must exist"
+    );
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+
+    for required in [
+        "Initial score: **45/100 provisional**",
+        "Current score: **",
+        "Total: **",
+        "## Scoring Rules",
+        "## Failure Layer Taxonomy",
+        "## Scenario Ledger",
+        "| RWO-N1 | Repo understanding and discovery |",
+        "## Structural Cleanup Backlog",
+        "## Static Gates To Add Or Strengthen",
+        "Recommended next scenario: **RWO-N",
+        "No fallback readers, compatibility aliases, client-authored generated UI",
+        "package/source/policy/trust/audit tables",
+        "alternate worker-spawn paths",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "collapsed-engine scorecard missing required checkpoint text: {required}"
+        );
+    }
+
+    let historical_scorecard = std::fs::read_to_string(
+        repo_root
+            .join("packages")
+            .join("agent")
+            .join("docs")
+            .join("capability-orchestration-test-scorecard.md"),
+    )
+    .expect("read historical capability orchestration scorecard");
+    assert!(
+        historical_scorecard.contains("Historical status")
+            && historical_scorecard.contains("collapsed-engine-hardening-scorecard.md"),
+        "previous capability orchestration scorecard must point to the active collapsed-engine scorecard"
+    );
+
+    let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
+    assert!(
+        readme.contains("packages/agent/docs/collapsed-engine-hardening-scorecard.md")
+            && readme.contains("active\n  collapsed-engine hardening scorecard")
+            && readme.contains("historical covered-path evidence"),
+        "README living-doc map must distinguish the active scorecard from historical evidence"
+    );
+
+    let capability_mod = std::fs::read_to_string(crate_root.join("src/domains/capability/mod.rs"))
+        .expect("read capability mod docs");
+    assert!(
+        capability_mod.contains("Provider integrations should only expose the `execute` primitive")
+            && capability_mod.contains("`capability::search`, `capability::inspect`")
+            && capability_mod.contains("never marked with\n//! model-facing capability metadata"),
+        "capability module docs must keep execute as the only model-facing primitive and search/inspect operator-only"
+    );
+
+    let capability_contract =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/contract.rs"))
+            .expect("read capability contract");
+    assert!(
+        capability_contract.contains("EXECUTE_FUNCTION_ID => json!")
+            && capability_contract.contains("_ => serde_json::Value::Null")
+            && capability_contract.contains("fn only_execute_has_model_metadata")
+            && capability_contract
+                .contains("assert!(model_metadata(SEARCH_FUNCTION_ID).is_null())")
+            && capability_contract
+                .contains("assert!(model_metadata(INSPECT_FUNCTION_ID).is_null())"),
+        "capability contract tests must keep execute as the only model-facing primitive"
+    );
+
+    let invariant_tests =
+        std::fs::read_to_string(crate_root.join("tests/threat_model_invariants.rs"))
+            .expect("read threat-model invariant tests");
+    for required_gate in [
+        "product_shell_reachability_and_prompt_library_resources_stay_enforced",
+        "provider_tool_terms_stay_inside_protocol_boundaries",
+        "modular_substrate_has_no_raw_scope_or_worker_token_authority_fallbacks",
+        "resource_native_orchestration_and_control_plane_gates_stay_on",
+        "generated_ui_resource_and_renderer_gates_stay_on",
+        "module_package_activation_gates_stay_on",
+        "external_workers_and_sandbox_spawn_are_first_class_engine_surfaces",
+        "current_architecture_terms_are_deleted_or_owned",
+    ] {
+        assert!(
+            invariant_tests.contains(required_gate),
+            "collapsed-engine static gate `{required_gate}` must remain present"
+        );
+    }
+
+    let schema = std::fs::read_to_string(
+        crate_root.join("src/domains/session/event_store/sqlite/migrations/v001_schema.sql"),
+    )
+    .expect("read consolidated schema");
+    for forbidden_table in [
+        "CREATE TABLE IF NOT EXISTS prompt_history",
+        "CREATE TABLE IF NOT EXISTS prompt_snippets",
+        "CREATE TABLE IF NOT EXISTS module_package",
+        "CREATE TABLE IF NOT EXISTS module_source",
+        "CREATE TABLE IF NOT EXISTS module_policy",
+        "CREATE TABLE IF NOT EXISTS module_trust",
+        "CREATE TABLE IF NOT EXISTS module_audit",
+    ] {
+        assert!(
+            !schema.contains(forbidden_table),
+            "collapsed substrate must not add side-channel table `{forbidden_table}`"
+        );
+    }
+}
+
+#[test]
 fn production_code_does_not_keep_placeholder_macros() {
     let repo_root = repo_root();
     let roots = [

@@ -2,6 +2,12 @@
 
 Last updated: 2026-05-29.
 
+Historical status: this scorecard is covered-path evidence for the first
+`execute` portal hardening pass. The active 100% hardening target is
+[`collapsed-engine-hardening-scorecard.md`](collapsed-engine-hardening-scorecard.md),
+which starts from the stricter collapsed-engine baseline and owns future
+scenario scoring.
+
 This scorecard tracks the manual and automated proof that Tron’s single
 model-facing `execute` portal is intuitive, robust, auditable, and safe enough
 for higher-level modular packages to build on. It is not the repo-wide
