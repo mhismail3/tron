@@ -17,6 +17,9 @@ use crate::domains::capability::registry::{
     CapabilitySearchPolicy, CapabilityTarget, parse_target, requires_fresh_revision, string_field,
 };
 use crate::domains::capability::types::CapabilityIndexHit;
+use crate::engine::resources::{
+    ACTIVATION_RECORD_KIND, MODULE_CONFIG_KIND, UI_SURFACE_KIND, WORKER_PACKAGE_KIND,
+};
 use crate::engine::{ActorContext, FunctionDefinition, FunctionHealth, FunctionQuery, Invocation};
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -50,6 +53,8 @@ const EXECUTE_WRAPPER_KEYS: &[&str] = &[
     "expectedSchemaDigest",
     "inspectionHandle",
 ];
+const ARTIFACT_RESOURCE_KIND: &str = "artifact";
+const MATERIALIZED_FILE_RESOURCE_KIND: &str = "materialized_file";
 
 pub(crate) async fn execute_value(
     invocation: &Invocation,
@@ -139,6 +144,7 @@ async fn execute_orchestrated_value(
             );
         }
     };
+    normalize_live_resource_inventory_operation(&mut input);
     if let Err(error) = validate_orchestration_constraint_shape(&input.constraints) {
         let diagnostics = orchestration_details(
             &orchestration_id,
@@ -754,6 +760,61 @@ fn normalize_execute_self_target(target_params: &mut Option<Value>, corrections:
     ));
 }
 
+fn normalize_live_resource_inventory_operation(input: &mut OrchestratedExecuteInput) {
+    let Some(intent) = input.intent.as_deref() else {
+        return;
+    };
+    if !intent_requests_resource_inventory(intent, &input.arguments)
+        || explicit_discovery_only_request(intent)
+    {
+        return;
+    }
+    if input
+        .target_params
+        .as_ref()
+        .is_some_and(|target| !target_is_resource_list(target))
+    {
+        return;
+    }
+    if input.operation.as_deref() == Some("run") {
+        return;
+    }
+    input.operation = Some("run".to_owned());
+    input.corrections.push(correction_record(
+        "resource_inventory_discovery_to_read_only_run",
+        "treated resource inventory discovery as a pure-read resource::list operation",
+        1.0,
+    ));
+}
+
+fn explicit_discovery_only_request(intent: &str) -> bool {
+    let normalized = intent.to_ascii_lowercase();
+    [
+        "do not execute",
+        "don't execute",
+        "no child invocation",
+        "without executing",
+        "dry run",
+        "dry-run",
+        "required fields",
+        "required arguments",
+        "schema",
+        "schemas",
+    ]
+    .iter()
+    .any(|phrase| normalized.contains(phrase))
+}
+
+fn target_is_resource_list(target: &Value) -> bool {
+    matches!(
+        parse_target(target),
+        Some(CapabilityTarget::Function(id))
+            | Some(CapabilityTarget::Contract(id))
+            | Some(CapabilityTarget::Capability(id))
+            if id == "resource::list"
+    )
+}
+
 fn is_execute_self_target(target: &Value) -> bool {
     match parse_target(target) {
         Some(CapabilityTarget::Function(id))
@@ -946,31 +1007,54 @@ pub(super) fn normalize_intent_target_arguments(
     let Some(intent) = intent else {
         return;
     };
-    if function.id.as_str() != "filesystem::read_file" {
-        return;
-    }
     let Some(object) = arguments.as_object_mut() else {
         return;
     };
 
-    if !object.contains_key("path") {
-        let requests = intent_file_read_requests(intent);
-        if requests.len() == 1 {
-            let request = &requests[0];
-            object.insert("path".to_owned(), json!(request.path));
-            apply_intent_line_bounds(object, request.start_line, request.end_line, corrections);
-            corrections.push(correction_record(
-                "intent_file_path_to_target_argument",
-                "bound safe relative file path from execute intent into filesystem::read_file arguments",
-                0.92,
-            ));
-        }
-    }
+    match function.id.as_str() {
+        "filesystem::read_file" => {
+            if !object.contains_key("path") {
+                let requests = intent_file_read_requests(intent);
+                if requests.len() == 1 {
+                    let request = &requests[0];
+                    object.insert("path".to_owned(), json!(request.path));
+                    apply_intent_line_bounds(
+                        object,
+                        request.start_line,
+                        request.end_line,
+                        corrections,
+                    );
+                    corrections.push(correction_record(
+                        "intent_file_path_to_target_argument",
+                        "bound safe relative file path from execute intent into filesystem::read_file arguments",
+                        0.92,
+                    ));
+                }
+            }
 
-    if object.contains_key("path") {
-        if let Some((start_line, end_line)) = intent_line_bounds(intent) {
-            apply_intent_line_bounds(object, Some(start_line), Some(end_line), corrections);
+            if object.contains_key("path")
+                && let Some((start_line, end_line)) = intent_line_bounds(intent)
+            {
+                apply_intent_line_bounds(object, Some(start_line), Some(end_line), corrections);
+            }
         }
+        "resource::list" => {
+            if !object.contains_key("kind") {
+                let requests = intent_resource_kind_requests(intent);
+                if requests.len() == 1 {
+                    object.insert("kind".to_owned(), json!(requests[0].kind));
+                    corrections.push(correction_record(
+                        "intent_resource_kind_to_target_argument",
+                        format!(
+                            "bound resource kind {} from execute intent into resource::list arguments",
+                            requests[0].kind
+                        ),
+                        0.95,
+                    ));
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1883,6 +1967,14 @@ pub(super) fn deterministic_intent_route(
             "deterministic_worktree_diff",
         );
     }
+    if intent_requests_resource_inventory(intent, arguments) {
+        return deterministic_hit_for_function(
+            "resource::list",
+            snapshot,
+            constraints,
+            "deterministic_resource_inventory",
+        );
+    }
     if intent_requests_filesystem_read(intent, arguments) {
         return deterministic_hit_for_function(
             "filesystem::read_file",
@@ -2233,6 +2325,96 @@ fn intent_requests_filesystem_read(intent: &str, arguments: &Value) -> bool {
         || !intent_file_read_requests(intent).is_empty()
 }
 
+fn intent_requests_resource_inventory(intent: &str, arguments: &Value) -> bool {
+    arguments
+        .get("kind")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| !kind.trim().is_empty())
+        || !intent_resource_kind_requests(intent).is_empty()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct IntentResourceKindRequest {
+    kind: &'static str,
+}
+
+fn intent_resource_kind_requests(intent: &str) -> Vec<IntentResourceKindRequest> {
+    let normalized = intent
+        .to_ascii_lowercase()
+        .replace(['_', '-'], " ")
+        .replace('\n', " ");
+    let words = normalized_intent_words(intent);
+    let asks_for_inventory = [
+        "resource",
+        "resources",
+        "record",
+        "records",
+        "existing",
+        "current",
+        "list",
+        "inventory",
+        "whether",
+        "present",
+        "available",
+    ]
+    .iter()
+    .any(|word| words.contains(*word));
+    if !asks_for_inventory {
+        return Vec::new();
+    }
+
+    let mut requests = Vec::new();
+    let mut seen = BTreeSet::new();
+    for (kind, phrases) in [
+        (
+            WORKER_PACKAGE_KIND,
+            &[
+                "worker package",
+                "worker packages",
+                "module package",
+                "module packages",
+                "package resource",
+                "package resources",
+                "package record",
+                "package records",
+            ][..],
+        ),
+        (
+            ACTIVATION_RECORD_KIND,
+            &[
+                "activation record",
+                "activation records",
+                "module activation",
+                "module activations",
+                "activation resource",
+                "activation resources",
+            ][..],
+        ),
+        (
+            MODULE_CONFIG_KIND,
+            &[
+                "module config",
+                "module configs",
+                "module configuration",
+                "module configurations",
+                "config resource",
+                "configuration resource",
+            ][..],
+        ),
+        (UI_SURFACE_KIND, &["ui surface", "ui surfaces"][..]),
+        (
+            MATERIALIZED_FILE_RESOURCE_KIND,
+            &["materialized file", "materialized files"][..],
+        ),
+        (ARTIFACT_RESOURCE_KIND, &["artifact", "artifacts"][..]),
+    ] {
+        if phrases.iter().any(|phrase| normalized.contains(phrase)) && seen.insert(kind) {
+            requests.push(IntentResourceKindRequest { kind });
+        }
+    }
+    requests
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct IntentFileReadRequest {
     path: String,
@@ -2246,6 +2428,53 @@ fn decomposition_phase_details(
     intent: Option<&str>,
     arguments: &Value,
 ) -> Option<Value> {
+    if target.entry.function.id.as_str() == "resource::list" {
+        if arguments
+            .get("kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| !kind.trim().is_empty())
+        {
+            return None;
+        }
+        let requests = intent_resource_kind_requests(intent?);
+        if requests.len() <= 1 {
+            return None;
+        }
+        let suggested_calls = requests
+            .iter()
+            .map(|request| {
+                json!({
+                    "intent": format!("List {} resources", request.kind),
+                    "target": "resource::list",
+                    "arguments": { "kind": request.kind }
+                })
+            })
+            .collect::<Vec<_>>();
+        return Some(json!({
+            "phase": "prepare",
+            "resolveMode": resolve.mode,
+            "candidates": resolve.candidates,
+            "rejectedCandidates": resolve.rejected_candidates,
+            "searchStatus": resolve.search_status,
+            "selectedTarget": {
+                "contractId": target.entry.contract_id.as_str(),
+                "implementationId": target.entry.implementation_id.as_str(),
+                "functionId": target.entry.function.id.as_str(),
+                "catalogRevision": target.entry.catalog_revision,
+                "schemaDigest": target.entry.schema_digest.as_str(),
+            },
+            "decomposition": {
+                "reason": "multiple_resource_kinds_for_single_inventory_request",
+                "targetCount": requests.len(),
+            },
+            "guidance": {
+                "kind": "one_resource_kind_per_execute",
+                "message": "resource inventory requests should list one resource kind per execute call so the result stays bounded and auditable. The suggested calls are guidance, not automatic retries.",
+                "suggestedCalls": suggested_calls,
+            },
+            "suggestedCalls": suggested_calls,
+        }));
+    }
     if target.entry.function.id.as_str() != "filesystem::read_file" {
         return None;
     }
@@ -3172,6 +3401,45 @@ mod tests {
         crate::domains::contract::function_definition_for_capability(&spec)
     }
 
+    fn resource_list_function() -> FunctionDefinition {
+        FunctionDefinition::new(
+            FunctionId::new("resource::list").expect("function id"),
+            crate::engine::WorkerId::new("resource").expect("worker id"),
+            "list typed resources",
+            crate::engine::VisibilityScope::System,
+            crate::engine::EffectClass::PureRead,
+        )
+        .with_request_schema(json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "kind": {"type": "string"},
+                "scope": {"type": "string", "enum": ["system", "workspace", "session"]},
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"},
+                "lifecycle": {"type": "string"},
+                "limit": {"type": "integer"}
+            }
+        }))
+    }
+
+    fn resolved_target_for(function: FunctionDefinition) -> ResolvedCapabilityTarget {
+        let entry = CapabilityRegistryEntry::from_function(function, 391);
+        ResolvedCapabilityTarget {
+            binding_decision: crate::domains::capability::types::CapabilityBindingDecision {
+                decision_id: "decision:test".to_owned(),
+                contract_id: entry.contract_id.clone(),
+                selected_implementation: entry.implementation_id.clone(),
+                selected_function_id: entry.function_id.clone(),
+                selection_policy: "test".to_owned(),
+                rejected_candidates: Vec::new(),
+                catalog_revision: entry.catalog_revision,
+                schema_digest: entry.schema_digest.clone(),
+            },
+            entry,
+        }
+    }
+
     #[test]
     fn discovery_only_intent_is_guidance_not_execution() {
         let input = parse_orchestrated_execute_input(&json!({
@@ -3214,6 +3482,43 @@ mod tests {
         }))
         .expect_err("invalid operation");
         assert!(invalid.to_string().contains("execute.operation"));
+    }
+
+    #[test]
+    fn resource_inventory_discovery_runs_pure_read_instead_of_schema_only() {
+        let mut input = parse_orchestrated_execute_input(&json!({
+            "operation": "discover",
+            "intent": "Discover whether current engine has existing module_package resources.",
+            "arguments": {}
+        }))
+        .expect("discover input");
+        assert!(input.discovery_only());
+
+        normalize_live_resource_inventory_operation(&mut input);
+
+        assert_eq!(input.operation.as_deref(), Some("run"));
+        assert!(!input.discovery_only());
+        assert!(input.corrections.iter().any(|correction| {
+            correction["kind"] == json!("resource_inventory_discovery_to_read_only_run")
+        }));
+    }
+
+    #[test]
+    fn resource_inventory_required_fields_remains_discovery_only() {
+        let mut input = parse_orchestrated_execute_input(&json!({
+            "operation": "discover",
+            "intent": "Discover module package registration required fields. Do not execute mutations.",
+            "arguments": {}
+        }))
+        .expect("discover input");
+
+        normalize_live_resource_inventory_operation(&mut input);
+
+        assert_eq!(input.operation.as_deref(), Some("discover"));
+        assert!(input.discovery_only());
+        assert!(input.corrections.iter().all(|correction| {
+            correction["kind"] != json!("resource_inventory_discovery_to_read_only_run")
+        }));
     }
 
     #[test]
@@ -3537,6 +3842,92 @@ mod tests {
         let entry = CapabilityRegistryEntry::from_function(function, 391);
         validate_target_payload(&entry, &arguments)
             .expect("intent binding should make read_file payload schema-valid");
+    }
+
+    #[test]
+    fn deterministic_intent_route_prefers_resource_list_for_module_resource_inventory() {
+        let resource_list = resource_list_function();
+        let mut binding_list = FunctionDefinition::new(
+            FunctionId::new("capability::binding_list").expect("function id"),
+            crate::engine::WorkerId::new("capability").expect("worker id"),
+            "list capability bindings",
+            crate::engine::VisibilityScope::System,
+            crate::engine::EffectClass::PureRead,
+        );
+        binding_list.description =
+            "inspect capability registration and binding metadata".to_owned();
+        let snapshot = CapabilityRegistrySnapshot::new(vec![binding_list, resource_list], 391);
+
+        let hit = deterministic_intent_route(
+            "Discover whether current engine has existing worker_package and activation_record resources by using pure-read resource listing only, and report whether full RWO-011 can proceed safely from the app without hand-authoring a manifest.",
+            &json!({}),
+            &snapshot,
+            &json!({}),
+        )
+        .expect("route check")
+        .expect("resource list route");
+
+        assert_eq!(hit.function_id, "resource::list");
+        assert_eq!(hit.matched_by, "deterministic_resource_inventory");
+    }
+
+    #[test]
+    fn intent_argument_normalization_binds_module_resource_kind_for_resource_list() {
+        let function = resource_list_function();
+        let mut arguments = json!({});
+        let mut corrections = Vec::new();
+
+        normalize_intent_target_arguments(
+            &function,
+            Some("List existing module_package resources."),
+            &mut arguments,
+            &mut corrections,
+        );
+
+        assert_eq!(arguments["kind"], json!(WORKER_PACKAGE_KIND));
+        assert!(corrections.iter().any(|correction| {
+            correction["kind"] == json!("intent_resource_kind_to_target_argument")
+        }));
+        let entry = CapabilityRegistryEntry::from_function(function, 391);
+        validate_target_payload(&entry, &arguments)
+            .expect("intent binding should make resource::list payload schema-valid");
+    }
+
+    #[test]
+    fn multi_resource_kind_inventory_requires_decomposition() {
+        let target = resolved_target_for(resource_list_function());
+        let resolve = OrchestrationResolve {
+            target_params: json!({"functionId": "resource::list"}),
+            mode: "intent_resolution".to_owned(),
+            candidates: Vec::new(),
+            rejected_candidates: Vec::new(),
+            search_status: Value::Null,
+        };
+
+        let details = decomposition_phase_details(
+            &resolve,
+            &target,
+            Some("List existing module_package and module_activation resources."),
+            &json!({}),
+        )
+        .expect("resource inventory should decompose by kind");
+
+        assert_eq!(
+            details["decomposition"]["reason"],
+            json!("multiple_resource_kinds_for_single_inventory_request")
+        );
+        assert_eq!(
+            details["suggestedCalls"][0]["target"],
+            json!("resource::list")
+        );
+        assert_eq!(
+            details["suggestedCalls"][0]["arguments"]["kind"],
+            json!(WORKER_PACKAGE_KIND)
+        );
+        assert_eq!(
+            details["suggestedCalls"][1]["arguments"]["kind"],
+            json!(ACTIVATION_RECORD_KIND)
+        );
     }
 
     #[test]
