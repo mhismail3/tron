@@ -134,7 +134,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .tags(vec!["answer", "submit answers", "resume", "user input"])
             .build()?,
         CapabilityContract::new("agent::spawn_subagent", "agent", EffectClass::ExternalSideEffect, RiskLevel::Medium, Some("agent.write"))
-            .description("Spawn a scoped child agent and return a handle immediately; use job::wait to block for completion.")
+            .description("Spawn a scoped child agent and return a handle immediately by default; for fan-out, omit blockingTimeoutMs until all children are spawned, then use agent::subagent_status or agent::subagent_result to gather results.")
             .request_schema(subagent_spawn_request_schema())
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
@@ -143,6 +143,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "kind": "async_run",
                 "stopsTurn": false,
                 "statusContractId": "agent::subagent_status",
+                "resultContractId": "agent::subagent_result",
                 "cancelContractId": "agent::cancel_subagent",
                 "streamTopics": STREAM_TOPICS,
                 "answerAuthority": "system"
@@ -394,7 +395,7 @@ fn subagent_spawn_request_schema() -> serde_json::Value {
             "workingDirectory": {"type": "string"},
             "maxTurns": {"type": "integer", "minimum": 1, "maximum": 20},
             "timeoutMs": {"type": "integer", "minimum": 1000, "maximum": 3600000},
-            "blockingTimeoutMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 300000},
+            "blockingTimeoutMs": {"type": ["integer", "null"], "minimum": 0, "maximum": 300000, "description": "Omit or set null for non-blocking fan-out. Set only when this spawn call should wait before returning."},
             "deniedContracts": {"type": "array", "items": {"type": "string"}},
             "skills": {"type": "array", "items": {"type": "string"}},
             "maxDepth": {"type": "integer", "minimum": 0, "maximum": 3}
@@ -488,6 +489,21 @@ mod tests {
                 .and_then(|value| value.get("statusContractId"))
                 .and_then(serde_json::Value::as_str),
             Some("agent::subagent_status")
+        );
+        assert_eq!(
+            spawn
+                .lifecycle
+                .as_ref()
+                .and_then(|value| value.get("resultContractId"))
+                .and_then(serde_json::Value::as_str),
+            Some("agent::subagent_result")
+        );
+        assert!(
+            spawn
+                .description
+                .as_ref()
+                .is_some_and(|description| description.contains("omit blockingTimeoutMs")),
+            "spawn_subagent contract must guide fan-out callers to non-blocking spawn"
         );
     }
 

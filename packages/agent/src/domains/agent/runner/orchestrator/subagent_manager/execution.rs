@@ -584,19 +584,7 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
         }
     };
 
-    if params.blocking_timeout_ms.is_none() && !params.tracker.parent_session_id.is_empty() {
-        // Compute `notify`: iOS should show a user-facing notification only
-        // when the parent session is idle. If the parent is currently running
-        // an agent turn, the backend delivers results via system-prompt
-        // injection, so no iOS notification is needed. Defaults to `true`
-        // (safe — user sees completion) if the probe is unavailable.
-        let parent_active = params
-            .run_state_probe
-            .as_ref()
-            .and_then(std::sync::Weak::upgrade)
-            .is_some_and(|p| p.has_active_run(&params.tracker.parent_session_id));
-        let notify = !parent_active;
-
+    if !params.tracker.parent_session_id.is_empty() {
         create_subagent_agent_result_resource(
             params.engine_host.as_ref(),
             &params.tracker.parent_session_id,
@@ -610,6 +598,20 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
             &params.spawn_type,
         )
         .await;
+    }
+
+    if params.blocking_timeout_ms.is_none() && !params.tracker.parent_session_id.is_empty() {
+        // Compute `notify`: iOS should show a user-facing notification only
+        // when the parent session is idle. If the parent is currently running
+        // an agent turn, the backend delivers results via system-prompt
+        // injection, so no iOS notification is needed. Defaults to `true`
+        // (safe — user sees completion) if the probe is unavailable.
+        let parent_active = params
+            .run_state_probe
+            .as_ref()
+            .and_then(std::sync::Weak::upgrade)
+            .is_some_and(|p| p.has_active_run(&params.tracker.parent_session_id));
+        let notify = !parent_active;
 
         let _ = params.broadcast.emit(TronEvent::SubagentResultAvailable {
             base: BaseEvent::now(&params.tracker.parent_session_id),

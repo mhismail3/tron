@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **57/100 provisional**
+Current score: **59/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -85,15 +85,15 @@ interruption, and resource failure states.
 | Execute portal ergonomics | 10 | 8 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
 | First-party capability usefulness | 10 | 8 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
 | Worker/function/trigger substrate | 14 | 7 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
-| Multi-capability orchestration | 12 | 8 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
-| Resource truth and durability | 10 | 6 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
+| Multi-capability orchestration | 12 | 9 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
+| Resource truth and durability | 10 | 7 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 6 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 5 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 5 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **57/100**
+Total: **59/100**
 
 ## Scoring Rules
 
@@ -177,7 +177,7 @@ The evidence note must identify:
 | RWO-N6 | State, queue, stream, trigger chain | passed | +1 | `sess_019e730c-0b78-7b73-8598-80a75810a394` | See 2026-05-29 RWO-N6 result note below. The run used 21 successful `capability::execute` invocations, 7 successful `capability::inspect`, 1 successful `state::set`, 1 successful `state::get`, 1 successful `queue::enqueue`, 1 successful `queue::list`, 1 successful `stream::subscribe`, 1 successful `stream::poll`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one ready `agent.test` queue row, one session-scoped state row, one `agent.test.execute` stream subscription, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. State write/read matched revision 1; queue enqueue/list returned the ready queued item; stream subscribe/poll succeeded and found no events; publish capability was not found. |
 | RWO-N7 | Live worker extensibility | passed_after_fix | +2 | conformance failure: `sess_019e732f-c5e0-7bf3-8130-9da7d39a3deb`; trigger retest with cleanup gap: `sess_019e733b-af69-7f93-bb15-7a717d906aef`; cleanup-fixed retest: `sess_019e7341-8eac-7bb3-97bc-efd16de60757`; trigger-guidance retest: `sess_019e735b-9168-7b43-bb95-56fb6cacca43` | See 2026-05-29 RWO-N7 result note below. Trigger-guidance retest used one `needs_selection` execute row for trigger-id metadata guidance, one successful `capability::execute` row, one successful target `rwo_n7::echo` invocation, catalog revisions 389-394, 0 approvals, 0 `compact.*` events, 0 session logs, and expected post-disconnect `CAPABILITY_NOT_FOUND` cleanup probes after unregister. | `execute_resolution`: session-generated implementations stayed `candidate` and were not binding-selectable. `queue_or_trigger`: visible trigger metadata was not projected through capability discovery. `worker_lifecycle`: stale session-scoped registry plugin/implementation rows stayed healthy after disconnect. `execute_resolution`: explicit trigger-id targets returned generic not-found instead of metadata-only guidance naming the related function target. | `0aabb48a2`; trigger-guidance checkpoint in this commit | Passed after rebuilt dev server PID 63286. Trigger-id target now returns `needs_selection`/`trigger_metadata_target` with suggested target `rwo_n7::echo`, no child invocation, and no trigger-id aliasing. Post-disconnect registry sync removed the session-generated implementation/plugin rows and direct execute returned expected `CAPABILITY_NOT_FOUND`. |
 | RWO-N8 | Module package activation | passed_after_fix | +2 | setup and first retest: `sess_019e7385-341e-7f30-8176-6b93396a6dbc`; final activation retest: `sess_019e7398-5d77-7d01-9c2a-465589dade48` | See 2026-05-29 RWO-N8 result note below. The setup run registered source/package, verified source, approved source, configured, activated, health-checked, disabled, and inspected the deterministic package. The final retest used 6 successful `capability::execute` rows, successful `module::activate`, `worker::spawn`, `module::check_health`, two `rwo_n8_20260529113609::health` invocations, duplicate activation replay, `module::disable`, `sandbox::stop_spawned_worker`, and `module::inspect_package`; 0 failed invocations; 2 executed approvals; disabled activation resource; revoked derived grant; no session logs. | `execute_correction`: nested wrapper cleanup stripped target-owned `arguments.mode` from `module::check_health`. `worker_lifecycle`: worker guide Python blocked in `recv_json` and stopped heartbeating while idle. `execute_resolution`: `worker::spawn` issued `engine_issued` scoped tokens, but binding selection only treated `session_scoped` session-generated functions as healthy. | `ae1b153bf` | Passed after rebuilt dev server PID 76020 with simulator booted. Direct fixture execute `019e7398-b60b-71b1-8e26-1ac35fcad2a1` selected `session_generated.rwo_n8_20260529113609.demo_echo` and invoked child `019e7398-b6f4-7b81-9c42-3acf2736499a`; disable stopped PID 77144 and revoked grant `sandbox-worker:rwo-n8-worker-20260529113609:019e7398-8526-7ff1-bbd5-280708370bf8`. |
-| RWO-N9 | Subagent fan-out/fan-in | pending | 0 | | | | | |
+| RWO-N9 | Subagent fan-out/fan-in | passed_after_fix | +2 | failed first run: `sess_019e73a5-c2ae-7fe3-b9b9-86131b2f7156`; passing retest: `sess_019e73ae-4645-7f03-bca5-fad68c3959c4` | See 2026-05-29 RWO-N9 result note below. The passing retest used 10 parent `capability::execute` rows, 2 non-blocking `agent::spawn_subagent` target rows, 4 `agent::subagent_status` rows, 2 `agent::subagent_result` rows, 8 child `capability::execute` rows, 2 deterministic `agent_result:subagent:*` resources, 1 final parent `agent_result`, 0 failed invocations, 0 approvals, 0 `compact.*` events, and 0 session-scoped log rows. | Primary `resource_truth`: completed blocking subagents did not write deterministic `agent_result:subagent:*` resources, so result/status could fall back to in-memory manager state. Secondary `schema_or_recipe`: omitted `blockingTimeoutMs` was coerced into a blocking wait and the contract did not name the result capability, so fan-out models were guided toward sequential work. | this checkpoint | Passed exact prompt after rebuilt dev server PID 83613 with simulator booted. Parent spawned child sessions `sess_019e73ae-7618-7e92-b86a-19a4f50c605a` and `sess_019e73ae-8413-7830-9a49-3c87c98180be` before waiting, status-polled both through `agent::subagent_status`, collected both through `agent::subagent_result`, and reported lineage/capabilities. A model-chosen `process::run sleep 10` was used only as a timer between canonical status polls; no hidden client or runner side channel was used. |
 | RWO-N10 | Memory auto-retain | pending | 0 | | | | | |
 | RWO-N11 | Resource failure matrix | pending | 0 | | | | | |
 | RWO-N12 | Approval and grant boundary | pending | 0 | | | | | |
@@ -1042,6 +1042,65 @@ Failure focus:
 - hidden sidecar orchestration;
 - missing cancellation semantics.
 
+2026-05-29 result:
+
+- First run: `/tmp/rwo_n9_agent_run_20260529051143.json`, parent session
+  `sess_019e73a5-c2ae-7fe3-b9b9-86131b2f7156`, real dev server PID 76020,
+  simulator booted. The parent invoked `agent::spawn_subagent` twice through
+  `capability::execute`, but both spawns used blocking waits and therefore ran
+  sequentially. The parent retrieved two `agent::subagent_result` values, but
+  no deterministic `agent_result:subagent:*` resource existed for either child.
+  One child had a recoverable failed `filesystem::read_file` against a
+  directory; the parent had no failed engine invocation because a later
+  `process::run` DB probe was rejected inside `capability::execute` before
+  child execution. This classified the scenario as failed with primary layer
+  `resource_truth` and secondary layer `schema_or_recipe`.
+- Focused tests/fixes: `spawn_blocking_records_resource_native_subagent_result`
+  first failed because a completed blocking subagent had no resource-native
+  result; it now passes. `omitted_subagent_blocking_timeout_is_nonblocking`
+  pins `agent::spawn_subagent` so omitted `blockingTimeoutMs` remains
+  non-blocking instead of being coerced into a blocking wait.
+  `interactive_and_subagent_contracts_project_lifecycle_metadata` now requires
+  `resultContractId = agent::subagent_result` and model guidance that fan-out
+  callers omit `blockingTimeoutMs`.
+- Retest: `/tmp/rwo_n9_agent_run_20260529052101.json`, parent session
+  `sess_019e73ae-4645-7f03-bca5-fad68c3959c4`, rebuilt dev server PID 83613,
+  simulator booted. The parent spawned `sess_019e73ae-7618-7e92-b86a-19a4f50c605a`
+  for filesystem capability inspection and
+  `sess_019e73ae-8413-7830-9a49-3c87c98180be` for agent/subagent capability
+  inspection before waiting. Both `agent::spawn_subagent` target rows returned
+  `status = running`, proving non-blocking fan-out. The parent then used
+  `agent::subagent_status` twice while both children were running, used one
+  `process::run` `sleep 10` timer through `execute`, status-polled both
+  children to `completed`, and used `agent::subagent_result` for each child.
+- Retest DB evidence: 10 parent `capability::execute` rows, 2
+  `agent::spawn_subagent` rows, 4 `agent::subagent_status` rows, 2
+  `agent::subagent_result` rows, 8 child `capability::execute` rows,
+  3 parent-scoped `agent_result` resources, 0 failed engine invocations, 0
+  approvals, 0 `compact.*` events, 0 session-scoped log rows, 1 completed
+  `agent::prompt_queue_drain` queue row, and stream rows on `agent.runtime`,
+  `compensation.records`, `events.session`, `queue.lifecycle`, and
+  `resource.leases`.
+- Resource proof: `agent_result:subagent:sess_019e73ae-7618-7e92-b86a-19a4f50c605a`
+  has version `ver_019e73ae-a256-7023-b2cd-717109d0894c`, and
+  `agent_result:subagent:sess_019e73ae-8413-7830-9a49-3c87c98180be` has version
+  `ver_019e73ae-ad62-7090-8da1-2bca70a81db7`; both are session-scoped to the
+  parent and record parent/child ids in metadata. The parent final
+  `agent_result` is `res_019e73af-8618-7073-a7fb-d685e41d3c3e`.
+- Negative proof: the table probe still found only pre-existing audit and
+  engine resource tables:
+  `capability_audit_events`, `constitution_home_audit`,
+  `constitution_resolution_audit`, `engine_resource_events`,
+  `engine_resource_leases`, `engine_resource_links`,
+  `engine_resource_type_definitions`, `engine_resource_versions`, and
+  `engine_resources`; no package/source/policy/trust product-state tables were
+  introduced.
+- Score impact: RWO-N9 earns `+2`. Multi-capability orchestration increases to
+  9/12 because parent/child execute, status polling, result retrieval, and child
+  filesystem work compose through the engine. Resource truth and durability
+  increases to 7/10 because completed subagent outputs are now represented by
+  deterministic resource truth for both blocking and non-blocking paths.
+
 ### RWO-N10: Memory Auto-Retain
 
 Run two scenarios:
@@ -1371,64 +1430,58 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N9: Subagent Fan-Out/Fan-In**
+Recommended next scenario: **RWO-N10: Memory Auto-Retain**
 
 Setup:
 
 - Use the currently configured real dev server.
-- Use the iOS simulator for the parent agent prompt.
-- Keep the task narrow: two subagents should inspect separate repo topics and
-  the parent should wait for both before comparing results.
-- Do not let the parent do the child inspection work itself unless the scenario
-  fails and is being isolated.
+- Use the iOS simulator for the parent agent prompt unless a deterministic
+  fixture is needed to trigger the below-threshold or retain path reliably.
+- Run one below-threshold memory scenario and one actual retain scenario with a
+  durable project lesson.
+- Keep memory truth engine-owned; do not inspect or mutate memory through a
+  client-owned side channel.
 
 Prompt:
 
 ```text
-Use only execute. Spawn two subagents to inspect separate narrow repo topics, wait for both, compare the results, and report parent/child lineage and capabilities involved.
+Use only execute. First, run a short prompt that should be below the memory auto-retain threshold and report the retain status. Then run a second prompt that teaches a durable project lesson worth retaining, wait for auto-retain, and report the memory/resource refs and DB-observable retain status.
 ```
 
 Procedure:
 
 1. Start a fresh simulator-backed session on the real dev server.
-2. Send the RWO-N9 prompt with only the model-facing `execute` primitive
-   available.
-3. Confirm the parent invokes `agent::spawn_subagent` twice through
-   `capability::execute`.
-4. Confirm each child session uses `execute` for its assigned repo inspection.
-5. Confirm the parent waits for both child results through canonical
-   job/subagent result capabilities before comparing them.
-6. Inspect DB lineage and queue/stream/resource evidence before scoring.
+2. Send the below-threshold memory prompt and let the turn complete.
+3. Confirm `memory::auto_retain_fire` reports an explicit bounded skip.
+4. Send the retain-worthy lesson prompt and let the turn plus auto-retain
+   complete.
+5. Confirm the retain path writes through engine-owned memory/resource
+   capability records.
+6. Inspect DB resource, invocation, queue, stream, event, log, and failure
+   evidence before scoring.
 
 After completion, inspect:
 
-- parent session id, run id, prompt invocation, and all parent
-  `capability::execute` rows;
-- `agent::spawn_subagent` child invocation ids and child session ids;
-- child session events, child `capability::execute` rows, and target filesystem
-  read/search/list invocations;
-- job/subagent status/result invocations used by the parent to wait and gather
-  outputs;
-- parent/child lineage fields in events, invocations, traces, and resources;
-- queue rows and stream topics emitted for subagent lifecycle and result
-  delivery;
-- resource refs from substrate-owned prompt-history, child outputs, and final
-  parent `agent_result` records;
+- session ids, run ids, prompt invocations, and `memory::auto_retain_fire`
+  invocations for both turns;
+- skip reason, retain decision, memory/resource ids, produced resource refs,
+  and idempotency keys;
+- resource versions, hashes, lifecycle state, links, and any memory-specific
+  event payloads;
+- queue rows and stream topics emitted for prompt completion and memory retain
+  lifecycle;
 - failed invocations, if any;
 - approval records, if any;
-- logs mentioning subagent spawn, wait, child execution, queue, stream, or
-  lineage failures.
+- logs mentioning memory retain, queue, stream, resource, or provider failures.
 
 Pass criteria:
 
-- Parent and both child agents use only `capability::execute` for model-facing
-  work.
-- Subagent creation, waiting, and result collection compose through the engine
-  substrate rather than hidden client or runner side channels.
-- Parent final answer reports parent/child lineage and the capabilities used by
-  each participant.
-- Child outputs remain reconstructable from DB events/resources/invocations.
-- Queue/stream records prove lifecycle and completion delivery.
+- The below-threshold path records an explicit skip without an endless spinner
+  or hidden mutation.
+- The retain path writes durable memory through the engine-owned
+  memory/resource substrate and returns/records resource refs.
+- Retain decisions, resource versions, and any failures are reconstructable from
+  DB invocation/event/log/resource/queue/stream records.
 - No client-owned policy, alternate worker-spawn path, fallback reader,
   compatibility layer, or product-state side channel is used.
 

@@ -773,6 +773,51 @@ async fn spawn_blocking_skips_parent_result_message() {
 }
 
 #[tokio::test]
+async fn spawn_blocking_records_resource_native_subagent_result() {
+    let (manager, session_mgr, _store) = make_subagent_manager(Arc::new(MockProvider));
+    let engine_host = crate::engine::EngineHostHandle::new_in_memory().unwrap();
+    manager.set_engine_host(engine_host.clone());
+
+    let parent_sid = session_mgr
+        .create_session("mock-model", "/tmp", None, None)
+        .unwrap();
+
+    let mut config = make_config("blocking resource task");
+    config.parent_session_id = Some(parent_sid.clone());
+    config.blocking_timeout_ms = Some(300_000);
+    let handle = manager.spawn(config).await.unwrap();
+    let resource_id =
+        crate::domains::agent::lineage::subagent_result_resource_id(&handle.session_id);
+
+    let inspected = engine_host
+        .invoke(crate::engine::Invocation::new_sync(
+            crate::engine::FunctionId::new("resource::inspect").unwrap(),
+            serde_json::json!({"resourceId": resource_id}),
+            crate::engine::CausalContext::new(
+                crate::engine::ActorId::new("system:test").unwrap(),
+                crate::engine::ActorKind::System,
+                crate::engine::AuthorityGrantId::new("engine-system").unwrap(),
+                crate::engine::TraceId::generate(),
+            )
+            .with_session_id(parent_sid.clone())
+            .with_scope("resource.read"),
+        ))
+        .await;
+
+    assert_eq!(inspected.error, None);
+    let inspection = &inspected.value.as_ref().unwrap()["inspection"];
+    assert_eq!(inspection["resource"]["resourceId"], resource_id);
+    assert_eq!(
+        inspection["versions"][0]["payload"]["metadata"]["parentSessionId"],
+        parent_sid
+    );
+    assert_eq!(
+        inspection["versions"][0]["payload"]["metadata"]["subagentSessionId"],
+        handle.session_id
+    );
+}
+
+#[tokio::test]
 async fn spawn_persists_lifecycle_events_to_parent() {
     let (manager, session_mgr, store) = make_subagent_manager(Arc::new(MockProvider));
 

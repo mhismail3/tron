@@ -410,6 +410,10 @@ fn resolve_agent_working_directory(
         })
 }
 
+fn resolve_subagent_blocking_timeout(requested: Option<u64>) -> Option<u64> {
+    requested
+}
+
 pub(crate) async fn spawn_subagent_value(
     params: Option<&Value>,
     invocation: &Invocation,
@@ -448,7 +452,7 @@ pub(crate) async fn spawn_subagent_value(
     let config = SubagentConfig {
         task: request.task.clone(),
         mode: SubagentMode::InProcess,
-        blocking_timeout_ms: request.blocking_timeout_ms.or(Some(0)),
+        blocking_timeout_ms: resolve_subagent_blocking_timeout(request.blocking_timeout_ms),
         model: request.model,
         parent_session_id: Some(session_id.clone()),
         system_prompt: request.system_prompt,
@@ -846,6 +850,30 @@ mod tests {
         assert!(
             matches!(error, CapabilityError::InvalidParams { .. }),
             "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn omitted_subagent_blocking_timeout_is_nonblocking() {
+        let request: SubagentSpawnRequest = serde_json::from_value(json!({
+            "sessionId": "current-session",
+            "task": "inspect one topic"
+        }))
+        .unwrap();
+        assert_eq!(
+            resolve_subagent_blocking_timeout(request.blocking_timeout_ms),
+            None
+        );
+
+        let blocking_request: SubagentSpawnRequest = serde_json::from_value(json!({
+            "sessionId": "current-session",
+            "task": "inspect one topic",
+            "blockingTimeoutMs": 30_000
+        }))
+        .unwrap();
+        assert_eq!(
+            resolve_subagent_blocking_timeout(blocking_request.blocking_timeout_ms),
+            Some(30_000)
         );
     }
 }

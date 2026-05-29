@@ -808,6 +808,16 @@ response shaping for these privileged primitive workers lives under
 catalog, ledger, stream, resource, lease, approval, and compensation access
 without owning primitive response contracts.
 
+Subagent orchestration is also engine-native. `agent::spawn_subagent` returns a
+child handle immediately when `blockingTimeoutMs` is omitted or `null`, so
+fan-out callers can spawn all children before polling `agent::subagent_status`
+or collecting `agent::subagent_result`. Completed capability subagents always
+write deterministic `agent_result:subagent:{session}` resources in the parent
+session scope, regardless of whether the caller asked the spawn call to block.
+The parent/child lineage, status/result invocations, resource versions, and
+stream events are therefore reconstructable from substrate records rather than
+in-memory runner state or client-owned bookkeeping.
+
 Sandbox-created capabilities enter through the high-risk `worker::spawn`
 capability. It requires explicit idempotency, `worker.write` authority, a
 worker resource lease, compensation notes, and the sandbox autonomy contract

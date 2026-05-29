@@ -23,6 +23,10 @@
 //!    service calls.
 //! 7. `/engine` subscriptions deliver those stream records to clients; the
 //!    transport never owns agent behavior.
+//! 8. `agent::spawn_subagent` is non-blocking when `blockingTimeoutMs` is
+//!    omitted, and every completed capability subagent writes a deterministic
+//!    `agent_result:subagent:{session}` resource before status/result readers
+//!    are expected to reconstruct child output.
 //!
 //! ## Submodules
 //!
