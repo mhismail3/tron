@@ -21,9 +21,11 @@
 //! `expectedOutputs[].path` is a relative path inside the isolated process
 //! sandbox; absolute, home-relative, and parent-escaping paths are rejected
 //! before approval so an impossible host path cannot pause for approval and
-//! fail only after execution. Relative materialization targets resolve to the
-//! active session worktree so approved sandbox output never leaks into the
-//! server process cwd. Every `process::run`
+//! fail only after execution. Shell redirection and `tee` targets in the command
+//! must match declared expected outputs; parent directories for declared outputs
+//! are prepared inside the sandbox before execution. Relative materialization
+//! targets resolve to the active session worktree so approved sandbox output
+//! never leaks into the server process cwd. Every `process::run`
 //! invocation requires active session worktree truth. Read-only command cwd/path
 //! operands and materialized output targets are bounded to that worktree, and
 //! child processes receive an allowlisted environment instead of inheriting
@@ -105,6 +107,9 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
     } else {
         None
     };
+    if let Some(sandbox) = sandbox.as_ref() {
+        prepare_sandbox_expected_output_dirs(&invocation.payload, sandbox.path())?;
+    }
     let cwd = sandbox
         .as_ref()
         .map(|dir| dir.path().to_string_lossy().into_owned())
@@ -119,6 +124,25 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
     let stdin = opt_string(params, "stdin");
     let env = opt_env(params);
     validate_process_env(&env)?;
+    let mut sandbox_env = Vec::new();
+    if let Some(sandbox) = sandbox.as_ref() {
+        let sandbox_home = sandbox.path().join("home");
+        let sandbox_tmp = sandbox.path().join("tmp");
+        std::fs::create_dir_all(&sandbox_home).map_err(|error| CapabilityError::Internal {
+            message: format!("create sandbox HOME: {error}"),
+        })?;
+        std::fs::create_dir_all(&sandbox_tmp).map_err(|error| CapabilityError::Internal {
+            message: format!("create sandbox TMPDIR: {error}"),
+        })?;
+        sandbox_env.push((
+            "HOME".to_owned(),
+            sandbox_home.to_string_lossy().into_owned(),
+        ));
+        sandbox_env.push((
+            "TMPDIR".to_owned(),
+            sandbox_tmp.to_string_lossy().into_owned(),
+        ));
+    }
 
     let shell_bin = match shell.as_str() {
         "bash" | "zsh" | "sh" => shell,
@@ -136,6 +160,7 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
         .env_clear()
         .envs(safe_process_environment())
         .envs(env)
+        .envs(sandbox_env)
         .stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
@@ -319,6 +344,64 @@ async fn materialize_expected_outputs(
         resource_refs: refs,
         outputs,
     })
+}
+
+fn prepare_sandbox_expected_output_dirs(
+    payload: &Value,
+    sandbox_root: &Path,
+) -> Result<(), CapabilityError> {
+    let Some(expected) = payload.get("expectedOutputs").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for item in expected {
+        let Some(relative) = item.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let output_path = safe_sandbox_declared_output_path(sandbox_root, relative)?;
+        if let Some(parent) = output_path.parent()
+            && parent != sandbox_root
+        {
+            std::fs::create_dir_all(parent).map_err(|error| CapabilityError::Internal {
+                message: format!("create declared process output directory: {error}"),
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn safe_sandbox_declared_output_path(
+    root: &Path,
+    relative: &str,
+) -> Result<PathBuf, CapabilityError> {
+    if relative.trim().is_empty() || relative.starts_with('~') {
+        return Err(CapabilityError::InvalidParams {
+            message: "expected output path must be relative inside the process sandbox".to_owned(),
+        });
+    }
+    let path = Path::new(relative);
+    if path.is_absolute() {
+        return Err(CapabilityError::InvalidParams {
+            message: "expected output path must be relative inside the process sandbox".to_owned(),
+        });
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(CapabilityError::InvalidParams {
+                    message: "expected output path must stay inside the process sandbox".to_owned(),
+                });
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "expected output path cannot be empty".to_owned(),
+        });
+    }
+    Ok(root.join(normalized))
 }
 
 struct BoundedPreview {
@@ -1080,6 +1163,73 @@ mod tests {
             Some(expected_target.to_string_lossy().as_ref())
         );
         assert_eq!(file_ref["fileContentHash"], materialized[0]["contentHash"]);
+    }
+
+    #[tokio::test]
+    async fn sandbox_materialized_nested_output_parent_is_prepared_inside_sandbox() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({
+                "command": "printf 'nested\n' > reports/high-risk-test.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "reports/high-risk-test.txt"}],
+                "retainOutput": true
+            }),
+            Some(&created.session.id),
+        );
+
+        let value = process_run_value(&invocation, &deps).await.unwrap();
+        assert_eq!(value["exitCode"], 0);
+        let materialized = value["materializedOutputs"].as_array().unwrap();
+        assert_eq!(materialized[0]["path"], "reports/high-risk-test.txt");
+        assert_eq!(materialized[0]["contentPreview"], "nested\n");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("reports/high-risk-test.txt")).unwrap(),
+            "nested\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn sandbox_materialized_home_relative_command_write_rejects_before_spawn() {
+        let store = event_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let created = store
+            .create_session(
+                "gpt-5.5",
+                &tmp.path().to_string_lossy(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let deps = Deps::for_test(store);
+        let invocation = invocation(
+            json!({
+                "command": "printf 'escape\n' > ~/.tron/workspace/reports/high-risk-test.txt",
+                "executionMode": "sandbox_materialized",
+                "expectedOutputs": [{"path": "reports/high-risk-test.txt"}]
+            }),
+            Some(&created.session.id),
+        );
+
+        let err = process_run_value(&invocation, &deps).await.unwrap_err();
+        assert!(
+            matches!(err, CapabilityError::InvalidParams { message } if message.contains("command write targets"))
+        );
+        assert!(!tmp.path().join("reports/high-risk-test.txt").exists());
     }
 
     #[tokio::test]

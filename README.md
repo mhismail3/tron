@@ -424,12 +424,17 @@ printing, `git status`, and `git log` run directly with
 are materialized back through resource refs. Relative materialized outputs land
 in the active session worktree by default, and the response includes bounded
 `materializedOutputs` summaries for exact content verification without a second
-shell command. `process::run` requires active session worktree truth. Read-only
+shell command. Shell redirection and `tee` targets in sandbox-materialized
+commands must match declared relative `expectedOutputs` paths; absolute,
+home-relative, shell-expanded, parent-escaping, or undeclared command output
+paths are rejected before approval. Nested declared output paths are allowed, and
+their parent directories are prepared inside the isolated sandbox before
+execution. `process::run` requires active session worktree truth. Read-only
 process cwd/path operands and sandbox materialization targets must stay inside
 the active session worktree, symlink escapes are rejected, and child processes
 receive an allowlisted environment rather than inherited server secrets. It
-defaults to the active session worktree when `cwd` is omitted and accepts
-bounded timeout fields in milliseconds. The
+defaults to the active session worktree when `cwd` is omitted and accepts bounded
+timeout fields in milliseconds. The
 model-facing `capability::execute` primitive is the only
 provider-visible capability tool: callers provide a natural-language `intent`,
 an optional `target` such as `process::run`, target-only `arguments`, optional
@@ -573,7 +578,7 @@ logs, compensation attempts, trace id, and final status. Loose program
 `artifacts` are rejected; durable outputs must be created by child resource or
 materialization capabilities.
 
-Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Read-only worktree and git inspection should use `worktree::get_status`, `worktree::get_diff`, `worktree::is_git_repo`, and `git::list_local_branches` before shell-style checks are considered. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may still run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe and stays inside the active session worktree. Mutating or publishing git commands still require execute preparation/freshness and approval, and write-like process commands must run in sandbox materialization mode with declared outputs that materialize through resource refs and bounded `materializedOutputs` summaries.
+Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Read-only worktree and git inspection should use `worktree::get_status`, `worktree::get_diff`, `worktree::is_git_repo`, and `git::list_local_branches` before shell-style checks are considered. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may still run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe and stays inside the active session worktree. Mutating or publishing git commands still require execute preparation/freshness and approval, and write-like process commands must run in sandbox materialization mode with declared relative outputs that materialize through resource refs and bounded `materializedOutputs` summaries.
 
 The same capability worker also registers operator/admin functions for native
 clients and the Engine Console. These are normal engine catalog functions, not

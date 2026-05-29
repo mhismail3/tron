@@ -1860,6 +1860,18 @@ fn resource_materialization_enforcement_gates_stay_on() {
             ),
         "process::run must keep model-facing cwd/path/symlink/output target bounds and must not inherit the server environment"
     );
+    assert!(
+        process_approval.contains("validate_sandbox_command_write_targets")
+            && process_approval.contains(
+                "sandbox_materialized_home_relative_command_write_is_invalid_before_approval"
+            )
+            && process_worker.contains("prepare_sandbox_expected_output_dirs")
+            && process_worker
+                .contains("sandbox_materialized_nested_output_parent_is_prepared_inside_sandbox")
+            && process_worker
+                .contains("sandbox_materialized_home_relative_command_write_rejects_before_spawn"),
+        "process::run sandbox materialization must reject undeclared/home/absolute command write targets before approval and prepare declared output parents inside the sandbox"
+    );
     let capability_operations =
         std::fs::read_to_string(crate_root.join("src/domains/capability/operations/mod.rs"))
             .expect("failed to read capability operations");

@@ -7,11 +7,13 @@
 //! used by `capability::execute` before dispatching to the process worker.
 
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::path::{Component, Path};
 
 const READ_ONLY_LOW_RISK_MESSAGE: &str = "process::run read_only commands must be proven low-risk by the classifier; use executionMode=sandbox_materialized with expectedOutputs for mutating or unknown commands. To verify sandbox materialized output, use the returned materializedOutputs summary or read the returned materialized file path/resource instead of running an unknown interpreter";
 const SANDBOX_OUTPUTS_REQUIRED_MESSAGE: &str = "process::run sandbox_materialized commands require expectedOutputs: [{\"path\":\"<relative-output-path>\"}] before approval";
 const SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE: &str = "process::run sandbox_materialized expectedOutputs[].path must be a relative path inside the process sandbox; do not use absolute host paths, home-relative paths, or parent-directory escapes";
+const SANDBOX_COMMAND_OUTPUT_PATH_MESSAGE: &str = "process::run sandbox_materialized command write targets must be declared relative expectedOutputs paths; do not write absolute host paths, home-relative paths, parent-directory escapes, shell-expanded paths, or undeclared output paths";
 
 /// Return true when a `process::run` payload should pause for user approval.
 pub(crate) fn run_requires_approval(payload: &Value) -> bool {
@@ -38,6 +40,7 @@ pub(crate) fn validate_run_payload_before_approval(payload: &Value) -> Result<()
         return Err(SANDBOX_OUTPUTS_REQUIRED_MESSAGE);
     }
     validate_sandbox_output_paths(payload)?;
+    validate_sandbox_command_write_targets(payload)?;
     Ok(())
 }
 
@@ -117,6 +120,177 @@ fn validate_sandbox_output_paths(payload: &Value) -> Result<(), &'static str> {
         }
     }
     Ok(())
+}
+
+fn validate_sandbox_command_write_targets(payload: &Value) -> Result<(), &'static str> {
+    if payload.get("executionMode").and_then(Value::as_str) != Some("sandbox_materialized") {
+        return Ok(());
+    }
+    let Some(command) = payload.get("command").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(outputs) = payload.get("expectedOutputs").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    let declared = outputs
+        .iter()
+        .filter_map(|output| output.get("path").and_then(Value::as_str))
+        .map(normalized_relative_path)
+        .collect::<Option<BTreeSet<_>>>()
+        .ok_or(SANDBOX_COMMAND_OUTPUT_PATH_MESSAGE)?;
+    if declared.is_empty() {
+        return Ok(());
+    }
+    for target in command_write_targets(command) {
+        let Some(normalized) = normalized_relative_path(&target) else {
+            return Err(SANDBOX_COMMAND_OUTPUT_PATH_MESSAGE);
+        };
+        if !declared.contains(&normalized) {
+            return Err(SANDBOX_COMMAND_OUTPUT_PATH_MESSAGE);
+        }
+    }
+    Ok(())
+}
+
+fn command_write_targets(command: &str) -> Vec<String> {
+    let tokens = write_target_tokens(command);
+    let mut targets = Vec::new();
+    let mut index = 0usize;
+    while index < tokens.len() {
+        let token = tokens[index].as_str();
+        if let Some((target, consumed_next)) =
+            redirection_target(token, tokens.get(index + 1).map(String::as_str))
+        {
+            if file_redirection_target(&target) {
+                targets.push(clean_shell_path_token(&target));
+            }
+            index += if consumed_next { 2 } else { 1 };
+            continue;
+        }
+        if token == "tee" {
+            index += 1;
+            while index < tokens.len() {
+                let candidate = tokens[index].as_str();
+                if shell_control_token(candidate) {
+                    break;
+                }
+                if candidate.starts_with('-') {
+                    index += 1;
+                    continue;
+                }
+                targets.push(clean_shell_path_token(candidate));
+                index += 1;
+            }
+            continue;
+        }
+        index += 1;
+    }
+    targets
+}
+
+fn write_target_tokens(command: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut token = String::new();
+    let mut quote = None;
+    let mut chars = command.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if let Some(quote_ch) = quote {
+            if ch == quote_ch {
+                quote = None;
+            } else {
+                token.push(ch);
+            }
+            continue;
+        }
+        if matches!(ch, '"' | '\'' | '`') {
+            quote = Some(ch);
+            continue;
+        }
+        if ch.is_whitespace() || matches!(ch, '(' | ')') {
+            if !token.is_empty() {
+                tokens.push(std::mem::take(&mut token));
+            }
+            continue;
+        }
+        if matches!(ch, '|' | '&' | ';') {
+            if !token.is_empty() {
+                tokens.push(std::mem::take(&mut token));
+            }
+            if chars.peek() == Some(&ch) {
+                chars.next();
+                tokens.push(format!("{ch}{ch}"));
+            } else {
+                tokens.push(ch.to_string());
+            }
+            continue;
+        }
+        token.push(ch);
+    }
+    if !token.is_empty() {
+        tokens.push(token);
+    }
+    tokens
+}
+
+fn redirection_target(token: &str, next: Option<&str>) -> Option<(String, bool)> {
+    for operator in ["&>>", "&>", "2>>", "2>", "1>>", "1>", ">>", ">"] {
+        if token == operator {
+            return next.map(|target| (target.to_owned(), true));
+        }
+        if let Some(rest) = token.strip_prefix(operator)
+            && !rest.is_empty()
+        {
+            return Some((rest.to_owned(), false));
+        }
+    }
+    token.rfind('>').and_then(|position| {
+        let target = &token[position + 1..];
+        (!target.is_empty()).then(|| (target.to_owned(), false))
+    })
+}
+
+fn file_redirection_target(target: &str) -> bool {
+    let trimmed = target.trim();
+    !trimmed.is_empty() && !trimmed.starts_with('&')
+}
+
+fn shell_control_token(token: &str) -> bool {
+    matches!(token, "|" | "||" | "&" | "&&" | ";" | ";;")
+}
+
+fn clean_shell_path_token(token: &str) -> String {
+    token
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '"' | '\'' | '`'))
+        .trim_end_matches(|ch: char| matches!(ch, ';' | ','))
+        .to_owned()
+}
+
+fn normalized_relative_path(path: &str) -> Option<String> {
+    let path = clean_shell_path_token(path);
+    if path.is_empty()
+        || path.starts_with('~')
+        || path.starts_with('$')
+        || path.contains("://")
+        || path
+            .chars()
+            .any(|ch| matches!(ch, '*' | '?' | '[' | ']' | '{' | '}'))
+    {
+        return None;
+    }
+    let path = Path::new(&path);
+    if path.is_absolute() {
+        return None;
+    }
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().to_string()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::Prefix(_) | Component::RootDir => return None,
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 fn path_text_is_home_relative(path: &str) -> bool {
@@ -583,6 +757,67 @@ mod tests {
         let err = validate_run_payload_before_approval(&payload).unwrap_err();
         assert!(err.contains("parent-directory escapes"));
         assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_home_relative_command_write_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "printf 'hi\\n' > ~/.tron/workspace/reports/high-risk-test.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "reports/high-risk-test.txt"}]
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("command write targets"));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_undeclared_command_write_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "printf 'hi\\n' > other.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "result.txt"}]
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("command write targets"));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_declared_nested_command_write_is_valid_before_approval() {
+        let payload = json!({
+            "command": "printf 'hi\\n' > reports/high-risk-test.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "reports/high-risk-test.txt"}]
+        });
+
+        assert_eq!(validate_run_payload_before_approval(&payload), Ok(()));
+        assert!(run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_tee_target_must_be_declared() {
+        let payload = json!({
+            "command": "printf 'hi\\n' | tee leaked.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "result.txt"}]
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("command write targets"));
+    }
+
+    #[test]
+    fn sandbox_materialized_declared_tee_pipeline_is_valid_before_approval() {
+        let payload = json!({
+            "command": "printf 'hi\\n' | tee reports/result.txt | wc -c",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [{"path": "reports/result.txt"}]
+        });
+
+        assert_eq!(validate_run_payload_before_approval(&payload), Ok(()));
     }
 
     #[test]

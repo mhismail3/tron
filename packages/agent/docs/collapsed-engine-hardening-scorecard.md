@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **76/100 provisional**
+Current score: **77/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -87,13 +87,13 @@ interruption, and resource failure states.
 | Worker/function/trigger substrate | 14 | 7 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 9 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 10 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
-| Safety, grants, and approvals | 10 | 9 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
+| Safety, grants, and approvals | 10 | 10 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 6 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 3 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **76/100**
+Total: **77/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -221,6 +221,25 @@ verification passed:
 required because SCB-S1 changed ownership boundaries without changing live
 execute behavior. Code modularity and simplification increases to `3/10`, and
 the banked score is now `76/100`.
+
+Resolved checkpoint note, 2026-05-29: the RWO-N14 P5 Google replay follow-up
+exposed and fixed a process sandbox command-output boundary. The failed
+simulator session `sess_019e74d4-7e0a-7c72-81e7-cb7e15c26be6` had approved
+`process::run` commands whose shell redirections targeted
+`~/.tron/workspace/reports/high-risk-test.txt` or an undeclared/nested path,
+which left the command outside the declared expected-output boundary or failed
+after approval. The root fix rejects sandbox-materialized redirection/`tee`
+targets that are not declared relative `expectedOutputs`, prepares declared
+nested output parent directories inside the isolated sandbox, and overrides
+sandbox `HOME`/`TMPDIR` before command spawn. The Google-only P5 harness passed
+on rebuilt dev server PID `57422` in
+`sess_019e7523-4c24-7b02-9ff7-08b896c05c74`, and a direct exact-payload probe
+in `sess_019e7523-ffb5-7601-acdf-8bf36461824a` returned
+`target_policy_rejected` with `approvalCreated=false`,
+`childInvocationCreated=false`, zero approval rows, zero `process::run` child
+rows, and no host leak at `~/.tron/workspace/reports/exact-home-leak-*.txt`.
+Safety, grants, and approvals increases to `10/10`, and the banked score is now
+`77/100`. The next active hardening target remains SCB-S1b.
 
 ## Scoring Rules
 
@@ -351,6 +370,7 @@ do not let screenshot state override the engine ledger.
 | RWO-N12 | Approval and grant boundary | passed_after_fix | +2 | failed direct policy probe: `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0`; approval session: `sess_019e73fd-ba7a-7521-bbdf-6dca81b5855c`; direct retest: `sess_019e7410-98a1-7472-a8b8-475bc8229055` | See 2026-05-29 RWO-N12 result note below. The live approval-flow session used 3 `capability::execute` rows, 2 approval records, 3 `approval::resolve` rows, 1 `process::run` child, 1 `materialized_file::update`, 3 `resource::create`, 2 completed prompt queue drains, 0 failed invocations, and 0 `compact.*` events. The direct retest used 3 `capability::execute`, 3 `approval::resolve`, 1 `process::run`, 1 `materialized_file::update`, 1 `resource::create`, 6 `engine::invoke`, 2 approval records, 8 stream rows, 0 failed invocations, and 0 `compact.*` events. Denial created approval `019e7410-996b-7431-afa9-f9e3da8e5c9c`, no child, and no target refs; approval created approval `019e7410-9b17-7673-b14c-c55da8e669c2`, child `019e7410-9b42-7ab0-a09f-73660aff8cad`, materialized file `materialized_file:2d5d7cc3d635bdaed7de5dd104b243c4e8640b393b8c1b4f1345093ebfe555f0`, and output `res_019e7410-9b4d-7fa1-93da-67dd1c38cda3`; replay execute `019e7410-9c24-71d0-b87c-ac8216df447a` reported `approvalReplayed=true` and `childInvocationCreated=false`. | `execute_resolution`: public `/engine` direct `capability::execute` used transport/client audit scopes but did not project active-profile execution policy scopes/runtime metadata, so direct execute failed with `CAPABILITY_DENIED` before approval. The root fix derives execute policy on the server from the active profile and rejects client-authored `contract.*`, `implementation.*`, `plugin.*`, and `capability.*` policy context. | `704fb8041` | Passed after rebuilt dev server PID 7070 with simulator booted. DB evidence proves policy scopes stayed server-owned, the denied mutation created no `process::run` child or target refs, the approved mutation created exactly one child and resource chain, duplicate approval resolve replayed, and direct public execute no longer requires client-supplied policy. |
 | RWO-N13 | Runtime resilience | passed | +1 | runtime pass: `sess_019e7422-7fb7-7423-a63c-16c473d6917e`; unscored harness attempt: `sess_019e741e-8b87-7f72-94f7-b98b3be63eb3` | See 2026-05-29 RWO-N13 result note below. Runtime log `/tmp/rwo_n13_runtime_run_20260529072756.json` and approval-pause log `/tmp/rwo_n13_approval_pause_run_20260529073320.json` reconstruct the scenario. Baseline prompt used `agent::prompt`, a completed `agent::prompt_queue_drain`, `filesystem::read_file`, and `process::run`; `./scripts/tron dev -bdt` moved PID `81779` to `47488` and passed the configured dev tests. The long read-only process acquired lease cursor `80311`, was interrupted by `./scripts/tron dev -d` moving PID `47488` to `48287`, persisted child `019e7424-1af7-7f91-9f27-d75c64927fb7` with exitCode `-1`, released lease `019e7424-1af7-7f91-9f27-d7682abb77bf`, and recorded compensation `019e7424-1e4e-76b2-a31c-fc97ad20efef`. Post-reconnect `process::run` child `019e7424-558d-7d51-b3d9-59df726a0642` exited `0`. Approval `019e7427-6989-7d90-829e-89f5d0689c07` stayed pending across `./scripts/tron dev -d` moving PID `48287` to `49356`, then executed child `019e7427-96ad-76d1-bf34-658c13775af3`, materialized file `materialized_file:10068ee46d1ca50c3c732f08a867d15e361ae22cc6c46e6ef492721428e67920`, and output `res_019e7427-96c5-7553-a106-bae7e50dbd4c`. No scenario idempotency key duplicated; only internal `engine::invoke` rows have blank idempotency keys. There were 0 failed invocations, 0 `compact.*` events, no session-scoped logs, and stream topics included `agent.runtime`, `events.session`, `queue.lifecycle`, `approvals`, `resource.leases`, and `compensation.records`. | none; first harness attempt waited for a `process::run` invocation row before completion even though active process truth is exposed through `resource.leases`. Simulator URL deep-link screenshots stopped at the iOS "Open in Tron?" confirmation, but the dashboard remained mounted/not onboarding and DB/session-stream reconstruction proved continuity. | n/a | Passed on the real dev server with the iOS simulator booted. Exact retest used the corrected lease-based harness, proved interrupted invocation visibility, approval-pause survival, queue/idempotency correctness, and successful post-reconnect execution. |
 | RWO-N14 | Provider full parity | partial_p6_major_providers_passed | +10 | clean P1 run: Anthropic `sess_019e7433-bd1f-79f0-8d6f-e037f2d07448`, OpenAI Codex `sess_019e7433-de30-7d51-8022-b15d5fc95b62`, Gemini `sess_019e7433-fb83-74e1-973b-281c617ca83b`, Ollama failed `sess_019e7434-10b9-7c73-8d44-e43af8017059`; wire-shape retest still failed `sess_019e743c-e359-7ea0-aa4d-42d7de3852d1`; final Ollama P1 retest passed `sess_019e7441-5e8b-7d91-8c14-b4352d6e1887`; clean P2 run: Anthropic `sess_019e7447-d814-7d02-b90d-a8dbc5998d6e`, OpenAI Codex `sess_019e7447-fda8-71e0-a427-99d9d9dd868d`, Gemini `sess_019e7448-1b59-74c3-b655-38b574ca2aee`, Ollama `sess_019e7448-34cd-7171-bab4-2e643ffec97e`; P3 failure: Ollama `sess_019e7450-983c-7033-8965-85f8daab139c`; clean P3 retest: Anthropic `sess_019e7466-2bd2-7d72-b17d-37ca53fe0993`, OpenAI Codex `sess_019e7466-58e5-7360-b0f5-1507d6e7d3c9`, Gemini `sess_019e7466-71ed-7bf3-a5b3-b425f9c41dc1`, Ollama `sess_019e7466-82f0-7e02-830e-5989c1bb896c`; clean P4 retest: Anthropic `sess_019e749e-8539-7591-a146-5ee38152b03a`, OpenAI Codex `sess_019e749f-2500-7240-a1b9-9b3295bdb853`, Gemini `sess_019e749f-a5b4-7471-b129-91d2ef9ce105`, Ollama `sess_019e749f-e321-7451-8392-1f742fd840d4`; P4 failed-card follow-up rerun: Anthropic `sess_019e74b7-b9bc-7de0-9c59-8cab92fffd77`, OpenAI Codex `sess_019e74b8-127f-72d2-865c-99de12e8ed1b`, Gemini `sess_019e74b8-4ff2-76c1-92d6-cae741f593f4`, Ollama/Gemma inconclusive `sess_019e74b8-7d7f-7400-94c7-8de99d917761`; P5 matrix: Anthropic `sess_019e74e3-09ae-7233-b27b-963573a4399a`, OpenAI Codex `sess_019e74e3-d6ad-7001-9685-fa398767de76`, Gemini `sess_019e74e4-4510-7393-a33a-b2626efe7a9a`, Ollama/Gemma inconclusive `sess_019e74e4-97b5-71c2-93f2-edac82506664`; P6 matrix: Anthropic `sess_019e74f0-095c-7c73-8151-fa3b33f1d729`, OpenAI Codex `sess_019e74f5-42c5-7443-9814-e9cc231a105f`, Gemini `sess_019e74f6-c0dc-7931-a7e9-f4c55d357464`, Ollama/Gemma inconclusive `sess_019e74f7-35dd-7ce2-8e26-07b64d919aef` | See 2026-05-29 RWO-N14 P1, P2, P3, P4, P4 follow-up, P5, and P6 result notes below. The P4 follow-up rerun used real dev server PID `10586`, run log `/tmp/rwo_n14_p4_provider_parity_20260529101057.json`, final simulator screenshots under `/tmp/rwo_n14_p4_*_final_simulator_20260529101057.png`, zero failed invocations, zero `compact.*` events, and zero `isError=true` capability completions. Anthropic, OpenAI Codex, and Gemini each created one executed `process::run` approval, one successful sandbox-materialized process child, materialized-file refs, execution-output refs, completed prompt queue drains, and no session/trace logs. Ollama/Gemma returned a non-error `needs_input` execute result without creating an approval or child. P5 then passed for Anthropic, OpenAI Codex, and Gemini on real dev server PID `36012` with run log `/tmp/rwo_n14_p5_provider_parity_20260529105816.json`: each provider had one setup approval, one setup `process::run` child, one P5 `capability::execute`, `approvalReplayed=true`, `childInvocationCreated=false`, zero new approvals, zero new process children, zero failed invocations, zero `compact.*` events, and completed queue drains. Ollama/Gemma made no setup execute call and remains inconclusive without engine failure. P6 then passed for Anthropic, OpenAI Codex, and Gemini on real dev server PID `36012` with run logs `/tmp/rwo_n14_p6_provider_parity_20260529111228.json` and `/tmp/rwo_n14_p6_provider_parity_20260529111810.json`: each provider used only `capability::execute` over filesystem inspection targets, cited inspected repo files, listed used capabilities, completed queue drains, and recorded zero failed invocations, zero approvals, and zero `compact.*` events. Ollama/Gemma used the same substrate without failures but cited only one file and did not satisfy the final answer contract. | Primary P1 `model_guidance`: execute text output appeared after metadata, and local Ollama reported a generic success sentence instead of the exact line. Provider-boundary cleanup also fixed stale outbound Ollama native field names and removed the inbound compatibility alias. P2 had no failure. Primary P3 `schema_or_recipe`: `process::run` did not express non-empty command in schema, the target guard allowed blank commands, and execute did not classify null required fields as missing input. Primary P4 `model_guidance`: approval-gated write commands were under-taught and could target `filesystem::write_file` or `approval::request` instead of `process::run`. Primary P4 `target_capability`: sandbox expected output paths were validated too late and allowed absolute or home-relative host paths to fail only after approval. P4 harness `observability_gap`: simulator collection returned after an early turn end while a later approval was still pending. P4 follow-up fixed primary `grant_or_approval` and execute preflight classification: approval idempotency was globally scoped, and repairable sandbox path mistakes were projected as failed cards instead of `needs_input`. P5 fixed `context_reconstruction`: persisted capability completion events now preserve model-facing execute observations separately from display text, so later turns see approval replay metadata from DB reconstruction. P5 also fixed `model_guidance`: approved execute results expose the effective replay idempotency key in top-level details, approval state/replay metadata, and model-facing replay hints. Derived execute keys now use `capability-execute:v2:<128-bit-hex>` to reduce model transcription errors while preserving deterministic engine-owned replay. The remaining Ollama/Gemma P5 and P6 results are `provider_runner`/small-local-model capability limits, not engine substrate failures. | P1 fix `9616a9b64`; P2 n/a; P3 fix `8da05af18`; P4 fix `ea6806937`; P4 failed-card follow-up `97d66318c`; P5 `c49c14664`; P6 n/a | P4 passed on rebuilt dev server PID `99393`; the failed-card follow-up rerun on PID `10586` verified no `isError=true` execute completions. P5 and P6 passed on rebuilt dev server PID `36012` for Anthropic, OpenAI Codex, and Gemini; later local-provider parity should try a larger Ollama model before treating Gemma 4 E4B as substrate evidence. RWO-N14 is complete for major-provider parity and the next active hardening target is structural cleanup. |
+| RWO-N14-F1 | Process sandbox command-output boundary follow-up | passed_after_fix | +1 | failed simulator session `sess_019e74d4-7e0a-7c72-81e7-cb7e15c26be6`; Google retest `sess_019e7523-4c24-7b02-9ff7-08b896c05c74`; direct exact-payload probe `sess_019e7523-ffb5-7601-acdf-8bf36461824a` | Google P5 retest on rebuilt dev server PID `57422` used run log `/tmp/rwo_n14_p5_provider_parity_20260529120827.json`, final simulator screenshot `/tmp/rwo_n14_p5_google_final_simulator_20260529120827.png`, one executed `process::run` approval, one setup `process::run` child, one replay `capability::execute`, `approvalReplayed=true`, `childInvocationCreated=false`, zero new approvals, zero new process children, zero failed invocations, and zero `compact.*` events. Direct exact-payload probe returned `target_policy_rejected` with `approvalCreated=false`, `childInvocationCreated=false`, zero approval rows, zero `process::run` child rows, and no host leak at `~/.tron/workspace/reports/exact-home-leak-20260529120914.txt`. | `target_capability` / `process_sandbox`: sandbox-materialized command write targets were not bounded to declared relative expected outputs before approval, nested expected-output parents were not prepared inside the sandbox, and sandbox commands inherited host `HOME`/`TMPDIR`. | this checkpoint | Passed `cargo test sandbox_materialized --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, `git diff --check`, Google simulator-backed P5 retest, and direct exact-payload live probe. |
 | SCB-S1 | `capability::execute` ownership decomposition audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_arguments.rs` now owns target argument affordances; `threat_model_invariants` rejects target-specific affordance function bodies in `execute.rs`; focused unit tests passed for intent argument normalization and deterministic routing. | Code modularity: target-specific argument normalization and intent/resource/path affordances lived in the central execute orchestrator. | this checkpoint | Passed `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
 
 ## Scenario Details
@@ -2205,11 +2225,76 @@ Use only execute. Inspect this repo enough to summarize the worker/function/trig
   parity. The remaining local-provider gap should be retried with a larger
   Ollama model before treating it as substrate evidence.
 
+2026-05-29 process sandbox command-output boundary follow-up:
+
+- Trigger: the later Google P5 simulator session
+  `sess_019e74d4-7e0a-7c72-81e7-cb7e15c26be6` exposed two failed
+  approval-gated `process::run` children for the high-risk write setup:
+  `019e74d4-98f7-7132-be21-8a938a0024f0` attempted to write
+  `~/.tron/workspace/reports/high-risk-test.txt` while declaring
+  `reports/high-risk-test.txt`, and
+  `019e74d4-a8d8-7ec0-8211-f16172c7e334` attempted
+  `reports/high-risk-test.txt` before the nested parent existed in the sandbox.
+- Root cause: `sandbox_materialized` bounded declared `expectedOutputs` paths
+  but did not preflight shell redirection/`tee` write targets against those
+  declarations, did not prepare nested expected-output parent directories inside
+  the sandbox, and inherited host `HOME`/`TMPDIR`, so a home-relative shell
+  expansion could target host state before materialization.
+- Fix: `process::run` now rejects sandbox-materialized command redirection and
+  `tee` targets unless they normalize to one of the declared relative
+  `expectedOutputs[].path` values; rejects absolute, home-relative,
+  shell-expanded, parent-escaping, globbed, and undeclared command output
+  targets before approval; prepares declared nested output parent directories
+  inside the sandbox; and applies sandbox-local `HOME`/`TMPDIR` after any
+  caller-provided env.
+- Focused coverage added:
+  `sandbox_materialized_home_relative_command_write_is_invalid_before_approval`,
+  `sandbox_materialized_undeclared_command_write_is_invalid_before_approval`,
+  `sandbox_materialized_declared_nested_command_write_is_valid_before_approval`,
+  `sandbox_materialized_tee_target_must_be_declared`,
+  `sandbox_materialized_declared_tee_pipeline_is_valid_before_approval`,
+  `sandbox_materialized_nested_output_parent_is_prepared_inside_sandbox`, and
+  `sandbox_materialized_home_relative_command_write_rejects_before_spawn`.
+  `threat_model_invariants` now statically requires the command-write-target
+  preflight and nested-output parent preparation gates to remain in place.
+- Exact live retest:
+  - Google-only P5 harness
+    `/tmp/rwo_n14_p5_provider_parity_20260529120827.json` passed on rebuilt dev
+    server PID `57422` with final simulator screenshot
+    `/tmp/rwo_n14_p5_google_final_simulator_20260529120827.png`. Session
+    `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` created approval
+    `019e7523-6873-7393-84a4-d924d3eeb530`, process child
+    `019e7523-6aee-7511-a5d2-b0e0d54acbfe`, materialized file
+    `materialized_file:ad853ffabe8a2798c146979cf62bcc168001220160ca6b5c922ad842efd2b76e`,
+    and execution output `res_019e7523-6b07-7181-b760-1d7d6b06247a`; the replay
+    observed `approvalReplayed=true`, `childInvocationCreated=false`, zero new
+    approvals, zero new process children, zero failed invocations, zero
+    `compact.*` events, and completed queue drains.
+  - Direct exact-payload probe
+    `sess_019e7523-ffb5-7601-acdf-8bf36461824a` submitted the previously bad
+    home-relative shape:
+    `printf 'This is a high-risk test file.\n' > ~/.tron/workspace/reports/exact-home-leak-20260529120914.txt`
+    with declared expected output
+    `reports/exact-home-leak-20260529120914.txt`. `capability::execute`
+    `019e7524-0035-78d3-9847-af7fd5a5d13e` returned
+    `target_policy_rejected`, `approvalCreated=false`,
+    `childInvocationCreated=false`, no approval rows, no `process::run` child,
+    no failed invocation rows, no `compact.*` events, and no file at
+    `/Users/moose/.tron/workspace/reports/exact-home-leak-20260529120914.txt`.
+- Score impact: Safety, grants, and approvals reaches `10/10`; current score
+  increases to `77/100`. Broad testing remains focused on SCB-S1b structural
+  decomposition before the deferred simulator/chat parity work.
+
 Deferred simulator/chat parity follow-up:
 
 - Formalize the simulator deep-link harness process so future scorecard tests
   can reproducibly open `tron://session/<session_id>`, wait for terminal DB
   state, and capture final screenshots after engine truth settles.
+- Formalize the RWO-N14 P4/P5 harness vocabulary and procedure. In this
+  scorecard, a "P5 harness" means the provider-parity harness that first seeds
+  an approval-gated `process::run`, resolves the approval through engine truth,
+  then replays the approved top-level execute idempotency key and verifies that
+  no new approval or child process is created.
 - Add a focused simulator parity test for deep-linked prompt submissions: the
   user prompt must appear in the chat transcript with the same ordering and
   state as `message.user`/`agent::prompt` DB truth.
@@ -2229,6 +2314,9 @@ Deferred simulator/chat parity follow-up:
 - These are tracked as `ios_rendering`/`stream_or_state` parity work after the
   core engine hardening gates; DB truth remains the canonical classifier for
   current scorecard scenarios.
+- Do not classify Gemma 4 E4B Ollama shortfalls as collapsed-substrate failures
+  until the same local-provider scenario has been retried with a larger local
+  model and canonical DB evidence.
 
 ## Structural Cleanup Backlog
 
