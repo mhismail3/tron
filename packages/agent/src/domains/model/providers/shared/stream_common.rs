@@ -10,6 +10,9 @@
 
 use serde_json::Map;
 
+use crate::domains::model::provider_protocol::{
+    CapabilityCallContext, parse_capability_call_arguments,
+};
 use crate::shared::events::StreamEvent;
 use crate::shared::messages::CapabilityInvocationDraft;
 
@@ -172,6 +175,17 @@ impl StreamAccumulator {
     ///
     /// Returns the events and removes the capability invocation from the active set.
     pub fn finish_capability_invocation(&mut self, id: &str) -> Vec<StreamEvent> {
+        self.finish_capability_invocation_with_provider(id, None)
+    }
+
+    /// Finish a capability invocation by ID with provider context for parse diagnostics.
+    ///
+    /// Returns the events and removes the capability invocation from the active set.
+    pub fn finish_capability_invocation_with_provider(
+        &mut self,
+        id: &str,
+        provider: Option<&str>,
+    ) -> Vec<StreamEvent> {
         let pos = self
             .capability_invocations
             .iter()
@@ -180,23 +194,20 @@ impl StreamAccumulator {
             return vec![];
         };
         let tc = self.capability_invocations.remove(idx);
-        // INVARIANT: a provider never emits partial JSON on a capability invocation —
-        // parse failures here indicate an upstream bug (stream chunk lost,
-        // wire corruption, or a provider quirk). Log so the operator has
-        // a signal; downstream still tries the tool with empty args.
-        let arguments: Map<String, serde_json::Value> = match serde_json::from_str(&tc.args) {
-            Ok(m) => m,
-            Err(error) => {
-                tracing::warn!(
-                    invocation_id = %tc.id,
-                    model_primitive_name = %tc.name,
-                    error = %error,
-                    raw_args_len = tc.args.len(),
-                    "capability_invocation args are not valid JSON — dispatching with empty args"
-                );
-                Map::new()
-            }
+        let ctx = CapabilityCallContext {
+            invocation_id: Some(tc.id.clone()),
+            model_primitive_name: Some(tc.name.clone()),
+            provider: provider.map(str::to_owned),
         };
+        let arguments: Map<String, serde_json::Value> =
+            match parse_capability_call_arguments(Some(&tc.args), Some(&ctx)) {
+                Ok(arguments) => arguments,
+                Err(error) => {
+                    return vec![StreamEvent::Error {
+                        error: error.to_string(),
+                    }];
+                }
+            };
         let capability_invocation = CapabilityInvocationDraft::new(tc.id, tc.name, arguments);
         vec![StreamEvent::CapabilityInvocationDraftEnd {
             capability_invocation,
@@ -511,6 +522,22 @@ mod tests {
                 assert!(capability_invocation.arguments.is_empty());
             }
             _ => panic!("expected CapabilityInvocationDraftEnd"),
+        }
+    }
+
+    #[test]
+    fn finish_capability_invocation_malformed_args_emits_error() {
+        let mut acc = StreamAccumulator::new();
+        let _ = acc.start_capability_invocation("call_1".into(), "execute".into());
+        let _ = acc.append_tool_args("call_1", "not json");
+        let events = acc.finish_capability_invocation_with_provider("call_1", Some("anthropic"));
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            StreamEvent::Error { error } => {
+                assert!(error.contains("anthropic capability invocation arguments"));
+                assert!(error.contains("malformed JSON"));
+            }
+            _ => panic!("expected Error"),
         }
     }
 

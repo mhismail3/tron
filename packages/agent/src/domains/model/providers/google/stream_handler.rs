@@ -10,6 +10,9 @@
 
 use std::collections::HashSet;
 
+use crate::domains::model::provider_protocol::{
+    CapabilityCallContext, parse_capability_call_arguments,
+};
 use crate::domains::model::providers::stream_common::StreamAccumulator;
 use crate::shared::content::AssistantContent;
 use crate::shared::events::{AssistantMessage, StreamEvent};
@@ -172,12 +175,20 @@ fn process_function_call(
     state.capability_invocation_index += 1;
 
     let args_str = serde_json::to_string(&fc.args).unwrap_or_else(|_| "{}".into());
-
-    // Parse args into Map<String, Value>
-    let arguments: Map<String, serde_json::Value> = match &fc.args {
-        serde_json::Value::Object(map) => map.clone(),
-        _ => Map::new(),
+    let ctx = CapabilityCallContext {
+        invocation_id: Some(id.clone()),
+        model_primitive_name: Some(fc.name.clone()),
+        provider: Some("google".into()),
     };
+    let arguments: Map<String, serde_json::Value> =
+        match parse_capability_call_arguments(Some(&args_str), Some(&ctx)) {
+            Ok(arguments) => arguments,
+            Err(error) => {
+                return vec![StreamEvent::Error {
+                    error: error.to_string(),
+                }];
+            }
+        };
 
     events.push(StreamEvent::CapabilityInvocationDraftStart {
         invocation_id: id.clone(),
@@ -522,6 +533,25 @@ mod tests {
             matches!(&events[2], StreamEvent::CapabilityInvocationDraftEnd { capability_invocation } if capability_invocation.thought_signature.as_deref() == Some("sig-123"))
         );
         assert_eq!(state.capability_invocations.len(), 1);
+    }
+
+    #[test]
+    fn non_object_function_call_arguments_fail_closed() {
+        let mut state = create_stream_state();
+        let fc = FunctionCallData {
+            name: "execute".into(),
+            args: serde_json::json!(["not", "an", "object"]),
+        };
+        let events = process_function_call(&fc, None, &mut state);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            StreamEvent::Error { error } => {
+                assert!(error.contains("google capability invocation arguments"));
+                assert!(error.contains("received array"));
+            }
+            _ => panic!("expected Error"),
+        }
+        assert!(state.capability_invocations.is_empty());
     }
 
     #[test]

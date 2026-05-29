@@ -6,6 +6,9 @@
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+use crate::domains::model::provider_protocol::{
+    CapabilityCallContext, parse_capability_call_arguments,
+};
 use crate::shared::content::AssistantContent;
 use crate::shared::events::StreamEvent;
 use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
@@ -98,6 +101,8 @@ pub struct KimiStreamState {
     usage: Option<TokenUsage>,
     /// Stop reason.
     stop_reason: Option<String>,
+    /// Whether malformed provider arguments have made the stream terminal.
+    failed: bool,
     /// Accumulated content blocks for the final Done message.
     content_blocks: Vec<AssistantContent>,
 }
@@ -113,6 +118,7 @@ impl KimiStreamState {
             active_capabilities: Vec::new(),
             usage: None,
             stop_reason: None,
+            failed: false,
             content_blocks: Vec::new(),
         }
     }
@@ -254,12 +260,20 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
     }
 
     // If this is the final chunk (has usage but no choices), emit Done
-    if chunk.choices.is_empty() && state.usage.is_some() && state.stop_reason.is_some() {
+    if !state.failed
+        && chunk.choices.is_empty()
+        && state.usage.is_some()
+        && state.stop_reason.is_some()
+    {
         emit_done(state, &mut events);
     }
 
     // If we got finish_reason and usage in the same chunk
-    if state.stop_reason.is_some() && state.usage.is_some() && !chunk.choices.is_empty() {
+    if !state.failed
+        && state.stop_reason.is_some()
+        && state.usage.is_some()
+        && !chunk.choices.is_empty()
+    {
         emit_done(state, &mut events);
     }
 
@@ -304,8 +318,22 @@ fn finalize_open_blocks(state: &mut KimiStreamState, events: &mut Vec<StreamEven
     // End any open capability invocations
     for slot in &mut state.active_capabilities {
         if let Some(active) = slot.take() {
+            let ctx = CapabilityCallContext {
+                invocation_id: Some(active.id.clone()),
+                model_primitive_name: Some(active.name.clone()),
+                provider: Some("kimi".into()),
+            };
             let arguments: Map<String, Value> =
-                serde_json::from_str(&active.arguments).unwrap_or_default();
+                match parse_capability_call_arguments(Some(&active.arguments), Some(&ctx)) {
+                    Ok(arguments) => arguments,
+                    Err(error) => {
+                        state.failed = true;
+                        events.push(StreamEvent::Error {
+                            error: error.to_string(),
+                        });
+                        continue;
+                    }
+                };
             state
                 .content_blocks
                 .push(AssistantContent::CapabilityInvocation {
@@ -771,6 +799,63 @@ mod tests {
             assert_eq!(capability_invocation.name, "execute");
             assert_eq!(capability_invocation.arguments["cmd"], "ls");
         }
+    }
+
+    #[test]
+    fn malformed_capability_invocation_arguments_fail_closed() {
+        let mut state = KimiStreamState::new();
+
+        let chunk1 = ChatCompletionChunk {
+            choices: vec![ChunkChoice {
+                delta: ChunkDelta {
+                    content: None,
+                    reasoning_content: None,
+                    capability_invocations: Some(vec![ChunkCapabilityInvocationDraft {
+                        index: 0,
+                        id: Some("call_bad".into()),
+                        function: Some(ChunkCapabilityInvocationDraftFunction {
+                            name: Some("execute".into()),
+                            arguments: Some("not json".into()),
+                        }),
+                    }]),
+                },
+                finish_reason: None,
+            }],
+            usage: None,
+        };
+        let _ = process_chunk(&chunk1, &mut state);
+
+        let chunk2 = ChatCompletionChunk {
+            choices: vec![ChunkChoice {
+                delta: ChunkDelta {
+                    content: None,
+                    reasoning_content: None,
+                    capability_invocations: None,
+                },
+                finish_reason: Some("capability_invocations".into()),
+            }],
+            usage: Some(ChunkUsage {
+                prompt_tokens: 100,
+                completion_tokens: 50,
+            }),
+        };
+        let events = process_chunk(&chunk2, &mut state);
+
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("kimi capability invocation arguments") && error.contains("malformed JSON")))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::CapabilityInvocationDraftEnd { .. }))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::Done { .. }))
+        );
     }
 
     #[test]

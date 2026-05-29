@@ -12,15 +12,17 @@
 //!
 //! Delegates text/thinking delta accumulation to [`StreamAccumulator`] from the
 //! shared `stream_common` module. OpenAI-specific reasoning dedup and capability invocation
-//! handling (HashMap-based, with `parse_capability_call_arguments`) stays here.
+//! handling (HashMap-based, with fail-closed provider argument parsing) stays here.
 
 use std::collections::{HashMap, HashSet};
 
 use crate::domains::model::providers::stream_common::StreamAccumulator;
-use crate::domains::model::providers::{CapabilityCallContext, parse_capability_call_arguments};
+use crate::domains::model::providers::{
+    CapabilityArgumentParseError, CapabilityCallContext, parse_capability_call_arguments,
+};
 use crate::shared::content::AssistantContent;
 use crate::shared::events::{AssistantMessage, StreamEvent};
-use crate::shared::messages::TokenUsage;
+use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
 use tracing::debug;
 
 use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
@@ -32,6 +34,8 @@ pub struct StreamState {
     pub acc: StreamAccumulator,
     /// Capability invocations by `call_id` → (id, name, `accumulated_args`).
     pub capability_invocations: HashMap<String, CapabilityInvocationDraftState>,
+    /// Whether a provider argument parse error has already made the stream terminal.
+    pub capability_argument_failed: bool,
     /// Deduplication set for reasoning text.
     pub seen_thinking_texts: HashSet<String>,
     /// Whether we received full reasoning text (vs only summary).
@@ -55,6 +59,7 @@ pub fn create_stream_state() -> StreamState {
     StreamState {
         acc: StreamAccumulator::new(),
         capability_invocations: HashMap::new(),
+        capability_argument_failed: false,
         seen_thinking_texts: HashSet::new(),
         has_reasoning_text: false,
     }
@@ -230,10 +235,19 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
     };
     if item.item_type == OutputItemType::FunctionCall {
         merge_function_call_item(item, state);
-        if let Some(capability_invocation) = capability_invocation_from_item_state(item, state) {
-            events.push(StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation,
-            });
+        match capability_invocation_from_item_state(item, state) {
+            Ok(Some(capability_invocation)) => {
+                events.push(StreamEvent::CapabilityInvocationDraftEnd {
+                    capability_invocation,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => {
+                state.capability_argument_failed = true;
+                events.push(StreamEvent::Error {
+                    error: error.to_string(),
+                });
+            }
         }
         return events;
     }
@@ -266,22 +280,22 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
 fn capability_invocation_from_item_state(
     item: &super::types::ResponsesOutputItem,
     state: &StreamState,
-) -> Option<crate::shared::messages::CapabilityInvocationDraft> {
-    let call_id = item.call_id.as_ref()?;
-    let tc = state.capability_invocations.get(call_id.as_str())?;
-    if tc.id.is_empty() || tc.name.is_empty() {
-        return None;
-    }
-    let ctx = CapabilityCallContext {
-        invocation_id: Some(tc.id.clone()),
-        model_primitive_name: Some(tc.name.clone()),
-        provider: Some("openai".into()),
+) -> Result<Option<CapabilityInvocationDraft>, CapabilityArgumentParseError> {
+    let Some(call_id) = item.call_id.as_ref() else {
+        return Ok(None);
     };
-    Some(crate::shared::messages::CapabilityInvocationDraft::new(
+    let Some(tc) = state.capability_invocations.get(call_id.as_str()) else {
+        return Ok(None);
+    };
+    if tc.id.is_empty() || tc.name.is_empty() {
+        return Ok(None);
+    }
+    let arguments = parse_openai_capability_arguments(tc)?;
+    Ok(Some(CapabilityInvocationDraft::new(
         tc.id.clone(),
         tc.name.clone(),
-        parse_capability_call_arguments(Some(&tc.args), Some(&ctx)),
-    ))
+        arguments,
+    )))
 }
 
 /// Process the `response.completed` event and emit final events.
@@ -312,24 +326,30 @@ fn process_completed_response(
     // Emit toolcall_end for each capability invocation
     for tc in state.capability_invocations.values() {
         if !tc.id.is_empty() && !tc.name.is_empty() {
-            let ctx = CapabilityCallContext {
-                invocation_id: Some(tc.id.clone()),
-                model_primitive_name: Some(tc.name.clone()),
-                provider: Some("openai".into()),
-            };
-            let arguments = parse_capability_call_arguments(Some(&tc.args), Some(&ctx));
-            events.push(StreamEvent::CapabilityInvocationDraftEnd {
-                capability_invocation: crate::shared::messages::CapabilityInvocationDraft::new(
-                    tc.id.clone(),
-                    tc.name.clone(),
-                    arguments.clone(),
-                ),
-            });
+            match parse_openai_capability_arguments(tc) {
+                Ok(arguments) => {
+                    events.push(StreamEvent::CapabilityInvocationDraftEnd {
+                        capability_invocation: CapabilityInvocationDraft::new(
+                            tc.id.clone(),
+                            tc.name.clone(),
+                            arguments,
+                        ),
+                    });
+                }
+                Err(error) => {
+                    state.capability_argument_failed = true;
+                    events.push(StreamEvent::Error {
+                        error: error.to_string(),
+                    });
+                }
+            }
         }
     }
 
     // Build final done event
-    events.push(build_done_event(state));
+    if !state.capability_argument_failed {
+        events.push(build_done_event(state));
+    }
 
     events
 }
@@ -423,6 +443,7 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
 /// Build the final `Done` event with the complete message.
 fn build_done_event(state: &StreamState) -> StreamEvent {
     let mut content: Vec<AssistantContent> = Vec::new();
+    let mut has_valid_capability_invocation = false;
 
     if !state.acc.accumulated_thinking.is_empty() {
         content.push(AssistantContent::Thinking {
@@ -437,25 +458,22 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
 
     for tc in state.capability_invocations.values() {
         if !tc.id.is_empty() && !tc.name.is_empty() {
-            let ctx = CapabilityCallContext {
-                invocation_id: Some(tc.id.clone()),
-                model_primitive_name: Some(tc.name.clone()),
-                provider: Some("openai".into()),
-            };
-            let arguments = parse_capability_call_arguments(Some(&tc.args), Some(&ctx));
-            content.push(AssistantContent::CapabilityInvocation {
-                id: tc.id.clone(),
-                name: tc.name.clone(),
-                arguments,
-                thought_signature: None,
-            });
+            if let Ok(arguments) = parse_openai_capability_arguments(tc) {
+                has_valid_capability_invocation = true;
+                content.push(AssistantContent::CapabilityInvocation {
+                    id: tc.id.clone(),
+                    name: tc.name.clone(),
+                    arguments,
+                    thought_signature: None,
+                });
+            }
         }
     }
 
-    let stop_reason = if state.capability_invocations.is_empty() {
-        "end_turn"
-    } else {
+    let stop_reason = if has_valid_capability_invocation {
         "capability_invocation"
+    } else {
+        "end_turn"
     };
 
     StreamEvent::Done {
@@ -470,6 +488,17 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
         },
         stop_reason: stop_reason.into(),
     }
+}
+
+fn parse_openai_capability_arguments(
+    tc: &CapabilityInvocationDraftState,
+) -> Result<serde_json::Map<String, serde_json::Value>, CapabilityArgumentParseError> {
+    let ctx = CapabilityCallContext {
+        invocation_id: Some(tc.id.clone()),
+        model_primitive_name: Some(tc.name.clone()),
+        provider: Some("openai".into()),
+    };
+    parse_capability_call_arguments(Some(&tc.args), Some(&ctx))
 }
 
 // =============================================================================
@@ -561,6 +590,7 @@ mod tests {
         assert_eq!(state.acc.output_tokens, 0);
         assert!(!state.acc.text_started);
         assert!(!state.acc.thinking_started);
+        assert!(!state.capability_argument_failed);
     }
 
     // ── Text streaming ─────────────────────────────────────────────
@@ -915,6 +945,39 @@ mod tests {
     }
 
     #[test]
+    fn output_item_done_with_malformed_arguments_fails_closed() {
+        let mut state = create_stream_state();
+        let _ = process_stream_event(
+            &function_call_added_event("call_bad", "process::run"),
+            &mut state,
+        );
+
+        let event = ResponsesSseEvent {
+            event_type: SseEventType::OutputItemDone,
+            item: Some(ResponsesOutputItem {
+                item_type: OutputItemType::FunctionCall,
+                call_id: Some("call_bad".into()),
+                name: Some("process::run".into()),
+                arguments: Some("not json".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let events = process_stream_event(&event, &mut state);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("malformed JSON") && error.contains("call_bad")))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::CapabilityInvocationDraftEnd { .. }))
+        );
+    }
+
+    #[test]
     fn completed_with_thinking_emits_thinking_end_before_done() {
         let mut state = create_stream_state();
         state.acc.thinking_started = true;
@@ -958,6 +1021,41 @@ mod tests {
         if let Some(StreamEvent::Done { message, .. }) = done {
             assert_eq!(message.content.len(), 2);
         }
+    }
+
+    #[test]
+    fn completed_malformed_function_call_arguments_emit_error_without_invocation() {
+        let mut state = create_stream_state();
+        let event = completed_event(
+            vec![ResponsesOutputItem {
+                item_type: OutputItemType::FunctionCall,
+                call_id: Some("call_bad".into()),
+                name: Some("process::run".into()),
+                arguments: Some("not json".into()),
+                ..Default::default()
+            }],
+            Some(ResponsesUsage {
+                input_tokens: 50,
+                output_tokens: 30,
+            }),
+        );
+
+        let events = process_stream_event(&event, &mut state);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("openai capability invocation arguments") && error.contains("process::run") && error.contains("call_bad")))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::CapabilityInvocationDraftEnd { .. }))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::Done { .. }))
+        );
     }
 
     #[test]

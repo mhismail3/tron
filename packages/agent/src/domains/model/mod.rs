@@ -5,7 +5,8 @@
 //! Model listing, model switching, and reasoning-level mutation operation
 //! bodies live in `operations/`; provider catalog helpers remain in `catalog.rs`.
 //! Provider-native stream and function-call details are isolated under
-//! `provider_protocol` before being converted to canonical capability history.
+//! `provider_protocol` before being converted to canonical capability history;
+//! malformed provider capability arguments fail closed at that boundary.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

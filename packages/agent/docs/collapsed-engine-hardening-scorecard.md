@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **80/100 provisional**
+Current score: **81/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -91,9 +91,9 @@ interruption, and resource failure states.
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 6 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
-| Code modularity and simplification | 10 | 6 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
+| Code modularity and simplification | 10 | 7 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **80/100**
+Total: **81/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -283,6 +283,25 @@ only for retention rules that can act within the bounded projection. Code
 modularity and simplification increases to `6/10`, and the banked score is now
 `80/100`.
 
+Resolved checkpoint note, 2026-05-29: SCB-S4 provider normalization
+classification passed after a root-cause fail-closed fix. The audit found
+active provider-boundary normalization only inside provider/protocol modules,
+but also found that malformed provider capability arguments could be projected
+as empty canonical arguments in OpenAI, Anthropic/shared stream accumulation,
+Google non-object function calls, and Kimi streamed arguments. The provider
+protocol parser now returns a typed error, provider stream handlers surface
+malformed or non-object capability arguments as `StreamEvent::Error`, and no
+`CapabilityInvocationDraftEnd` or `Done` event is emitted for those malformed
+paths. `provider_argument_normalization_fails_closed` now enforces this
+boundary. No simulator run was required because valid provider wire behavior was
+unchanged and the failure class is a deterministic malformed-wire negative
+fixture. A light app-path smoke still opened
+`tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` on the booted
+iPhone 17 Pro simulator against dev server PID `57422` and rendered the
+existing P5 chat path; screenshot:
+`/tmp/scb_s4_app_path_smoke_20260529.png`. Code modularity and simplification
+increases to `7/10`, and the banked score is now `81/100`.
+
 ## Scoring Rules
 
 - `+1` for a simulator-tested scenario with DB proof and no code changes needed.
@@ -417,6 +436,7 @@ do not let screenshot state override the engine ledger.
 | SCB-S1b | Deterministic route and decomposition ownership audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_resolution.rs` now owns deterministic routing, namespace clarification, execute constraints, argument-schema fit promotion/filtering, low-confidence intent evidence checks, candidate summaries, and target-specific decomposition guidance. `execute.rs` dropped from 4153 lines to 3300 lines and remains the parse/resolve/prepare/run/observe spine. | `code_ownership`: deterministic route, decomposition, namespace clarification, and argument-schema fit logic still lived in the central execute orchestrator after SCB-S1. | this checkpoint | Passed `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test orchestration_argument --lib -- --nocapture`, `cargo test decomposition --lib -- --nocapture`, `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test capability_ --lib -- --nocapture` (451 passed), `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
 | SCB-S2 | Capability registry ownership split audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | `registry/index.rs` now owns hybrid search, lexical/vector ranking, document identity, vector-fusion helpers, and degraded-index status. `registry/primer.rs` owns context-primer policy, visible primer selection, and model-facing primer rendering. `registry/recipes.rs` remains recipe-owned. The registry root now documents the submodule split and keeps catalog projection plus store implementations. | `primer_rendering`: under tight token budgets, primer rendering could emit only the long header and omit the first core capability. `code_ownership`: ranking/indexing and primer rendering lived in the central registry root beside store/SQLite behavior. | this checkpoint | Failed first `cargo test registry --lib -- --nocapture` at `primer_respects_core_policy`; after the root fix, passed `cargo test primer_respects_core_policy --lib -- --nocapture` and `cargo test registry --lib -- --nocapture` (195 passed). |
 | SCB-S3 | Canonical bounded resource projection audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | Prompt library and voice notes now compose list/inspect summaries through `domains/resource_projection.rs`; generated UI authoring now composes collection summaries through `current_resource_payloads_by_prefix` with `RESOURCE_COLLECTION_SCAN_LIMIT = 500`; control and module trust/audit projections are statically required to stay bounded. | `resource_projection`: generated UI prompt/notification/subagent authoring still had `limit: 10_000` scans, and prompt-history pruning briefly inspected an extra resource because default 10,000-entry pruning cannot be proven through a 500-resource bounded projection. | this checkpoint | Failed first `cargo test prompt_library_resources --lib -- --nocapture` at `prompt_history_record_skips_prune_scan_when_default_limits_cannot_prune`; after the root fix, passed the same command, `cargo test domain_outputs --lib -- --nocapture`, `cargo test generated_ui --lib -- --nocapture`, and `cargo test --test threat_model_invariants bounded_resource_projection_summaries_stay_canonical -- --nocapture`. |
+| SCB-S4 | Provider normalization classification | passed_after_fix | +1 | static-gate scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Provider-specific schema terms remain confined to provider/protocol modules. Provider capability argument parsing now returns `Result`, and OpenAI, Anthropic/shared stream accumulation, Google, and Kimi route malformed or non-object arguments to `StreamEvent::Error` without emitting a canonical capability invocation or `Done` event. Ollama already deserializes arguments as a typed object at the provider boundary. Light simulator smoke opened `tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` against dev server PID `57422` and rendered the existing P5 chat path; screenshot `/tmp/scb_s4_app_path_smoke_20260529.png`. | `provider_runner`: streamed or completed provider arguments could fail open as `{}` in `provider_protocol::capability_parsing`, shared stream accumulation, Kimi, and OpenAI; Google non-object function-call args could also become empty canonical arguments. | this checkpoint | Passed `cargo test capability_parsing --lib -- --nocapture`, `cargo test stream_common --lib -- --nocapture`, `cargo test openai::stream_handler --lib -- --nocapture`, `cargo test google::stream_handler --lib -- --nocapture`, `cargo test kimi::stream_handler --lib -- --nocapture`, and `cargo test --test threat_model_invariants provider_argument_normalization_fails_closed -- --nocapture`. |
 
 ## Scenario Details
 
@@ -2517,6 +2537,35 @@ Acceptance criteria:
 - Malformed tool arguments fail closed with useful diagnostics.
 - Provider parity tests pass.
 
+SCB-S4 checkpoint, 2026-05-29:
+
+- Classified active provider normalization as provider/protocol-owned:
+  OpenAI, Anthropic/shared stream accumulation, Google, Kimi, and Ollama
+  provider wire shapes remain isolated under `domains/model/providers` and
+  `domains/model/provider_protocol`.
+- Removed the fail-open provider argument path. `parse_capability_call_arguments`
+  now returns `Result<Map<String, Value>, CapabilityArgumentParseError>`; absent
+  and empty argument strings still represent empty arguments, while malformed
+  JSON and non-object JSON fail closed with provider/capability/invocation
+  diagnostics.
+- OpenAI completed and output-item function calls, Anthropic/shared streamed
+  invocation stops, Google function calls, and Kimi streamed invocations now
+  surface malformed provider arguments as `StreamEvent::Error` without emitting
+  `CapabilityInvocationDraftEnd` or `Done` for the malformed path.
+- Added focused negative fixtures for provider argument parsing, shared stream
+  accumulation, OpenAI, Google, and Kimi. Added
+  `provider_argument_normalization_fails_closed` in
+  `packages/agent/tests/threat_model_invariants.rs` so streamed provider
+  argument parsing cannot regress to direct `serde_json::from_str(...).unwrap`
+  or empty-argument fallback behavior.
+- No engine/capability core provider-schema leakage was found. Existing
+  `provider_tool_terms_stay_inside_protocol_boundaries` continues to enforce
+  that boundary.
+- No simulator run was required for this checkpoint because valid provider wire
+  behavior was unchanged. The changed behavior is the deterministic malformed
+  provider-wire negative path, and the focused Rust fixtures are the smallest
+  reliable proof.
+
 ### 5. Harden Hidden Side Effects
 
 Problem:
@@ -2627,6 +2676,10 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
   actions, `control::act`, dynamic UI catalogs, raw-scope authorization,
   package/source/policy/trust/audit tables, or alternate worker-spawn paths.
 - Provider-specific schema terms do not leak outside provider/protocol modules.
+- Provider capability argument normalization fails closed through
+  `provider_protocol::capability_parsing`; streamed provider handlers must not
+  deserialize malformed arguments directly or project them as empty canonical
+  invocations.
 - New target-specific execute behavior must be capability-owned, not
   central-spaghetti owned.
 - Capability registry ranking/indexing stays in `registry/index.rs`, primer
@@ -2682,21 +2735,22 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **SCB-S4: Classify Provider Normalization**
+Recommended next scenario: **SCB-S5: Harden Hidden Side Effects**
 
 Setup:
 
-- SCB-S1, SCB-S1b, SCB-S2, and SCB-S3 completed the first execute, registry,
-  and bounded resource projection cleanup passes. Do not rerun broad provider
-  parity unless provider normalization code changes live request/response
-  behavior.
-- Continue Structural Cleanup Backlog item 4 from this scorecard. Start as a
-  deterministic Rust/static-gate audit: identify provider-specific protocol
-  terms, classify active normalization versus legacy compatibility, and ensure
-  provider schema details do not leak into engine/capability core.
-- If the audit removes or changes live provider normalization, run the smallest
-  provider-backed scenario needed to prove the wire behavior, then inspect DB
-  invocation/event/log truth before updating this scorecard.
+- SCB-S1, SCB-S1b, SCB-S2, SCB-S3, and SCB-S4 completed the execute,
+  registry, bounded resource projection, and provider-normalization cleanup
+  passes.
+- Continue Structural Cleanup Backlog item 5 from this scorecard. Start by
+  classifying hidden side effects that can fire after the visible agent turn:
+  prompt history, memory retain, cron truth reconstruction, notification
+  read-state decisions, and any remaining 10,000-shaped resource traversals
+  deferred from SCB-S3.
+- Prefer deterministic Rust/static-gate fixtures for ownership and boundedness.
+  If a hidden side-effect path changes live behavior, run the smallest
+  live-server scenario that proves invocation/event/resource/log truth after the
+  visible response settles.
 - Do not add fallback readers, compatibility aliases, alternate worker-spawn
   paths, client-owned policy, product-state side channels, package/source/policy/
   trust/audit tables, or central branches that make new capabilities require
@@ -2704,36 +2758,37 @@ Setup:
 
 Procedure:
 
-1. Inventory provider-specific schema, tool-call, response-shape, and error
-   normalization code in provider/protocol modules and in engine/capability
-   core.
-2. Classify each finding as active provider API normalization, shared provider
-   protocol utility, malformed-input diagnostic, dead legacy compatibility, or
-   misplaced core knowledge.
-3. Add or strengthen the smallest static or unit test proving provider-specific
-   terms stay in provider/protocol ownership boundaries.
-4. Remove true backward-compatibility aliases or misplaced core branches only
-   after a focused test captures the intended current provider behavior.
+1. Inventory prompt-history, memory retain, cron truth, notification, and other
+   post-turn side-effect code paths.
+2. Classify each path as engine-owned observable work, bounded projection,
+   hidden sidecar, legacy fallback, or product-state side channel.
+3. Add or strengthen the smallest static or unit test proving post-turn work
+   routes through invocation/event/resource truth and bounded resource access.
+4. Remove hidden sidecars, fallback readers, or unbounded scans only after a
+   focused test captures the intended current behavior.
 5. Remove dead/fallback/legacy/compatibility code found nearby.
-6. Run focused provider/capability tests plus
+6. Run focused side-effect/resource tests plus
    `cargo test --test threat_model_invariants -- --nocapture`, then update this
    scorecard with the exact files, tests, and ownership decision.
 
 After completion, inspect:
 
-- provider/protocol modules discovered during the inventory;
-- `capability::execute` request/response projection code touched by the audit;
+- prompt-history and memory-retain modules discovered during the inventory;
+- cron truth reconstruction, notification read-state, and other deferred
+  resource traversal paths from SCB-S3;
 - `packages/agent/tests/threat_model_invariants.rs`;
 - module docs for any moved ownership boundary.
 
 Pass criteria:
 
-- Provider-specific normalization is either kept in focused provider/protocol
-  ownership with tests or removed as legacy compatibility.
-- Engine and capability core do not contain provider API schema spellings except
-  where a documented shared protocol boundary explicitly requires them.
-- Malformed tool arguments fail closed with useful diagnostics.
-- Static gates fail on future unclassified provider schema leakage.
+- Prompt history and memory retain are observable through engine-owned
+  invocation/event/resource truth.
+- Hidden side effects cannot mutate durable state without reconstructable DB
+  evidence.
+- Remaining deferred 10,000-shaped resource traversals are classified, bounded,
+  or explicitly justified by canonical truth reconstruction.
+- Static gates fail on future unclassified hidden sidecars or unbounded resource
+  scans.
 - Docs explain any new ownership boundary.
 - Focused tests pass, and `cargo test --test threat_model_invariants -- --nocapture`
   passes.

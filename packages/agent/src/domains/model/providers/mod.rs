@@ -6,13 +6,15 @@
 //! plus shared infrastructure used across providers. Provider-native
 //! function-call and tool-call wire details stay inside provider modules and
 //! `domains::model::provider_protocol`; the rest of Tron consumes canonical
-//! capability invocation drafts, results, and history.
+//! capability invocation drafts, results, and history. Provider modules must
+//! reject malformed or non-object capability arguments at the stream boundary
+//! instead of projecting them as empty canonical invocations.
 //!
 //! - [`provider`] — Core [`Provider`] trait, [`ProviderStreamOptions`], [`ProviderError`]
 //! - [`models`] — Model registry, ID constants, provider detection, capability queries
 //! - [`sse`] — Shared SSE line parser for HTTP streaming responses
 //! - [`retry`] — Stream retry with exponential backoff + jitter
-//! - [`provider_protocol::capability_parsing`] — Robust JSON parsing for provider capability invocation arguments
+//! - [`provider_protocol::capability_parsing`] — Fail-closed JSON parsing for provider capability invocation arguments
 //! - [`context_composition`] — Context part ordering and stable/volatile grouping
 //! - [`provider_protocol::id_remapping`] — Capability invocation ID format conversion between providers
 //! - [`stream_common`] — Shared [`stream_common::StreamAccumulator`] for delta processing
@@ -59,8 +61,9 @@ pub mod tokens;
 
 pub use crate::domains::model::provider_protocol::remap_invocation_id;
 pub use crate::domains::model::provider_protocol::{
-    CapabilityCallContext, IdFormat, build_invocation_id_mapping, capability_parsing, id_remapping,
-    is_valid_capability_call_arguments, parse_capability_call_arguments,
+    CapabilityArgumentParseError, CapabilityCallContext, IdFormat, build_invocation_id_mapping,
+    capability_parsing, id_remapping, is_valid_capability_call_arguments,
+    parse_capability_call_arguments,
 };
 pub use context_composition::{
     GroupedContextParts, compose_context_parts, compose_context_parts_grouped,

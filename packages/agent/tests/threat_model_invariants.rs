@@ -264,7 +264,7 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| SCB-S1b | Deterministic route and decomposition ownership audit |",
         "| SCB-S2 | Capability registry ownership split audit |",
         "| SCB-S3 | Canonical bounded resource projection audit |",
-        "Recommended next scenario: **SCB-S4:",
+        "Recommended next scenario: **SCB-S5:",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
@@ -3203,6 +3203,58 @@ fn provider_tool_terms_stay_inside_protocol_boundaries() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn provider_argument_normalization_fails_closed() {
+    let crate_root = crate_root();
+
+    let parsing = std::fs::read_to_string(
+        crate_root.join("src/domains/model/provider_protocol/capability_parsing.rs"),
+    )
+    .expect("read provider capability parsing boundary");
+    assert!(
+        parsing.contains("Result<Map<String, Value>, CapabilityArgumentParseError>"),
+        "provider capability argument parsing must return a Result"
+    );
+    assert!(
+        !parsing.contains("returning empty object"),
+        "provider capability argument parsing must not fail open as empty arguments"
+    );
+
+    for relative in [
+        "src/domains/model/providers/shared/stream_common.rs",
+        "src/domains/model/providers/openai/stream_handler.rs",
+        "src/domains/model/providers/google/stream_handler.rs",
+        "src/domains/model/providers/kimi/stream_handler.rs",
+    ] {
+        let content = std::fs::read_to_string(crate_root.join(relative))
+            .unwrap_or_else(|e| panic!("failed to read {relative}: {e}"));
+        assert!(
+            content.contains("parse_capability_call_arguments"),
+            "{relative} must use the provider-protocol argument parser"
+        );
+        assert!(
+            content.contains("StreamEvent::Error"),
+            "{relative} must surface malformed provider arguments as stream errors"
+        );
+    }
+
+    for relative in [
+        "src/domains/model/providers/shared/stream_common.rs",
+        "src/domains/model/providers/kimi/stream_handler.rs",
+    ] {
+        let content = std::fs::read_to_string(crate_root.join(relative))
+            .unwrap_or_else(|e| panic!("failed to read {relative}: {e}"));
+        assert!(
+            !content.contains("serde_json::from_str(&"),
+            "{relative} must not deserialize streamed provider arguments directly"
+        );
+        assert!(
+            !content.contains("dispatching with empty args"),
+            "{relative} must not preserve fail-open provider argument fallback language"
+        );
     }
 }
 

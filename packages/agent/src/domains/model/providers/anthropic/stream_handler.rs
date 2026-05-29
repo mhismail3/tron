@@ -219,7 +219,10 @@ fn handle_content_block_stop(state: &mut StreamState) -> Vec<StreamEvent> {
         }
         Some(BlockType::CapabilityInvocation) => {
             let id = state.current_invocation_id.take().unwrap_or_default();
-            let events = state.acc.finish_capability_invocation(&id);
+            let events = state.acc.finish_capability_invocation_with_provider(
+                &id,
+                Some(state.provider_type.as_str()),
+            );
             // Extract the CapabilityInvocationDraft from the event to build the content block.
             if let Some(StreamEvent::CapabilityInvocationDraftEnd {
                 capability_invocation,
