@@ -203,6 +203,33 @@ async fn prompt_history_is_resource_backed_deduped_without_retired_tables() {
 }
 
 #[tokio::test]
+async fn prompt_history_record_skips_prune_scan_when_default_limits_cannot_prune() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+
+    let recorded = handle
+        .invoke(host_invocation(
+            "prompt_library::history_record",
+            json!({"prompt": "This prompt is below the default prune threshold"}),
+            prompt_internal_write_context("prompt-history-no-prune-scan"),
+        ))
+        .await;
+    assert_eq!(recorded.error, None);
+    assert_eq!(recorded.value.as_ref().unwrap()["recorded"], true);
+
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    let child_inspects = records
+        .iter()
+        .filter(|record| record.parent_invocation_id.as_ref() == Some(&recorded.invocation_id))
+        .filter(|record| record.function_id.as_str() == "resource::inspect")
+        .count();
+    assert_eq!(
+        child_inspects, 1,
+        "history_record should inspect only the deterministic history resource when default retention limits cannot prune"
+    );
+}
+
+#[tokio::test]
 async fn prompt_history_skip_and_validation_fail_without_accepted_refs() {
     let ctx = crate::shared::server::test_support::make_test_context();
     let handle = ctx.engine_host.clone();

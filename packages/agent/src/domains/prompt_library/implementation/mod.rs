@@ -22,6 +22,8 @@
 //!   prompt-library tables are not runtime readers.
 //! - Capture is interactive-only: cron- and subagent-dispatched prompts are
 //!   never recorded (the prompt payload's `source: "cron"` param gates this).
+//! - Auto-prune stays resource-backed but avoids payload inspection when the
+//!   active resource count and age policy prove that nothing can be pruned.
 
 pub mod normalize;
 pub mod types;

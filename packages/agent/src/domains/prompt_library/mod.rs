@@ -505,19 +505,27 @@ async fn prune_history_resources(
     if max_entries.is_none() && cutoff.is_none() {
         return Ok(Vec::new());
     }
+    let active_resources: Vec<String> = history_resources(deps)
+        .await?
+        .into_iter()
+        .filter(|resource| resource["lifecycle"] != "discarded")
+        .filter_map(|resource| {
+            resource
+                .get("resourceId")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .collect();
+    if cutoff.is_none() && max_entries.is_some_and(|max| active_resources.len() <= max) {
+        return Ok(Vec::new());
+    }
     let mut histories = Vec::new();
-    for resource in history_resources(deps).await? {
-        if resource["lifecycle"] == "discarded" {
-            continue;
-        }
-        let Some(resource_id) = resource.get("resourceId").and_then(Value::as_str) else {
-            continue;
-        };
-        if let Some(inspection) = inspect_resource(deps, Some(parent), resource_id).await?
+    for resource_id in active_resources {
+        if let Some(inspection) = inspect_resource(deps, Some(parent), &resource_id).await?
             && let Ok(payload) = current_payload(&inspection)
             && let Some(item) = history_from_payload(&payload)
         {
-            histories.push((resource_id.to_owned(), item));
+            histories.push((resource_id, item));
         }
     }
     histories.sort_by(|(_, left), (_, right)| compare_history_items(left, right));
