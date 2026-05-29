@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **77/100 provisional**
+Current score: **78/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -91,9 +91,9 @@ interruption, and resource failure states.
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 6 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
-| Code modularity and simplification | 10 | 3 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
+| Code modularity and simplification | 10 | 4 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **77/100**
+Total: **78/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -239,7 +239,22 @@ in `sess_019e7523-ffb5-7601-acdf-8bf36461824a` returned
 `childInvocationCreated=false`, zero approval rows, zero `process::run` child
 rows, and no host leak at `~/.tron/workspace/reports/exact-home-leak-*.txt`.
 Safety, grants, and approvals increases to `10/10`, and the banked score is now
-`77/100`. The next active hardening target remains SCB-S1b.
+`77/100`. At that checkpoint, the next active hardening target was SCB-S1b.
+
+Resolved checkpoint note, 2026-05-29: SCB-S1b deterministic route and
+decomposition ownership audit passed as a deterministic Rust/static-gate
+scenario. Deterministic intent routing, namespace clarification, execute
+constraints, argument-schema fit promotion/filtering, low-confidence intent
+evidence checks, candidate summaries, and target-specific decomposition
+guidance moved out of `packages/agent/src/domains/capability/operations/execute.rs`
+into `packages/agent/src/domains/capability/operations/target_resolution.rs`.
+`execute.rs` now keeps the orchestration spine while `target_arguments.rs` owns
+target argument affordances and `target_resolution.rs` owns target planning
+heuristics. `threat_model_invariants` now rejects those target-resolution
+function bodies if they reappear in `execute.rs`. No simulator run was required
+because this checkpoint changed ownership boundaries without changing live
+execute behavior. Code modularity and simplification increases to `4/10`, and
+the banked score is now `78/100`.
 
 ## Scoring Rules
 
@@ -372,6 +387,7 @@ do not let screenshot state override the engine ledger.
 | RWO-N14 | Provider full parity | partial_p6_major_providers_passed | +10 | clean P1 run: Anthropic `sess_019e7433-bd1f-79f0-8d6f-e037f2d07448`, OpenAI Codex `sess_019e7433-de30-7d51-8022-b15d5fc95b62`, Gemini `sess_019e7433-fb83-74e1-973b-281c617ca83b`, Ollama failed `sess_019e7434-10b9-7c73-8d44-e43af8017059`; wire-shape retest still failed `sess_019e743c-e359-7ea0-aa4d-42d7de3852d1`; final Ollama P1 retest passed `sess_019e7441-5e8b-7d91-8c14-b4352d6e1887`; clean P2 run: Anthropic `sess_019e7447-d814-7d02-b90d-a8dbc5998d6e`, OpenAI Codex `sess_019e7447-fda8-71e0-a427-99d9d9dd868d`, Gemini `sess_019e7448-1b59-74c3-b655-38b574ca2aee`, Ollama `sess_019e7448-34cd-7171-bab4-2e643ffec97e`; P3 failure: Ollama `sess_019e7450-983c-7033-8965-85f8daab139c`; clean P3 retest: Anthropic `sess_019e7466-2bd2-7d72-b17d-37ca53fe0993`, OpenAI Codex `sess_019e7466-58e5-7360-b0f5-1507d6e7d3c9`, Gemini `sess_019e7466-71ed-7bf3-a5b3-b425f9c41dc1`, Ollama `sess_019e7466-82f0-7e02-830e-5989c1bb896c`; clean P4 retest: Anthropic `sess_019e749e-8539-7591-a146-5ee38152b03a`, OpenAI Codex `sess_019e749f-2500-7240-a1b9-9b3295bdb853`, Gemini `sess_019e749f-a5b4-7471-b129-91d2ef9ce105`, Ollama `sess_019e749f-e321-7451-8392-1f742fd840d4`; P4 failed-card follow-up rerun: Anthropic `sess_019e74b7-b9bc-7de0-9c59-8cab92fffd77`, OpenAI Codex `sess_019e74b8-127f-72d2-865c-99de12e8ed1b`, Gemini `sess_019e74b8-4ff2-76c1-92d6-cae741f593f4`, Ollama/Gemma inconclusive `sess_019e74b8-7d7f-7400-94c7-8de99d917761`; P5 matrix: Anthropic `sess_019e74e3-09ae-7233-b27b-963573a4399a`, OpenAI Codex `sess_019e74e3-d6ad-7001-9685-fa398767de76`, Gemini `sess_019e74e4-4510-7393-a33a-b2626efe7a9a`, Ollama/Gemma inconclusive `sess_019e74e4-97b5-71c2-93f2-edac82506664`; P6 matrix: Anthropic `sess_019e74f0-095c-7c73-8151-fa3b33f1d729`, OpenAI Codex `sess_019e74f5-42c5-7443-9814-e9cc231a105f`, Gemini `sess_019e74f6-c0dc-7931-a7e9-f4c55d357464`, Ollama/Gemma inconclusive `sess_019e74f7-35dd-7ce2-8e26-07b64d919aef` | See 2026-05-29 RWO-N14 P1, P2, P3, P4, P4 follow-up, P5, and P6 result notes below. The P4 follow-up rerun used real dev server PID `10586`, run log `/tmp/rwo_n14_p4_provider_parity_20260529101057.json`, final simulator screenshots under `/tmp/rwo_n14_p4_*_final_simulator_20260529101057.png`, zero failed invocations, zero `compact.*` events, and zero `isError=true` capability completions. Anthropic, OpenAI Codex, and Gemini each created one executed `process::run` approval, one successful sandbox-materialized process child, materialized-file refs, execution-output refs, completed prompt queue drains, and no session/trace logs. Ollama/Gemma returned a non-error `needs_input` execute result without creating an approval or child. P5 then passed for Anthropic, OpenAI Codex, and Gemini on real dev server PID `36012` with run log `/tmp/rwo_n14_p5_provider_parity_20260529105816.json`: each provider had one setup approval, one setup `process::run` child, one P5 `capability::execute`, `approvalReplayed=true`, `childInvocationCreated=false`, zero new approvals, zero new process children, zero failed invocations, zero `compact.*` events, and completed queue drains. Ollama/Gemma made no setup execute call and remains inconclusive without engine failure. P6 then passed for Anthropic, OpenAI Codex, and Gemini on real dev server PID `36012` with run logs `/tmp/rwo_n14_p6_provider_parity_20260529111228.json` and `/tmp/rwo_n14_p6_provider_parity_20260529111810.json`: each provider used only `capability::execute` over filesystem inspection targets, cited inspected repo files, listed used capabilities, completed queue drains, and recorded zero failed invocations, zero approvals, and zero `compact.*` events. Ollama/Gemma used the same substrate without failures but cited only one file and did not satisfy the final answer contract. | Primary P1 `model_guidance`: execute text output appeared after metadata, and local Ollama reported a generic success sentence instead of the exact line. Provider-boundary cleanup also fixed stale outbound Ollama native field names and removed the inbound compatibility alias. P2 had no failure. Primary P3 `schema_or_recipe`: `process::run` did not express non-empty command in schema, the target guard allowed blank commands, and execute did not classify null required fields as missing input. Primary P4 `model_guidance`: approval-gated write commands were under-taught and could target `filesystem::write_file` or `approval::request` instead of `process::run`. Primary P4 `target_capability`: sandbox expected output paths were validated too late and allowed absolute or home-relative host paths to fail only after approval. P4 harness `observability_gap`: simulator collection returned after an early turn end while a later approval was still pending. P4 follow-up fixed primary `grant_or_approval` and execute preflight classification: approval idempotency was globally scoped, and repairable sandbox path mistakes were projected as failed cards instead of `needs_input`. P5 fixed `context_reconstruction`: persisted capability completion events now preserve model-facing execute observations separately from display text, so later turns see approval replay metadata from DB reconstruction. P5 also fixed `model_guidance`: approved execute results expose the effective replay idempotency key in top-level details, approval state/replay metadata, and model-facing replay hints. Derived execute keys now use `capability-execute:v2:<128-bit-hex>` to reduce model transcription errors while preserving deterministic engine-owned replay. The remaining Ollama/Gemma P5 and P6 results are `provider_runner`/small-local-model capability limits, not engine substrate failures. | P1 fix `9616a9b64`; P2 n/a; P3 fix `8da05af18`; P4 fix `ea6806937`; P4 failed-card follow-up `97d66318c`; P5 `c49c14664`; P6 n/a | P4 passed on rebuilt dev server PID `99393`; the failed-card follow-up rerun on PID `10586` verified no `isError=true` execute completions. P5 and P6 passed on rebuilt dev server PID `36012` for Anthropic, OpenAI Codex, and Gemini; later local-provider parity should try a larger Ollama model before treating Gemma 4 E4B as substrate evidence. RWO-N14 is complete for major-provider parity and the next active hardening target is structural cleanup. |
 | RWO-N14-F1 | Process sandbox command-output boundary follow-up | passed_after_fix | +1 | failed simulator session `sess_019e74d4-7e0a-7c72-81e7-cb7e15c26be6`; Google retest `sess_019e7523-4c24-7b02-9ff7-08b896c05c74`; direct exact-payload probe `sess_019e7523-ffb5-7601-acdf-8bf36461824a` | Google P5 retest on rebuilt dev server PID `57422` used run log `/tmp/rwo_n14_p5_provider_parity_20260529120827.json`, final simulator screenshot `/tmp/rwo_n14_p5_google_final_simulator_20260529120827.png`, one executed `process::run` approval, one setup `process::run` child, one replay `capability::execute`, `approvalReplayed=true`, `childInvocationCreated=false`, zero new approvals, zero new process children, zero failed invocations, and zero `compact.*` events. Direct exact-payload probe returned `target_policy_rejected` with `approvalCreated=false`, `childInvocationCreated=false`, zero approval rows, zero `process::run` child rows, and no host leak at `~/.tron/workspace/reports/exact-home-leak-20260529120914.txt`. | `target_capability` / `process_sandbox`: sandbox-materialized command write targets were not bounded to declared relative expected outputs before approval, nested expected-output parents were not prepared inside the sandbox, and sandbox commands inherited host `HOME`/`TMPDIR`. | this checkpoint | Passed `cargo test sandbox_materialized --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, `git diff --check`, Google simulator-backed P5 retest, and direct exact-payload live probe. |
 | SCB-S1 | `capability::execute` ownership decomposition audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_arguments.rs` now owns target argument affordances; `threat_model_invariants` rejects target-specific affordance function bodies in `execute.rs`; focused unit tests passed for intent argument normalization and deterministic routing. | Code modularity: target-specific argument normalization and intent/resource/path affordances lived in the central execute orchestrator. | this checkpoint | Passed `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
+| SCB-S1b | Deterministic route and decomposition ownership audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_resolution.rs` now owns deterministic routing, namespace clarification, execute constraints, argument-schema fit promotion/filtering, low-confidence intent evidence checks, candidate summaries, and target-specific decomposition guidance. `execute.rs` dropped from 4153 lines to 3300 lines and remains the parse/resolve/prepare/run/observe spine. | `code_ownership`: deterministic route, decomposition, namespace clarification, and argument-schema fit logic still lived in the central execute orchestrator after SCB-S1. | this checkpoint | Passed `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test orchestration_argument --lib -- --nocapture`, `cargo test decomposition --lib -- --nocapture`, `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test capability_ --lib -- --nocapture` (451 passed), `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
 
 ## Scenario Details
 
@@ -2282,8 +2298,8 @@ Use only execute. Inspect this repo enough to summarize the worker/function/trig
     no failed invocation rows, no `compact.*` events, and no file at
     `/Users/moose/.tron/workspace/reports/exact-home-leak-20260529120914.txt`.
 - Score impact: Safety, grants, and approvals reaches `10/10`; current score
-  increases to `77/100`. Broad testing remains focused on SCB-S1b structural
-  decomposition before the deferred simulator/chat parity work.
+  increased to `77/100` at that checkpoint, and broad testing moved to SCB-S1b
+  structural decomposition before the deferred simulator/chat parity work.
 
 Deferred simulator/chat parity follow-up:
 
@@ -2314,6 +2330,9 @@ Deferred simulator/chat parity follow-up:
 - These are tracked as `ios_rendering`/`stream_or_state` parity work after the
   core engine hardening gates; DB truth remains the canonical classifier for
   current scorecard scenarios.
+- UI polish for the chat and approval surfaces is deliberately deferred until
+  engine-state parity is proven; cosmetic improvements must not mask or bypass
+  drift between visible state and canonical engine truth.
 - Do not classify Gemma 4 E4B Ollama shortfalls as collapsed-substrate failures
   until the same local-provider scenario has been retried with a larger local
   model and canonical DB evidence.
@@ -2349,6 +2368,22 @@ SCB-S1 checkpoint, 2026-05-29:
   of `execute.rs`.
 - Left deterministic route/decomposition presentation in `execute.rs` for the
   next focused ownership pass.
+
+SCB-S1b checkpoint, 2026-05-29:
+
+- Moved deterministic route selection, namespace clarification, execute
+  constraint filtering, argument-schema fit promotion/filtering,
+  low-confidence intent evidence checks, candidate summaries, and
+  target-specific decomposition guidance into
+  `packages/agent/src/domains/capability/operations/target_resolution.rs`.
+- Added a static gate that keeps the target-resolution helper bodies out of
+  `execute.rs` and requires the new module's invariant and route/decomposition
+  markers.
+- `execute.rs` remains the orchestration spine: parse wrapper request, resolve
+  intent or explicit target, prepare freshness/payload, run through the selected
+  capability, and observe/project the result.
+- Broader capability verification passed with
+  `cargo test capability_ --lib -- --nocapture` after the move.
 
 ### 2. Split Capability Registry Ownership
 
@@ -2493,6 +2528,8 @@ Acceptance criteria:
 - Harness-submitted prompts render in the same ordering as native prompt entry.
 - Mismatches classify as `ios_rendering` or `stream_or_state` drift, not as
   successful engine evidence.
+- Visual polish starts only after this parity gate passes, so presentation work
+  cannot substitute for engine-truth reconciliation.
 
 ## Static Gates To Add Or Strengthen
 
@@ -2564,65 +2601,67 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **SCB-S1b: Deterministic Route And Decomposition
-Ownership Audit**
+Recommended next scenario: **SCB-S2: Capability Registry Ownership Split Audit**
 
 Setup:
 
-- RWO-N14 provider parity is complete for Anthropic, OpenAI Codex, and Gemini;
-  do not rerun broad provider parity unless investigating a regression.
-- Continue Structural Cleanup Backlog item 1 from the SCB-S1 checkpoint. This is
-  a deterministic Rust/static-gate scenario unless a refactor changes live
-  behavior; use the simulator only for any changed live `execute` behavior.
-- Focus on deterministic route selection, decomposition guidance, namespace
-  clarification, and argument-schema fit logic that still lives in
-  `packages/agent/src/domains/capability/operations/execute.rs`. Keep `execute`
-  collapsed as the parse, resolve, prepare, run, and observe spine, but isolate
-  target-owned filesystem/process/web/resource/worktree knowledge into focused
-  ownership where a coherent slice exists.
+- SCB-S1 and SCB-S1b completed the first `capability::execute` decomposition
+  passes. Do not rerun provider parity unless the registry cleanup changes live
+  execute/search behavior.
+- Continue Structural Cleanup Backlog item 2 from this scorecard. This is a
+  deterministic Rust/static-gate scenario unless a refactor changes live
+  capability search, registry sync, recipe projection, or primer rendering.
+- Focus on `packages/agent/src/domains/capability/registry/mod.rs`, which still
+  mixes store behavior, SQLite persistence, ranking/indexing, recipes, plugin
+  manifests, primer rendering, and projection logic. Keep behavior identical;
+  split only an ownership boundary with local tests and static gates.
 - Do not add fallback readers, compatibility aliases, alternate worker-spawn
-  paths, client-owned policy, product-state side channels, or target-specific
-  branches that make new capabilities require central `execute` edits.
+  paths, client-owned policy, product-state side channels, package/source/policy/
+  trust/audit tables, or central branches that make new capabilities require
+  unrelated registry edits.
 
 Procedure:
 
-1. Inventory target-specific knowledge that remains in deterministic route,
-   decomposition, namespace clarification, and argument-schema fit code.
-2. Classify each finding as legitimate central orchestration, capability-owned
-   recipe/affordance candidate, provider-boundary normalization, or dead/legacy
-   code.
-3. Add or strengthen the smallest static or unit test proving that new
-   target-specific execute behavior cannot grow in the central path unnoticed.
-4. Move one coherent ownership slice out of the central execute flow only if the
-   audit identifies a concrete root-cause cleanup with clear local tests.
+1. Inventory registry responsibilities that remain in `registry/mod.rs`,
+   especially SQLite schema/store access, search ranking/indexing, recipes,
+   plugin manifest projection, primer rendering, and binding projection.
+2. Classify each finding as legitimate registry store ownership, extraction
+   candidate, behavior-coupled code that should stay, dead/legacy code, or
+   deferred large-file cleanup.
+3. Add or strengthen the smallest static or unit test proving that the selected
+   ownership boundary cannot collapse back into `registry/mod.rs` unnoticed.
+4. Move one coherent registry slice only if the audit identifies a clear
+   behavior-preserving cleanup with local tests. Prefer an existing-adjacent
+   boundary such as recipes, ranking/indexing, or primer projection over a broad
+   rewrite.
 5. Remove dead/fallback/legacy/compatibility code found nearby.
-6. Run the focused capability tests and `threat_model_invariants`, then update
-   this scorecard with the exact files, tests, and ownership decision.
+6. Run focused capability registry/search/ranking/discovery tests plus
+   `cargo test --test threat_model_invariants -- --nocapture`, then update this
+   scorecard with the exact files, tests, and ownership decision.
 
 After completion, inspect:
 
-- `packages/agent/src/domains/capability/operations/mod.rs`;
-- `packages/agent/src/domains/capability/operations/*.rs`;
-- domain `contract.rs`, `registry`, and recipe/primer code touched by the audit;
+- `packages/agent/src/domains/capability/registry/mod.rs`;
+- `packages/agent/src/domains/capability/registry/*.rs`;
+- `packages/agent/src/domains/capability/operations/search.rs` and
+  `operations/inspect.rs` if search/discovery projections are touched;
 - `packages/agent/tests/threat_model_invariants.rs`;
 - module docs for any moved ownership boundary.
 
 Pass criteria:
 
-- Every target-specific execute branch is either removed, moved to owning
-  domain affordances/recipes, or explicitly classified as central orchestration
-  with a test-backed reason.
-- The collapsed `execute` surface stays behaviorally compatible for the covered
-  scenarios without adding fallback or compatibility paths.
-- Static gates fail on future unclassified target-specific execute growth.
+- The selected registry slice is either moved to focused ownership or explicitly
+  classified as behavior-coupled with a test-backed reason.
+- Registry search, ranking, discovery, recipe, binding, and primer behavior stay
+  compatible for covered scenarios.
+- Static gates fail on future unclassified registry ownership regression.
 - Docs explain any new ownership boundary.
 - Focused tests pass, and `cargo test --test threat_model_invariants -- --nocapture`
   passes.
 
-If it fails, classify the primary layer as `code_ownership`,
-`execute_correction`, `execute_resolution`, `schema_or_recipe`, or
-`provider_runner`, then stop broad cleanup until the exact ownership failure is
-fixed and retested.
+If it fails, classify the primary layer as `code_ownership`, `registry_store`,
+`schema_or_recipe`, `execute_resolution`, or `provider_runner`, then stop broad
+cleanup until the exact ownership failure is fixed and retested.
 
 ## Acceptance Criteria For This Planning Checkpoint
 

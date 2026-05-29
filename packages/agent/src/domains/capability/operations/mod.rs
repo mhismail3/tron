@@ -5,8 +5,9 @@
 //! stable contract plus one concrete implementation. Future plugin manifests
 //! can add richer contract/binding rows without changing the model-facing
 //! single `execute` surface. Target-specific argument affordances are isolated in
-//! `target_arguments` so the shared execute flow does not grow new per-capability
-//! branches unnoticed.
+//! `target_arguments`, while deterministic route and argument-fit heuristics
+//! live in `target_resolution`, so the shared execute flow does not grow new
+//! per-capability branches unnoticed.
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -56,20 +57,14 @@ mod inspect;
 mod run;
 mod search;
 mod target_arguments;
+mod target_resolution;
 
 pub(crate) use audit::audit_query_value;
 #[cfg(test)]
 use audit::{audit_event_matches_orchestration_filters, filter_orchestration_audit_result};
 pub(crate) use execute::execute_value;
 #[cfg(test)]
-use execute::{
-    apply_argument_schema_fit_filter, apply_deterministic_intent_route,
-    clarification_candidates_for_intent, deterministic_intent_route, intent_strongly_matches_hit,
-    lacks_sufficient_intent_resolution_evidence, orchestration_constraints_allow_hit,
-    orchestration_hit_from_entry, parse_orchestrated_execute_input, prepared_execute_payload,
-    promote_argument_schema_fit_candidates, validate_orchestration_constraint_shape,
-    validate_orchestration_constraints,
-};
+use execute::{parse_orchestrated_execute_input, prepared_execute_payload};
 #[cfg(test)]
 use inspect::inspect_targets;
 pub(crate) use inspect::{inspect_value, status_value};
@@ -86,6 +81,14 @@ use search::{render_search_result_value, search_queries};
 use target_arguments::{
     normalize_target_arguments, normalize_target_idempotency_argument,
     normalize_target_specific_arguments,
+};
+#[cfg(test)]
+use target_resolution::{
+    apply_argument_schema_fit_filter, apply_deterministic_intent_route,
+    clarification_candidates_for_intent, deterministic_intent_route, intent_strongly_matches_hit,
+    lacks_sufficient_intent_resolution_evidence, orchestration_constraints_allow_hit,
+    orchestration_hit_from_entry, promote_argument_schema_fit_candidates,
+    validate_orchestration_constraint_shape, validate_orchestration_constraints,
 };
 
 pub(crate) async fn registry_snapshot_value(

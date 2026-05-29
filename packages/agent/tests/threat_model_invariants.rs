@@ -261,7 +261,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "## Structural Cleanup Backlog",
         "## Static Gates To Add Or Strengthen",
         "| SCB-S1 | `capability::execute` ownership decomposition audit |",
-        "Recommended next scenario: **SCB-S1b:",
+        "| SCB-S1b | Deterministic route and decomposition ownership audit |",
+        "Recommended next scenario: **SCB-S2:",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
@@ -1882,6 +1883,10 @@ fn resource_materialization_enforcement_gates_stay_on() {
         crate_root.join("src/domains/capability/operations/target_arguments.rs"),
     )
     .expect("failed to read capability target argument operations");
+    let capability_target_resolution = std::fs::read_to_string(
+        crate_root.join("src/domains/capability/operations/target_resolution.rs"),
+    )
+    .expect("failed to read capability target resolution operations");
     let capability_run =
         std::fs::read_to_string(crate_root.join("src/domains/capability/operations/run.rs"))
             .expect("failed to read capability run operations");
@@ -1942,6 +1947,42 @@ fn resource_materialization_enforcement_gates_stay_on() {
         assert!(
             capability_target_arguments.contains(required),
             "target_arguments.rs must document and own classified target-specific execute affordance marker `{required}`"
+        );
+    }
+    for forbidden in [
+        "pub(super) fn deterministic_intent_route(",
+        "pub(super) fn clarification_candidates_for_intent(",
+        "pub(super) fn apply_argument_schema_fit_filter(",
+        "pub(super) fn promote_argument_schema_fit_candidates(",
+        "pub(super) fn validate_orchestration_constraints(",
+        "pub(super) fn orchestration_constraints_allow_hit(",
+        "pub(super) fn intent_strongly_matches_hit(",
+        "pub(super) fn lacks_sufficient_intent_resolution_evidence(",
+        "pub(super) fn decomposition_phase_details(",
+        "pub(super) fn decomposition_result_message(",
+    ] {
+        assert!(
+            !capability_execute.contains(forbidden),
+            "target-resolution execute helper `{forbidden}` must stay in target_resolution.rs, not execute.rs"
+        );
+        assert!(
+            capability_target_resolution.contains(forbidden),
+            "target_resolution.rs must own target-resolution execute helper `{forbidden}`"
+        );
+    }
+    for required in [
+        "# INVARIANT: target resolution heuristics stay classified",
+        "deterministic_worktree_diff",
+        "deterministic_resource_inventory",
+        "namespace_clarification",
+        "argument_schema_fit",
+        "multiple_resource_kinds_for_single_inventory_request",
+        "multiple_files_for_single_target",
+        "MIN_UNANCHORED_INTENT_SCORE",
+    ] {
+        assert!(
+            capability_target_resolution.contains(required),
+            "target_resolution.rs must document and own classified target-resolution marker `{required}`"
         );
     }
 
