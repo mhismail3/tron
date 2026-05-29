@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **81/100 provisional**
+Current score: **82/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -89,11 +89,11 @@ interruption, and resource failure states.
 | Resource truth and durability | 10 | 10 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 10 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
-| Observability and auditability | 8 | 6 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
+| Observability and auditability | 8 | 7 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 7 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **81/100**
+Total: **82/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -302,6 +302,21 @@ existing P5 chat path; screenshot:
 `/tmp/scb_s4_app_path_smoke_20260529.png`. Code modularity and simplification
 increases to `7/10`, and the banked score is now `81/100`.
 
+Resolved checkpoint note, 2026-05-29: SCB-S5 hidden side-effect hardening
+passed after bounded-resource cleanup. The SCB-S3 deferred `limit: 10_000`
+resource list shapes in retained-memory context loading, notification inbox/read
+decisions, and cron schedule/run truth reconstruction were classified as
+bounded resource projections over engine truth, not product-owned side channels.
+The resource store already clamps list reads to 500, but these production
+callers now use named scan limits tied to
+`resource_projection::MAX_RESOURCE_COLLECTION_LIMIT`, and
+`hidden_side_effect_resource_scans_stay_bounded_and_observable` rejects future
+drift. A simulator app-path smoke opened
+`tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` against real dev
+server PID `2214`; screenshot:
+`/tmp/scb_s5_app_path_smoke_20260529.png`. Observability and auditability
+increases to `7/8`, and the banked score is now `82/100`.
+
 ## Scoring Rules
 
 - `+1` for a simulator-tested scenario with DB proof and no code changes needed.
@@ -437,6 +452,7 @@ do not let screenshot state override the engine ledger.
 | SCB-S2 | Capability registry ownership split audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | `registry/index.rs` now owns hybrid search, lexical/vector ranking, document identity, vector-fusion helpers, and degraded-index status. `registry/primer.rs` owns context-primer policy, visible primer selection, and model-facing primer rendering. `registry/recipes.rs` remains recipe-owned. The registry root now documents the submodule split and keeps catalog projection plus store implementations. | `primer_rendering`: under tight token budgets, primer rendering could emit only the long header and omit the first core capability. `code_ownership`: ranking/indexing and primer rendering lived in the central registry root beside store/SQLite behavior. | this checkpoint | Failed first `cargo test registry --lib -- --nocapture` at `primer_respects_core_policy`; after the root fix, passed `cargo test primer_respects_core_policy --lib -- --nocapture` and `cargo test registry --lib -- --nocapture` (195 passed). |
 | SCB-S3 | Canonical bounded resource projection audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | Prompt library and voice notes now compose list/inspect summaries through `domains/resource_projection.rs`; generated UI authoring now composes collection summaries through `current_resource_payloads_by_prefix` with `RESOURCE_COLLECTION_SCAN_LIMIT = 500`; control and module trust/audit projections are statically required to stay bounded. | `resource_projection`: generated UI prompt/notification/subagent authoring still had `limit: 10_000` scans, and prompt-history pruning briefly inspected an extra resource because default 10,000-entry pruning cannot be proven through a 500-resource bounded projection. | this checkpoint | Failed first `cargo test prompt_library_resources --lib -- --nocapture` at `prompt_history_record_skips_prune_scan_when_default_limits_cannot_prune`; after the root fix, passed the same command, `cargo test domain_outputs --lib -- --nocapture`, `cargo test generated_ui --lib -- --nocapture`, and `cargo test --test threat_model_invariants bounded_resource_projection_summaries_stay_canonical -- --nocapture`. |
 | SCB-S4 | Provider normalization classification | passed_after_fix | +1 | static-gate scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Provider-specific schema terms remain confined to provider/protocol modules. Provider capability argument parsing now returns `Result`, and OpenAI, Anthropic/shared stream accumulation, Google, and Kimi route malformed or non-object arguments to `StreamEvent::Error` without emitting a canonical capability invocation or `Done` event. Ollama already deserializes arguments as a typed object at the provider boundary. Light simulator smoke opened `tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` against dev server PID `57422` and rendered the existing P5 chat path; screenshot `/tmp/scb_s4_app_path_smoke_20260529.png`. | `provider_runner`: streamed or completed provider arguments could fail open as `{}` in `provider_protocol::capability_parsing`, shared stream accumulation, Kimi, and OpenAI; Google non-object function-call args could also become empty canonical arguments. | this checkpoint | Passed `cargo test capability_parsing --lib -- --nocapture`, `cargo test stream_common --lib -- --nocapture`, `cargo test openai::stream_handler --lib -- --nocapture`, `cargo test google::stream_handler --lib -- --nocapture`, `cargo test kimi::stream_handler --lib -- --nocapture`, and `cargo test --test threat_model_invariants provider_argument_normalization_fails_closed -- --nocapture`. |
+| SCB-S5 | Hidden side-effect boundedness audit | passed_after_fix | +1 | static-gate scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Retained-memory context loading, notification inbox/read-state reconstruction, and cron schedule/run truth now use named 500-resource scan limits tied to `resource_projection::MAX_RESOURCE_COLLECTION_LIMIT`. The resource store already enforced the 500-row cap, so the root issue was an unclassified contract shape rather than an actual unbounded read. DB smoke for the deep-linked session showed 22 events, 39 successful invocation rows grouped under engine/resource/session/agent/capability/memory/notification/process functions, 1 executed approval, 4 resource rows, 2 completed queues, stream rows on `agent.runtime`, `approvals`, `compensation.records`, `events.session`, `queue.lifecycle`, and `resource.leases`, 0 session logs, and 0 `compact.*` events. Simulator screenshot `/tmp/scb_s5_app_path_smoke_20260529.png` showed the user prompt and assistant content in the app route. | `resource_projection`: hidden side-effect truth reconstruction still requested `limit: 10_000` in retained-memory context, notification read decisions/inbox listing, and cron schedule/run reconstruction even though the resource primitive clamped results. | this checkpoint | Passed `cargo test --test threat_model_invariants hidden_side_effect_resource_scans_stay_bounded_and_observable -- --nocapture`, `cargo test retained_memory_context_reads_resource_artifacts --lib -- --nocapture`, `cargo test notification_ --lib -- --nocapture`, `cargo test cron_ --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, and simulator deep-link smoke against real dev server PID `2214`. |
 
 ## Scenario Details
 
@@ -2589,6 +2605,33 @@ Acceptance criteria:
   scans in cron truth reconstruction, notification read-state decisions, and
   retained-memory context loading without introducing side-channel state.
 
+SCB-S5 checkpoint, 2026-05-29:
+
+- Classified retained-memory context loading as a bounded resource-backed prompt
+  projection. It now names `RETAINED_MEMORY_CONTEXT_SCAN_LIMIT`, ties that limit
+  to `resource_projection::MAX_RESOURCE_COLLECTION_LIMIT`, and retains the
+  separate 200-entry context rendering cap.
+- Classified notification inbox/read-state reconstruction as a bounded
+  resource-backed projection over notification resources plus read decision
+  resources linked with `affects_notification`. It now uses
+  `NOTIFICATION_TRUTH_SCAN_LIMIT`, tied to the shared resource projection cap.
+- Classified cron schedule and run truth reconstruction as a bounded
+  resource-backed projection over `decision` and `evidence` resources. It now
+  uses `CRON_RESOURCE_TRUTH_SCAN_LIMIT`, tied to the shared resource projection
+  cap; the cron SQLite cache remains runtime mechanics, not product truth.
+- Added `hidden_side_effect_resource_scans_stay_bounded_and_observable` to
+  prevent these post-turn/hidden-side-effect paths from drifting back to
+  unclassified `limit: 10_000` resource traversals or losing resource-capability
+  evidence markers.
+- Focused verification passed for retained-memory context loading,
+  notification resources/read-state, cron resource truth, the new static gate,
+  and the full threat-model invariant suite.
+- Simulator app-path smoke opened
+  `tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` on the booted
+  iPhone 17 Pro simulator against real dev server PID `2214`; screenshot
+  `/tmp/scb_s5_app_path_smoke_20260529.png` showed the deep-linked chat route
+  with both user prompt and assistant content visible.
+
 ### 6. Continue Test Decomposition
 
 Problem:
@@ -2688,6 +2731,10 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
 - Prompt library, voice notes, and generated UI resource collection summaries
   stay on canonical bounded projection helpers; generated UI authoring must not
   reintroduce `limit: 10_000` resource scans.
+- Retained-memory context loading, notification inbox/read-state reconstruction,
+  and cron schedule/run truth reconstruction stay on named scan limits tied to
+  `resource_projection::MAX_RESOURCE_COLLECTION_LIMIT`; these hidden
+  side-effect paths must not reintroduce `limit: 10_000` resource scans.
 - Simulator deep-link harness instructions stay present in this scorecard and
   `packages/ios-app/docs/development.md`.
 - Simulator deep-link evidence records chat parity checks for user prompt
@@ -2735,22 +2782,20 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **SCB-S5: Harden Hidden Side Effects**
+Recommended next scenario: **SCB-S6: Continue Test Decomposition**
 
 Setup:
 
-- SCB-S1, SCB-S1b, SCB-S2, SCB-S3, and SCB-S4 completed the execute,
-  registry, bounded resource projection, and provider-normalization cleanup
-  passes.
-- Continue Structural Cleanup Backlog item 5 from this scorecard. Start by
-  classifying hidden side effects that can fire after the visible agent turn:
-  prompt history, memory retain, cron truth reconstruction, notification
-  read-state decisions, and any remaining 10,000-shaped resource traversals
-  deferred from SCB-S3.
-- Prefer deterministic Rust/static-gate fixtures for ownership and boundedness.
-  If a hidden side-effect path changes live behavior, run the smallest
-  live-server scenario that proves invocation/event/resource/log truth after the
-  visible response settles.
+- SCB-S1, SCB-S1b, SCB-S2, SCB-S3, SCB-S4, and SCB-S5 completed the execute,
+  registry, bounded resource projection, provider-normalization, and hidden
+  side-effect cleanup passes.
+- Continue Structural Cleanup Backlog item 6 from this scorecard. Start by
+  inventorying Rust test files over 1k lines and any generated or fixture-heavy
+  test files that remain intentionally large.
+- Prefer deterministic Rust/static-gate fixtures for ownership and file-size
+  exceptions. A simulator run is not required unless test decomposition changes
+  live app or server behavior; if it does, use the simulator deep-link protocol
+  and DB reconstruction checklist.
 - Do not add fallback readers, compatibility aliases, alternate worker-spawn
   paths, client-owned policy, product-state side channels, package/source/policy/
   trust/audit tables, or central branches that make new capabilities require
@@ -2758,38 +2803,36 @@ Setup:
 
 Procedure:
 
-1. Inventory prompt-history, memory retain, cron truth, notification, and other
-   post-turn side-effect code paths.
-2. Classify each path as engine-owned observable work, bounded projection,
-   hidden sidecar, legacy fallback, or product-state side channel.
-3. Add or strengthen the smallest static or unit test proving post-turn work
-   routes through invocation/event/resource truth and bounded resource access.
-4. Remove hidden sidecars, fallback readers, or unbounded scans only after a
-   focused test captures the intended current behavior.
-5. Remove dead/fallback/legacy/compatibility code found nearby.
-6. Run focused side-effect/resource tests plus
+1. Inventory `packages/agent/tests/*.rs` and `packages/agent/src/**/tests*.rs`
+   files over 1k lines.
+2. Classify each large file as single-concern but fixture-heavy, generated/
+   snapshot-heavy, or mixed-concern and worth splitting.
+3. For any mixed-concern file, add or identify the smallest focused test target
+   before moving code, then split into ownership-local modules without changing
+   behavior.
+4. For files that should remain large, record an explicit static-gate exception
+   with the owning concern and reason.
+5. Remove nearby dead/fallback/legacy/compatibility test scaffolding only after
+   focused coverage proves it is no longer needed.
+6. Run the affected focused test filters plus
    `cargo test --test threat_model_invariants -- --nocapture`, then update this
-   scorecard with the exact files, tests, and ownership decision.
+   scorecard with file counts, splits, exceptions, and test evidence.
 
 After completion, inspect:
 
-- prompt-history and memory-retain modules discovered during the inventory;
-- cron truth reconstruction, notification read-state, and other deferred
-  resource traversal paths from SCB-S3;
+- large Rust test files discovered during the inventory;
+- owning module docs for any moved test boundary;
 - `packages/agent/tests/threat_model_invariants.rs`;
-- module docs for any moved ownership boundary.
+- this scorecard's large-file/static-gate notes.
 
 Pass criteria:
 
-- Prompt history and memory retain are observable through engine-owned
-  invocation/event/resource truth.
-- Hidden side effects cannot mutate durable state without reconstructable DB
-  evidence.
-- Remaining deferred 10,000-shaped resource traversals are classified, bounded,
-  or explicitly justified by canonical truth reconstruction.
-- Static gates fail on future unclassified hidden sidecars or unbounded resource
-  scans.
-- Docs explain any new ownership boundary.
+- Tests land near the owning concern rather than broad catch-all files.
+- Files over 1k lines have either been split or have explicit, enforced
+  justification.
+- Static gates fail on future broad catch-all test growth without an ownership
+  exception.
+- Docs explain any new ownership boundary if tests move across modules.
 - Focused tests pass, and `cargo test --test threat_model_invariants -- --nocapture`
   passes.
 

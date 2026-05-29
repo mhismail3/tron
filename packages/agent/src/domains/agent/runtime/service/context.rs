@@ -1,4 +1,7 @@
 //! Prompt-run bootstrap and volatile context assembly.
+//!
+//! Retained-memory context is a bounded read projection over resource
+//! capabilities. It must not grow a direct store reader or hidden state path.
 
 use std::sync::Arc;
 
@@ -9,6 +12,10 @@ use super::{
     PromptBootstrapData, PromptContextArtifacts, VolatileTokens, load_prompt_bootstrap,
     load_prompt_bootstrap_minimal,
 };
+
+const RETAINED_MEMORY_CONTEXT_SCAN_LIMIT: usize =
+    crate::domains::resource_projection::MAX_RESOURCE_COLLECTION_LIMIT;
+const RETAINED_MEMORY_CONTEXT_ENTRY_LIMIT: usize = 200;
 
 pub(super) struct PromptContextBundle {
     pub(super) combined_rules: Option<String>,
@@ -194,7 +201,7 @@ async fn load_retained_memory_resource_context(
     let listed = invoke_resource_read(
         engine_host,
         "resource::list",
-        json!({"kind": "artifact", "limit": 10_000}),
+        json!({"kind": "artifact", "limit": RETAINED_MEMORY_CONTEXT_SCAN_LIMIT}),
         "memory-context-list",
     )
     .await?;
@@ -210,7 +217,7 @@ async fn load_retained_memory_resource_context(
     ids.sort();
 
     let mut sections = Vec::new();
-    for id in ids.into_iter().take(200) {
+    for id in ids.into_iter().take(RETAINED_MEMORY_CONTEXT_ENTRY_LIMIT) {
         let inspected = invoke_resource_read(
             engine_host,
             "resource::inspect",

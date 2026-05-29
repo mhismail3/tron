@@ -2,7 +2,9 @@
 //!
 //! Notification delivery/read facts are engine resources and decisions. Session
 //! events remain historical invocation records and are never used as inbox
-//! source truth.
+//! source truth. Inbox reconstruction uses bounded resource-capability
+//! projections only; it must not grow a notification-owned side table or hidden
+//! store reader.
 
 use chrono::Utc;
 use serde::Serialize;
@@ -20,6 +22,8 @@ const NOTIFICATION_READ_DECISION: &str = "notification_read";
 const NOTIFICATION_MARK_ALL_READ_DECISION: &str = "notification_mark_all_read";
 const DELIVERY_EVIDENCE_TYPE: &str = "notification_delivery";
 const MAX_NOTIFICATION_LIST_LIMIT: usize = 100;
+const NOTIFICATION_TRUTH_SCAN_LIMIT: usize =
+    crate::domains::resource_projection::MAX_RESOURCE_COLLECTION_LIMIT;
 
 /// A single notification returned to the client inbox.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -442,7 +446,7 @@ async fn read_decisions(deps: &Deps) -> Result<Vec<ReadDecision>, CapabilityErro
         deps,
         None,
         "resource::list",
-        json!({"kind": "decision", "limit": 10_000}),
+        json!({"kind": "decision", "limit": NOTIFICATION_TRUTH_SCAN_LIMIT}),
         "list:read-decisions",
         "resource.read",
     )
@@ -536,7 +540,7 @@ async fn notification_resources(deps: &Deps) -> Result<Vec<Value>, CapabilityErr
         deps,
         None,
         "resource::list",
-        json!({"kind": NOTIFICATION_KIND, "limit": 10_000}),
+        json!({"kind": NOTIFICATION_KIND, "limit": NOTIFICATION_TRUTH_SCAN_LIMIT}),
         "list:notifications",
         "resource.read",
     )

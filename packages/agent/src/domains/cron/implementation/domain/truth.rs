@@ -3,7 +3,9 @@
 //! Cron keeps a low-level SQLite cache for timer/runtime mechanics, but
 //! operator-visible schedule definitions and completed run observations are
 //! owned by `decision` and `evidence` resources. This boundary is the only place
-//! cron composes resource capabilities directly.
+//! cron composes resource capabilities directly. Truth reconstruction stays on
+//! bounded resource-capability projections; the runtime cache is never product
+//! truth and must not become a store reader.
 
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -18,6 +20,8 @@ use crate::shared::server::errors::CapabilityError;
 
 pub(crate) const CRON_SCHEDULE_DECISION_TYPE: &str = "cron_schedule";
 pub(crate) const CRON_RUN_EVIDENCE_TYPE: &str = "cron_run";
+pub(crate) const CRON_RESOURCE_TRUTH_SCAN_LIMIT: usize =
+    crate::domains::resource_projection::MAX_RESOURCE_COLLECTION_LIMIT;
 
 #[derive(Clone, Debug)]
 pub(crate) struct CronScheduleRecord {
@@ -44,7 +48,7 @@ pub(crate) async fn list_schedule_records(
         engine_host,
         parent,
         "resource::list",
-        json!({"kind": "decision", "limit": 10_000}),
+        json!({"kind": "decision", "limit": CRON_RESOURCE_TRUTH_SCAN_LIMIT}),
         "list:schedules",
         "resource.read",
     )
@@ -168,7 +172,7 @@ pub(crate) async fn list_run_evidence(
         engine_host,
         parent,
         "resource::list",
-        json!({"kind": "evidence", "limit": 10_000}),
+        json!({"kind": "evidence", "limit": CRON_RESOURCE_TRUTH_SCAN_LIMIT}),
         &format!("list:runs:{job_id}"),
         "resource.read",
     )

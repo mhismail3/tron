@@ -264,7 +264,10 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| SCB-S1b | Deterministic route and decomposition ownership audit |",
         "| SCB-S2 | Capability registry ownership split audit |",
         "| SCB-S3 | Canonical bounded resource projection audit |",
-        "Recommended next scenario: **SCB-S5:",
+        "| SCB-S4 | Provider normalization classification |",
+        "| SCB-S5 | Hidden side-effect boundedness audit |",
+        "Recommended next scenario: **SCB-S6:",
+        "hidden_side_effect_resource_scans_stay_bounded_and_observable",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
@@ -2266,6 +2269,71 @@ fn bounded_resource_projection_summaries_stay_canonical() {
                 && content.contains("limit: 500")
                 && !content.contains("limit: 10_000"),
             "{rel} module trust/audit projections must stay resource-native and bounded"
+        );
+    }
+}
+
+#[test]
+fn hidden_side_effect_resource_scans_stay_bounded_and_observable() {
+    let crate_root = crate_root();
+
+    for (label, rel, limit_marker, required_markers) in [
+        (
+            "retained memory context",
+            "src/domains/agent/runtime/service/context.rs",
+            "RETAINED_MEMORY_CONTEXT_SCAN_LIMIT",
+            &[
+                "MAX_RESOURCE_COLLECTION_LIMIT",
+                "\"resource::list\"",
+                "\"resource::inspect\"",
+                "artifact:memory-rule:",
+                "artifact:memory-argument:",
+            ][..],
+        ),
+        (
+            "notification inbox",
+            "src/domains/notifications/inbox.rs",
+            "NOTIFICATION_TRUTH_SCAN_LIMIT",
+            &[
+                "MAX_RESOURCE_COLLECTION_LIMIT",
+                "\"resource::list\"",
+                "\"resource::inspect\"",
+                "\"decision::create\"",
+                "\"evidence::attach\"",
+                "\"resource::link\"",
+                "affects_notification",
+            ][..],
+        ),
+        (
+            "cron truth",
+            "src/domains/cron/implementation/domain/truth.rs",
+            "CRON_RESOURCE_TRUTH_SCAN_LIMIT",
+            &[
+                "MAX_RESOURCE_COLLECTION_LIMIT",
+                "\"resource::list\"",
+                "\"resource::inspect\"",
+                "\"decision::create\"",
+                "\"evidence::attach\"",
+                "decision:cron-schedule:",
+                "evidence:cron-run:",
+            ][..],
+        ),
+    ] {
+        let content = std::fs::read_to_string(crate_root.join(rel))
+            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
+        assert!(
+            content.contains(limit_marker),
+            "{label} must name its resource scan limit so hidden side-effect ownership stays auditable"
+        );
+        for marker in required_markers {
+            assert!(
+                content.contains(marker),
+                "{label} must retain observable resource-capability marker `{marker}`"
+            );
+        }
+        assert!(
+            !content.contains("\"limit\": 10_000") && !content.contains("limit: 10_000"),
+            "{label} must not reintroduce unbounded-looking resource scans"
         );
     }
 }
