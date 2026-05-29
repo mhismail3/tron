@@ -25,7 +25,8 @@ struct GeneratedUIDTOTests {
             "requiredRisk": "low",
             "approvalPolicy": {"required": false},
             "targetRevision": 1,
-            "expiresAt": "2100-01-01T00:00:00Z"
+            "expiresAt": "2100-01-01T00:00:00Z",
+            "presentation": {"tone": "neutral", "buttonRole": "neutral", "icon": "arrow.clockwise"}
           }],
           "redactionPolicy": {"mode": "redacted"},
           "expiresAt": "2100-01-01T00:00:00Z",
@@ -47,6 +48,7 @@ struct GeneratedUIDTOTests {
         #expect(surface.catalog.id == "tron.ui.catalog.core.v1")
         #expect(surface.layout.children?.first?.type == "Text")
         #expect(surface.actions.first?.targetFunctionId == "control::snapshot")
+        #expect(surface.actions.first?.presentation?.icon == "arrow.clockwise")
         #expect(surface.authoring?.mode == "generated")
         #expect(surface.authoring?.targetType == "worker")
 
@@ -62,13 +64,14 @@ struct GeneratedUIDTOTests {
           "catalog": {"id": "tron.ui.catalog.core.v1", "revision": 1},
           "expiresAt": "2100-01-01T00:00:00Z",
           "targets": [{"targetType": "worker", "targetId": "control"}],
-          "actions": [{"actionId": "refresh", "label": "Refresh", "targetFunctionId": "control::snapshot", "requiredRisk": "low"}]
+          "actions": [{"actionId": "refresh", "label": "Refresh", "targetFunctionId": "control::snapshot", "requiredRisk": "low", "presentation": {"tone": "neutral", "buttonRole": "neutral", "icon": "arrow.clockwise"}}]
         }
         """
         let ref = try JSONDecoder().decode(UiSurfaceRefDTO.self, from: Data(refJSON.utf8))
 
         #expect(ref.resourceId == "res-ui")
         #expect(ref.actions?.first?.targetFunctionId == "control::snapshot")
+        #expect(ref.actions?.first?.presentation?.buttonRole == "neutral")
     }
 
     @Test("decodes ui surface inspection validation and mutation responses")

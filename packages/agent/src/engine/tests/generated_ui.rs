@@ -349,6 +349,14 @@ async fn ui_surface_for_target_creates_deterministic_worker_surface() {
         value["surface"]["actions"][0]["consequence"]["recommendedCanonicalAction"],
         "ui::refresh_surface"
     );
+    assert_eq!(
+        value["surface"]["actions"][0]["presentation"]["buttonRole"],
+        "neutral"
+    );
+    assert_eq!(
+        value["surface"]["actions"][0]["presentation"]["icon"],
+        "arrow.clockwise"
+    );
 
     let replayed = handle
         .invoke(host_invocation(
@@ -1349,14 +1357,12 @@ async fn control_advertises_generated_surface_authoring_without_layout_templates
         .await;
     assert_eq!(inspect.error, None);
     let value = inspect.value.as_ref().unwrap();
-    assert!(
-        value["availableActions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|action| action["functionId"] == "ui::surface_for_target"
-                && action["consequence"]["recommendedCanonicalAction"] == "ui::surface_for_target")
-    );
+    assert!(value["availableActions"].as_array().unwrap().iter().any(
+        |action| action["functionId"] == "ui::surface_for_target"
+            && action["consequence"]["recommendedCanonicalAction"] == "ui::surface_for_target"
+            && action["presentation"]["buttonRole"] == "primary"
+            && action["presentation"]["icon"] == "plus"
+    ));
     let text = serde_json::to_string(value).unwrap();
     assert!(!text.contains("payloadTemplate"));
     assert!(!text.contains("inputSchema"));

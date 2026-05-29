@@ -116,13 +116,35 @@ private struct GeneratedUIConfirmation: Identifiable {
     let title: String
     let message: String
     let confirmLabel: String
+    let buttonRole: GeneratedUIActionButtonRole
 }
 
 private let generatedUIRowExpansionAnimation = Animation.smooth(duration: 0.22, extraBounce: 0)
 
 private enum GeneratedUIActionButtonRole {
     case primary
+    case neutral
     case destructive
+
+    init(presentation: UiActionPresentationDTO?) {
+        switch presentation?.buttonRole {
+        case "primary":
+            self = .primary
+        case "destructive":
+            self = .destructive
+        default:
+            self = .neutral
+        }
+    }
+
+    var dialogRole: ButtonRole? {
+        switch self {
+        case .destructive:
+            return .destructive
+        case .primary, .neutral:
+            return nil
+        }
+    }
 }
 
 private struct GeneratedUIActionButtonStyle: ButtonStyle {
@@ -153,6 +175,8 @@ private struct GeneratedUIActionButtonStyle: ButtonStyle {
         switch role {
         case .primary:
             return .tronBackground
+        case .neutral:
+            return .tronTextPrimary
         case .destructive:
             return .tronError
         }
@@ -163,6 +187,8 @@ private struct GeneratedUIActionButtonStyle: ButtonStyle {
         switch role {
         case .primary:
             return .tronEmerald
+        case .neutral:
+            return .tronSurfaceElevated
         case .destructive:
             return .tronError.opacity(0.08)
         }
@@ -173,6 +199,8 @@ private struct GeneratedUIActionButtonStyle: ButtonStyle {
         switch role {
         case .primary:
             return .tronEmerald.opacity(0.95)
+        case .neutral:
+            return .tronBorder.opacity(0.78)
         case .destructive:
             return .tronError.opacity(0.35)
         }
@@ -213,7 +241,7 @@ struct GeneratedUISurfaceView: View {
                 titleVisibility: .visible
             ) {
                 if let pendingConfirmation {
-                    Button(pendingConfirmation.confirmLabel, role: .destructive) {
+                    Button(pendingConfirmation.confirmLabel, role: pendingConfirmation.buttonRole.dialogRole) {
                         let actionId = pendingConfirmation.actionId
                         self.pendingConfirmation = nil
                         submit(actionId: actionId)
@@ -580,23 +608,20 @@ struct GeneratedUISurfaceView: View {
         compact: Bool = false
     ) -> AnyView {
         let action = action(for: actionId)
-        let label = action?.label ?? fallbackLabel ?? humanizedActionLabel(actionId)
-        let destructive = isDestructive(action: action, label: label)
+        let label = action?.label ?? fallbackLabel ?? "Action"
+        let role = GeneratedUIActionButtonRole(presentation: action?.presentation)
         let enabled = actionsEnabled && canSubmit(actionId: actionId)
         let button = Button {
             submit(actionId: actionId)
         } label: {
-            Label(label, systemImage: actionSymbol(action: action, label: label))
+            Label(label, systemImage: presentationIcon(for: action))
                 .font(TronTypography.buttonSM)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
                 .frame(maxWidth: compact ? nil : .infinity)
         }
         .disabled(!enabled)
-        if destructive {
-            return AnyView(button.buttonStyle(.generatedUIAction(role: .destructive, isEnabled: enabled, compact: compact)))
-        }
-        return AnyView(button.buttonStyle(.generatedUIAction(isEnabled: enabled, compact: compact)))
+        return AnyView(button.buttonStyle(.generatedUIAction(role: role, isEnabled: enabled, compact: compact)))
     }
 
     private func confirmationButton(
@@ -607,6 +632,7 @@ struct GeneratedUISurfaceView: View {
     ) -> AnyView {
         let action = action(for: actionId)
         let label = action?.label ?? title
+        let role = GeneratedUIActionButtonRole(presentation: action?.presentation)
         let enabled = actionsEnabled && canSubmit(actionId: actionId)
         return AnyView(Button {
             guard let actionId, enabled else { return }
@@ -614,16 +640,17 @@ struct GeneratedUISurfaceView: View {
                 actionId: actionId,
                 title: title,
                 message: message,
-                confirmLabel: label
+                confirmLabel: label,
+                buttonRole: role
             )
         } label: {
-            Label(title, systemImage: "trash")
+            Label(title, systemImage: presentationIcon(for: action))
                 .font(TronTypography.buttonSM)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.generatedUIAction(role: .destructive, isEnabled: enabled))
+        .buttonStyle(.generatedUIAction(role: role, isEnabled: enabled))
         .disabled(!enabled))
     }
 
@@ -637,29 +664,13 @@ struct GeneratedUISurfaceView: View {
         return GeneratedUIRenderer.inputIsSatisfied(formValues, for: action)
     }
 
-    private func isDestructive(action: UiActionDTO?, label: String) -> Bool {
-        let text = "\(label) \(action?.actionId ?? "")".lowercased()
-        return text.contains("delete")
-            || text.contains("clear")
-            || text.contains("discard")
-            || text.contains("quarantine")
-    }
-
-    private func actionSymbol(action: UiActionDTO?, label: String) -> String {
-        let text = "\(label) \(action?.actionId ?? "")".lowercased()
-        if text.contains("refresh") { return "arrow.clockwise" }
-        if text.contains("create") || text.contains("add") { return "plus" }
-        if text.contains("update") || text.contains("save") { return "checkmark" }
-        if text.contains("delete") || text.contains("clear") || text.contains("discard") { return "trash" }
-        return "arrow.right"
-    }
-
-    private func humanizedActionLabel(_ actionId: String?) -> String {
-        guard let actionId else { return "Action" }
-        return actionId
-            .split(separator: "-")
-            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            .joined(separator: " ")
+    private func presentationIcon(for action: UiActionDTO?) -> String {
+        guard let icon = action?.presentation?.icon?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !icon.isEmpty
+        else {
+            return "arrow.right"
+        }
+        return icon
     }
 
     private func disclosureIcon(for component: UiComponentDTO) -> String {

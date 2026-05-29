@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **83/100 provisional**
+Current score: **84/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -91,9 +91,9 @@ interruption, and resource failure states.
 | Runtime resilience | 10 | 7 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 7 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
-| Code modularity and simplification | 10 | 8 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
+| Code modularity and simplification | 10 | 9 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **83/100**
+Total: **84/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -328,6 +328,19 @@ scorecard row with an owner/reason marker, and enforces per-file line budgets so
 future broad catch-all growth fails statically. Code modularity and
 simplification increases to `8/10`, and the banked score is now `83/100`.
 
+Resolved checkpoint note, 2026-05-29: SCB-S7 capability-presentation ownership
+passed after moving generated UI action presentation hints into server-authored
+action payloads and action summaries. iOS now decodes `UiActionPresentationDTO`
+and renders stored generated-UI button role/icon data without local
+destructive/refresh/create heuristics or humanized action-id fallbacks; generated
+UI submissions still carry only surface coordinates, user input, and an
+idempotency key. Static gates now reject future client-owned generated-action
+semantics, and the simulator app-path smoke opened
+`tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` against real dev
+server PID `18521`; screenshot:
+`/tmp/scb_s7_app_path_smoke_20260529.png`. Code modularity and simplification
+increases to `9/10`, and the banked score is now `84/100`.
+
 ## Scoring Rules
 
 - `+1` for a simulator-tested scenario with DB proof and no code changes needed.
@@ -465,6 +478,7 @@ do not let screenshot state override the engine ledger.
 | SCB-S4 | Provider normalization classification | passed_after_fix | +1 | static-gate scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Provider-specific schema terms remain confined to provider/protocol modules. Provider capability argument parsing now returns `Result`, and OpenAI, Anthropic/shared stream accumulation, Google, and Kimi route malformed or non-object arguments to `StreamEvent::Error` without emitting a canonical capability invocation or `Done` event. Ollama already deserializes arguments as a typed object at the provider boundary. Light simulator smoke opened `tron://session/sess_019e7523-4c24-7b02-9ff7-08b896c05c74` against dev server PID `57422` and rendered the existing P5 chat path; screenshot `/tmp/scb_s4_app_path_smoke_20260529.png`. | `provider_runner`: streamed or completed provider arguments could fail open as `{}` in `provider_protocol::capability_parsing`, shared stream accumulation, Kimi, and OpenAI; Google non-object function-call args could also become empty canonical arguments. | this checkpoint | Passed `cargo test capability_parsing --lib -- --nocapture`, `cargo test stream_common --lib -- --nocapture`, `cargo test openai::stream_handler --lib -- --nocapture`, `cargo test google::stream_handler --lib -- --nocapture`, `cargo test kimi::stream_handler --lib -- --nocapture`, and `cargo test --test threat_model_invariants provider_argument_normalization_fails_closed -- --nocapture`. |
 | SCB-S5 | Hidden side-effect boundedness audit | passed_after_fix | +1 | static-gate scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Retained-memory context loading, notification inbox/read-state reconstruction, and cron schedule/run truth now use named 500-resource scan limits tied to `resource_projection::MAX_RESOURCE_COLLECTION_LIMIT`. The resource store already enforced the 500-row cap, so the root issue was an unclassified contract shape rather than an actual unbounded read. DB smoke for the deep-linked session showed 22 events, 39 successful invocation rows grouped under engine/resource/session/agent/capability/memory/notification/process functions, 1 executed approval, 4 resource rows, 2 completed queues, stream rows on `agent.runtime`, `approvals`, `compensation.records`, `events.session`, `queue.lifecycle`, and `resource.leases`, 0 session logs, and 0 `compact.*` events. Simulator screenshot `/tmp/scb_s5_app_path_smoke_20260529.png` showed the user prompt and assistant content in the app route. | `resource_projection`: hidden side-effect truth reconstruction still requested `limit: 10_000` in retained-memory context, notification read decisions/inbox listing, and cron schedule/run reconstruction even though the resource primitive clamped results. | this checkpoint | Passed `cargo test --test threat_model_invariants hidden_side_effect_resource_scans_stay_bounded_and_observable -- --nocapture`, `cargo test retained_memory_context_reads_resource_artifacts --lib -- --nocapture`, `cargo test notification_ --lib -- --nocapture`, `cargo test cron_ --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, and simulator deep-link smoke against real dev server PID `2214`. |
 | SCB-S6 | Test decomposition and large-file ownership audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | `src/engine/tests/module_activation.rs` dropped from 1,950 lines to 873 lines and now owns shared fixtures plus declarations only. New child modules own package registration, local-process activation, and operator-surface tests. Remaining Rust test files over 1,000 lines are explicitly audited below with owner/reason markers and enforced line budgets. | `code_ownership`: module-activation registration, activation runtime, grant-boundary, and operator-surface tests lived in the shared fixture root; remaining large test files had no enforced scorecard audit row or line budget. | this checkpoint | Passed `cargo test module_activation --lib -- --nocapture`, `cargo test --test threat_model_invariants rust_test_ownership_stays_code_adjacent -- --nocapture`, `cargo test --test threat_model_invariants large_rust_test_files_have_scorecard_ownership_audit -- --nocapture`, and `cargo test --test threat_model_invariants -- --nocapture`. |
+| SCB-S7 | Capability presentation ownership audit | passed_after_fix | +1 | static/unit scenario; app-path smoke `sess_019e7523-4c24-7b02-9ff7-08b896c05c74` | Generated UI action presentation is now authored by `engine::primitives::action_summary` and stored on action payloads/summaries as `presentation.buttonRole` and `presentation.icon`; `ui::inspect_surface` and control UI refs project it without exposing templates in control. iOS decodes `UiActionPresentationDTO`, renders stored button role/icon data, and retains coordinate-only `UiActionSubmissionDTO`. DB smoke for the deep-linked session showed 22 session events, 47 successful invocations grouped under agent/approval/capability/device/engine/materialized-file/memory/notification/process/prompt/resource/session/skills functions, 1 executed `process::run` approval, 4 resources created by session invocations (`agent_result` 2, `execution_output` 1, `materialized_file` 1), stream rows on `agent.runtime`, `approvals`, `events.session`, and `queue.lifecycle`, 0 session logs, and 0 `compact.*` events. Simulator screenshot `/tmp/scb_s7_app_path_smoke_20260529.png` showed the deep-linked app route with user and agent content visible. | `code_ownership`: the generated UI renderer inferred destructive/refresh/create semantics and SF Symbols from action labels/ids through local `isDestructive`, `actionSymbol`, and `humanizedActionLabel` logic even though the server already owned action targets/templates/consequences. | this checkpoint | Passed `cargo test --manifest-path packages/agent/Cargo.toml generated_ui --lib -- --nocapture`, `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants generated_ui_resource_and_renderer_gates_stay_on -- --nocapture`, `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`, `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`, `cargo check --manifest-path packages/agent/Cargo.toml`, `cd packages/ios-app && xcodegen generate`, targeted `xcodebuild test` for `GeneratedUIDTOTests`, `GeneratedUIRendererTests`, and `SourceGuardTests` on iPhone 17 Pro, and simulator deep-link smoke against real dev server PID `18521`. |
 
 ## Scenario Details
 
@@ -2677,15 +2691,15 @@ SCB-S6 checkpoint, 2026-05-29:
   `packages/agent/src/**/tests*`/`tests/`, requires each remaining large file to
   appear in the audit table below, and enforces a line budget.
 
-Large-file audit after SCB-S6:
+Large-file audit after SCB-S7:
 
 | File | Lines | Classification | Owner/Reason Marker | Enforced Budget |
 |---|---:|---|---|---:|
-| `packages/agent/tests/threat_model_invariants.rs` | 5,082 | intentional exception | cross-cutting static architecture gates | 5,200 |
+| `packages/agent/tests/threat_model_invariants.rs` | 5,126 | intentional exception | cross-cutting static architecture gates | 5,200 |
 | `packages/agent/tests/integration/tests.rs` | 3,108 | intentional exception | transport e2e suite with shared WebSocket harness | 3,300 |
 | `packages/agent/src/domains/session/event_store/store/tests.rs` | 3,083 | intentional exception | single event-store API matrix | 3,300 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2,712 | intentional exception | worktree coordinator lifecycle matrix | 2,900 |
-| `packages/agent/src/engine/tests/generated_ui.rs` | 1,859 | intentional exception | single generated-UI primitive matrix | 2,050 |
+| `packages/agent/src/engine/tests/generated_ui.rs` | 1,865 | intentional exception | single generated-UI primitive matrix | 2,050 |
 | `packages/agent/src/domains/agent/runner/guardrails/tests.rs` | 1,695 | intentional exception | guardrail rule-pattern matrix | 1,850 |
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1,571 | intentional exception | SQLite event repository query matrix | 1,750 |
 | `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests.rs` | 1,545 | intentional exception | subagent manager orchestration matrix | 1,700 |
@@ -2715,6 +2729,25 @@ Acceptance criteria:
 - iOS submits only stored action coordinates and user input where generated UI is
   involved.
 - No client-owned policy, grants, or action target construction.
+
+SCB-S7 checkpoint, 2026-05-29:
+
+- Classified generated UI action role/icon derivation as client-owned semantic
+  drift: the server owned the action target, payload template, and consequence,
+  but iOS still inferred destructive/refresh/create meaning from labels and
+  action ids.
+- Moved generated action presentation hints into the server-owned
+  `action_summary` primitive. Stored generated UI actions and action summaries
+  now include `presentation.buttonRole` and `presentation.icon`.
+- Kept iOS as a renderer: it decodes `UiActionPresentationDTO`, maps the stored
+  button role to visual style/dialog role, and falls back only to neutral visual
+  rendering if a malformed surface omits presentation. It no longer humanizes
+  action ids or scans labels/action ids for local semantics.
+- Strengthened Rust and iOS static gates so generated UI submissions stay
+  coordinate-only and generated UI rendering cannot reintroduce local action
+  semantic guesses.
+- Deferred the separate chat/approval parity issues to SCB-S8 rather than
+  mixing UI polish into this architecture hardening pass.
 
 ### 8. Prove Chat/Engine State Parity
 
@@ -2792,6 +2825,10 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
 - `large_rust_test_files_have_scorecard_ownership_audit` keeps the SCB-S6
   large-file audit exact: new files over 1,000 lines or audited files exceeding
   budget must split or update this scorecard with a new owner/reason.
+- Generated UI action presentation semantics stay server-owned: Rust action
+  summaries must keep `presentation.buttonRole`/`presentation.icon`, iOS must
+  consume `UiActionPresentationDTO`, and the generated UI renderer must not infer
+  action meaning from labels or action ids.
 
 ## Verification Commands
 
@@ -2832,22 +2869,23 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **SCB-S7: Move Capability Presentation Toward Server Ownership**
+Recommended next scenario: **SCB-S8: Prove Chat/Engine State Parity**
 
 Setup:
 
 - SCB-S1, SCB-S1b, SCB-S2, SCB-S3, SCB-S4, and SCB-S5 completed the execute,
   registry, bounded resource projection, provider-normalization, and hidden
   side-effect cleanup passes. SCB-S6 split the mixed module-activation test root
-  and added an enforced large-test-file audit.
-- Continue Structural Cleanup Backlog item 7 from this scorecard. Start by
-  inventorying iOS and server presentation paths for capability cards, detail
-  sheets, generated UI action rendering, action summaries, icons, colors,
-  labels, status text, and consequence text.
-- Prefer deterministic static/unit tests for ownership. If any iOS rendering
-  behavior changes, run the smallest simulator deep-link scenario that proves
-  the app renders server-owned presentation truth without constructing policy or
-  action targets locally.
+  and added an enforced large-test-file audit. SCB-S7 moved generated UI action
+  presentation semantics to server-owned action payloads/summaries and kept iOS
+  as a thin renderer.
+- Continue Structural Cleanup Backlog item 8 from this scorecard. Start by
+  reproducing the known visible parity risks: harness-submitted user prompts can
+  be absent from chat while agent responses render, and approval/action sheets
+  can remain visible after terminal engine state advances.
+- Use a real dev server and the iPhone 17 Pro simulator. The simulator
+  deep-link harness instructions in this scorecard and
+  `packages/ios-app/docs/development.md` are the canonical procedure.
 - Do not add fallback readers, compatibility aliases, alternate worker-spawn
   paths, client-owned policy, product-state side channels, package/source/policy/
   trust/audit tables, or central branches that make new capabilities require
@@ -2855,47 +2893,53 @@ Setup:
 
 Procedure:
 
-1. Inventory capability presentation code in Rust metadata/action-summary/
-   generated-UI authoring and iOS capability cards/detail sheets/generated UI
-   renderers.
-2. Classify each presentation decision as server-owned metadata, server-owned
-   generated UI payload, pure visual rendering, or client-owned semantic guess.
-3. Add or strengthen the smallest static/unit tests proving iOS does not
-   construct capability policy, grants, action target ids, payload templates, or
-   semantic consequence text locally.
-4. Move presentation hints to server-owned capability metadata or stored
-   generated UI payloads where practical; keep iOS as a thin renderer.
-5. Remove dead/fallback/legacy/compatibility presentation paths found nearby.
+1. Choose or create the smallest deterministic session that has one
+   harness-submitted user prompt, one assistant response, and one terminal
+   approval/action state transition.
+2. Open `tron://session/<session_id>` in the booted simulator only after the DB
+   terminal state is stable.
+3. Capture simulator evidence and query session DB truth for events,
+   invocations, approvals, resources, queues, streams, and logs.
+4. Compare visible chat/user prompt/assistant response/approval sheet state to
+   canonical DB truth for the same session id.
+5. If there is drift, classify the owner as `ios_rendering` or
+   `stream_or_state`, add or identify the smallest focused test, fix only the
+   owning module, remove nearby dead/fallback/legacy/compat code, and rerun the
+   exact scenario.
 6. Run focused Rust/iOS tests plus
    `cargo test --test threat_model_invariants -- --nocapture`, then update this
-   scorecard with exact files, tests, and ownership decisions.
+   scorecard with exact files, tests, screenshots, and DB evidence.
 
 After completion, inspect:
 
-- `packages/agent/src/domains/capability/` metadata and action-summary paths;
-- `packages/agent/src/engine/primitives/ui/` generated UI authoring paths;
-- iOS capability card/detail/generated UI rendering files;
+- `packages/agent/src/domains/session/event_store/` event reconstruction paths;
+- `packages/agent/src/engine/primitives/approval.rs` and action-state streams;
+- iOS chat reconstruction and deep-link handling files under
+  `packages/ios-app/Sources/ViewModels/Chat/`,
+  `packages/ios-app/Sources/Views/Chat/`, and
+  `packages/ios-app/Sources/Services/Network/DeepLinkRouter.swift`;
+- iOS approval/action sheet dismissal paths;
 - `packages/agent/tests/threat_model_invariants.rs`;
-- relevant iOS tests or focused simulator evidence if rendering changes.
+- relevant iOS tests and focused simulator screenshots.
 
 Pass criteria:
 
-- Capability presentation hints that imply semantics, actions, consequence, or
-  status are server-owned where practical.
-- iOS submits only stored generated UI coordinates and user input for generated
-  UI actions.
-- iOS does not construct policy, grants, action targets, or capability semantics
-  from local guesses.
-- Static gates fail on future client-owned presentation policy or generated UI
-  action target construction.
-- Docs explain any moved presentation ownership boundary.
+- Harness-submitted user prompts, assistant content, capability result cards,
+  approval/action state, and terminal errors visible in chat match DB truth for
+  the same session id.
+- Approval/action sheets disappear or become inert when terminal engine status
+  makes them non-actionable.
+- No product-state side channel is introduced to make parity appear correct.
+- Static or focused iOS tests fail on future visible drift where practical.
+- Docs explain the simulator parity harness and any engine/UI projection
+  boundary changed.
 - Focused tests pass, and `cargo test --test threat_model_invariants -- --nocapture`
   passes.
 
 If it fails, classify the primary layer as `code_ownership`,
-`provider_runner`, `schema_or_recipe`, `model_guidance`, or
-`execute_resolution`, then stop broad cleanup until the exact ownership failure
-is fixed and retested.
+`ios_rendering`, `stream_or_state`, `schema_or_recipe`, `model_guidance`, or
+`execute_resolution`, then stop broad cleanup until the exact parity failure is
+fixed and retested.
 
 ## Acceptance Criteria For This Planning Checkpoint
 

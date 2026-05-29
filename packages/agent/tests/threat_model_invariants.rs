@@ -346,9 +346,11 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| SCB-S4 | Provider normalization classification |",
         "| SCB-S5 | Hidden side-effect boundedness audit |",
         "| SCB-S6 | Test decomposition and large-file ownership audit |",
-        "Recommended next scenario: **SCB-S7:",
+        "| SCB-S7 | Capability presentation ownership audit |",
+        "Recommended next scenario: **SCB-S8:",
         "hidden_side_effect_resource_scans_stay_bounded_and_observable",
         "large_rust_test_files_have_scorecard_ownership_audit",
+        "Generated UI action presentation semantics stay server-owned",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
@@ -2556,6 +2558,7 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
         "generated authoring",
         "targetFunctionId",
         "idempotencyKey",
+        "presentation",
     ] {
         assert!(
             ui_tree.contains(required),
@@ -2567,13 +2570,29 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
         "generated UI must expose ui::catalog, not a parallel render-contract API"
     );
 
+    let action_summary =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/action_summary.rs"))
+            .expect("failed to read action summary primitive");
+    for required in [
+        "action_presentation",
+        "\"presentation\"",
+        "\"buttonRole\"",
+        "\"icon\"",
+    ] {
+        assert!(
+            action_summary.contains(required),
+            "canonical action summary projection must keep server-owned presentation marker `{required}`"
+        );
+    }
+
     let control = std::fs::read_to_string(crate_root.join("src/engine/primitives/control.rs"))
         .expect("failed to read control primitive");
     assert!(
         control.contains("uiSurfaceRefs")
+            && control.contains("\"presentation\"")
             && !control.contains("payloadTemplate")
             && !control.contains("inputSchema"),
-        "control projections must expose UI surface refs without inlining action templates or schemas"
+        "control projections must expose UI surface presentation refs without inlining action templates or schemas"
     );
 
     let renderer_path = repo_root
@@ -2627,6 +2646,28 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
             && !renderer.contains("WebView"),
         "iOS generated UI renderer must fail closed and must not render executable markup"
     );
+    for required in [
+        "UiActionPresentationDTO",
+        "GeneratedUIActionButtonRole(presentation:",
+        "presentationIcon(for:",
+    ] {
+        assert!(
+            renderer.contains(required),
+            "iOS generated UI renderer must consume server-owned action presentation `{required}`"
+        );
+    }
+    for forbidden in [
+        "isDestructive(action:",
+        "actionSymbol(action:",
+        "humanizedActionLabel",
+        "text.contains(\"delete\")",
+        "text.contains(\"refresh\")",
+    ] {
+        assert!(
+            !renderer.contains(forbidden),
+            "iOS generated UI renderer must not infer action semantics locally via `{forbidden}`"
+        );
+    }
 
     let generated_ui_dtos_path = repo_root
         .join("packages")
@@ -2637,6 +2678,11 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
         .join("EngineProtocolTypes+GeneratedUI.swift");
     let generated_ui_dtos = std::fs::read_to_string(&generated_ui_dtos_path)
         .unwrap_or_else(|e| panic!("failed to read {generated_ui_dtos_path:?}: {e}"));
+    assert!(
+        generated_ui_dtos.contains("struct UiActionPresentationDTO")
+            && generated_ui_dtos.contains("var presentation: UiActionPresentationDTO?"),
+        "generated UI DTOs must expose server-owned action presentation without changing submissions"
+    );
     let submission_dto = generated_ui_dtos
         .split("struct UiActionSubmissionDTO")
         .nth(1)

@@ -92,6 +92,13 @@ struct UiActionDTO: Codable, Equatable, Sendable {
     var expiresAt: String
     var targetResourceId: String?
     var targetVersionId: String?
+    var presentation: UiActionPresentationDTO? = nil
+}
+
+struct UiActionPresentationDTO: Codable, Equatable, Sendable {
+    var tone: String?
+    var icon: String?
+    var buttonRole: String?
 }
 
 struct UiActionSummaryDTO: Codable, Equatable, Sendable {
@@ -102,6 +109,7 @@ struct UiActionSummaryDTO: Codable, Equatable, Sendable {
     var requiredRisk: String?
     var targetRevision: UInt64?
     var expiresAt: String?
+    var presentation: UiActionPresentationDTO? = nil
 }
 
 struct UiActionSubmissionDTO: Codable, Equatable, Sendable {

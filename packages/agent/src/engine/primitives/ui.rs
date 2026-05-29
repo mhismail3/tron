@@ -868,6 +868,8 @@ fn action_summaries(payload: Option<&Value>) -> Value {
                     "targetRevision": action.get("targetRevision").cloned().unwrap_or(Value::Null),
                     "requiredRisk": action.get("requiredRisk").cloned().unwrap_or(Value::Null),
                     "expiresAt": action.get("expiresAt").cloned().unwrap_or(Value::Null),
+                    "consequence": action.get("consequence").cloned().unwrap_or(Value::Null),
+                    "presentation": action.get("presentation").cloned().unwrap_or(Value::Null),
                 })
             })
             .collect(),
