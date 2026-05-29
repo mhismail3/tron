@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **64/100 provisional**
+Current score: **65/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -88,12 +88,12 @@ interruption, and resource failure states.
 | Multi-capability orchestration | 12 | 9 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 9 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 8 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
-| Runtime resilience | 10 | 5 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
+| Runtime resilience | 10 | 6 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 5 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **64/100**
+Total: **65/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -110,6 +110,12 @@ projection gap. Direct public execute now derives active-profile execution
 policy scopes/runtime metadata on the server, rejects client-authored execute
 policy context, and passed the exact approval/denial/replay retest. The banked
 score is now `64/100`; broad testing may proceed to RWO-N13.
+
+Resolved checkpoint note, 2026-05-29: RWO-N13 passed the runtime resilience
+live-server scenario with the iOS simulator booted. The dev server survived
+`./scripts/tron dev -bdt`, an in-flight long `process::run` interruption during
+`./scripts/tron dev -d`, and an approval pause across a second no-build dev
+restart. The banked score is now `65/100`; broad testing may proceed to RWO-N14.
 
 ## Scoring Rules
 
@@ -197,7 +203,7 @@ The evidence note must identify:
 | RWO-N10 | Memory auto-retain | passed | +1 | `sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6` | See 2026-05-29 RWO-N10 result note below. The run used the real dev server and booted simulator evidence, kept the default auto-retain interval of 10, recorded 9 explicit `memory::auto_retain_fire` skips with `reason = below_threshold`, then fired on the tenth user message with `status = retaining`. The terminal `memory.retained` event recorded 4 resource refs: memory journal artifact, session materialized projection, memory-rule artifact, and rule materialized projection. DB evidence shows 0 failed invocations, 0 approvals, 0 `compact.*` events, 10 completed prompt queue drains, and resource versions with hashes/lifecycle state. | none; no code changes required | n/a | Passed without changing settings or using a side channel. Retain truth was engine-owned: `memory.retained` event seq 152, parent auto-retain invocation `019e73bb-209f-7561-912f-909dfe5f6e5a`, trace `019e73ba-fe7e-7511-ab2b-7275bfbecf3b`, and resource refs were produced by `artifact::create`, `materialized_file::update`, and `resource::link` children under that invocation. |
 | RWO-N11 | Resource failure matrix | passed_after_fix | +2 | first failed run: `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2`; resource-truth retest: `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6`; execute-guidance retest: `sess_019e73eb-f65c-7ce3-a621-aa8b0d078494` | See 2026-05-29 RWO-N11 result note below. Final retest used 17 `capability::execute` rows, 6 `materialized_file::update`, 2 `materialized_file::hash_verify`, 2 `materialized_file::read`, 2 `materialized_file::inspect`, 3 `resource::create`, 1 `materialized_file::discard`, 0 approvals, 0 `compact.*` events, 0 session logs, damaged truth for missing-bytes and hash-mismatch fixtures, discarded lifecycle for the discarded fixture, replay of step 4, and 0 `target_payload_invalid` execute rows. | Primary fixed root cause was `resource_truth`: missing canonical bytes returned an opaque handler failure without damaged resource truth, and discarded materialized files remained readable/updatable through operational wrappers. Follow-up fixed `schema_or_recipe`: lifecycle CAS guidance now teaches `expectedCurrentVersionId`, not `versionId`, before the model calls lifecycle targets. | `c8a230983`; `9069323a1` | Passed after rebuilt dev server PID 98981 with simulator booted. Step 14 first attempted `materialized_file::discard` with `expectedCurrentVersionId = ver_019e73ed-1591-7cb3-8693-b0f2121f40fc` and succeeded without a pre-child validation failure. |
 | RWO-N12 | Approval and grant boundary | passed_after_fix | +2 | failed direct policy probe: `sess_019e73fa-ba22-7bd1-a9a1-f359286c80c0`; approval session: `sess_019e73fd-ba7a-7521-bbdf-6dca81b5855c`; direct retest: `sess_019e7410-98a1-7472-a8b8-475bc8229055` | See 2026-05-29 RWO-N12 result note below. The live approval-flow session used 3 `capability::execute` rows, 2 approval records, 3 `approval::resolve` rows, 1 `process::run` child, 1 `materialized_file::update`, 3 `resource::create`, 2 completed prompt queue drains, 0 failed invocations, and 0 `compact.*` events. The direct retest used 3 `capability::execute`, 3 `approval::resolve`, 1 `process::run`, 1 `materialized_file::update`, 1 `resource::create`, 6 `engine::invoke`, 2 approval records, 8 stream rows, 0 failed invocations, and 0 `compact.*` events. Denial created approval `019e7410-996b-7431-afa9-f9e3da8e5c9c`, no child, and no target refs; approval created approval `019e7410-9b17-7673-b14c-c55da8e669c2`, child `019e7410-9b42-7ab0-a09f-73660aff8cad`, materialized file `materialized_file:2d5d7cc3d635bdaed7de5dd104b243c4e8640b393b8c1b4f1345093ebfe555f0`, and output `res_019e7410-9b4d-7fa1-93da-67dd1c38cda3`; replay execute `019e7410-9c24-71d0-b87c-ac8216df447a` reported `approvalReplayed=true` and `childInvocationCreated=false`. | `execute_resolution`: public `/engine` direct `capability::execute` used transport/client audit scopes but did not project active-profile execution policy scopes/runtime metadata, so direct execute failed with `CAPABILITY_DENIED` before approval. The root fix derives execute policy on the server from the active profile and rejects client-authored `contract.*`, `implementation.*`, `plugin.*`, and `capability.*` policy context. | `704fb8041` | Passed after rebuilt dev server PID 7070 with simulator booted. DB evidence proves policy scopes stayed server-owned, the denied mutation created no `process::run` child or target refs, the approved mutation created exactly one child and resource chain, duplicate approval resolve replayed, and direct public execute no longer requires client-supplied policy. |
-| RWO-N13 | Runtime resilience | pending | 0 | | | | | |
+| RWO-N13 | Runtime resilience | passed | +1 | runtime pass: `sess_019e7422-7fb7-7423-a63c-16c473d6917e`; unscored harness attempt: `sess_019e741e-8b87-7f72-94f7-b98b3be63eb3` | See 2026-05-29 RWO-N13 result note below. Runtime log `/tmp/rwo_n13_runtime_run_20260529072756.json` and approval-pause log `/tmp/rwo_n13_approval_pause_run_20260529073320.json` reconstruct the scenario. Baseline prompt used `agent::prompt`, a completed `agent::prompt_queue_drain`, `filesystem::read_file`, and `process::run`; `./scripts/tron dev -bdt` moved PID `81779` to `47488` and passed the configured dev tests. The long read-only process acquired lease cursor `80311`, was interrupted by `./scripts/tron dev -d` moving PID `47488` to `48287`, persisted child `019e7424-1af7-7f91-9f27-d75c64927fb7` with exitCode `-1`, released lease `019e7424-1af7-7f91-9f27-d7682abb77bf`, and recorded compensation `019e7424-1e4e-76b2-a31c-fc97ad20efef`. Post-reconnect `process::run` child `019e7424-558d-7d51-b3d9-59df726a0642` exited `0`. Approval `019e7427-6989-7d90-829e-89f5d0689c07` stayed pending across `./scripts/tron dev -d` moving PID `48287` to `49356`, then executed child `019e7427-96ad-76d1-bf34-658c13775af3`, materialized file `materialized_file:10068ee46d1ca50c3c732f08a867d15e361ae22cc6c46e6ef492721428e67920`, and output `res_019e7427-96c5-7553-a106-bae7e50dbd4c`. No scenario idempotency key duplicated; only internal `engine::invoke` rows have blank idempotency keys. There were 0 failed invocations, 0 `compact.*` events, no session-scoped logs, and stream topics included `agent.runtime`, `events.session`, `queue.lifecycle`, `approvals`, `resource.leases`, and `compensation.records`. | none; first harness attempt waited for a `process::run` invocation row before completion even though active process truth is exposed through `resource.leases`. Simulator URL deep-link screenshots stopped at the iOS "Open in Tron?" confirmation, but the dashboard remained mounted/not onboarding and DB/session-stream reconstruction proved continuity. | n/a | Passed on the real dev server with the iOS simulator booted. Exact retest used the corrected lease-based harness, proved interrupted invocation visibility, approval-pause survival, queue/idempotency correctness, and successful post-reconnect execution. |
 | RWO-N14 | Provider full parity | pending | 0 | | | | | |
 
 ## Scenario Details
@@ -1494,6 +1500,56 @@ Failure focus:
 - duplicate child execution;
 - indefinite spinner.
 
+2026-05-29 result:
+
+- Classification: `passed`.
+- Session: `sess_019e7422-7fb7-7423-a63c-16c473d6917e`; first unscored
+  harness attempt: `sess_019e741e-8b87-7f72-94f7-b98b3be63eb3`.
+- Real dev server and simulator evidence: iPhone 17 Pro simulator was booted
+  and the Tron app stayed on the Sessions dashboard, not onboarding. Simulator
+  deep-link screenshots hit the iOS "Open in Tron?" confirmation, so mounted
+  chat continuity is recorded from DB/session stream reconstruction rather than
+  screenshot-only evidence.
+- Restart evidence: `./scripts/tron dev -bdt` moved PID `81779` to `47488`
+  and passed the configured dev tests: 5769 library tests, 46 main binary tests,
+  12 `db_path_guard` tests, 50 `threat_model_invariants` tests, and 80
+  integration tests.
+- Baseline queue evidence: prompt invocation
+  `019e7422-8c72-7c32-be30-bbe83203993b`, queue receipt
+  `019e7422-bcc7-7920-8d89-af16295019c6`, queue `agent`, function
+  `agent::prompt_queue_drain`, status `completed`, attempts `0`.
+- Long-process interruption evidence: `process::run` child
+  `019e7424-1af7-7f91-9f27-d75c64927fb7` under `capability::execute`
+  `019e7424-1a2e-7a00-8aa3-2b9f384bd23d` acquired lease
+  `019e7424-1af7-7f91-9f27-d7682abb77bf` at stream cursor `80311`.
+  `./scripts/tron dev -d` moved PID `47488` to `48287`; the interrupted child
+  persisted with `exitCode = -1`, `durationMs = 850`, no output, released the
+  lease, and recorded compensation
+  `019e7424-1e4e-76b2-a31c-fc97ad20efef`.
+- Post-reconnect evidence: direct `capability::execute`
+  `019e7424-54b6-7c20-becc-f21fcb03d40a` invoked `process::run`
+  `019e7424-558d-7d51-b3d9-59df726a0642`, which exited `0` and returned
+  `Fri May 29 07:29:58 PDT 2026`.
+- Approval-pause evidence: approval
+  `019e7427-6989-7d90-829e-89f5d0689c07` for
+  `rwo-n13-approval-process-20260529073320` was created pending before restart.
+  `./scripts/tron dev -d` moved PID `48287` to `49356`; after restart,
+  `approval::resolve` `019e7427-96aa-70a1-863d-558de00b9c9d` executed
+  `process::run` child `019e7427-96ad-76d1-bf34-658c13775af3`, materialized
+  `approval-pause.txt` as
+  `materialized_file:10068ee46d1ca50c3c732f08a867d15e361ae22cc6c46e6ef492721428e67920`
+  version `ver_019e7427-96c3-7990-b619-9ff2f3a25582`, and retained output
+  `res_019e7427-96c5-7553-a106-bae7e50dbd4c`.
+- Durability and idempotency evidence: no RWO-N13 scenario idempotency key
+  duplicated; the only duplicate group was blank-key internal `engine::invoke`.
+  `events` had zero `compact.*` rows, `engine_invocations` had zero failed rows
+  for the scored run, no session-scoped logs were written, and reconstruction
+  spans `engine_invocations`, `engine_queue_items`, `engine_approvals`,
+  `engine_resource_leases`, `engine_compensation_records`, `engine_resources`,
+  `engine_resource_versions`, and `engine_stream_events`.
+- Score impact: Runtime resilience increases to `6/10`; current score increases
+  to `65/100`.
+
 ### RWO-N14: Provider Full Parity
 
 Run these prompts through OpenAI, Anthropic, Gemini, and Ollama:
@@ -1725,60 +1781,79 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N13: Runtime Resilience**
+Recommended next scenario: **RWO-N14: Provider Full Parity**
 
 Setup:
 
 - Use the currently configured real dev server.
-- Keep the iOS simulator launched and record whether the app reconnects or
-  remains on onboarding.
-- Exercise mounted reconnect after `./scripts/tron dev -bdt`, then an
-  in-flight interruption with `./scripts/tron dev -d` during a long
-  `process::run`.
-- Inspect invocation, queue, stream, event, resource, and log records for
-  duplicate turns, interrupted child state, and prompt recovery.
+- Keep the iOS simulator launched and record the visible provider/result state.
+- Run the same core prompts through OpenAI, Anthropic, Gemini, and Ollama when
+  the local profile has credentials or a reachable local provider.
+- Do not add fallback provider paths. If a provider is unavailable, record the
+  blocked provider with the credential/health evidence and continue only with
+  providers that can execute through the real engine substrate.
+- Inspect invocation, approval, resource, queue, stream, event, and log records
+  after each provider run for target selection parity, correction classes,
+  approval semantics, resource/idempotency behavior, and provider-specific
+  leakage into engine semantics.
 
-Prompt:
+Prompts:
 
 ```text
-Use only execute. Start a long but bounded read-only process task, tolerate a dev-server restart, then continue with a small post-reconnect execute call. Report parent invocation ids, child invocation ids, queue/run ids, interruption status, and whether any turn or child execution duplicated.
+Use only execute. Read the first line of README.md by intent, without guessing an absolute path. Report the target capability and invocation ids.
+
+Use only execute. Run a safe read-only date command. Report the target capability, execution mode, parent invocation id, and child invocation id.
+
+Use only execute. Attempt a process run with a deliberately missing required command field, then report the correction or validation class without inventing a workaround.
+
+Use only execute. Start a high-risk write command that requires approval, pause for approval, then resume after approval and report the approval id, child invocation id, and resource refs.
+
+Use only execute. Replay the approved command with the same idempotency key and report whether a new child invocation was created.
+
+Use only execute. Inspect this repo enough to summarize the worker/function/trigger architecture. Do not answer from memory. Cite files inspected and list every capability used.
 ```
 
 Procedure:
 
-1. Start a fresh simulator-backed session on the real dev server.
-2. Begin a normal multi-step read-only task and restart with
-   `./scripts/tron dev -bdt` to prove mounted reconnect after build/test.
-3. Begin a long read-only `process::run` and restart with `./scripts/tron dev -d`
-   while the child is in flight.
-4. Continue after reconnect with one small `execute` call.
-5. Inspect DB invocation, queue, stream, event, log, and resource evidence before
-   scoring.
+1. Start a fresh simulator-backed session for the first available provider.
+2. Record provider availability from profile credentials, configured defaults,
+   local Ollama health, and server/model settings without exposing secret values.
+3. Run each prompt through every available provider using the same real engine
+   substrate and the same scorecard evidence checklist.
+4. For unavailable providers, record `blocked` provider evidence in the RWO-N14
+   row without awarding parity credit for that provider.
+5. After each provider run, inspect DB invocation, approval, queue, stream,
+   event, log, resource, and provider metadata evidence before continuing.
+6. Compare the provider runs for target selection, correction class, approval
+   behavior, idempotency/replay semantics, resource truth, and leaked
+   provider-specific details.
 
 After completion, inspect:
 
-- session ids, run ids, prompt invocations, target capability invocations, and
-  parent/child invocation ids;
-- restart timestamps, server PIDs, reconnect events, and any interruption
-  notifications;
-- queue rows and stream topics emitted for prompt scheduling, prompt completion,
-  and interruption/reconnect behavior;
+- session ids, run ids, provider names, prompt invocations, target capability
+  invocations, and parent/child invocation ids;
+- provider request/response metadata that is already stored by the engine and
+  does not expose secrets;
+- queue rows and stream topics emitted for prompt scheduling and completion;
+- approval ids, statuses, denial/approval decisions, and replay evidence;
 - resource ids, version ids, content hashes, lifecycle state, and idempotency
-  keys for any final results;
+  keys for final and intermediate results;
 - failed invocations, if any;
-- approval records, if any;
-- logs mentioning reconnect, interruption, queue, stream, process, or provider
-  failures.
+- logs mentioning provider, tool-call, schema-conversion, stream, process,
+  approval, resource, or idempotency failures.
 
 Pass criteria:
 
-- Dashboard and chat reconnect without manual state repair.
-- No duplicate turns and no duplicate child invocations.
-- Interrupted work is visible as interrupted or failed state with traceable
-  invocation/log evidence.
-- Queue retry/idempotency remain correct after restart.
-- Recovery is reconstructable from DB invocation/event/log/resource/queue/stream
-  records.
+- Available providers select the same canonical target capabilities for the same
+  task class, allowing only provider-model wording differences in final prose.
+- Missing required fields fail or correct through the same engine-owned
+  correction class.
+- Approval pause/resume and replay semantics are identical across available
+  providers.
+- Resource and idempotency truth remain engine-owned and reconstructable from DB
+  invocation/event/log/resource/approval/queue/stream records.
+- Provider-specific schema, tool id, or streaming-delta details do not leak into
+  engine semantics.
 - No client-owned policy, alternate worker-spawn path, fallback reader,
   compatibility layer, or product-state side channel is used.
 
