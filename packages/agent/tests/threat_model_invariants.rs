@@ -260,7 +260,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| RWO-N1 | Repo understanding and discovery |",
         "## Structural Cleanup Backlog",
         "## Static Gates To Add Or Strengthen",
-        "Recommended next scenario: **SCB-S1:",
+        "| SCB-S1 | `capability::execute` ownership decomposition audit |",
+        "Recommended next scenario: **SCB-S1b:",
         "tron://session/<session_id>",
         "xcrun simctl openurl booted",
         "chat parity drift",
@@ -532,6 +533,7 @@ fn critical_execution_and_ui_boundaries_stay_split() {
     for required_file in [
         "src/domains/capability/operations/mod.rs",
         "src/domains/capability/operations/execute.rs",
+        "src/domains/capability/operations/target_arguments.rs",
         "src/domains/capability/operations/run.rs",
         "src/domains/capability/operations/search.rs",
         "src/domains/capability/operations/inspect.rs",
@@ -1864,6 +1866,10 @@ fn resource_materialization_enforcement_gates_stay_on() {
     let capability_execute =
         std::fs::read_to_string(crate_root.join("src/domains/capability/operations/execute.rs"))
             .expect("failed to read capability execute operations");
+    let capability_target_arguments = std::fs::read_to_string(
+        crate_root.join("src/domains/capability/operations/target_arguments.rs"),
+    )
+    .expect("failed to read capability target argument operations");
     let capability_run =
         std::fs::read_to_string(crate_root.join("src/domains/capability/operations/run.rs"))
             .expect("failed to read capability run operations");
@@ -1889,6 +1895,43 @@ fn resource_materialization_enforcement_gates_stay_on() {
             && !capability_operations.contains("fn preflight_rejection_result"),
         "capability operations parent must not regain child execution, program execution, or preflight projection bodies"
     );
+    for forbidden in [
+        "fn normalize_intent_target_arguments",
+        "fn normalize_contextual_target_arguments",
+        "fn normalize_target_specific_arguments",
+        "fn normalize_process_run_arguments",
+        "fn normalize_filesystem_list_dir_arguments",
+        "fn normalize_web_search_arguments",
+        "fn normalize_filesystem_apply_patch_arguments",
+        "fn normalize_process_expected_output_aliases",
+        "fn intent_file_read_requests",
+        "fn intent_resource_kind_requests",
+        "fn intent_requests_worktree_diff",
+    ] {
+        assert!(
+            !capability_execute.contains(forbidden),
+            "target-specific execute affordance `{forbidden}` must stay in target_arguments.rs, not execute.rs"
+        );
+        assert!(
+            capability_target_arguments.contains(forbidden),
+            "target_arguments.rs must own target-specific execute affordance `{forbidden}`"
+        );
+    }
+    for required in [
+        "# INVARIANT: target-specific normalization stays classified",
+        "\"process::run\"",
+        "\"filesystem::list_dir\"",
+        "\"web::search\"",
+        "\"filesystem::apply_patch\"",
+        "\"filesystem::read_file\"",
+        "\"resource::list\"",
+        "\"worktree::is_git_repo\"",
+    ] {
+        assert!(
+            capability_target_arguments.contains(required),
+            "target_arguments.rs must document and own classified target-specific execute affordance marker `{required}`"
+        );
+    }
 
     let filesystem_contract =
         std::fs::read_to_string(crate_root.join("src/domains/filesystem/contract.rs"))

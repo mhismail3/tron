@@ -4,7 +4,9 @@
 //! than creating a second capability catalog. A catalog function is projected as a
 //! stable contract plus one concrete implementation. Future plugin manifests
 //! can add richer contract/binding rows without changing the model-facing
-//! single `execute` surface.
+//! single `execute` surface. Target-specific argument affordances are isolated in
+//! `target_arguments` so the shared execute flow does not grow new per-capability
+//! branches unnoticed.
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -53,6 +55,7 @@ mod execute;
 mod inspect;
 mod run;
 mod search;
+mod target_arguments;
 
 pub(crate) use audit::audit_query_value;
 #[cfg(test)]
@@ -62,10 +65,8 @@ pub(crate) use execute::execute_value;
 use execute::{
     apply_argument_schema_fit_filter, apply_deterministic_intent_route,
     clarification_candidates_for_intent, deterministic_intent_route, intent_strongly_matches_hit,
-    lacks_sufficient_intent_resolution_evidence, normalize_target_arguments,
-    normalize_target_idempotency_argument, normalize_target_specific_arguments,
-    orchestration_constraints_allow_hit, orchestration_hit_from_entry,
-    parse_orchestrated_execute_input, prepared_execute_payload,
+    lacks_sufficient_intent_resolution_evidence, orchestration_constraints_allow_hit,
+    orchestration_hit_from_entry, parse_orchestrated_execute_input, prepared_execute_payload,
     promote_argument_schema_fit_candidates, validate_orchestration_constraint_shape,
     validate_orchestration_constraints,
 };
@@ -81,6 +82,11 @@ use run::{
 pub(crate) use search::search_value;
 #[cfg(test)]
 use search::{render_search_result_value, search_queries};
+#[cfg(test)]
+use target_arguments::{
+    normalize_target_arguments, normalize_target_idempotency_argument,
+    normalize_target_specific_arguments,
+};
 
 pub(crate) async fn registry_snapshot_value(
     invocation: &Invocation,
