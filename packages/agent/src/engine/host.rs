@@ -1139,6 +1139,15 @@ impl EngineHostHandle {
             .fail(receipt_id, max_attempts, backoff_ms)
     }
 
+    /// Inspect a queue item by receipt.
+    pub async fn get_queue_item(&self, receipt_id: &str) -> Result<Option<EngineQueueItem>> {
+        let store = self.inner.lock().await.primitives.queue.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
+            .get(receipt_id)
+    }
+
     /// Record a trigger handoff that enqueued the target invocation.
     pub async fn record_enqueued_invocation(
         &self,

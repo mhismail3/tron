@@ -306,6 +306,94 @@ async fn trigger_dispatch_primitive_enqueues_and_drains_triggered_invocation() {
 }
 
 #[tokio::test]
+async fn queue_failure_event_records_updated_retry_state() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("alpha::flaky", "alpha")
+                .with_allowed_delivery_modes(vec![DeliveryMode::Sync, DeliveryMode::Enqueue])
+                .with_required_authority(AuthorityRequirement::scope("queue.test")),
+            Some(Arc::new(FailHandler)),
+            false,
+        )
+        .unwrap();
+    handle
+        .subscribe_stream(
+            "queue-failure-sub".to_owned(),
+            "queue.lifecycle".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some("session-a".to_owned()),
+            None,
+        )
+        .await
+        .unwrap();
+    let item = handle
+        .enqueue_invocation(crate::engine::EnqueueInvocation {
+            queue: "default".to_owned(),
+            function_id: fid("alpha::flaky"),
+            target_revision: None,
+            payload: json!({"message": "fail once"}),
+            actor_id: actor("agent"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: grant("manual-grant"),
+            authority_scopes: vec!["queue.test".to_owned()],
+            trace_id: trace("rwo-n16-queue-failure"),
+            parent_invocation_id: None,
+            trigger_id: None,
+            session_id: Some("session-a".to_owned()),
+            workspace_id: None,
+            idempotency_key: Some("rwo-n16-queue-target".to_owned()),
+        })
+        .await
+        .unwrap();
+
+    let drained = EngineQueueDrainer::drain_receipt(&handle, &item.receipt_id, "worker-a")
+        .await
+        .unwrap()
+        .expect("queued item should drain to a failed attempt");
+    assert!(drained.error.is_some());
+    let updated = handle
+        .get_queue_item(&item.receipt_id)
+        .await
+        .unwrap()
+        .expect("queue item should remain inspectable");
+    assert_eq!(updated.status, crate::engine::queue::QueueItemStatus::Ready);
+    assert_eq!(updated.attempts, 1);
+    assert_eq!(updated.lease_owner, None);
+    assert_eq!(updated.lease_expires_at, None);
+
+    let page = handle
+        .poll_stream(
+            "queue-failure-sub",
+            Some(StreamCursor(0)),
+            10,
+            &StreamActorScope::scoped(Some("session-a".to_owned()), None),
+        )
+        .await
+        .unwrap();
+    let fail_event = page
+        .events
+        .iter()
+        .find(|event| {
+            event.payload["type"] == "queue.fail" && event.payload["receiptId"] == item.receipt_id
+        })
+        .expect("queue failure event should be published");
+    assert_eq!(fail_event.payload["status"], "ready");
+    assert_eq!(fail_event.payload["attempts"], 1);
+    assert!(
+        fail_event
+            .payload
+            .get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("boom"))
+    );
+}
+
+#[tokio::test]
 async fn sqlite_primitive_stores_persist_stream_state_and_queue_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("tron.sqlite");

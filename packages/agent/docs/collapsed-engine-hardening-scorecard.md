@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **91/100 provisional**
+Current score: **94/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -84,16 +84,16 @@ interruption, and resource failure states.
 |---|---:|---:|---|
 | Execute portal ergonomics | 10 | 10 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
 | First-party capability usefulness | 10 | 10 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
-| Worker/function/trigger substrate | 14 | 11 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
+| Worker/function/trigger substrate | 14 | 13 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 9 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 10 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
 | Safety, grants, and approvals | 10 | 10 | Safe work runs autonomously; risky work gates correctly; denial/replay/revocation/expiry leave no invalid side effects |
-| Runtime resilience | 10 | 8 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
+| Runtime resilience | 10 | 9 | Restart, reconnect, queue retry, approval pause, cancellation, partial failure, and cleanup are robust |
 | Observability and auditability | 8 | 8 | Every scenario is reconstructable from DB invocation/event/log/resource/approval/queue/stream records |
 | Provider parity | 6 | 6 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 9 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **91/100**
+Total: **94/100**
 
 Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
 `schema_or_recipe` follow-up is fixed and retested. The banked score remains
@@ -508,6 +508,7 @@ chat parity drift; do not let screenshot state override the engine ledger.
 | RWO-N14-F1 | Process sandbox command-output boundary follow-up | passed_after_fix | +1 | failed simulator session `sess_019e74d4-7e0a-7c72-81e7-cb7e15c26be6`; Google retest `sess_019e7523-4c24-7b02-9ff7-08b896c05c74`; direct exact-payload probe `sess_019e7523-ffb5-7601-acdf-8bf36461824a` | Google P5 retest on rebuilt dev server PID `57422` used run log `/tmp/rwo_n14_p5_provider_parity_20260529120827.json`, final simulator screenshot `/tmp/rwo_n14_p5_google_final_simulator_20260529120827.png`, one executed `process::run` approval, one setup `process::run` child, one replay `capability::execute`, `approvalReplayed=true`, `childInvocationCreated=false`, zero new approvals, zero new process children, zero failed invocations, and zero `compact.*` events. Direct exact-payload probe returned `target_policy_rejected` with `approvalCreated=false`, `childInvocationCreated=false`, zero approval rows, zero `process::run` child rows, and no host leak at `~/.tron/workspace/reports/exact-home-leak-20260529120914.txt`. | `target_capability` / `process_sandbox`: sandbox-materialized command write targets were not bounded to declared relative expected outputs before approval, nested expected-output parents were not prepared inside the sandbox, and sandbox commands inherited host `HOME`/`TMPDIR`. | this checkpoint | Passed `cargo test sandbox_materialized --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, `git diff --check`, Google simulator-backed P5 retest, and direct exact-payload live probe. |
 | RWO-N15 | Live worker queue/trigger/stream robustness | passed_after_fix | +6 | passing run `sess_019e75e0-b3bb-7be0-bf24-6ab044aa0def`; unscored direct-client policy attempt `sess_019e75db-fafe-7831-b669-3134e7f552fe`; unscored premature-harness terminal attempt `sess_019e75de-e8c2-7052-b44b-f9c12215354a` | Passing run used real dev server PID `41237`, run log `/tmp/rwo_n15_agent_run_20260529153520.json`, fixture log `/tmp/rwo_n15_agent_worker_fixture_20260529153520.jsonl`, and old paired simulator screenshot `/tmp/rwo_n15_20260529153520_old_simulator.png`. The agent used only `capability::execute` to run `stream::subscribe`, `trigger::dispatch`, `queue::get`, `stream::poll`, `resource::create`, `worker::health`, and `stream::unsubscribe`. Queue receipt `019e75e0-da53-7c00-a1ad-9fda0b347c13` completed with attempts `0`, lease owner `tron-server`, target child `rwo_n15_agent_20260529153520::queued_echo`, and trigger id `manual:rwo_n15_agent_20260529153520.queued_echo`. Stream topic `rwo_n15_agent_20260529153520.worker.events` produced one payload with `rwoN15Fixture=true`; queue lifecycle stream showed enqueue, claim, and complete. Evidence resource `evidence:rwo-n15-agent:20260529153520` version `ver_019e75e1-1524-70f2-aec1-4373d74845d1` stored session-scoped payload truth. Catalog revisions 403-408 prove worker/function/trigger register and unregister cleanup after fixture termination. DB classification found zero failed invocations, zero pending approvals, zero `compact.*` events, zero open scenario queue rows, no resource leases, no active RWO-N15 subscription, and only expected app websocket `events.session`/`approvals` subscriptions after the simulator deep link. | RWO-N15 prep found two root gaps before the passing run: `execute_resolution` had no canonical agent-visible `trigger::dispatch` primitive for dispatching registered triggers through the engine runtime, and `queue_or_trigger` kept the built-in `manual` trigger type Sync-only so real enqueue registrations failed while fixture-local tests could pass with a custom trigger type. Two unscored harness lessons were recorded: direct public `capability::execute` is a client actor and cannot see agent-visible primitives, and harnesses must wait for `stream.turn_end` with `stopReason = "end_turn"` rather than treating `tool_use` turn boundaries as terminal. | this checkpoint | Passed after adding `trigger::dispatch`, widening the built-in manual trigger type to Sync+Enqueue, adding focused Rust tests, restarting the real dev server, rerunning the exact agent-path scenario, terminating the volatile fixture, and opening the same session in the old paired simulator. Remaining resilience gap: RWO-N15 proves post-terminal worker cleanup, not pre-terminal worker crash/retry/failure semantics. |
 | RWO-N15-F1 | Harness terminal-state guard | passed_after_fix | +0 | failed simulator-backed harness session `sess_019e75de-e8c2-7052-b44b-f9c12215354a`; clean RWO-N15 session `sess_019e75e0-b3bb-7be0-bf24-6ab044aa0def` | Latest failed invocation rows were the unscored RWO-N15 harness attempt: `trigger::dispatch` child `019e75df-14cf-76c3-ad70-2278bf93e07e` failed after the worker unregistered, and later `worker::health` child `019e75df-59d2-73d1-9786-69ddaa0d9c46` failed for the same missing worker. DB stream evidence shows worker connected/function registered/trigger registered at cursors `106470-106472`, then disconnected/unregistered at cursors `106525-106526` before the agent's second tool turn. The new terminal guard reports `terminal=false`, `reason=no_end_turn` at sequence `34` for that session, and reports `terminal=true`, `reason=end_turn_stable`, `terminalSequence=238`, zero open queues, and zero pending approvals for the clean RWO-N15 session. | `observability_gap`: the temporary harness treated the first `stream.turn_end` with `stopReason = "tool_use"` as a completed session and stopped the volatile fixture while the engine still had later tool turns to execute. | this checkpoint | Added `packages/agent/tests/fixtures/session_terminal_guard.py` with pure self-tests and DB-backed CLI evaluation. Updated simulator docs and static gates so harnesses must wait for `stopReason = "end_turn"`, no later `stream.turn_start`, no pending approvals, no open queue items, and stable DB rows. Score remains `91/100` because this prevents recurrence of an unscored harness failure rather than proving a new engine substrate axis. |
+| RWO-N16 | Pre-terminal worker disconnect retry | passed_after_fix | +3 | passing run `sess_019e7602-4f74-7e92-90c1-0b75d7b78bc9`; unscored harness-schema attempt `sess_019e75fe-fa72-78d3-aeef-aa517516463e` | Passing run used rebuilt real dev server PID `55414`, run log `/tmp/rwo_n16_agent_run_20260529161203.json`, fixture log `/tmp/rwo_n16_agent_worker_fixture_20260529161203.jsonl`, and old paired simulator screenshot `/tmp/rwo_n16_20260529161203_old_simulator.png`. The agent used only `capability::execute` for two stream subscriptions, `trigger::dispatch`, `queue::get`, worker and queue stream polls, `resource::create`, `worker::health`, and two unsubscriptions. The fixture disconnected before result for first target invocation `019e7602-931f-7c50-b394-bdc0c98b4afb`, then reconnected and completed retry target `019e7602-9727-7880-95fd-a7f51bdc4306`. Queue receipt `019e7602-92d2-7061-97f9-cb597dc8db58` completed with attempts `1`. Queue lifecycle cursor `107219` recorded `queue.fail`, status `ready`, attempts `1`, and `WORKER_DISCONNECTED`; cursor `107226` recorded `queue.complete`, status `completed`, attempts `1`. Evidence resource `evidence:rwo-n16-agent:20260529161203` version `ver_019e7602-dfec-7443-8354-1cc96a14c184` stored session-scoped payload truth. Terminal guard returned `end_turn_stable`, terminal sequence `327`, zero pending approvals, and zero open queue items. DB classification found exactly one expected failed invocation, zero approvals, zero `compact.*` events, no resource leases, and catalog revisions `391-402` proving disconnect unregister, reconnect register, and final unregister cleanup. | `worker_lifecycle` / `queue_or_trigger`: external websocket disconnect while an invocation was pending did not immediately fail pending waiters; queue failure stream projection also published stale pre-fail attempts/status, making retry truth harder to prove. | this checkpoint | Passed after adding pending-invocation disconnect failure in `external_workers.rs`, publishing post-fail queue retry state from `queue.rs`, adding focused Rust tests, extending the live worker fixture with deterministic disconnect/reconnect controls, adding `rwo_n16_live_agent_harness.py`, restarting the real dev server, rerunning the agent path, and opening the same session in the old paired simulator. Score is now `94/100`; cancellation and terminal dead-letter semantics remain the next RWO-N16 subcase rather than being overclaimed here. |
 | SCB-S1 | `capability::execute` ownership decomposition audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_arguments.rs` now owns target argument affordances; `threat_model_invariants` rejects target-specific affordance function bodies in `execute.rs`; focused unit tests passed for intent argument normalization and deterministic routing. | Code modularity: target-specific argument normalization and intent/resource/path affordances lived in the central execute orchestrator. | this checkpoint | Passed `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
 | SCB-S1b | Deterministic route and decomposition ownership audit | passed_static_gate | +1 | n/a: deterministic Rust/static-gate scenario | `target_resolution.rs` now owns deterministic routing, namespace clarification, execute constraints, argument-schema fit promotion/filtering, low-confidence intent evidence checks, candidate summaries, and target-specific decomposition guidance. `execute.rs` dropped from 4153 lines to 3300 lines and remains the parse/resolve/prepare/run/observe spine. | `code_ownership`: deterministic route, decomposition, namespace clarification, and argument-schema fit logic still lived in the central execute orchestrator after SCB-S1. | this checkpoint | Passed `cargo test deterministic_intent_route --lib -- --nocapture`, `cargo test orchestration_argument --lib -- --nocapture`, `cargo test decomposition --lib -- --nocapture`, `cargo test intent_argument_normalization --lib -- --nocapture`, `cargo test capability_ --lib -- --nocapture` (451 passed), `cargo test --test threat_model_invariants -- --nocapture`, `cargo fmt --all -- --check`, and `git diff --check`. |
 | SCB-S2 | Capability registry ownership split audit | passed_after_fix | +1 | n/a: deterministic Rust/static-gate scenario | `registry/index.rs` now owns hybrid search, lexical/vector ranking, document identity, vector-fusion helpers, and degraded-index status. `registry/primer.rs` owns context-primer policy, visible primer selection, and model-facing primer rendering. `registry/recipes.rs` remains recipe-owned. The registry root now documents the submodule split and keeps catalog projection plus store implementations. | `primer_rendering`: under tight token budgets, primer rendering could emit only the long header and omit the first core capability. `code_ownership`: ranking/indexing and primer rendering lived in the central registry root beside store/SQLite behavior. | this checkpoint | Failed first `cargo test registry --lib -- --nocapture` at `primer_respects_core_policy`; after the root fix, passed `cargo test primer_respects_core_policy --lib -- --nocapture` and `cargo test registry --lib -- --nocapture` (195 passed). |
@@ -2637,6 +2638,106 @@ Verification:
 - Score remains `91/100`; this fixes recurrence of an unscored harness
   classification bug rather than proving a new collapsed-engine substrate axis.
 
+### RWO-N16: Pre-Terminal Worker Disconnect Retry
+
+This completes the disconnect/retry slice of
+**RWO-N16: Pre-terminal Worker Failure/Retry/Cancellation Robustness**.
+
+Trigger:
+
+- RWO-N15 proved registration, queued trigger dispatch, stream evidence, and
+  clean post-terminal unregister. It did not prove a worker disconnect while the
+  engine still had a claimed target invocation waiting for a result.
+- The prior transport path could leave a pending external-worker invocation
+  waiter alive until timeout after the websocket closed. That delayed queue
+  failure/retry truth and risked stale pending waiters under worker churn.
+- Queue failure lifecycle projection also emitted the pre-failure queue item,
+  so the `queue.fail` event did not show the authoritative post-fail
+  retry/dead-letter status and attempt count.
+
+Fix:
+
+- `packages/agent/src/transport/runtime/external_workers.rs` now drains all
+  pending socket invocation waiters on websocket disconnect and returns a
+  canonical `WORKER_DISCONNECTED` worker result to the engine invocation path.
+  Timeout and cancellation paths also remove their pending waiter entries.
+- `packages/agent/src/engine/queue.rs` now fetches the updated queue item after
+  `fail_queue_item` and publishes `queue.fail` with the actual post-fail
+  status and attempts.
+- `packages/agent/src/engine/host.rs` exposes `get_queue_item` for queue
+  runtime inspection after mutation.
+- `packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py` now supports
+  deterministic first-invocation `error-on-first-invoke` and
+  `disconnect-on-first-invoke` modes, optional reconnect after disconnect, and
+  a pre-result sleep control.
+- Added `packages/agent/tests/fixtures/rwo_n16_live_agent_harness.py` so future
+  runs can reproduce the real dev-server plus old-simulator deep-link evidence
+  without rebuilding a one-off `/tmp` harness.
+
+Live evidence:
+
+- Real dev server PID: `55414`.
+- Session: `sess_019e7602-4f74-7e92-90c1-0b75d7b78bc9`.
+- Run log: `/tmp/rwo_n16_agent_run_20260529161203.json`.
+- Worker fixture log:
+  `/tmp/rwo_n16_agent_worker_fixture_20260529161203.jsonl`.
+- Old paired simulator screenshot:
+  `/tmp/rwo_n16_20260529161203_old_simulator.png`.
+- Worker/function/trigger/topic:
+  `rwo-n16-agent-worker-20260529161203`,
+  `rwo_n16_agent_20260529161203::queued_echo`,
+  `manual:rwo_n16_agent_20260529161203.queued_echo`, and
+  `rwo_n16_agent_20260529161203.worker.events`.
+- The fixture disconnected before returning first invocation
+  `019e7602-931f-7c50-b394-bdc0c98b4afb`; the engine recorded that target row
+  as the single expected failed invocation with
+  `WORKER_DISCONNECTED`.
+- The fixture reconnected immediately, reregistered the same worker/function/
+  trigger, and completed retry invocation
+  `019e7602-9727-7880-95fd-a7f51bdc4306` with
+  `rwoN16Retry = true`.
+- Queue receipt `019e7602-92d2-7061-97f9-cb597dc8db58` completed with
+  attempts `1`. Queue lifecycle cursor `107219` recorded `queue.fail` with
+  status `ready`, attempts `1`, and the disconnect error. Cursor `107226`
+  recorded `queue.complete` with status `completed` and attempts `1`.
+- Evidence resource `evidence:rwo-n16-agent:20260529161203` was written at
+  version `ver_019e7602-dfec-7443-8354-1cc96a14c184`.
+- Catalog revisions `391-402` prove initial registration, pre-terminal
+  unregister after disconnect, reconnect registration, and final unregister
+  cleanup after harness stop.
+- Terminal guard returned `terminal=true`, `reason=end_turn_stable`,
+  `terminalSequence=327`, zero pending approvals, and zero open queue items.
+- DB classification found exactly one expected failed invocation, zero
+  approvals, zero `compact.*` events, no resource leases, and no open scenario
+  queue rows.
+- Computer Use verified the old `iPhone 17 Pro` simulator window rendered the
+  deep-linked terminal RWO-N16 chat route after the run.
+
+Verification:
+
+- `python3 packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py --self-test --session-id self-test-session`
+  passed.
+- `python3 packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py --self-test --session-id self-test-session --failure-mode disconnect-on-first-invoke --reconnect-after-disconnect`
+  passed.
+- `python3 -m py_compile packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py packages/agent/tests/fixtures/rwo_n16_live_agent_harness.py packages/agent/tests/fixtures/session_terminal_guard.py`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml websocket_disconnect_fails_pending_worker_invocations -- --nocapture`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::external_worker -- --nocapture`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`
+  passed.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  passed.
+- `git diff --check` passed before this scorecard update; rerun before commit.
+- Score impact: worker/function/trigger substrate increases from `11/14` to
+  `13/14`, runtime resilience increases from `8/10` to `9/10`, and total score
+  increases from `91/100` to `94/100`.
+- Remaining RWO-N16 subcase: cancellation and terminal dead-letter behavior
+  under a claimed/pre-terminal queue item are not yet scored.
+
 ## Structural Cleanup Backlog
 
 ### 1. Decompose `capability::execute`
@@ -3065,6 +3166,11 @@ Add or strengthen tests in `packages/agent/tests/threat_model_invariants.rs`:
 - Simulator deep-link harnesses must treat `stream.turn_end` with
   `stopReason = "tool_use"` as non-terminal and wait for `stopReason =
   "end_turn"` plus DB reconstruction before classification.
+- Pre-terminal worker retry harness controls must stay reproducible through
+  `packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py` and
+  `packages/agent/tests/fixtures/rwo_n16_live_agent_harness.py`; future worker
+  churn tests must use engine-owned worker sockets and queue truth rather than
+  process-kill side channels or private runtime helpers.
 - Large-file audit rows exist for files over 1k lines that remain intentionally
   large.
 - `large_rust_test_files_have_scorecard_ownership_audit` keeps the SCB-S6
@@ -3115,17 +3221,19 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 ## Next Test
 
 Recommended next scenario:
-**RWO-N16: Pre-terminal Worker Failure/Retry/Cancellation Robustness**
+**RWO-N16B: Queue Cancellation And Dead-Letter Robustness**
 
 Setup:
 
-- RWO-N15 proved a live worker can register functions/triggers, dispatch a
-  trigger through `trigger::dispatch`, enqueue work, drain it, publish stream
-  evidence, write a resource-backed evidence record, unregister cleanly, and
-  deep-link the same terminal session into the paired simulator. The remaining
-  weakness is pre-terminal churn: a worker must fail, disconnect, retry,
-  cancel, or terminally fail while the engine still owns a claimed or pending
-  queue item.
+- RWO-N16 proved pre-terminal websocket disconnect handling: the first claimed
+  worker invocation failed immediately as `WORKER_DISCONNECTED`, the queue item
+  moved back to `ready` with attempts `1`, the worker reconnected, the same
+  receipt completed, and the simulator deep link rendered the terminal chat.
+- Remaining RWO-N16 coverage is cancellation and terminal failure: a worker
+  must block or repeatedly fail while the engine still owns a claimed or
+  pending queue item, then the engine must record explicit cancellation or
+  dead-letter truth without orphaning leases, grants, stream subscriptions, or
+  healthy dead workers.
 - Use a real dev server and the iPhone 17 Pro simulator. The simulator
   deep-link harness instructions in this scorecard and
   `packages/ios-app/docs/development.md` are the canonical procedure.
@@ -3136,19 +3244,21 @@ Setup:
 
 Procedure:
 
-1. Reuse or extend the RWO-N15 live worker fixture with deterministic controls
-   that can block, fail, disconnect, or cancel after queue claim and before
-   target result completion.
+1. Reuse or extend `packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py`
+   and `packages/agent/tests/fixtures/rwo_n16_live_agent_harness.py` with the
+   smallest deterministic controls needed for a blocked claimed item, an
+   explicit `queue::cancel`, and repeated target failure to terminal
+   dead-letter.
 2. Drive the scenario through a real agent session using `capability::execute`
    only. Dispatch the queued work through `trigger::dispatch`; do not call
    private runtime helpers from the harness as the scenario proof.
-3. Stop or fail the worker at the narrowest pre-terminal point. Prove the engine
-   records heartbeat/disconnect, retry or terminal failure, resource lease
-   cleanup, queue state, compensation if applicable, and stream visibility
-   without a restart-only side path.
+3. Cancel or repeatedly fail the queued target at the narrowest pre-terminal
+   point. Prove the engine records cancellation or terminal dead-letter state,
+   resource lease cleanup, queue state, compensation if applicable, and stream
+   visibility without a restart-only side path.
 4. Rerun the exact same scenario through the success path after any root-cause
-   fix, so the scorecard captures both failure-state truth and recovered
-   forward progress.
+   fix, so the scorecard captures failure-state truth and recovered forward
+   progress separately from the already-passed disconnect retry proof.
 5. Open `tron://session/<session_id>` in the booted simulator after terminal DB
    state is stable and capture app-path evidence for the same session.
 6. Query `~/.tron/internal/database/tron.sqlite` for events, invocations,

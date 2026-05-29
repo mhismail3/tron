@@ -5,7 +5,9 @@
 //! invoke the same function with the original authority and trace context. A
 //! retried queue item keeps the original logical idempotency key on the item,
 //! but executes retry attempts with attempt-scoped target keys so a stored
-//! handler failure does not turn into a permanent replay result.
+//! handler failure does not turn into a permanent replay result. Queue failure
+//! lifecycle events are emitted from the post-fail item state, so stream
+//! subscribers see the authoritative retry/dead-letter status and attempt count.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -394,7 +396,11 @@ impl EngineQueueRuntime {
         let result = handle.invoke(invocation).await;
         if result.error.is_some() {
             handle.fail_queue_item(&item.receipt_id, 3, 1_000).await?;
-            publish_queue_lifecycle_event(handle, "fail", &item, Some(&result)).await;
+            let updated = handle
+                .get_queue_item(&item.receipt_id)
+                .await?
+                .unwrap_or_else(|| item.clone());
+            publish_queue_lifecycle_event(handle, "fail", &updated, Some(&result)).await;
         } else {
             handle.complete_queue_item(&item.receipt_id).await?;
             publish_queue_lifecycle_event(handle, "complete", &item, Some(&result)).await;
@@ -883,7 +889,7 @@ pub async fn publish_queue_lifecycle_event(
         "enqueue" => "ready",
         "claim" => "leased",
         "complete" => "completed",
-        "fail" => "ready_or_dead_lettered",
+        "fail" => item.status.as_str(),
         "cancel" => "cancelled",
         "dead_letter" => "dead_lettered",
         _ => item.status.as_str(),

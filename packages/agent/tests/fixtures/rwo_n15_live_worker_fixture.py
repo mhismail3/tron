@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic live worker fixture for the RWO-N15 queue/trigger/stream scenario."""
+"""Deterministic live worker fixture for RWO-N15/RWO-N16 queue scenarios."""
 
 import argparse
 import json
@@ -146,7 +146,12 @@ def stream_publish_message(args, invoke_message, result):
     }
 
 
-def run_fixture(args):
+def should_fail_first_invocation(args, failure_state):
+    return args.failure_mode != "none" and failure_state["invocations"] == 1
+
+
+def run_fixture(args, failure_state=None):
+    failure_state = failure_state or {"invocations": 0}
     token = worker_token(args)
     bearer = base.load_bearer_token(args.auth_path)
     log_handle = open(args.log, "a", encoding="utf-8") if args.log else None
@@ -214,6 +219,7 @@ def run_fixture(args):
                 continue
             if message_type == "invoke":
                 invocation_id = message["invocationId"]
+                failure_state["invocations"] += 1
                 if message.get("functionId") != args.function_id:
                     base.send_json(sock, {
                         "type": "result",
@@ -224,8 +230,37 @@ def run_fixture(args):
                     base.log_event(log_handle, "invoke_rejected", invocationId=invocation_id)
                     continue
                 payload = message.get("payload", {})
+                if args.sleep_before_result_ms:
+                    base.log_event(
+                        log_handle,
+                        "invoke_sleep_before_result",
+                        invocationId=invocation_id,
+                        sleepMs=args.sleep_before_result_ms,
+                    )
+                    time.sleep(args.sleep_before_result_ms / 1000)
+                if should_fail_first_invocation(args, failure_state):
+                    if args.failure_mode == "error-on-first-invoke":
+                        base.send_json(sock, {
+                            "type": "result",
+                            "invocationId": invocation_id,
+                            "result": None,
+                            "error": {
+                                "code": "RWO_N16_FIRST_INVOKE_ERROR",
+                                "message": "RWO-N16 deterministic first invoke failure",
+                            },
+                        })
+                        base.log_event(log_handle, "invoke_failed_first", invocationId=invocation_id)
+                        continue
+                    if args.failure_mode == "disconnect-on-first-invoke":
+                        base.log_event(
+                            log_handle,
+                            "invoke_disconnect_before_result",
+                            invocationId=invocation_id,
+                        )
+                        return "disconnect_before_result"
                 result = {
                     "rwoN15Fixture": True,
+                    "rwoN16Retry": args.failure_mode != "none" and failure_state["invocations"] > 1,
                     "workerId": args.worker_id,
                     "functionId": args.function_id,
                     "invocationId": invocation_id,
@@ -244,11 +279,11 @@ def run_fixture(args):
                 })
                 base.log_event(log_handle, "invoke_completed", invocationId=invocation_id, result=result)
                 if args.exit_after_invoke:
-                    return
+                    return "completed_after_invoke"
                 continue
             if message_type == "disconnect":
                 base.log_event(log_handle, "server_disconnect", message=message)
-                return
+                return "server_disconnect"
             base.log_event(log_handle, "unhandled_message", message=message)
     finally:
         if sock is not None:
@@ -268,6 +303,7 @@ def run_fixture(args):
                 pass
         if log_handle:
             log_handle.close()
+    return "stopped"
 
 
 def parse_args(argv):
@@ -284,6 +320,19 @@ def parse_args(argv):
     parser.add_argument("--heartbeat-interval-ms", type=int, default=5000)
     parser.add_argument("--log")
     parser.add_argument("--exit-after-invoke", action="store_true")
+    parser.add_argument(
+        "--failure-mode",
+        choices=["none", "error-on-first-invoke", "disconnect-on-first-invoke"],
+        default="none",
+        help="Deterministically fail the first worker invocation before a successful retry.",
+    )
+    parser.add_argument(
+        "--reconnect-after-disconnect",
+        action="store_true",
+        help="Reconnect and reregister after disconnect-on-first-invoke so the queued item can retry.",
+    )
+    parser.add_argument("--reconnect-delay-ms", type=int, default=100)
+    parser.add_argument("--sleep-before-result-ms", type=int, default=0)
     parser.add_argument("--self-test", action="store_true")
     return parser.parse_args(argv)
 
@@ -301,9 +350,24 @@ def main(argv):
         assert function_definition(args)["allowed_delivery_modes"] == ["Sync", "Enqueue"]
         assert trigger_definition(args)["delivery_mode"] == "Enqueue"
         assert worker_definition(args, token)["authority_grant"] == token["authorityGrantId"]
-        print(json.dumps({"ok": True, "functionId": args.function_id, "triggerId": args.trigger_id}))
+        state = {"invocations": 1}
+        assert should_fail_first_invocation(args, state) == (args.failure_mode != "none")
+        print(json.dumps({
+            "ok": True,
+            "functionId": args.function_id,
+            "triggerId": args.trigger_id,
+            "failureMode": args.failure_mode,
+        }))
         return 0
-    run_fixture(args)
+    failure_state = {"invocations": 0}
+    outcome = run_fixture(args, failure_state)
+    if (
+        outcome == "disconnect_before_result"
+        and args.reconnect_after_disconnect
+        and not STOP
+    ):
+        time.sleep(args.reconnect_delay_ms / 1000)
+        run_fixture(args, failure_state)
     return 0
 
 
