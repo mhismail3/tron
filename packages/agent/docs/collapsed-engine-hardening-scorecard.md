@@ -70,7 +70,7 @@ canonical substrate primitives.
 
 ## Current Score
 
-Current score: **51/100 provisional**
+Current score: **52/100 provisional**
 
 This score is intentionally conservative. Tron has strong evidence for many
 covered `execute` paths, but the full collapsed-backend architecture still needs
@@ -83,7 +83,7 @@ calls, runtime interruption, and resource failure states.
 | Axis | Points | Current | Full Credit Requires |
 |---|---:|---:|---|
 | Execute portal ergonomics | 10 | 8 | One `execute` tool resolves, prepares, corrects, runs, pauses, replays, and explains failures without fragile model guessing |
-| First-party capability usefulness | 10 | 7 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
+| First-party capability usefulness | 10 | 8 | Filesystem, process, git/worktree, web, browser/display, logs, settings, model, memory, prompt, resource, state, queue, stream, worker, and module capabilities work in real tasks |
 | Worker/function/trigger substrate | 14 | 4 | Live workers register functions/triggers, update discovery, invoke, stream, heartbeat, disconnect, and clean up without restart |
 | Multi-capability orchestration | 12 | 7 | Agents chain read/search/edit/run/state/resource/approval/queue/subagent operations in realistic workflows |
 | Resource truth and durability | 10 | 6 | Durable outputs, resource versions, CAS, hashes, discard, damaged state, and idempotency are proven through live paths |
@@ -93,7 +93,7 @@ calls, runtime interruption, and resource failure states.
 | Provider parity | 6 | 3 | OpenAI, Anthropic, Gemini, and Ollama expose equivalent `execute` behavior for core scenarios |
 | Code modularity and simplification | 10 | 1 | No central spaghetti, no unclassified dead/fallback/compat logic, clear ownership, and large files decomposed where useful |
 
-Total: **51/100**
+Total: **52/100**
 
 ## Scoring Rules
 
@@ -173,7 +173,7 @@ The evidence note must identify:
 | RWO-N2 | Practical code change workflow | passed_after_fix | +2 | first failure: `sess_019e72c3-e190-7ba2-b447-8debb4e36054`; exact retest pass: `sess_019e72e6-88a4-71c1-bc85-787e86df0235`; replay failure: `sess_019e72ea-c4e7-7842-82bb-654538fa3ce5`; replay retest pass: `sess_019e72f3-ee99-7a91-84ef-e3f47604a2ff` | See 2026-05-29 RWO-N2 result notes below. Exact retest passed with 3 target `capability::execute` calls, `filesystem::write_file` 1, `filesystem::read_file` 1, `materialized_file::update` 1, `resource::create` 1, and 0 failed invocations/approvals/compact events/log rows. Replay retest passed with 2 `filesystem::write_file` rows under session-scoped `rwontwoalpha`, one `filesystem::read_file`, one materialized file resource/version, 0 failed invocations, 0 approvals, 0 compact events, 0 logs, 1 completed queue drain, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | Fixed `schema_or_recipe`: new-file guidance/search now prefers `filesystem::write_file` over missing-file `apply_patch`. Fixed `stream_or_state`: runtime event persistence advances from DB sequence truth before preassigned events. Fixed `resource_truth`: file-content mutations use session-scoped idempotency so the same key cannot replay another isolated worktree path. | `87f368dd6` | Passed exact prompt after rebuilt dev server PID 22402 and passed replay subcheck after rebuilt dev server PID 27362. DB reconstruction matches simulator UI and proves the replay reused one resource/version inside the active session. |
 | RWO-N3 | Safe process plus filesystem composition | passed | +1 | `sess_019e72fd-5e00-75d1-b58f-a9853a621daa` | See 2026-05-29 RWO-N3 result note below. The run used 2 successful `capability::execute` invocations, 1 successful `process::run`, 1 successful `filesystem::read_file`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. `process::run` used `executionMode = read_only`; README first line matched the filesystem read. |
 | RWO-N4 | Web research capability | passed | +1 | `sess_019e7301-b34f-7240-99aa-ea6d6cdac1c2` | See 2026-05-29 RWO-N4 result note below. The run used 2 successful `capability::execute` invocations, 1 successful `web::search`, 1 successful `web::fetch`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; source returned an HTTP 403 Cloudflare/JS challenge through the web fetch capability and the agent reported it without fallback browsing | n/a | Passed exact prompt on the real dev server. Search returned official `https://platform.openai.com/docs/models`; fetch targeted that URL through `first_party.web.v1.fetch`; no browser/client-owned path was used. |
-| RWO-N5 | Browser and display capability probe | pending | 0 | | | | | |
+| RWO-N5 | Browser and display capability probe | passed | +1 | `sess_019e7308-762f-7691-987e-ea33f8eac543` | See 2026-05-29 RWO-N5 result note below. The run used 6 successful `capability::execute` invocations, 1 successful `browser::get_status`, 2 successful `capability::inspect`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. `browser::get_status` returned `hasBrowser = false` and `isStreaming = false`; `display::stop_stream` was inspected but not invoked; no browser/client-owned action path was used. |
 | RWO-N6 | State, queue, stream, trigger chain | pending | 0 | | | | | |
 | RWO-N7 | Live worker extensibility | pending | 0 | | | | | |
 | RWO-N8 | Module package activation | pending | 0 | | | | | |
@@ -604,6 +604,53 @@ Failure focus:
 - bad `needs_selection` UI;
 - ambiguous unavailable-state messaging;
 - client-owned browser action path.
+
+2026-05-29 result:
+
+- Simulator session `sess_019e7308-762f-7691-987e-ea33f8eac543` ran the exact
+  RWO-N5 prompt against the real dev server. The UI completed with execute
+  cards only and did not open arbitrary sites or invoke a client-owned browser
+  action.
+- Parent runtime invocation: `agent::run_turn`
+  `019e7308-ba8a-7471-b965-af35e5c2434c`.
+- Discovery and inspection were all mediated through `capability::execute`.
+  Execute invocation ids were `019e7308-c6c6-7283-88c1-7e97f2820959`,
+  `019e7308-dbc5-7810-abd7-880c3eec59fa`,
+  `019e7308-ed57-71b3-b9f8-adfe06d56216`,
+  `019e7308-f71e-7003-8b53-6a2adbb77a2a`,
+  `019e7309-014d-7662-a4b4-cf383d7b8868`, and
+  `019e7309-0bba-70d1-b87d-7af5b6b52a1d`.
+- Broad and namespace-scoped discovery returned `needs_selection` guidance
+  rather than failed probe calls. Browser discovery narrowed to
+  `browser::get_status`; display discovery narrowed to `display::stop_stream`.
+- `browser::get_status` child invocation
+  `019e7308-f7f5-7a70-808c-b156ab733e7f` executed through parent
+  `capability::execute` `019e7308-f71e-7003-8b53-6a2adbb77a2a`, selected
+  `first_party.browser.v1.get_status`, required no approval, and returned
+  `hasBrowser = false` and `isStreaming = false`.
+- `capability::inspect` child invocation
+  `019e7309-022b-7211-a762-f796e35670e4` inspected
+  `display::stop_stream`, selected `first_party.display.v1.stop_stream`, and
+  reported `effect = external_side_effect`, `risk = medium`, required
+  `streamId`, and caller-supplied idempotency. The display capability was not
+  invoked because stopping a stream is an action, not inspection.
+- `capability::inspect` child invocation
+  `019e7309-0c8f-70e3-835d-4dc33eff16bb` inspected
+  `browser::get_status`, selected `first_party.browser.v1.get_status`, and
+  reported `effect = pure_read`, `risk = low`, with no approval requirement.
+- DB reconstruction: 41 events, 8 messages, 7 turns, 6 successful
+  `capability::execute` invocations, 1 successful `browser::get_status`, 2
+  successful `capability::inspect`, 0 failed invocations, 0 approvals, 0
+  `compact.*` events, and 0 session-scoped logs. Queue evidence was one
+  completed `agent::prompt_queue_drain`; stream evidence was `agent.runtime`,
+  `events.session`, and `queue.lifecycle`.
+- Resource refs were substrate-owned only:
+  `artifact:prompt-history:39c1567733a6b43fe22ba97ad4fefdaa105e8cd7b65c0ac1cc3c8b0487a26e29`
+  version `ver_019e7308-ba8b-7dd1-bf05-b7699b0478b3`, and final
+  `agent_result` resource `res_019e7309-1b86-73d1-8e8f-f9113d7d40b5` version
+  `ver_019e7309-1b86-73d1-8e8f-f94d12b7ce72`.
+- The scenario passes with score delta `+1`. Current score is 52/100. The next
+  scenario is RWO-N6.
 
 ### RWO-N6: State, Queue, Stream, Trigger Chain
 
@@ -1040,7 +1087,7 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario: **RWO-N5: Browser And Display Capability Probe**
+Recommended next scenario: **RWO-N6: State, Queue, Stream, Trigger Chain**
 
 Session:
 
@@ -1051,7 +1098,7 @@ Session:
 Prompt:
 
 ```text
-Use only execute. Discover whether browser or display capabilities are available. If available, inspect their status and report what they can safely do. Do not open arbitrary sites unless the capability explicitly supports it.
+Use only execute. Create a small state value, read it back, enqueue related work if queue capabilities are available, inspect or drain the queue, publish or read a stream event if available, and report every invocation id.
 ```
 
 After completion, inspect:
@@ -1060,25 +1107,29 @@ After completion, inspect:
 - model provider;
 - parent invocation;
 - all child `capability::execute` invocations;
-- target browser/display capabilities used, or the exact unavailable status;
+- target state, queue, and stream capabilities used, or the exact unavailable
+  status for each missing substrate surface;
 - failed invocations, if any;
-- approvals, expected none unless browser/display policy explicitly requires one;
+- approvals, expected none unless a target capability policy explicitly requires
+  one;
 - resource refs from substrate-owned prompt-history or final `agent_result`
   records;
-- queue/stream/state evidence if present;
-- logs mentioning discovery, browser/display, capability selection, or approval
+- queue rows, stream rows, and state rows created or read by the scenario;
+- logs mentioning state, queue, stream, capability selection, or approval
   failures.
 
 Pass criteria:
 
-- Browser/display discovery resolves through `capability::execute`.
-- Available capabilities are accurately reported, or missing capabilities return
-  `needs_capability` or a clear unavailable status.
-- The answer reports what the capability can safely do without opening
-  arbitrary sites.
+- State is written and read through engine state primitives, or the missing
+  state capability returns `needs_capability` or a clear unavailable status.
+- Queue action is traceable through queue substrate rows, or the missing queue
+  capability returns `needs_capability` or a clear unavailable status.
+- Stream action is traceable through stream substrate rows, or the missing
+  stream capability returns `needs_capability` or a clear unavailable status.
+- The answer reports every invocation id used.
 - No failed probe calls.
-- No client-owned browser action path is used.
-- No approval is required unless explicitly required by policy.
+- No side-channel state, queue, or stream path is used.
+- No approval is required unless explicitly required by target policy.
 - DB reconstruction matches the UI.
 
 If it fails, classify the primary failure layer and stop broader testing until
