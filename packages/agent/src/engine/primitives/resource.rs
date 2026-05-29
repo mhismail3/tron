@@ -244,7 +244,7 @@ fn resource_wrapper_registrations(
         handled_registration(
             resource_wrapper_function(
                 ARTIFACT_PROMOTE_FUNCTION,
-                "promote an artifact resource",
+                "promote an artifact resource; use expectedCurrentVersionId, not versionId, as the optional CAS guard",
                 EffectClass::IdempotentWrite,
             )
             .with_request_schema(wrapper_lifecycle_schema())
@@ -254,7 +254,7 @@ fn resource_wrapper_registrations(
         handled_registration(
             resource_wrapper_function(
                 ARTIFACT_DISCARD_FUNCTION,
-                "discard an artifact resource",
+                "discard an artifact resource; use expectedCurrentVersionId, not versionId, as the optional CAS guard",
                 EffectClass::IdempotentWrite,
             )
             .with_request_schema(wrapper_lifecycle_schema())
@@ -520,7 +520,7 @@ fn resource_wrapper_registrations(
         handled_registration(
             resource_wrapper_function(
                 MATERIALIZED_FILE_PROMOTE_FUNCTION,
-                "promote a materialized file resource",
+                "promote a materialized file resource; use expectedCurrentVersionId, not versionId, as the optional CAS guard",
                 EffectClass::IdempotentWrite,
             )
             .with_request_schema(wrapper_lifecycle_schema())
@@ -533,7 +533,7 @@ fn resource_wrapper_registrations(
         handled_registration(
             resource_wrapper_function(
                 MATERIALIZED_FILE_DISCARD_FUNCTION,
-                "discard a materialized file resource",
+                "discard a materialized file resource; use expectedCurrentVersionId, not versionId, as the optional CAS guard",
                 EffectClass::IdempotentWrite,
             )
             .with_request_schema(wrapper_lifecycle_schema())
@@ -618,7 +618,7 @@ fn resource_wrapper_registrations(
         handled_registration(
             resource_wrapper_function(
                 PATCH_MERGE_FUNCTION,
-                "merge a patch proposal resource",
+                "merge a patch proposal resource; use expectedCurrentVersionId, not versionId, as the optional CAS guard",
                 EffectClass::IdempotentWrite,
             )
             .with_request_schema(wrapper_lifecycle_schema())
@@ -2105,7 +2105,7 @@ fn update_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "resourceId": {"type": "string"},
-            "expectedCurrentVersionId": {"type": "string"},
+            "expectedCurrentVersionId": expected_current_version_id_property(),
             "lifecycle": {"type": "string"},
             "payload": {},
             "locations": locations_schema()
@@ -2167,7 +2167,7 @@ fn wrapper_update_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "resourceId": {"type": "string"},
-            "expectedCurrentVersionId": {"type": "string"},
+            "expectedCurrentVersionId": expected_current_version_id_property(),
             "payload": {},
             "locations": locations_schema()
         }
@@ -2181,8 +2181,15 @@ fn wrapper_lifecycle_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "resourceId": {"type": "string"},
-            "expectedCurrentVersionId": {"type": "string"}
+            "expectedCurrentVersionId": expected_current_version_id_property()
         }
+    })
+}
+
+fn expected_current_version_id_property() -> Value {
+    json!({
+        "type": "string",
+        "description": "Optional CAS guard; use expectedCurrentVersionId, not versionId, with a prior result's version.versionId, resourceRefs[].versionId, or inspect.resource.currentVersionId."
     })
 }
 
@@ -2230,7 +2237,7 @@ fn artifact_merge_schema() -> Value {
         "properties": {
             "targetResourceId": {"type": "string"},
             "sourceResourceIds": {"type": "array", "items": {"type": "string"}},
-            "expectedCurrentVersionId": {"type": "string"},
+            "expectedCurrentVersionId": expected_current_version_id_property(),
             "lifecycle": {"type": "string"},
             "payload": {},
             "locations": locations_schema()
@@ -2346,7 +2353,7 @@ fn materialized_file_update_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "resourceId": {"type": "string"},
-            "expectedCurrentVersionId": {"type": "string"},
+            "expectedCurrentVersionId": expected_current_version_id_property(),
             "path": {"type": "string"},
             "content": {"type": "string"},
             "contentHash": {"type": "string"},

@@ -95,12 +95,10 @@ interruption, and resource failure states.
 
 Total: **62/100**
 
-Active checkpoint note, 2026-05-29: post-run DB audit found one unexpected
-RWO-N11 execute-layer validation failure before the successful discard retry.
-The banked score remains `62/100` for the resource-truth fixes already proven,
-but broad testing is paused before RWO-N12 until the RWO-N11
-`schema_or_recipe` follow-up is fixed and the exact scenario is retested with no
-unexpected `target_payload_invalid` execute rows.
+Resolved checkpoint note, 2026-05-29: the RWO-N11 execute-layer
+`schema_or_recipe` follow-up is fixed and retested. The banked score remains
+`62/100` because RWO-N11 already earned its scenario points, and broad testing
+may proceed to RWO-N12.
 
 ## Scoring Rules
 
@@ -186,7 +184,7 @@ The evidence note must identify:
 | RWO-N8 | Module package activation | passed_after_fix | +2 | setup and first retest: `sess_019e7385-341e-7f30-8176-6b93396a6dbc`; final activation retest: `sess_019e7398-5d77-7d01-9c2a-465589dade48` | See 2026-05-29 RWO-N8 result note below. The setup run registered source/package, verified source, approved source, configured, activated, health-checked, disabled, and inspected the deterministic package. The final retest used 6 successful `capability::execute` rows, successful `module::activate`, `worker::spawn`, `module::check_health`, two `rwo_n8_20260529113609::health` invocations, duplicate activation replay, `module::disable`, `sandbox::stop_spawned_worker`, and `module::inspect_package`; 0 failed invocations; 2 executed approvals; disabled activation resource; revoked derived grant; no session logs. | `execute_correction`: nested wrapper cleanup stripped target-owned `arguments.mode` from `module::check_health`. `worker_lifecycle`: worker guide Python blocked in `recv_json` and stopped heartbeating while idle. `execute_resolution`: `worker::spawn` issued `engine_issued` scoped tokens, but binding selection only treated `session_scoped` session-generated functions as healthy. | `ae1b153bf` | Passed after rebuilt dev server PID 76020 with simulator booted. Direct fixture execute `019e7398-b60b-71b1-8e26-1ac35fcad2a1` selected `session_generated.rwo_n8_20260529113609.demo_echo` and invoked child `019e7398-b6f4-7b81-9c42-3acf2736499a`; disable stopped PID 77144 and revoked grant `sandbox-worker:rwo-n8-worker-20260529113609:019e7398-8526-7ff1-bbd5-280708370bf8`. |
 | RWO-N9 | Subagent fan-out/fan-in | passed_after_fix | +2 | failed first run: `sess_019e73a5-c2ae-7fe3-b9b9-86131b2f7156`; passing retest: `sess_019e73ae-4645-7f03-bca5-fad68c3959c4` | See 2026-05-29 RWO-N9 result note below. The passing retest used 10 parent `capability::execute` rows, 2 non-blocking `agent::spawn_subagent` target rows, 4 `agent::subagent_status` rows, 2 `agent::subagent_result` rows, 8 child `capability::execute` rows, 2 deterministic `agent_result:subagent:*` resources, 1 final parent `agent_result`, 0 failed invocations, 0 approvals, 0 `compact.*` events, and 0 session-scoped log rows. | Primary `resource_truth`: completed blocking subagents did not write deterministic `agent_result:subagent:*` resources, so result/status could fall back to in-memory manager state. Secondary `schema_or_recipe`: omitted `blockingTimeoutMs` was coerced into a blocking wait and the contract did not name the result capability, so fan-out models were guided toward sequential work. | `5c79bf677` | Passed exact prompt after rebuilt dev server PID 83613 with simulator booted. Parent spawned child sessions `sess_019e73ae-7618-7e92-b86a-19a4f50c605a` and `sess_019e73ae-8413-7830-9a49-3c87c98180be` before waiting, status-polled both through `agent::subagent_status`, collected both through `agent::subagent_result`, and reported lineage/capabilities. A model-chosen `process::run sleep 10` was used only as a timer between canonical status polls; no hidden client or runner side channel was used. |
 | RWO-N10 | Memory auto-retain | passed | +1 | `sess_019e73ba-2d9b-7dd3-9cbe-6704e0efb4a6` | See 2026-05-29 RWO-N10 result note below. The run used the real dev server and booted simulator evidence, kept the default auto-retain interval of 10, recorded 9 explicit `memory::auto_retain_fire` skips with `reason = below_threshold`, then fired on the tenth user message with `status = retaining`. The terminal `memory.retained` event recorded 4 resource refs: memory journal artifact, session materialized projection, memory-rule artifact, and rule materialized projection. DB evidence shows 0 failed invocations, 0 approvals, 0 `compact.*` events, 10 completed prompt queue drains, and resource versions with hashes/lifecycle state. | none; no code changes required | n/a | Passed without changing settings or using a side channel. Retain truth was engine-owned: `memory.retained` event seq 152, parent auto-retain invocation `019e73bb-209f-7561-912f-909dfe5f6e5a`, trace `019e73ba-fe7e-7511-ab2b-7275bfbecf3b`, and resource refs were produced by `artifact::create`, `materialized_file::update`, and `resource::link` children under that invocation. |
-| RWO-N11 | Resource failure matrix | passed_after_fix_with_followup | +2 | first failed run: `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2`; resource-truth retest: `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6` | See 2026-05-29 RWO-N11 result note below. Retest used 18 `capability::execute` rows, 6 `materialized_file::update`, 2 `materialized_file::hash_verify`, 2 `materialized_file::read`, 2 `materialized_file::inspect`, 3 `resource::create`, 1 `materialized_file::discard`, 0 approvals, 0 `compact.*` events, resource lifecycle/version rows for normal, stale-CAS, missing payload, missing bytes, hash mismatch, discard, and replay paths, plus one unexpected pre-child `target_payload_invalid` execute row now tracked as an open follow-up. | Primary fixed root cause was `resource_truth`: missing canonical bytes returned an opaque handler failure without damaged resource truth, and discarded materialized files remained readable/updatable through operational wrappers. Open follow-up is `schema_or_recipe`: lifecycle CAS guidance let the model send `versionId` instead of `expectedCurrentVersionId` for `materialized_file::discard`. | `c8a230983`; follow-up pending | Resource-truth paths passed after rebuilt dev server PID 90819 with simulator booted. Missing bytes and hash mismatch both produced damaged versions, stale CAS and declared hash mismatch failed before mutation, step 4/5 idempotency replay reused child `019e73d2-95a3-7fe1-a305-f3638a22a9c2`, and discarded read failed closed with no client-owned side channel. Exact scenario must be rerun after the execute-guidance fix before RWO-N12 starts. |
+| RWO-N11 | Resource failure matrix | passed_after_fix | +2 | first failed run: `sess_019e73c7-7e3d-7090-9fe9-96bd4d9118d2`; resource-truth retest: `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6`; execute-guidance retest: `sess_019e73eb-f65c-7ce3-a621-aa8b0d078494` | See 2026-05-29 RWO-N11 result note below. Final retest used 17 `capability::execute` rows, 6 `materialized_file::update`, 2 `materialized_file::hash_verify`, 2 `materialized_file::read`, 2 `materialized_file::inspect`, 3 `resource::create`, 1 `materialized_file::discard`, 0 approvals, 0 `compact.*` events, 0 session logs, damaged truth for missing-bytes and hash-mismatch fixtures, discarded lifecycle for the discarded fixture, replay of step 4, and 0 `target_payload_invalid` execute rows. | Primary fixed root cause was `resource_truth`: missing canonical bytes returned an opaque handler failure without damaged resource truth, and discarded materialized files remained readable/updatable through operational wrappers. Follow-up fixed `schema_or_recipe`: lifecycle CAS guidance now teaches `expectedCurrentVersionId`, not `versionId`, before the model calls lifecycle targets. | `c8a230983`; this checkpoint | Passed after rebuilt dev server PID 98981 with simulator booted. Step 14 first attempted `materialized_file::discard` with `expectedCurrentVersionId = ver_019e73ed-1591-7cb3-8693-b0f2121f40fc` and succeeded without a pre-child validation failure. |
 | RWO-N12 | Approval and grant boundary | pending | 0 | | | | | |
 | RWO-N13 | Runtime resilience | pending | 0 | | | | | |
 | RWO-N14 | Provider full parity | pending | 0 | | | | | |
@@ -1292,6 +1290,42 @@ Failure focus:
   omitted the guarded form. This is not a resource-truth fallback or target
   handler bug, but it blocks new broad scenario testing until fixed and retested
   with zero unexpected `target_payload_invalid` execute rows.
+- Follow-up fix: model-facing execute metadata now names resource lifecycle
+  targets and tells callers to pass prior result `version.versionId` or
+  `resourceRefs[].versionId` as `expectedCurrentVersionId`, not `versionId`.
+  Resource lifecycle target descriptions and request-schema field descriptions
+  carry the same CAS vocabulary, and generated lifecycle recipes include
+  `expectedCurrentVersionId: "<currentVersionId>"` so validation feedback does
+  not show an unguarded-only discard example. No target-side `versionId` alias,
+  fallback reader, or lifecycle compatibility path was added; invalid `versionId`
+  payloads still fail closed.
+- Focused regression coverage added:
+  `execute_schema_teaches_target_call_shape_and_complete_payloads` now requires
+  lifecycle CAS guidance in the model-facing execute schema, and
+  `lifecycle_version_id_mistake_returns_cas_field_guidance_without_aliasing`
+  proves the historical `versionId` mistake still returns
+  `target_payload_invalid` while the guidance names `expectedCurrentVersionId`
+  and the guarded recipe shape.
+- Execute-guidance retest `sess_019e73eb-f65c-7ce3-a621-aa8b0d078494` ran the
+  exact RWO-N11 prompt against rebuilt dev server PID `98981` with the booted
+  simulator evidence at `/tmp/rwo_n11_followup_simulator_before.png`. The run
+  log is `/tmp/rwo_n11_agent_run_20260529062824.json`.
+- Retest proof: DB query found 0 `target_payload_invalid` rows for
+  `capability::execute`, 0 approvals, 0 `compact.*` events, 0 session-scoped log
+  rows, and stream topics `agent.runtime`, `compensation.records`,
+  `events.session`, and `queue.lifecycle`. Event sequences 377 and 379 show
+  step 14 first attempted `materialized_file::discard` with
+  `expectedCurrentVersionId =
+  ver_019e73ed-1591-7cb3-8693-b0f2121f40fc`, and child invocation
+  `019e73ed-259f-73d2-b40e-06a885f5ce21` succeeded. Step 4/5 target
+  idempotency replay reused child `019e73ec-6393-7be1-adb4-380ec712f36a` via
+  replay row `019e73ec-758b-7f33-b894-8bd5bb9994a3`.
+- Final retest resource proof: primary has two available versions and lifecycle
+  `materialized`; missing-bytes fixture has an available baseline plus damaged
+  version `ver_019e73ec-d1b2-7ad3-a542-c11be6316f05` with missing/unreadable
+  damage reason; hash-mismatch fixture has damaged version
+  `ver_019e73ed-05ca-7933-b57c-6581a77bf540`; discarded fixture has lifecycle
+  `discarded` and discarded version `ver_019e73ed-259f-73d2-b40e-06b497105113`.
 - No package/source/policy/trust/audit side-table probe hits were found after
   excluding canonical `engine_resource*` tables, and no client-owned policy,
   alternate worker-spawn path, fallback reader, compatibility layer, or
@@ -1303,8 +1337,8 @@ Scoring:
   resource-truth bugs, received focused root-cause fixes, and passed a
   resource-truth retest with DB reconstruction.
 - Current score remains `62/100` provisional for the banked resource-truth
-  checkpoint. The next action is the RWO-N11 execute-guidance follow-up and
-  exact retest; RWO-N12 does not start until that follow-up is closed.
+  checkpoint. The RWO-N11 execute-guidance follow-up is closed; the next action
+  is RWO-N12.
 - Resource truth and durability increases to `9/10`.
 
 ### RWO-N12: Approval And Grant Boundary
@@ -1587,36 +1621,7 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 
 ## Next Test
 
-Recommended next scenario:
-**RWO-N11 follow-up: Lifecycle CAS Argument Guidance Retest**
-
-Blocking reason:
-
-- Post-run DB audit of `sess_019e73d2-0e47-7230-8f4c-1756dbda35a6` found
-  unexpected `capability::execute` invocation
-  `019e73d3-86e1-7320-b2e3-b5910290e0a7` with `details.status =
-  target_payload_invalid`.
-- The failed step sent `arguments.versionId` to `materialized_file::discard`
-  instead of `expectedCurrentVersionId`, then corrected on retry.
-- Classify as `schema_or_recipe`. Do not add a target-side alias or
-  compatibility reader.
-
-Procedure:
-
-1. Add the smallest focused regression around the model-facing lifecycle
-   schema/execute guidance so guarded resource lifecycle calls teach
-   `expectedCurrentVersionId`, including the explicit "not `versionId`" case.
-2. Fix the owning schema or metadata module only.
-3. Rerun the exact RWO-N11 scenario on the real dev server with the iOS
-   simulator when available.
-4. Query DB events/invocations/resources after the retest. The pass condition is
-   the same resource-truth proof plus zero unexpected `target_payload_invalid`
-   execute rows and first-attempt step 14 using `expectedCurrentVersionId`.
-5. Record the fix commit, retest session id, invocation ids, and score impact in
-   this scorecard before moving to the next scenario.
-
-Next new scenario after the follow-up passes:
-**RWO-N12: Approval And Grant Boundary**
+Recommended next scenario: **RWO-N12: Approval And Grant Boundary**
 
 Setup:
 

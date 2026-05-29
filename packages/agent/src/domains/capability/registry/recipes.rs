@@ -195,7 +195,24 @@ fn recipe_payload_example(function: &FunctionDefinition) -> Value {
             );
         }
     }
+    if should_show_expected_current_version_guard(properties, &required)
+        && let Some(field) = properties.get("expectedCurrentVersionId")
+    {
+        payload.insert(
+            "expectedCurrentVersionId".to_owned(),
+            recipe_example_value("expectedCurrentVersionId", field, function),
+        );
+    }
     Value::Object(payload)
+}
+
+fn should_show_expected_current_version_guard(
+    properties: &serde_json::Map<String, Value>,
+    required: &BTreeSet<&str>,
+) -> bool {
+    properties.contains_key("expectedCurrentVersionId")
+        && required.contains("resourceId")
+        && required.len() == 1
 }
 
 fn recipe_example_value(name: &str, field: &Value, function: &FunctionDefinition) -> Value {
@@ -213,6 +230,7 @@ fn recipe_example_value(name: &str, field: &Value, function: &FunctionDefinition
         "title" => Value::String("Tron update".to_owned()),
         "body" => Value::String("Task finished.".to_owned()),
         "content" | "newContent" => Value::String("example content".to_owned()),
+        "expectedCurrentVersionId" => Value::String("<currentVersionId>".to_owned()),
         "oldString" => Value::String("old text".to_owned()),
         "newString" => Value::String("new text".to_owned()),
         "task" => Value::String("Investigate the requested topic and report findings.".to_owned()),

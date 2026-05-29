@@ -3932,6 +3932,48 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_version_id_mistake_returns_cas_field_guidance_without_aliasing() {
+        let host = crate::engine::EngineHost::new().expect("engine host");
+        let function = host
+            .catalog()
+            .function(&FunctionId::new("materialized_file::discard").expect("function id"))
+            .expect("materialized_file::discard")
+            .clone();
+        let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);
+        let target = ResolvedCapabilityTarget {
+            binding_decision: decision_for_entry(&entry, "test", Vec::new()),
+            entry: entry.clone(),
+        };
+        let error = validate_target_payload(
+            &entry,
+            &json!({
+                "resourceId": "materialized_file:rwo-n11-agent-discarded",
+                "versionId": "ver_demo"
+            }),
+        )
+        .expect_err("payload error");
+        assert_eq!(payload_preflight_status(&error), "target_payload_invalid");
+
+        let value = preflight_rejection_result(&function, &target, error, "target_payload_invalid")
+            .expect("structured result");
+        let result: CapabilityResult = serde_json::from_value(value).expect("capability result");
+        let CapabilityResultBody::Blocks(blocks) = result.content else {
+            panic!("expected block content");
+        };
+        let CapabilityResultContent::Text { text } = &blocks[0] else {
+            panic!("expected text content");
+        };
+        assert!(text.contains("materialized_file::discard rejected before child execution"));
+        assert!(text.contains("expectedCurrentVersionId"));
+        assert!(text.contains("not versionId"), "{text}");
+        assert!(text.contains(r#""expectedCurrentVersionId":"<currentVersionId>""#));
+
+        let details = result.details.expect("details");
+        assert_eq!(details["status"], json!("target_payload_invalid"));
+        assert_eq!(details["childInvocationCreated"], json!(false));
+    }
+
+    #[test]
     fn approved_execute_result_reports_approval_and_child_invocation() {
         let function = test_function("process::run");
         let entry = CapabilityRegistryEntry::from_function(function.clone(), 77);

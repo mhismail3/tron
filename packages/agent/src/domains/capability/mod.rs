@@ -102,6 +102,10 @@
 //! model targets a visible trigger id, `execute` must return selection guidance
 //! that names the related function target; it must not alias the trigger id,
 //! create a child invocation, or route through a trigger-specific side path.
+//! Resource lifecycle CAS guards are target-owned `expectedCurrentVersionId`
+//! fields. Prior results expose version ids as `versionId`, but execute
+//! guidance and recipes must teach callers to pass that value as
+//! `expectedCurrentVersionId`; `versionId` is not accepted as an alias.
 //! Vague intents that name a known capability namespace fail closed as
 //! `needs_selection`, not `needs_capability`: the result includes bounded
 //! top-level candidate summaries and the same list in orchestration diagnostics
