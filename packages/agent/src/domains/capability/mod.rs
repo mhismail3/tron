@@ -95,6 +95,10 @@
 //! contract boundary: `list_dir` and `read_file` should receive known paths,
 //! while uncertain module, file, or extensionless names are first located with
 //! `find`, `glob`, or `search_text`.
+//! Trigger ids surfaced through `relatedTriggers` stay metadata-only. If a
+//! model targets a visible trigger id, `execute` must return selection guidance
+//! that names the related function target; it must not alias the trigger id,
+//! create a child invocation, or route through a trigger-specific side path.
 //! Vague intents that name a known capability namespace fail closed as
 //! `needs_selection`, not `needs_capability`: the result includes bounded
 //! top-level candidate summaries and the same list in orchestration diagnostics

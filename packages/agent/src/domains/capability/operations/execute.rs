@@ -261,6 +261,33 @@ async fn execute_orchestrated_value(
                         orchestration_status_is_error("needs_selection"),
                     );
                 }
+                IntentResolveOutcome::TriggerMetadataTarget {
+                    guidance,
+                    search_status,
+                } => {
+                    let phase_details = trigger_metadata_target_phase_details(
+                        "intent_resolution",
+                        None,
+                        &guidance,
+                        search_status,
+                    );
+                    let diagnostics = orchestration_details(
+                        &orchestration_id,
+                        "needs_selection",
+                        input.intent.as_deref(),
+                        None,
+                        &input,
+                        phase_details,
+                        Vec::new(),
+                    );
+                    record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+                    return orchestration_result(
+                        "needs_selection",
+                        &trigger_metadata_target_message(&guidance),
+                        diagnostics,
+                        orchestration_status_is_error("needs_selection"),
+                    );
+                }
             }
         }
     };
@@ -269,6 +296,37 @@ async fn execute_orchestrated_value(
     let target = match resolve_target(&resolve.target_params, deps, &actor).await {
         Ok(target) => target,
         Err(error @ CapabilityError::NotFound { .. }) => {
+            if let Some(guidance) = trigger_metadata_target_guidance_for_visible_catalog(
+                &resolve.target_params,
+                &input.arguments,
+                deps,
+                &actor,
+            )
+            .await
+            {
+                let phase_details = trigger_metadata_target_phase_details(
+                    &resolve.mode,
+                    Some(resolve.target_params.clone()),
+                    &guidance,
+                    resolve.search_status.clone(),
+                );
+                let diagnostics = orchestration_details(
+                    &orchestration_id,
+                    "needs_selection",
+                    input.intent.as_deref(),
+                    None,
+                    &input,
+                    phase_details,
+                    Vec::new(),
+                );
+                record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
+                return orchestration_result(
+                    "needs_selection",
+                    &trigger_metadata_target_message(&guidance),
+                    diagnostics,
+                    orchestration_status_is_error("needs_selection"),
+                );
+            }
             let diagnostics = orchestration_details(
                 &orchestration_id,
                 "needs_capability",
@@ -559,6 +617,10 @@ enum IntentResolveOutcome {
     },
     NeedsCapability {
         candidates: Vec<Value>,
+        search_status: Value,
+    },
+    TriggerMetadataTarget {
+        guidance: Value,
         search_status: Value,
     },
 }
@@ -1495,6 +1557,14 @@ async fn resolve_intent_target(
         })
         .await;
     let snapshot = registry_snapshot_for_functions(deps, actor, functions).await;
+    if let Some(guidance) =
+        trigger_metadata_target_guidance_for_intent(intent, arguments, &snapshot)
+    {
+        return Ok(IntentResolveOutcome::TriggerMetadataTarget {
+            guidance,
+            search_status: Value::Null,
+        });
+    }
     let store = deps.registry_store.clone();
     let embedding_provider = deps.embedding_provider.clone();
     let policy = CapabilitySearchPolicy::default();
@@ -3087,8 +3157,9 @@ fn discovery_message(target: &ResolvedCapabilityTarget) -> String {
         String::new()
     } else {
         format!(
-            " Related triggers visible as metadata: {}; invoke this capability by function id, not by trigger id.",
-            related_trigger_ids.join(", ")
+            " Related triggers visible as metadata: {}. To invoke this capability by function id, not by trigger id, set target to `{}`; do not use trigger ids as execute targets.",
+            related_trigger_ids.join(", "),
+            target.entry.function.id.as_str()
         )
     };
     format!(
@@ -3122,6 +3193,215 @@ fn related_trigger_ids(entry: &CapabilityRegistryEntry) -> Vec<String> {
         .filter_map(|trigger| trigger.get("triggerId").and_then(Value::as_str))
         .map(ToOwned::to_owned)
         .collect()
+}
+
+async fn trigger_metadata_target_guidance_for_visible_catalog(
+    target_params: &Value,
+    arguments: &Value,
+    deps: &Deps,
+    actor: &ActorContext,
+) -> Option<Value> {
+    let functions = deps
+        .engine_host
+        .discover(&FunctionQuery {
+            actor: Some(actor.clone()),
+            health: Some(FunctionHealth::Healthy),
+            ..FunctionQuery::default()
+        })
+        .await;
+    let snapshot = registry_snapshot_for_functions(deps, actor, functions).await;
+    trigger_metadata_target_guidance_for_target_params(target_params, arguments, &snapshot)
+}
+
+fn trigger_metadata_target_guidance_for_target_params(
+    target_params: &Value,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+) -> Option<Value> {
+    let target_id = target_id_from_params(target_params)?;
+    trigger_metadata_target_guidance_for_ids([target_id.as_str()], arguments, snapshot)
+}
+
+fn trigger_metadata_target_guidance_for_intent(
+    intent: &str,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+) -> Option<Value> {
+    let trigger_ids = snapshot
+        .entries
+        .iter()
+        .flat_map(|entry| {
+            entry
+                .function
+                .metadata
+                .get("relatedTriggers")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|trigger| trigger.get("triggerId").and_then(Value::as_str))
+        })
+        .filter(|trigger_id| intent.contains(*trigger_id))
+        .collect::<BTreeSet<_>>();
+    trigger_metadata_target_guidance_for_ids(trigger_ids, arguments, snapshot)
+}
+
+fn trigger_metadata_target_guidance_for_ids<'a>(
+    trigger_ids: impl IntoIterator<Item = &'a str>,
+    arguments: &Value,
+    snapshot: &CapabilityRegistrySnapshot,
+) -> Option<Value> {
+    let requested_trigger_ids = trigger_ids
+        .into_iter()
+        .map(str::trim)
+        .filter(|trigger_id| !trigger_id.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<BTreeSet<_>>();
+    if requested_trigger_ids.is_empty() {
+        return None;
+    }
+
+    let mut candidates = Vec::new();
+    let mut related_triggers = Vec::new();
+    let mut suggested_calls = Vec::new();
+    let mut seen_functions = BTreeSet::new();
+    let mut matched_trigger_ids = BTreeSet::new();
+    for entry in &snapshot.entries {
+        let Some(triggers) = entry
+            .function
+            .metadata
+            .get("relatedTriggers")
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for trigger in triggers {
+            let Some(trigger_id) = trigger.get("triggerId").and_then(Value::as_str) else {
+                continue;
+            };
+            if !requested_trigger_ids.contains(trigger_id) {
+                continue;
+            }
+            matched_trigger_ids.insert(trigger_id.to_owned());
+            related_triggers.push(trigger.clone());
+            if seen_functions.insert(entry.function_id.clone()) {
+                candidates.push(trigger_metadata_candidate_summary(entry));
+                suggested_calls.push(json!({
+                    "target": entry.function_id.as_str(),
+                    "arguments": arguments.clone(),
+                }));
+            }
+        }
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+    let requested = matched_trigger_ids.into_iter().collect::<Vec<_>>();
+    Some(json!({
+        "kind": "trigger_metadata_target",
+        "message": "Trigger ids are metadata, not executable capability targets. Re-run execute with the related function id as target; do not use trigger ids as execute targets.",
+        "requestedTriggerIds": requested,
+        "relatedTriggers": related_triggers,
+        "candidates": candidates,
+        "suggestedCalls": suggested_calls,
+    }))
+}
+
+fn target_id_from_params(target_params: &Value) -> Option<String> {
+    match parse_target(target_params)? {
+        CapabilityTarget::Function(id)
+        | CapabilityTarget::Implementation(id)
+        | CapabilityTarget::Contract(id)
+        | CapabilityTarget::Capability(id) => Some(id),
+    }
+}
+
+fn trigger_metadata_candidate_summary(entry: &CapabilityRegistryEntry) -> Value {
+    json!({
+        "kind": "implementation",
+        "contractId": entry.contract_id.as_str(),
+        "implementationId": entry.implementation_id.as_str(),
+        "functionId": entry.function_id.as_str(),
+        "score": 1.0,
+        "matchedBy": "related_trigger_metadata",
+        "riskLevel": format!("{:?}", entry.function.risk_level),
+        "effectClass": format!("{:?}", entry.function.effect_class),
+        "snippet": bounded_snippet(&entry.search_text),
+    })
+}
+
+fn trigger_metadata_target_phase_details(
+    resolve_mode: &str,
+    selected_target: Option<Value>,
+    guidance: &Value,
+    search_status: Value,
+) -> Value {
+    let mut object = Map::new();
+    object.insert("phase".to_owned(), json!("resolve"));
+    object.insert("resolveMode".to_owned(), json!(resolve_mode));
+    if let Some(selected_target) = selected_target {
+        object.insert("selectedTarget".to_owned(), selected_target);
+    }
+    object.insert(
+        "candidates".to_owned(),
+        guidance
+            .get("candidates")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+    );
+    object.insert("searchStatus".to_owned(), search_status);
+    object.insert("guidance".to_owned(), guidance.clone());
+    object.insert(
+        "suggestedCalls".to_owned(),
+        guidance
+            .get("suggestedCalls")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
+    );
+    object.insert(
+        "docs".to_owned(),
+        json!({
+            "relatedTriggers": guidance
+                .get("relatedTriggers")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        }),
+    );
+    Value::Object(object)
+}
+
+fn trigger_metadata_target_message(guidance: &Value) -> String {
+    let trigger_ids = guidance
+        .get("requestedTriggerIds")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    let function_ids = guidance
+        .get("candidates")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| candidate.get("functionId").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    let trigger_label = if trigger_ids.is_empty() {
+        "the requested trigger id".to_owned()
+    } else {
+        trigger_ids.join(", ")
+    };
+    match function_ids.as_slice() {
+        [function_id] => format!(
+            "Trigger ids are metadata, not executable capability targets. Re-run execute with target `{function_id}` and the same arguments; do not use trigger id `{trigger_label}` as the target. No child invocation was created."
+        ),
+        [] => format!(
+            "Trigger ids are metadata, not executable capability targets. Re-run execute with the related function id as target; do not use trigger id `{trigger_label}` as the target. No child invocation was created."
+        ),
+        _ => format!(
+            "Trigger ids are metadata, not executable capability targets. Re-run execute with one related function target: {}. Do not use trigger id `{trigger_label}` as the target. No child invocation was created.",
+            function_ids.join(", ")
+        ),
+    }
 }
 
 pub(super) fn lacks_sufficient_intent_resolution_evidence(
@@ -3641,6 +3921,90 @@ mod tests {
         assert!(message.contains("manual:rwo_n7.echo"));
         assert!(message.contains("visible as metadata"));
         assert!(message.contains("not by trigger id"));
+    }
+
+    #[test]
+    fn trigger_metadata_target_guidance_names_related_function_without_aliasing_trigger() {
+        let mut function = FunctionDefinition::new(
+            FunctionId::new("rwo_n7::echo").expect("function id"),
+            crate::engine::WorkerId::new("rwo-n7-worker").expect("worker id"),
+            "RWO-N7 fixture",
+            crate::engine::VisibilityScope::System,
+            crate::engine::EffectClass::PureRead,
+        );
+        function.metadata = json!({
+            "relatedTriggers": [{
+                "triggerId": "manual:rwo_n7.echo",
+                "triggerType": "manual",
+                "targetFunction": "rwo_n7::echo"
+            }]
+        });
+        let snapshot = CapabilityRegistrySnapshot::new(vec![function], 7);
+        let arguments = json!({
+            "message": "rwo-n7 live worker test",
+            "nonce": "rwo-n7-2026-05-29"
+        });
+
+        let guidance = trigger_metadata_target_guidance_for_target_params(
+            &json!({"capabilityId": "manual:rwo_n7.echo"}),
+            &arguments,
+            &snapshot,
+        )
+        .expect("trigger metadata guidance");
+        let message = trigger_metadata_target_message(&guidance);
+
+        assert_eq!(guidance["kind"], json!("trigger_metadata_target"));
+        assert_eq!(
+            guidance["requestedTriggerIds"],
+            json!(["manual:rwo_n7.echo"])
+        );
+        assert_eq!(
+            guidance["candidates"][0]["functionId"],
+            json!("rwo_n7::echo")
+        );
+        assert_eq!(
+            guidance["suggestedCalls"][0]["target"],
+            json!("rwo_n7::echo")
+        );
+        assert_eq!(guidance["suggestedCalls"][0]["arguments"], arguments);
+        assert!(message.contains("Trigger ids are metadata"));
+        assert!(message.contains("target `rwo_n7::echo`"));
+        assert!(!message.contains("CAPABILITY_NOT_FOUND"));
+    }
+
+    #[test]
+    fn trigger_metadata_intent_guidance_uses_exact_visible_trigger_ids() {
+        let mut function = FunctionDefinition::new(
+            FunctionId::new("rwo_n7::echo").expect("function id"),
+            crate::engine::WorkerId::new("rwo-n7-worker").expect("worker id"),
+            "RWO-N7 fixture",
+            crate::engine::VisibilityScope::System,
+            crate::engine::EffectClass::PureRead,
+        );
+        function.metadata = json!({
+            "relatedTriggers": [{
+                "triggerId": "manual:rwo_n7.echo",
+                "triggerType": "manual",
+                "targetFunction": "rwo_n7::echo"
+            }]
+        });
+        let snapshot = CapabilityRegistrySnapshot::new(vec![function], 7);
+
+        let guidance = trigger_metadata_target_guidance_for_intent(
+            "Trigger the user-supplied exact manual trigger id `manual:rwo_n7.echo`.",
+            &json!({}),
+            &snapshot,
+        )
+        .expect("trigger metadata guidance");
+
+        assert_eq!(
+            guidance["requestedTriggerIds"],
+            json!(["manual:rwo_n7.echo"])
+        );
+        assert_eq!(
+            guidance["suggestedCalls"],
+            json!([{"target": "rwo_n7::echo", "arguments": {}}])
+        );
     }
 
     fn observability_metrics_function() -> FunctionDefinition {

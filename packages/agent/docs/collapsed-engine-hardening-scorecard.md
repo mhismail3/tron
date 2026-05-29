@@ -175,7 +175,7 @@ The evidence note must identify:
 | RWO-N4 | Web research capability | passed | +1 | `sess_019e7301-b34f-7240-99aa-ea6d6cdac1c2` | See 2026-05-29 RWO-N4 result note below. The run used 2 successful `capability::execute` invocations, 1 successful `web::search`, 1 successful `web::fetch`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; source returned an HTTP 403 Cloudflare/JS challenge through the web fetch capability and the agent reported it without fallback browsing | n/a | Passed exact prompt on the real dev server. Search returned official `https://platform.openai.com/docs/models`; fetch targeted that URL through `first_party.web.v1.fetch`; no browser/client-owned path was used. |
 | RWO-N5 | Browser and display capability probe | passed | +1 | `sess_019e7308-762f-7691-987e-ea33f8eac543` | See 2026-05-29 RWO-N5 result note below. The run used 6 successful `capability::execute` invocations, 1 successful `browser::get_status`, 2 successful `capability::inspect`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one completed `agent::prompt_queue_drain`, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. `browser::get_status` returned `hasBrowser = false` and `isStreaming = false`; `display::stop_stream` was inspected but not invoked; no browser/client-owned action path was used. |
 | RWO-N6 | State, queue, stream, trigger chain | passed | +1 | `sess_019e730c-0b78-7b73-8598-80a75810a394` | See 2026-05-29 RWO-N6 result note below. The run used 21 successful `capability::execute` invocations, 7 successful `capability::inspect`, 1 successful `state::set`, 1 successful `state::get`, 1 successful `queue::enqueue`, 1 successful `queue::list`, 1 successful `stream::subscribe`, 1 successful `stream::poll`, prompt-history `artifact::create`, and final `resource::create` agent result. There were 0 failed invocations, 0 approvals, 0 `compact.*` events, 0 session-scoped logs, one ready `agent.test` queue row, one session-scoped state row, one `agent.test.execute` stream subscription, and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows. | none; no code changes required | n/a | Passed exact prompt on the real dev server. State write/read matched revision 1; queue enqueue/list returned the ready queued item; stream subscribe/poll succeeded and found no events; publish capability was not found. |
-| RWO-N7 | Live worker extensibility | passed_after_fix | +2 | conformance failure: `sess_019e732f-c5e0-7bf3-8130-9da7d39a3deb`; trigger retest with cleanup gap: `sess_019e733b-af69-7f93-bb15-7a717d906aef`; final cleanup-fixed retest: `sess_019e7341-8eac-7bb3-97bc-efd16de60757` | See 2026-05-29 RWO-N7 result note below. Final retest used 4 successful `capability::execute` rows, 1 successful target `rwo_n7::echo` invocation, catalog revisions 389-394, 0 approvals, 0 `compact.*` events, 0 session logs, one final `agent_result`, one completed agent queue row, and worker lifecycle stream rows for connect/register/disconnect/unregister. | `execute_resolution`: session-generated implementations stayed `candidate` and were not binding-selectable. `queue_or_trigger`: visible trigger metadata was not projected through capability discovery. `worker_lifecycle`: stale session-scoped registry plugin/implementation rows stayed healthy after disconnect. | `0aabb48a2` | Passed after rebuilt dev server PID 56952. Post-disconnect registry sync removed the session-generated implementation/plugin rows and direct execute returned `CAPABILITY_NOT_FOUND`. |
+| RWO-N7 | Live worker extensibility | passed_after_fix | +2 | conformance failure: `sess_019e732f-c5e0-7bf3-8130-9da7d39a3deb`; trigger retest with cleanup gap: `sess_019e733b-af69-7f93-bb15-7a717d906aef`; cleanup-fixed retest: `sess_019e7341-8eac-7bb3-97bc-efd16de60757`; trigger-guidance retest: `sess_019e735b-9168-7b43-bb95-56fb6cacca43` | See 2026-05-29 RWO-N7 result note below. Trigger-guidance retest used one `needs_selection` execute row for trigger-id metadata guidance, one successful `capability::execute` row, one successful target `rwo_n7::echo` invocation, catalog revisions 389-394, 0 approvals, 0 `compact.*` events, 0 session logs, and expected post-disconnect `CAPABILITY_NOT_FOUND` cleanup probes after unregister. | `execute_resolution`: session-generated implementations stayed `candidate` and were not binding-selectable. `queue_or_trigger`: visible trigger metadata was not projected through capability discovery. `worker_lifecycle`: stale session-scoped registry plugin/implementation rows stayed healthy after disconnect. `execute_resolution`: explicit trigger-id targets returned generic not-found instead of metadata-only guidance naming the related function target. | `0aabb48a2`; trigger-guidance checkpoint in this commit | Passed after rebuilt dev server PID 63286. Trigger-id target now returns `needs_selection`/`trigger_metadata_target` with suggested target `rwo_n7::echo`, no child invocation, and no trigger-id aliasing. Post-disconnect registry sync removed the session-generated implementation/plugin rows and direct execute returned expected `CAPABILITY_NOT_FOUND`. |
 | RWO-N8 | Module package activation | pending | 0 | | | | | |
 | RWO-N9 | Subagent fan-out/fan-in | pending | 0 | | | | | |
 | RWO-N10 | Memory auto-retain | pending | 0 | | | | | |
@@ -803,12 +803,44 @@ Failure focus:
   `019e7341-a398-7a11-ae54-3fdb7ec49e13` surfaced
   `Related triggers visible as metadata: manual:rwo_n7.echo; invoke this
   capability by function id, not by trigger id.`
-- The model still made two documented trigger-target detours:
+- Historical cleanup-fixed retest detours: the model still made two documented
+  trigger-target detours:
   `019e7341-b780-7bd2-9042-4ea75eaaf895` returned a `needs_selection` style
   discovery response, and `019e7341-ca5c-7fb3-b0a1-59761e853524` returned
   `CAPABILITY_NOT_FOUND` for target `manual:rwo_n7.echo`. These did not create
-  child target invocations and are retained as guidance evidence for later
-  trigger ergonomics work.
+  child target invocations. The trigger-guidance checkpoint treats this as a
+  real ergonomics bug, not a passing-path artifact.
+- Trigger-guidance root cause was `execute_resolution`: when the requested
+  target exactly matched a visible `relatedTriggers[].triggerId`, `execute`
+  fell through to generic target resolution and returned `CAPABILITY_NOT_FOUND`.
+  The fix checks visible trigger metadata during intent resolution and explicit
+  target-not-found handling, returns `needs_selection` with
+  `guidance.kind = trigger_metadata_target`, and suggests the related function
+  target without aliasing the trigger id or creating a child invocation.
+- Focused trigger-guidance regression coverage added:
+  `trigger_metadata_target_guidance_names_related_function_without_aliasing_trigger`
+  and `trigger_metadata_intent_guidance_uses_exact_visible_trigger_ids`.
+- Direct replay of the historical bad call against rebuilt dev server PID 63286
+  returned execute invocation `019e735a-5d89-7c81-b783-3b5fdb7ceab1` with
+  `details.status = needs_selection`, `guidance.kind =
+  trigger_metadata_target`, `suggestedCalls[0].target = rwo_n7::echo`,
+  `childInvocationCreated = false`, and no `CAPABILITY_NOT_FOUND`.
+- Trigger-guidance exact retest session:
+  `sess_019e735b-9168-7b43-bb95-56fb6cacca43`, prompt invocation
+  `019e735b-916e-7083-a488-7047b379bded`, run
+  `019e735b-916e-7083-a488-7059e9046afa`, trace
+  `019e735b-916e-7083-a488-702f9baf2bf2`. The simulator app was running
+  against the real dev server while the prompt executed.
+- Trigger-guidance retest invocation sequence:
+  `capability::execute` `019e735b-a1af-7530-890f-ac656a040838` returned
+  `needs_selection`/`trigger_metadata_target` with suggested target
+  `rwo_n7::echo` and no child invocation. The follow-up
+  `capability::execute` `019e735b-b058-79f3-955e-299420040da6` returned `ok`
+  and invoked target `rwo_n7::echo` invocation
+  `019e735b-b146-7331-b942-263bedfe92eb`. The agent final answer reported the
+  discovery execute id, invoke execute id, target fixture invocation id, fixture
+  result fields, and that trigger metadata is visible but trigger ids are not
+  executable targets.
 - Successful function invocation:
   `capability::execute` `019e7341-d9b1-7f53-a053-f71ffbabe7b2` selected
   implementation `session_generated.rwo_n7.rwo_n7_echo` under policy
@@ -823,8 +855,12 @@ Failure focus:
   392-394. `worker.lifecycle` stream events recorded connected,
   function_registered, trigger_registered, disconnected, and unregistered for
   `rwo-n7-fixture-worker`.
-- Post-disconnect registry snapshot proof: direct `execute` target
-  `rwo_n7::echo` returned `CAPABILITY_NOT_FOUND`, and DB counts were
+- Trigger-guidance retest cleanup proof: fixture log
+  `/tmp/rwo_n7_live_worker_fixture_trigger_guidance_fix.jsonl` recorded
+  `disconnect_sent` at 2026-05-29T10:52:07Z. Post-disconnect direct `execute`
+  target `rwo_n7::echo` returned expected `CAPABILITY_NOT_FOUND` in invocation
+  `019e7360-69bd-7f62-99a4-484583506c68` at catalog revision 394 with
+  `childInvocationCreated = false`, and DB counts were
   `capability_implementations(function_id = rwo_n7::echo) = 0` and
   `capability_plugins(plugin_id = session_generated.rwo-n7-fixture-worker) = 0`.
 - DB reconstruction for the final retest: 31 events, 6 messages, 5 turns, 4
@@ -832,8 +868,14 @@ Failure focus:
   `compact.*` events, 0 session logs, one final `agent_result` resource
   `res_019e7342-28bd-7032-8ea8-90f29e5f718e`, one completed `agent` queue row,
   and `agent.runtime`/`events.session`/`queue.lifecycle` stream rows.
-- The scenario passes with score delta `+2`. Current score is 55/100. The next
-  scenario is RWO-N8.
+- DB reconstruction for the trigger-guidance retest agent turn: events through
+  sequence 428 showed 0 `compact.*` events, 0 approvals, 0 session logs, and 0
+  failed invocations. The expected post-disconnect cleanup probes were recorded
+  after the final answer and are classified as cleanup evidence, not scenario
+  invocation failures.
+- The scenario remains passed with score delta `+2`. Current score stays
+  55/100 because the trigger-guidance checkpoint hardens RWO-N7 evidence but
+  does not add a new scenario. The next scenario is RWO-N8.
 
 ### RWO-N8: Module Package Activation
 
