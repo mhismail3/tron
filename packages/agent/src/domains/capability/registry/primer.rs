@@ -4,11 +4,9 @@
 //! indexing do not own model-facing documentation text.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use super::index::trust_rank;
-use super::{CapabilityRegistryEntry, CapabilityRegistrySnapshot};
-use crate::domains::capability::types::AgentCapabilityRecipe;
+use super::{AgentCapabilityRecipeDisplay, CapabilityRegistryEntry, CapabilityRegistrySnapshot};
 
 const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
     "capability::execute",
@@ -112,6 +110,7 @@ pub(crate) fn render_capability_primer(
     let mut rendered_entries = 0usize;
     for entry in entries.drain(..) {
         let recipe = entry.agent_recipe();
+        let display = AgentCapabilityRecipeDisplay::new(&recipe);
         let mut line = format!(
             "- `{}` — {}. Use when: {}",
             recipe.contract_id, recipe.display_name, recipe.use_when
@@ -120,35 +119,23 @@ pub(crate) fn render_capability_primer(
             if !recipe.required_payload.is_empty() {
                 line.push_str(&format!(
                     " Required arguments: {}",
-                    recipe.required_payload.join("; ")
+                    display.required_arguments
                 ));
             }
-            if !recipe.optional_payload.is_empty() {
-                let optional = recipe
-                    .optional_payload
-                    .iter()
-                    .take(6)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                line.push_str(&format!(" Optional: {}", optional.join("; ")));
+            if let Some(optional) = display.optional_arguments_limited(6) {
+                line.push_str(&format!(" Optional: {optional}"));
             }
         }
         if policy.include_examples
-            && let Ok(example) = serde_json::to_string(&recipe.execute_template)
+            && let Some(example) = &display.execute_template_json
         {
             line.push_str(&format!(" Execute: {example}"));
-            if let Some(risky_example) = risky_direct_recipe_example(&recipe)
-                && let Ok(example) = serde_json::to_string(risky_example)
-            {
+            if let Some(example) = &display.risky_direct_example_json {
                 line.push_str(&format!(" Risky execute: {example}"));
             }
         }
-        if recipe.inspect_required {
-            line.push_str(" Execute prepares freshness before elevated-risk work.");
-        } else if recipe.approval_behavior != "none" {
-            line.push_str(&format!(" Approval: {}.", recipe.approval_behavior));
-        } else if recipe.direct_execution == "conditional_safe_direct" {
-            line.push_str(" Safe payloads run directly; risky payloads may pause for approval.");
+        if let Some(guidance) = &display.primer_execution_guidance {
+            line.push_str(guidance);
         }
         line.push('\n');
         if rendered_entries > 0 && estimated_tokens(out.len() + line.len()) > policy.max_tokens {
@@ -161,16 +148,6 @@ pub(crate) fn render_capability_primer(
         rendered_entries += 1;
     }
     Some(out)
-}
-
-fn risky_direct_recipe_example(recipe: &AgentCapabilityRecipe) -> Option<&Value> {
-    if recipe.direct_execution != "conditional_safe_direct" {
-        return None;
-    }
-    recipe.examples.iter().find(|example| {
-        example["arguments"]["executionMode"] == "sandbox_materialized"
-            && example["arguments"]["expectedOutputs"].is_array()
-    })
 }
 
 fn primer_rank(entry: &CapabilityRegistryEntry) -> (u8, u8, u8) {

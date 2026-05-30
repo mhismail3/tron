@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        5_700,
+        5_800,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -585,7 +585,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **10/100**",
+        "Current score: **25/100**",
         "## Operating Rules",
         "## Review Rubric",
         "## Static Gates",
@@ -933,6 +933,11 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability/registry/recipes.rs",
         "src/domains/capability/registry/search_policy.rs",
         "src/domains/capability/registry/store.rs",
+        "src/domains/capability/registry/store/memory.rs",
+        "src/domains/capability/registry/store/projection.rs",
+        "src/domains/capability/registry/store/schema.rs",
+        "src/domains/capability/registry/store/sqlite.rs",
+        "src/domains/capability/registry/store/sqlite_runtime.rs",
         "src/domains/capability/registry/tests/mod.rs",
         "src/domains/capability/registry/tests/projection.rs",
         "src/domains/capability/registry/tests/recipes.rs",
@@ -1103,6 +1108,44 @@ fn critical_execution_and_ui_boundaries_stay_split() {
             "capability registry root must not regain extracted store helper `{forbidden}`"
         );
     }
+    let capability_recipes =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/recipes.rs"))
+            .expect("read capability recipes");
+    for required in [
+        "pub(crate) struct AgentCapabilityRecipeDisplay",
+        "fn display_field_list(",
+        "fn primer_execution_guidance(",
+        "fn risky_direct_recipe_example_json(",
+    ] {
+        assert!(
+            capability_recipes.contains(required),
+            "capability recipes must own CLC-1 recipe display model helper `{required}`"
+        );
+    }
+    for rel in [
+        "src/domains/capability/operations/presentation.rs",
+        "src/domains/capability/operations/schema_validation.rs",
+        "src/domains/capability/operations/execute/result.rs",
+        "src/domains/capability/registry/primer.rs",
+    ] {
+        let content = std::fs::read_to_string(crate_root.join(rel))
+            .unwrap_or_else(|error| panic!("read {rel}: {error}"));
+        assert!(
+            content.contains("AgentCapabilityRecipeDisplay"),
+            "{rel} must use the recipe-owned CLC-1 display model instead of rebuilding recipe text locally"
+        );
+        for forbidden in [
+            "required_payload.join",
+            "optional_payload.join",
+            "serde_json::to_string(&recipe.execute_template)",
+            "fn risky_direct_recipe_example(",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{rel} must not regain duplicated recipe display helper `{forbidden}`"
+            );
+        }
+    }
     let capability_support_traits = std::fs::read_to_string(
         crate_root.join("src/domains/capability_support/implementations/traits.rs"),
     )
@@ -1120,15 +1163,89 @@ fn critical_execution_and_ui_boundaries_stay_split() {
             .expect("read capability registry store");
     for required in [
         "pub(crate) trait CapabilityRegistryStore",
-        "pub(crate) struct SqliteCapabilityRegistryStore",
-        "pub(crate) struct InMemoryCapabilityRegistryStore",
-        "const CAPABILITY_REGISTRY_SCHEMA",
+        "mod memory;",
+        "mod projection;",
+        "mod schema;",
+        "mod sqlite;",
+        "mod sqlite_runtime;",
+        "pub(crate) use memory::InMemoryCapabilityRegistryStore;",
+        "pub(crate) use sqlite::SqliteCapabilityRegistryStore;",
     ] {
         assert!(
             capability_registry_store.contains(required),
             "capability registry store must own CLC-1 persistence boundary `{required}`"
         );
     }
+    assert!(
+        line_count(&crate_root.join("src/domains/capability/registry/store.rs")) <= 1_000,
+        "capability registry store root must stay below the 1,000 LOC review-smell threshold after CLC-1 extraction"
+    );
+    for forbidden in [
+        "pub(crate) struct SqliteCapabilityRegistryStore",
+        "pub(crate) struct InMemoryCapabilityRegistryStore",
+        "const CAPABILITY_REGISTRY_SCHEMA",
+        "fn query_json_column(",
+        "fn redact_audit_event(",
+        "fn write_vectors(",
+        "CREATE TABLE IF NOT EXISTS capability_plugins",
+    ] {
+        assert!(
+            !capability_registry_store.contains(forbidden),
+            "capability registry store root must not regain extracted persistence helper `{forbidden}`"
+        );
+    }
+    let capability_registry_memory =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/store/memory.rs"))
+            .expect("read capability registry memory store");
+    assert!(
+        capability_registry_memory.contains("pub(crate) struct InMemoryCapabilityRegistryStore")
+            && capability_registry_memory
+                .contains("impl CapabilityRegistryStore for InMemoryCapabilityRegistryStore"),
+        "capability registry memory store must own the in-memory store implementation"
+    );
+    let capability_registry_schema =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/store/schema.rs"))
+            .expect("read capability registry schema");
+    assert!(
+        capability_registry_schema.contains("pub(super) const CAPABILITY_REGISTRY_SCHEMA")
+            && capability_registry_schema.contains("CREATE TABLE IF NOT EXISTS capability_plugins"),
+        "capability registry schema boundary must own the SQLite schema text"
+    );
+    let capability_registry_sqlite =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/store/sqlite.rs"))
+            .expect("read capability registry sqlite helpers");
+    assert!(
+        capability_registry_sqlite.contains("pub(crate) struct SqliteCapabilityRegistryStore")
+            && capability_registry_sqlite.contains("fn initialize_schema(")
+            && capability_registry_sqlite.contains("fn ensure_vector_table(")
+            && capability_registry_sqlite.contains("fn write_vectors(")
+            && capability_registry_sqlite.contains("fn vector_search("),
+        "capability registry sqlite helper boundary must own SQLite opening, schema migration, and vector persistence"
+    );
+    let capability_registry_runtime = std::fs::read_to_string(
+        crate_root.join("src/domains/capability/registry/store/sqlite_runtime.rs"),
+    )
+    .expect("read capability registry sqlite runtime");
+    assert!(
+        capability_registry_runtime
+            .contains("impl CapabilityRegistryStore for SqliteCapabilityRegistryStore")
+            && capability_registry_runtime.contains("fn sync_snapshot(")
+            && capability_registry_runtime.contains("fn record_program_run(")
+            && capability_registry_runtime.contains("fn resolve_pause(")
+            && capability_registry_runtime.contains("fn update_run_status("),
+        "capability registry sqlite runtime must own store trait mutation/query behavior"
+    );
+    let capability_registry_projection = std::fs::read_to_string(
+        crate_root.join("src/domains/capability/registry/store/projection.rs"),
+    )
+    .expect("read capability registry projection helpers");
+    assert!(
+        capability_registry_projection.contains("fn query_bindings(")
+            && capability_registry_projection.contains("fn query_implementations(")
+            && capability_registry_projection.contains("fn redact_audit_event(")
+            && capability_registry_projection.contains("fn redact_program_run("),
+        "capability registry projection boundary must own query projection and redaction helpers"
+    );
 
     let program_runtime =
         std::fs::read_to_string(crate_root.join("src/domains/program/runtime.rs"))

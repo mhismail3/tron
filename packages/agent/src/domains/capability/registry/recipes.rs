@@ -37,6 +37,89 @@ pub(super) fn agent_recipe_for_entry(entry: &CapabilityRegistryEntry) -> AgentCa
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct AgentCapabilityRecipeDisplay {
+    pub(crate) execute_template_json: Option<String>,
+    pub(crate) required_arguments: String,
+    pub(crate) optional_arguments: String,
+    optional_payload: Vec<String>,
+    pub(crate) search_execution_guidance: String,
+    pub(crate) approval_guidance: Option<String>,
+    pub(crate) primer_execution_guidance: Option<String>,
+    pub(crate) risky_direct_example_json: Option<String>,
+}
+
+impl AgentCapabilityRecipeDisplay {
+    pub(crate) fn new(recipe: &AgentCapabilityRecipe) -> Self {
+        Self {
+            execute_template_json: serde_json::to_string(&recipe.execute_template).ok(),
+            required_arguments: display_field_list(&recipe.required_payload),
+            optional_arguments: display_field_list(&recipe.optional_payload),
+            optional_payload: recipe.optional_payload.clone(),
+            search_execution_guidance: if recipe.inspect_required {
+                "Freshness is required for elevated-risk work; model-facing execute prepares it before approval.".to_owned()
+            } else {
+                format!("Direct execution: {}.", recipe.direct_execution)
+            },
+            approval_guidance: (recipe.approval_behavior != "none")
+                .then(|| format!("Approval: {}.", recipe.approval_behavior)),
+            primer_execution_guidance: primer_execution_guidance(recipe),
+            risky_direct_example_json: risky_direct_recipe_example_json(recipe),
+        }
+    }
+
+    pub(crate) fn optional_arguments_limited(&self, limit: usize) -> Option<String> {
+        if self.optional_payload.is_empty() {
+            return None;
+        }
+        Some(
+            self.optional_payload
+                .iter()
+                .take(limit)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    }
+}
+
+fn display_field_list(fields: &[String]) -> String {
+    if fields.is_empty() {
+        "none".to_owned()
+    } else {
+        fields.join("; ")
+    }
+}
+
+fn primer_execution_guidance(recipe: &AgentCapabilityRecipe) -> Option<String> {
+    if recipe.inspect_required {
+        return Some(" Execute prepares freshness before elevated-risk work.".to_owned());
+    }
+    if recipe.approval_behavior != "none" {
+        return Some(format!(" Approval: {}.", recipe.approval_behavior));
+    }
+    if recipe.direct_execution == "conditional_safe_direct" {
+        return Some(
+            " Safe payloads run directly; risky payloads may pause for approval.".to_owned(),
+        );
+    }
+    None
+}
+
+fn risky_direct_recipe_example_json(recipe: &AgentCapabilityRecipe) -> Option<String> {
+    if recipe.direct_execution != "conditional_safe_direct" {
+        return None;
+    }
+    recipe
+        .examples
+        .iter()
+        .find(|example| {
+            example["arguments"]["executionMode"] == "sandbox_materialized"
+                && example["arguments"]["expectedOutputs"].is_array()
+        })
+        .and_then(|example| serde_json::to_string(example).ok())
+}
+
 fn recipe_use_when(function: &FunctionDefinition) -> String {
     let description = compact_description(&function.description);
     if description.starts_with("Canonical domain capability ") {

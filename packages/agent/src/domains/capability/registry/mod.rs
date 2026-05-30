@@ -36,6 +36,7 @@ pub(crate) use index::HybridLocalCapabilityIndex;
 use index::{document_key, risk_rank, trust_rank};
 use primer::is_core_context_capability;
 pub(crate) use primer::{CapabilityContextPrimerPolicy, render_capability_primer};
+pub(crate) use recipes::AgentCapabilityRecipeDisplay;
 use recipes::agent_recipe_for_entry;
 pub(crate) use search_policy::{CapabilitySearchFilters, CapabilitySearchPolicy};
 

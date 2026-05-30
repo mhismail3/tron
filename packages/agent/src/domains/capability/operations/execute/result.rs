@@ -3,6 +3,7 @@ use serde_json::{Map, Value, json};
 use super::super::{ResolvedCapabilityTarget, capability_result_value};
 use super::trigger_metadata::{related_trigger_ids, related_triggers_metadata};
 use super::{OrchestratedExecuteInput, OrchestrationResolve};
+use crate::domains::capability::registry::AgentCapabilityRecipeDisplay;
 use crate::engine::Invocation;
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
@@ -125,16 +126,7 @@ pub(super) fn discovery_phase_details(
 
 pub(super) fn discovery_message(target: &ResolvedCapabilityTarget) -> String {
     let recipe = target.entry.agent_recipe();
-    let required = if recipe.required_payload.is_empty() {
-        "none".to_owned()
-    } else {
-        recipe.required_payload.join("; ")
-    };
-    let optional = if recipe.optional_payload.is_empty() {
-        "none".to_owned()
-    } else {
-        recipe.optional_payload.join("; ")
-    };
+    let display = AgentCapabilityRecipeDisplay::new(&recipe);
     let related_trigger_ids = related_trigger_ids(&target.entry);
     let trigger_clause = if related_trigger_ids.is_empty() {
         String::new()
@@ -148,8 +140,8 @@ pub(super) fn discovery_message(target: &ResolvedCapabilityTarget) -> String {
     format!(
         "Capability discovery for {}. Required arguments: {}. Optional arguments: {}. Effect/risk: {:?}/{:?}.{} No child invocation was created.",
         target.entry.contract_id,
-        required,
-        optional,
+        display.required_arguments,
+        display.optional_arguments,
         target.entry.function.effect_class,
         target.entry.function.risk_level,
         trigger_clause

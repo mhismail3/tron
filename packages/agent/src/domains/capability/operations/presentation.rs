@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use super::super::registry::CapabilityRegistryEntry;
+use super::super::registry::{AgentCapabilityRecipeDisplay, CapabilityRegistryEntry};
 use super::super::types::CapabilityIndexHit;
 use crate::engine::FunctionDefinition;
 use crate::shared::server::errors::CapabilityError;
@@ -48,32 +48,22 @@ fn render_search_hit_recipe(hit: &CapabilityIndexHit) -> String {
         recipe.contract_id, recipe.display_name
     ));
     lines.push(format!("Use when: {}", recipe.use_when));
-    if let Ok(template) = serde_json::to_string(&recipe.execute_template) {
+    let display = AgentCapabilityRecipeDisplay::new(recipe);
+    if let Some(template) = &display.execute_template_json {
         lines.push(format!("Execute:\n```json\n{template}\n```"));
     }
     if !recipe.required_payload.is_empty() {
         lines.push(format!(
             "Required arguments: {}.",
-            recipe.required_payload.join("; ")
+            display.required_arguments
         ));
     }
-    if !recipe.optional_payload.is_empty() {
-        let optional = recipe
-            .optional_payload
-            .iter()
-            .take(8)
-            .cloned()
-            .collect::<Vec<_>>();
-        lines.push(format!("Optional payload: {}.", optional.join("; ")));
+    if let Some(optional) = display.optional_arguments_limited(8) {
+        lines.push(format!("Optional payload: {optional}."));
     }
-    if recipe.inspect_required {
-        lines
-            .push("Freshness is required for elevated-risk work; model-facing execute prepares it before approval.".to_owned());
-    } else {
-        lines.push(format!("Direct execution: {}.", recipe.direct_execution));
-    }
-    if recipe.approval_behavior != "none" {
-        lines.push(format!("Approval: {}.", recipe.approval_behavior));
+    lines.push(display.search_execution_guidance);
+    if let Some(approval) = display.approval_guidance {
+        lines.push(approval);
     }
     lines.push(format!("Result: {}", recipe.result_summary));
     lines.join("\n")

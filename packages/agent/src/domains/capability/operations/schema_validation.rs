@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use super::super::registry::CapabilityRegistryEntry;
+use super::super::registry::{AgentCapabilityRecipeDisplay, CapabilityRegistryEntry};
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::{self as capability_error_codes, CapabilityError};
 
@@ -38,25 +38,18 @@ fn recipe_validation_error_with_schema_details(
 ) -> CapabilityError {
     let mapped = engine_error_to_capability_error(error);
     let recipe = entry.agent_recipe();
-    let example = serde_json::to_string(&recipe.execute_template).unwrap_or_else(|_| {
+    let display = AgentCapabilityRecipeDisplay::new(&recipe);
+    let example = display.execute_template_json.clone().unwrap_or_else(|| {
         format!(
-            "{{\"mode\":\"invoke\",\"contractId\":\"{}\",\"payload\":{{}}}}",
+            "{{\"target\":\"{}\",\"arguments\":{{}}}}",
             recipe.contract_id
         )
     });
     let guidance = format!(
         "Invalid arguments for {}. Put target arguments inside execute.arguments. Required arguments: {}. Optional arguments: {}.{} Example: {}",
         entry.contract_id,
-        if recipe.required_payload.is_empty() {
-            "none".to_owned()
-        } else {
-            recipe.required_payload.join("; ")
-        },
-        if recipe.optional_payload.is_empty() {
-            "none".to_owned()
-        } else {
-            recipe.optional_payload.join("; ")
-        },
+        display.required_arguments,
+        display.optional_arguments,
         conditional_argument_guidance(entry),
         example
     );
