@@ -75,6 +75,30 @@ final class EngineApprovalStateTests: XCTestCase {
         }
     }
 
+    func testPendingApprovalEventCreatesChipAndOpensSheet() {
+        let viewModel = ChatViewModel(
+            engineClient: EngineClient(serverURL: URL(string: "ws://localhost:0")!),
+            sessionId: "session-1"
+        )
+
+        viewModel.handleApprovalPending(
+            ApprovalPendingPlugin.Result(
+                approval: approvalRecord(approvalId: "approval-1", status: .pending)
+            )
+        )
+
+        XCTAssertTrue(viewModel.engineApprovalState.showSheet)
+        XCTAssertEqual(viewModel.engineApprovalState.currentData?.engineApprovalId, "approval-1")
+        XCTAssertEqual(viewModel.messages.count, 1)
+        if case .engineApproval(let data) = viewModel.messages.first?.content {
+            XCTAssertEqual(data.status, .pending)
+            XCTAssertEqual(data.engineApprovalId, "approval-1")
+            XCTAssertEqual(data.engineFunctionId, "process::run")
+        } else {
+            XCTFail("expected pending engine approval chip")
+        }
+    }
+
     private func approvalData(approvalId: String) -> EngineApprovalData {
         EngineApprovalData(
             invocationId: "engine-approval:\(approvalId)",
