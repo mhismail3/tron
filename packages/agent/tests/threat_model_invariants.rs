@@ -3109,12 +3109,20 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
 
     let control = std::fs::read_to_string(crate_root.join("src/engine/primitives/control.rs"))
         .expect("failed to read control primitive");
+    let control_actions =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/control/actions.rs"))
+            .expect("failed to read control action catalog boundary");
+    let control_tree = [control.as_str(), control_actions.as_str()].join("\n");
     assert!(
-        control.contains("uiSurfaceRefs")
-            && control.contains("\"presentation\"")
+        control.contains("mod actions;")
+            && control.contains("use actions::{actions_for_target, substrate_actions};")
+            && line_count(&crate_root.join("src/engine/primitives/control.rs")) <= 1_000
+            && control.contains("uiSurfaceRefs")
+            && control_tree.contains("\"presentation\"")
+            && control_actions.contains("fn substrate_actions(")
             && !control.contains("payloadTemplate")
             && !control.contains("inputSchema"),
-        "control projections must expose UI surface presentation refs without inlining action templates or schemas"
+        "control projections must expose UI surface presentation refs through the action catalog boundary without inlining action templates or schemas"
     );
 
     let renderer_path = repo_root
@@ -3835,35 +3843,40 @@ fn module_package_activation_gates_stay_on() {
 
     let control = std::fs::read_to_string(crate_root.join("src/engine/primitives/control.rs"))
         .expect("failed to read control primitive");
+    let control_actions =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/control/actions.rs"))
+            .expect("failed to read control action catalog boundary");
+    let control_tree = [control.as_str(), control_actions.as_str()].join("\n");
     assert!(
-        control.contains("modulePackages")
+        control.contains("mod actions;")
+            && control.contains("modulePackages")
             && control.contains("moduleConfigs")
             && control.contains("activationRecords")
             && control.contains("moduleSourceTrust")
-            && control.contains("module::inspect_package")
-            && control.contains("module::check_health")
-            && control.contains("module::verify_integrity")
-            && control.contains("module::recover_activation")
-            && control.contains("module::verify_source")
-            && control.contains("module::approve_source")
-            && control.contains("module::run_conformance")
-            && control.contains("module::register_source")
-            && control.contains("module::verify_signature")
-            && control.contains("module::audit_policy")
-            && control.contains("module::record_policy_audit")
-            && control.contains("module::reconcile_trust")
-            && control.contains("module::inspect_trust")
-            && control.contains("module::renew_trust_root")
-            && control.contains("module::rotate_signature_key")
-            && control.contains("module::expire_trust_decision")
-            && control.contains("module::enforce_revocation")
-            && control.contains("module::simulate_trust_change")
-            && control.contains("module::record_trust_review")
-            && control.contains("module::trust_audit_status")
-            && control.contains("module::schedule_trust_audit")
-            && control.contains("module::run_scheduled_trust_audit")
-            && control.contains("module::record_trust_audit_retention")
-            && !control.contains("module::act\""),
+            && control_tree.contains("module::inspect_package")
+            && control_tree.contains("module::check_health")
+            && control_tree.contains("module::verify_integrity")
+            && control_tree.contains("module::recover_activation")
+            && control_tree.contains("module::verify_source")
+            && control_tree.contains("module::approve_source")
+            && control_tree.contains("module::run_conformance")
+            && control_tree.contains("module::register_source")
+            && control_tree.contains("module::verify_signature")
+            && control_tree.contains("module::audit_policy")
+            && control_tree.contains("module::record_policy_audit")
+            && control_tree.contains("module::reconcile_trust")
+            && control_tree.contains("module::inspect_trust")
+            && control_tree.contains("module::renew_trust_root")
+            && control_tree.contains("module::rotate_signature_key")
+            && control_tree.contains("module::expire_trust_decision")
+            && control_tree.contains("module::enforce_revocation")
+            && control_tree.contains("module::simulate_trust_change")
+            && control_tree.contains("module::record_trust_review")
+            && control_tree.contains("module::trust_audit_status")
+            && control_tree.contains("module::schedule_trust_audit")
+            && control_tree.contains("module::run_scheduled_trust_audit")
+            && control_tree.contains("module::record_trust_audit_retention")
+            && !control_tree.contains("module::act\""),
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
 
@@ -5353,7 +5366,7 @@ fn operator_consequence_and_voice_note_resource_boundaries_stay_enforced() {
     );
 
     for rel in [
-        "src/engine/primitives/control.rs",
+        "src/engine/primitives/control/actions.rs",
         "src/engine/primitives/module.rs",
         "src/engine/primitives/module/trust_audit.rs",
         "src/engine/primitives/ui.rs",
