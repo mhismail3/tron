@@ -59,16 +59,11 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        6_300,
+        6_500,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
         "transport e2e suite with shared WebSocket harness",
-        3_300,
-    ),
-    (
-        "packages/agent/src/domains/session/event_store/store/tests.rs",
-        "single event-store API matrix",
         3_300,
     ),
     (
@@ -585,7 +580,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **40/100**",
+        "Current score: **52/100**",
         "## Operating Rules",
         "## Review Rubric",
         "## Static Gates",
@@ -613,6 +608,8 @@ fn codebase_cleanup_scorecard_stays_formalized() {
         "scripts/tron dev -bd --json --wait 30",
         "gemma4:e4b",
         "larger local models",
+        "session_storage_protocol_boundaries_stay_split",
+        "events/tron/catalog.rs",
     ] {
         assert!(
             scorecard.contains(required),
@@ -663,6 +660,176 @@ fn codebase_cleanup_scorecard_stays_formalized() {
             "{path} has grown to {line_count} lines over the cleanup scorecard budget {budget}; decompose it or update the scorecard exception"
         );
     }
+}
+
+#[test]
+fn session_storage_protocol_boundaries_stay_split() {
+    let crate_root = crate_root();
+    let read = |relative: &str| {
+        let path = crate_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+
+    for relative in [
+        "src/domains/session/event_store/sqlite/repositories/session.rs",
+        "src/domains/session/event_store/sqlite/repositories/session/projections.rs",
+        "src/domains/session/event_store/sqlite/repositories/session/tests.rs",
+        "src/domains/session/event_store/event/reconstruct.rs",
+        "src/domains/session/event_store/event/reconstruct/tests.rs",
+        "src/domains/session/event_store/sqlite/migrations/mod.rs",
+        "src/domains/session/event_store/sqlite/migrations/tests.rs",
+        "src/domains/session/event_store/store/tests.rs",
+        "src/shared/protocol/events.rs",
+        "src/shared/protocol/events/capability.rs",
+        "src/shared/protocol/events/factory.rs",
+        "src/shared/protocol/events/stream.rs",
+        "src/shared/protocol/events/tron.rs",
+        "src/shared/protocol/events/tron/catalog.rs",
+        "src/shared/protocol/events/tests.rs",
+        "src/shared/storage.rs",
+        "src/shared/storage/archive.rs",
+        "src/shared/storage/maintenance.rs",
+        "src/shared/storage/payloads.rs",
+        "src/shared/storage/schema.rs",
+        "src/shared/storage/stats.rs",
+        "src/shared/storage/tests.rs",
+        "src/transport/engine_ws.rs",
+        "src/transport/engine_ws/outbound.rs",
+        "src/transport/engine_ws/stream_projection.rs",
+        "src/transport/engine_ws/wire.rs",
+        "src/transport/engine_ws/tests.rs",
+    ] {
+        assert!(
+            crate_root.join(relative).is_file(),
+            "CLC-3 split boundary file must exist: {relative}"
+        );
+    }
+
+    for relative in [
+        "src/domains/session/event_store/sqlite/repositories/session.rs",
+        "src/domains/session/event_store/event/reconstruct.rs",
+        "src/domains/session/event_store/sqlite/migrations/mod.rs",
+        "src/domains/session/event_store/store/tests.rs",
+        "src/shared/protocol/events.rs",
+        "src/shared/storage.rs",
+        "src/transport/engine_ws.rs",
+    ] {
+        assert!(
+            line_count(&crate_root.join(relative)) <= 1_000,
+            "CLC-3 parent boundary must stay below 1,000 LOC: {relative}"
+        );
+    }
+
+    let session = read("src/domains/session/event_store/sqlite/repositories/session.rs");
+    let projections =
+        read("src/domains/session/event_store/sqlite/repositories/session/projections.rs");
+    assert!(
+        session.contains("#[path = \"session/projections.rs\"]")
+            && session.contains("#[path = \"session/tests.rs\"]")
+            && projections.contains("pub struct MessagePreview")
+            && projections.contains("pub struct ActivitySummaryLine")
+            && projections.contains("pub fn get_message_previews(")
+            && projections.contains("pub fn get_activity_summaries(")
+            && projections.contains("pub(super) fn extract_text_from_payload("),
+        "session dashboard projections must stay in the session/projections boundary"
+    );
+    for forbidden in [
+        "pub fn get_message_previews(",
+        "pub fn get_activity_summaries(",
+        "pub(super) fn extract_text_from_payload(",
+        "mod tests {",
+    ] {
+        assert!(
+            !session.contains(forbidden),
+            "session repository root must not regain extracted CLC-3 body `{forbidden}`"
+        );
+    }
+
+    let reconstruct = read("src/domains/session/event_store/event/reconstruct.rs");
+    let reconstruct_tests = read("src/domains/session/event_store/event/reconstruct/tests.rs");
+    assert!(
+        reconstruct.contains("#[path = \"reconstruct/tests.rs\"]")
+            && !reconstruct.contains("mod tests {")
+            && reconstruct_tests.contains("mod basic_capability;")
+            && reconstruct_tests.contains("mod lifecycle_metadata;")
+            && reconstruct_tests.contains("mod multimodal_performance;")
+            && reconstruct_tests.contains("mod synthetic_interrupts;"),
+        "event reconstruction tests must stay in scenario-owned child modules"
+    );
+
+    let migrations = read("src/domains/session/event_store/sqlite/migrations/mod.rs");
+    let migration_tests = read("src/domains/session/event_store/sqlite/migrations/tests.rs");
+    assert!(
+        migrations.contains("mod tests;")
+            && !migrations.contains("mod tests {")
+            && migration_tests.contains("mod devices_retired;")
+            && migration_tests.contains("mod mechanics;")
+            && migration_tests.contains("mod schema_events;")
+            && migration_tests.contains("mod sessions_logs;"),
+        "migration tests must stay split from the migration runner"
+    );
+
+    let store_tests = read("src/domains/session/event_store/store/tests.rs");
+    assert!(
+        !store_tests.contains("#[test]")
+            && store_tests.contains("mod activity_summary;")
+            && store_tests.contains("mod append_counters;")
+            && store_tests.contains("mod queries_state;")
+            && store_tests.contains("mod tree_sessions;"),
+        "event-store API test root must stay a fixture/module map only"
+    );
+
+    let events = read("src/shared/protocol/events.rs");
+    let stream = read("src/shared/protocol/events/stream.rs");
+    let catalog = read("src/shared/protocol/events/tron/catalog.rs");
+    assert!(
+        events.contains("#[path = \"events/capability.rs\"]")
+            && events.contains("#[path = \"events/factory.rs\"]")
+            && events.contains("#[path = \"events/stream.rs\"]")
+            && events.contains("#[path = \"events/tron.rs\"]")
+            && events.contains("#[path = \"events/tests.rs\"]")
+            && !events.contains("pub enum TronEvent")
+            && !events.contains("pub enum StreamEvent")
+            && stream.contains("pub enum StreamEvent")
+            && catalog.contains("macro_rules! tron_events")
+            && catalog.contains("pub enum TronEvent")
+            && catalog.contains("impl TronEvent")
+            && catalog.contains("VARIANT_COUNT"),
+        "protocol event DTOs must stay split while the exhaustive TronEvent catalog remains explicit"
+    );
+
+    let storage = read("src/shared/storage.rs");
+    assert!(
+        storage.contains("#[path = \"storage/archive.rs\"]")
+            && storage.contains("#[path = \"storage/maintenance.rs\"]")
+            && storage.contains("#[path = \"storage/payloads.rs\"]")
+            && storage.contains("#[path = \"storage/schema.rs\"]")
+            && storage.contains("#[path = \"storage/stats.rs\"]")
+            && !storage.contains("pub fn store_content_blob(")
+            && !storage.contains("pub fn archive_retired_database_files(")
+            && !storage.contains("pub fn ensure_storage_schema(")
+            && !storage.contains("pub fn storage_stats("),
+        "shared storage root must stay a typed runtime facade, not regain helper implementations"
+    );
+
+    let engine_ws = read("src/transport/engine_ws.rs");
+    let wire = read("src/transport/engine_ws/wire.rs");
+    let stream_projection = read("src/transport/engine_ws/stream_projection.rs");
+    let outbound = read("src/transport/engine_ws/outbound.rs");
+    assert!(
+        engine_ws.contains("#[path = \"engine_ws/outbound.rs\"]")
+            && engine_ws.contains("#[path = \"engine_ws/stream_projection.rs\"]")
+            && engine_ws.contains("#[path = \"engine_ws/wire.rs\"]")
+            && !engine_ws.contains("pub(super) struct HelloMessage")
+            && !engine_ws.contains("fn protocol_event_value(")
+            && !engine_ws.contains("fn send_engine_ws_value(")
+            && wire.contains("pub(super) struct HelloMessage")
+            && wire.contains("pub(super) struct ProtocolEvent")
+            && stream_projection.contains("pub(super) fn protocol_event_value(")
+            && outbound.contains("pub(super) fn send_engine_ws_value("),
+        "engine WebSocket root must stay on session flow while wire/projection/outbound concerns stay split"
+    );
 }
 
 #[test]
@@ -2198,12 +2365,15 @@ fn modular_substrate_has_no_raw_scope_or_worker_token_authority_fallbacks() {
 fn modular_engine_storage_generation_is_clean_break() {
     let storage = std::fs::read_to_string(crate_root().join("src/shared/storage.rs"))
         .expect("failed to read shared storage");
+    let archive = std::fs::read_to_string(crate_root().join("src/shared/storage/archive.rs"))
+        .expect("failed to read shared storage archive policy");
     assert!(
         storage.contains("CURRENT_STORAGE_GENERATION: &str = \"modular-engine-v4\""),
         "storage generation must stay on the retired notification-read-state clean-break generation"
     );
     assert!(
-        storage.contains("archive_incompatible_active_database(active_db_path)?"),
+        storage.contains("prepare_active_database(&self.path)")
+            && archive.contains("archive_incompatible_active_database(active_db_path)?"),
         "startup must archive incompatible active DB files before opening current schema"
     );
 }
@@ -4639,6 +4809,8 @@ fn unified_storage_has_no_active_old_database_paths() {
                 .to_string_lossy()
                 .replace('\\', "/");
             if rel == "packages/agent/src/shared/storage.rs"
+                || rel == "packages/agent/src/shared/storage/archive.rs"
+                || rel == "packages/agent/src/shared/storage/tests.rs"
                 || rel == "packages/agent/tests/threat_model_invariants.rs"
             {
                 continue;
@@ -4672,6 +4844,8 @@ fn blobs_are_owned_through_storage_payload_refs() {
         }
         assert!(
             rel == "packages/agent/src/shared/storage.rs"
+                || rel == "packages/agent/src/shared/storage/payloads.rs"
+                || rel == "packages/agent/src/shared/storage/tests.rs"
                 || rel
                     == "packages/agent/src/domains/session/event_store/sqlite/repositories/blob.rs",
             "{rel} calls store_content_blob directly; use store_json_value/store_json_bytes so every blob has a storage_payload_refs owner"
@@ -5464,10 +5638,7 @@ fn server_package_uses_domain_owned_engine_layout() {
             .split("#[cfg(test)]")
             .next()
             .unwrap_or(content.as_str());
-        let is_test_only_file = rel.file_name().is_some_and(|name| {
-            let name = name.to_string_lossy();
-            name == "tests.rs" || name.ends_with("_tests.rs")
-        });
+        let is_test_only_file = is_src_rust_test_file(&path);
         if rel.starts_with("src/domains") && !is_test_only_file {
             assert!(
                 !production_content.contains("use super::*;"),
