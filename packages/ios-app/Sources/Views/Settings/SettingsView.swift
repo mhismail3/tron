@@ -10,8 +10,6 @@ struct SettingsView: View {
 
     private var engineClient: EngineClient { dependencies.engineClient }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
-    private var defaultModelValue: String { dependencies.defaultModel }
-
     @State private var showingResetAlert = false
     @State private var showLogViewer = false
     @State private var showArchiveAllConfirmation = false
@@ -52,7 +50,7 @@ struct SettingsView: View {
             && !engineClient.connectionState.isConnected
     }
 
-    private var showsServerUnavailableFallback: Bool {
+    private var showsServerUnavailableState: Bool {
         hasPairedServers && !serverSettingsReady
     }
 
@@ -78,10 +76,10 @@ struct SettingsView: View {
     }
 
     private var selectedModelDisplayName: String {
-        if let model = settingsState.availableModels.first(where: { $0.id == defaultModelValue }) {
+        if let model = settingsState.availableModels.first(where: { $0.id == settingsState.defaultModel }) {
             return model.formattedModelName
         }
-        return defaultModelValue.shortModelName
+        return settingsState.defaultModel.shortModelName
     }
 
     var body: some View {
@@ -245,7 +243,7 @@ struct SettingsView: View {
             LazyVGrid(columns: mainSettingsDestinationGridColumns, spacing: MainSettingsGridLayout.rowSpacing) {
                 ForEach(
                     MainSettingsGridDestination.visibleDestinations(
-                        serverSettingsUnavailable: showsServerUnavailableFallback
+                        serverSettingsUnavailable: showsServerUnavailableState
                     ),
                     id: \.self
                 ) { destination in
@@ -253,7 +251,7 @@ struct SettingsView: View {
                 }
             }
 
-            if showsServerUnavailableFallback {
+            if showsServerUnavailableState {
                 serverUnavailableCard
             }
 
@@ -278,7 +276,7 @@ struct SettingsView: View {
     private var mainSettingsDestinationGridColumns: [GridItem] {
         mainSettingsGridColumns(
             count: MainSettingsGridLayout.destinationColumnCount(
-                serverSettingsUnavailable: showsServerUnavailableFallback
+                serverSettingsUnavailable: showsServerUnavailableState
             )
         )
     }
@@ -472,7 +470,7 @@ struct SettingsView: View {
         action.isEnabled(
             hasSessions: !eventStoreManager.sessions.isEmpty,
             serverSettingsReady: serverSettingsReady,
-            serverSettingsUnavailable: showsServerUnavailableFallback,
+            serverSettingsUnavailable: showsServerUnavailableState,
             isInProgress: isDangerActionInProgress(action)
         )
     }
@@ -630,9 +628,14 @@ struct SettingsView: View {
         let client = engineClient
         Task {
             do {
-                try await settingsState.resetToDefaults(using: client) {
+                let fresh = try await settingsState.resetToDefaults(using: client) {
                     dependencies.pairedServerStore.activeServer?.id == activeServerId
                         && dependencies.engineClient === client
+                }
+                if let activeServerId,
+                   dependencies.pairedServerStore.activeServer?.id == activeServerId,
+                   dependencies.engineClient === client {
+                    dependencies.applyServerSettingsSnapshot(fresh, for: activeServerId)
                 }
             } catch {
                 if dependencies.pairedServerStore.activeServer?.id == activeServerId,
@@ -751,6 +754,9 @@ struct SettingsView: View {
                     settingsState.applyServerSettings(fresh)
                     settingsState.isLoaded = true
                     settingsState.loadError = nil
+                    if let activeServerId {
+                        dependencies.applyServerSettingsSnapshot(fresh, for: activeServerId)
+                    }
                 }
             } catch {
                 await MainActor.run {

@@ -13,13 +13,6 @@ struct AgentSettingsPage: View {
     @State private var newProtectedBranch = ""
 
     private var engineClient: EngineClient { dependencies.engineClient }
-    private var defaultModelValue: String { dependencies.defaultModel }
-    private var defaultModelBinding: Binding<String> {
-        Binding(
-            get: { dependencies.defaultModel },
-            set: { dependencies.defaultModel = $0 }
-        )
-    }
 
     var body: some View {
         SettingsPageContainer(title: "Agent") {
@@ -48,9 +41,9 @@ struct AgentSettingsPage: View {
         .sheet(isPresented: $showDefaultModelPicker) {
             ModelPickerSheet(
                 models: settingsState.availableModels,
-                currentModelId: defaultModelValue,
+                currentModelId: settingsState.defaultModel,
                 onSelect: { model in
-                    defaultModelBinding.wrappedValue = model.id
+                    settingsState.defaultModel = model.id
                     updateServerSetting {
                         ServerSettingsUpdate(server: .init(defaultModel: model.id))
                     }

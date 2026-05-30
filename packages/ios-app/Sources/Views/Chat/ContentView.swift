@@ -5,6 +5,23 @@ struct PendingSessionDeepLink: Equatable {
     let scrollTarget: ScrollTarget?
 }
 
+struct ServerOnboardingLaunchRequest: Equatable {
+    let prefill: PairedServer?
+}
+
+struct DeferredServerOnboardingLaunch: Equatable {
+    private(set) var request: ServerOnboardingLaunchRequest?
+
+    mutating func request(prefill server: PairedServer?) {
+        request = ServerOnboardingLaunchRequest(prefill: server)
+    }
+
+    mutating func consume() -> ServerOnboardingLaunchRequest? {
+        defer { request = nil }
+        return request
+    }
+}
+
 func pendingSessionDeepLink(
     sessionId: String?,
     scrollTarget: ScrollTarget?
@@ -38,6 +55,7 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var showNewSessionSheet = false
     @State private var showSettings = false
+    @State private var deferredServerOnboardingLaunch = DeferredServerOnboardingLaunch()
 
     // Voice notes recording
     @State private var showVoiceNotesRecording = false
@@ -71,10 +89,10 @@ struct ContentView: View {
             .sheet(isPresented: $showNewSessionSheet) {
                 newSessionFlowSheet
             }
-            .sheet(isPresented: $showSettings) {
+            .sheet(isPresented: $showSettings, onDismiss: launchDeferredServerOnboardingIfNeeded) {
                 SettingsView { server in
+                    deferredServerOnboardingLaunch.request(prefill: server)
                     showSettings = false
-                    ServerOnboardingLauncher.post(prefill: server)
                 }
                     .environment(\.dependencies, dependencies)
             }
@@ -446,6 +464,11 @@ struct ContentView: View {
         }
         deepLinkSessionId = nil
         deepLinkScrollTarget = nil
+    }
+
+    private func launchDeferredServerOnboardingIfNeeded() {
+        guard let request = deferredServerOnboardingLaunch.consume() else { return }
+        ServerOnboardingLauncher.post(prefill: request.prefill)
     }
 }
 

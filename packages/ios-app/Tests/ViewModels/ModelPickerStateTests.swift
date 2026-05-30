@@ -396,6 +396,50 @@ struct ModelPickerStateTests {
         #expect(model.defaultReasoningLevel == "high")
     }
 
+    @Test("reasoning control is hidden when picker has no bound reasoning state")
+    func testReasoningControlHiddenWithoutBoundReasoningState() {
+        let model = ModelInfo(
+            id: "claude-opus-4-6",
+            name: "Opus 4.6",
+            provider: "anthropic",
+            contextWindow: 200_000,
+            supportsThinking: true,
+            supportsImages: true,
+            supportsDocuments: true,
+            tier: "opus",
+            isRetiredGeneration: false,
+            supportsReasoning: true,
+            reasoningLevels: ["low", "medium", "high", "max"]
+        )
+
+        #expect(ModelPickerReasoningVisibility.showsReasoningControl(
+            selectedModel: model,
+            reasoningLevel: nil
+        ) == false)
+    }
+
+    @Test("reasoning control is visible when model and caller both support reasoning")
+    func testReasoningControlVisibleWithBoundReasoningState() {
+        let model = ModelInfo(
+            id: "claude-opus-4-6",
+            name: "Opus 4.6",
+            provider: "anthropic",
+            contextWindow: 200_000,
+            supportsThinking: true,
+            supportsImages: true,
+            supportsDocuments: true,
+            tier: "opus",
+            isRetiredGeneration: false,
+            supportsReasoning: true,
+            reasoningLevels: ["low", "medium", "high", "max"]
+        )
+
+        #expect(ModelPickerReasoningVisibility.showsReasoningControl(
+            selectedModel: model,
+            reasoningLevel: "medium"
+        ))
+    }
+
     @Test("Switch model calls onError callback with error message")
     func testSwitchModel_callsOnErrorCallback() async {
         let mockClient = MockModelClient()

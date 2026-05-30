@@ -11,6 +11,7 @@ final class SettingsState {
 
     // MARK: - Server-Authoritative Settings
 
+    var defaultModel: String = ""
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
     var preserveRecentCount: Int = 5
     var triggerTokenThreshold: Double = 0.70
@@ -170,15 +171,17 @@ final class SettingsState {
 
     /// Reset settings to server defaults through the engine. The server applies its own defaults
     /// and returns the new values — no hardcoded defaults on the client.
+    @discardableResult
     func resetToDefaults(
         using engineClient: EngineClient,
         acceptResult: @escaping @MainActor () -> Bool = { true }
-    ) async throws {
+    ) async throws -> ServerSettings {
         let settings = try await engineClient.settings.resetToDefaults(
             idempotencyKey: .userAction("settings.resetToDefaults")
         )
-        guard acceptResult() else { return }
+        guard acceptResult() else { return settings }
         applyServerSettings(settings)
+        return settings
     }
 
     func clearServerSnapshot() {
@@ -205,6 +208,7 @@ final class SettingsState {
     /// default or a missing optional field.
     func applyServerSettings(_ settings: ServerSettings) {
         lastLoadedSettings = settings
+        defaultModel = settings.defaultModel
         preserveRecentCount = settings.compaction.preserveRecentCount
         triggerTokenThreshold = settings.compaction.triggerTokenThreshold
         rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles

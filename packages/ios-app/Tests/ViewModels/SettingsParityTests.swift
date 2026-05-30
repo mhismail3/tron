@@ -25,6 +25,7 @@ final class SettingsParityTests: XCTestCase {
     /// not that it's actually displayed, but the intent is explicit.
     private let KNOWN_UI_FIELDS: Set<String> = [
         // General
+        "defaultModel",
         "quickSessionWorkspace",
         // Context compaction
         "preserveRecentCount",

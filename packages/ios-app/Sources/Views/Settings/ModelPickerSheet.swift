@@ -9,7 +9,7 @@ struct ModelPickerSheet: View {
     let models: [ModelInfo]
     let currentModelId: String
     var readOnly: Bool = false
-    var reasoningLevel: String = "medium"
+    var reasoningLevel: String?
     let onSelect: (ModelInfo) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -31,7 +31,10 @@ struct ModelPickerSheet: View {
     }
 
     private var supportsReasoning: Bool {
-        selectedModelInfo?.supportsReasoning == true
+        ModelPickerReasoningVisibility.showsReasoningControl(
+            selectedModel: selectedModelInfo,
+            reasoningLevel: reasoningLevel
+        )
     }
 
     private var availableReasoningLevels: [String] {
@@ -138,13 +141,14 @@ struct ModelPickerSheet: View {
     // MARK: - Reasoning Button
 
     private var reasoningButton: some View {
-        Button {
+        let currentReasoningLevel = reasoningLevel ?? "medium"
+        return Button {
             showReasoningPopover = true
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: Color.reasoningLevelIcon(reasoningLevel))
+                Image(systemName: Color.reasoningLevelIcon(currentReasoningLevel))
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                Text(reasoningLevelLabel(reasoningLevel))
+                Text(reasoningLevelLabel(currentReasoningLevel))
                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
             }
             .foregroundStyle(selectedProviderColor)
@@ -152,7 +156,7 @@ struct ModelPickerSheet: View {
         .popover(isPresented: $showReasoningPopover, arrowEdge: .top) {
             ReasoningLevelPopover(
                 levels: availableReasoningLevels,
-                currentLevel: reasoningLevel,
+                currentLevel: currentReasoningLevel,
                 accentColor: selectedProviderColor,
                 onSelect: { level in
                     showReasoningPopover = false
@@ -181,6 +185,12 @@ struct ModelPickerSheet: View {
               let model = models.first(where: { $0.id == pendingModelId }) else { return }
         hasCommitted = true
         onSelect(model)
+    }
+}
+
+enum ModelPickerReasoningVisibility {
+    static func showsReasoningControl(selectedModel: ModelInfo?, reasoningLevel: String?) -> Bool {
+        reasoningLevel != nil && selectedModel?.supportsReasoning == true
     }
 }
 

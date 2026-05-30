@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, strict source-control git policy/event-origin projection, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -521,6 +521,16 @@ nested manual stroke. Send Feedback is mail-only: it builds the redacted
 diagnostics JSON, opens the native Mail composer with the tracked support
 recipient and attachment, and shows an alert when Mail is unavailable because
 iOS does not reliably attach files through a default-mail-app handoff.
+Settings is a projection of the active server snapshot. `SettingsState` stores
+the loaded `defaultModel` alongside the rest of `settings::get`; Agent model
+selection sends a sparse `settings::update`, reloads `settings::get`, and only
+then updates the app-wide active-server snapshot. A failed write rolls visible
+settings back to the last loaded server response. Model picker reasoning
+controls are opt-in: chat/session flows pass a reasoning binding, while Settings
+model pickers hide the control because they do not own reasoning-level writes.
+When Settings launches server onboarding, `ContentView` records the requested
+prefill, dismisses Settings, and posts the onboarding launch from the sheet's
+dismiss callback so SwiftUI never drops the second modal presentation.
 The settings toolbar exposes Logs in every build configuration. Production and
 TestFlight builds can still inspect and copy redacted in-memory client logs
 while the production logger keeps its lower-volume `.info` default. During

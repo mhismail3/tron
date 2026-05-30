@@ -113,7 +113,7 @@ struct AgentControlView: View {
                     models: availableModels,
                     currentModelId: currentModelId,
                     readOnly: readOnly,
-                    reasoningLevel: reasoningLevel ?? "medium",
+                    reasoningLevel: reasoningLevel,
                     onSelect: { model in
                         NotificationCenter.default.post(name: .modelPickerAction, object: model)
                     }

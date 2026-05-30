@@ -8,6 +8,7 @@ final class SettingsStateTests: XCTestCase {
 
     func testInitialValuesMatchDefaults() {
         let state = SettingsState()
+        XCTAssertEqual(state.defaultModel, "")
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
         XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
@@ -92,6 +93,18 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
     }
 
+    func testApplyServerSettingsLoadsDefaultModelFromServer() throws {
+        let state = SettingsState()
+        let settings = try JSONDecoder().decode(
+            ServerSettings.self,
+            from: try ServerSettingsFixture.data(#"{"server":{"defaultModel":"claude-opus-4-6"}}"#)
+        )
+
+        state.applyServerSettings(settings)
+
+        XCTAssertEqual(state.defaultModel, "claude-opus-4-6")
+    }
+
     func testClearServerSnapshotHidesServerSettingsDuringSwitch() {
         let state = SettingsState()
         state.isLoaded = true
@@ -125,10 +138,12 @@ final class SettingsStateTests: XCTestCase {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/loaded"}}"#))
         state.applyServerSettings(settings)
         state.quickSessionWorkspace = "/optimistic"
+        state.defaultModel = "locally-selected-before-server-accepted"
 
         state.rollbackToLastLoadedSettings(message: "save failed")
 
         XCTAssertEqual(state.quickSessionWorkspace, "/loaded")
+        XCTAssertEqual(state.defaultModel, "claude-sonnet-4-6")
         XCTAssertEqual(state.loadError, "save failed")
         XCTAssertTrue(state.isLoaded)
     }

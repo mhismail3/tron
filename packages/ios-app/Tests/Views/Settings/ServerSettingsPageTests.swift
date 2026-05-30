@@ -77,6 +77,29 @@ struct ServerSettingsPageTests {
         ])
     }
 
+    @Test("deferred onboarding launch preserves nil prefill until settings dismiss")
+    func deferredOnboardingLaunchPreservesNilPrefill() {
+        var launch = DeferredServerOnboardingLaunch()
+
+        launch.request(prefill: nil)
+
+        let request = launch.consume()
+        #expect(request != nil)
+        #expect(request?.prefill == nil)
+        #expect(launch.consume() == nil)
+    }
+
+    @Test("deferred onboarding launch preserves paired server until settings dismiss")
+    func deferredOnboardingLaunchPreservesPairedServer() {
+        var launch = DeferredServerOnboardingLaunch()
+        let server = PairedServer(id: "studio", label: "Studio", host: "studio.local", port: 1984)
+
+        launch.request(prefill: server)
+
+        #expect(launch.consume()?.prefill == server)
+        #expect(launch.consume() == nil)
+    }
+
     @Test("server summary prompts pairing when no local servers exist")
     func serverSummaryPromptsPairingWhenNoLocalServersExist() {
         let context = ServerSettingsSummary.Context(
