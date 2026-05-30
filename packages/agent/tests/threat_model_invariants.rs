@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        5_900,
+        5_950,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -3281,6 +3281,58 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
             && engine_console_view
                 .contains("state.controlAdvertisesAction(functionId: \"ui::surface_for_target\""),
         "iOS generated surface authoring affordances must be gated by server-advertised control actions"
+    );
+}
+
+#[test]
+fn engine_ledger_ownership_boundaries_stay_split() {
+    let crate_root = crate_root();
+    let ledger_path = crate_root.join("src/engine/ledger.rs");
+    let ledger = std::fs::read_to_string(&ledger_path).expect("failed to read engine ledger");
+    let outcome = std::fs::read_to_string(crate_root.join("src/engine/ledger/outcome.rs"))
+        .expect("failed to read engine ledger outcome boundary");
+    let sqlite_codec =
+        std::fs::read_to_string(crate_root.join("src/engine/ledger/sqlite_codec.rs"))
+            .expect("failed to read engine ledger SQLite codec boundary");
+
+    assert!(
+        ledger.contains("mod outcome;")
+            && ledger.contains("mod sqlite_codec;")
+            && ledger.contains("pub use outcome::{StoredEngineError, StoredInvocationOutcome};")
+            && ledger.contains("pub trait EngineLedgerStore")
+            && ledger.contains("pub struct InMemoryEngineLedgerStore")
+            && ledger.contains("pub struct SqliteEngineLedgerStore")
+            && line_count(&ledger_path) <= 1_000,
+        "engine ledger root must stay a store contract plus in-memory/SQLite orchestration below 1,000 LOC"
+    );
+    for forbidden in [
+        "pub struct StoredEngineError",
+        "pub struct StoredInvocationOutcome",
+        "const SQLITE_SCHEMA",
+        "struct RawCatalogChangeRow",
+        "fn raw_invocation_record(",
+        "fn optional_stored_json_string",
+    ] {
+        assert!(
+            !ledger.contains(forbidden),
+            "engine ledger root must not regain extracted helper `{forbidden}`"
+        );
+    }
+    assert!(
+        outcome.contains("pub struct StoredEngineError")
+            && outcome.contains("pub struct StoredInvocationOutcome")
+            && outcome.contains("from_engine_error")
+            && outcome.contains("to_replay_result"),
+        "engine ledger outcome boundary must own stored error/result replay projection"
+    );
+    assert!(
+        sqlite_codec.contains("pub(super) const SQLITE_SCHEMA")
+            && sqlite_codec.contains("pub(super) struct RawCatalogChangeRow")
+            && sqlite_codec.contains("pub(super) fn raw_invocation_record(")
+            && sqlite_codec.contains("pub(super) fn optional_stored_json_string")
+            && sqlite_codec.contains("pub(super) fn resolve_optional_stored_json_string")
+            && sqlite_codec.contains("pub(super) fn ensure_column"),
+        "engine ledger SQLite codec boundary must own schema, row reconstruction, and stored JSON helpers"
     );
 }
 
