@@ -926,6 +926,23 @@ fn merge_aborted_carries_origin_field() {
     assert_eq!(json["origin"], "finalize");
 }
 
+#[test]
+fn pending_merge_detected_carries_origin_field() {
+    let evt = TronEvent::WorktreePendingMergeDetected {
+        base: crate::shared::events::BaseEvent::now("s1"),
+        source_branch: "main".into(),
+        target_branch: "session/x".into(),
+        strategy: "rebase".into(),
+        origin: "rebase_on_main".into(),
+        started_at_ms: 10,
+        auto_abort_at_ms: 20,
+    };
+    let json = serde_json::to_value(&evt).unwrap();
+    assert_eq!(json["origin"], "rebase_on_main");
+    let back: TronEvent = serde_json::from_value(json).unwrap();
+    assert_eq!(back.event_type(), "worktree.pending_merge_detected");
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Phase K — StashPop lifecycle (continue / abort)
 //

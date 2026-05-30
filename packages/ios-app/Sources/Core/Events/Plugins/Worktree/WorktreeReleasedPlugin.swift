@@ -9,12 +9,12 @@ enum WorktreeReleasedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
             let finalCommit: String?
-            let branchPreserved: Bool?
-            let deleted: Bool?
+            let branchPreserved: Bool
+            let deleted: Bool
         }
     }
 
@@ -25,11 +25,11 @@ enum WorktreeReleasedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
             finalCommit: data.finalCommit,
-            branchPreserved: data.branchPreserved ?? false,
-            deleted: data.deleted ?? false
+            branchPreserved: data.branchPreserved,
+            deleted: data.deleted
         )
     }
 

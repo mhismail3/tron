@@ -7,7 +7,7 @@ enum WorktreeConflictDetectedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
             let sourceBranch: String
@@ -27,7 +27,7 @@ enum WorktreeConflictDetectedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
             sourceBranch: data.sourceBranch,
             targetBranch: data.targetBranch,

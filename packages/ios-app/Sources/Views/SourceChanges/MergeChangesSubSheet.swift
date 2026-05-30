@@ -2,13 +2,13 @@ import SwiftUI
 
 // MARK: - Merge Changes Sub-Sheet
 
-/// Merges the session branch into the configured target branch. Defaults to
-/// the repo's base branch (typically `main`); the remote-branch picker is
-/// still available for edge cases where a session needs to merge into a
-/// non-default integration branch. By default also rebranches the worktree
-/// onto a fresh session branch so new work stays isolated; that follow-up can
-/// be disabled via the "Auto-create new session branch" toggle, which leaves
-/// the worktree on the original source branch.
+/// Merges the session branch into the configured target branch. Leaving the
+/// picker blank asks the server to resolve the repo default branch; the
+/// remote-branch picker is available for edge cases where a session needs to
+/// merge into a non-default integration branch. By default also rebranches the
+/// worktree onto a fresh session branch so new work stays isolated; that
+/// follow-up can be disabled via the "Auto-create new session branch" toggle,
+/// which leaves the worktree on the original source branch.
 ///
 /// On conflicts, the sub-sheet swaps its payload to the `ConflictResolverSubSheet`
 /// flow, keeping the user in the same sheet for the full resolution cycle.
@@ -110,15 +110,26 @@ struct MergeChangesSubSheet: View {
         )
         .tronErrorAlert(message: $runner.errorMessage)
         .task {
-            targetBranch = suggestedTargetBranch ?? "main"
-            strategy = MergeStrategy(rawValue: defaultStrategy) ?? .merge
-            deleteOldBranch = (defaultSessionBranchPolicy == "deleteOnFinalize")
+            targetBranch = suggestedTargetBranch ?? ""
+            if let parsed = MergeStrategy(rawValue: defaultStrategy) {
+                strategy = parsed
+            } else {
+                runner.errorMessage = "Server returned unsupported merge strategy: \(defaultStrategy)"
+            }
+            switch defaultSessionBranchPolicy {
+            case "deleteOnFinalize":
+                deleteOldBranch = true
+            case "keep":
+                deleteOldBranch = false
+            default:
+                runner.errorMessage = "Server returned unsupported branch policy: \(defaultSessionBranchPolicy)"
+            }
         }
     }
 
     private var displayTarget: String {
         let t = targetBranch.trimmingCharacters(in: .whitespaces)
-        return t.isEmpty ? (suggestedTargetBranch ?? "main") : t
+        return t.isEmpty ? (suggestedTargetBranch ?? "default branch") : t
     }
 
     // MARK: Dynamic Hero Summary
@@ -155,12 +166,12 @@ struct MergeChangesSubSheet: View {
                     engineClient: engineClient,
                     sessionId: sessionId,
                     accent: accent,
-                    placeholder: "main",
+                    placeholder: suggestedTargetBranch ?? "Server default",
                     selection: $targetBranch,
                     source: .remote()
                 )
             }
-            SettingsCaption(text: "Defaults to main. Only branches published on origin are valid merge targets.")
+            SettingsCaption(text: "Leave blank to use the server-resolved default branch. Only branches published on origin are valid merge targets.")
         }
     }
 

@@ -7,14 +7,14 @@ enum RepoMainAdvancedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let repoRoot: String?
-            let oldHead: String?
-            let newHead: String?
-            let sourceSessionId: String?
-            let cause: String?
+            let repoRoot: String
+            let oldHead: String
+            let newHead: String
+            let sourceSessionId: String
+            let cause: String
         }
     }
 
@@ -27,13 +27,13 @@ enum RepoMainAdvancedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            repoRoot: data.repoRoot ?? "",
-            oldHead: data.oldHead ?? "",
-            newHead: data.newHead ?? "",
-            sourceSessionId: data.sourceSessionId ?? "",
-            cause: data.cause ?? ""
+            repoRoot: data.repoRoot,
+            oldHead: data.oldHead,
+            newHead: data.newHead,
+            sourceSessionId: data.sourceSessionId,
+            cause: data.cause
         )
     }
 

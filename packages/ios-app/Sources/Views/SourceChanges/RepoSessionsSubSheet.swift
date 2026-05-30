@@ -10,7 +10,7 @@ import SwiftUI
 ///      action (only surfaced when ended branches exist).
 ///
 /// Refreshes live from `repo.*` and `worktree.*` events by observing
-/// `gitWorkflowState.divergenceRefreshTick`.
+/// `gitWorkflowState.sourceControlRefreshTick`.
 @available(iOS 26.0, *)
 struct RepoSessionsSubSheet: View {
     let engineClient: EngineClient
@@ -82,7 +82,7 @@ struct RepoSessionsSubSheet: View {
         )
         .tronErrorAlert(message: $errorMessage)
         .task { await loadAll() }
-        .onChange(of: gitWorkflowState?.divergenceRefreshTick ?? 0) { _, _ in
+        .onChange(of: gitWorkflowState?.sourceControlRefreshTick ?? 0) { _, _ in
             Task { await loadAll() }
         }
     }

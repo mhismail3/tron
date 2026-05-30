@@ -9,12 +9,12 @@ enum WorktreeAcquiredPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let path: String?
-            let branch: String?
-            let baseCommit: String?
+            let path: String
+            let branch: String
+            let baseCommit: String
             let baseBranch: String?
         }
     }
@@ -27,11 +27,11 @@ enum WorktreeAcquiredPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            path: data.path ?? "",
-            branch: data.branch ?? "",
-            baseCommit: data.baseCommit ?? "",
+            path: data.path,
+            branch: data.branch,
+            baseCommit: data.baseCommit,
             baseBranch: data.baseBranch
         )
     }

@@ -149,7 +149,7 @@ struct OnboardingStateTests {
     @Test("acceptPairingPayload starts a fresh setup hydration scope")
     func acceptPairingPayloadStartsFreshSetupScope() throws {
         let state = OnboardingState(defaults: ephemeralDefaults())
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/stale"}}"#.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/stale"}}"#))
         state.hasPairedMac = true
         state.hydrateSetup(serverId: "old-server", settings: settings, authState: nil)
 
@@ -163,7 +163,7 @@ struct OnboardingStateTests {
     @Test("prepareServerOnboarding starts Settings-launched onboarding at connect")
     func prepareServerOnboardingStartsAtConnect() throws {
         let state = OnboardingState(defaults: ephemeralDefaults())
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/stale"}}"#.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/stale"}}"#))
         state.currentStep = .model
         state.hasPairedMac = true
         state.pairingHost = "stale.example.com"
@@ -316,7 +316,7 @@ struct OnboardingStateTests {
 
     @Test("setup snapshot exposes existing server preferences and masked credentials")
     func setupSnapshotHydratesExistingServerState() throws {
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data("""
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
         {
           "server": {
             "defaultWorkspace": "/Users/example/project",
@@ -326,7 +326,7 @@ struct OnboardingStateTests {
             "retainModel": "claude-haiku-4-5-20251001"
           }
         }
-        """.utf8))
+        """))
         let auth = try JSONDecoder().decode(AuthState.self, from: Data("""
         {
           "providers": {
@@ -378,7 +378,7 @@ struct OnboardingStateTests {
     @Test("reset clears hydrated setup snapshot")
     func resetClearsSetupSnapshot() throws {
         let state = OnboardingState(defaults: ephemeralDefaults())
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/tmp"}}"#.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/tmp"}}"#))
         state.hydrateSetup(serverId: "server-1", settings: settings, authState: nil)
 
         state.reset()
@@ -391,14 +391,14 @@ struct OnboardingStateTests {
     @Test("credential refresh updates setup snapshot without losing server preferences")
     func credentialRefreshUpdatesSetupSnapshot() throws {
         let state = OnboardingState(defaults: ephemeralDefaults())
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data("""
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
         {
           "server": {
             "defaultWorkspace": "/Users/example/project",
             "defaultModel": "claude-opus-4-6"
           }
         }
-        """.utf8))
+        """))
         let emptyAuth = try JSONDecoder().decode(AuthState.self, from: Data(#"{"providers":{},"services":{}}"#.utf8))
         let refreshedAuth = try JSONDecoder().decode(AuthState.self, from: Data("""
         {

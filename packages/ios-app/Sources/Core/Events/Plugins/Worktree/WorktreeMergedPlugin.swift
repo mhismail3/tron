@@ -9,13 +9,13 @@ enum WorktreeMergedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let sourceBranch: String?
-            let targetBranch: String?
+            let sourceBranch: String
+            let targetBranch: String
             let mergeCommit: String?
-            let strategy: String?
+            let strategy: String
         }
     }
 
@@ -27,12 +27,12 @@ enum WorktreeMergedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            sourceBranch: data.sourceBranch ?? "",
-            targetBranch: data.targetBranch ?? "",
+            sourceBranch: data.sourceBranch,
+            targetBranch: data.targetBranch,
             mergeCommit: data.mergeCommit,
-            strategy: data.strategy ?? ""
+            strategy: data.strategy
         )
     }
 

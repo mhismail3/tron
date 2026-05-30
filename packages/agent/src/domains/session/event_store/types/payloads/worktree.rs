@@ -223,6 +223,8 @@ pub struct WorktreePendingMergeDetectedPayload {
     pub target_branch: String,
     /// Strategy in flight.
     pub strategy: String,
+    /// Origin of the pending merge (`"finalize" | "rebase_on_main" | "stash_pop"`).
+    pub origin: String,
     /// Epoch ms when the merge started (derived from MERGE_MSG mtime).
     pub started_at_ms: u64,
     /// Epoch ms when the auto-abort timer fires.

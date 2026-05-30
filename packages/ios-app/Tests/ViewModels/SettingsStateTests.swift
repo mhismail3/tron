@@ -55,7 +55,7 @@ final class SettingsStateTests: XCTestCase {
 
     func testApplyServerSettingsLoadsDiagnosticsFields() throws {
         let state = SettingsState()
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data("""
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
         {
           "observability": {
             "logLevel": "debug",
@@ -68,7 +68,7 @@ final class SettingsStateTests: XCTestCase {
             "maxDatabaseMb": 256
           }
         }
-        """.utf8))
+        """))
 
         state.applyServerSettings(settings)
 
@@ -86,7 +86,7 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         state.quickSessionWorkspace = "/from/previous/server"
 
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{}"#.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
         state.applyServerSettings(settings)
 
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
@@ -108,7 +108,7 @@ final class SettingsStateTests: XCTestCase {
 
     func testClearServerSnapshotClearsRollbackAnchor() throws {
         let state = SettingsState()
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/old/server"}}"#.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/old/server"}}"#))
         state.applyServerSettings(settings)
 
         state.clearServerSnapshot()
@@ -122,7 +122,7 @@ final class SettingsStateTests: XCTestCase {
 
     func testFailedUpdateRollsBackToLastLoadedServerSettings() throws {
         let state = SettingsState()
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{"server":{"defaultWorkspace":"/loaded"}}"#.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/loaded"}}"#))
         state.applyServerSettings(settings)
         state.quickSessionWorkspace = "/optimistic"
 

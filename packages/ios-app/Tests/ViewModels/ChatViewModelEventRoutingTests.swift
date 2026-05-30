@@ -127,6 +127,91 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         )
     }
 
+    // MARK: - Source Control Event Routing Tests
+
+    func test_worktreeMainSynced_marksSourceControlStale() {
+        let tick = viewModel.gitWorkflowState.sourceControlRefreshTick
+
+        viewModel.handleWorktreeMainSynced(WorktreeMainSyncedPlugin.Result(
+            mainBranch: "main",
+            oldHead: "old",
+            newHead: "new",
+            advancedBy: 2
+        ))
+
+        XCTAssertEqual(viewModel.gitWorkflowState.sourceControlRefreshTick, tick + 1)
+    }
+
+    func test_worktreeCommit_marksSourceControlStale() {
+        let tick = viewModel.gitWorkflowState.sourceControlRefreshTick
+
+        viewModel.handleWorktreeCommit(WorktreeCommitPlugin.Result(
+            commitHash: "abc123",
+            message: "checkpoint",
+            filesChanged: ["Sources/App.swift"],
+            insertions: 4,
+            deletions: 1,
+            totalCommitCount: 3,
+            hasUncommittedChanges: false
+        ))
+
+        XCTAssertEqual(viewModel.gitWorkflowState.sourceControlRefreshTick, tick + 1)
+    }
+
+    func test_worktreeMerged_marksSourceControlStale() {
+        let tick = viewModel.gitWorkflowState.sourceControlRefreshTick
+
+        viewModel.handleWorktreeMerged(WorktreeMergedPlugin.Result(
+            sourceBranch: "session/one",
+            targetBranch: "main",
+            mergeCommit: "abc123",
+            strategy: "merge"
+        ))
+
+        XCTAssertEqual(viewModel.gitWorkflowState.sourceControlRefreshTick, tick + 1)
+    }
+
+    func test_worktreeSessionFinalized_marksSourceControlStale() {
+        let tick = viewModel.gitWorkflowState.sourceControlRefreshTick
+
+        viewModel.handleWorktreeSessionFinalized(WorktreeSessionFinalizedPlugin.Result(
+            sourceBranch: "session/one",
+            targetBranch: "main",
+            mergeCommit: "abc123",
+            strategy: "merge",
+            newBranch: "session/two",
+            newBaseCommit: "def456",
+            oldBranchDeleted: true,
+            oldBranchDeleteError: nil
+        ))
+
+        XCTAssertEqual(viewModel.gitWorkflowState.sourceControlRefreshTick, tick + 1)
+    }
+
+    func test_worktreeConflictDetected_unknownOriginDoesNotCreateFallbackBanner() {
+        viewModel.handleWorktreeConflictDetected(WorktreeConflictDetectedPlugin.Result(
+            sourceBranch: "session/one",
+            targetBranch: "main",
+            origin: "future_origin",
+            paths: ["App.swift"]
+        ))
+
+        XCTAssertNil(viewModel.gitWorkflowState.conflictBanner)
+    }
+
+    func test_pendingMergeDetectedStoresServerOrigin() {
+        viewModel.handleWorktreePendingMergeDetected(WorktreePendingMergeDetectedPlugin.Result(
+            sourceBranch: "main",
+            targetBranch: "session/one",
+            strategy: "rebase",
+            origin: "rebase_on_main",
+            startedAtMs: 10,
+            autoAbortAtMs: 20
+        ))
+
+        XCTAssertEqual(viewModel.gitWorkflowState.pendingMerge?.origin, .rebaseOnMain)
+    }
+
     // MARK: - Text Delta Routing Tests
 
     func test_textDelta_routesToStreamingManager() {

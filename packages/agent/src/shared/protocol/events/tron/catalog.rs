@@ -936,6 +936,9 @@ tron_events! {
         #[serde(rename = "targetBranch")]
         target_branch: String,
         strategy: String,
+        /// Origin of the reconstructed pending merge
+        /// (`"finalize" | "rebase_on_main" | "stash_pop"`).
+        origin: String,
         #[serde(rename = "startedAtMs")]
         started_at_ms: u64,
         #[serde(rename = "autoAbortAtMs")]

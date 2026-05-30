@@ -16,31 +16,35 @@ extension ChatViewModel {
 
     func handleWorktreeAcquired(_ result: WorktreeAcquiredPlugin.Result) {
         worktreeState.cache.applyAcquired(result, sessionId: sessionId)
+        gitWorkflowState.markSourceControlStale()
     }
 
     func handleWorktreeCommit(_ result: WorktreeCommitPlugin.Result) {
+        gitWorkflowState.markSourceControlStale()
         Task { await worktreeState.cache.applyCommit(result, sessionId: sessionId) }
     }
 
     func handleWorktreeMerged(_ result: WorktreeMergedPlugin.Result) {
-        Task { await worktreeState.cache.refresh(sessionId: sessionId) }
+        refreshSourceControlStatus()
     }
 
     func handleWorktreeReleased(_ result: WorktreeReleasedPlugin.Result) {
         worktreeState.cache.applyReleased(sessionId: sessionId)
+        gitWorkflowState.markSourceControlStale()
     }
 
     // MARK: - Git Workflow Event Handlers
 
     func handleWorktreeMainSynced(_ result: WorktreeMainSyncedPlugin.Result) {
-        // Divergence chips in SourceControlStatusHeader are recomputed on sheet
-        // reload; nothing to mutate in ChatViewModel state.
+        // Local main moved or was confirmed current; open Source Control
+        // surfaces must reload divergence/action gating from server truth.
+        gitWorkflowState.markSourceControlStale()
         logDebug("worktree.main_synced advancedBy=\(result.advancedBy)")
     }
 
     func handleWorktreeSessionFinalized(_ result: WorktreeSessionFinalizedPlugin.Result) {
         // Rebranch occurred — refresh worktree status to pick up new branch/base.
-        Task { await requestWorktreeStatus() }
+        refreshSourceControlStatus()
         // Route to APNs-style local notification if app is backgrounded.
         GitNotificationRouter.shared.postFinalizeCompleted(
             sessionId: sessionId,
@@ -59,12 +63,16 @@ extension ChatViewModel {
         // Unified conflict banner — origin disambiguates between merge,
         // rebase, and stash-pop conflict contexts; the resolver sheet
         // adapts copy and abort semantics based on the origin.
-        gitWorkflowState.conflictBanner = ConflictBanner(
+        guard let banner = ConflictBanner(
             sourceBranch: result.sourceBranch,
             targetBranch: result.targetBranch,
             origin: result.origin,
             paths: result.paths
-        )
+        ) else {
+            logWarning("worktree.conflict_detected unknown origin '\(result.origin)'; dropping")
+            return
+        }
+        gitWorkflowState.conflictBanner = banner
     }
 
     func handleWorktreeConflictResolved(_ result: WorktreeConflictResolvedPlugin.Result) {
@@ -89,26 +97,31 @@ extension ChatViewModel {
         // Resolver succeeded — clear banners and refresh status.
         gitWorkflowState.conflictBanner = nil
         gitWorkflowState.pendingMerge = nil
-        Task { await requestWorktreeStatus() }
+        refreshSourceControlStatus()
     }
 
     func handleWorktreeMergeAborted(_ result: WorktreeMergeAbortedPlugin.Result) {
         // Abort restores the pre-merge state — clear banners either way.
         gitWorkflowState.conflictBanner = nil
         gitWorkflowState.pendingMerge = nil
-        Task { await requestWorktreeStatus() }
+        refreshSourceControlStatus()
     }
 
     func handleWorktreePushed(_ result: WorktreePushedPlugin.Result) {
         // A successful push advances origin — chips are now stale.
-        gitWorkflowState.markDivergenceStale()
+        gitWorkflowState.markSourceControlStale()
     }
 
     func handleWorktreePendingMergeDetected(_ result: WorktreePendingMergeDetectedPlugin.Result) {
+        guard let origin = ConflictOrigin(wire: result.origin) else {
+            logWarning("worktree.pending_merge_detected unknown origin '\(result.origin)'; dropping")
+            return
+        }
         gitWorkflowState.pendingMerge = PendingMergeBanner(
             sourceBranch: result.sourceBranch,
             targetBranch: result.targetBranch,
             strategy: result.strategy,
+            origin: origin,
             startedAtMs: result.startedAtMs,
             autoAbortAtMs: result.autoAbortAtMs
         )
@@ -118,8 +131,7 @@ extension ChatViewModel {
         // Session branch tip moved to include main. Chips are stale;
         // refresh divergence + worktree status so the UI reflects the
         // new base commit.
-        gitWorkflowState.markDivergenceStale()
-        Task { await requestWorktreeStatus() }
+        refreshSourceControlStatus()
     }
 
     func handleWorktreePostRebaseStashConflict(_ result: WorktreePostRebaseStashConflictPlugin.Result) {
@@ -129,5 +141,10 @@ extension ChatViewModel {
         // ref for diagnostics. Do not set a separate banner — all conflict
         // surfacing flows through `conflictBanner` for UX consistency.
         logDebug("worktree.post_rebase_stash_conflict stash=\(result.stashRef) paths=\(result.paths.count)")
+    }
+
+    private func refreshSourceControlStatus() {
+        gitWorkflowState.markSourceControlStale()
+        Task { await requestWorktreeStatus() }
     }
 }

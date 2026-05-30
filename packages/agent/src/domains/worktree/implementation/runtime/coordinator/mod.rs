@@ -51,6 +51,9 @@
 //! `listConflicts` / `resolveConflict` / `continueMerge` / `abortMerge`
 //! capability surface works uniformly across all three origins; only the
 //! continue/abort side effects differ.
+//! Crash recovery and live stream projection preserve this origin in
+//! `worktree.pending_merge_detected`, so clients can render the right guidance
+//! and route abort/continue actions without guessing.
 //!
 //! `merge_context` routes the working directory by origin:
 //! - `Finalize` → `info.repo_root`

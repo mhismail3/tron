@@ -7,12 +7,12 @@ enum WorktreeConflictResolvedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let path: String?
-            let resolution: String?
-            let remaining: UInt32?
+            let path: String
+            let resolution: String
+            let remaining: UInt32
         }
     }
 
@@ -23,11 +23,11 @@ enum WorktreeConflictResolvedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            path: data.path ?? "",
-            resolution: data.resolution ?? "",
-            remaining: data.remaining ?? 0
+            path: data.path,
+            resolution: data.resolution,
+            remaining: data.remaining
         )
     }
 

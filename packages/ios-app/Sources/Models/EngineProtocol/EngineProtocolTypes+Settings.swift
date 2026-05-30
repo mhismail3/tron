@@ -4,10 +4,10 @@ import Foundation
 
 /// Server-authoritative settings decoded from `settings::get` engine protocol.
 ///
-/// Every field uses `decodeIfPresent` with sensible defaults so that a missing
-/// or newly-added field never crashes the entire decode. This is critical because
-/// the Rust server's serde round-trip may drop unknown fields, and new server
-/// versions may add fields that older iOS versions don't know about.
+/// Most non-policy sections use `decodeIfPresent` with defaults that mirror
+/// server defaults so missing passive fields do not crash the settings screen.
+/// Git workflow policy is stricter: merge, push, and protected-branch behavior
+/// must come from the server payload and is rejected if absent.
 struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?
@@ -242,28 +242,19 @@ struct ServerSettings: Decodable {
             retainModel = "claude-sonnet-4-6"
         }
 
-        // git.*
-        if let gitContainer = try? container.nestedContainer(keyedBy: GitKeys.self, forKey: .git) {
-            gitTargetBranch = try? gitContainer.decodeIfPresent(String.self, forKey: .targetBranch)
-            gitProtectedBranches = (try? gitContainer.decodeIfPresent([String].self, forKey: .protectedBranches)) ?? ["main", "master", "develop"]
-            gitSessionBranchPolicy = (try? gitContainer.decodeIfPresent(String.self, forKey: .sessionBranchPolicy)) ?? "keep"
-            gitMergeStrategy = (try? gitContainer.decodeIfPresent(String.self, forKey: .mergeStrategy)) ?? "merge"
-            gitAutoSetUpstream = (try? gitContainer.decodeIfPresent(Bool.self, forKey: .autoSetUpstream)) ?? true
-            gitCrashRecoveryAbortTimeoutMs = (try? gitContainer.decodeIfPresent(UInt64.self, forKey: .crashRecoveryAbortTimeoutMs)) ?? (30 * 60 * 1000)
-            gitOpTimeoutNetworkMs = (try? gitContainer.decodeIfPresent(UInt64.self, forKey: .opTimeoutNetworkMs)) ?? 60_000
-            gitOpTimeoutLocalMs = (try? gitContainer.decodeIfPresent(UInt64.self, forKey: .opTimeoutLocalMs)) ?? 30_000
-            gitSubagentConflictResolutionEnabled = (try? gitContainer.decodeIfPresent(Bool.self, forKey: .subagentConflictResolutionEnabled)) ?? true
-        } else {
-            gitTargetBranch = nil
-            gitProtectedBranches = ["main", "master", "develop"]
-            gitSessionBranchPolicy = "keep"
-            gitMergeStrategy = "merge"
-            gitAutoSetUpstream = true
-            gitCrashRecoveryAbortTimeoutMs = 30 * 60 * 1000
-            gitOpTimeoutNetworkMs = 60_000
-            gitOpTimeoutLocalMs = 30_000
-            gitSubagentConflictResolutionEnabled = true
-        }
+        // git.*: source-control actions depend on these values, so missing
+        // fields are treated as server contract failures rather than local
+        // defaults.
+        let gitContainer = try container.nestedContainer(keyedBy: GitKeys.self, forKey: .git)
+        gitTargetBranch = try gitContainer.decodeIfPresent(String.self, forKey: .targetBranch)
+        gitProtectedBranches = try gitContainer.decode([String].self, forKey: .protectedBranches)
+        gitSessionBranchPolicy = try gitContainer.decode(String.self, forKey: .sessionBranchPolicy)
+        gitMergeStrategy = try gitContainer.decode(String.self, forKey: .mergeStrategy)
+        gitAutoSetUpstream = try gitContainer.decode(Bool.self, forKey: .autoSetUpstream)
+        gitCrashRecoveryAbortTimeoutMs = try gitContainer.decode(UInt64.self, forKey: .crashRecoveryAbortTimeoutMs)
+        gitOpTimeoutNetworkMs = try gitContainer.decode(UInt64.self, forKey: .opTimeoutNetworkMs)
+        gitOpTimeoutLocalMs = try gitContainer.decode(UInt64.self, forKey: .opTimeoutLocalMs)
+        gitSubagentConflictResolutionEnabled = try gitContainer.decode(Bool.self, forKey: .subagentConflictResolutionEnabled)
 
         // promptLibrary.*
         if let plContainer = try? container.nestedContainer(keyedBy: PromptLibraryKeys.self, forKey: .promptLibrary) {

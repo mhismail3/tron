@@ -26,6 +26,16 @@ struct ServerSettingsTests {
             "hooks": { "llmModel": "claude-opus-4-6", "builtinHooks": [{"id":"h1","enabled":true}] },
             "skills": { "compactionPolicy": "preserveAll", "showIndex": "never" },
             "memory": { "autoRetainInterval": 25, "retainModel": "claude-opus-4-6" },
+            "git": {
+                "protectedBranches": ["main", "release"],
+                "sessionBranchPolicy": "deleteOnFinalize",
+                "mergeStrategy": "squash",
+                "autoSetUpstream": false,
+                "crashRecoveryAbortTimeoutMs": 120000,
+                "opTimeoutNetworkMs": 90000,
+                "opTimeoutLocalMs": 45000,
+                "subagentConflictResolutionEnabled": false
+            },
             "observability": {
                 "logLevel": "debug",
                 "payloadCapture": "trace",
@@ -52,6 +62,14 @@ struct ServerSettingsTests {
         #expect(settings.skillsShowIndex == "never")
         #expect(settings.autoRetainInterval == 25)
         #expect(settings.retainModel == "claude-opus-4-6")
+        #expect(settings.gitProtectedBranches == ["main", "release"])
+        #expect(settings.gitSessionBranchPolicy == "deleteOnFinalize")
+        #expect(settings.gitMergeStrategy == "squash")
+        #expect(settings.gitAutoSetUpstream == false)
+        #expect(settings.gitCrashRecoveryAbortTimeoutMs == 120000)
+        #expect(settings.gitOpTimeoutNetworkMs == 90000)
+        #expect(settings.gitOpTimeoutLocalMs == 45000)
+        #expect(settings.gitSubagentConflictResolutionEnabled == false)
         #expect(settings.observabilityLogLevel == "debug")
         #expect(settings.observabilityPayloadCapture == "trace")
         #expect(settings.observabilityVerboseRetentionDays == 3)
@@ -62,10 +80,9 @@ struct ServerSettingsTests {
 
     // MARK: - All Defaults
 
-    @Test("decode empty JSON uses all defaults")
-    func emptyJsonDefaults() throws {
-        let json = "{}"
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+    @Test("decode minimal server payload uses non-policy defaults")
+    func minimalServerPayloadDefaults() throws {
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
         #expect(settings.defaultModel == "claude-sonnet-4-6")
         #expect(settings.defaultWorkspace == nil)
         #expect(settings.compaction.preserveRecentCount == 5)
@@ -79,6 +96,10 @@ struct ServerSettingsTests {
         #expect(settings.skillsShowIndex == "always")
         #expect(settings.autoRetainInterval == 10)
         #expect(settings.retainModel == "claude-sonnet-4-6")
+        #expect(settings.gitProtectedBranches == ["main", "master", "develop"])
+        #expect(settings.gitSessionBranchPolicy == "keep")
+        #expect(settings.gitMergeStrategy == "merge")
+        #expect(settings.gitAutoSetUpstream == true)
         #expect(settings.observabilityLogLevel == "info")
         #expect(settings.observabilityPayloadCapture == "normal")
         #expect(settings.observabilityVerboseRetentionDays == 7)
@@ -92,15 +113,23 @@ struct ServerSettingsTests {
     @Test("server key present with only default model")
     func partialNesting() throws {
         let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.isolationMode == "always") // session default
+    }
+
+    @Test("missing git policy block is rejected")
+    func missingGitPolicyBlockRejected() {
+        let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
+        }
     }
 
     @Test("session key present but isolation key missing")
     func sessionWithoutIsolation() throws {
         let json = #"{"session":{"queueDrainMode":"batched"}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.queueDrainMode == "batched")
         #expect(settings.isolationMode == "always") // default
     }
@@ -148,15 +177,14 @@ struct ServerSettingsTests {
     @Test("decode memory settings from JSON")
     func memorySettingsDecode() throws {
         let json = #"{"memory": {"autoRetainInterval": 20, "retainModel": "claude-haiku-4-5-20251001"}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.autoRetainInterval == 20)
         #expect(settings.retainModel == "claude-haiku-4-5-20251001")
     }
 
     @Test("memory settings defaults when key missing")
     func memorySettingsDefaults() throws {
-        let json = "{}"
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
         #expect(settings.autoRetainInterval == 10)
         #expect(settings.retainModel == "claude-sonnet-4-6")
     }
@@ -164,7 +192,7 @@ struct ServerSettingsTests {
     @Test("memory settings zero disables auto-retain")
     func memorySettingsZeroDisables() throws {
         let json = #"{"memory": {"autoRetainInterval": 0}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.autoRetainInterval == 0)
     }
 
@@ -272,7 +300,7 @@ struct ServerSettingsTests {
             }
         }
         """
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.updateEnabled == true)
         #expect(settings.updateChannel == "beta")
         #expect(settings.updateFrequency == "hourly")
@@ -281,8 +309,7 @@ struct ServerSettingsTests {
 
     @Test("update settings defaults when key missing")
     func updateSettingsDefaultsWhenMissing() throws {
-        let json = "{}"
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
         // The default from the Rust UpdateSettings struct: opt-in (enabled=false),
         // stable channel, daily cadence, notify-only.
         #expect(settings.updateEnabled == false)
@@ -294,7 +321,7 @@ struct ServerSettingsTests {
     @Test("update settings defaults when server present but update missing")
     func updateSettingsDefaultsWhenServerOnly() throws {
         let json = #"{"server":{"defaultWorkspace":"/tmp"}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: json.data(using: .utf8)!)
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.updateEnabled == false)
         #expect(settings.updateChannel == "stable")
     }
@@ -302,13 +329,13 @@ struct ServerSettingsTests {
     @Test("decode transcription setting from JSON")
     func transcriptionSettingDecode() throws {
         let json = #"{"server":{"transcription":{"enabled":true}}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.transcriptionEnabled == true)
     }
 
     @Test("transcription setting defaults off when missing")
     func transcriptionSettingDefaultsOff() throws {
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(#"{}"#.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
         #expect(settings.transcriptionEnabled == false)
     }
 

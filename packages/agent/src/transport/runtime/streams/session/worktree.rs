@@ -217,6 +217,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             source_branch,
             target_branch,
             strategy,
+            origin,
             started_at_ms,
             auto_abort_at_ms,
             ..
@@ -227,6 +228,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "sourceBranch": source_branch,
                 "targetBranch": target_branch,
                 "strategy": strategy,
+                "origin": origin,
                 "startedAtMs": started_at_ms,
                 "autoAbortAtMs": auto_abort_at_ms,
             })),

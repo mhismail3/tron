@@ -7,16 +7,16 @@ enum WorktreeSessionFinalizedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let sourceBranch: String?
-            let targetBranch: String?
+            let sourceBranch: String
+            let targetBranch: String
             let mergeCommit: String?
-            let strategy: String?
-            let newBranch: String?
-            let newBaseCommit: String?
-            let oldBranchDeleted: Bool?
+            let strategy: String
+            let newBranch: String
+            let newBaseCommit: String
+            let oldBranchDeleted: Bool
             let oldBranchDeleteError: String?
         }
     }
@@ -33,15 +33,15 @@ enum WorktreeSessionFinalizedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            sourceBranch: data.sourceBranch ?? "",
-            targetBranch: data.targetBranch ?? "",
+            sourceBranch: data.sourceBranch,
+            targetBranch: data.targetBranch,
             mergeCommit: data.mergeCommit,
-            strategy: data.strategy ?? "",
-            newBranch: data.newBranch ?? "",
-            newBaseCommit: data.newBaseCommit ?? "",
-            oldBranchDeleted: data.oldBranchDeleted ?? false,
+            strategy: data.strategy,
+            newBranch: data.newBranch,
+            newBaseCommit: data.newBaseCommit,
+            oldBranchDeleted: data.oldBranchDeleted,
             oldBranchDeleteError: data.oldBranchDeleteError
         )
     }

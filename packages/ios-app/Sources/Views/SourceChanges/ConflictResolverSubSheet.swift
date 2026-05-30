@@ -119,12 +119,14 @@ struct ConflictResolverSubSheet: View {
         }
     }
 
-    /// Hero copy adapts to the conflict origin so the user understands
-    /// exactly what's in progress. Falls back to finalize-style copy when
-    /// `gitWorkflowState` is absent (defensive; in practice it's always
-    /// provided).
+    /// Hero copy adapts to the server-provided conflict origin so the user
+    /// understands exactly what's in progress.
     private var heroDescription: String {
-        let origin = gitWorkflowState?.conflictBanner?.origin ?? .finalize
+        guard let origin = gitWorkflowState?.conflictBanner?.origin
+            ?? gitWorkflowState?.pendingMerge?.origin
+        else {
+            return "No active conflict state is available for this session."
+        }
         return origin.resolverDescription
     }
 

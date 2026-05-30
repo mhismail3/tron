@@ -2,7 +2,7 @@ import Foundation
 
 /// Holds per-session git workflow signals that are surfaced in the Source
 /// Control sheet — repo-wide lock holder, pending-merge crash recovery
-/// state, conflict banner, and a divergence-staleness tick.
+/// state, conflict banner, and a source-control refresh tick.
 ///
 /// The SCM sheet reads this state to render the header badges and to route
 /// conflict-resolver / pending-merge banners. Handlers in
@@ -46,16 +46,16 @@ final class GitWorkflowState {
     var conflictBanner: ConflictBanner?
 
     // ─────────────────────────────────────────────────────────────────────
-    // Divergence-chip staleness signal.
-    // Incremented on `repo.main_advanced` and after sync/finalize/push so
-    // observing sheets re-fetch `repo.getDivergence` / `repo.listSessions`.
+    // Source-control staleness signal.
+    // Incremented on git/worktree events that can change the current branch,
+    // dirty state, commit counts, peer-session list, or divergence chips.
     // ─────────────────────────────────────────────────────────────────────
 
-    var divergenceRefreshTick: Int = 0
+    var sourceControlRefreshTick: Int = 0
 
-    /// Mark divergence chips dirty so sheets fetch fresh data.
-    func markDivergenceStale() {
-        divergenceRefreshTick &+= 1
+    /// Mark source-control projections dirty so open sheets fetch fresh data.
+    func markSourceControlStale() {
+        sourceControlRefreshTick &+= 1
     }
 
     init() {}
@@ -67,6 +67,7 @@ struct PendingMergeBanner: Equatable {
     let sourceBranch: String
     let targetBranch: String
     let strategy: String
+    let origin: ConflictOrigin
     let startedAtMs: UInt64
     let autoAbortAtMs: UInt64
 }
@@ -74,15 +75,16 @@ struct PendingMergeBanner: Equatable {
 /// Origin of a conflict. Drives copy and action labels in the resolver.
 ///
 /// Wire values match the server's `MergeOrigin::as_str()` output.
-enum ConflictOrigin: String, Equatable {
+enum ConflictOrigin: String, Equatable, Sendable {
     case finalize
     case rebaseOnMain = "rebase_on_main"
     case stashPop = "stash_pop"
 
-    /// Parse the wire string, falling back to `.finalize` for unknown
-    /// values (forward-compatibility with server additions).
-    init(wire: String) {
-        self = ConflictOrigin(rawValue: wire) ?? .finalize
+    /// Parse the server wire string. Unknown values are a contract violation
+    /// and must be rejected by the caller instead of coerced into a workflow.
+    init?(wire: String) {
+        guard let parsed = ConflictOrigin(rawValue: wire) else { return nil }
+        self = parsed
     }
 
     /// Short human-readable label for banners ("Merge", "Rebase on main",
@@ -137,10 +139,11 @@ struct ConflictBanner: Equatable {
     let paths: [String]
 
     /// Construct from a server event — parses the origin string.
-    init(sourceBranch: String, targetBranch: String, origin: String, paths: [String]) {
+    init?(sourceBranch: String, targetBranch: String, origin: String, paths: [String]) {
+        guard let parsedOrigin = ConflictOrigin(wire: origin) else { return nil }
         self.sourceBranch = sourceBranch
         self.targetBranch = targetBranch
-        self.origin = ConflictOrigin(wire: origin)
+        self.origin = parsedOrigin
         self.paths = paths
     }
 

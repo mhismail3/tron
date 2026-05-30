@@ -10,15 +10,15 @@ enum WorktreeRebasedOnMainPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let mainBranch: String?
-            let strategy: String?
-            let oldBaseCommit: String?
-            let newBaseCommit: String?
-            let mainCommitsIncorporated: UInt64?
-            let hadAutoStash: Bool?
+            let mainBranch: String
+            let strategy: String
+            let oldBaseCommit: String
+            let newBaseCommit: String
+            let mainCommitsIncorporated: UInt64
+            let hadAutoStash: Bool
         }
     }
 
@@ -32,14 +32,14 @@ enum WorktreeRebasedOnMainPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            mainBranch: data.mainBranch ?? "main",
-            strategy: data.strategy ?? "rebase",
-            oldBaseCommit: data.oldBaseCommit ?? "",
-            newBaseCommit: data.newBaseCommit ?? "",
-            mainCommitsIncorporated: data.mainCommitsIncorporated ?? 0,
-            hadAutoStash: data.hadAutoStash ?? false
+            mainBranch: data.mainBranch,
+            strategy: data.strategy,
+            oldBaseCommit: data.oldBaseCommit,
+            newBaseCommit: data.newBaseCommit,
+            mainCommitsIncorporated: data.mainCommitsIncorporated,
+            hadAutoStash: data.hadAutoStash
         )
     }
 

@@ -28,7 +28,7 @@ extension ChatViewModel {
     /// Main advanced in this repo (likely from a peer session's finalize).
     /// Refresh worktree status so divergence chips reflect the new drift.
     func handleRepoMainAdvanced(_ result: RepoMainAdvancedPlugin.Result) {
-        gitWorkflowState.markDivergenceStale()
+        gitWorkflowState.markSourceControlStale()
         Task { await requestWorktreeStatus() }
     }
 }

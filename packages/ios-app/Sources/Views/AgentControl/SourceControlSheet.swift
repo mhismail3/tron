@@ -48,12 +48,11 @@ struct SourceControlSheet: View {
     @State private var pendingAbortOrigin: ConflictOrigin?
     @State private var isAbortingConflict = false
 
-    // Server-sourced defaults for git sub-sheets. Fetched once in `.task`;
-    // if settings are temporarily unavailable, the local initial values keep
-    // the sheet usable without authorizing protected-branch pushes.
-    @State private var defaultMergeStrategy: String = "merge"
-    @State private var defaultSessionBranchPolicy: String = "keep"
-    @State private var defaultAutoSetUpstream: Bool = true
+    // Server-sourced defaults for git sub-sheets. Until these load, actions
+    // that depend on them stay disabled rather than using Swift-owned policy.
+    @State private var defaultMergeStrategy: String?
+    @State private var defaultSessionBranchPolicy: String?
+    @State private var defaultAutoSetUpstream: Bool?
     /// Protected branches from server settings — drives the Push tile's
     /// enabled state. `nil` means "not yet loaded from the server"; in that
     /// state Push is gated off entirely so we never authorize a push to a
@@ -103,12 +102,7 @@ struct SourceControlSheet: View {
                                         activeGitAction = .conflictResolver
                                     },
                                     onAbort: { origin in
-                                        // `nil` ⇒ pending-merge banner (server's
-                                        // `pending_merge_detected` event has no
-                                        // origin field yet, so `.finalize`
-                                        // remains the current product default).
-                                        // Live conflict banners pass the actual origin.
-                                        pendingAbortOrigin = origin ?? .finalize
+                                        pendingAbortOrigin = origin
                                     }
                                 )
                                 .sheetSection()
@@ -177,10 +171,13 @@ struct SourceControlSheet: View {
                 _ = await (data, defaults)
                 await loadDivergence()
             }
-            // Sibling-session main advances / local finalize|sync|push all
-            // bump the tick — re-pull divergence chips so they stay fresh.
-            .onChange(of: gitWorkflowState?.divergenceRefreshTick ?? 0) { _, _ in
-                Task { await loadDivergence() }
+            // Git/worktree events bump the tick; reload both status/diff and
+            // repo metadata so visible action gating follows server truth.
+            .onChange(of: gitWorkflowState?.sourceControlRefreshTick ?? 0) { _, _ in
+                Task {
+                    await loadData()
+                    await loadDivergence()
+                }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
@@ -320,8 +317,9 @@ struct SourceControlSheet: View {
         action: @escaping () -> Void
     ) -> some View {
         let g = gating
-        let isEnabled = g.isEnabled(tile)
-        let reason = g.reason(for: tile)
+        let defaultReason = gitDefaultBlockReason(for: tile)
+        let isEnabled = defaultReason == nil && g.isEnabled(tile)
+        let reason = defaultReason ?? g.reason(for: tile)
         return Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
@@ -366,23 +364,31 @@ struct SourceControlSheet: View {
                 sessionId: sessionId
             )
         case .finalize:
-            MergeChangesSubSheet(
-                engineClient: engineClient,
-                sessionId: sessionId,
-                suggestedTargetBranch: worktreeStatus?.worktree?.baseBranch,
-                defaultStrategy: defaultMergeStrategy,
-                defaultSessionBranchPolicy: defaultSessionBranchPolicy,
-                onConflicts: { _ in
-                    activeGitAction = .conflictResolver
-                }
-            )
+            if let defaultMergeStrategy, let defaultSessionBranchPolicy {
+                MergeChangesSubSheet(
+                    engineClient: engineClient,
+                    sessionId: sessionId,
+                    suggestedTargetBranch: worktreeStatus?.worktree?.baseBranch,
+                    defaultStrategy: defaultMergeStrategy,
+                    defaultSessionBranchPolicy: defaultSessionBranchPolicy,
+                    onConflicts: { _ in
+                        activeGitAction = .conflictResolver
+                    }
+                )
+            } else {
+                gitSettingsUnavailableSheet(title: "Merge Changes", accent: .tronCoral)
+            }
         case .push:
-            PushSubSheet(
-                engineClient: engineClient,
-                sessionId: sessionId,
-                currentBranch: worktreeStatus?.worktree?.branch ?? "",
-                defaultAutoSetUpstream: defaultAutoSetUpstream
-            )
+            if let defaultAutoSetUpstream {
+                PushSubSheet(
+                    engineClient: engineClient,
+                    sessionId: sessionId,
+                    currentBranch: worktreeStatus?.worktree?.branch ?? "",
+                    defaultAutoSetUpstream: defaultAutoSetUpstream
+                )
+            } else {
+                gitSettingsUnavailableSheet(title: "Push Branch", accent: .tronSky)
+            }
         case .repoSessions:
             RepoSessionsSubSheet(
                 engineClient: engineClient,
@@ -427,17 +433,43 @@ struct SourceControlSheet: View {
             return
         }
 
-        // Resolve both engine protocols in parallel, then flush to state once with a
-        // coordinated animation so chips + Sessions tile fade in together.
-        async let d = engineClient.repo.getDivergence(sessionId: sessionId)
-        async let s = engineClient.repo.listSessions(sessionId: sessionId)
-        let resolvedDivergence = try? await d
-        let resolvedSessions = try? await s
-        withAnimation(.easeInOut(duration: 0.25)) {
-            divergence = resolvedDivergence
-            if let resolvedSessions {
+        do {
+            async let d = engineClient.repo.getDivergence(sessionId: sessionId)
+            async let s = engineClient.repo.listSessions(sessionId: sessionId)
+            let (resolvedDivergence, resolvedSessions) = try await (d, s)
+            withAnimation(.easeInOut(duration: 0.25)) {
+                divergence = resolvedDivergence
                 repoSessionCount = max(0, resolvedSessions.count - 1)
             }
+        } catch {
+            errorMessage = friendlyGitError(error, action: .load)
+        }
+    }
+
+    private func gitDefaultBlockReason(for tile: GitTile) -> String? {
+        switch tile {
+        case .merge:
+            if defaultMergeStrategy == nil || defaultSessionBranchPolicy == nil {
+                return "Git action defaults are still loading from the server."
+            }
+        case .push:
+            if defaultAutoSetUpstream == nil || protectedBranches == nil {
+                return "Git push policy is still loading from the server."
+            }
+        case .commit, .sessions, .rebase, .pull:
+            break
+        }
+        return nil
+    }
+
+    private func gitSettingsUnavailableSheet(title: String, accent: Color) -> some View {
+        GitSubSheetContainer(title: title, accent: accent) {
+            GitHeroCard(
+                icon: "exclamationmark.triangle",
+                title: "Settings unavailable",
+                description: "This action needs current git settings from the server before it can run.",
+                accent: accent
+            )
         }
     }
 
@@ -465,14 +497,17 @@ struct SourceControlSheet: View {
     }
 
     /// Fetch `git.*` defaults from server settings so sub-sheets reflect the
-    /// user's preferences (strategy, branch policy, upstream behavior). If
-    /// the read fails, the local initial values remain in place.
+    /// user's preferences (strategy, branch policy, upstream behavior).
     private func loadGitDefaults() async {
-        guard let settings = try? await engineClient.settings.get() else { return }
-        defaultMergeStrategy = settings.gitMergeStrategy
-        defaultSessionBranchPolicy = settings.gitSessionBranchPolicy
-        defaultAutoSetUpstream = settings.gitAutoSetUpstream
-        protectedBranches = settings.gitProtectedBranches
+        do {
+            let settings = try await engineClient.settings.get()
+            defaultMergeStrategy = settings.gitMergeStrategy
+            defaultSessionBranchPolicy = settings.gitSessionBranchPolicy
+            defaultAutoSetUpstream = settings.gitAutoSetUpstream
+            protectedBranches = settings.gitProtectedBranches
+        } catch {
+            errorMessage = "Failed to load git settings: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Data Loading
@@ -480,9 +515,9 @@ struct SourceControlSheet: View {
     private func loadData() async {
         do {
             async let diff = engineClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
-            async let status: WorktreeGetStatusResult? = { try? await engineClient.worktree.getStatus(sessionId: sessionId) }()
+            async let status = engineClient.worktree.getStatus(sessionId: sessionId)
             diffResult = try await diff
-            worktreeStatus = await status
+            worktreeStatus = try await status
         } catch {
             errorMessage = friendlyGitError(error, action: .load)
         }

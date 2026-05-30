@@ -215,6 +215,67 @@ final class EventPluginTests: XCTestCase {
         XCTAssertNil(context.handleApprovalResolvedCalledWith?.child)
     }
 
+    // MARK: - Source Control Plugin Contract Tests
+
+    func testWorktreeMainSyncedPlugin_rejectsMissingRequiredPayloadField() {
+        EventRegistry.shared.register(WorktreeMainSyncedPlugin.self)
+
+        let json = """
+        {
+            "type": "worktree.main_synced",
+            "sessionId": "session-1",
+            "data": {
+                "mainBranch": "main",
+                "newHead": "def456",
+                "advancedBy": 1
+            }
+        }
+        """.data(using: .utf8)!
+
+        XCTAssertNil(EventRegistry.shared.parse(type: "worktree.main_synced", data: json))
+    }
+
+    func testRepoMainAdvancedPlugin_rejectsMissingRequiredPayloadField() {
+        EventRegistry.shared.register(RepoMainAdvancedPlugin.self)
+
+        let json = """
+        {
+            "type": "repo.main_advanced",
+            "data": {
+                "repoRoot": "/repo",
+                "oldHead": "abc123",
+                "newHead": "def456",
+                "cause": "sync"
+            }
+        }
+        """.data(using: .utf8)!
+
+        XCTAssertNil(EventRegistry.shared.parse(type: "repo.main_advanced", data: json))
+    }
+
+    func testWorktreePendingMergeDetectedPlugin_parsesOrigin() {
+        EventRegistry.shared.register(WorktreePendingMergeDetectedPlugin.self)
+
+        let json = """
+        {
+            "type": "worktree.pending_merge_detected",
+            "sessionId": "session-1",
+            "data": {
+                "sourceBranch": "main",
+                "targetBranch": "session/one",
+                "strategy": "rebase",
+                "origin": "rebase_on_main",
+                "startedAtMs": 10,
+                "autoAbortAtMs": 20
+            }
+        }
+        """.data(using: .utf8)!
+
+        let event = EventRegistry.shared.parse(type: "worktree.pending_merge_detected", data: json)
+        let result = event?.getResult() as? WorktreePendingMergeDetectedPlugin.Result
+        XCTAssertEqual(result?.origin, "rebase_on_main")
+    }
+
     // MARK: - Session Archive/Unarchive Plugin Tests
 
     func testSessionArchivedPlugin_parsesFromTopLevelSessionId() {

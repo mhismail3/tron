@@ -545,6 +545,7 @@ fn tron_event_all_event_types() {
             source_branch: "session/1".into(),
             target_branch: "main".into(),
             strategy: "merge".into(),
+            origin: "finalize".into(),
             started_at_ms: 0,
             auto_abort_at_ms: 0,
         },

@@ -31,11 +31,9 @@ struct SourceControlStatusHeader: View {
     /// what to display.
     var onResolve: (() -> Void)?
 
-    /// Abort the in-progress operation. Carries the origin where the
-    /// header knows it (live conflict banner); pending-merge banners
-    /// pass `nil` because the server's `pending_merge_detected` event
-    /// doesn't yet include origin — the parent maps `nil` to `.finalize`.
-    var onAbort: ((ConflictOrigin?) -> Void)?
+    /// Abort the in-progress operation. Carries the server origin so the
+    /// caller invokes the matching abort semantics for finalize/rebase/stash.
+    var onAbort: ((ConflictOrigin) -> Void)?
 
     @State private var didCopy = false
 
@@ -220,7 +218,7 @@ struct SourceControlStatusHeader: View {
                 }
                 .buttonStyle(.plain)
                 Button {
-                    onAbort?(nil)
+                    onAbort?(pending.origin)
                 } label: {
                     Text("Abort Now")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))

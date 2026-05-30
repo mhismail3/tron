@@ -7,14 +7,14 @@ enum WorktreePushedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let branch: String?
-            let remote: String?
-            let setUpstream: Bool?
-            let dryRun: Bool?
-            let forceWithLease: Bool?
+            let branch: String
+            let remote: String
+            let setUpstream: Bool
+            let dryRun: Bool
+            let forceWithLease: Bool
         }
     }
 
@@ -27,13 +27,13 @@ enum WorktreePushedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            branch: data.branch ?? "",
-            remote: data.remote ?? "",
-            setUpstream: data.setUpstream ?? false,
-            dryRun: data.dryRun ?? false,
-            forceWithLease: data.forceWithLease ?? false
+            branch: data.branch,
+            remote: data.remote,
+            setUpstream: data.setUpstream,
+            dryRun: data.dryRun,
+            forceWithLease: data.forceWithLease
         )
     }
 

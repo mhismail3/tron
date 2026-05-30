@@ -10,11 +10,11 @@ enum WorktreePostRebaseStashConflictPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let stashRef: String?
-            let paths: [String]?
+            let stashRef: String
+            let paths: [String]
         }
     }
 
@@ -24,10 +24,10 @@ enum WorktreePostRebaseStashConflictPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            stashRef: data.stashRef ?? "stash@{0}",
-            paths: data.paths ?? []
+            stashRef: data.stashRef,
+            paths: data.paths
         )
     }
 

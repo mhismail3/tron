@@ -160,6 +160,9 @@ struct AgentControlView: View {
             .onChange(of: contextState?.contextWindowTokens) {
                 Task { await reloadContextInBackground() }
             }
+            .onChange(of: gitWorkflowState?.sourceControlRefreshTick ?? 0) { _, _ in
+                Task { await loadChanges() }
+            }
         }
         .adaptivePresentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)

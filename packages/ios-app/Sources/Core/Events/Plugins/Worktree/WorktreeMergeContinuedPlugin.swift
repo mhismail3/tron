@@ -7,7 +7,7 @@ enum WorktreeMergeContinuedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
             let mergeCommit: String
@@ -26,7 +26,7 @@ enum WorktreeMergeContinuedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
             mergeCommit: data.mergeCommit,
             strategy: data.strategy

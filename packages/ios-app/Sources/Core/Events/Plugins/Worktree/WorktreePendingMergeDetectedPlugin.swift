@@ -7,14 +7,15 @@ enum WorktreePendingMergeDetectedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let sourceBranch: String?
-            let targetBranch: String?
-            let strategy: String?
-            let startedAtMs: UInt64?
-            let autoAbortAtMs: UInt64?
+            let sourceBranch: String
+            let targetBranch: String
+            let strategy: String
+            let origin: String
+            let startedAtMs: UInt64
+            let autoAbortAtMs: UInt64
         }
     }
 
@@ -22,18 +23,20 @@ enum WorktreePendingMergeDetectedPlugin: DispatchableEventPlugin {
         let sourceBranch: String
         let targetBranch: String
         let strategy: String
+        let origin: String
         let startedAtMs: UInt64
         let autoAbortAtMs: UInt64
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            sourceBranch: data.sourceBranch ?? "",
-            targetBranch: data.targetBranch ?? "",
-            strategy: data.strategy ?? "",
-            startedAtMs: data.startedAtMs ?? 0,
-            autoAbortAtMs: data.autoAbortAtMs ?? 0
+            sourceBranch: data.sourceBranch,
+            targetBranch: data.targetBranch,
+            strategy: data.strategy,
+            origin: data.origin,
+            startedAtMs: data.startedAtMs,
+            autoAbortAtMs: data.autoAbortAtMs
         )
     }
 

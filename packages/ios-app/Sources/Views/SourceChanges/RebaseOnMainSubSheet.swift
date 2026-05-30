@@ -2,9 +2,9 @@ import SwiftUI
 
 // MARK: - Rebase on Main Sub-Sheet
 
-/// Pulls main's commits forward into the session branch — the reverse of
+/// Pulls the base branch's commits forward into the session branch — the reverse of
 /// `MergeChangesSubSheet`. The session stays on its current branch;
-/// main just lands on top.
+/// the base branch lands on top.
 ///
 /// On conflicts, dismisses and calls `onConflicts` so the parent can
 /// route to `ConflictResolverSubSheet` (same pattern as finalize).
@@ -15,7 +15,7 @@ struct RebaseOnMainSubSheet: View {
     let engineClient: EngineClient
     let sessionId: String
     let suggestedMainBranch: String?
-    /// Divergence info for the "main behind origin" warning banner.
+    /// Divergence info for the base-branch-behind-origin warning banner.
     let divergence: RepoDivergence?
     var onConflicts: (() -> Void)?
 
@@ -39,9 +39,9 @@ struct RebaseOnMainSubSheet: View {
         var description: String {
             switch self {
             case .rebase:
-                "Replays your session's commits on top of main. Linear history, but your session commits get new identifiers."
+                "Replays your session's commits on top of the base branch. Linear history, but your session commits get new identifiers."
             case .merge:
-                "Creates a merge commit on your session branch that joins main's history. Preserves existing commit SHAs."
+                "Creates a merge commit on your session branch that joins the base branch history. Preserves existing commit SHAs."
             }
         }
         var summaryVerb: String {
@@ -92,11 +92,15 @@ struct RebaseOnMainSubSheet: View {
     }
 
     private var displayMain: String {
-        suggestedMainBranch ?? "main"
+        suggestedMainBranch ?? "server default branch"
+    }
+
+    private var displayMainTitle: String {
+        suggestedMainBranch ?? "Server default branch"
     }
 
     private var heroTitle: String {
-        "Rebase on \(displayMain)"
+        "Rebase on \(displayMainTitle)"
     }
 
     private var heroDescription: String {
@@ -126,7 +130,7 @@ struct RebaseOnMainSubSheet: View {
     private func mainStaleWarningCard(behind: UInt64) -> some View {
         GitResultBanner(
             kind: .warning,
-            title: "Main is \(behind) commit\(behind == 1 ? "" : "s") behind origin",
+            title: "\(displayMainTitle) is \(behind) commit\(behind == 1 ? "" : "s") behind origin",
             detail: "Pull first to include the latest remote changes before rebasing."
         )
     }
@@ -139,7 +143,7 @@ struct RebaseOnMainSubSheet: View {
         case .success(let s):
             GitResultBanner(
                 kind: .success,
-                title: "Rebased on \(displayMain)",
+                title: "Rebased on \(displayMainTitle)",
                 detail: successDetail(s)
             )
         case .conflicts(let c):

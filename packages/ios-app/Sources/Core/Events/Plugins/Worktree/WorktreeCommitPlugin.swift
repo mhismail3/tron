@@ -9,16 +9,16 @@ enum WorktreeCommitPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let commitHash: String?
-            let message: String?
-            let filesChanged: [String]?
-            let insertions: Int?
-            let deletions: Int?
-            let totalCommitCount: Int?
-            let hasUncommittedChanges: Bool?
+            let commitHash: String
+            let message: String
+            let filesChanged: [String]
+            let insertions: Int
+            let deletions: Int
+            let totalCommitCount: Int
+            let hasUncommittedChanges: Bool
         }
     }
 
@@ -33,15 +33,15 @@ enum WorktreeCommitPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            commitHash: data.commitHash ?? "",
-            message: data.message ?? "",
-            filesChanged: data.filesChanged ?? [],
-            insertions: data.insertions ?? 0,
-            deletions: data.deletions ?? 0,
-            totalCommitCount: data.totalCommitCount ?? 0,
-            hasUncommittedChanges: data.hasUncommittedChanges ?? false
+            commitHash: data.commitHash,
+            message: data.message,
+            filesChanged: data.filesChanged,
+            insertions: data.insertions,
+            deletions: data.deletions,
+            totalCommitCount: data.totalCommitCount,
+            hasUncommittedChanges: data.hasUncommittedChanges
         )
     }
 

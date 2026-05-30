@@ -7,13 +7,13 @@ enum WorktreeMainSyncedPlugin: DispatchableEventPlugin {
         let type: String
         let sessionId: String?
         let timestamp: String?
-        let data: DataPayload?
+        let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
-            let mainBranch: String?
-            let oldHead: String?
-            let newHead: String?
-            let advancedBy: UInt64?
+            let mainBranch: String
+            let oldHead: String
+            let newHead: String
+            let advancedBy: UInt64
         }
     }
 
@@ -25,12 +25,12 @@ enum WorktreeMainSyncedPlugin: DispatchableEventPlugin {
     }
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else { return nil }
+        let data = event.data
         return Result(
-            mainBranch: data.mainBranch ?? "",
-            oldHead: data.oldHead ?? "",
-            newHead: data.newHead ?? "",
-            advancedBy: data.advancedBy ?? 0
+            mainBranch: data.mainBranch,
+            oldHead: data.oldHead,
+            newHead: data.newHead,
+            advancedBy: data.advancedBy
         )
     }
 

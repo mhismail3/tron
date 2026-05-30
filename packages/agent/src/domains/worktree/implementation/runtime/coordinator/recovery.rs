@@ -289,6 +289,7 @@ impl WorktreeCoordinator {
             let auto_abort_ms = self.config.auto_abort_ms;
             let started_at_ms = pending.started_at_ms.max(0) as u64;
             let auto_abort_at_ms = started_at_ms.saturating_add(auto_abort_ms);
+            let origin = pending.origin.as_str().to_string();
 
             let _ = self.event_store.append(&AppendOptions {
                 session_id: &info.session_id,
@@ -297,6 +298,7 @@ impl WorktreeCoordinator {
                     "sourceBranch": pending.source_branch,
                     "targetBranch": pending.target_branch,
                     "strategy": strategy_str,
+                    "origin": origin.clone(),
                     "startedAtMs": started_at_ms,
                     "autoAbortAtMs": auto_abort_at_ms,
                 }),
@@ -308,6 +310,7 @@ impl WorktreeCoordinator {
                 source_branch: pending.source_branch.clone(),
                 target_branch: pending.target_branch.clone(),
                 strategy: strategy_str.to_string(),
+                origin,
                 started_at_ms,
                 auto_abort_at_ms,
             });
