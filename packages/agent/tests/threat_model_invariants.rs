@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        6_500,
+        6_700,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -580,7 +580,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **62/100**",
+        "Current score: **74/100**",
         "## Operating Rules",
         "## Review Rubric",
         "## Static Gates",
@@ -610,6 +610,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
         "larger local models",
         "session_storage_protocol_boundaries_stay_split",
         "model_provider_profile_boundaries_stay_split",
+        "agent_runner_context_boundaries_stay_split",
         "events/tron/catalog.rs",
     ] {
         assert!(
@@ -955,6 +956,77 @@ fn model_provider_profile_boundaries_stay_split() {
             && profile_validation.contains("pub(crate) fn validate_context_block_manifest")
             && profile_validation.contains("pub(super) fn validate_profile"),
         "profile root must stay on profile loading while typed validation owns context provider surfaces"
+    );
+}
+
+#[test]
+fn agent_runner_context_boundaries_stay_split() {
+    let crate_root = crate_root();
+    let read = |relative: &str| {
+        let path = crate_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+
+    for relative in [
+        "src/domains/agent/runner/agent/capability_invocation_executor.rs",
+        "src/domains/agent/runner/agent/compaction_handler.rs",
+        "src/domains/agent/runner/agent/turn_runner.rs",
+        "src/domains/agent/runner/agent/turn_runner/capability_invocations.rs",
+        "src/domains/agent/runner/hooks/engine.rs",
+        "src/domains/agent/runner/hooks/prompt_handler.rs",
+        "src/domains/agent/runner/orchestrator/orchestrator.rs",
+        "src/domains/agent/runner/orchestrator/session_manager.rs",
+        "src/domains/agent/runner/orchestrator/turn_accumulator.rs",
+    ] {
+        let text = read(relative);
+        assert!(
+            line_count(&crate_root.join(relative)) <= 1_000
+                && text.contains("#[path =")
+                && !text.contains("mod tests {"),
+            "CLC-5 runtime parent must stay below 1,000 LOC with tests split out: {relative}"
+        );
+    }
+
+    for relative in [
+        "src/domains/agent/runner/agent/capability_invocation_executor/tests.rs",
+        "src/domains/agent/runner/agent/compaction_handler/tests.rs",
+        "src/domains/agent/runner/agent/turn_runner/tests.rs",
+        "src/domains/agent/runner/agent/turn_runner/turn_context.rs",
+        "src/domains/agent/runner/agent/turn_runner/capability_invocations/tests.rs",
+        "src/domains/agent/runner/hooks/engine/tests.rs",
+        "src/domains/agent/runner/hooks/engine/tests/context_results.rs",
+        "src/domains/agent/runner/hooks/prompt_handler/tests.rs",
+        "src/domains/agent/runner/orchestrator/orchestrator/tests.rs",
+        "src/domains/agent/runner/orchestrator/session_manager/tests.rs",
+        "src/domains/agent/runner/orchestrator/turn_accumulator/tests.rs",
+    ] {
+        assert!(
+            crate_root.join(relative).is_file(),
+            "CLC-5 split boundary file must exist: {relative}"
+        );
+    }
+
+    let turn_runner = read("src/domains/agent/runner/agent/turn_runner.rs");
+    let turn_context = read("src/domains/agent/runner/agent/turn_runner/turn_context.rs");
+    assert!(
+        turn_runner.contains("mod turn_context;")
+            && turn_runner.contains("#[path = \"turn_runner/tests.rs\"]")
+            && !turn_runner.contains("fn build_turn_context(")
+            && !turn_runner.contains("fn resolve_provider_primitive_surface(")
+            && turn_context.contains("pub(super) fn build_turn_context(")
+            && turn_context.contains("pub(super) async fn build_capability_primer_context(")
+            && turn_context.contains("pub(super) async fn resolve_provider_primitive_surface(")
+            && turn_context.contains("pub(super) fn resolved_turn_policy_ids("),
+        "turn runner root must stay on turn orchestration while turn context/surface resolution lives in turn_context"
+    );
+
+    let hook_engine_tests = read("src/domains/agent/runner/hooks/engine/tests.rs");
+    assert!(
+        hook_engine_tests.contains("#[path = \"tests/context_results.rs\"]")
+            && line_count(&crate_root.join("src/domains/agent/runner/hooks/engine/tests.rs"))
+                <= 1_000,
+        "hook engine tests must stay decomposed enough to avoid a new large CLC-9 exception"
     );
 }
 

@@ -4,9 +4,9 @@ Created: 2026-05-30
 
 Initial cleanup score: **0/100**
 
-Current score: **62/100**
+Current score: **74/100**
 
-Status: **CLC-4 complete; CLC-5 next**
+Status: **CLC-5 complete; CLC-6 next**
 
 This scorecard is the repo-local maintainability plan. It is separate from
 `collapsed-engine-hardening-scorecard.md`, which remains at **100/100** for
@@ -107,6 +107,11 @@ cleanup gates:
   focused modules; provider/profile parent files stay below 1,000 LOC; provider
   tests stay in child modules; profile validation owns the typed context-block
   provider surface contract.
+- `agent_runner_context_boundaries_stay_split` gates the CLC-5 split: turn,
+  compaction, capability invocation, hook, session, and turn-accumulator parent
+  files stay below 1,000 LOC; moved test matrices stay in child modules; turn
+  context construction and live provider surface resolution stay out of the
+  `turn_runner.rs` orchestration root.
 
 ## Scenario Ledger
 
@@ -117,7 +122,7 @@ cleanup gates:
 | CLC-2 | Complete | +15 | `packages/agent/src/engine/`, `packages/agent/src/engine/primitives/`, `packages/agent/src/engine/resources/` | Split the resource primitive by ownership boundary: the parent `resource.rs` is now a registration/dispatch spine below 1,000 LOC, with artifact/goal curation, common wrapper/resource-ref helpers, payload parsing, materialized-file/patch mutation, and schemas in focused submodules. Split `engine/resources/store.rs` so the root is below 1,000 LOC; event/id helpers, SQLite schema/row/JSON codecs, and store tests now live in focused `resources/store/*` submodules. Split `engine/queue.rs` so the durable item/store file is below 1,000 LOC and queue draining plus lifecycle stream projection live in `engine/queue/runtime.rs`. Moved approval idempotency tests to `engine/approval/tests.rs`, leaving `approval.rs` below 1,000 LOC. Split catalog-change DTOs from `engine/types.rs` into `engine/types/catalog.rs`, leaving the public type export stable and the root below 1,000 LOC. Split generated-UI request/response schemas from `primitives/ui.rs` into `primitives/ui/schemas.rs`, leaving the generated-UI root below 1,000 LOC. Split generated-UI action authoring from `primitives/ui/authoring/mod.rs` into `primitives/ui/authoring/actions.rs`, leaving both below 1,000 LOC. Split control action catalog definitions from `primitives/control.rs` into `primitives/control/actions.rs`, leaving the control root below 1,000 LOC. Split persisted invocation outcome projection and SQLite schema/row/JSON codecs from `engine/ledger.rs` into `engine/ledger/outcome.rs` and `engine/ledger/sqlite_codec.rs`, leaving the ledger root below 1,000 LOC. Split grant record/request/bootstrap/event builders and SQLite row/risk/JSON codecs from `engine/grants.rs` into `engine/grants/model.rs` and `engine/grants/sqlite_codec.rs`, leaving the grants root below 1,000 LOC. Split `primitives/runtime.rs` so the root host-dispatched query dispatcher is below 1,000 LOC, worker protocol guide projection lives in `primitives/runtime/worker_protocol.rs`, and the executable Python template is readable source in `primitives/runtime/worker_protocol_template.py`. Split `engine/registry.rs` so the live-catalog root is below 1,000 LOC while catalog-change recording, sync invocation/idempotency lifecycle, and output-contract enforcement live in focused `engine/registry/*` submodules. Split `module/trust_audit.rs` so the action/status/retention root is below 1,000 LOC while schedule parsing and due-bucket calculation live in `module/trust_audit/schedule.rs`. Split `module/source_trust.rs` into registration, verification, approval, lifecycle, policy, inspection, support, and schema submodules, leaving every source-trust implementation file below 1,000 LOC. Split the module registration catalogue into `module/registrations.rs`, package manifest validation/runtime parsing into `module/manifest.rs`, module grant policy into `module/grants.rs`, module resource helpers into `module/resources.rs`, base request/response schemas into `module/schemas.rs`, payload parsing/secret enforcement helpers into `module/payload.rs`, server-authored action catalogs into `module/actions.rs`, store access into `module/store_access.rs`, package registration/configuration/inspection into `module/package_lifecycle.rs`, activation/upgrade/rollback/disable/quarantine orchestration into `module/activation_lifecycle.rs`, and decision/evidence resource creation into `module/evidence.rs`, cutting `module.rs` to 207 LOC. Split engine host meta-function constants, watch DTOs, schemas, visibility projection, delegated invocation shaping, and payload parsers into `engine/host/meta.rs`; split the host-dispatched primitive runtime implementation into `engine/host/runtime_host.rs`; split host-handle constructors, catalog operations, module-maintenance queue producers, invocation orchestration, invocation support helpers, and substrate-store methods into focused `engine/host/*` submodules, cutting `host.rs` to 815 LOC. CLC-2 is closed; final verification covered queue/resource/module/generated UI/host/static gates without regressions. | `engine::tests::resource_kernel`, `engine::resources::store`, `engine::tests::state_queue`, `sqlite_queue_blobs_large_payload_but_claim_returns_original_payload`, `engine::approval::tests`, `engine::tests::ids_types`, `engine::tests::generated_ui`, `engine::tests::ledger_idempotency`, `engine::tests::grant_authority`, `engine::tests::meta_primitives`, `engine::tests::catalog_discovery`, `engine::tests::host_invocation`, `engine::tests::module_activation`, and `threat_model_invariants` passed for the completed CLC-2 slices; CLC-2 resource, resource-store, queue, approval, engine-type, generated-UI, generated-UI authoring, control, ledger, grant, runtime, registry, host meta, host runtime host, host handle/substrate/invocation, module store-access, package-lifecycle, activation-lifecycle, evidence, resource, grant, manifest, registration, schema, payload, action, trust-audit, and source-trust large-file gates added. Final CLC-2 broad engine and static gates passed. | None for CLC-2; terminal-state behavior remains guarded by later runner/chat parity checkpoints. |
 | CLC-3 | Complete | +12 | `packages/agent/src/domains/session/`, `packages/agent/src/shared/protocol/`, `packages/agent/src/shared/storage.rs`, `packages/agent/src/transport/` | Split session dashboard projections and session tests out of the session repository root; split event reconstruction, migration, and event-store API tests into scenario-owned children; split protocol events into capability, factory, stream, Tron support, generated Tron catalog, and focused tests; split shared storage into archive, schema, payload, maintenance, stats, and tests; split `/engine` WebSocket wire DTOs, stream projection, outbound serialization, and tests from the transport flow root. | `domains::session::event_store`, `shared::storage`, `shared::events`, `transport::engine_ws`, CLC-3 static gate, formatting, and diff checks passed after extraction. | `events/tron/catalog.rs` remains an explicit 1,153 LOC exception because the exhaustive serde-tagged `TronEvent` catalog and accessor macro are clearer in one audited file than in a synthetic compatibility layer. |
 | CLC-4 | Complete | +10 | `packages/agent/src/domains/model/providers/`, `packages/agent/src/shared/foundation/profile.rs` | Split OpenAI provider-native types into auth/config, model registry, Responses DTO, catalog shard, and test modules; split large provider inline tests into child modules for OpenAI, Anthropic, Google, and Ollama; split profile validation and tests from profile loading; replaced stringly context-block `providerSurface` validation with the typed `ContextBlockProviderSurface` enum while preserving the canonical `providerSurface = "capability"` contract. | `domains::model::providers`, `shared::profile`, CLC-4 static gate, formatting, and diff checks. | `packages/agent/src/domains/model/providers/openai/message_converter.rs`, `kimi/stream_handler.rs`, `factory.rs`, and provider token/context helpers remain below 1,000 LOC but are future cleanup candidates if they grow or CLC-4 is reopened. Local `gemma4:e4b` remains substrate smoke only. |
-| CLC-5 | Not started | +12 | `packages/agent/src/domains/agent/runner/`, `packages/agent/src/domains/agent/runtime/`, `packages/agent/src/domains/context/` | Target: reduce turn-runner, compaction, hook, and capability invocation executor sprawl; separate turn orchestration from provider result handling and continuation state. | Context, compaction, stream processor, subagent, and simulator terminal-state harnesses. | Chat/engine parity issues remain tracked for later UI polish but cannot introduce product-state side channels. |
+| CLC-5 | Complete | +12 | `packages/agent/src/domains/agent/runner/` | Split inline runner/hook/orchestrator test matrices out of runtime roots for capability invocation execution, compaction, turn-runner capability invocation continuation, hook engine, prompt hooks, orchestrator, session manager, and turn accumulator; split hook-engine context-result tests into a child module to avoid creating a new CLC-9 exception; moved turn context construction, capability primer rendering, live provider primitive-surface resolution, and resolved policy-id projection into `turn_runner/turn_context.rs`, leaving `turn_runner.rs` as the orchestration spine. | `domains::agent::runner` passed, 1,366 tests; CLC-5 static gate, formatting, and diff checks. | Pre-existing CLC-9 test matrices remain intentionally large: guardrails, stream processor, context manager, compaction engine, and subagent manager. Chat/engine parity UI drift remains tracked for later UI polish and cannot introduce product-state side channels. |
 | CLC-6 | Not started | +10 | `packages/agent/src/domains/worktree/`, `packages/agent/src/domains/cron/`, `packages/agent/src/domains/process/`, `packages/agent/src/domains/auth/`, `packages/agent/src/domains/settings/`, `packages/agent/src/domains/skills/` | Target: split coordinators/schedulers, keep process policy and sandbox materialization process-owned, remove bespoke storage/auth helpers where canonical helpers exist. | Targeted domain tests and settings parity checks. | Settings changes must update iOS parity in the same checkpoint. |
 | CLC-7 | Not started | +10 | `packages/ios-app/Sources/Views/`, `packages/ios-app/Sources/ViewModels/`, `packages/ios-app/Sources/Services/Network/`, `packages/ios-app/Sources/Models/` | Target: decompose `EngineConsoleView.swift`, `CapabilityInvocationTypes.swift`, `EngineConnection.swift`, `NewSessionFlow.swift`, and `CapabilityInvocationViews.swift`; keep iOS thin. | Focused iOS tests, `xcodegen generate`, simulator deep-link smoke for navigation changes. | Server-owned policy/routing/generated UI semantics must not move into Swift. |
 | CLC-8 | Not started | +8 | `packages/mac-app/Sources/`, `packages/mac-app/docs/`, `scripts/tron`, `scripts/tron-lib.sh` | Target: decompose CLI scripts by command family, centralize health checks across foreground/background/dev/restore, keep Mac wrapper observer/manager only. | Mac service tests where available and manual `scripts/tron dev` recovery smoke. | Service restore paths touch user LaunchAgents; avoid optimistic messages. |
@@ -536,7 +541,8 @@ Closed CLC-3 acceptance:
   channels were introduced.
 - README event/schema contracts did not require updates because public module,
   CLI, event, settings, and database schema contracts did not change.
-- Next cleanup phase is CLC-5 agent runner, context, hooks, and subagents.
+- Next cleanup phase after CLC-3 was CLC-4 model providers and context
+  surfaces.
 
 ## CLC-4 Model Providers And Context Surfaces
 
@@ -581,7 +587,49 @@ Closed CLC-4 acceptance:
   explicit registry aliases, or client-owned policy paths were introduced.
 - README contracts did not require updates because no public CLI, database,
   event, settings, auth precedence, or top-level Rust module contract changed.
-- Next cleanup phase is CLC-5 agent runner, context, hooks, and subagents.
+- Next cleanup phase after CLC-4 was CLC-5 agent runner, context, hooks, and
+  subagents.
+
+## CLC-5 Agent Runner, Context, Hooks, And Subagents
+
+Accepted CLC-5 cleanup:
+
+- Runtime roots no longer carry broad inline test matrices. Tests moved to
+  child modules for capability invocation execution, compaction, turn-runner
+  capability invocation continuation, hook engine, prompt hooks, orchestrator,
+  session manager, and turn accumulator.
+- `hooks/engine/tests.rs` was split again into `tests/context_results.rs`
+  instead of creating a new >1,000 LOC test exception.
+- `turn_runner.rs` now stays on turn orchestration. Turn context assembly,
+  capability-primer rendering, live provider primitive-surface resolution, and
+  resolved profile policy-id projection live in `turn_runner/turn_context.rs`.
+- All CLC-5 runtime implementation parents that were over 1,000 LOC are now
+  below the limit. Remaining large files in the area are pre-existing CLC-9
+  scenario/test matrices.
+- `agent_runner_context_boundaries_stay_split` gates the split and rejects
+  runtime parents regaining inline tests, crossing 1,000 LOC, or pulling turn
+  context/surface resolution back into `turn_runner.rs`.
+
+CLC-5 verification evidence from 2026-05-30:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::agent::runner --lib -- --nocapture`: passed, 1,366 tests.
+- `python3 packages/agent/tests/fixtures/session_terminal_guard.py --self-test`: passed.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`: passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`: passed, 60 tests after the CLC-5 runner/context split gate.
+- `git diff --check`: passed.
+
+Closed CLC-5 acceptance:
+
+- Turn orchestration is separated from context/surface construction in
+  `turn_runner/turn_context.rs`.
+- Capability invocation continuation logic remains in
+  `turn_runner/capability_invocations.rs`, with its test matrix moved out of
+  the runtime file.
+- Compaction, hook, session, orchestrator, and turn-accumulator runtime roots
+  are below 1,000 LOC and keep tests in child modules.
+- No terminal-state logic, compaction notice behavior, simulator harness, or
+  chat/product-state channel changed in this checkpoint.
+- Next cleanup phase is CLC-6 smaller-domain cleanup.
 
 ## Large-File Audit
 
@@ -593,7 +641,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 6491 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, and CLC-4 split-boundary gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, and model-provider/profile subtree checks. | 6500 | CLC-9 |
+| `packages/agent/tests/threat_model_invariants.rs` | 6564 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, and CLC-5 split-boundary gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, and runner/context subtree checks. | 6700 | CLC-9 |
 | `packages/agent/tests/integration/tests.rs` | 3108 | CLC-9 harnesses | Transport e2e suite with shared WebSocket harness. | 3150 | CLC-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2848 | CLC-7 iOS tests | Event transformer matrix should split only when concepts separate. | 2900 | CLC-7 |
 | `packages/agent/src/domains/worktree/implementation/scm/git.rs` | 2726 | CLC-6 worktree | Git coordinator carries many command families. | 2750 | CLC-6 |
@@ -606,22 +654,16 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift` | 1857 | CLC-7 iOS views | Console view should split into focused view models/components. | 1900 | CLC-7 |
 | `packages/agent/src/domains/agent/runner/guardrails/tests.rs` | 1695 | CLC-9 runner tests | Guardrail rule-pattern matrix. | 1725 | CLC-9 |
 | `packages/agent/src/domains/skills/implementation/runtime/tracker.rs` | 1629 | CLC-6 skills | Runtime tracking has multiple ownership concerns. | 1650 | CLC-6 |
-| `packages/agent/src/domains/agent/runner/agent/capability_invocation_executor.rs` | 1596 | CLC-5 runner | Invocation continuation state should split from turn orchestration. | 1625 | CLC-5 |
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1571 | CLC-9 session tests | SQLite event repository query matrix. | 1600 | CLC-9 |
 | `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests.rs` | 1545 | CLC-9 runner tests | Subagent manager orchestration matrix. | 1575 | CLC-9 |
-| `packages/agent/src/domains/agent/runner/hooks/engine.rs` | 1461 | CLC-5 hooks | Hook orchestration is broad. | 1500 | CLC-5 |
 | `packages/ios-app/Sources/Models/Messages/CapabilityInvocationTypes.swift` | 1440 | CLC-7 iOS models | Capability invocation presentation model is too broad. | 1475 | CLC-7 |
 | `packages/agent/src/engine/tests/module_activation/source_trust.rs` | 1364 | CLC-9 engine tests | Module source-trust scenario matrix. | 1400 | CLC-9 |
 | `packages/agent/src/platform/updater/mod.rs` | 1339 | CLC-8 Mac/platform | Updater behavior should split by concern if touched. | 1375 | CLC-8 |
 | `packages/ios-app/Sources/Services/Network/EngineConnection.swift` | 1319 | CLC-7 iOS network | Engine connection should stay transport-only. | 1350 | CLC-7 |
 | `packages/agent/src/domains/process/mod.rs` | 1298 | CLC-6 process | Process policy and execution materialization should stay process-owned and split when touched. | 1325 | CLC-6 |
-| `packages/agent/src/domains/agent/runner/hooks/prompt_handler.rs` | 1291 | CLC-5 hooks | Prompt hook handling is broad. | 1325 | CLC-5 |
-| `packages/agent/src/domains/agent/runner/agent/compaction_handler.rs` | 1254 | CLC-5 context | Compaction handling should stay isolated from turn orchestration. | 1300 | CLC-5 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs` | 1239 | CLC-9 worktree tests | Rebase-on-main conflict/recovery matrix. | 1275 | CLC-9 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1207 | CLC-9 engine tests | Resource-kernel matrix. | 1250 | CLC-9 |
-| `packages/agent/src/domains/agent/runner/agent/turn_runner/capability_invocations.rs` | 1203 | CLC-5 runner | Capability invocation turn continuation logic is dense. | 1250 | CLC-5 |
 | `packages/agent/skills/vault/scripts/vault.sh` | 1200 | CLC-6 skills | Managed vault script exceeds source budget. | 1225 | CLC-6 |
-| `packages/agent/src/domains/agent/runner/agent/turn_runner.rs` | 1190 | CLC-5 runner | Turn runner should remain orchestration only. | 1225 | CLC-5 |
 | `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | 1177 | CLC-9 runner tests | Stream processor event-shape matrix. | 1200 | CLC-9 |
 | `packages/agent/src/domains/agent/runner/context/context_manager_tests.rs` | 1164 | CLC-9 context tests | Context manager policy/rules matrix. | 1200 | CLC-9 |
 | `packages/agent/src/shared/protocol/events/tron/catalog.rs` | 1153 | CLC-3 protocol | Exhaustive generated `TronEvent` enum catalog and accessors stay together for serde tagging, grep-ability, and match exhaustiveness without introducing a compatibility macro layer. | 1200 | CLC-3 |
@@ -630,11 +672,8 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/agent/src/main.rs` | 1112 | CLC-8 startup | Main startup should stay bootstrap-only. | 1150 | CLC-8 |
 | `packages/ios-app/Sources/Views/Session/NewSessionFlow.swift` | 1111 | CLC-7 iOS views | New-session flow needs focused view model boundaries. | 1150 | CLC-7 |
 | `packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationViews.swift` | 1065 | CLC-7 iOS views | Capability invocation UI should stay presentation-only. | 1100 | CLC-7 |
-| `packages/agent/src/domains/agent/runner/orchestrator/orchestrator.rs` | 1053 | CLC-5 runner | Orchestration logic should split from state mutation. | 1075 | CLC-5 |
 | `packages/agent/src/platform/apns/push_helpers.rs` | 1045 | CLC-8 platform | Push helper concerns should split if touched. | 1075 | CLC-8 |
 | `packages/ios-app/Tests/Infrastructure/EventDatabaseTests.swift` | 1038 | CLC-7 iOS tests | Event database test matrix. | 1075 | CLC-7 |
-| `packages/agent/src/domains/agent/runner/orchestrator/session_manager.rs` | 1035 | CLC-5 runner | Session manager state updates should stay focused. | 1075 | CLC-5 |
-| `packages/agent/src/domains/agent/runner/orchestrator/turn_accumulator.rs` | 1012 | CLC-5 runner | Turn accumulation should stay isolated. | 1050 | CLC-5 |
 | `packages/agent/src/domains/mcp/product_protocol/client.rs` | 1010 | CLC-6 MCP | Product protocol client is near budget and should split if touched. | 1050 | CLC-6 |
 | `packages/agent/src/shared/foundation/paths.rs` | 1007 | CLC-6 foundation | Path constants/helpers are near budget and guarded for personal info. | 1050 | CLC-6 |
 | `packages/agent/src/domains/auth/provider_credentials/openai.rs` | 1005 | CLC-6 auth | OpenAI auth helper is near budget. | 1050 | CLC-6 |
@@ -672,12 +711,12 @@ Escalate to:
 
 ## Next Scenario
 
-Next checkpoint: **CLC-5 Agent Runner, Context, Hooks, And Subagents**.
+Next checkpoint: **CLC-6 Worktree, Cron, Process, Auth, Settings, Skills, And Smaller Domains**.
 
-Begin the runner/context audit with
-`packages/agent/src/domains/agent/runner/`,
-`packages/agent/src/domains/agent/runtime/`, and
-`packages/agent/src/domains/context/`. Measure the current large files, keep
-turn orchestration separate from provider result handling and tool continuation
-state, preserve database terminal-state guards, and keep chat/engine parity
-evidence intact without adding product-state side channels.
+Begin the smaller-domain audit with
+`packages/agent/src/domains/worktree/`, `packages/agent/src/domains/cron/`,
+`packages/agent/src/domains/process/`, `packages/agent/src/domains/auth/`,
+`packages/agent/src/domains/settings/`, and `packages/agent/src/domains/skills/`.
+Measure current large files, keep process policy and sandbox materialization
+process-owned, reuse canonical storage/auth helpers, and preserve settings
+parity with iOS when settings contracts change.
