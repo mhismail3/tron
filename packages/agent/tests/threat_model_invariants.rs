@@ -3460,18 +3460,30 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
 
     let ui = std::fs::read_to_string(crate_root.join("src/engine/primitives/ui.rs"))
         .expect("failed to read generated UI primitive");
+    let ui_schemas =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/ui/schemas.rs"))
+            .expect("failed to read generated UI schema boundary");
     let ui_validation =
         std::fs::read_to_string(crate_root.join("src/engine/primitives/ui/validation.rs"))
             .expect("failed to read generated UI validation boundary");
     assert!(
-        ui.contains("mod validation;")
+        ui.contains("mod schemas;")
+            && ui.contains("mod validation;")
+            && ui.contains("use schemas::*;")
             && ui.contains("use validation::{")
+            && line_count(&crate_root.join("src/engine/primitives/ui.rs")) <= 1_000
             && ui.contains("IdempotencyContract::caller_system_engine_ledger()")
+            && ui_schemas.contains("fn create_surface_schema(")
+            && ui_schemas.contains("fn surface_for_target_schema(")
+            && ui_schemas.contains("fn submit_action_schema(")
             && ui_validation.contains("fn validate_action_target")
             && ui_validation.contains("fn validate_action_payload_template_against_target_schema")
             && ui_validation.contains("pub(super) fn validate_surface")
             && ui_validation.contains("pub(super) fn validate_surface_targets")
             && ui_validation.contains("pub(in crate::engine) fn action_child_invocation")
+            && !ui.contains("fn create_surface_schema")
+            && !ui.contains("fn surface_for_target_schema")
+            && !ui.contains("fn submit_action_schema")
             && !ui.contains("fn validate_action_target")
             && !ui.contains("fn surface_validation_state")
             && !ui.contains("fn validate_action_payload_template_against_target_schema")
