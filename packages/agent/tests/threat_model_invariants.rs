@@ -958,6 +958,7 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability_support/implementations/traits.rs",
         "src/domains/capability_support/implementations/traits/tests.rs",
         "src/engine/primitives/ui/authoring/mod.rs",
+        "src/engine/primitives/ui/authoring/actions.rs",
         "src/engine/primitives/ui/authoring/prompt.rs",
         "src/engine/primitives/ui/authoring/notifications.rs",
         "src/engine/primitives/ui/authoring/subagent.rs",
@@ -5855,6 +5856,7 @@ fn line_count(path: &Path) -> usize {
 fn read_generated_ui_authoring_tree(crate_root: &Path) -> String {
     [
         "src/engine/primitives/ui/authoring/mod.rs",
+        "src/engine/primitives/ui/authoring/actions.rs",
         "src/engine/primitives/ui/authoring/prompt.rs",
         "src/engine/primitives/ui/authoring/notifications.rs",
         "src/engine/primitives/ui/authoring/subagent.rs",
