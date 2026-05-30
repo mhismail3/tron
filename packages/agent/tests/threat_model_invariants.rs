@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        6_700,
+        6_850,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -590,7 +590,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **84/100**",
+        "Current score: **94/100**",
         "## Operating Rules",
         "## Review Rubric",
         "## Static Gates",
@@ -622,6 +622,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
         "model_provider_profile_boundaries_stay_split",
         "agent_runner_context_boundaries_stay_split",
         "smaller_domain_boundaries_stay_split",
+        "ios_thin_client_boundaries_stay_split",
         "events/tron/catalog.rs",
     ] {
         assert!(
@@ -673,6 +674,70 @@ fn codebase_cleanup_scorecard_stays_formalized() {
             "{path} has grown to {line_count} lines over the cleanup scorecard budget {budget}; decompose it or update the scorecard exception"
         );
     }
+}
+
+#[test]
+fn ios_thin_client_boundaries_stay_split() {
+    let repo_root = repo_root();
+    let read = |relative: &str| {
+        let path = repo_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+
+    for relative in [
+        "packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift",
+        "packages/ios-app/Sources/Views/EngineConsole/EngineConsoleComponents.swift",
+        "packages/ios-app/Sources/Views/EngineConsole/EngineConsoleSection.swift",
+        "packages/ios-app/Sources/Models/Messages/CapabilityInvocationTypes.swift",
+        "packages/ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift",
+        "packages/ios-app/Sources/Models/Messages/CapabilityPresentation.swift",
+        "packages/ios-app/Sources/Services/Network/EngineConnection.swift",
+        "packages/ios-app/Sources/Services/Network/EngineConnectionTypes.swift",
+        "packages/ios-app/Sources/Services/Network/EngineConnectionProtocolFrames.swift",
+        "packages/ios-app/Sources/Views/Session/NewSessionFlow.swift",
+        "packages/ios-app/Sources/Views/Session/NewSessionFlowTypes.swift",
+        "packages/ios-app/Sources/Views/Session/NewSessionFlowComponents.swift",
+        "packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationViews.swift",
+        "packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationDetailComponents.swift",
+        "packages/ios-app/Sources/Views/Capabilities/CapabilityResultRenderers.swift",
+    ] {
+        let path = repo_root.join(relative);
+        assert!(
+            path.is_file(),
+            "CLC-7 split boundary file must exist: {relative}"
+        );
+        assert!(
+            line_count(&path) <= 1_000,
+            "CLC-7 source file must stay below 1,000 LOC after split: {relative}"
+        );
+    }
+
+    let engine_console =
+        read("packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift");
+    let capability_types =
+        read("packages/ios-app/Sources/Models/Messages/CapabilityInvocationTypes.swift");
+    let engine_connection =
+        read("packages/ios-app/Sources/Services/Network/EngineConnection.swift");
+    let new_session = read("packages/ios-app/Sources/Views/Session/NewSessionFlow.swift");
+    let invocation_views =
+        read("packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationViews.swift");
+    assert!(
+        !engine_console.contains("struct EngineConsoleSectionChips")
+            && !engine_console.contains("struct PluginCard")
+            && !engine_console.contains("struct CapabilityInspectionSheet")
+            && !engine_console.contains("enum ConsoleSection")
+            && !capability_types.contains("struct CapabilityInvocationDisplayModel")
+            && !capability_types.contains("enum CapabilityPresentation")
+            && !engine_connection.contains("enum ConnectionState")
+            && !engine_connection.contains("struct EngineHelloFrame")
+            && !engine_connection.contains("final class EngineConnectionSessionDelegate")
+            && !new_session.contains("struct NewSessionShortcutButton")
+            && !new_session.contains("enum NewSessionProfileMode")
+            && !invocation_views.contains("struct CapabilityDetailHeader")
+            && !invocation_views.contains("struct CapabilityResultRenderer"),
+        "CLC-7 parents must not regain extracted iOS component/type/protocol-frame bodies"
+    );
 }
 
 #[test]

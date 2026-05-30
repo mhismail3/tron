@@ -1,136 +1,5 @@
 import Foundation
 
-// ARCHITECTURE: ~966 lines — connection state machine (7 states), reconnection strategies
-// (foreground normal retry loop + deploy-aware), bounded ping verification, heartbeat loop, message
-// routing, and background state management.
-// These are tightly coupled transport concerns that share connection state. Pragmatic trigger:
-// if a third reconnection strategy is needed.
-
-// MARK: - Connection State
-
-enum ConnectionState: Equatable, Sendable {
-    case disconnected
-    case connecting
-    case connected
-    case reconnecting(attempt: Int, nextRetrySeconds: Int)
-    case deployRestarting(remainingSeconds: Int)  // Server deploying, patient reconnection
-    case failed(reason: String)
-    /// Server rejected the WS upgrade with HTTP 401 — bearer token is missing,
-    /// expired, or rotated. Read-only state; user must re-pair via the
-    /// `ConnectionStatusPill` CTA before reconnect can resume.
-    case unauthorized(reason: String)
-
-    var isConnected: Bool {
-        if case .connected = self { return true }
-        return false
-    }
-
-    var isReconnecting: Bool {
-        switch self {
-        case .reconnecting, .deployRestarting: return true
-        default: return false
-        }
-    }
-
-    /// Whether the user can interact with the session (send messages, etc.)
-    /// Only true when fully connected - reconnecting is read-only mode.
-    /// `.unauthorized` is read-only — user must re-pair before interacting.
-    var canInteract: Bool {
-        if case .connected = self { return true }
-        return false
-    }
-
-    /// True when no further automatic reconnect is in flight and the user
-    /// must take action (manual retry or re-pair). Used by the
-    /// `ConnectionStatusPill` to surface tap-to-fix CTAs.
-    var requiresUserAction: Bool {
-        switch self {
-        case .failed, .unauthorized: return true
-        default: return false
-        }
-    }
-
-    var displayText: String {
-        switch self {
-        case .disconnected: return "Disconnected"
-        case .connecting: return "Connecting..."
-        case .connected: return "Connected"
-        case .reconnecting(let attempt, let seconds): return "Reconnecting (\(attempt)) in \(seconds)s..."
-        case .deployRestarting(let seconds): return "Server deploying... \(seconds)s"
-        case .failed(let reason): return "Failed: \(reason)"
-        case .unauthorized: return "Re-pair this server (Tap to fix)"
-        }
-    }
-}
-
-// MARK: - WebSocket Errors
-
-enum EngineConnectionError: Error, LocalizedError, Sendable, Equatable {
-    case notConnected
-    case timeout
-    case invalidResponse
-    case connectionFailed(String)
-    case encodingError
-    case decodingError(String)
-    /// Server returned HTTP 401 on the WS upgrade — bearer token missing,
-    /// wrong, or rotated. Surfaces as `ConnectionState.unauthorized`.
-    case unauthorized(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .notConnected: return "Not connected to server"
-        case .timeout: return "Request timed out"
-        case .invalidResponse: return "Invalid response from server"
-        case .connectionFailed(let reason): return "Connection failed: \(reason)"
-        case .encodingError: return "Failed to encode request"
-        case .decodingError(let detail): return "Failed to decode response: \(detail)"
-        case .unauthorized(let reason): return "Unauthorized: \(reason)"
-        }
-    }
-}
-
-// MARK: - Bearer Token Provider
-
-/// Strategy for resolving a bearer token to attach to the WebSocket upgrade
-/// request. Returns `nil` if no token is available; the request goes out
-/// without an Authorization header, the server returns 401, and
-/// `EngineConnection` transitions to `ConnectionState.unauthorized`.
-typealias BearerTokenProvider = @MainActor () -> String?
-
-private final class SingleResumeContinuationBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var continuation: CheckedContinuation<Void, Error>?
-
-    init(_ continuation: CheckedContinuation<Void, Error>) {
-        self.continuation = continuation
-    }
-
-    func resume() {
-        resume(.success(()))
-    }
-
-    func resume(throwing error: Error) {
-        resume(.failure(error))
-    }
-
-    private func resume(_ result: Result<Void, Error>) {
-        lock.lock()
-        guard let continuation else {
-            lock.unlock()
-            return
-        }
-        self.continuation = nil
-        lock.unlock()
-
-        switch result {
-        case .success:
-            continuation.resume()
-        case .failure(let error):
-            continuation.resume(throwing: error)
-        }
-    }
-}
-
 // MARK: - WebSocket Service
 
 @Observable
@@ -146,8 +15,7 @@ final class EngineConnection {
     private var isConnectedFlag = false
     private var reconnectAttempts = 0
 
-    /// Normal reconnect policy — retry while foreground so dev rebuilds and
-    /// Mac restarts recover without forcing every screen to own retry logic.
+    /// Retry while foreground so dev rebuilds and Mac restarts recover centrally.
     private let reconnectPolicy = ReconnectProbePolicy()
 
     private let requestTimeout: TimeInterval = 30.0
@@ -159,7 +27,6 @@ final class EngineConnection {
     nonisolated static let heartbeatInterval: TimeInterval = 5.0
     nonisolated static let failedAfterExhaustionReason = "Connection lost — tap to retry"
 
-    /// Task for reconnection (can be cancelled for manual retry)
     private var reconnectTask: Task<Void, Never>?
     private var openedWebSocketTask: URLSessionWebSocketTask?
     private var openContinuation: SingleResumeContinuationBox?
@@ -168,7 +35,6 @@ final class EngineConnection {
     private var pendingRequests: [String: CheckedContinuation<Data, Error>] = [:]
     private var timeoutTasks: [String: Task<Void, Never>] = [:]
 
-    /// Prevents concurrent connection attempts (race condition guard)
     private var isConnectionInProgress = false
 
     private(set) var connectionState: ConnectionState = .disconnected
@@ -178,28 +44,18 @@ final class EngineConnection {
 
     // MARK: - Background State
 
-    /// Tracks whether the app is in the background to pause heartbeats and save battery
-    /// Note: We only pause heartbeats, we don't disconnect - reconnecting is expensive and error-prone
     private var isInBackground = false
 
     // MARK: - Deploy Restart State
 
-    /// Set when the server broadcasts `server.restarting` before a deploy shutdown.
-    /// Triggers patient reconnection instead of the normal short reconnect probe.
     private var isDeployRestarting = false
 
-    /// Expected total restart time in milliseconds (from server event).
     private var deployRestartExpectedMs: Int = 0
 
-    /// Bearer token resolver invoked on every WS upgrade. `nil` means "send
-    /// no Authorization header" — used by paired servers that have not completed
-    /// bearer pairing on this device.
+    /// Resolver invoked on every WS upgrade. `nil` sends no Authorization header.
     private let bearerTokenProvider: BearerTokenProvider?
 
-    /// URLSession delegate that notices HTTP 401 on the upgrade and routes
-    /// to `markUnauthorized(reason:)`. Held strong here because URLSession
-    /// keeps a strong reference to its delegate; we own the lifetime so the
-    /// session can be torn down cleanly on disconnect.
+    /// Held strongly so delegate lifetime tracks the session.
     private var sessionDelegate: EngineConnectionSessionDelegate?
 
     init(serverURL: URL, bearerTokenProvider: BearerTokenProvider? = nil) {
@@ -207,10 +63,7 @@ final class EngineConnection {
         self.bearerTokenProvider = bearerTokenProvider
     }
 
-    /// Build the URLRequest used for the WS upgrade. Internal so unit tests
-    /// can verify the Authorization header. Re-evaluates `bearerTokenProvider`
-    /// on every call so token rotations propagate without re-instantiating
-    /// the service.
+    /// Build the URLRequest used for the WS upgrade.
     func makeUpgradeRequest() -> URLRequest {
         var request = URLRequest(url: serverURL)
         request.timeoutInterval = 30
@@ -220,18 +73,10 @@ final class EngineConnection {
         return request
     }
 
-    /// Force the state machine into `.unauthorized(reason:)`. Cancels any
-    /// in-flight reconnect, tears down the socket, and parks the service
-    /// until the user re-pairs (which surfaces via `manualRetry()` after
-    /// the bearer provider returns a fresh token).
-    ///
-    /// Safe to call from any URLSession delegate callback via `await
-    /// MainActor.run` — the actual mutation happens on the main actor.
+    /// Force the state machine into `.unauthorized(reason:)` until re-pair.
     func markUnauthorized(reason: String) {
         logger.warning("WS upgrade rejected (401): \(reason)", category: .websocket)
 
-        // Cancel reconnect bookkeeping so we don't immediately re-attempt
-        // and burn cycles against a server that will keep returning 401.
         reconnectTask?.cancel()
         reconnectTask = nil
         reconnectAttempts = 0
@@ -272,7 +117,6 @@ final class EngineConnection {
         stateOnStart: ConnectionState,
         stateOnFailure: ConnectionState
     ) async {
-        // Prevent concurrent connection attempts (race condition guard)
         guard !isConnectionInProgress else {
             logger.debug("Connection already in progress, skipping", category: .websocket)
             return
@@ -283,7 +127,6 @@ final class EngineConnection {
             return
         }
 
-        // Set lock immediately before any async work
         isConnectionInProgress = true
         defer { isConnectionInProgress = false }
 
@@ -296,10 +139,6 @@ final class EngineConnection {
         configuration.timeoutIntervalForResource = 300
         logger.verbose("URLSession config: requestTimeout=30s, resourceTimeout=300s", category: .websocket)
 
-        // Install a delegate so we can detect HTTP 401 on the upgrade — the
-        // delegate routes to `markUnauthorized(reason:)` when it sees a 401
-        // response code on the failed task. URLSession retains its delegate,
-        // so we hold our own strong reference for symmetric teardown.
         let delegate = EngineConnectionSessionDelegate(owner: self)
         sessionDelegate = delegate
 
@@ -441,15 +280,7 @@ final class EngineConnection {
         logger.logWebSocketState("Disconnected")
     }
 
-    /// Set background state to pause heartbeats and save battery.
-    /// Call this from scene phase changes in TronMobileApp.
-    ///
-    /// Note: We only pause heartbeats for a live `.connected` socket — reconnecting is
-    /// expensive so we don't want to tear that down on every backgrounding.
-    ///
-    /// When backgrounding mid-reconnect, cancel the probe and reset to `.disconnected` so the
-    /// foreground handler can decide whether to run a fresh probe instead of assuming work is
-    /// still in flight.
+    /// Pause heartbeat work and cancel in-flight reconnects while backgrounded.
     func setBackgroundState(_ inBackground: Bool) {
         guard isInBackground != inBackground else { return }
         isInBackground = inBackground
@@ -465,8 +296,6 @@ final class EngineConnection {
                 reconnectAttempts = 0
                 connectionState = .disconnected
             case .connected, .disconnected, .failed, .deployRestarting, .unauthorized:
-                // .unauthorized is a parked state — backgrounding doesn't
-                // change it; the user must re-pair when they return.
                 break
             }
         } else {
@@ -475,20 +304,15 @@ final class EngineConnection {
     }
 
     /// Signal that the server is about to restart for a deploy.
-    /// Sets deploy-aware reconnection mode — more patient than normal reconnection.
-    /// Called when the `server.restarting` event is received.
     func setDeployRestarting(expectedMs: Int) {
         isDeployRestarting = true
         deployRestartExpectedMs = expectedMs
-        // Show deploy state immediately (even though connection is still alive for now)
         let totalExpectedSeconds = max(1, (expectedMs + 5000) / 1000) // server delay + startup buffer
         connectionState = .deployRestarting(remainingSeconds: totalExpectedSeconds)
         logger.info("Deploy restart signaled: expectedMs=\(expectedMs), totalExpected=\(totalExpectedSeconds)s", category: .websocket)
     }
 
-    /// Verify connection is alive by sending a ping.
-    /// Returns true if connection responds, false if dead.
-    /// If dead, cleans up stale state so reconnection can proceed.
+    /// Verify connection liveness by pinging and cleaning up stale state on failure.
     func verifyConnection() async -> Bool {
         guard isConnectedFlag, let task = engineConnectionTask else {
             return false
@@ -877,7 +701,6 @@ final class EngineConnection {
             )
             onEvent?(delivery)
         } else if let id = json["id"] as? String {
-            // This is an engine response - cancel timeout task and resume continuation.
             timeoutTasks[id]?.cancel()
             timeoutTasks.removeValue(forKey: id)
 
@@ -904,7 +727,6 @@ final class EngineConnection {
             try? await Task.sleep(for: .seconds(Self.heartbeatInterval))
             guard isConnectedFlag else { break }
 
-            // Skip pings when in background to save battery and radio wake-ups
             if isInBackground {
                 logger.verbose("Skipping ping - app in background", category: .websocket)
                 continue
@@ -920,7 +742,6 @@ final class EngineConnection {
                 let pingDuration = (CFAbsoluteTimeGetCurrent() - pingStart) * 1000
                 logger.verbose("Ping #\(pingCount) successful (\(String(format: "%.1f", pingDuration))ms)", category: .websocket)
 
-                // Reset reconnect attempts after first successful ping - connection is verified
                 if reconnectAttempts > 0 {
                     logger.info("Connection verified via ping - resetting reconnect counter", category: .websocket)
                     reconnectAttempts = 0
@@ -937,7 +758,6 @@ final class EngineConnection {
     // MARK: - Pending Request Cleanup
 
     /// Fail all pending engine requests and cancel their timeout tasks.
-    /// Shared between disconnect() (voluntary) and handleDisconnect() (involuntary).
     private func failPendingRequests(error: Error) {
         let pendingCount = pendingRequests.count
         for (id, continuation) in pendingRequests {
@@ -975,29 +795,23 @@ final class EngineConnection {
 
         failPendingRequests(error: EngineConnectionError.connectionFailed("Disconnected"))
 
-        // Don't reconnect if in background
         if isInBackground {
             connectionState = .disconnected
             return
         }
 
-        // Use deploy-aware reconnection if we received server.restarting
         if isDeployRestarting {
             reconnectTask = Task { [weak self] in
                 await self?.startDeployReconnection()
             }
         } else {
-            // Start the foreground retry loop in a tracked task.
             reconnectTask = Task { [weak self] in
                 await self?.startReconnection()
             }
         }
     }
 
-    /// Run foreground automatic reconnect probes until the socket returns,
-    /// authentication fails, the app backgrounds, or an optional policy cap is
-    /// reached. This keeps dashboard and chat controls self-healing after a
-    /// dev-server rebuild without adding per-view retry loops.
+    /// Run foreground reconnect probes until the socket returns or parks.
     private func startReconnection() async {
         guard !isConnectedFlag && !isInBackground && !Task.isCancelled else { return }
         while !isConnectedFlag && !isInBackground && !Task.isCancelled {
@@ -1058,14 +872,11 @@ final class EngineConnection {
         }
     }
 
-    /// Deploy-aware reconnection — waits for the server to restart, then reconnects with more patience.
-    /// Uses 10 attempts because `server.restarting` told us the server is expected to come back.
+    /// Wait for the deploy window, then reconnect with the patient deploy budget.
     private func startDeployReconnection() async {
         let maxDeployAttempts = 10
         let deployRetryDelay: TimeInterval = 3.0
 
-        // Phase 1: Wait for the server to finish shutting down and restarting.
-        // Show countdown during expected restart time.
         let totalWaitSeconds = max(1, (deployRestartExpectedMs + 5000) / 1000)
         logger.info("Deploy reconnection: waiting \(totalWaitSeconds)s for server restart", category: .websocket)
 
@@ -1079,7 +890,6 @@ final class EngineConnection {
         guard !Task.isCancelled else { return }
         connectionState = .deployRestarting(remainingSeconds: 0)
 
-        // Phase 2: Attempt to reconnect.
         reconnectAttempts = 0
         while reconnectAttempts < maxDeployAttempts && !isConnectedFlag && !Task.isCancelled {
             reconnectAttempts += 1
@@ -1096,7 +906,6 @@ final class EngineConnection {
                 return
             }
 
-            // Wait before next attempt
             if reconnectAttempts < maxDeployAttempts && !Task.isCancelled {
                 var delay = Int(deployRetryDelay)
                 while delay > 0 && !isConnectedFlag && !Task.isCancelled {
@@ -1107,7 +916,6 @@ final class EngineConnection {
             }
         }
 
-        // Exhausted all deploy reconnection attempts
         if !isConnectedFlag && !Task.isCancelled {
             logger.warning("Deploy reconnection failed after \(maxDeployAttempts) attempts", category: .websocket)
             isDeployRestarting = false
@@ -1116,20 +924,16 @@ final class EngineConnection {
         }
     }
 
-    /// Manual retry triggered from UI — use the normal open timeout, not the
-    /// short automatic reconnect probe, so cold Tailscale/device routes have
-    /// enough time to establish before we park in `.failed`.
+    /// Manual retry uses the normal open timeout for cold Tailscale/device routes.
     func manualRetry() async {
         guard !isConnectedFlag && !isConnectionInProgress else {
             logger.debug("Manual retry ignored - already connected or connecting", category: .websocket)
             return
         }
 
-        // Cancel any ongoing reconnection task to prevent races
         reconnectTask?.cancel()
         reconnectTask = nil
 
-        // Reset attempt counter and deploy state for fresh connection
         reconnectAttempts = 0
         isDeployRestarting = false
         deployRestartExpectedMs = 0
@@ -1150,170 +954,6 @@ final class EngineConnection {
             reconnectTask = Task { [weak self] in
                 await self?.startReconnection()
             }
-        }
-    }
-}
-
-// MARK: - Engine Protocol Frames
-
-private struct EngineHelloFrame: Encodable {
-    let type = "hello"
-    let id: String
-    let protocolVersion: UInt64
-    let clientName: String?
-    let clientVersion: String?
-    let sessionId: String?
-    let workspaceId: String?
-}
-
-struct EngineHelloResult: Decodable, Equatable, Sendable {
-    let type: String
-    let id: String?
-    let protocolVersion: UInt64
-    let minimumSupportedVersion: UInt64
-    let serverId: String
-    let currentCatalogRevision: UInt64
-}
-
-private struct EngineFunctionCallFrame<P: Encodable>: Encodable {
-    let type = "invoke"
-    let id: String
-    let functionId: String
-    let payload: P
-    let expectedRevision: UInt64?
-    let idempotencyKey: String?
-    let context: EngineInvocationContext?
-}
-
-private struct EngineSubscribeFrame: Encodable {
-    let type = "subscribe"
-    let id: String
-    let topic: String
-    let cursor: UInt64?
-    let filters: [String: AnyCodable]?
-    let limit: Int?
-    let context: EngineInvocationContext?
-}
-
-private struct EnginePollFrame: Encodable {
-    let type = "poll"
-    let id: String
-    let subscriptionId: String?
-    let topic: String?
-    let cursor: UInt64?
-    let filters: [String: AnyCodable]?
-    let limit: Int?
-    let context: EngineInvocationContext?
-}
-
-private struct EngineAckFrame: Encodable {
-    let type = "ack"
-    let id: String
-    let subscriptionId: String
-    let cursor: UInt64
-}
-
-private struct EngineResponseEnvelope<R: Decodable>: Decodable {
-    let type: String
-    let id: String?
-    let ok: Bool
-    let result: R?
-    let error: EngineProtocolError?
-    let traceId: String?
-    let catalogRevision: UInt64?
-}
-
-// MARK: - URLSession Delegate
-
-/// `URLSession` + `URLSessionWebSocket` delegate that detects HTTP 401 on
-/// the WS upgrade and routes the failure to `EngineConnection.markUnauthorized`.
-///
-/// URLSession retains its delegate; `EngineConnection` holds a strong
-/// reference here so the delegate's lifetime tracks the session — and
-/// `urlSession(_:didBecomeInvalidWithError:)` clears that reference when the
-/// session is torn down (manual disconnect, retry, unauthorized).
-final class EngineConnectionSessionDelegate: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
-    /// Stored as `weak` to avoid the URLSession ↔ delegate ↔ service retain
-    /// cycle. `@unchecked Sendable` because Swift can't reason about the
-    /// `weak` storage being safely accessed across actor boundaries — we
-    /// hop to MainActor inside every callback before touching `owner`.
-    private weak var ownerRef: EngineConnection?
-
-    init(owner: EngineConnection) {
-        self.ownerRef = owner
-    }
-
-    /// Snapshot the weak ref; the only caller is the `MainActor.run` body
-    /// inside the URLSession callbacks below.
-    @MainActor
-    private func owner() -> EngineConnection? { ownerRef }
-
-    func urlSession(
-        _ session: URLSession,
-        webSocketTask: URLSessionWebSocketTask,
-        didOpenWithProtocol protocol: String?
-    ) {
-        Task { @MainActor in
-            owner()?.markWebSocketOpened(webSocketTask)
-        }
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        webSocketTask: URLSessionWebSocketTask,
-        didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
-        reason: Data?
-    ) {
-        Task { @MainActor in
-            await owner()?.markWebSocketClosed(webSocketTask, closeCode: closeCode)
-        }
-    }
-
-    /// URLSession exposes failed WebSocket upgrade responses most reliably
-    /// through task metrics. A 401 means the bearer token is
-    /// wrong/missing/rotated — route to `markUnauthorized` so the state
-    /// machine parks for re-pair.
-    func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
-        didFinishCollecting metrics: URLSessionTaskMetrics
-    ) {
-        Task { @MainActor in
-            owner()?.logWebSocketTaskMetrics(metrics)
-        }
-        for transaction in metrics.transactionMetrics {
-            if let response = transaction.response {
-                Task { @MainActor in
-                    owner()?.logWebSocketUpgradeResponse(response)
-                }
-                record(response: response)
-            }
-        }
-    }
-
-    /// Some failed upgrades only expose their response at completion, so
-    /// keep this as a second chance after metrics collection.
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let response = task.response {
-            Task { @MainActor in
-                owner()?.logWebSocketUpgradeResponse(response)
-            }
-            record(response: response)
-        }
-        guard let error else { return }
-        Task { @MainActor in
-            owner()?.logWebSocketTaskCompletionError(error)
-            owner()?.markWebSocketOpenFailed(task, error: error)
-        }
-    }
-
-    private func record(response: URLResponse) {
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 401 else {
-            return
-        }
-        Task { @MainActor in
-            owner()?.markUnauthorized(reason: "Server rejected authentication")
         }
     }
 }

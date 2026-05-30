@@ -149,13 +149,24 @@ final class SubagentState {
 | `Models/UnifiedEventTransformer.swift` | History reconstruction |
 | `ViewModels/Chat/ChatViewModel.swift` | Main chat state |
 | `Services/Network/EngineClient.swift` | /engine client protocol, canonical invoke, and stream subscriptions |
+| `Services/Network/EngineConnection.swift` | WebSocket transport state machine, heartbeat, reconnect, request/response routing |
+| `Services/Network/EngineConnectionTypes.swift` | Connection state, connection errors, bearer-token resolver, one-shot continuation box |
+| `Services/Network/EngineConnectionProtocolFrames.swift` | `/engine` wire frames and WebSocket URLSession delegate |
 | `Services/Network/Clients/CapabilityClient.swift` | Capability admin, control, and generated UI primitive client for Engine Console |
 | `Services/Storage/EngineConsoleCache.swift` | Read-only disconnected Engine Console summary cache, including redacted generated UI refs |
 | `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state |
 | `Views/EngineConsole/EngineConsoleView.swift` | Top-level capability operator console |
+| `Views/EngineConsole/EngineConsoleSection.swift` | Engine Console section identity |
+| `Views/EngineConsole/EngineConsoleComponents.swift` | Console-specific section chips, metrics, cards, rows, and inspection sheet components |
 | `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources; uses Tron typography/color tokens, restrained native row expansion, and submits only stored action coordinates |
+| `Models/Messages/CapabilityInvocationTypes.swift` | Capability invocation lifecycle DTOs, artifacts, results, and errors |
+| `Models/Messages/CapabilityInvocationDisplayModel.swift` | Server-authored capability invocation display projection |
+| `Models/Messages/CapabilityPresentation.swift` | Capability status color, icon, and label presentation helpers |
+| `Views/Capabilities/CapabilityInvocationViews.swift` | Capability invocation chip/detail/result shell |
+| `Views/Capabilities/CapabilityInvocationDetailComponents.swift` | Detail sheet header, execution groups, readable rows, and raw disclosure components |
+| `Views/Capabilities/CapabilityResultRenderers.swift` | Capability result summary/rendering components |
 
 ## Engine Client Boundary
 
@@ -177,6 +188,12 @@ chip updates from the engine record and any matching approval sheet is dismissed
 so stale local UI cannot remain actionable after server truth advances. ACKs are
 coalesced to the latest cursor per subscription so bursts do not turn into one
 engine request per event.
+Large client files are split by client-owned concern only: transport state
+types and wire frames stay beside `EngineConnection`, Engine Console components
+stay beside the console view, and capability invocation display/presentation
+helpers stay beside the message models and invocation views. Those splits must
+not introduce capability policy, routing, approval truth, generated-UI
+semantics, or server-owned product state into Swift.
 The local `EventDatabase` is a projection/cache. If Documents storage is
 unavailable at launch, the app uses `temporaryFallback` cache mode rather than
 crashing, logs that mode, includes it in diagnostics bundles, and shows it in
