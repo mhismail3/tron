@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        5_800,
+        5_900,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -4525,6 +4525,21 @@ fn primitive_workers_are_owned_outside_host_bucket() {
 
     let primitive_runtime = std::fs::read_to_string(primitives_root.join("runtime.rs"))
         .expect("failed to read primitive runtime");
+    let queue_root_path = crate_root.join("src/engine/queue.rs");
+    let queue_root =
+        std::fs::read_to_string(&queue_root_path).expect("failed to read engine queue root");
+    let queue_runtime = std::fs::read_to_string(crate_root.join("src/engine/queue/runtime.rs"))
+        .expect("failed to read engine queue runtime boundary");
+    assert!(
+        queue_root.contains("mod runtime;")
+            && queue_root.contains("pub use runtime::{")
+            && line_count(&queue_root_path) <= 1_000
+            && !queue_root.contains("pub struct EngineQueueRuntime")
+            && !queue_root.contains("fn queue_lifecycle_stream_event(")
+            && queue_runtime.contains("pub struct EngineQueueRuntime")
+            && queue_runtime.contains("fn queue_lifecycle_stream_event("),
+        "engine queue root must keep runtime draining and lifecycle stream projection in src/engine/queue/runtime.rs"
+    );
     for required in [
         "PrimitiveRuntimeHost",
         "catalog_list",

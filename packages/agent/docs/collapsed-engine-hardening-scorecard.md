@@ -3204,7 +3204,7 @@ Large-file audit after RWO-N17:
 
 | File | Lines | Classification | Owner/Reason Marker | Enforced Budget |
 |---|---:|---|---|---:|
-| `packages/agent/tests/threat_model_invariants.rs` | 5,226 | intentional exception | cross-cutting static architecture gates | 5,400 |
+| `packages/agent/tests/threat_model_invariants.rs` | 5,811 | intentional exception | cross-cutting static architecture gates | 5,900 |
 | `packages/agent/tests/integration/tests.rs` | 3,108 | intentional exception | transport e2e suite with shared WebSocket harness | 3,300 |
 | `packages/agent/src/domains/session/event_store/store/tests.rs` | 3,083 | intentional exception | single event-store API matrix | 3,300 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2,712 | intentional exception | worktree coordinator lifecycle matrix | 2,900 |

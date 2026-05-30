@@ -21,14 +21,17 @@ use std::path::Path;
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::discovery::ActorKind;
 use super::errors::{EngineError, Result};
-use super::host::EngineHostHandle;
 use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId};
-use super::invocation::{CausalContext, Invocation, InvocationResult};
-use super::types::{DeliveryMode, FunctionRevision};
+use super::types::FunctionRevision;
+
+mod runtime;
+
+pub use runtime::{EngineQueueDrainer, EngineQueueRuntime, publish_queue_lifecycle_event};
+pub(in crate::engine) use runtime::{queue_failure_event_type, queue_lifecycle_stream_event};
 
 /// Queue item lifecycle.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -343,139 +346,6 @@ impl InMemoryEngineQueueStore {
 /// SQLite queue store.
 pub struct SqliteEngineQueueStore {
     conn: Connection,
-}
-
-/// Queue drain runtime.
-pub struct EngineQueueRuntime;
-
-impl EngineQueueRuntime {
-    /// Claim and execute one queue item, returning `Ok(None)` when no item is
-    /// ready. Failed invocations are retried through the queue store.
-    pub async fn drain_once(
-        handle: &EngineHostHandle,
-        queue: &str,
-        lease_owner: &str,
-    ) -> Result<Option<InvocationResult>> {
-        let Some(item) = handle.claim_queue_item(queue, lease_owner, 30_000).await? else {
-            return Ok(None);
-        };
-        publish_queue_lifecycle_event(handle, "claim", &item, None).await;
-        Self::execute_claimed_item(handle, item).await.map(Some)
-    }
-
-    /// Claim and execute a specific receipt. Used by transport surfaces
-    /// that must synchronously preserve an existing wire contract without
-    /// racing unrelated queued work.
-    pub async fn drain_receipt(
-        handle: &EngineHostHandle,
-        receipt_id: &str,
-        lease_owner: &str,
-    ) -> Result<Option<InvocationResult>> {
-        let Some(item) = handle
-            .claim_queue_item_by_receipt(receipt_id, lease_owner, 30_000)
-            .await?
-        else {
-            return Ok(None);
-        };
-        publish_queue_lifecycle_event(handle, "claim", &item, None).await;
-        Self::execute_claimed_item(handle, item).await.map(Some)
-    }
-
-    async fn execute_claimed_item(
-        handle: &EngineHostHandle,
-        item: EngineQueueItem,
-    ) -> Result<InvocationResult> {
-        let mut context = CausalContext::new(
-            item.actor_id.clone(),
-            item.actor_kind.clone(),
-            item.authority_grant_id.clone(),
-            item.trace_id.clone(),
-        );
-        for scope in &item.authority_scopes {
-            context = context.with_scope(scope.clone());
-        }
-        if let Some(parent) = &item.parent_invocation_id {
-            context = context.with_parent_invocation(parent.clone());
-        }
-        if let Some(trigger_id) = &item.trigger_id {
-            context = context.with_trigger_id(trigger_id.clone());
-        }
-        if let Some(session_id) = &item.session_id {
-            context = context.with_session_id(session_id.clone());
-        }
-        if let Some(workspace_id) = &item.workspace_id {
-            context = context.with_workspace_id(workspace_id.clone());
-        }
-        if let Some(key) = &item.idempotency_key {
-            let attempt_key = if item.attempts == 0 {
-                key.clone()
-            } else {
-                format!("{key}:queue-retry:{}", item.attempts)
-            };
-            context = context.with_idempotency_key(attempt_key);
-        }
-        context.delivery_mode = DeliveryMode::Sync;
-        let mut invocation =
-            Invocation::new_sync(item.function_id.clone(), item.payload.clone(), context);
-        invocation.expected_function_revision = item.target_revision;
-        let target = handle.invoke_queue_target(invocation).await;
-        let recorded_invocation = target.recorded_invocation;
-        let result = target.result;
-        if result.error.is_some() {
-            if handle.fail_queue_item(&item.receipt_id, 3, 1_000).await? {
-                let updated = handle
-                    .get_queue_item(&item.receipt_id)
-                    .await?
-                    .unwrap_or_else(|| item.clone());
-                publish_queue_lifecycle_event(
-                    handle,
-                    queue_failure_event_type(&updated),
-                    &updated,
-                    Some((&result, recorded_invocation)),
-                )
-                .await;
-            }
-        } else {
-            if handle.complete_queue_item(&item.receipt_id).await? {
-                let updated = handle
-                    .get_queue_item(&item.receipt_id)
-                    .await?
-                    .unwrap_or_else(|| item.clone());
-                publish_queue_lifecycle_event(
-                    handle,
-                    "complete",
-                    &updated,
-                    Some((&result, recorded_invocation)),
-                )
-                .await;
-            }
-        }
-        Ok(result)
-    }
-}
-
-/// Service-shaped queue drainer for production owners that want a named
-/// boundary instead of calling the lower-level queue runtime directly.
-pub struct EngineQueueDrainer;
-
-impl EngineQueueDrainer {
-    /// Claim and execute one queue item.
-    pub async fn drain_once(
-        handle: &EngineHostHandle,
-        queue: &str,
-        lease_owner: &str,
-    ) -> Result<Option<InvocationResult>> {
-        EngineQueueRuntime::drain_once(handle, queue, lease_owner).await
-    }
-
-    /// Claim and execute a specific queue receipt.
-    pub async fn drain_receipt(
-        handle: &EngineHostHandle,
-        receipt_id: &str,
-        lease_owner: &str,
-    ) -> Result<Option<InvocationResult>> {
-        EngineQueueRuntime::drain_receipt(handle, receipt_id, lease_owner).await
-    }
 }
 
 impl SqliteEngineQueueStore {
@@ -943,65 +813,5 @@ fn sqlite_err(operation: &'static str, message: impl Into<String>) -> EngineErro
     EngineError::LedgerFailure {
         operation,
         message: message.into(),
-    }
-}
-
-/// Publish a queue lifecycle event to the engine stream primitive.
-pub async fn publish_queue_lifecycle_event(
-    handle: &EngineHostHandle,
-    event_type: &str,
-    item: &EngineQueueItem,
-    result: Option<(&InvocationResult, bool)>,
-) {
-    let _ = handle
-        .publish_stream_event(queue_lifecycle_stream_event(event_type, item, result))
-        .await;
-}
-
-pub(in crate::engine) fn queue_failure_event_type(item: &EngineQueueItem) -> &'static str {
-    if item.status == QueueItemStatus::DeadLettered {
-        "dead_letter"
-    } else {
-        "fail"
-    }
-}
-
-pub(in crate::engine) fn queue_lifecycle_stream_event(
-    event_type: &str,
-    item: &EngineQueueItem,
-    result: Option<(&InvocationResult, bool)>,
-) -> super::streams::PublishStreamEvent {
-    let status = match event_type {
-        "enqueue" => "ready",
-        "claim" => "leased",
-        "complete" => "completed",
-        "fail" => item.status.as_str(),
-        "cancel" => "cancelled",
-        "dead_letter" => "dead_lettered",
-        _ => item.status.as_str(),
-    };
-    super::streams::PublishStreamEvent {
-        topic: "queue.lifecycle".to_owned(),
-        payload: json!({
-            "type": format!("queue.{event_type}"),
-            "receiptId": &item.receipt_id,
-            "queue": &item.queue,
-            "functionId": &item.function_id,
-            "status": status,
-            "attempts": item.attempts,
-            "deliveryInvocationId": result.map(|(value, _)| value.invocation_id.to_string()),
-            "resultInvocationId": result.and_then(|(value, recorded)| {
-                recorded.then(|| value.invocation_id.to_string())
-            }),
-            "error": result
-                .and_then(|(value, _)| value.error.as_ref())
-                .map(ToString::to_string),
-        }),
-        visibility: super::types::VisibilityScope::Session,
-        session_id: item.session_id.clone(),
-        workspace_id: item.workspace_id.clone(),
-        producer: "queue".to_owned(),
-        trace_id: Some(item.trace_id.clone()),
-        parent_invocation_id: item.parent_invocation_id.clone(),
     }
 }
