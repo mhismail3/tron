@@ -9,6 +9,11 @@
 - **Wizard mode** — shown on first launch, before `~/.tron/internal/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, optional local transcription setup, and pairing-info display.
 - **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system::ping` and exposes status + copy actions + diagnostics. Passive poll/menu-open refreshes never overwrite an explicit busy action such as "Restarting"; the action handler owns the final status refresh when the command exits.
 
+Mac wrapper regression evidence for the active post-100 operating scorecard is
+tracked in `packages/agent/docs/post-100-operating-conditions-scorecard.md`.
+Wrapper scenarios must keep `/health`, launchd, and SMAppService evidence tied
+to the visible wizard/menu state.
+
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
 `Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. Release helper executables are produced by `cargo build --release --bin tron --bin tron-program-worker` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/`; `tron` is the LaunchAgent entrypoint and `tron-program-worker` is the required sibling process for `execute(mode: "program")`. The helper is signed before the outer app. The agent binary embeds the first-party capability-search ONNX/tokenizer bundle during the Rust build, so semantic capability search is offline and independent of mutable runtime model files. The app bundle also carries managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/internal/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.

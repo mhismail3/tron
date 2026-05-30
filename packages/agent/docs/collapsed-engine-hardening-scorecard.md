@@ -3424,8 +3424,9 @@ xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17
 ## Next Test
 
 No scored collapsed-engine hardening scenario remains open after RWO-N17. Future
-work should be treated as regression or expansion unless it invalidates a
-banked invariant and lowers the score.
+post-100 operating, provider-breadth, simulator, and UI/UX regression work now
+lives in `post-100-operating-conditions-scorecard.md` unless it invalidates a
+banked collapsed-engine invariant and lowers this score.
 
 Recommended next work:
 

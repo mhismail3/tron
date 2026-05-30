@@ -401,7 +401,7 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
     let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
     assert!(
         readme.contains("packages/agent/docs/collapsed-engine-hardening-scorecard.md")
-            && readme.contains("active\n  collapsed-engine hardening scorecard")
+            && readme.contains("completed\n  collapsed-engine hardening scorecard")
             && readme.contains("historical covered-path evidence"),
         "README living-doc map must distinguish the active scorecard from historical evidence"
     );
@@ -642,7 +642,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
     let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
     assert!(
         readme.contains("packages/agent/docs/codebase-cleanup-scorecard.md")
-            && readme.contains("active repo-local\n  cleanup completion scorecard")
+            && readme.contains("completed repo-local\n  cleanup scorecard")
             && readme.contains("defaults dev logging to `RUST_LOG=info,ort=error`")
             && readme.contains("only after `/health` passes"),
         "README living-doc and CLI map must document the active cleanup scorecard and dev restore contract"
@@ -685,6 +685,114 @@ fn codebase_cleanup_scorecard_stays_formalized() {
             "{path} has grown to {line_count} lines over the cleanup scorecard budget {budget}; decompose it or update the scorecard exception"
         );
     }
+}
+
+#[test]
+fn post_100_operating_scorecard_stays_formalized() {
+    let repo_root = repo_root();
+    let scorecard_path =
+        repo_root.join("packages/agent/docs/post-100-operating-conditions-scorecard.md");
+    assert!(
+        scorecard_path.is_file(),
+        "post-100 operating scorecard must exist"
+    );
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+
+    for required in [
+        "Initial score: **0/100**",
+        "Current score: **",
+        "collapsed-engine-hardening-scorecard.md`: **100/100**",
+        "codebase-cleanup-scorecard.md`: **100/100**",
+        "## Operating Loop",
+        "## Evidence Contract",
+        "## ROC Scenario Ledger",
+        "## UI Inventory",
+        "## UXR Scenario Ledger",
+        "## Baseline Evidence",
+        "scripts/tron ci fmt check clippy test",
+        "scripts/tron dev -bd --json --wait 30",
+        "curl -fsS http://localhost:9847/health",
+        "xcrun simctl openurl <udid>",
+        "Computer Use confirmation",
+        "`notifications::mark_read`",
+        "`notifications::mark_all_read`",
+        "`capability::execute`",
+        "`gemma4:e4b`",
+        "`compact.*`",
+        "No optimistic success before `/health`",
+        "No scored collapsed-engine hardening scenario remains open after RWO-N17",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "post-100 scorecard missing required checkpoint text: {required}"
+        );
+    }
+    for prefix in ["ROC", "UXR"] {
+        for id in 0..=10 {
+            let needle = format!("| {prefix}-{id} |");
+            assert!(
+                scorecard.contains(&needle),
+                "post-100 scorecard missing {needle}"
+            );
+        }
+    }
+    for owner in [
+        "ios_rendering",
+        "ios_state_projection",
+        "ios_action_wiring",
+        "server_contract",
+        "stream_or_reconstruction",
+        "mac_wrapper_ui",
+        "test_harness",
+    ] {
+        assert!(
+            scorecard.contains(owner),
+            "post-100 scorecard missing owner {owner}"
+        );
+    }
+
+    let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
+    assert!(
+        readme.contains("packages/agent/docs/post-100-operating-conditions-scorecard.md")
+            && readme
+                .contains("active\n  post-100 operating conditions and UI/UX regression scorecard")
+            && readme.contains("completed\n  collapsed-engine hardening scorecard")
+            && readme.contains("completed repo-local\n  cleanup scorecard"),
+        "README living-doc map must name the active post-100 scorecard and completed 100/100 scorecards"
+    );
+
+    let ios_development =
+        std::fs::read_to_string(repo_root.join("packages/ios-app/docs/development.md"))
+            .expect("read iOS development docs");
+    let mac_architecture =
+        std::fs::read_to_string(repo_root.join("packages/mac-app/docs/architecture.md"))
+            .expect("read Mac architecture docs");
+    assert!(
+        ios_development.contains("post-100-operating-conditions-scorecard.md")
+            && ios_development.contains("Computer Use confirmation")
+            && mac_architecture.contains("post-100-operating-conditions-scorecard.md")
+            && mac_architecture.contains("SMAppService evidence"),
+        "iOS and Mac docs must link post-100 simulator/wrapper evidence rules"
+    );
+
+    let collapsed = std::fs::read_to_string(
+        repo_root.join("packages/agent/docs/collapsed-engine-hardening-scorecard.md"),
+    )
+    .expect("read collapsed-engine scorecard");
+    let cleanup = std::fs::read_to_string(
+        repo_root.join("packages/agent/docs/codebase-cleanup-scorecard.md"),
+    )
+    .expect("read cleanup scorecard");
+    assert!(
+        collapsed.contains("Current score: **100/100**")
+            && collapsed.contains("Total: **100/100**")
+            && collapsed.contains("post-100-operating-conditions-scorecard.md")
+            && cleanup.contains("Current score: **100/100**")
+            && cleanup.contains("Status: **CLC-10 complete; cleanup scorecard at 100/100**")
+            && cleanup.contains("post-100-operating-conditions-scorecard.md"),
+        "completed scorecards must stay at 100/100 and point future regression work to the post-100 scorecard"
+    );
 }
 
 #[test]

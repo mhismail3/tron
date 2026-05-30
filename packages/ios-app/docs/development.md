@@ -108,6 +108,10 @@ xcodebuild test \
 
 Use the simulator deep-link path when a server-side harness creates or drives a
 real session and the test needs visible iOS evidence for that exact session.
+The active post-100 UI/UX scorecard lives at
+`packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
+scenario ledger for broad simulator evidence, owner classification, and
+Computer Use confirmation.
 The app registers `tron` and `tron-mobile` URL schemes, and
 `DeepLinkRouter` handles session routes in the form
 `tron://session/<session_id>`.

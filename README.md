@@ -92,11 +92,13 @@ Current living entry points:
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
 - `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`,
   registry, recipes, and provider export.
-- `packages/agent/docs/collapsed-engine-hardening-scorecard.md`: active
-  collapsed-engine hardening scorecard and scenario ledger.
-- `packages/agent/docs/codebase-cleanup-scorecard.md`: active repo-local
-  cleanup completion scorecard, large-file budget ledger, and module-by-module
-  maintainability plan.
+- `packages/agent/docs/post-100-operating-conditions-scorecard.md`: active
+  post-100 operating conditions and UI/UX regression scorecard.
+- `packages/agent/docs/collapsed-engine-hardening-scorecard.md`: completed
+  collapsed-engine hardening scorecard and scenario ledger at 100/100.
+- `packages/agent/docs/codebase-cleanup-scorecard.md`: completed repo-local
+  cleanup scorecard, large-file budget ledger, and module-by-module
+  maintainability plan at 100/100.
 - `packages/agent/docs/capability-orchestration-test-scorecard.md`:
   historical covered-path evidence for the single `execute` portal.
 - `packages/agent/src/domains/cron/implementation/mod.rs`: decision-backed

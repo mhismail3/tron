@@ -955,6 +955,8 @@ Escalate to:
 
 - Scope is repo-local cleanup only; no PR publishing.
 - The collapsed-engine scorecard remains separate and complete at **100/100**.
+- Post-100 operating and UI/UX regression work lives in
+  `post-100-operating-conditions-scorecard.md`.
 - Cleanup score starts as progress **0/100**, not as a functionality score.
 - Behavior preservation is required unless the scenario ledger identifies a bug
   and root-cause fix.
