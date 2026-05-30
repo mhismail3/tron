@@ -73,7 +73,7 @@ cleanup gates:
 | ID | Status | Score delta | Touched folders | Deleted complexity | Tests | Residual risks |
 |----|--------|-------------|-----------------|--------------------|-------|----------------|
 | CLC-0 | Complete | +10 | `scripts/`, `packages/agent/src/domains/capability/`, `packages/agent/src/shared/foundation/`, `packages/agent/tests/`, `README.md`, `packages/agent/docs/` | Replaced optimistic installed-service restore prints with one health-gated helper; moved the brittle recipe assertion to schema/display invariants instead of exact wording; made the capability schema provider surface a named contract. | `search_visible_content_contains_actionable_recipe`; `default_context_block_manifest_declares_capability_schema_surface`; `threat_model_invariants`; `scripts/tron dev -bd --json --wait 30`; `curl /health` | Installed `/Applications/Tron.app` can still be stale; no fallback compatibility is added, so the diagnostic requires reinstall/update. |
-| CLC-1 | In progress | +0 awarded, +15 pending | `packages/agent/src/domains/capability/operations/`, `packages/agent/src/domains/capability/registry/`, `packages/agent/src/domains/capability_support/` | Extracted `operations/{schema_validation,presentation,policy_profile}.rs`, cutting `operations/mod.rs` from 4,917 to 4,251 LOC; extracted `registry/store.rs`, cutting `registry/mod.rs` from 4,960 to 2,550 LOC while keeping store behavior unchanged. | `search_visible_content_contains_actionable_recipe`, capability operations tests, capability registry tests, and CLC-1 static gates passed after extraction; full CLC-1 verification pending. | Registry store remains large but concern-owned, `execute.rs` remains large, broad test fixtures remain in implementation roots, and CLC-1 receives no score until the full acceptance set is closed. |
+| CLC-1 | In progress | +0 awarded, +15 pending | `packages/agent/src/domains/capability/operations/`, `packages/agent/src/domains/capability/registry/`, `packages/agent/src/domains/capability_support/` | Extracted `operations/{schema_validation,presentation,policy_profile}.rs`, cutting `operations/mod.rs` from 4,917 to 4,251 LOC; extracted `registry/store.rs`, cutting `registry/mod.rs` from 4,960 to 2,550 LOC; split registry and operations root tests into concern-owned test modules, cutting `registry/mod.rs` to 1,059 LOC and `operations/mod.rs` to 1,705 LOC. | `search_visible_content_contains_actionable_recipe`, capability operations tests, capability registry tests, and CLC-1 static gates passed after extraction; full CLC-1 verification pending. | `execute.rs` and `registry/store.rs` remain large, `operations/mod.rs` still needs admin orchestration decomposition, and CLC-1 receives no score until the full acceptance set is closed. |
 | CLC-2 | Not started | +15 | `packages/agent/src/engine/`, `packages/agent/src/engine/primitives/`, `packages/agent/src/engine/resources/` | Target: split host/module/resource/registry/ledger/queue/approval/grants by ownership boundary, separate orchestration from mutation, make transitions atomic. | Queue/resource/module/generated UI tests and side-channel static gates. | Terminal-state behavior is sensitive; run focused harnesses before broad cleanup. |
 | CLC-3 | Not started | +12 | `packages/agent/src/domains/session/`, `packages/agent/src/shared/protocol/`, `packages/agent/src/shared/storage.rs` | Target: separate DTOs from reconstruction/mutation, remove stringly event handling when a typed dispatcher exists, keep README schema list accurate. | Session/event-store tests and README contract gates. | DB schema docs can drift quickly if migrations move. |
 | CLC-4 | Not started | +10 | `packages/agent/src/domains/model/providers/`, `packages/agent/src/domains/model/provider_protocol/`, `packages/agent/src/domains/model/providers/shared/`, `packages/agent/src/shared/foundation/profile.rs`, `packages/agent/src/shared/foundation/constitution.rs` | Target: split provider wire concerns, isolate provider spellings at boundaries, make context-block provider surfaces explicit and typed. | Provider parsing tests and RWO-N14 provider parity harness availability. | Local `gemma4:e4b` is substrate smoke only; hosted high-capability models stay primary scored path. |
@@ -148,14 +148,19 @@ Accepted partial decomposition:
   storage, and vector persistence details.
 - `registry/mod.rs` remains the catalog projection and selection root instead
   of mixing projection semantics with durable store implementation.
+- `operations/tests/*` now owns the previous operations-root test matrix by
+  display/search, normalization, policy, resolution, result, admin, and audit
+  concerns.
+- `registry/tests/*` now owns the previous registry-root test matrix by
+  projection, recipe, index, primer, store, and support concerns.
 - `critical_execution_and_ui_boundaries_stay_split` now gates the new CLC-1
-  boundaries and rejects those helper bodies returning to `operations/mod.rs`
-  or `registry/mod.rs`.
+  boundaries and rejects those helper/test bodies returning to
+  `operations/mod.rs` or `registry/mod.rs`.
 
 CLC-1 partial verification evidence from 2026-05-30:
 
-- `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::operations --lib -- --nocapture`: passed, 103 tests.
-- `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::registry --lib -- --nocapture`: passed, 31 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::registry --lib -- --nocapture`: passed, 31 tests after registry test split.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::operations --lib -- --nocapture`: passed, 103 tests after operations test split.
 - `cargo test --manifest-path packages/agent/Cargo.toml domains::capability --lib -- --nocapture`: passed, 248 tests.
 - `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`: passed, 56 tests.
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`: passed.
@@ -163,10 +168,9 @@ CLC-1 partial verification evidence from 2026-05-30:
 
 Remaining CLC-1 work:
 
-- Decompose remaining `registry/mod.rs` projection helpers and registry-owned
-  tests without recombining store persistence into the root.
-- Move broad test-only fixtures out of implementation roots without creating
-  new unaudited >1,000 LOC files.
+- Decompose remaining `operations/mod.rs` admin orchestration helpers and
+  `registry/mod.rs` projection helpers without recombining store persistence
+  or tests into the roots.
 - Keep `execute.rs` as an orchestration spine by pushing any remaining
   target-specific guidance into recipe/schema/display owners.
 - Consolidate repeated recipe/search/rendering conditionals behind explicit
@@ -183,7 +187,6 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
 | `packages/agent/tests/threat_model_invariants.rs` | 5461 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement. | 5700 | CLC-9 |
-| `packages/agent/src/domains/capability/operations/mod.rs` | 4251 | CLC-1 capability operations | Parent operation file still owns admin orchestration and test fixtures, but target payload guidance, presentation, and profile-policy persistence are now split out. | 4300 | CLC-1 |
 | `packages/agent/src/engine/primitives/module.rs` | 3832 | CLC-2 engine primitives | Module lifecycle, trust, and policy orchestration need ownership splits. | 3900 | CLC-2 |
 | `packages/agent/src/domains/model/providers/openai/types.rs` | 3576 | CLC-4 providers | Provider DTO shapes and conversion concerns are too concentrated. | 3650 | CLC-4 |
 | `packages/agent/src/engine/host.rs` | 3387 | CLC-2 engine host | Host orchestration and mutation concerns remain dense. | 3450 | CLC-2 |
@@ -196,7 +199,6 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/agent/src/domains/worktree/implementation/scm/git.rs` | 2726 | CLC-6 worktree | Git coordinator carries many command families. | 2750 | CLC-6 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-6 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-6 |
 | `packages/agent/src/engine/primitives/resource.rs` | 2578 | CLC-2 resources | Resource mutation/state logic needs narrower files. | 2600 | CLC-2 |
-| `packages/agent/src/domains/capability/registry/mod.rs` | 2550 | CLC-1 capability registry | Root now owns catalog projection and selection semantics; store persistence is split to `registry/store.rs`, but projection helpers and tests remain dense. | 2600 | CLC-1 |
 | `packages/agent/src/domains/capability/registry/store.rs` | 2441 | CLC-1 capability registry store | Concrete registry persistence, schema, redaction, program run/pause/run storage, and vector storage are split from the root but still broad. | 2500 | CLC-1 |
 | `packages/agent/src/domains/session/event_store/event/reconstruct.rs` | 2377 | CLC-3 event reconstruction | Reconstruction and DTO interpretation are concentrated. | 2400 | CLC-3 |
 | `packages/agent/src/shared/foundation/profile.rs` | 2041 | CLC-4 profile surface | Profile parsing, context contracts, and tests are dense. | 2050 | CLC-4 |
@@ -209,6 +211,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift` | 1857 | CLC-7 iOS views | Console view should split into focused view models/components. | 1900 | CLC-7 |
 | `scripts/tron-lib.sh` | 1878 | CLC-8 CLI lib | Shared shell helpers are becoming a broad service layer. | 1950 | CLC-8 |
 | `packages/agent/src/transport/engine_ws.rs` | 1741 | CLC-3 transport/protocol | Engine WebSocket framing and routing are dense. | 1775 | CLC-3 |
+| `packages/agent/src/domains/capability/operations/mod.rs` | 1705 | CLC-1 capability operations | Parent operation file now owns admin orchestration only; helper modules and concern-owned tests are split out, but admin orchestration helpers remain dense. | 1750 | CLC-1 |
 | `packages/agent/src/shared/storage.rs` | 1703 | CLC-3 storage | Shared storage helpers need contract review. | 1725 | CLC-3 |
 | `packages/agent/src/domains/agent/runner/guardrails/tests.rs` | 1695 | CLC-9 runner tests | Guardrail rule-pattern matrix. | 1725 | CLC-9 |
 | `packages/agent/src/engine/primitives/ui/authoring/mod.rs` | 1667 | CLC-2 generated UI | Generated UI authoring should split by primitive concern. | 1700 | CLC-2 |
@@ -251,6 +254,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/agent/src/engine/approval.rs` | 1075 | CLC-2 approvals | Approval transitions should stay atomic and explicit. | 1100 | CLC-2 |
 | `packages/agent/src/domains/model/providers/ollama/message_converter.rs` | 1070 | CLC-4 providers | Ollama conversion logic is dense. | 1100 | CLC-4 |
 | `packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationViews.swift` | 1065 | CLC-7 iOS views | Capability invocation UI should stay presentation-only. | 1100 | CLC-7 |
+| `packages/agent/src/domains/capability/registry/mod.rs` | 1059 | CLC-1 capability registry | Root now owns catalog projection and selection semantics; store persistence and tests are split out, but projection helpers remain dense. | 1100 | CLC-1 |
 | `packages/agent/src/domains/agent/runner/orchestrator/orchestrator.rs` | 1053 | CLC-5 runner | Orchestration logic should split from state mutation. | 1075 | CLC-5 |
 | `packages/agent/src/engine/primitives/ui.rs` | 1051 | CLC-2 generated UI | Generated UI primitive root should split if touched. | 1075 | CLC-2 |
 | `packages/agent/src/platform/apns/push_helpers.rs` | 1045 | CLC-8 platform | Push helper concerns should split if touched. | 1075 | CLC-8 |

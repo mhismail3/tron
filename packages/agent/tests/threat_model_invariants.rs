@@ -909,9 +909,25 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability/operations/search.rs",
         "src/domains/capability/operations/inspect.rs",
         "src/domains/capability/operations/audit.rs",
+        "src/domains/capability/operations/tests/mod.rs",
+        "src/domains/capability/operations/tests/display.rs",
+        "src/domains/capability/operations/tests/normalization.rs",
+        "src/domains/capability/operations/tests/policy.rs",
+        "src/domains/capability/operations/tests/resolution.rs",
+        "src/domains/capability/operations/tests/result.rs",
+        "src/domains/capability/operations/tests/admin.rs",
+        "src/domains/capability/operations/tests/audit.rs",
+        "src/domains/capability/operations/tests/support.rs",
         "src/domains/capability/registry/mod.rs",
         "src/domains/capability/registry/recipes.rs",
         "src/domains/capability/registry/store.rs",
+        "src/domains/capability/registry/tests/mod.rs",
+        "src/domains/capability/registry/tests/projection.rs",
+        "src/domains/capability/registry/tests/recipes.rs",
+        "src/domains/capability/registry/tests/index.rs",
+        "src/domains/capability/registry/tests/primer.rs",
+        "src/domains/capability/registry/tests/store.rs",
+        "src/domains/capability/registry/tests/support.rs",
         "src/engine/primitives/ui/authoring/mod.rs",
         "src/engine/primitives/ui/authoring/prompt.rs",
         "src/engine/primitives/ui/authoring/notifications.rs",
@@ -941,6 +957,7 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "mod schema_validation;",
         "mod presentation;",
         "mod policy_profile;",
+        "mod tests;",
     ] {
         assert!(
             capability_operations.contains(required),
@@ -948,6 +965,9 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         );
     }
     for forbidden in [
+        "mod tests {",
+        "fn test_function(",
+        "fn test_approval_record(",
         "fn validate_target_payload(",
         "fn render_search_summary(",
         "fn render_inspection_summary(",
@@ -963,10 +983,13 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         std::fs::read_to_string(crate_root.join("src/domains/capability/registry/mod.rs"))
             .expect("read capability registry root");
     assert!(
-        capability_registry.contains("mod store;"),
-        "capability registry root must declare focused CLC-1 store boundary"
+        capability_registry.contains("mod store;") && capability_registry.contains("mod tests;"),
+        "capability registry root must declare focused CLC-1 store and test boundaries"
     );
     for forbidden in [
+        "mod tests {",
+        "fn test_function(",
+        "fn session_generated_function(",
         "pub(crate) struct SqliteCapabilityRegistryStore",
         "pub(crate) struct InMemoryCapabilityRegistryStore",
         "const CAPABILITY_REGISTRY_SCHEMA",
