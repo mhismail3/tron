@@ -4748,6 +4748,9 @@ fn primitive_workers_are_owned_outside_host_bucket() {
         .expect("failed to read engine host");
     let host_meta = std::fs::read_to_string(crate_root.join("src/engine/host/meta.rs"))
         .expect("failed to read engine host meta boundary");
+    let host_runtime_host =
+        std::fs::read_to_string(crate_root.join("src/engine/host/runtime_host.rs"))
+            .expect("failed to read engine host runtime host boundary");
     assert!(
         host.contains("mod meta;")
             && host.contains("pub use meta::{CatalogWatchRequest, CatalogWatchResponse};")
@@ -4761,6 +4764,16 @@ fn primitive_workers_are_owned_outside_host_bucket() {
             && !host.contains("fn delegated_child_invocation(")
             && !host.contains("fn is_host_dispatched_primitive_namespace("),
         "engine host meta vocabulary, schemas, DTOs, and payload parsers must stay in host/meta.rs"
+    );
+    assert!(
+        host.contains("mod runtime_host;")
+            && host_runtime_host
+                .contains("impl primitives::runtime::PrimitiveRuntimeHost for EngineHost")
+            && host_runtime_host.contains("fn resource_type_definitions(")
+            && host_runtime_host.contains("fn storage_stats(")
+            && host_runtime_host.contains("fn stored_log_values(")
+            && !host.contains("impl primitives::runtime::PrimitiveRuntimeHost for EngineHost"),
+        "engine host primitive runtime implementation must stay in host/runtime_host.rs"
     );
     for removed in [
         "struct StreamPrimitiveHandler",
