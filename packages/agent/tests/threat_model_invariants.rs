@@ -900,6 +900,7 @@ fn critical_execution_and_ui_boundaries_stay_split() {
 
     for required_file in [
         "src/domains/capability/operations/mod.rs",
+        "src/domains/capability/operations/admin.rs",
         "src/domains/capability/operations/execute.rs",
         "src/domains/capability/operations/target_arguments.rs",
         "src/domains/capability/operations/schema_validation.rs",
@@ -920,6 +921,7 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability/operations/tests/support.rs",
         "src/domains/capability/registry/mod.rs",
         "src/domains/capability/registry/recipes.rs",
+        "src/domains/capability/registry/search_policy.rs",
         "src/domains/capability/registry/store.rs",
         "src/domains/capability/registry/tests/mod.rs",
         "src/domains/capability/registry/tests/projection.rs",
@@ -954,6 +956,7 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         std::fs::read_to_string(crate_root.join("src/domains/capability/operations/mod.rs"))
             .expect("read capability operations root");
     for required in [
+        "mod admin;",
         "mod schema_validation;",
         "mod presentation;",
         "mod policy_profile;",
@@ -966,6 +969,9 @@ fn critical_execution_and_ui_boundaries_stay_split() {
     }
     for forbidden in [
         "mod tests {",
+        "pub(crate) async fn registry_snapshot_value(",
+        "pub(crate) async fn plugin_install_value(",
+        "pub(super) fn validate_plugin_manifest(",
         "fn test_function(",
         "fn test_approval_record(",
         "fn validate_target_payload(",
@@ -983,11 +989,16 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         std::fs::read_to_string(crate_root.join("src/domains/capability/registry/mod.rs"))
             .expect("read capability registry root");
     assert!(
-        capability_registry.contains("mod store;") && capability_registry.contains("mod tests;"),
-        "capability registry root must declare focused CLC-1 store and test boundaries"
+        capability_registry.contains("mod search_policy;")
+            && capability_registry.contains("mod store;")
+            && capability_registry.contains("mod tests;"),
+        "capability registry root must declare focused CLC-1 search-policy, store, and test boundaries"
     );
     for forbidden in [
         "mod tests {",
+        "pub(crate) struct CapabilitySearchPolicy",
+        "pub(crate) struct CapabilitySearchFilters",
+        "fn document_kind_matches(",
         "fn test_function(",
         "fn session_generated_function(",
         "pub(crate) struct SqliteCapabilityRegistryStore",
