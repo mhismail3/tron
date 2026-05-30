@@ -765,6 +765,16 @@ fn rust_test_ownership_stays_code_adjacent() {
             && !module_activation_root.contains("#[tokio::test]"),
         "module_activation.rs must contain shared fixtures and declarations only"
     );
+    let approval_path = crate_root.join("src/engine/approval.rs");
+    let approval = std::fs::read_to_string(&approval_path)
+        .unwrap_or_else(|error| panic!("failed to read {approval_path:?}: {error}"));
+    assert!(
+        approval.contains("mod tests;")
+            && !approval.contains("mod tests {")
+            && line_count(&approval_path) <= 1_000
+            && crate_root.join("src/engine/approval/tests.rs").is_file(),
+        "engine approval tests must stay in src/engine/approval/tests.rs and keep approval.rs below the review-smell threshold"
+    );
 
     for (old_file, new_root, modules) in [
         (
