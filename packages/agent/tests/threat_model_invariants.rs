@@ -4791,6 +4791,23 @@ fn agent_runtime_stays_engine_native() {
 #[test]
 fn server_package_uses_domain_owned_engine_layout() {
     let crate_root = crate_root();
+    let engine_types_path = crate_root.join("src/engine/types.rs");
+    let engine_types = std::fs::read_to_string(&engine_types_path)
+        .unwrap_or_else(|error| panic!("failed to read {engine_types_path:?}: {error}"));
+    let engine_catalog_types =
+        std::fs::read_to_string(crate_root.join("src/engine/types/catalog.rs"))
+            .expect("failed to read engine catalog type boundary");
+    assert!(
+        engine_types.contains("mod catalog;")
+            && engine_types.contains("pub use catalog::*;")
+            && line_count(&engine_types_path) <= 1_000
+            && !engine_types.contains("pub struct CatalogChange")
+            && !engine_types.contains("pub enum CatalogSubjectKind")
+            && engine_catalog_types.contains("pub struct CatalogChange")
+            && engine_catalog_types.contains("pub enum CatalogSubjectKind"),
+        "engine types root must keep catalog change DTOs in src/engine/types/catalog.rs"
+    );
+
     for removed in [
         "src/server",
         "src/runtime",
