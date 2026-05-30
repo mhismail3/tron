@@ -902,6 +902,13 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability/operations/mod.rs",
         "src/domains/capability/operations/admin.rs",
         "src/domains/capability/operations/execute.rs",
+        "src/domains/capability/operations/execute/tests/mod.rs",
+        "src/domains/capability/operations/execute/tests/discovery.rs",
+        "src/domains/capability/operations/execute/tests/normalization.rs",
+        "src/domains/capability/operations/execute/tests/observe.rs",
+        "src/domains/capability/operations/execute/tests/support.rs",
+        "src/domains/capability/operations/execute/tests/terminal.rs",
+        "src/domains/capability/operations/execute/tests/trigger_metadata.rs",
         "src/domains/capability/operations/target_arguments.rs",
         "src/domains/capability/operations/schema_validation.rs",
         "src/domains/capability/operations/presentation.rs",
@@ -930,6 +937,8 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability/registry/tests/primer.rs",
         "src/domains/capability/registry/tests/store.rs",
         "src/domains/capability/registry/tests/support.rs",
+        "src/domains/capability_support/implementations/traits.rs",
+        "src/domains/capability_support/implementations/traits/tests.rs",
         "src/engine/primitives/ui/authoring/mod.rs",
         "src/engine/primitives/ui/authoring/prompt.rs",
         "src/engine/primitives/ui/authoring/notifications.rs",
@@ -985,6 +994,17 @@ fn critical_execution_and_ui_boundaries_stay_split() {
             "capability operations root must not regain extracted CLC-1 helper `{forbidden}`"
         );
     }
+    let capability_execute =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/operations/execute.rs"))
+            .expect("read capability execute root");
+    assert!(
+        capability_execute.contains("mod tests;"),
+        "capability execute root must keep tests in an adjacent CLC-1 test module"
+    );
+    assert!(
+        !capability_execute.contains("mod tests {"),
+        "capability execute root must not regain its broad inline test module"
+    );
     let capability_registry =
         std::fs::read_to_string(crate_root.join("src/domains/capability/registry/mod.rs"))
             .expect("read capability registry root");
@@ -1011,6 +1031,18 @@ fn critical_execution_and_ui_boundaries_stay_split() {
             "capability registry root must not regain extracted store helper `{forbidden}`"
         );
     }
+    let capability_support_traits = std::fs::read_to_string(
+        crate_root.join("src/domains/capability_support/implementations/traits.rs"),
+    )
+    .expect("read capability support traits");
+    assert!(
+        capability_support_traits.contains("mod tests;"),
+        "capability support traits must keep tests in an adjacent CLC-1 test module"
+    );
+    assert!(
+        !capability_support_traits.contains("mod tests {"),
+        "capability support traits must not regain its broad inline test module"
+    );
     let capability_registry_store =
         std::fs::read_to_string(crate_root.join("src/domains/capability/registry/store.rs"))
             .expect("read capability registry store");
