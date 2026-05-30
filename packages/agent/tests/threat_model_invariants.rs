@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        6_050,
+        6_150,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -3648,10 +3648,13 @@ fn module_package_activation_gates_stay_on() {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"))
     };
     let module = read_module_file("src/engine/primitives/module.rs");
+    let module_actions = read_module_file("src/engine/primitives/module/actions.rs");
     let module_grants = read_module_file("src/engine/primitives/module/grants.rs");
     let module_manifest = read_module_file("src/engine/primitives/module/manifest.rs");
+    let module_payload = read_module_file("src/engine/primitives/module/payload.rs");
     let module_registrations = read_module_file("src/engine/primitives/module/registrations.rs");
     let module_resources = read_module_file("src/engine/primitives/module/resources.rs");
+    let module_schemas = read_module_file("src/engine/primitives/module/schemas.rs");
     let module_trust_review = read_module_file("src/engine/primitives/module/trust_review.rs");
     let module_trust_audit = read_module_file("src/engine/primitives/module/trust_audit.rs");
     let module_trust_audit_schedule =
@@ -3663,10 +3666,13 @@ fn module_package_activation_gates_stay_on() {
         read_module_file("src/engine/primitives/module/activation_runtime.rs");
     let module_tree = [
         module.as_str(),
+        module_actions.as_str(),
         module_grants.as_str(),
         module_manifest.as_str(),
+        module_payload.as_str(),
         module_registrations.as_str(),
         module_resources.as_str(),
+        module_schemas.as_str(),
         module_trust_review.as_str(),
         module_trust_audit.as_str(),
         module_trust_audit_schedule.as_str(),
@@ -3735,6 +3741,48 @@ fn module_package_activation_gates_stay_on() {
             && !module.contains("fn link_if_possible("),
         "module resource mutation and projection helpers must stay in resources.rs"
     );
+    assert!(
+        module.contains("mod schemas;")
+            && module_schemas.contains("pub(super) fn register_package_schema(")
+            && module_schemas.contains("pub(super) fn activate_schema(")
+            && module_schemas.contains("pub(super) fn module_resource_response_schema(")
+            && !module.contains("fn register_package_schema(")
+            && !module.contains("fn activate_schema(")
+            && !module.contains("fn module_resource_response_schema("),
+        "module base request/response schemas must stay in schemas.rs"
+    );
+    assert!(
+        module.contains("mod actions;")
+            && module_actions.contains("pub(super) fn module_actions_for_package(")
+            && module_actions.contains("pub(super) fn module_actions_for_trust_target(")
+            && !module.contains("fn module_actions_for_package(")
+            && !module.contains("fn module_actions_for_trust_target("),
+        "module action catalogs must stay in actions.rs"
+    );
+    for helper in [
+        "required_object",
+        "required_value_str",
+        "required_map_str",
+        "string_array_from",
+        "parse_risk",
+        "parse_datetime",
+        "hash_json",
+        "append_string_array",
+        "append_value_array",
+        "bounded_json",
+        "truncate_utf8_bytes",
+        "reject_raw_secrets",
+        "collect_secret_refs",
+    ] {
+        assert!(
+            module_payload.contains(&format!("pub(super) fn {helper}")),
+            "module payload helper `{helper}` must live in payload.rs"
+        );
+        assert!(
+            !module.contains(&format!("fn {helper}(")),
+            "module payload helper `{helper}` must not drift back into module.rs"
+        );
+    }
     assert!(
         module.contains("mod source_trust;") && module.contains("mod health_integrity;"),
         "module primitive must declare source-trust and health/integrity ownership boundaries"
@@ -4062,9 +4110,13 @@ fn module_package_activation_gates_stay_on() {
         crate_root.join("src/engine/resources/validation.rs"),
         crate_root.join("src/engine/invocation.rs"),
         crate_root.join("src/engine/primitives/module.rs"),
+        crate_root.join("src/engine/primitives/module/actions.rs"),
+        crate_root.join("src/engine/primitives/module/activation_runtime.rs"),
         crate_root.join("src/engine/primitives/module/grants.rs"),
         crate_root.join("src/engine/primitives/module/manifest.rs"),
+        crate_root.join("src/engine/primitives/module/payload.rs"),
         crate_root.join("src/engine/primitives/module/resources.rs"),
+        crate_root.join("src/engine/primitives/module/schemas.rs"),
         crate_root.join("src/engine/primitives/module/trust_review.rs"),
         crate_root.join("src/engine/primitives/module/trust_audit.rs"),
         crate_root.join("src/engine/primitives/module/health_integrity.rs"),
@@ -5524,7 +5576,7 @@ fn operator_consequence_and_voice_note_resource_boundaries_stay_enforced() {
 
     for rel in [
         "src/engine/primitives/control/actions.rs",
-        "src/engine/primitives/module.rs",
+        "src/engine/primitives/module/actions.rs",
         "src/engine/primitives/module/trust_audit.rs",
         "src/engine/primitives/ui.rs",
     ] {
