@@ -25,7 +25,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "priority": {"type": "string", "enum": ["low", "normal", "high"]},
                     "badge": {"type": "integer", "minimum": 0},
                     "data": {"additionalProperties": true, "type": "object"},
-                    "sheetContent": {"additionalProperties": true, "type": "object"},
+                    "sheetContent": {"type": "string", "description": "Optional Markdown content for the in-app detail sheet."},
                     "sessionId": {"type": "string"},
                     "workspaceId": {"type": "string"}
                 },
@@ -43,7 +43,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "successCount": {"type": "integer"},
                     "totalCount": {"type": "integer"},
                     "warning": {"type": ["string", "null"]},
-                    "sheetContent": {},
+                    "sheetContent": {"type": ["string", "null"]},
                     "data": {},
                     "resourceRefs": {"type": "array"},
                     "evidenceRefs": {"type": "array"}
@@ -87,7 +87,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .description("Mark one notification inbox resource as read.")
             .tags(vec!["notification", "inbox", "read", "badge"])
             .request_schema(json!({"additionalProperties":false,"properties":{"eventId":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["eventId"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"},"decisionRefs":{"type":"array"}},"required":["success","decisionRefs"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"},"unreadCount":{"type":"integer"},"decisionRefs":{"type":"array"}},"required":["success","unreadCount","decisionRefs"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .output_contract(optional_decision_output_contract())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
@@ -96,7 +96,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .description("Mark all visible notification inbox resources as read, optionally scoped to one session.")
             .tags(vec!["notification", "inbox", "read", "badge"])
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"marked":{"type":"integer"},"decisionRefs":{"type":"array"}},"required":["marked","decisionRefs"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"marked":{"type":"integer"},"unreadCount":{"type":"integer"},"decisionRefs":{"type":"array"}},"required":["marked","unreadCount","decisionRefs"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .output_contract(optional_decision_output_contract())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))

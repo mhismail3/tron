@@ -4,6 +4,10 @@
 //! namespace. Notification delivery/read truth is resource-backed:
 //! `notifications::send` creates a `notification` resource plus delivery
 //! `evidence`, and read/mark-all-read state is stored as `decision` resources.
+//! Mark-read responses include the server global unread count so clients never
+//! infer badge truth from local visible rows. Notification resource child
+//! writes inherit caller session/workspace context when present and otherwise
+//! use the notification system context for global inbox actions.
 //! Session events and APNs delivery remain audit/projection channels, not inbox
 //! source truth.
 
@@ -111,13 +115,22 @@ async fn notifications_send_value(
     if let Some(data) = &data {
         reject_raw_secret_value(data, "data")?;
     }
-    let sheet_content = params
+    let sheet_content_value = params
         .and_then(|value| value.get("sheetContent"))
         .cloned()
         .or_else(|| params.and_then(|value| value.get("sheet_content")).cloned());
-    if let Some(sheet_content) = &sheet_content {
-        reject_raw_secret_value(sheet_content, "sheetContent")?;
-    }
+    let sheet_content = match sheet_content_value {
+        Some(Value::String(value)) => {
+            reject_raw_secret_text(&value, "sheetContent")?;
+            Some(value)
+        }
+        Some(Value::Null) | None => None,
+        Some(_) => {
+            return Err(CapabilityError::InvalidParams {
+                message: "sheetContent must be a string".to_owned(),
+            });
+        }
+    };
     let now = chrono::Utc::now().to_rfc3339();
     let prepared = NotificationInboxService::prepare(
         invocation,
@@ -294,6 +307,7 @@ mod tests {
                 "title": "t".repeat(80),
                 "body": "b".repeat(260),
                 "priority": "high",
+                "sheetContent": "## Details\n- Render this in the app sheet.",
                 "data": {
                     "custom": "value",
                     "invocationId": "forged-invocation",
@@ -308,10 +322,18 @@ mod tests {
         .expect("send");
 
         assert_eq!(result["success"], json!(true));
+        assert_eq!(
+            result["sheetContent"],
+            json!("## Details\n- Render this in the app sheet.")
+        );
         let sent = notify.last.lock().unwrap().clone().expect("notification");
         assert!(sent.title.len() <= MAX_TITLE_LENGTH);
         assert!(sent.body.len() <= MAX_BODY_LENGTH);
         assert_eq!(sent.priority, "high");
+        assert_eq!(
+            sent.sheet_content.as_deref(),
+            Some("## Details\n- Render this in the app sheet.")
+        );
         assert_eq!(sent.data.as_ref().unwrap()["custom"], json!("value"));
         assert_eq!(sent.data.as_ref().unwrap()["sessionId"], json!("sess_1"));
         assert_eq!(sent.data.as_ref().unwrap()["workspaceId"], json!("ws_1"));
@@ -345,6 +367,38 @@ mod tests {
 
         assert!(
             error.to_string().contains("causal context"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            notify.last.lock().unwrap().is_none(),
+            "invalid notification must not reach delivery delegate"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_rejects_non_string_sheet_content() {
+        let ctx = make_test_context();
+        let notify = Arc::new(RecordingNotify::default());
+        let deps = Deps {
+            engine_host: ctx.engine_host.clone(),
+            notify_delegate: notify.clone(),
+        };
+        let invocation = test_invocation();
+        let error = notifications_send_value(
+            Some(&json!({
+                "title": "Sheet shape",
+                "body": "Native sheets render Markdown text.",
+                "priority": "normal",
+                "sheetContent": {"markdown": "## Wrong shape"}
+            })),
+            &deps,
+            &invocation,
+        )
+        .await
+        .expect_err("sheetContent must match the native Markdown string contract");
+
+        assert!(
+            error.to_string().contains("sheetContent must be a string"),
             "unexpected error: {error}"
         );
         assert!(

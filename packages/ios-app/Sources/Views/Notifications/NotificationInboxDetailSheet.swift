@@ -17,6 +17,7 @@ struct NotificationInboxDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("autoMarkNotificationsRead") private var autoMarkRead = true
     @State private var hasMarkedRead = false
+    @State private var isMarkingRead = false
 
     private var isRead: Bool {
         notification.isRead || hasMarkedRead
@@ -53,13 +54,19 @@ struct NotificationInboxDetailSheet: View {
                                 Task { await markRead() }
                             } label: {
                                 HStack(spacing: 4) {
-                                    Image(systemName: "checkmark.circle")
-                                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                    if isMarkingRead {
+                                        ProgressView()
+                                            .controlSize(.mini)
+                                    } else {
+                                        Image(systemName: "checkmark.circle")
+                                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                    }
                                     Text("Mark Read")
                                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                                 }
                                 .foregroundStyle(.tronEmerald)
                             }
+                            .disabled(isMarkingRead)
                         } else {
                             Button { dismiss() } label: {
                                 Image(systemName: "checkmark")
@@ -142,7 +149,14 @@ struct NotificationInboxDetailSheet: View {
     // MARK: - Actions
 
     private func markRead() async {
-        let success = await notificationStore.markRead(eventId: notification.eventId, idempotencyKey: .userAction("notifications.markRead"))
+        guard !isRead, !isMarkingRead else { return }
+        isMarkingRead = true
+        defer { isMarkingRead = false }
+        let success = await notificationStore.markRead(
+            eventId: notification.eventId,
+            sessionId: notification.sessionId,
+            idempotencyKey: .userAction("notifications.markRead")
+        )
         if success {
             hasMarkedRead = true
         }

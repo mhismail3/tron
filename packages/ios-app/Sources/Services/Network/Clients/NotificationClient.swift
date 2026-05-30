@@ -11,9 +11,21 @@ final class NotificationClient: EngineDomainClient {
     }
 
     /// Mark a single notification as read.
-    func markRead(eventId: String, idempotencyKey: EngineIdempotencyKey) async throws -> NotificationMarkReadResult {
+    func markRead(
+        eventId: String,
+        sessionId: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> NotificationMarkReadResult {
         _ = try requireTransport().requireConnection()
-        let params = NotificationMarkReadParams(eventId: eventId)
+        let params = NotificationMarkReadParams(eventId: eventId, sessionId: sessionId)
+        if let sessionId {
+            return try await invokeWrite(
+                "notifications::mark_read",
+                params,
+                idempotencyKey: idempotencyKey,
+                context: sessionInvocationContext(sessionId)
+            )
+        }
         return try await invokeWrite("notifications::mark_read", params, idempotencyKey: idempotencyKey)
     }
 
@@ -49,6 +61,7 @@ private struct NotificationListParams: Encodable {
 
 private struct NotificationMarkReadParams: Encodable {
     let eventId: String
+    let sessionId: String?
 }
 
 private struct NotificationMarkAllReadParams: Encodable {
@@ -80,8 +93,10 @@ struct NotificationListResult: Codable {
 
 struct NotificationMarkReadResult: Codable {
     let success: Bool
+    let unreadCount: Int
 }
 
 struct NotificationMarkAllReadResult: Codable {
     let marked: Int
+    let unreadCount: Int
 }

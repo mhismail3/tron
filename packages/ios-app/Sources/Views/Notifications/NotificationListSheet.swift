@@ -44,6 +44,7 @@ struct NotificationListSheet: View {
     @State private var selectedNotification: NotificationDTO?
     @State private var didAutoOpen = false
     @State private var filter: NotificationInboxFilter = .all
+    @State private var isMarkingAllRead = false
 
     private var visibleNotifications: [NotificationDTO] {
         NotificationInboxFilter.apply(notificationStore.notifications, filter: filter)
@@ -64,16 +65,22 @@ struct NotificationListSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if notificationStore.unreadCount > 0 {
                         Button {
-                            Task { await notificationStore.markAllRead(idempotencyKey: .userAction("notifications.markAllRead")) }
+                            markAllRead()
                         } label: {
                             HStack(spacing: 4) {
-                                Image(systemName: "checkmark.circle")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                if isMarkingAllRead {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                } else {
+                                    Image(systemName: "checkmark.circle")
+                                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                }
                                 Text("Read All")
                                     .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             }
                             .foregroundStyle(.tronEmerald)
                         }
+                        .disabled(isMarkingAllRead)
                     }
                 }
                 ToolbarItem(placement: .principal) {
@@ -158,6 +165,15 @@ struct NotificationListSheet: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+    }
+
+    private func markAllRead() {
+        guard !isMarkingAllRead else { return }
+        isMarkingAllRead = true
+        Task {
+            await notificationStore.markAllRead(idempotencyKey: .userAction("notifications.markAllRead"))
+            isMarkingAllRead = false
+        }
     }
 }
 

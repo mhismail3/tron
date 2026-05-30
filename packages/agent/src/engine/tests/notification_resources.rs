@@ -11,6 +11,12 @@ fn notification_write_context(key: &str) -> CausalContext {
     mutating_causal(key).with_scope("notifications.write")
 }
 
+fn notification_system_write_context(key: &str) -> CausalContext {
+    causal()
+        .with_idempotency_key(key)
+        .with_scope("notifications.write")
+}
+
 fn notification_ui_context(key: &str) -> CausalContext {
     mutating_causal(key)
         .with_scope("ui.write")
@@ -139,6 +145,7 @@ async fn notifications_send_list_and_read_are_resource_backed() {
     assert_eq!(read.error, None);
     let read_value = read.value.as_ref().unwrap();
     assert_eq!(read_value["success"], true);
+    assert_eq!(read_value["unreadCount"], 0);
     assert!(
         read_value["decisionRefs"]
             .as_array()
@@ -150,6 +157,39 @@ async fn notifications_send_list_and_read_are_resource_backed() {
     let after_read = list_notifications(&handle).await;
     assert_eq!(after_read["notifications"][0]["isRead"], true);
     assert_eq!(after_read["unreadCount"], 0);
+}
+
+#[tokio::test]
+async fn notification_mark_read_works_without_caller_session_context() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+
+    let sent = handle
+        .invoke(host_invocation(
+            "notifications::send",
+            json!({
+                "title": "System mark read",
+                "body": "The inbox action can be launched from global UI.",
+                "priority": "normal"
+            }),
+            notification_write_context("notification-system-mark-read-send"),
+        ))
+        .await;
+    assert_eq!(sent.error, None);
+    let listed = list_notifications(&handle).await;
+    let notification_id = listed["notifications"][0]["eventId"].as_str().unwrap();
+
+    let read = handle
+        .invoke(host_invocation(
+            "notifications::mark_read",
+            json!({"eventId": notification_id}),
+            notification_system_write_context("notification-system-mark-read"),
+        ))
+        .await;
+
+    assert_eq!(read.error, None);
+    assert_eq!(read.value.as_ref().unwrap()["success"], true);
+    assert_eq!(read.value.as_ref().unwrap()["unreadCount"], 0);
 }
 
 #[tokio::test]
@@ -210,6 +250,20 @@ async fn notification_mark_all_read_creates_one_scoped_decision() {
             .await;
         assert_eq!(sent.error, None);
     }
+    let other_session = handle
+        .invoke(host_invocation(
+            "notifications::send",
+            json!({
+                "title": "Other session",
+                "body": "Scoped mark-all must leave this unread.",
+                "priority": "normal"
+            }),
+            notification_write_context("notification-send-other-session")
+                .with_session_id("session-b")
+                .with_workspace_id("workspace-b"),
+        ))
+        .await;
+    assert_eq!(other_session.error, None);
 
     let marked = handle
         .invoke(host_invocation(
@@ -220,6 +274,7 @@ async fn notification_mark_all_read_creates_one_scoped_decision() {
         .await;
     assert_eq!(marked.error, None);
     assert_eq!(marked.value.as_ref().unwrap()["marked"], 2);
+    assert_eq!(marked.value.as_ref().unwrap()["unreadCount"], 1);
     assert_eq!(
         marked.value.as_ref().unwrap()["decisionRefs"]
             .as_array()
@@ -239,7 +294,56 @@ async fn notification_mark_all_read_creates_one_scoped_decision() {
     assert_eq!(replay.error, None);
     assert_eq!(replay.value, marked.value);
     assert_eq!(resources_with_kind(&handle, "decision").await.len(), 1);
-    assert_eq!(list_notifications(&handle).await["unreadCount"], 0);
+    let listed = list_notifications(&handle).await;
+    assert_eq!(listed["unreadCount"], 1);
+    assert!(
+        listed["notifications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["sessionId"] == "session-b" && entry["isRead"] == false)
+    );
+}
+
+#[tokio::test]
+async fn notification_mark_all_read_works_without_caller_session_context() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+
+    for idx in 0..2 {
+        let sent = handle
+            .invoke(host_invocation(
+                "notifications::send",
+                json!({
+                    "title": format!("Global notice {idx}"),
+                    "body": "Global Read All should be valid from the inbox sheet.",
+                    "priority": "normal"
+                }),
+                notification_write_context(&format!("notification-global-send-{idx}")),
+            ))
+            .await;
+        assert_eq!(sent.error, None);
+    }
+
+    let marked = handle
+        .invoke(host_invocation(
+            "notifications::mark_all_read",
+            json!({}),
+            notification_system_write_context("notification-global-mark-all"),
+        ))
+        .await;
+
+    assert_eq!(marked.error, None);
+    assert_eq!(marked.value.as_ref().unwrap()["marked"], 2);
+    assert_eq!(marked.value.as_ref().unwrap()["unreadCount"], 0);
+    let listed = list_notifications(&handle).await;
+    assert!(
+        listed["notifications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|entry| entry["isRead"] == true)
+    );
 }
 
 #[tokio::test]

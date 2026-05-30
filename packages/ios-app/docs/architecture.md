@@ -217,9 +217,13 @@ established, it does not start server work that the UI cannot observe.
 Foreground notification inbox updates follow the same thin-client rule:
 notification capability completions delivered over `/engine` refresh the inbox, while
 APNs remains the background device-delivery transport. Read-state mutations are
-also connection-gated; views may request a scoped mark-read while the socket is
-still warming up, but `NotificationStore` skips those writes until the engine is
-connected instead of logging a warning for expected startup timing.
+also connection-gated and never optimistic: `NotificationStore` mutates local
+rows only after `notifications::mark_read` or `notifications::mark_all_read`
+returns, uses the server's global `unreadCount` for badge truth, and surfaces a
+toast if the action fails. Detail mark-read calls carry the row's `sessionId`
+when available; global Read All stays unscoped, while session-open auto-read
+uses `notifications::mark_all_read(sessionId:)` so one session cannot clear
+another session's unread rows.
 
 ### Capability Console Boundary
 

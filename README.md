@@ -487,7 +487,11 @@ arguments visible so schema validation still fails closed.
 `notifications::send` sends through the first-party notification delegate and
 persists operator-visible notification truth as `notification` resources with
 delivery `evidence`; read and mark-all-read state is stored as `decision`
-resources rather than per-event table rows.
+resources rather than per-event table rows. Optional `sheetContent` is Markdown
+text for native detail sheets, not an arbitrary object. `notifications::mark_read`
+and `notifications::mark_all_read` return the server global `unreadCount`;
+scoped mark-all accepts `sessionId`, while unscoped Read All remains a global
+inbox action with notification-owned resource write context.
 `voice_notes::save` transcribes audio into resource-backed `artifact` and
 `materialized_file` outputs; `voice_notes::list` and `voice_notes::delete` read
 and discard resource state rather than treating Markdown files as source truth.

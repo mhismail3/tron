@@ -156,7 +156,7 @@ pub struct Notification {
     pub data: Option<Value>,
     /// Optional sheet content (metadata only, not in push).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sheet_content: Option<Value>,
+    pub sheet_content: Option<String>,
 }
 
 fn default_priority() -> String {

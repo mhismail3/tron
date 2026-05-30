@@ -204,7 +204,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "priority": {"type": "string"},
                     "badge": {"type": ["integer", "null"]},
                     "data": {"type": ["object", "null"]},
-                    "sheetContent": {},
+                    "sheetContent": {"type": ["string", "null"]},
                     "sessionId": {"type": "string"},
                     "workspaceId": {"type": "string"},
                     "invocationId": {"type": "string"},

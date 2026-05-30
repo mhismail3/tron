@@ -21,6 +21,7 @@ const NOTIFICATION_RESOURCE_PREFIX: &str = "notification:";
 const NOTIFICATION_READ_DECISION: &str = "notification_read";
 const NOTIFICATION_MARK_ALL_READ_DECISION: &str = "notification_mark_all_read";
 const DELIVERY_EVIDENCE_TYPE: &str = "notification_delivery";
+const NOTIFICATIONS_SYSTEM_CONTEXT_ID: &str = "notifications";
 const MAX_NOTIFICATION_LIST_LIMIT: usize = 100;
 const NOTIFICATION_TRUTH_SCAN_LIMIT: usize =
     crate::domains::resource_projection::MAX_RESOURCE_COLLECTION_LIMIT;
@@ -39,7 +40,7 @@ pub(crate) struct NotificationInboxEntry {
     pub(crate) timestamp: String,
     pub(crate) title: String,
     pub(crate) body: String,
-    pub(crate) sheet_content: Option<Value>,
+    pub(crate) sheet_content: Option<String>,
     pub(crate) is_read: bool,
     pub(crate) read_at: Option<String>,
     pub(crate) session_title: Option<String>,
@@ -64,6 +65,7 @@ pub(crate) struct NotificationListResult {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MarkReadResult {
     pub(crate) success: bool,
+    pub(crate) unread_count: u64,
     pub(crate) decision_refs: Vec<Value>,
 }
 
@@ -72,6 +74,7 @@ pub(crate) struct MarkReadResult {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MarkAllReadResult {
     pub(crate) marked: usize,
+    pub(crate) unread_count: u64,
     pub(crate) decision_refs: Vec<Value>,
 }
 
@@ -218,8 +221,10 @@ impl NotificationInboxService {
         let resource_id = normalize_notification_resource_id(event_id);
         let inspection = require_notification(deps, Some(parent), &resource_id).await?;
         if let Some(existing) = existing_single_read_decision(deps, &resource_id).await? {
+            let unread_count = Self::global_unread_count(deps).await?;
             return Ok(MarkReadResult {
                 success: true,
+                unread_count,
                 decision_refs: vec![existing],
             });
         }
@@ -263,8 +268,10 @@ impl NotificationInboxService {
             "mark-read:link",
         )
         .await?;
+        let unread_count = Self::global_unread_count(deps).await?;
         Ok(MarkReadResult {
             success: true,
+            unread_count,
             decision_refs: resource_refs(&decision),
         })
     }
@@ -281,8 +288,10 @@ impl NotificationInboxService {
             .filter(|entry| !entry.is_read)
             .collect::<Vec<_>>();
         if unread.is_empty() {
+            let unread_count = Self::global_unread_count(deps).await?;
             return Ok(MarkAllReadResult {
                 marked: 0,
+                unread_count,
                 decision_refs: Vec::new(),
             });
         }
@@ -336,10 +345,16 @@ impl NotificationInboxService {
             )
             .await?;
         }
+        let unread_count = Self::global_unread_count(deps).await?;
         Ok(MarkAllReadResult {
             marked: affected.len(),
+            unread_count,
             decision_refs: resource_refs(&decision),
         })
+    }
+
+    async fn global_unread_count(deps: &Deps) -> Result<u64, CapabilityError> {
+        Ok(Self::list(deps, 1, None).await?.unread_count)
     }
 }
 
@@ -380,7 +395,10 @@ fn entry_from_payload(
             .to_owned(),
         title,
         body,
-        sheet_content: payload.get("sheetContent").cloned(),
+        sheet_content: payload
+            .get("sheetContent")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         is_read: read_decision.is_some(),
         read_at: read_decision.map(|decision| decision.read_at.clone()),
         session_title: payload
@@ -762,17 +780,16 @@ async fn invoke_resource_capability(
     ));
     if let Some(parent) = parent {
         causal.parent_invocation_id = Some(parent.id.clone());
-        if let Some(session_id) = &parent.causal_context.session_id {
-            causal = causal.with_session_id(session_id.clone());
-        }
-        if let Some(workspace_id) = &parent.causal_context.workspace_id {
-            causal = causal.with_workspace_id(workspace_id.clone());
-        }
-    } else {
-        causal = causal
-            .with_session_id("notifications")
-            .with_workspace_id("notifications");
     }
+    let session_id = parent
+        .and_then(|invocation| invocation.causal_context.session_id.as_deref())
+        .unwrap_or(NOTIFICATIONS_SYSTEM_CONTEXT_ID);
+    let workspace_id = parent
+        .and_then(|invocation| invocation.causal_context.workspace_id.as_deref())
+        .unwrap_or(NOTIFICATIONS_SYSTEM_CONTEXT_ID);
+    causal = causal
+        .with_session_id(session_id)
+        .with_workspace_id(workspace_id);
     let result = deps
         .engine_host
         .invoke(Invocation::new_sync(
