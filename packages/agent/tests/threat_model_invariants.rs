@@ -911,6 +911,7 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability/operations/audit.rs",
         "src/domains/capability/registry/mod.rs",
         "src/domains/capability/registry/recipes.rs",
+        "src/domains/capability/registry/store.rs",
         "src/engine/primitives/ui/authoring/mod.rs",
         "src/engine/primitives/ui/authoring/prompt.rs",
         "src/engine/primitives/ui/authoring/notifications.rs",
@@ -956,6 +957,38 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         assert!(
             !capability_operations.contains(forbidden),
             "capability operations root must not regain extracted CLC-1 helper `{forbidden}`"
+        );
+    }
+    let capability_registry =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/mod.rs"))
+            .expect("read capability registry root");
+    assert!(
+        capability_registry.contains("mod store;"),
+        "capability registry root must declare focused CLC-1 store boundary"
+    );
+    for forbidden in [
+        "pub(crate) struct SqliteCapabilityRegistryStore",
+        "pub(crate) struct InMemoryCapabilityRegistryStore",
+        "const CAPABILITY_REGISTRY_SCHEMA",
+        "CREATE TABLE IF NOT EXISTS capability_plugins",
+    ] {
+        assert!(
+            !capability_registry.contains(forbidden),
+            "capability registry root must not regain extracted store helper `{forbidden}`"
+        );
+    }
+    let capability_registry_store =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/registry/store.rs"))
+            .expect("read capability registry store");
+    for required in [
+        "pub(crate) trait CapabilityRegistryStore",
+        "pub(crate) struct SqliteCapabilityRegistryStore",
+        "pub(crate) struct InMemoryCapabilityRegistryStore",
+        "const CAPABILITY_REGISTRY_SCHEMA",
+    ] {
+        assert!(
+            capability_registry_store.contains(required),
+            "capability registry store must own CLC-1 persistence boundary `{required}`"
         );
     }
 
@@ -5243,7 +5276,9 @@ fn cleanup_scorecard_large_file_budgets(scorecard: &str) -> BTreeMap<String, usi
     let mut budgets = BTreeMap::new();
     let mut in_table = false;
     for line in scorecard.lines() {
-        if line.starts_with("| File | LOC @ CLC-0 | Owner | Reason | Budget |") {
+        if line.starts_with("| File | LOC @ CLC-0 | Owner | Reason | Budget |")
+            || line.starts_with("| File | Current LOC | Owner | Reason | Budget |")
+        {
             in_table = true;
             continue;
         }
