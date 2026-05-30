@@ -3648,6 +3648,7 @@ fn module_package_activation_gates_stay_on() {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"))
     };
     let module = read_module_file("src/engine/primitives/module.rs");
+    let module_grants = read_module_file("src/engine/primitives/module/grants.rs");
     let module_manifest = read_module_file("src/engine/primitives/module/manifest.rs");
     let module_registrations = read_module_file("src/engine/primitives/module/registrations.rs");
     let module_trust_review = read_module_file("src/engine/primitives/module/trust_review.rs");
@@ -3661,6 +3662,7 @@ fn module_package_activation_gates_stay_on() {
         read_module_file("src/engine/primitives/module/activation_runtime.rs");
     let module_tree = [
         module.as_str(),
+        module_grants.as_str(),
         module_manifest.as_str(),
         module_registrations.as_str(),
         module_trust_review.as_str(),
@@ -3674,6 +3676,22 @@ fn module_package_activation_gates_stay_on() {
     assert!(
         module.contains("mod activation_runtime;"),
         "module primitive must declare the activation runtime ownership boundary"
+    );
+    assert!(
+        module.contains("mod grants;")
+            && module_grants.contains("pub(super) fn child_grant_from_payload(")
+            && module_grants.contains("pub(super) fn ensure_grant_request_narrows_caller(")
+            && module_grants.contains("pub(super) fn ensure_grant_ceiling_narrows_caller(")
+            && module_grants.contains("pub(super) fn ensure_grant_request_within_ceiling(")
+            && module_grants.contains("pub(super) fn ensure_grant_ceiling_within_ceiling(")
+            && module_grants.contains("pub(super) fn ensure_path_within_grant_roots(")
+            && !module.contains("fn child_grant_from_payload(")
+            && !module.contains("fn ensure_grant_request_narrows_caller(")
+            && !module.contains("fn ensure_grant_ceiling_narrows_caller(")
+            && !module.contains("fn ensure_grant_request_within_ceiling(")
+            && !module.contains("fn ensure_grant_ceiling_within_ceiling(")
+            && !module.contains("fn ensure_path_within_grant_roots("),
+        "module grant derivation and narrowing checks must stay in grants.rs"
     );
     assert!(
         module.contains("mod manifest;")
@@ -4028,6 +4046,7 @@ fn module_package_activation_gates_stay_on() {
         crate_root.join("src/engine/resources/validation.rs"),
         crate_root.join("src/engine/invocation.rs"),
         crate_root.join("src/engine/primitives/module.rs"),
+        crate_root.join("src/engine/primitives/module/grants.rs"),
         crate_root.join("src/engine/primitives/module/manifest.rs"),
         crate_root.join("src/engine/primitives/module/trust_review.rs"),
         crate_root.join("src/engine/primitives/module/trust_audit.rs"),
