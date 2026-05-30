@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        5_950,
+        6_000,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -2978,18 +2978,20 @@ fn bounded_resource_projection_summaries_stay_canonical() {
         "control projections must keep bounded resource access"
     );
 
-    for rel in [
-        "src/engine/primitives/module/trust_audit.rs",
-        "src/engine/primitives/module/source_trust.rs",
+    let module_trust_audit =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/module/trust_audit.rs"))
+            .expect("failed to read module trust audit");
+    let module_source_trust = read_module_source_trust_tree(&crate_root);
+    for (label, content) in [
+        ("trust_audit", module_trust_audit.as_str()),
+        ("source_trust", module_source_trust.as_str()),
     ] {
-        let content = std::fs::read_to_string(crate_root.join(rel))
-            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
         assert!(
             content.contains("list_resources(ListResources")
                 && content.contains("inspect_resource")
                 && content.contains("limit: 500")
                 && !content.contains("limit: 10_000"),
-            "{rel} module trust/audit projections must stay resource-native and bounded"
+            "{label} module trust/audit projections must stay resource-native and bounded"
         );
     }
 }
@@ -3650,7 +3652,7 @@ fn module_package_activation_gates_stay_on() {
     let module_trust_audit = read_module_file("src/engine/primitives/module/trust_audit.rs");
     let module_trust_audit_schedule =
         read_module_file("src/engine/primitives/module/trust_audit/schedule.rs");
-    let module_source_trust = read_module_file("src/engine/primitives/module/source_trust.rs");
+    let module_source_trust = read_module_source_trust_tree(&crate_root);
     let module_health_integrity =
         read_module_file("src/engine/primitives/module/health_integrity.rs");
     let module_activation_runtime =
@@ -3989,7 +3991,7 @@ fn module_package_activation_gates_stay_on() {
             && resources.contains("enforces_revocation"),
         "worker_package resources must carry source trust and conformance refs"
     );
-    for path in [
+    let mut module_resource_native_paths = vec![
         crate_root.join("src/engine/grants.rs"),
         crate_root.join("src/engine/resources/store.rs"),
         crate_root.join("src/engine/resources/definitions.rs"),
@@ -3998,9 +4000,15 @@ fn module_package_activation_gates_stay_on() {
         crate_root.join("src/engine/primitives/module.rs"),
         crate_root.join("src/engine/primitives/module/trust_review.rs"),
         crate_root.join("src/engine/primitives/module/trust_audit.rs"),
-        crate_root.join("src/engine/primitives/module/source_trust.rs"),
         crate_root.join("src/engine/primitives/module/health_integrity.rs"),
-    ] {
+    ];
+    module_resource_native_paths
+        .push(crate_root.join("src/engine/primitives/module/source_trust.rs"));
+    module_resource_native_paths.extend(files_with_extensions(
+        &crate_root.join("src/engine/primitives/module/source_trust"),
+        &["rs"],
+    ));
+    for path in module_resource_native_paths {
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
         assert!(
@@ -5871,6 +5879,23 @@ fn read_generated_ui_authoring_tree(crate_root: &Path) -> String {
     })
     .collect::<Vec<_>>()
     .join("\n")
+}
+
+fn read_module_source_trust_tree(crate_root: &Path) -> String {
+    let mut files = vec![crate_root.join("src/engine/primitives/module/source_trust.rs")];
+    files.extend(files_with_extensions(
+        &crate_root.join("src/engine/primitives/module/source_trust"),
+        &["rs"],
+    ));
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn files_to_scan(root: &Path) -> Vec<PathBuf> {
