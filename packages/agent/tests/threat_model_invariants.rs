@@ -4020,10 +4020,10 @@ fn module_package_activation_gates_stay_on() {
         "module activation tests must stay split by source-trust and health/integrity concern"
     );
 
-    let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
-        .expect("failed to read engine host");
-    let host_dispatched = host
-        .split("fn is_host_dispatched_primitive_namespace")
+    let host_meta = std::fs::read_to_string(crate_root.join("src/engine/host/meta.rs"))
+        .expect("failed to read engine host meta boundary");
+    let host_dispatched = host_meta
+        .split("pub(super) fn is_host_dispatched_primitive_namespace")
         .nth(1)
         .expect("engine host must define primitive dispatch guard");
     assert!(
@@ -4182,6 +4182,8 @@ fn module_package_activation_gates_stay_on() {
             && !ui.contains("\"enforce_disable\", \"enforce_quarantine\""),
         "generated UI must derive trust-review operation schemas from the canonical module source"
     );
+    let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
+        .expect("failed to read engine host");
     assert!(
         host.contains("primitives::module::trust_audit_current_due_bucket")
             && host.contains("primitives::module::trust_audit_evidence_matches_due_bucket")
@@ -4744,6 +4746,22 @@ fn primitive_workers_are_owned_outside_host_bucket() {
 
     let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
         .expect("failed to read engine host");
+    let host_meta = std::fs::read_to_string(crate_root.join("src/engine/host/meta.rs"))
+        .expect("failed to read engine host meta boundary");
+    assert!(
+        host.contains("mod meta;")
+            && host.contains("pub use meta::{CatalogWatchRequest, CatalogWatchResponse};")
+            && host_meta.contains("pub(super) const ENGINE_WORKER_ID")
+            && host_meta.contains("pub(super) fn meta_function_definitions(")
+            && host_meta.contains("pub(super) fn watch_request_from_payload(")
+            && host_meta.contains("pub(super) fn delegated_child_invocation(")
+            && host_meta.contains("pub(super) fn is_host_dispatched_primitive_namespace(")
+            && !host.contains("fn meta_function_definitions(")
+            && !host.contains("fn watch_request_from_payload(")
+            && !host.contains("fn delegated_child_invocation(")
+            && !host.contains("fn is_host_dispatched_primitive_namespace("),
+        "engine host meta vocabulary, schemas, DTOs, and payload parsers must stay in host/meta.rs"
+    );
     for removed in [
         "struct StreamPrimitiveHandler",
         "struct StatePrimitiveHandler",
