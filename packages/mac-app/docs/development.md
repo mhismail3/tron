@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-04-29 (dev menu busy-state preservation + command log)
+> Last verified: 2026-05-30 (dev menu busy-state preservation, command log, and CLI command modules)
 
 ## Setup
 
@@ -42,6 +42,11 @@ Run these commands from the repo root unless a step says otherwise. The wrapper 
 | Xcode isolated install/reinstall test | `bash packages/mac-app/scripts/bundle-agent.sh --profile debug`<br>`cd packages/mac-app && xcodegen generate`<br>Open `TronMac.xcodeproj`, select `TronMac Isolated Install`, Run | Runs the first-run wizard against `com.tron.server.dev`, port `9848`, and `~/.tron-dev`; safe while the production DMG app/server remain installed |
 | Local Release install test | `bash packages/mac-app/scripts/bundle-agent.sh`<br>`cd packages/mac-app && xcodegen generate`<br>`xcodebuild -scheme TronMac -destination 'platform=macOS' -configuration Release build`<br>`ditto "$HOME/Library/Developer/Xcode/DerivedData/TronMac-"*/Build/Products/Release/Tron.app /Applications/Tron.app`<br>`open /Applications/Tron.app` | Replaces the single installed-release slot with a local `com.tron.mac` build; exercises the same path and SMAppService registration as the DMG, without notarization/Gatekeeper |
 | Rust server iteration only | `./scripts/tron dev` | Stops `com.tron.server`, runs `~/.tron/internal/run/Tron-Dev.app` on port `9847`, waits for `/health` in background mode, writes startup and exit output to `~/.tron/internal/run/tron-dev-background.log`, then restores `/Applications/Tron.app` through `--tron-start-server-and-quit` on exit. Background mode is LaunchAgent-backed so non-interactive agents do not own the server process group. Agent automation should prefer `./scripts/tron dev -bd --json --wait <seconds>` and verify with `./scripts/tron status --json`. |
+
+The workspace CLI dispatcher is intentionally small. Command families live in
+`scripts/tron.d/`; runtime helpers shared by the installed `tron-cli` live in
+`scripts/tron-lib.d/` and are copied beside `tron-lib.sh` during
+`tron install`, `tron setup`, and contributor deploy refreshes.
 | Production DMG release | Push/run the `server-v*` release workflow in `.github/workflows/release-mac.yml` | Builds `tron` and `tron-program-worker` with relay secrets, stages both into `Tron.app`, verifies bundled transcription resources, signs helper then wrapper, notarizes/staples, creates the DMG, and publishes it |
 
 ## Local dev loop

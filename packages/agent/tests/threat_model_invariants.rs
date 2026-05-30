@@ -33,7 +33,7 @@ const TRUST_BOUNDARY_SITES: &[(&str, &str)] = &[
     // C1 — filesystem services accept arbitrary paths
     ("src/domains/filesystem/service.rs", "trusted-local"),
     // C2 — server binds 0.0.0.0 by default
-    ("src/main.rs", "trusted-local"),
+    ("src/main_cli.rs", "trusted-local"),
     // L8 — client-supplied bundleId trusted at register time
     ("src/domains/device/mod.rs", "trusted-local"),
     // L14 — `is_path_within` is lexical, no symlink resolution
@@ -47,7 +47,7 @@ const TRUST_BOUNDARY_SITES: &[(&str, &str)] = &[
 /// repo root rather than `CARGO_MANIFEST_DIR`. Resolved separately.
 const TRUST_BOUNDARY_REPO_SITES: &[(&str, &str)] = &[
     // L3 — launchd plist is user-writable
-    ("scripts/tron", "trusted-local"),
+    ("scripts/tron.d/deploy.sh", "trusted-local"),
 ];
 
 const LARGE_TEST_FILE_LIMIT_LINES: usize = 1_000;
@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        6_850,
+        6_950,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -590,7 +590,8 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **94/100**",
+        "Current score: **97/100**",
+        "Score normalization note",
         "## Operating Rules",
         "## Review Rubric",
         "## Static Gates",
@@ -623,6 +624,9 @@ fn codebase_cleanup_scorecard_stays_formalized() {
         "agent_runner_context_boundaries_stay_split",
         "smaller_domain_boundaries_stay_split",
         "ios_thin_client_boundaries_stay_split",
+        "mac_script_boundaries_stay_split",
+        "main_runtime.rs",
+        "push_helpers_tests.rs",
         "events/tron/catalog.rs",
     ] {
         assert!(
@@ -642,23 +646,26 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     let tron_script = std::fs::read_to_string(repo_root.join("scripts/tron"))
         .expect("failed to read scripts/tron");
-    let tron_lib = std::fs::read_to_string(repo_root.join("scripts/tron-lib.sh"))
-        .expect("failed to read scripts/tron-lib.sh");
+    let tron_dev = std::fs::read_to_string(repo_root.join("scripts/tron.d/dev.sh"))
+        .expect("failed to read scripts/tron.d/dev.sh");
+    let tron_service = std::fs::read_to_string(repo_root.join("scripts/tron-lib.d/service.sh"))
+        .expect("failed to read scripts/tron-lib.d/service.sh");
     assert!(
-        tron_script.contains("local wait_seconds=30")
-            && tron_script.contains(r#"${RUST_LOG:-info,ort=error}"#)
-            && !tron_script.contains(r#"${RUST_LOG:-debug,ort=error}"#)
-            && !tron_script.contains("default: 12")
-            && tron_script.contains("restart_installed_service_after_dev 12"),
+        tron_script.contains("source \"$tron_cmd_module\"")
+            && tron_dev.contains("local wait_seconds=30")
+            && tron_dev.contains(r#"${RUST_LOG:-info,ort=error}"#)
+            && !tron_dev.contains(r#"${RUST_LOG:-debug,ort=error}"#)
+            && !tron_dev.contains("default: 12")
+            && tron_dev.contains("restart_installed_service_after_dev 12"),
         "tron dev must keep info-level default logging, 30s background health wait, and shared restore helper"
     );
     assert!(
-        tron_lib.contains("wait_for_service_health")
-            && tron_lib.contains("print_installed_service_restart_diagnostic")
-            && tron_lib.contains(
+        tron_service.contains("wait_for_service_health")
+            && tron_service.contains("print_installed_service_restart_diagnostic")
+            && tron_service.contains(
                 "Stale helpers can fail while parsing capability schema providerSurface values"
             )
-            && tron_lib
+            && tron_service
                 .contains("print_success \"Installed service restarted (PID: ${pid:-unknown})\""),
         "installed-service restore must be health-gated and carry the stale-installed-app diagnostic"
     );
@@ -737,6 +744,88 @@ fn ios_thin_client_boundaries_stay_split() {
             && !invocation_views.contains("struct CapabilityDetailHeader")
             && !invocation_views.contains("struct CapabilityResultRenderer"),
         "CLC-7 parents must not regain extracted iOS component/type/protocol-frame bodies"
+    );
+}
+
+#[test]
+fn mac_script_boundaries_stay_split() {
+    let repo_root = repo_root();
+    let read = |relative: &str| {
+        let path = repo_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+
+    for relative in [
+        "scripts/tron",
+        "scripts/tron.d/automation.sh",
+        "scripts/tron.d/deploy.sh",
+        "scripts/tron.d/dev.sh",
+        "scripts/tron.d/quality.sh",
+        "scripts/tron.d/workspace.sh",
+        "scripts/tron-lib.sh",
+        "scripts/tron-lib.d/auth.sh",
+        "scripts/tron-lib.d/bundle.sh",
+        "scripts/tron-lib.d/logs.sh",
+        "scripts/tron-lib.d/service.sh",
+        "packages/agent/src/main.rs",
+        "packages/agent/src/main_cli.rs",
+        "packages/agent/src/main_runtime.rs",
+        "packages/agent/src/platform/updater/mod.rs",
+        "packages/agent/src/platform/updater/tests.rs",
+        "packages/agent/src/platform/apns/push_helpers.rs",
+        "packages/agent/src/platform/apns/push_helpers_tests.rs",
+    ] {
+        let path = repo_root.join(relative);
+        assert!(
+            path.is_file(),
+            "CLC-8 script/startup boundary file must exist: {relative}"
+        );
+        assert!(
+            line_count(&path) <= 1_000,
+            "CLC-8 script/startup boundary must stay below 1,000 LOC: {relative}"
+        );
+    }
+
+    let tron = read("scripts/tron");
+    let tron_lib = read("scripts/tron-lib.sh");
+    let deploy = read("scripts/tron.d/deploy.sh");
+    let dev = read("scripts/tron.d/dev.sh");
+    let service = read("scripts/tron-lib.d/service.sh");
+    let main_rs = read("packages/agent/src/main.rs");
+    let main_cli = read("packages/agent/src/main_cli.rs");
+    let main_runtime = read("packages/agent/src/main_runtime.rs");
+    let updater = read("packages/agent/src/platform/updater/mod.rs");
+    let push_helpers = read("packages/agent/src/platform/apns/push_helpers.rs");
+    assert!(
+        tron.contains("\"$SCRIPT_DIR\"/tron.d/*.sh")
+            && !tron.contains("cmd_dev()")
+            && !tron.contains("cmd_deploy()")
+            && !tron.contains("cmd_ci()")
+            && tron_lib.contains("\"$TRON_LIB_MODULE_DIR\"/*.sh")
+            && !tron_lib.contains("cmd_status()")
+            && !tron_lib.contains("cmd_login()")
+            && deploy.contains("cp \"$SCRIPT_DIR\"/tron-lib.d/*.sh")
+            && service.contains("\"$CONTRIBUTOR_DIR/tron-lib.d\"")
+            && dev.contains("restart_installed_service_after_dev 12"),
+        "CLC-8 scripts must keep command-family bodies in modules, copy runtime modules during install/deploy, and preserve health-gated dev restore"
+    );
+    assert!(
+        main_rs.contains("mod main_cli;")
+            && main_rs.contains("mod main_runtime;")
+            && !main_rs.contains("struct Cli")
+            && !main_rs.contains("fn init_database")
+            && main_cli.contains("struct Cli")
+            && main_cli.contains("run_subcommand")
+            && !main_cli.contains("init_database")
+            && main_runtime.contains("run_server")
+            && main_runtime.contains("fn init_database")
+            && main_runtime.contains("fn init_services")
+            && updater.contains("mod tests;")
+            && !updater.contains("fn parse_triple")
+            && push_helpers.contains("push_helpers_tests.rs")
+            && !push_helpers.contains("to_apns_notification_maps_all_fields"),
+        "CLC-8 binary/platform roots must keep CLI, runtime, and large test matrices in focused modules"
     );
 }
 
@@ -2094,7 +2183,7 @@ fn installed_pre_commit_hook_enforces_rustfmt_and_personal_info_guard() {
 
 #[test]
 fn tron_dev_background_start_is_file_logged_and_health_checked() {
-    let script_path = repo_root().join("scripts").join("tron");
+    let script_path = repo_root().join("scripts").join("tron.d").join("dev.sh");
     let content = std::fs::read_to_string(&script_path)
         .unwrap_or_else(|e| panic!("failed to read {script_path:?}: {e}"));
     let background_start = content
@@ -2160,28 +2249,42 @@ fn tron_cli_status_and_logs_are_agent_automation_ready() {
     let lib_path = repo_root.join("scripts").join("tron-lib.sh");
     let lib = std::fs::read_to_string(&lib_path)
         .unwrap_or_else(|e| panic!("failed to read {lib_path:?}: {e}"));
+    let logs_path = repo_root.join("scripts").join("tron-lib.d").join("logs.sh");
+    let logs = std::fs::read_to_string(&logs_path)
+        .unwrap_or_else(|e| panic!("failed to read {logs_path:?}: {e}"));
+    let service_path = repo_root
+        .join("scripts")
+        .join("tron-lib.d")
+        .join("service.sh");
+    let service = std::fs::read_to_string(&service_path)
+        .unwrap_or_else(|e| panic!("failed to read {service_path:?}: {e}"));
+    let dev_path = repo_root.join("scripts").join("tron.d").join("dev.sh");
+    let dev = std::fs::read_to_string(&dev_path)
+        .unwrap_or_else(|e| panic!("failed to read {dev_path:?}: {e}"));
 
     assert!(
         lib.contains("DB_PATH=\"$TRON_HOME/internal/database/tron.sqlite\""),
         "tron logs/status helpers must use the unified tron.sqlite database, not retired log.db"
     );
     assert!(
-        lib.contains("--tail)") && lib.contains("--json)"),
+        logs.contains("--tail)") && logs.contains("--json)"),
         "tron logs must keep machine-friendly --tail and --json aliases used by automation"
     );
     assert!(
-        lib.contains("cmd_status_json()"),
+        service.contains("cmd_status_json()"),
         "tron status must expose a machine-readable status function"
     );
     assert!(
-        lib.contains("\"mode\"") && lib.contains("\"listenerPid\"") && lib.contains("\"healthy\""),
+        service.contains("\"mode\"")
+            && service.contains("\"listenerPid\"")
+            && service.contains("\"healthy\""),
         "tron status --json must include mode, listenerPid, and healthy fields"
     );
     assert!(
-        lib.contains("\"pidFileStale\"")
-            && lib.contains("\"pidFilePid\"")
-            && lib.contains("\"logPath\"")
-            && lib.contains("\"devLaunchdLoaded\""),
+        service.contains("\"pidFileStale\"")
+            && service.contains("\"pidFilePid\"")
+            && service.contains("\"logPath\"")
+            && service.contains("\"devLaunchdLoaded\""),
         "tron status --json must expose stale pid-file and log-path diagnostics for agents"
     );
     assert!(
@@ -2194,7 +2297,7 @@ fn tron_cli_status_and_logs_are_agent_automation_ready() {
         "main dispatch must pass status flags such as --json through to cmd_status"
     );
     assert!(
-        script.contains("--wait SECONDS") && script.contains("--json"),
+        dev.contains("--wait SECONDS") && dev.contains("--json"),
         "tron dev help and parser must advertise agent-friendly --wait and --json flags"
     );
 }
@@ -2205,8 +2308,14 @@ fn program_worker_binary_is_built_and_packaged_with_tron_helper() {
     let script_path = repo_root.join("scripts").join("tron");
     let script = std::fs::read_to_string(&script_path)
         .unwrap_or_else(|e| panic!("failed to read {script_path:?}: {e}"));
+    let dev_path = repo_root.join("scripts").join("tron.d").join("dev.sh");
+    let dev = std::fs::read_to_string(&dev_path)
+        .unwrap_or_else(|e| panic!("failed to read {dev_path:?}: {e}"));
+    let deploy_path = repo_root.join("scripts").join("tron.d").join("deploy.sh");
+    let deploy = std::fs::read_to_string(&deploy_path)
+        .unwrap_or_else(|e| panic!("failed to read {deploy_path:?}: {e}"));
     assert!(
-        script.contains("--bin tron --bin tron-program-worker"),
+        dev.contains("--bin tron --bin tron-program-worker"),
         "tron dev/install flows must build the server and program-worker binaries together"
     );
     assert!(
@@ -2214,17 +2323,23 @@ fn program_worker_binary_is_built_and_packaged_with_tron_helper() {
         "workspace script must track the release program worker beside tron"
     );
     assert!(
-        script.contains("tron-program-worker.bak"),
+        deploy.contains("tron-program-worker.bak"),
         "deploy rollback must back up the program worker with the server binary"
     );
 
     let lib_path = repo_root.join("scripts").join("tron-lib.sh");
     let lib = std::fs::read_to_string(&lib_path)
         .unwrap_or_else(|e| panic!("failed to read {lib_path:?}: {e}"));
+    let bundle_path = repo_root
+        .join("scripts")
+        .join("tron-lib.d")
+        .join("bundle.sh");
+    let bundle = std::fs::read_to_string(&bundle_path)
+        .unwrap_or_else(|e| panic!("failed to read {bundle_path:?}: {e}"));
     assert!(
         lib.contains("INSTALLED_PROGRAM_WORKER=")
             && lib.contains("tron-program-worker")
-            && lib.contains("Cannot create app bundle: sibling tron-program-worker missing"),
+            && bundle.contains("Cannot create app bundle: sibling tron-program-worker missing"),
         "shared bundle creation must require and stage the sibling program-worker binary"
     );
 
@@ -2463,6 +2578,8 @@ fn capability_registry_authority_stays_deleted() {
     ];
     for root in [
         crate_root.join("src/main.rs"),
+        crate_root.join("src/main_cli.rs"),
+        crate_root.join("src/main_runtime.rs"),
         crate_root.join("src/domains/agent/runner"),
         crate_root.join("src/app"),
         crate_root.join("src/domains/capability_support"),
@@ -6180,9 +6297,9 @@ fn domains_do_not_import_other_domains_private_operations() {
 
 #[test]
 fn main_background_work_is_registered_with_shutdown() {
-    let main_path = crate_root().join("src/main.rs");
-    let content = std::fs::read_to_string(&main_path)
-        .unwrap_or_else(|e| panic!("failed to read {main_path:?}: {e}"));
+    let main_runtime_path = crate_root().join("src/main_runtime.rs");
+    let content = std::fs::read_to_string(&main_runtime_path)
+        .unwrap_or_else(|e| panic!("failed to read {main_runtime_path:?}: {e}"));
     for required in [
         "register_blocking_supervisor_shutdown(server.shutdown())",
         "shutdown.register_task(handle)",
@@ -6193,7 +6310,7 @@ fn main_background_work_is_registered_with_shutdown() {
     ] {
         assert!(
             content.contains(required),
-            "main.rs must keep shutdown ownership marker `{required}`"
+            "main_runtime.rs must keep shutdown ownership marker `{required}`"
         );
     }
 }

@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-04-30 (menu dev takeover controls)
+> Last verified: 2026-05-30 (menu dev takeover controls and CLI command-module split)
 
 ## Overview
 
@@ -106,6 +106,11 @@ The menu bar observes `tron dev` takeover but does not start it. Contributors
 start dev servers from the checkout-owned `scripts/tron` CLI; the app only
 detects when `Tron-Dev.app` owns port 9847 and exposes the bounded stop/resume
 action for that live process.
+The CLI dispatcher stays in `scripts/tron`, workspace command families live in
+`scripts/tron.d/`, and runtime service/log/auth/bundle helpers shared with the
+installed `tron-cli` live in `scripts/tron-lib.d/`. The Mac wrapper remains an
+observer/manager through `SMAppService`; script modules must not become a
+second production policy owner.
 
 ### Protocol-bounded subprocess surface
 

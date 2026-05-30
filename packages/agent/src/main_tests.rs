@@ -1,10 +1,22 @@
 use super::*;
 use clap::Parser;
+use parking_lot::RwLock;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tron::app::config::ServerConfig;
+use tron::app::server::TronServer;
+use tron::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
+use tron::domains::agent::runner::orchestrator::session_manager::SessionManager;
+use tron::domains::model::providers::factory as provider_factory;
+use tron::domains::model::providers::provider::ProviderFactory;
+use tron::domains::session::event_store::{ConnectionConfig, EventStore};
 use tron::domains::settings::TronSettings;
 use tron::domains::settings::db_path_policy::{
     PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
     validate_production_db_path_for_home,
 };
+use tron::domains::skills::registry::SkillRegistry;
+use tron::shared::server::context::ServerRuntimeContext;
 use tron::transport::runtime::streams::EngineStreamEventPump;
 
 /// Small pool size for tests — prevents FD exhaustion when many tests

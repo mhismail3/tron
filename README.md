@@ -124,10 +124,12 @@ tron/
 |   +-- ios-app/            SwiftUI iOS application
 |   +-- mac-app/            SwiftUI Mac menu-bar wrapper (Tron.app) — install wizard + server lifecycle
 +-- scripts/
-|   +-- tron                CLI for build, deploy, service management
+|   +-- tron                CLI dispatcher for build, deploy, service management
+|   +-- tron.d/             Workspace CLI command-family modules
 |   +-- tron-version        Version print/check/sync helper used by CI + releases
 |   +-- tron-release-notes  Deterministic tagged-release changelog generator
-|   +-- tron-lib.sh         Shared bash helpers used by scripts/tron
+|   +-- tron-lib.sh         Shared bash configuration and module loader
+|   +-- tron-lib.d/         Runtime CLI service/log/auth/bundle modules
 |   +-- tron-cli            Contributor CLI helper for local service management
 |   +-- tron-ios-beta       Local physical-device build/install/stop helper for iOS app variants
 |   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
@@ -154,7 +156,9 @@ engine/     Live capability fabric: catalog, workers, triggers, ledger, streams,
 domains/    Every Tron worker: contracts, deps, handlers, operations, local services, tests
 platform/   OS/vendor integrations: APNS, device broker, updater
 shared/     Foundation IDs/errors/paths, protocol DTOs, unified storage helpers
-main.rs     Thin CLI/startup entry point
+main.rs     Thin binary entry point
+main_cli.rs CLI parsing and auth subcommand dispatch
+main_runtime.rs Server startup/runtime wiring
 ```
 
 | Module | Purpose | Key Types |
@@ -273,7 +277,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions, TDD expectations,
 
 ## CLI Reference
 
-The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); when adding or renaming a subcommand, update this table.
+The `scripts/tron` CLI manages workspace development and contributor service workflows. The dispatch table is at the bottom of `scripts/tron` (the `case "$1" in` block); command-family bodies live in `scripts/tron.d/`, while runtime service/log/auth/bundle helpers loaded by both `scripts/tron` and the installed `tron-cli` live in `scripts/tron-lib.d/`. When adding or renaming a subcommand, update the dispatcher and the owning module together.
 
 ### Development (workspace only)
 
@@ -1425,7 +1429,7 @@ tron deploy --ci     # Non-interactive: any failure aborts
 
 `tron deploy` is a contributor-only script path and is not the production Mac distribution mechanism. Production releases are the notarized DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG.
 
-The deploy process (`scripts/tron::cmd_deploy`) is retained for local contributor workflows:
+The deploy process (`scripts/tron.d/deploy.sh::cmd_deploy`) is retained for local contributor workflows:
 
 1. Aborts if a dev server is bound to the prod port.
 2. Warns on uncommitted changes (errors out under `--ci`).
