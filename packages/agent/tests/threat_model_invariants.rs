@@ -92,9 +92,19 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
         1_700,
     ),
     (
+        "packages/agent/src/domains/auth/provider_credentials/storage/tests.rs",
+        "credential storage scenario matrix",
+        1_425,
+    ),
+    (
         "packages/agent/src/engine/tests/module_activation/source_trust.rs",
         "module source-trust scenario matrix",
         1_500,
+    ),
+    (
+        "packages/agent/src/domains/skills/implementation/runtime/tracker/tests.rs",
+        "skill runtime tracker scenario matrix",
+        1_350,
     ),
     (
         "packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs",
@@ -580,7 +590,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **74/100**",
+        "Current score: **84/100**",
         "## Operating Rules",
         "## Review Rubric",
         "## Static Gates",
@@ -611,6 +621,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
         "session_storage_protocol_boundaries_stay_split",
         "model_provider_profile_boundaries_stay_split",
         "agent_runner_context_boundaries_stay_split",
+        "smaller_domain_boundaries_stay_split",
         "events/tron/catalog.rs",
     ] {
         assert!(
@@ -1027,6 +1038,89 @@ fn agent_runner_context_boundaries_stay_split() {
             && line_count(&crate_root.join("src/domains/agent/runner/hooks/engine/tests.rs"))
                 <= 1_000,
         "hook engine tests must stay decomposed enough to avoid a new large CLC-9 exception"
+    );
+}
+
+#[test]
+fn smaller_domain_boundaries_stay_split() {
+    let crate_root = crate_root();
+    let read = |relative: &str| {
+        let path = crate_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+
+    for relative in [
+        "src/domains/cron/implementation/runtime/scheduler.rs",
+        "src/domains/auth/provider_credentials/storage.rs",
+        "src/domains/skills/implementation/runtime/tracker.rs",
+        "src/domains/process/mod.rs",
+        "src/domains/cron/implementation/execution/executor.rs",
+        "src/domains/mcp/product_protocol/client.rs",
+        "src/shared/foundation/paths.rs",
+        "src/domains/auth/provider_credentials/openai.rs",
+    ] {
+        let text = read(relative);
+        assert!(
+            line_count(&crate_root.join(relative)) <= 1_000
+                && text.contains("#[path =")
+                && !text.contains("mod tests {"),
+            "CLC-6 parent must keep extracted tests in a child module and stay below 1,000 LOC: {relative}"
+        );
+    }
+
+    for relative in [
+        "src/domains/worktree/implementation/scm/git.rs",
+        "src/domains/worktree/implementation/scm/git/command.rs",
+        "src/domains/worktree/implementation/scm/git/conflicts.rs",
+        "src/domains/worktree/implementation/scm/git/error_classification.rs",
+        "src/domains/worktree/implementation/scm/git/parsing.rs",
+        "src/domains/worktree/implementation/scm/git/remote.rs",
+        "src/domains/worktree/implementation/scm/git/state.rs",
+        "src/domains/worktree/implementation/scm/git/tests.rs",
+        "src/domains/worktree/implementation/scm/git/phase1_tests.rs",
+        "src/domains/cron/implementation/runtime/scheduler/tests.rs",
+        "src/domains/auth/provider_credentials/storage/tests.rs",
+        "src/domains/skills/implementation/runtime/tracker/tests.rs",
+        "src/domains/process/tests.rs",
+        "src/domains/cron/implementation/execution/executor/tests.rs",
+        "src/domains/mcp/product_protocol/client/tests.rs",
+        "src/shared/foundation/paths/tests.rs",
+        "src/domains/auth/provider_credentials/openai/tests.rs",
+    ] {
+        assert!(
+            crate_root.join(relative).is_file(),
+            "CLC-6 split boundary file must exist: {relative}"
+        );
+    }
+
+    let git = read("src/domains/worktree/implementation/scm/git.rs");
+    let git_command = read("src/domains/worktree/implementation/scm/git/command.rs");
+    let git_remote = read("src/domains/worktree/implementation/scm/git/remote.rs");
+    let git_state = read("src/domains/worktree/implementation/scm/git/state.rs");
+    let git_conflicts = read("src/domains/worktree/implementation/scm/git/conflicts.rs");
+    let git_parsing = read("src/domains/worktree/implementation/scm/git/parsing.rs");
+    let git_errors = read("src/domains/worktree/implementation/scm/git/error_classification.rs");
+    assert!(
+        line_count(&crate_root.join("src/domains/worktree/implementation/scm/git.rs")) <= 1_000
+            && git.contains("#[path = \"git/command.rs\"]")
+            && git.contains("#[path = \"git/remote.rs\"]")
+            && git.contains("#[path = \"git/state.rs\"]")
+            && git.contains("#[path = \"git/conflicts.rs\"]")
+            && git.contains("#[path = \"git/tests.rs\"]")
+            && !git.contains("mod tests {")
+            && !git.contains("pub async fn remote_list(")
+            && !git.contains("pub async fn stash_push(")
+            && !git.contains("pub async fn conflict_sections(")
+            && !git.contains("async fn run_capture(")
+            && git_command.contains("pub(crate) async fn run(")
+            && git_command.contains("pub(super) async fn run_capture(")
+            && git_remote.contains("pub async fn push(")
+            && git_state.contains("pub async fn stash_pop(")
+            && git_conflicts.contains("pub async fn conflict_sections(")
+            && git_parsing.contains("pub(super) fn parse_worktree_porcelain(")
+            && git_errors.contains("pub(crate) fn classify_remote_error("),
+        "GitExecutor root must stay a command catalog while command execution, remote, state, conflict, parsing, and error-classification concerns live in child modules"
     );
 }
 
@@ -3004,6 +3098,8 @@ fn resource_materialization_enforcement_gates_stay_on() {
     );
     let process_worker = std::fs::read_to_string(crate_root.join("src/domains/process/mod.rs"))
         .expect("failed to read process worker");
+    let process_tests = std::fs::read_to_string(crate_root.join("src/domains/process/tests.rs"))
+        .expect("failed to read process worker tests");
     let process_bounds = std::fs::read_to_string(crate_root.join("src/domains/process/bounds.rs"))
         .expect("failed to read process boundary validation");
     let process_approval =
@@ -3026,12 +3122,12 @@ fn resource_materialization_enforcement_gates_stay_on() {
             && process_bounds.contains("uses shell glob or brace expansion")
             && process_worker.contains(".env_clear()")
             && process_bounds.contains("safe_process_environment")
-            && process_worker.contains("process_run_requires_active_session_worktree")
-            && process_worker.contains("read_only_process_rejects_paths_outside_session_worktree")
-            && process_worker
+            && process_tests.contains("process_run_requires_active_session_worktree")
+            && process_tests.contains("read_only_process_rejects_paths_outside_session_worktree")
+            && process_tests
                 .contains("read_only_process_rejects_symlink_operands_that_escape_worktree")
-            && process_worker.contains("read_only_process_rejects_shell_glob_path_operands")
-            && process_worker.contains(
+            && process_tests.contains("read_only_process_rejects_shell_glob_path_operands")
+            && process_tests.contains(
                 "sandbox_materialized_absolute_target_path_cannot_escape_session_worktree"
             ),
         "process::run must keep model-facing cwd/path/symlink/output target bounds and must not inherit the server environment"
@@ -3042,9 +3138,9 @@ fn resource_materialization_enforcement_gates_stay_on() {
                 "sandbox_materialized_home_relative_command_write_is_invalid_before_approval"
             )
             && process_worker.contains("prepare_sandbox_expected_output_dirs")
-            && process_worker
+            && process_tests
                 .contains("sandbox_materialized_nested_output_parent_is_prepared_inside_sandbox")
-            && process_worker
+            && process_tests
                 .contains("sandbox_materialized_home_relative_command_write_rejects_before_spawn"),
         "process::run sandbox materialization must reject undeclared/home/absolute command write targets before approval and prepare declared output parents inside the sandbox"
     );

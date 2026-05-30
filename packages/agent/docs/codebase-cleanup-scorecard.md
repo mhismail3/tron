@@ -4,9 +4,9 @@ Created: 2026-05-30
 
 Initial cleanup score: **0/100**
 
-Current score: **74/100**
+Current score: **84/100**
 
-Status: **CLC-5 complete; CLC-6 next**
+Status: **CLC-6 complete; CLC-7 next**
 
 This scorecard is the repo-local maintainability plan. It is separate from
 `collapsed-engine-hardening-scorecard.md`, which remains at **100/100** for
@@ -112,6 +112,12 @@ cleanup gates:
   files stay below 1,000 LOC; moved test matrices stay in child modules; turn
   context construction and live provider surface resolution stay out of the
   `turn_runner.rs` orchestration root.
+- `smaller_domain_boundaries_stay_split` gates the CLC-6 split: the worktree
+  Git executor root stays below 1,000 LOC while command execution, remote,
+  state/ref mutation, conflict helpers, parser helpers, error classification,
+  and Git tests stay in focused `git/*` submodules; cron scheduler/executor,
+  auth provider storage/OpenAI auth, process, MCP product-protocol client,
+  skills tracker, and shared path parents keep moved tests in child modules.
 
 ## Scenario Ledger
 
@@ -123,7 +129,7 @@ cleanup gates:
 | CLC-3 | Complete | +12 | `packages/agent/src/domains/session/`, `packages/agent/src/shared/protocol/`, `packages/agent/src/shared/storage.rs`, `packages/agent/src/transport/` | Split session dashboard projections and session tests out of the session repository root; split event reconstruction, migration, and event-store API tests into scenario-owned children; split protocol events into capability, factory, stream, Tron support, generated Tron catalog, and focused tests; split shared storage into archive, schema, payload, maintenance, stats, and tests; split `/engine` WebSocket wire DTOs, stream projection, outbound serialization, and tests from the transport flow root. | `domains::session::event_store`, `shared::storage`, `shared::events`, `transport::engine_ws`, CLC-3 static gate, formatting, and diff checks passed after extraction. | `events/tron/catalog.rs` remains an explicit 1,153 LOC exception because the exhaustive serde-tagged `TronEvent` catalog and accessor macro are clearer in one audited file than in a synthetic compatibility layer. |
 | CLC-4 | Complete | +10 | `packages/agent/src/domains/model/providers/`, `packages/agent/src/shared/foundation/profile.rs` | Split OpenAI provider-native types into auth/config, model registry, Responses DTO, catalog shard, and test modules; split large provider inline tests into child modules for OpenAI, Anthropic, Google, and Ollama; split profile validation and tests from profile loading; replaced stringly context-block `providerSurface` validation with the typed `ContextBlockProviderSurface` enum while preserving the canonical `providerSurface = "capability"` contract. | `domains::model::providers`, `shared::profile`, CLC-4 static gate, formatting, and diff checks. | `packages/agent/src/domains/model/providers/openai/message_converter.rs`, `kimi/stream_handler.rs`, `factory.rs`, and provider token/context helpers remain below 1,000 LOC but are future cleanup candidates if they grow or CLC-4 is reopened. Local `gemma4:e4b` remains substrate smoke only. |
 | CLC-5 | Complete | +12 | `packages/agent/src/domains/agent/runner/` | Split inline runner/hook/orchestrator test matrices out of runtime roots for capability invocation execution, compaction, turn-runner capability invocation continuation, hook engine, prompt hooks, orchestrator, session manager, and turn accumulator; split hook-engine context-result tests into a child module to avoid creating a new CLC-9 exception; moved turn context construction, capability primer rendering, live provider primitive-surface resolution, and resolved policy-id projection into `turn_runner/turn_context.rs`, leaving `turn_runner.rs` as the orchestration spine. | `domains::agent::runner` passed, 1,366 tests; CLC-5 static gate, formatting, and diff checks. | Pre-existing CLC-9 test matrices remain intentionally large: guardrails, stream processor, context manager, compaction engine, and subagent manager. Chat/engine parity UI drift remains tracked for later UI polish and cannot introduce product-state side channels. |
-| CLC-6 | Not started | +10 | `packages/agent/src/domains/worktree/`, `packages/agent/src/domains/cron/`, `packages/agent/src/domains/process/`, `packages/agent/src/domains/auth/`, `packages/agent/src/domains/settings/`, `packages/agent/src/domains/skills/` | Target: split coordinators/schedulers, keep process policy and sandbox materialization process-owned, remove bespoke storage/auth helpers where canonical helpers exist. | Targeted domain tests and settings parity checks. | Settings changes must update iOS parity in the same checkpoint. |
+| CLC-6 | Complete | +10 | `packages/agent/src/domains/worktree/`, `packages/agent/src/domains/cron/`, `packages/agent/src/domains/process/`, `packages/agent/src/domains/auth/`, `packages/agent/src/domains/skills/`, `packages/agent/src/domains/mcp/product_protocol/`, `packages/agent/src/shared/foundation/` | Split `GitExecutor` by command-family owner (`command`, `remote`, `state`, `conflicts`, `parsing`, `error_classification`) and moved Git tests out of the command catalog root; moved inline tests out of cron scheduler/executor, auth provider storage/OpenAI auth, skills tracker, process, MCP product-protocol client, and shared path parents; added the CLC-6 static boundary gate. | Targeted worktree/cron/process/auth/skills/MCP/foundation tests, formatting, `threat_model_invariants`, and diff checks. | Settings contracts were not changed, so no iOS settings parity update was required. Large test matrices and the managed vault shell script remain audited rows for CLC-9/CLC-10 rather than production-source CLC-6 blockers. |
 | CLC-7 | Not started | +10 | `packages/ios-app/Sources/Views/`, `packages/ios-app/Sources/ViewModels/`, `packages/ios-app/Sources/Services/Network/`, `packages/ios-app/Sources/Models/` | Target: decompose `EngineConsoleView.swift`, `CapabilityInvocationTypes.swift`, `EngineConnection.swift`, `NewSessionFlow.swift`, and `CapabilityInvocationViews.swift`; keep iOS thin. | Focused iOS tests, `xcodegen generate`, simulator deep-link smoke for navigation changes. | Server-owned policy/routing/generated UI semantics must not move into Swift. |
 | CLC-8 | Not started | +8 | `packages/mac-app/Sources/`, `packages/mac-app/docs/`, `scripts/tron`, `scripts/tron-lib.sh` | Target: decompose CLI scripts by command family, centralize health checks across foreground/background/dev/restore, keep Mac wrapper observer/manager only. | Mac service tests where available and manual `scripts/tron dev` recovery smoke. | Service restore paths touch user LaunchAgents; avoid optimistic messages. |
 | CLC-9 | Not started | +5 | `packages/agent/tests/`, `packages/agent/src/**/tests*`, `packages/agent/tests/fixtures/` | Target: split large tests only when it reduces concepts, keep harnesses scenario-owned and DB-classifying, preserve RWO-N17 as canonical multi-session simulator regression. | `threat_model_invariants`, fixture self-tests, harness smoke. | Static gates should not become a dumping ground for local unit assertions. |
@@ -629,7 +635,57 @@ Closed CLC-5 acceptance:
   are below 1,000 LOC and keep tests in child modules.
 - No terminal-state logic, compaction notice behavior, simulator harness, or
   chat/product-state channel changed in this checkpoint.
-- Next cleanup phase is CLC-6 smaller-domain cleanup.
+- Next cleanup phase is CLC-7 iOS thin-client cleanup.
+
+## CLC-6 Smaller-Domain Cleanup
+
+CLC-6 is complete and has awarded its **+10** points.
+
+Accepted decomposition:
+
+- `scm/git.rs` is now the public `GitExecutor` command catalog and no longer
+  owns every command-family body. Command execution helpers live in
+  `scm/git/command.rs`; remote/fetch/push behavior lives in
+  `scm/git/remote.rs`; reset/stash/config/ref mutation lives in
+  `scm/git/state.rs`; conflict-index helpers live in `scm/git/conflicts.rs`;
+  parser helpers and remote-error classifiers live in
+  `scm/git/{parsing,error_classification}.rs`.
+- Git executor test matrices moved to `scm/git/tests.rs` and
+  `scm/git/phase1_tests.rs`, leaving the production root below 1,000 LOC.
+- Cron scheduler and executor, auth provider credential storage and OpenAI
+  auth, skills runtime tracking, process materialization/policy, MCP
+  product-protocol client, and shared foundation paths now keep their test
+  suites in child modules instead of inline implementation roots.
+- `smaller_domain_boundaries_stay_split` gates the split and rejects CLC-6
+  parents regaining inline tests, crossing 1,000 LOC, or pulling Git command
+  execution / remote / state / conflict / parsing / error-classification bodies
+  back into `git.rs`.
+
+CLC-6 verification evidence from 2026-05-30:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::worktree --lib -- --nocapture`: passed, 296 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::cron --lib -- --nocapture`: passed, 185 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::process --lib -- --nocapture`: passed, 37 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::auth --lib -- --nocapture`: passed, 201 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::skills --lib -- --nocapture`: passed, 213 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::mcp::product_protocol --lib -- --nocapture`: passed, 114 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml shared::paths --lib -- --nocapture`: passed, 38 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::settings --lib -- --nocapture`: passed, 191 tests; settings contracts were unchanged.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`: passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`: passed, 61 tests after the CLC-6 split gate and SCB-S6 large-test audit were updated.
+- `git diff --check`: passed.
+
+Closed CLC-6 acceptance:
+
+- Production CLC-6 parent files touched in this checkpoint are now below 1,000
+  LOC.
+- Process policy and sandbox materialization remain process-owned; this
+  checkpoint moved tests only and did not create process policy fallbacks.
+- Settings contracts did not change, so no iOS settings parity work was needed.
+- Existing large test matrices remain explicit audit rows for CLC-9. The
+  managed vault shell script remains an explicit large-file row for the final
+  sweep because splitting a managed skill entrypoint requires skill packaging
+  verification and was not needed to close source-domain CLC-6.
 
 ## Large-File Audit
 
@@ -641,42 +697,35 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 6564 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, and CLC-5 split-boundary gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, and runner/context subtree checks. | 6700 | CLC-9 |
+| `packages/agent/tests/threat_model_invariants.rs` | 6659 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, and CLC-6 split-boundary gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, and smaller-domain subtree checks. | 6700 | CLC-9 |
 | `packages/agent/tests/integration/tests.rs` | 3108 | CLC-9 harnesses | Transport e2e suite with shared WebSocket harness. | 3150 | CLC-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2848 | CLC-7 iOS tests | Event transformer matrix should split only when concepts separate. | 2900 | CLC-7 |
-| `packages/agent/src/domains/worktree/implementation/scm/git.rs` | 2726 | CLC-6 worktree | Git coordinator carries many command families. | 2750 | CLC-6 |
-| `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-6 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-6 |
+| `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-9 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-9 |
 | `scripts/tron` | 1959 | CLC-8 CLI | Single script owns many command families and dev restore paths. | 2050 | CLC-8 |
-| `packages/agent/src/domains/cron/implementation/runtime/scheduler.rs` | 1927 | CLC-6 cron | Scheduler orchestration and mutation should split. | 1950 | CLC-6 |
-| `packages/agent/src/domains/auth/provider_credentials/storage.rs` | 1887 | CLC-6 auth | Credential storage helpers need canonical boundary review. | 1925 | CLC-6 |
 | `scripts/tron-lib.sh` | 1878 | CLC-8 CLI lib | Shared shell helpers are becoming a broad service layer. | 1950 | CLC-8 |
 | `packages/agent/src/engine/tests/generated_ui.rs` | 1865 | CLC-9 engine tests | Generated UI primitive matrix. | 1900 | CLC-9 |
 | `packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift` | 1857 | CLC-7 iOS views | Console view should split into focused view models/components. | 1900 | CLC-7 |
 | `packages/agent/src/domains/agent/runner/guardrails/tests.rs` | 1695 | CLC-9 runner tests | Guardrail rule-pattern matrix. | 1725 | CLC-9 |
-| `packages/agent/src/domains/skills/implementation/runtime/tracker.rs` | 1629 | CLC-6 skills | Runtime tracking has multiple ownership concerns. | 1650 | CLC-6 |
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1571 | CLC-9 session tests | SQLite event repository query matrix. | 1600 | CLC-9 |
 | `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests.rs` | 1545 | CLC-9 runner tests | Subagent manager orchestration matrix. | 1575 | CLC-9 |
 | `packages/ios-app/Sources/Models/Messages/CapabilityInvocationTypes.swift` | 1440 | CLC-7 iOS models | Capability invocation presentation model is too broad. | 1475 | CLC-7 |
+| `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | 1384 | CLC-9 auth tests | Credential storage scenario matrix moved out of the implementation root during CLC-6. | 1425 | CLC-9 |
 | `packages/agent/src/engine/tests/module_activation/source_trust.rs` | 1364 | CLC-9 engine tests | Module source-trust scenario matrix. | 1400 | CLC-9 |
 | `packages/agent/src/platform/updater/mod.rs` | 1339 | CLC-8 Mac/platform | Updater behavior should split by concern if touched. | 1375 | CLC-8 |
 | `packages/ios-app/Sources/Services/Network/EngineConnection.swift` | 1319 | CLC-7 iOS network | Engine connection should stay transport-only. | 1350 | CLC-7 |
-| `packages/agent/src/domains/process/mod.rs` | 1298 | CLC-6 process | Process policy and execution materialization should stay process-owned and split when touched. | 1325 | CLC-6 |
+| `packages/agent/src/domains/skills/implementation/runtime/tracker/tests.rs` | 1302 | CLC-9 skills tests | Skill runtime tracking scenario matrix moved out of the implementation root during CLC-6. | 1350 | CLC-9 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs` | 1239 | CLC-9 worktree tests | Rebase-on-main conflict/recovery matrix. | 1275 | CLC-9 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1207 | CLC-9 engine tests | Resource-kernel matrix. | 1250 | CLC-9 |
-| `packages/agent/skills/vault/scripts/vault.sh` | 1200 | CLC-6 skills | Managed vault script exceeds source budget. | 1225 | CLC-6 |
+| `packages/agent/skills/vault/scripts/vault.sh` | 1200 | CLC-10 managed skills | Single managed skill entrypoint; split only with packaging/selftest verification. | 1225 | CLC-10 |
 | `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | 1177 | CLC-9 runner tests | Stream processor event-shape matrix. | 1200 | CLC-9 |
 | `packages/agent/src/domains/agent/runner/context/context_manager_tests.rs` | 1164 | CLC-9 context tests | Context manager policy/rules matrix. | 1200 | CLC-9 |
 | `packages/agent/src/shared/protocol/events/tron/catalog.rs` | 1153 | CLC-3 protocol | Exhaustive generated `TronEvent` enum catalog and accessors stay together for serde tagging, grep-ability, and match exhaustiveness without introducing a compatibility macro layer. | 1200 | CLC-3 |
-| `packages/agent/src/domains/cron/implementation/execution/executor.rs` | 1140 | CLC-6 cron | Cron executor orchestration is dense. | 1175 | CLC-6 |
 | `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | 1127 | CLC-9 context tests | Compaction engine scenario matrix. | 1175 | CLC-9 |
 | `packages/agent/src/main.rs` | 1112 | CLC-8 startup | Main startup should stay bootstrap-only. | 1150 | CLC-8 |
 | `packages/ios-app/Sources/Views/Session/NewSessionFlow.swift` | 1111 | CLC-7 iOS views | New-session flow needs focused view model boundaries. | 1150 | CLC-7 |
 | `packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationViews.swift` | 1065 | CLC-7 iOS views | Capability invocation UI should stay presentation-only. | 1100 | CLC-7 |
 | `packages/agent/src/platform/apns/push_helpers.rs` | 1045 | CLC-8 platform | Push helper concerns should split if touched. | 1075 | CLC-8 |
 | `packages/ios-app/Tests/Infrastructure/EventDatabaseTests.swift` | 1038 | CLC-7 iOS tests | Event database test matrix. | 1075 | CLC-7 |
-| `packages/agent/src/domains/mcp/product_protocol/client.rs` | 1010 | CLC-6 MCP | Product protocol client is near budget and should split if touched. | 1050 | CLC-6 |
-| `packages/agent/src/shared/foundation/paths.rs` | 1007 | CLC-6 foundation | Path constants/helpers are near budget and guarded for personal info. | 1050 | CLC-6 |
-| `packages/agent/src/domains/auth/provider_credentials/openai.rs` | 1005 | CLC-6 auth | OpenAI auth helper is near budget. | 1050 | CLC-6 |
 
 ## Test Plan
 
@@ -711,12 +760,12 @@ Escalate to:
 
 ## Next Scenario
 
-Next checkpoint: **CLC-6 Worktree, Cron, Process, Auth, Settings, Skills, And Smaller Domains**.
+Next checkpoint: **CLC-7 iOS Thin Client Cleanup**.
 
-Begin the smaller-domain audit with
-`packages/agent/src/domains/worktree/`, `packages/agent/src/domains/cron/`,
-`packages/agent/src/domains/process/`, `packages/agent/src/domains/auth/`,
-`packages/agent/src/domains/settings/`, and `packages/agent/src/domains/skills/`.
-Measure current large files, keep process policy and sandbox materialization
-process-owned, reuse canonical storage/auth helpers, and preserve settings
-parity with iOS when settings contracts change.
+Begin the thin-client audit with `packages/ios-app/Sources/Views/`,
+`packages/ios-app/Sources/ViewModels/`,
+`packages/ios-app/Sources/Services/Network/`, and
+`packages/ios-app/Sources/Models/`. Decompose large Swift presentation,
+view-model, and transport files without moving policy, routing, approval,
+generated UI semantics, or product truth into Swift. Preserve RWO-N17
+deep-link/chat parity behavior for any navigation or session-view changes.

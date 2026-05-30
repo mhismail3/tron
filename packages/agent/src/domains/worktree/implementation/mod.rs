@@ -19,7 +19,7 @@
 //! | Module        | Contents |
 //! |---------------|----------|
 //! | `coordinator` | Top-level orchestrator (`WorktreeCoordinator`) with sync / finalize / push / conflict / repo-lock submodules |
-//! | `git`         | `GitExecutor` — typed wrapper around the `git` CLI |
+//! | `git`         | `GitExecutor` command catalog with command/remote/state/conflict/parser/error-classification submodules |
 //! | `isolation`   | Worktree acquisition / release primitives |
 //! | `lifecycle`   | Coordinator's acquire / release hooks |
 //! | `sync`        | `sync_main` — FF local main from upstream |

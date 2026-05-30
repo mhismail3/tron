@@ -3204,14 +3204,16 @@ Large-file audit after RWO-N17:
 
 | File | Lines | Classification | Owner/Reason Marker | Enforced Budget |
 |---|---:|---|---|---:|
-| `packages/agent/tests/threat_model_invariants.rs` | 6,365 | intentional exception | cross-cutting static architecture gates | 6,500 |
+| `packages/agent/tests/threat_model_invariants.rs` | 6,659 | intentional exception | cross-cutting static architecture gates | 6,700 |
 | `packages/agent/tests/integration/tests.rs` | 3,108 | intentional exception | transport e2e suite with shared WebSocket harness | 3,300 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2,712 | intentional exception | worktree coordinator lifecycle matrix | 2,900 |
 | `packages/agent/src/engine/tests/generated_ui.rs` | 1,865 | intentional exception | single generated-UI primitive matrix | 2,050 |
 | `packages/agent/src/domains/agent/runner/guardrails/tests.rs` | 1,695 | intentional exception | guardrail rule-pattern matrix | 1,850 |
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1,571 | intentional exception | SQLite event repository query matrix | 1,750 |
 | `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests.rs` | 1,545 | intentional exception | subagent manager orchestration matrix | 1,700 |
+| `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | 1,384 | intentional exception | credential storage scenario matrix | 1,425 |
 | `packages/agent/src/engine/tests/module_activation/source_trust.rs` | 1,364 | intentional exception | module source-trust scenario matrix | 1,500 |
+| `packages/agent/src/domains/skills/implementation/runtime/tracker/tests.rs` | 1,302 | intentional exception | skill runtime tracker scenario matrix | 1,350 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs` | 1,239 | intentional exception | rebase-on-main conflict/recovery matrix | 1,400 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1,207 | intentional exception | single resource-kernel matrix | 1,400 |
 | `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | 1,177 | intentional exception | stream processor event-shape matrix | 1,350 |
