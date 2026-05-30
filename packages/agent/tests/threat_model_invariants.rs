@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        6_200,
+        6_300,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -585,7 +585,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **25/100**",
+        "Current score: **40/100**",
         "## Operating Rules",
         "## Review Rubric",
         "## Static Gates",
@@ -3648,9 +3648,14 @@ fn module_package_activation_gates_stay_on() {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"))
     };
     let module = read_module_file("src/engine/primitives/module.rs");
+    let module_activation_lifecycle =
+        read_module_file("src/engine/primitives/module/activation_lifecycle.rs");
     let module_actions = read_module_file("src/engine/primitives/module/actions.rs");
+    let module_evidence = read_module_file("src/engine/primitives/module/evidence.rs");
     let module_grants = read_module_file("src/engine/primitives/module/grants.rs");
     let module_manifest = read_module_file("src/engine/primitives/module/manifest.rs");
+    let module_package_lifecycle =
+        read_module_file("src/engine/primitives/module/package_lifecycle.rs");
     let module_payload = read_module_file("src/engine/primitives/module/payload.rs");
     let module_registrations = read_module_file("src/engine/primitives/module/registrations.rs");
     let module_resources = read_module_file("src/engine/primitives/module/resources.rs");
@@ -3662,17 +3667,22 @@ fn module_package_activation_gates_stay_on() {
     let module_source_trust = read_module_source_trust_tree(&crate_root);
     let module_health_integrity =
         read_module_file("src/engine/primitives/module/health_integrity.rs");
+    let module_store_access = read_module_file("src/engine/primitives/module/store_access.rs");
     let module_activation_runtime =
         read_module_file("src/engine/primitives/module/activation_runtime.rs");
     let module_tree = [
         module.as_str(),
+        module_activation_lifecycle.as_str(),
         module_actions.as_str(),
+        module_evidence.as_str(),
         module_grants.as_str(),
         module_manifest.as_str(),
+        module_package_lifecycle.as_str(),
         module_payload.as_str(),
         module_registrations.as_str(),
         module_resources.as_str(),
         module_schemas.as_str(),
+        module_store_access.as_str(),
         module_trust_review.as_str(),
         module_trust_audit.as_str(),
         module_trust_audit_schedule.as_str(),
@@ -3684,6 +3694,27 @@ fn module_package_activation_gates_stay_on() {
     assert!(
         module.contains("mod activation_runtime;"),
         "module primitive must declare the activation runtime ownership boundary"
+    );
+    assert!(
+        line_count(&crate_root.join("src/engine/primitives/module.rs")) <= 1_000
+            && module.contains("mod store_access;")
+            && module_store_access.contains("pub(super) fn inspect_resource(")
+            && module_store_access.contains("pub(super) async fn inspect_worker(")
+            && module.contains("mod package_lifecycle;")
+            && module_package_lifecycle.contains("pub(super) fn register_package(")
+            && module_package_lifecycle.contains("async fn package_diagnostics(")
+            && module.contains("mod activation_lifecycle;")
+            && module_activation_lifecycle.contains("pub(super) async fn activate(")
+            && module_activation_lifecycle.contains("async fn activate_inner(")
+            && module_activation_lifecycle.contains("fn upgrade_source(")
+            && module.contains("mod evidence;")
+            && module_evidence.contains("pub(super) struct EvidenceCreation")
+            && module_evidence.contains("pub(super) fn create_evidence_resource(")
+            && !module.contains("fn inspect_resource(")
+            && !module.contains("fn register_package(")
+            && !module.contains("async fn activate_inner(")
+            && !module.contains("fn create_evidence_resource("),
+        "module root must stay below 1,000 LOC while store access, package lifecycle, activation lifecycle, and evidence creation stay in focused submodules"
     );
     assert!(
         module.contains("mod grants;")
