@@ -3640,30 +3640,25 @@ fn module_package_activation_gates_stay_on() {
         "module package lifecycle must be a first-party primitive worker"
     );
 
-    let module_path = crate_root.join("src/engine/primitives/module.rs");
-    let module = std::fs::read_to_string(&module_path)
-        .unwrap_or_else(|e| panic!("failed to read {module_path:?}: {e}"));
-    let module_trust_review_path = crate_root.join("src/engine/primitives/module/trust_review.rs");
-    let module_trust_review = std::fs::read_to_string(&module_trust_review_path)
-        .unwrap_or_else(|e| panic!("failed to read {module_trust_review_path:?}: {e}"));
-    let module_trust_audit_path = crate_root.join("src/engine/primitives/module/trust_audit.rs");
-    let module_trust_audit = std::fs::read_to_string(&module_trust_audit_path)
-        .unwrap_or_else(|e| panic!("failed to read {module_trust_audit_path:?}: {e}"));
-    let module_source_trust_path = crate_root.join("src/engine/primitives/module/source_trust.rs");
-    let module_source_trust = std::fs::read_to_string(&module_source_trust_path)
-        .unwrap_or_else(|e| panic!("failed to read {module_source_trust_path:?}: {e}"));
-    let module_health_integrity_path =
-        crate_root.join("src/engine/primitives/module/health_integrity.rs");
-    let module_health_integrity = std::fs::read_to_string(&module_health_integrity_path)
-        .unwrap_or_else(|e| panic!("failed to read {module_health_integrity_path:?}: {e}"));
-    let module_activation_runtime_path =
-        crate_root.join("src/engine/primitives/module/activation_runtime.rs");
-    let module_activation_runtime = std::fs::read_to_string(&module_activation_runtime_path)
-        .unwrap_or_else(|e| panic!("failed to read {module_activation_runtime_path:?}: {e}"));
+    let read_module_file = |relative: &str| {
+        let path = crate_root.join(relative);
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"))
+    };
+    let module = read_module_file("src/engine/primitives/module.rs");
+    let module_trust_review = read_module_file("src/engine/primitives/module/trust_review.rs");
+    let module_trust_audit = read_module_file("src/engine/primitives/module/trust_audit.rs");
+    let module_trust_audit_schedule =
+        read_module_file("src/engine/primitives/module/trust_audit/schedule.rs");
+    let module_source_trust = read_module_file("src/engine/primitives/module/source_trust.rs");
+    let module_health_integrity =
+        read_module_file("src/engine/primitives/module/health_integrity.rs");
+    let module_activation_runtime =
+        read_module_file("src/engine/primitives/module/activation_runtime.rs");
     let module_tree = [
         module.as_str(),
         module_trust_review.as_str(),
         module_trust_audit.as_str(),
+        module_trust_audit_schedule.as_str(),
         module_source_trust.as_str(),
         module_health_integrity.as_str(),
         module_activation_runtime.as_str(),
@@ -3859,6 +3854,7 @@ fn module_package_activation_gates_stay_on() {
             && module.contains("mod trust_audit;")
             && module.contains("mod source_trust;")
             && module.contains("mod health_integrity;")
+            && module_trust_audit.contains("mod schedule;")
             && module_trust_review.contains("TRUST_REVIEW_OPERATIONS")
             && module_trust_review.contains("fn resolve_trust_review")
             && module_trust_review.contains("fn recommended_actions_for_trust_review")
@@ -3866,9 +3862,9 @@ fn module_package_activation_gates_stay_on() {
             && module_trust_audit.contains("fn trust_audit_status")
             && module_trust_audit.contains("fn run_scheduled_trust_audit")
             && module_trust_audit.contains("fn record_trust_audit_retention")
-            && module_trust_audit.contains("parse_trust_audit_wall_clock_time")
-            && module_trust_audit.contains("fn missed_buckets")
-            && module_trust_audit.contains("trust_audit_current_due_bucket")
+            && module_trust_audit_schedule.contains("parse_trust_audit_wall_clock_time")
+            && module_trust_audit_schedule.contains("fn missed_buckets")
+            && module_trust_audit_schedule.contains("trust_audit_current_due_bucket")
             && !module.contains("fn resolve_trust_review")
             && !module.contains("fn schedule_trust_audit")
             && !module.contains("fn trust_audit_status")
