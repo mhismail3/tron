@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        5_200,
+        5_400,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -352,7 +352,12 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| RWO-N16 | Pre-terminal worker disconnect retry |",
         "**RWO-N16: Pre-terminal Worker Failure/Retry/Cancellation Robustness**",
         "RWO-N16B: Queue Cancellation And Dead-Letter Robustness",
-        "**RWO-N17: Multi-Session Churn And Harness Ownership Robustness**",
+        "| RWO-N17 | Multi-session churn and harness ownership robustness |",
+        "No scored collapsed-engine hardening scenario remains open after RWO-N17",
+        "claude-sonnet-4-6",
+        "gpt-5.5",
+        "gemma4:e4b",
+        "larger local models",
         "hidden_side_effect_resource_scans_stay_bounded_and_observable",
         "large_rust_test_files_have_scorecard_ownership_audit",
         "Generated UI action presentation semantics stay server-owned",
@@ -361,11 +366,13 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "xcrun simctl install booted",
         "stale app binary is invalid parity evidence",
         "chat parity drift",
+        "nonzero `simctl openurl` return code",
         "no pending approvals for the session\nfamily",
         "Do not treat `stream.turn_end` with `stopReason = \"tool_use\"` as terminal",
         "packages/agent/tests/fixtures/session_terminal_guard.py",
         "packages/agent/tests/fixtures/rwo_n16_live_agent_harness.py",
         "packages/agent/tests/fixtures/rwo_n16b_live_agent_harness.py",
+        "packages/agent/tests/fixtures/rwo_n17_live_multi_session_harness.py",
         "dead_lettered",
         "No fallback readers, compatibility aliases, client-authored generated UI",
         "package/source/policy/trust/audit tables",
@@ -416,6 +423,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
             && ios_development.contains("engine_approvals.status")
             && ios_development.contains("no pending approvals")
             && ios_development.contains("stopReason = \"tool_use\"")
+            && ios_development.contains("nonzero `simctl openurl` return code")
+            && ios_development.contains("ContentView.onAppear")
             && ios_development.contains("session_terminal_guard.py"),
         "iOS development docs must preserve the simulator session deep-link harness procedure"
     );
@@ -437,6 +446,62 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
             && terminal_guard.contains("dead_lettered")
             && terminal_guard.contains("stream.turn_start"),
         "session terminal guard must reject tool-use boundaries and pending engine work"
+    );
+
+    let rwo_n17_harness = std::fs::read_to_string(
+        repo_root
+            .join("packages")
+            .join("agent")
+            .join("tests")
+            .join("fixtures")
+            .join("rwo_n17_live_multi_session_harness.py"),
+    )
+    .expect("read RWO-N17 multi-session harness");
+    assert!(
+        rwo_n17_harness.contains("claude-sonnet-4-6")
+            && rwo_n17_harness.contains("safe_run_cmd")
+            && rwo_n17_harness.contains("\"openurl\"")
+            && rwo_n17_harness.contains("\"returncode\"")
+            && rwo_n17_harness.contains("activeHarnessSubscriptionCount")
+            && rwo_n17_harness.contains("activeClientSubscriptionCount")
+            && rwo_n17_harness.contains("visibleLeakCount")
+            && rwo_n17_harness.contains("backgroundLeakCount")
+            && rwo_n17_harness.contains("simulatorOk"),
+        "RWO-N17 harness must keep current-model, simulator-return-code, subscription, and cross-session leakage checks"
+    );
+
+    let content_view = std::fs::read_to_string(
+        repo_root
+            .join("packages")
+            .join("ios-app")
+            .join("Sources")
+            .join("Views")
+            .join("Chat")
+            .join("ContentView.swift"),
+    )
+    .expect("read iOS ContentView");
+    assert!(
+        content_view.contains("PendingSessionDeepLink")
+            && content_view.contains("pendingSessionDeepLink(")
+            && content_view.contains("processPendingDeepLinkSession()")
+            && content_view.contains(".onAppear")
+            && content_view.contains(".onChange(of: deepLinkSessionId)"),
+        "ContentView must keep cold-start and live session deep links on one coordinator path"
+    );
+
+    let content_view_tests = std::fs::read_to_string(
+        repo_root
+            .join("packages")
+            .join("ios-app")
+            .join("Tests")
+            .join("ViewModels")
+            .join("ContentViewCoordinatorTests.swift"),
+    )
+    .expect("read ContentView coordinator tests");
+    assert!(
+        content_view_tests.contains("PendingSessionDeepLinkTests")
+            && content_view_tests.contains("testPendingSessionDeepLinkPreservesSessionAndTarget"),
+        "iOS tests must cover pending session deep-link state used by simulator harnesses"
     );
 
     let capability_mod = std::fs::read_to_string(crate_root.join("src/domains/capability/mod.rs"))

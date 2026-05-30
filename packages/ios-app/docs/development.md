@@ -136,6 +136,14 @@ xcrun simctl openurl booted "tron://session/<session_id>"
 xcrun simctl io booted screenshot /tmp/<scenario>-simulator.png
 ```
 
+Harnesses must treat a nonzero `simctl openurl` return code or screenshot
+return code as invalid app-path evidence, even when the server DB reaches a
+terminal state. Reset the old paired simulator or classify the run as
+`ios_rendering`/harness evidence failure instead of passing from stale UI state.
+Cold-start session routes are consumed through the pending deep-link path on
+`ContentView.onAppear`; if the app opens to the session list after a successful
+`openurl`, record the mismatch as parity drift.
+
 Record the session id, run log, screenshot path, dev-server PID or health
 snapshot, and the matching database evidence together. A screenshot captured
 right after `simctl openurl` is navigation evidence only. For chat parity

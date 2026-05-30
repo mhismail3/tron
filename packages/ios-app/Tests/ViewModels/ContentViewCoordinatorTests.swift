@@ -69,6 +69,27 @@ final class ContentViewCoordinatorTests: XCTestCase {
     }
 }
 
+// MARK: - Pending Deep Link State
+
+final class PendingSessionDeepLinkTests: XCTestCase {
+    func testPendingSessionDeepLinkReturnsNilWithoutSession() {
+        XCTAssertNil(pendingSessionDeepLink(sessionId: nil, scrollTarget: .bottom))
+    }
+
+    func testPendingSessionDeepLinkPreservesSessionAndTarget() {
+        XCTAssertEqual(
+            pendingSessionDeepLink(
+                sessionId: "sess_pending",
+                scrollTarget: .capabilityInvocation(id: "cap_123")
+            ),
+            PendingSessionDeepLink(
+                sessionId: "sess_pending",
+                scrollTarget: .capabilityInvocation(id: "cap_123")
+            )
+        )
+    }
+}
+
 // MARK: - resolveQuickSessionWorkspace (Pure Function Tests)
 
 /// Tests for the workspace resolution logic used by createQuickSession.

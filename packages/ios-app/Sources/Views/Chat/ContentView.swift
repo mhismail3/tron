@@ -1,5 +1,18 @@
 import SwiftUI
 
+struct PendingSessionDeepLink: Equatable {
+    let sessionId: String
+    let scrollTarget: ScrollTarget?
+}
+
+func pendingSessionDeepLink(
+    sessionId: String?,
+    scrollTarget: ScrollTarget?
+) -> PendingSessionDeepLink? {
+    guard let sessionId else { return nil }
+    return PendingSessionDeepLink(sessionId: sessionId, scrollTarget: scrollTarget)
+}
+
 // MARK: - Content View
 
 @available(iOS 26.0, *)
@@ -93,6 +106,8 @@ struct ContentView: View {
                 if PendingShareService.load() != nil {
                     handlePendingShare()
                 }
+
+                processPendingDeepLinkSession()
             }
             .onDisappear {}
             .onChange(of: engineClient.connectionState) { oldState, newState in
@@ -149,16 +164,8 @@ struct ContentView: View {
             .onChange(of: selectedSessionId) { _, newValue in
                 coordinator?.handleSessionSelection(newValue)
             }
-            .onChange(of: deepLinkSessionId) { _, newSessionId in
-                coordinator?.handleDeepLink(
-                    sessionId: newSessionId,
-                    scrollTarget: deepLinkScrollTarget
-                ) { sessionId, scrollTarget in
-                    selectedSessionId = sessionId
-                    currentScrollTarget = scrollTarget
-                    deepLinkScrollTarget = nil
-                }
-                deepLinkSessionId = nil
+            .onChange(of: deepLinkSessionId) { _, _ in
+                processPendingDeepLinkSession()
             }
     }
 
@@ -422,6 +429,23 @@ struct ContentView: View {
                 )
             }
         }
+    }
+
+    private func processPendingDeepLinkSession() {
+        guard let pending = pendingSessionDeepLink(
+            sessionId: deepLinkSessionId,
+            scrollTarget: deepLinkScrollTarget
+        ) else { return }
+
+        coordinator?.handleDeepLink(
+            sessionId: pending.sessionId,
+            scrollTarget: pending.scrollTarget
+        ) { sessionId, scrollTarget in
+            selectedSessionId = sessionId
+            currentScrollTarget = scrollTarget
+        }
+        deepLinkSessionId = nil
+        deepLinkScrollTarget = nil
     }
 }
 
