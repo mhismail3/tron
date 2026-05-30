@@ -8,6 +8,9 @@
 //! handler failure does not turn into a permanent replay result. Queue failure
 //! lifecycle events are emitted from the post-fail item state, so stream
 //! subscribers see the authoritative retry/dead-letter status and attempt count.
+//! Cancellation is terminal for an in-flight item: the queue clears the lease,
+//! publishes cancellation, and a late target result cannot complete or fail the
+//! cancelled receipt.
 //! Worker transport loss before a non-mutating queued target returns is treated
 //! as delivery failure: the queue publishes retry state, but the target
 //! invocation ledger does not record an application-level handler failure.
@@ -259,7 +262,15 @@ impl InMemoryEngineQueueStore {
         let Some(item) = self.items.get_mut(receipt_id) else {
             return Ok(false);
         };
+        if matches!(
+            item.status,
+            QueueItemStatus::Cancelled | QueueItemStatus::DeadLettered
+        ) {
+            return Ok(false);
+        }
         item.status = QueueItemStatus::Completed;
+        item.lease_owner = None;
+        item.lease_expires_at = None;
         item.updated_at = Utc::now();
         Ok(true)
     }
@@ -269,6 +280,12 @@ impl InMemoryEngineQueueStore {
         let Some(item) = self.items.get_mut(receipt_id) else {
             return Ok(false);
         };
+        if matches!(
+            item.status,
+            QueueItemStatus::Completed | QueueItemStatus::Cancelled | QueueItemStatus::DeadLettered
+        ) {
+            return Ok(false);
+        }
         item.attempts = item.attempts.saturating_add(1);
         item.lease_owner = None;
         item.lease_expires_at = None;
@@ -287,10 +304,15 @@ impl InMemoryEngineQueueStore {
         let Some(item) = self.items.get_mut(receipt_id) else {
             return Ok(false);
         };
-        if matches!(item.status, QueueItemStatus::Completed) {
+        if matches!(
+            item.status,
+            QueueItemStatus::Completed | QueueItemStatus::DeadLettered
+        ) {
             return Ok(false);
         }
         item.status = QueueItemStatus::Cancelled;
+        item.lease_owner = None;
+        item.lease_expires_at = None;
         item.updated_at = Utc::now();
         Ok(true)
     }
@@ -400,27 +422,33 @@ impl EngineQueueRuntime {
         let recorded_invocation = target.recorded_invocation;
         let result = target.result;
         if result.error.is_some() {
-            handle.fail_queue_item(&item.receipt_id, 3, 1_000).await?;
-            let updated = handle
-                .get_queue_item(&item.receipt_id)
-                .await?
-                .unwrap_or_else(|| item.clone());
-            publish_queue_lifecycle_event(
-                handle,
-                "fail",
-                &updated,
-                Some((&result, recorded_invocation)),
-            )
-            .await;
+            if handle.fail_queue_item(&item.receipt_id, 3, 1_000).await? {
+                let updated = handle
+                    .get_queue_item(&item.receipt_id)
+                    .await?
+                    .unwrap_or_else(|| item.clone());
+                publish_queue_lifecycle_event(
+                    handle,
+                    queue_failure_event_type(&updated),
+                    &updated,
+                    Some((&result, recorded_invocation)),
+                )
+                .await;
+            }
         } else {
-            handle.complete_queue_item(&item.receipt_id).await?;
-            publish_queue_lifecycle_event(
-                handle,
-                "complete",
-                &item,
-                Some((&result, recorded_invocation)),
-            )
-            .await;
+            if handle.complete_queue_item(&item.receipt_id).await? {
+                let updated = handle
+                    .get_queue_item(&item.receipt_id)
+                    .await?
+                    .unwrap_or_else(|| item.clone());
+                publish_queue_lifecycle_event(
+                    handle,
+                    "complete",
+                    &updated,
+                    Some((&result, recorded_invocation)),
+                )
+                .await;
+            }
         }
         Ok(result)
     }
@@ -610,7 +638,21 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
 
     /// Complete one queue item.
     pub fn complete(&mut self, receipt_id: &str) -> Result<bool> {
-        self.update_status(receipt_id, QueueItemStatus::Completed)
+        let Some(mut item) = self.get(receipt_id)? else {
+            return Ok(false);
+        };
+        if matches!(
+            item.status,
+            QueueItemStatus::Cancelled | QueueItemStatus::DeadLettered
+        ) {
+            return Ok(false);
+        }
+        item.status = QueueItemStatus::Completed;
+        item.lease_owner = None;
+        item.lease_expires_at = None;
+        item.updated_at = Utc::now();
+        self.update_item(&item)?;
+        Ok(true)
     }
 
     /// Fail one queue item, retrying until `max_attempts`.
@@ -618,6 +660,12 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
         let Some(mut item) = self.get(receipt_id)? else {
             return Ok(false);
         };
+        if matches!(
+            item.status,
+            QueueItemStatus::Completed | QueueItemStatus::Cancelled | QueueItemStatus::DeadLettered
+        ) {
+            return Ok(false);
+        }
         item.attempts = item.attempts.saturating_add(1);
         item.lease_owner = None;
         item.lease_expires_at = None;
@@ -634,7 +682,21 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
 
     /// Cancel one queue item.
     pub fn cancel(&mut self, receipt_id: &str) -> Result<bool> {
-        self.update_status(receipt_id, QueueItemStatus::Cancelled)
+        let Some(mut item) = self.get(receipt_id)? else {
+            return Ok(false);
+        };
+        if matches!(
+            item.status,
+            QueueItemStatus::Completed | QueueItemStatus::DeadLettered
+        ) {
+            return Ok(false);
+        }
+        item.status = QueueItemStatus::Cancelled;
+        item.lease_owner = None;
+        item.lease_expires_at = None;
+        item.updated_at = Utc::now();
+        self.update_item(&item)?;
+        Ok(true)
     }
 
     /// Get one item.
@@ -712,17 +774,6 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
             )
             .map_err(|err| sqlite_err("queue.update", err.to_string()))?;
         Ok(())
-    }
-
-    fn update_status(&mut self, receipt_id: &str, status: QueueItemStatus) -> Result<bool> {
-        let changed = self
-            .conn
-            .execute(
-                "UPDATE engine_queue_items SET status = ?1, updated_at = ?2 WHERE receipt_id = ?3",
-                params![status.as_str(), Utc::now().to_rfc3339(), receipt_id],
-            )
-            .map_err(|err| sqlite_err("queue.status", err.to_string()))?;
-        Ok(changed > 0)
     }
 }
 
@@ -902,6 +953,24 @@ pub async fn publish_queue_lifecycle_event(
     item: &EngineQueueItem,
     result: Option<(&InvocationResult, bool)>,
 ) {
+    let _ = handle
+        .publish_stream_event(queue_lifecycle_stream_event(event_type, item, result))
+        .await;
+}
+
+pub(in crate::engine) fn queue_failure_event_type(item: &EngineQueueItem) -> &'static str {
+    if item.status == QueueItemStatus::DeadLettered {
+        "dead_letter"
+    } else {
+        "fail"
+    }
+}
+
+pub(in crate::engine) fn queue_lifecycle_stream_event(
+    event_type: &str,
+    item: &EngineQueueItem,
+    result: Option<(&InvocationResult, bool)>,
+) -> super::streams::PublishStreamEvent {
     let status = match event_type {
         "enqueue" => "ready",
         "claim" => "leased",
@@ -911,30 +980,28 @@ pub async fn publish_queue_lifecycle_event(
         "dead_letter" => "dead_lettered",
         _ => item.status.as_str(),
     };
-    let _ = handle
-        .publish_stream_event(super::streams::PublishStreamEvent {
-            topic: "queue.lifecycle".to_owned(),
-            payload: json!({
-                "type": format!("queue.{event_type}"),
-                "receiptId": &item.receipt_id,
-                "queue": &item.queue,
-                "functionId": &item.function_id,
-                "status": status,
-                "attempts": item.attempts,
-                "deliveryInvocationId": result.map(|(value, _)| value.invocation_id.to_string()),
-                "resultInvocationId": result.and_then(|(value, recorded)| {
-                    recorded.then(|| value.invocation_id.to_string())
-                }),
-                "error": result
-                    .and_then(|(value, _)| value.error.as_ref())
-                    .map(ToString::to_string),
+    super::streams::PublishStreamEvent {
+        topic: "queue.lifecycle".to_owned(),
+        payload: json!({
+            "type": format!("queue.{event_type}"),
+            "receiptId": &item.receipt_id,
+            "queue": &item.queue,
+            "functionId": &item.function_id,
+            "status": status,
+            "attempts": item.attempts,
+            "deliveryInvocationId": result.map(|(value, _)| value.invocation_id.to_string()),
+            "resultInvocationId": result.and_then(|(value, recorded)| {
+                recorded.then(|| value.invocation_id.to_string())
             }),
-            visibility: super::types::VisibilityScope::Session,
-            session_id: item.session_id.clone(),
-            workspace_id: item.workspace_id.clone(),
-            producer: "queue".to_owned(),
-            trace_id: Some(item.trace_id.clone()),
-            parent_invocation_id: item.parent_invocation_id.clone(),
-        })
-        .await;
+            "error": result
+                .and_then(|(value, _)| value.error.as_ref())
+                .map(ToString::to_string),
+        }),
+        visibility: super::types::VisibilityScope::Session,
+        session_id: item.session_id.clone(),
+        workspace_id: item.workspace_id.clone(),
+        producer: "queue".to_owned(),
+        trace_id: Some(item.trace_id.clone()),
+        parent_invocation_id: item.parent_invocation_id.clone(),
+    }
 }

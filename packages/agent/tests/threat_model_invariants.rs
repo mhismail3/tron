@@ -351,7 +351,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "| RWO-N15-F1 | Harness terminal-state guard |",
         "| RWO-N16 | Pre-terminal worker disconnect retry |",
         "**RWO-N16: Pre-terminal Worker Failure/Retry/Cancellation Robustness**",
-        "**RWO-N16B: Queue Cancellation And Dead-Letter Robustness**",
+        "RWO-N16B: Queue Cancellation And Dead-Letter Robustness",
+        "**RWO-N17: Multi-Session Churn And Harness Ownership Robustness**",
         "hidden_side_effect_resource_scans_stay_bounded_and_observable",
         "large_rust_test_files_have_scorecard_ownership_audit",
         "Generated UI action presentation semantics stay server-owned",
@@ -364,6 +365,8 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         "Do not treat `stream.turn_end` with `stopReason = \"tool_use\"` as terminal",
         "packages/agent/tests/fixtures/session_terminal_guard.py",
         "packages/agent/tests/fixtures/rwo_n16_live_agent_harness.py",
+        "packages/agent/tests/fixtures/rwo_n16b_live_agent_harness.py",
+        "dead_lettered",
         "No fallback readers, compatibility aliases, client-authored generated UI",
         "package/source/policy/trust/audit tables",
         "alternate worker-spawn paths",
@@ -431,6 +434,7 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
             && terminal_guard.contains("no_end_turn")
             && terminal_guard.contains("open_queue_items")
             && terminal_guard.contains("pending_approvals")
+            && terminal_guard.contains("dead_lettered")
             && terminal_guard.contains("stream.turn_start"),
         "session terminal guard must reject tool-use boundaries and pending engine work"
     );

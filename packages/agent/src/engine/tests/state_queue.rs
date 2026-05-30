@@ -394,6 +394,233 @@ async fn queue_failure_event_records_updated_retry_state() {
 }
 
 #[tokio::test]
+async fn queue_cancel_during_claim_preserves_terminal_cancelled_state() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    let started = Arc::new(Barrier::new(2));
+    let release = Arc::new(Notify::new());
+    handle
+        .register_function_for_setup(
+            read_function("alpha::blocked", "alpha")
+                .with_allowed_delivery_modes(vec![DeliveryMode::Sync, DeliveryMode::Enqueue])
+                .with_required_authority(AuthorityRequirement::scope("queue.test")),
+            Some(Arc::new(BlockingHandler {
+                started: started.clone(),
+                release: release.clone(),
+            })),
+            false,
+        )
+        .unwrap();
+    handle
+        .subscribe_stream(
+            "queue-cancel-sub".to_owned(),
+            "queue.lifecycle".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some("session-a".to_owned()),
+            None,
+        )
+        .await
+        .unwrap();
+    let item = handle
+        .enqueue_invocation(crate::engine::EnqueueInvocation {
+            queue: "default".to_owned(),
+            function_id: fid("alpha::blocked"),
+            target_revision: None,
+            payload: json!({"message": "block"}),
+            actor_id: actor("agent"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: grant("manual-grant"),
+            authority_scopes: vec!["queue.test".to_owned()],
+            trace_id: trace("rwo-n16b-cancel"),
+            parent_invocation_id: None,
+            trigger_id: None,
+            session_id: Some("session-a".to_owned()),
+            workspace_id: None,
+            idempotency_key: Some("rwo-n16b-cancel-target".to_owned()),
+        })
+        .await
+        .unwrap();
+
+    let drain_handle = handle.clone();
+    let receipt = item.receipt_id.clone();
+    let drain_task = tokio::spawn(async move {
+        EngineQueueDrainer::drain_receipt(&drain_handle, &receipt, "worker-a").await
+    });
+    started.wait().await;
+
+    let cancelled = handle
+        .invoke(host_invocation(
+            "queue::cancel",
+            json!({"receiptId": item.receipt_id}),
+            mutating_causal("rwo-n16b-cancel")
+                .with_scope("queue.write")
+                .with_session_id("session-a"),
+        ))
+        .await;
+    assert_eq!(cancelled.error, None);
+    assert_eq!(cancelled.value.as_ref().unwrap()["cancelled"], true);
+    let after_cancel = handle
+        .get_queue_item(&item.receipt_id)
+        .await
+        .unwrap()
+        .expect("cancelled queue item should remain inspectable");
+    assert_eq!(after_cancel.status, queue::QueueItemStatus::Cancelled);
+    assert_eq!(after_cancel.lease_owner, None);
+    assert_eq!(after_cancel.lease_expires_at, None);
+
+    release.notify_waiters();
+    let drained = drain_task
+        .await
+        .unwrap()
+        .unwrap()
+        .expect("drain should complete after blocked handler releases");
+    assert_eq!(drained.error, None);
+    let final_item = handle
+        .get_queue_item(&item.receipt_id)
+        .await
+        .unwrap()
+        .expect("cancelled queue item should remain inspectable");
+    assert_eq!(final_item.status, queue::QueueItemStatus::Cancelled);
+    assert_eq!(final_item.lease_owner, None);
+    assert_eq!(final_item.lease_expires_at, None);
+
+    let page = handle
+        .poll_stream(
+            "queue-cancel-sub",
+            Some(StreamCursor(0)),
+            10,
+            &StreamActorScope::scoped(Some("session-a".to_owned()), None),
+        )
+        .await
+        .unwrap();
+    let receipt_events: Vec<_> = page
+        .events
+        .iter()
+        .filter(|event| event.payload["receiptId"] == item.receipt_id)
+        .collect();
+    assert!(
+        receipt_events
+            .iter()
+            .any(|event| event.payload["type"] == "queue.claim")
+    );
+    let cancel_event = receipt_events
+        .iter()
+        .find(|event| event.payload["type"] == "queue.cancel")
+        .expect("queue cancellation should be visible on lifecycle stream");
+    assert_eq!(cancel_event.payload["status"], "cancelled");
+    assert!(
+        !receipt_events
+            .iter()
+            .any(|event| event.payload["type"] == "queue.complete")
+    );
+}
+
+#[tokio::test]
+async fn queue_terminal_failure_publishes_dead_letter_lifecycle_event() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("alpha::always_fail", "alpha")
+                .with_allowed_delivery_modes(vec![DeliveryMode::Sync, DeliveryMode::Enqueue])
+                .with_required_authority(AuthorityRequirement::scope("queue.test")),
+            Some(Arc::new(FailHandler)),
+            false,
+        )
+        .unwrap();
+    handle
+        .subscribe_stream(
+            "queue-dead-letter-sub".to_owned(),
+            "queue.lifecycle".to_owned(),
+            StreamCursor(0),
+            VisibilityScope::Session,
+            Some("session-a".to_owned()),
+            None,
+        )
+        .await
+        .unwrap();
+    let item = handle
+        .enqueue_invocation(crate::engine::EnqueueInvocation {
+            queue: "default".to_owned(),
+            function_id: fid("alpha::always_fail"),
+            target_revision: None,
+            payload: json!({"message": "fail"}),
+            actor_id: actor("agent"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: grant("manual-grant"),
+            authority_scopes: vec!["queue.test".to_owned()],
+            trace_id: trace("rwo-n16b-dead-letter"),
+            parent_invocation_id: None,
+            trigger_id: None,
+            session_id: Some("session-a".to_owned()),
+            workspace_id: None,
+            idempotency_key: Some("rwo-n16b-dead-letter-target".to_owned()),
+        })
+        .await
+        .unwrap();
+
+    for attempt in 1..=3 {
+        let drained = EngineQueueDrainer::drain_receipt(&handle, &item.receipt_id, "worker-a")
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("attempt {attempt} should drain"));
+        assert!(drained.error.is_some());
+        if attempt < 3 {
+            tokio::time::sleep(std::time::Duration::from_millis(1_100)).await;
+        }
+    }
+    let updated = handle
+        .get_queue_item(&item.receipt_id)
+        .await
+        .unwrap()
+        .expect("dead-lettered queue item should remain inspectable");
+    assert_eq!(updated.status, queue::QueueItemStatus::DeadLettered);
+    assert_eq!(updated.attempts, 3);
+    assert_eq!(updated.lease_owner, None);
+    assert_eq!(updated.lease_expires_at, None);
+
+    let page = handle
+        .poll_stream(
+            "queue-dead-letter-sub",
+            Some(StreamCursor(0)),
+            20,
+            &StreamActorScope::scoped(Some("session-a".to_owned()), None),
+        )
+        .await
+        .unwrap();
+    let receipt_events: Vec<_> = page
+        .events
+        .iter()
+        .filter(|event| event.payload["receiptId"] == item.receipt_id)
+        .collect();
+    assert_eq!(
+        receipt_events
+            .iter()
+            .filter(|event| event.payload["type"] == "queue.fail")
+            .count(),
+        2
+    );
+    let dead_letter_event = receipt_events
+        .iter()
+        .find(|event| event.payload["type"] == "queue.dead_letter")
+        .expect("terminal queue failure should publish an explicit dead-letter event");
+    assert_eq!(dead_letter_event.payload["status"], "dead_lettered");
+    assert_eq!(dead_letter_event.payload["attempts"], 3);
+    assert!(
+        dead_letter_event
+            .payload
+            .get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|message| message.contains("boom"))
+    );
+}
+
+#[tokio::test]
 async fn sqlite_primitive_stores_persist_stream_state_and_queue_records() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("tron.sqlite");

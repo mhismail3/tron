@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 DEFAULT_DB_PATH = os.path.expanduser("~/.tron/internal/database/tron.sqlite")
 TERMINAL_STOP_REASON = "end_turn"
+TERMINAL_QUEUE_STATUSES = ("completed", "cancelled", "dead_lettered")
 
 
 @dataclass(frozen=True)
@@ -146,14 +147,15 @@ def _pending_approvals(conn, session_id):
 
 
 def _open_queue_items(conn, session_id):
+    terminal_statuses = ", ".join("?" for _ in TERMINAL_QUEUE_STATUSES)
     return conn.execute(
-        """
+        f"""
         SELECT COUNT(*)
         FROM engine_queue_items
         WHERE session_id = ?
-          AND status NOT IN ('completed', 'failed', 'cancelled')
+          AND status NOT IN ({terminal_statuses})
         """,
-        (session_id,),
+        (session_id, *TERMINAL_QUEUE_STATUSES),
     ).fetchone()[0]
 
 
@@ -274,6 +276,7 @@ def self_test():
     assert evaluate_terminal_state(later_turn).reason == "later_turn_start"
     assert evaluate_terminal_state(end_turn, pending_approvals=1).reason == "pending_approvals"
     assert evaluate_terminal_state(end_turn, open_queue_items=1).reason == "open_queue_items"
+    assert "dead_lettered" in TERMINAL_QUEUE_STATUSES
 
 
 def parse_args(argv):

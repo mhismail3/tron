@@ -9,6 +9,7 @@ use super::{
     PrimitiveFunctionRegistration, PrimitiveStores, QUEUE_WORKER_ID, handled_registration,
     optional_u64, primitive_function, required_str, required_string_owned,
 };
+use crate::engine::queue::{queue_failure_event_type, queue_lifecycle_stream_event};
 use crate::engine::{
     EffectClass, EngineError, FunctionRevision, IdempotencyContract, InProcessFunctionHandler,
     Invocation, Result,
@@ -19,6 +20,7 @@ pub(super) fn registrations(
 ) -> Result<Vec<PrimitiveFunctionRegistration>> {
     let queue_handler = Arc::new(QueuePrimitiveHandler {
         store: stores.queue.clone(),
+        streams: stores.streams.clone(),
     });
     Ok(vec![
         handled_registration(
@@ -120,6 +122,22 @@ pub(super) fn registrations(
 
 struct QueuePrimitiveHandler {
     store: Arc<std::sync::Mutex<super::QueueStoreBackend>>,
+    streams: Arc<std::sync::Mutex<super::StreamStoreBackend>>,
+}
+
+impl QueuePrimitiveHandler {
+    fn publish_lifecycle(
+        &self,
+        event_type: &str,
+        item: &crate::engine::queue::EngineQueueItem,
+    ) -> Result<()> {
+        let mut streams = self
+            .streams
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?;
+        streams.publish(queue_lifecycle_stream_event(event_type, item, None))?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -156,6 +174,8 @@ impl InProcessFunctionHandler for QueuePrimitiveHandler {
                     workspace_id: invocation.causal_context.workspace_id.clone(),
                     idempotency_key: invocation.causal_context.idempotency_key.clone(),
                 })?;
+                drop(store);
+                self.publish_lifecycle("enqueue", &item)?;
                 Ok(json!({ "item": item }))
             }
             "queue::claim" => {
@@ -167,7 +187,17 @@ impl InProcessFunctionHandler for QueuePrimitiveHandler {
             }
             "queue::complete" => {
                 let receipt_id = required_str(&invocation.payload, "receiptId")?;
-                Ok(json!({ "completed": store.complete(receipt_id)? }))
+                let completed = store.complete(receipt_id)?;
+                let item = if completed {
+                    store.get(receipt_id)?
+                } else {
+                    None
+                };
+                drop(store);
+                if let Some(item) = item {
+                    self.publish_lifecycle("complete", &item)?;
+                }
+                Ok(json!({ "completed": completed }))
             }
             "queue::fail" => {
                 let receipt_id = required_str(&invocation.payload, "receiptId")?;
@@ -175,11 +205,27 @@ impl InProcessFunctionHandler for QueuePrimitiveHandler {
                     optional_u64(invocation.payload.get("maxAttempts"))?.unwrap_or(3) as u32;
                 let backoff_ms =
                     optional_u64(invocation.payload.get("backoffMs"))?.unwrap_or(0) as i64;
-                Ok(json!({ "failed": store.fail(receipt_id, max_attempts, backoff_ms)? }))
+                let failed = store.fail(receipt_id, max_attempts, backoff_ms)?;
+                let item = if failed { store.get(receipt_id)? } else { None };
+                drop(store);
+                if let Some(item) = item {
+                    self.publish_lifecycle(queue_failure_event_type(&item), &item)?;
+                }
+                Ok(json!({ "failed": failed }))
             }
             "queue::cancel" => {
                 let receipt_id = required_str(&invocation.payload, "receiptId")?;
-                Ok(json!({ "cancelled": store.cancel(receipt_id)? }))
+                let cancelled = store.cancel(receipt_id)?;
+                let item = if cancelled {
+                    store.get(receipt_id)?
+                } else {
+                    None
+                };
+                drop(store);
+                if let Some(item) = item {
+                    self.publish_lifecycle("cancel", &item)?;
+                }
+                Ok(json!({ "cancelled": cancelled }))
             }
             "queue::get" => {
                 let receipt_id = required_str(&invocation.payload, "receiptId")?;
