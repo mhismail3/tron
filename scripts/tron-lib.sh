@@ -395,6 +395,52 @@ health_check() {
     [ "$response" = "200" ]
 }
 
+wait_for_service_health() {
+    local wait_seconds="${1:-12}"
+    local attempt max_attempts
+    if ! [[ "$wait_seconds" =~ ^[0-9]+$ ]] || [ "$wait_seconds" -lt 1 ]; then
+        wait_seconds=12
+    fi
+    max_attempts=$((wait_seconds * 2))
+    for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+        if health_check && [ -n "$(listener_pid_for_port "$PROD_PORT")" ]; then
+            return 0
+        fi
+        sleep 0.5
+    done
+    return 1
+}
+
+print_installed_service_restart_diagnostic() {
+    print_error "Installed service restart was requested, but /health never passed."
+    echo "  The installed helper was not reported as restarted because no healthy listener was observed."
+    if [ -x "$RELEASE_APP_BINARY" ]; then
+        echo "  /Applications/Tron.app may be stale relative to the current profile defaults."
+        echo "  Stale helpers can fail while parsing capability schema providerSurface values."
+        echo "  Reinstall or update /Applications/Tron.app, then run: tron start"
+    else
+        echo "  /Applications/Tron.app is missing or not executable; install it before relying on production restore."
+    fi
+}
+
+restart_installed_service_after_dev() {
+    local wait_seconds="${1:-12}"
+    print_status "Restarting installed service..."
+    if ! ensure_restartable_prod_server; then
+        print_error "Cannot restart: install Tron.app at /Applications/Tron.app"
+        return 1
+    fi
+    launchd_start "$PLIST_NAME"
+    if wait_for_service_health "$wait_seconds"; then
+        local pid
+        pid="$(listener_pid_for_port "$PROD_PORT")"
+        print_success "Installed service restarted (PID: ${pid:-unknown})"
+        return 0
+    fi
+    print_installed_service_restart_diagnostic
+    return 1
+}
+
 listener_pid_for_port() {
     local port="${1:-$PROD_PORT}"
     lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true

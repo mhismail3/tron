@@ -2663,11 +2663,28 @@ mod tests {
             value["details"]["results"][0]["recipe"]["contractId"],
             json!("process::run")
         );
-        let required_command = value["details"]["results"][0]["recipe"]["requiredPayload"][0]
-            .as_str()
+        let required_payload = value["details"]["results"][0]["recipe"]["requiredPayload"]
+            .as_array()
+            .expect("required payload summaries");
+        let required_command = required_payload
+            .iter()
+            .filter_map(|summary| summary.as_str())
+            .find(|summary| summary.starts_with("command: string"))
             .expect("required command summary");
         assert!(required_command.starts_with("command: string"));
-        assert!(required_command.contains("Shell command to run"));
+        let command_summary = required_command.to_ascii_lowercase();
+        assert!(command_summary.contains("shell command to run"));
+        assert!(command_summary.contains("date"));
+        assert!(
+            required_payload
+                .iter()
+                .filter_map(|summary| summary.as_str())
+                .any(|summary| {
+                    summary.starts_with("executionMode: string")
+                        && summary.contains("read_only")
+                        && summary.contains("sandbox_materialized")
+                })
+        );
     }
 
     #[test]

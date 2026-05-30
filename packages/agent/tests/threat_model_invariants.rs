@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        5_400,
+        5_700,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -563,6 +563,104 @@ fn collapsed_engine_hardening_scorecard_stays_formalized() {
         assert!(
             !schema.contains(forbidden_table),
             "collapsed substrate must not add side-channel table `{forbidden_table}`"
+        );
+    }
+}
+
+#[test]
+fn codebase_cleanup_scorecard_stays_formalized() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+    let scorecard_path = repo_root
+        .join("packages")
+        .join("agent")
+        .join("docs")
+        .join("codebase-cleanup-scorecard.md");
+    assert!(
+        scorecard_path.is_file(),
+        "active repo-local cleanup scorecard must exist"
+    );
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+
+    for required in [
+        "Initial cleanup score: **0/100**",
+        "Current score: **10/100**",
+        "## Operating Rules",
+        "## Review Rubric",
+        "## Static Gates",
+        "## Scenario Ledger",
+        "## Large-File Audit",
+        "| CLC-0 |",
+        "| CLC-1 |",
+        "| CLC-2 |",
+        "| CLC-3 |",
+        "| CLC-4 |",
+        "| CLC-5 |",
+        "| CLC-6 |",
+        "| CLC-7 |",
+        "| CLC-8 |",
+        "| CLC-9 |",
+        "| CLC-10 |",
+        "New cleanup exceptions require scorecard rows",
+        "search_visible_content_contains_actionable_recipe",
+        "RUST_LOG=info,ort=error",
+        "Background `tron dev` health wait defaults to `30s`",
+        "Installed service restarted",
+        "/health",
+        "stale-installed-app diagnostic",
+        "providerSurface = \"capability\"",
+        "scripts/tron dev -bd --json --wait 30",
+        "gemma4:e4b",
+        "larger local models",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "cleanup scorecard missing required checkpoint text: {required}"
+        );
+    }
+
+    let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
+    assert!(
+        readme.contains("packages/agent/docs/codebase-cleanup-scorecard.md")
+            && readme.contains("active repo-local\n  cleanup completion scorecard")
+            && readme.contains("defaults dev logging to `RUST_LOG=info,ort=error`")
+            && readme.contains("only after `/health` passes"),
+        "README living-doc and CLI map must document the active cleanup scorecard and dev restore contract"
+    );
+
+    let tron_script = std::fs::read_to_string(repo_root.join("scripts/tron"))
+        .expect("failed to read scripts/tron");
+    let tron_lib = std::fs::read_to_string(repo_root.join("scripts/tron-lib.sh"))
+        .expect("failed to read scripts/tron-lib.sh");
+    assert!(
+        tron_script.contains("local wait_seconds=30")
+            && tron_script.contains(r#"${RUST_LOG:-info,ort=error}"#)
+            && !tron_script.contains(r#"${RUST_LOG:-debug,ort=error}"#)
+            && !tron_script.contains("default: 12")
+            && tron_script.contains("restart_installed_service_after_dev 12"),
+        "tron dev must keep info-level default logging, 30s background health wait, and shared restore helper"
+    );
+    assert!(
+        tron_lib.contains("wait_for_service_health")
+            && tron_lib.contains("print_installed_service_restart_diagnostic")
+            && tron_lib.contains(
+                "Stale helpers can fail while parsing capability schema providerSurface values"
+            )
+            && tron_lib
+                .contains("print_success \"Installed service restarted (PID: ${pid:-unknown})\""),
+        "installed-service restore must be health-gated and carry the stale-installed-app diagnostic"
+    );
+
+    let budgets = cleanup_scorecard_large_file_budgets(&scorecard);
+    let large_files = cleanup_scorecard_large_files(&repo_root, &crate_root);
+    for (path, line_count) in &large_files {
+        let budget = budgets.get(path).unwrap_or_else(|| {
+            panic!("{path} exceeds 1,000 LOC and needs a cleanup scorecard row")
+        });
+        assert!(
+            line_count <= budget,
+            "{path} has grown to {line_count} lines over the cleanup scorecard budget {budget}; decompose it or update the scorecard exception"
         );
     }
 }
@@ -5111,6 +5209,82 @@ fn rust_files_under(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     visit_rust_files(root, &mut files);
     files
+}
+
+fn cleanup_scorecard_large_file_budgets(scorecard: &str) -> BTreeMap<String, usize> {
+    let mut budgets = BTreeMap::new();
+    let mut in_table = false;
+    for line in scorecard.lines() {
+        if line.starts_with("| File | LOC @ CLC-0 | Owner | Reason | Budget |") {
+            in_table = true;
+            continue;
+        }
+        if !in_table {
+            continue;
+        }
+        if !line.starts_with('|') || line.trim().is_empty() {
+            break;
+        }
+        if line.starts_with("|------") {
+            continue;
+        }
+        let cells = line.split('|').map(str::trim).collect::<Vec<_>>();
+        if cells.len() < 7 {
+            continue;
+        }
+        let path = cells[1].trim_matches('`');
+        let budget_digits = cells[5]
+            .chars()
+            .filter(char::is_ascii_digit)
+            .collect::<String>();
+        if path.is_empty() || budget_digits.is_empty() {
+            continue;
+        }
+        let budget = budget_digits
+            .parse::<usize>()
+            .unwrap_or_else(|error| panic!("invalid cleanup budget `{}`: {error}", cells[5]));
+        budgets.insert(path.to_owned(), budget);
+    }
+    budgets
+}
+
+fn cleanup_scorecard_large_files(repo_root: &Path, crate_root: &Path) -> BTreeMap<String, usize> {
+    let mut files = Vec::new();
+    files.extend(files_with_extensions(&crate_root.join("src"), &["rs"]));
+    files.extend(files_with_extensions(&crate_root.join("tests"), &["rs"]));
+    files.extend(files_with_extensions(
+        &repo_root.join("packages/agent/skills"),
+        &["sh"],
+    ));
+    for root in [
+        repo_root.join("packages/ios-app/Sources"),
+        repo_root.join("packages/ios-app/Tests"),
+        repo_root.join("packages/mac-app/Sources"),
+        repo_root.join("packages/mac-app/Tests"),
+    ] {
+        files.extend(files_with_extensions(&root, &["swift"]));
+    }
+    files.extend(files_with_extensions(&repo_root.join("scripts"), &["sh"]));
+    files.push(repo_root.join("scripts/tron"));
+    files.sort();
+    files.dedup();
+
+    let mut large_files = BTreeMap::new();
+    for path in files {
+        if !path.is_file() {
+            continue;
+        }
+        let line_count = line_count(&path);
+        if line_count > 1_000 {
+            let relative = path
+                .strip_prefix(repo_root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            large_files.insert(relative, line_count);
+        }
+    }
+    large_files
 }
 
 fn is_src_rust_test_file(path: &Path) -> bool {

@@ -500,7 +500,7 @@ create_dev_launchd_plist() {
         <key>TRON_REPO_ROOT</key>
         <string>$RUST_WORKSPACE</string>
         <key>RUST_LOG</key>
-        <string>${RUST_LOG:-debug,ort=error}</string>
+        <string>${RUST_LOG:-info,ort=error}</string>
         <key>TRON_DEV_BINARY</key>
         <string>$DEV_BINARY</string>
     </dict>
@@ -525,7 +525,7 @@ cmd_dev() {
     local do_test=false
     local do_background=false
     local output_json=false
-    local wait_seconds=12
+    local wait_seconds=30
     local log_level=""
 
     while [[ $# -gt 0 ]]; do
@@ -535,7 +535,7 @@ cmd_dev() {
             -d|--background) do_background=true; shift ;;
             -l|--log-level) log_level="$2"; shift 2 ;;
             --json)       output_json=true; shift ;;
-            --wait)        wait_seconds="${2:-12}"; shift 2 ;;
+            --wait)        wait_seconds="${2:-30}"; shift 2 ;;
             -bt|-tb)      do_build=true; do_test=true; shift ;;
             -bd|-db)      do_build=true; do_background=true; shift ;;
             -btd|-bdt|-tbd|-tdb|-dbt|-dtb) do_build=true; do_test=true; do_background=true; shift ;;
@@ -559,7 +559,7 @@ cmd_dev() {
                 echo "  -d, --background  Run in background (logs to database and $DEV_BACKGROUND_LOG)"
                 echo "  -l, --log-level   Override database log level (trace/debug/info/warn/error)"
                 echo "  --json            Emit final machine-readable server status on stdout"
-                echo "  --wait SECONDS    Max health wait for background starts (default: 12)"
+                echo "  --wait SECONDS    Max health wait for background starts (default: 30)"
                 echo "  --stop            Stop dev server and restart the installed service"
                 echo "  --log             Tail the server log"
                 echo ""
@@ -631,15 +631,14 @@ dev_start_foreground() {
         sleep 1
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
-            print_status "Restarting installed service..."
-            launchd_start "$PLIST_NAME"
+            restart_installed_service_after_dev 12
             return 1
         fi
     fi
 
     # Restart the installed helper on ANY exit (Ctrl+C, error, normal exit).
     # IMPORTANT: no `exec` — must run as child so EXIT trap fires
-    trap 'echo ""; print_status "Restarting installed service..."; if ensure_restartable_prod_server; then launchd_start "$PLIST_NAME"; print_success "Installed service restarted"; else print_error "Cannot restart: install Tron.app at /Applications/Tron.app"; fi' EXIT INT TERM
+    trap 'echo ""; restart_installed_service_after_dev 12' EXIT INT TERM
 
     echo ""
     echo -e "${CYAN}Starting Tron Dev Server (takeover)${NC}"
@@ -657,13 +656,13 @@ dev_start_foreground() {
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
     codesign_bundle "$DEV_BUNDLE"
 
-    RUST_LOG="${RUST_LOG:-debug,ort=error}" "$DEV_BINARY" \
+    RUST_LOG="${RUST_LOG:-info,ort=error}" "$DEV_BINARY" \
         --port "$PROD_PORT" ${log_level:+--log-level "$log_level"}
 }
 
 dev_start_background() {
     local output_json="${1:-false}"
-    local wait_seconds="${2:-12}"
+    local wait_seconds="${2:-30}"
     if ! [[ "$wait_seconds" =~ ^[0-9]+$ ]] || [ "$wait_seconds" -lt 1 ]; then
         print_error "--wait must be a positive integer number of seconds"
         return 2
@@ -690,8 +689,7 @@ dev_start_background() {
         sleep 1
         if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
-            print_status "Restarting installed service..."
-            launchd_start "$PLIST_NAME"
+            restart_installed_service_after_dev 12
             return 1
         fi
     fi
@@ -710,7 +708,7 @@ dev_start_background() {
         echo "=== tron dev background start $(date -u +"%Y-%m-%dT%H:%M:%SZ") ==="
         echo "binary=$DEV_BINARY"
         echo "port=$PROD_PORT"
-        echo "rust_log=${RUST_LOG:-debug,ort=error}"
+        echo "rust_log=${RUST_LOG:-info,ort=error}"
     } > "$dev_log"
 
     create_dev_launchd_plist "$log_level"
@@ -720,11 +718,7 @@ dev_start_background() {
             print_status "Last dev server log lines ($dev_log):"
             tail -n 80 "$dev_log" >&2 || true
         fi
-        print_status "Restarting installed service..."
-        if ensure_restartable_prod_server; then
-            launchd_start "$PLIST_NAME"
-            print_success "Installed service restarted"
-        fi
+        restart_installed_service_after_dev 12
         return 1
     fi
 
@@ -788,11 +782,7 @@ dev_start_background() {
         else
             print_warning "Dev server log was empty: $dev_log"
         fi
-        print_status "Restarting installed service..."
-        if ensure_restartable_prod_server; then
-            launchd_start "$PLIST_NAME"
-            print_success "Installed service restarted"
-        fi
+        restart_installed_service_after_dev 12
         return 1
     fi
 }
@@ -822,13 +812,7 @@ dev_stop() {
         # If it was kill -9, restart manually:
         sleep 1
         if ! service_is_running; then
-            print_status "Restarting installed service..."
-            if ensure_restartable_prod_server; then
-                launchd_start "$PLIST_NAME"
-                print_success "Installed service restarted"
-            else
-                print_error "Cannot restart: install Tron.app at /Applications/Tron.app"
-            fi
+            restart_installed_service_after_dev 12
         fi
     else
         if launchd_is_loaded "$DEV_PLIST_NAME"; then
@@ -837,13 +821,7 @@ dev_stop() {
             rm -f "$DEV_BACKGROUND_PID_FILE"
             print_success "Dev takeover launchd job stopped"
             if ! service_is_running; then
-                print_status "Restarting installed service..."
-                if ensure_restartable_prod_server; then
-                    launchd_start "$PLIST_NAME"
-                    print_success "Installed service restarted"
-                else
-                    print_error "Cannot restart: install Tron.app at /Applications/Tron.app"
-                fi
+                restart_installed_service_after_dev 12
             fi
         else
             rm -f "$DEV_BACKGROUND_PID_FILE"

@@ -1512,6 +1512,8 @@ const KNOWN_CONTEXT_BLOCKS: &[&str] = &[
     "conversation.messages",
 ];
 
+pub(crate) const CAPABILITY_SCHEMA_PROVIDER_SURFACE: &str = "capability";
+
 pub(crate) fn validate_context_block_manifest(path: &Path) -> io::Result<()> {
     let content = fs::read_to_string(path)?;
     let manifest: ContextBlockManifest = toml::from_str(&content).map_err(|error| {
@@ -1565,7 +1567,12 @@ pub(crate) fn validate_context_block_manifest(path: &Path) -> io::Result<()> {
                 &block.id,
                 "providerSurface",
                 provider_surface,
-                &["instructions", "message", "capability", "excluded"],
+                &[
+                    "instructions",
+                    "message",
+                    CAPABILITY_SCHEMA_PROVIDER_SURFACE,
+                    "excluded",
+                ],
             )?;
         }
         if !seen.insert(block.id.clone()) {
@@ -1725,6 +1732,25 @@ store = "auth.json"
                     "{}{}{}",
                     "fine-grained-", "capability", "-streaming"
                 ))
+        );
+    }
+
+    #[test]
+    fn default_context_block_manifest_declares_capability_schema_surface() {
+        let manifest_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("defaults/profiles/default/context/context-blocks.toml");
+        validate_context_block_manifest(&manifest_path).unwrap();
+        let manifest: ContextBlockManifest =
+            toml::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        let schemas = manifest
+            .blocks
+            .iter()
+            .find(|block| block.id == "capabilities.schemas")
+            .expect("capabilities.schemas block");
+
+        assert_eq!(
+            schemas.provider_surface.as_deref(),
+            Some(CAPABILITY_SCHEMA_PROVIDER_SURFACE)
         );
     }
 
