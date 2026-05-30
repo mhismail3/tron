@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        6_950,
+        7_050,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -75,11 +75,6 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
         "packages/agent/src/engine/tests/generated_ui.rs",
         "single generated-UI primitive matrix",
         2_050,
-    ),
-    (
-        "packages/agent/src/domains/agent/runner/guardrails/tests.rs",
-        "guardrail rule-pattern matrix",
-        1_850,
     ),
     (
         "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs",
@@ -590,7 +585,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **97/100**",
+        "Current score: **99/100**",
         "Score normalization note",
         "## Operating Rules",
         "## Review Rubric",
@@ -625,6 +620,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
         "smaller_domain_boundaries_stay_split",
         "ios_thin_client_boundaries_stay_split",
         "mac_script_boundaries_stay_split",
+        "test_harness_boundaries_stay_split",
         "main_runtime.rs",
         "push_helpers_tests.rs",
         "events/tron/catalog.rs",
@@ -1512,6 +1508,86 @@ fn large_rust_test_files_have_scorecard_ownership_audit() {
         assert!(
             scorecard.contains(path) && scorecard.contains(reason),
             "SCB-S6 scorecard audit must include {path} with reason marker `{reason}`"
+        );
+    }
+}
+
+#[test]
+fn test_harness_boundaries_stay_split() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+
+    let guardrails_root = crate_root.join("src/domains/agent/runner/guardrails");
+    assert!(
+        !guardrails_root.join("tests.rs").exists(),
+        "guardrails tests must stay split by concern under guardrails/tests/"
+    );
+    let guardrails_mod =
+        std::fs::read_to_string(guardrails_root.join("mod.rs")).expect("read guardrails/mod.rs");
+    assert!(
+        guardrails_mod.contains("mod tests;") && !guardrails_mod.contains("#[path = \"tests.rs\"]"),
+        "guardrails module should use the concern-owned test directory directly"
+    );
+    for relative in [
+        "src/domains/agent/runner/guardrails/tests/mod.rs",
+        "src/domains/agent/runner/guardrails/tests/serialization.rs",
+        "src/domains/agent/runner/guardrails/tests/pattern_path_resource.rs",
+        "src/domains/agent/runner/guardrails/tests/context_composite.rs",
+        "src/domains/agent/runner/guardrails/tests/engine_audit.rs",
+    ] {
+        let path = crate_root.join(relative);
+        assert!(
+            path.is_file(),
+            "guardrails test split file missing: {relative}"
+        );
+        assert!(
+            line_count(&path) <= 1_000,
+            "guardrails test split file must stay below 1,000 LOC: {relative}"
+        );
+    }
+
+    let fixtures_root = repo_root.join("packages/agent/tests/fixtures");
+    for relative in [
+        "rwo_n7_live_worker_fixture.py",
+        "rwo_n15_live_worker_fixture.py",
+        "session_terminal_guard.py",
+    ] {
+        let path = fixtures_root.join(relative);
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        assert!(
+            content.contains("--self-test"),
+            "{relative} must keep a runnable fixture self-test"
+        );
+    }
+
+    let n15 = std::fs::read_to_string(fixtures_root.join("rwo_n15_live_worker_fixture.py"))
+        .expect("read RWO-N15 fixture");
+    let self_test_pos = n15
+        .find("if args.self_test:")
+        .expect("RWO-N15 fixture self-test branch missing");
+    let visibility_pos = n15
+        .find("if args.visibility == \"session\"")
+        .expect("RWO-N15 fixture visibility validation missing");
+    assert!(
+        self_test_pos < visibility_pos,
+        "RWO-N15 fixture --self-test must run before live session/workspace visibility validation"
+    );
+
+    let n17 = std::fs::read_to_string(fixtures_root.join("rwo_n17_live_multi_session_harness.py"))
+        .expect("read RWO-N17 harness");
+    for required in [
+        "claude-sonnet-4-6",
+        "safe_run_cmd",
+        "activeHarnessSubscriptionCount",
+        "activeClientSubscriptionCount",
+        "visibleLeakCount",
+        "backgroundLeakCount",
+        "simulatorOk",
+    ] {
+        assert!(
+            n17.contains(required),
+            "RWO-N17 harness must retain multi-session app-path evidence marker `{required}`"
         );
     }
 }

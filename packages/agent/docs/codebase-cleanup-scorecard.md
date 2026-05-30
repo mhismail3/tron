@@ -4,9 +4,9 @@ Created: 2026-05-30
 
 Initial cleanup score: **0/100**
 
-Current score: **97/100**
+Current score: **99/100**
 
-Status: **CLC-8 complete; CLC-9 next**
+Status: **CLC-9 complete; CLC-10 next**
 
 This scorecard is the repo-local maintainability plan. It is separate from
 `collapsed-engine-hardening-scorecard.md`, which remains at **100/100** for
@@ -136,6 +136,10 @@ cleanup gates:
   paths copy `tron-lib.d/` beside `tron-lib.sh`; dev takeover restore stays
   health-gated through the shared service module; and updater/APNS test
   matrices stay out of production roots.
+- `test_harness_boundaries_stay_split` gates the CLC-9 test/harness split:
+  guardrails tests stay concern-owned under `guardrails/tests/`, fixture
+  self-tests stay runnable without live server/session arguments, and RWO-N17
+  keeps the current-model simulator/deep-link multi-session evidence markers.
 
 ## Scenario Ledger
 
@@ -150,7 +154,7 @@ cleanup gates:
 | CLC-6 | Complete | +10 | `packages/agent/src/domains/worktree/`, `packages/agent/src/domains/cron/`, `packages/agent/src/domains/process/`, `packages/agent/src/domains/auth/`, `packages/agent/src/domains/skills/`, `packages/agent/src/domains/mcp/product_protocol/`, `packages/agent/src/shared/foundation/` | Split `GitExecutor` by command-family owner (`command`, `remote`, `state`, `conflicts`, `parsing`, `error_classification`) and moved Git tests out of the command catalog root; moved inline tests out of cron scheduler/executor, auth provider storage/OpenAI auth, skills tracker, process, MCP product-protocol client, and shared path parents; added the CLC-6 static boundary gate. | Targeted worktree/cron/process/auth/skills/MCP/foundation tests, formatting, `threat_model_invariants`, and diff checks. | Settings contracts were not changed, so no iOS settings parity update was required. Large test matrices and the managed vault shell script remain audited rows for CLC-9/CLC-10 rather than production-source CLC-6 blockers. |
 | CLC-7 | Complete | +10 | `packages/ios-app/Sources/Views/`, `packages/ios-app/Sources/Services/Network/`, `packages/ios-app/Sources/Models/`, `packages/ios-app/docs/`, `packages/agent/tests/` | Split Engine Console section/component bodies, capability invocation display/presentation models, capability detail/result renderers, new-session flow types/components, and engine connection types/protocol frames out of broad Swift roots; trimmed redundant transport comments instead of widening private state-machine internals. | `xcodegen generate`; targeted `xcodebuild test` for capability invocation display, new-session flow, engine connection reconnect, and Engine Console state; `ios_thin_client_boundaries_stay_split`. | No chat/session navigation behavior changed, so simulator deep-link smoke was not required for this checkpoint. Large iOS test matrices remain audited rows for the test/harness cleanup lane rather than CLC-7 production-source blockers. |
 | CLC-8 | Complete | +3 normalized (+8 planning effort) | `scripts/`, `packages/mac-app/docs/`, `README.md`, `packages/agent/src/main*.rs`, `packages/agent/src/platform/`, `packages/agent/tests/` | Split `scripts/tron` into `scripts/tron.d/{workspace,quality,dev,deploy,automation}.sh` and `scripts/tron-lib.sh` into `scripts/tron-lib.d/{service,bundle,logs,auth}.sh`; kept service health/restore logic centralized in `service.sh`; updated install/deploy/setup to copy runtime library modules; split the binary startup root into `main.rs`, `main_cli.rs`, and `main_runtime.rs`; moved updater and APNS push-helper test matrices out of production roots. | `bash -n` for CLI scripts; `scripts/tron status --json`; `scripts/tron dev -bd --json --wait 30`; `curl /health`; focused `cli_default_host`, `parse_triple`, and `to_apns_notification_maps_all_fields`; `mac_script_boundaries_stay_split`. | None for CLC-8; `main_runtime.rs` remains below 1,000 LOC and should be split again if future startup work makes it grow. |
-| CLC-9 | Not started | +2 normalized (+5 planning effort) | `packages/agent/tests/`, `packages/agent/src/**/tests*`, `packages/agent/tests/fixtures/` | Target: split large tests only when it reduces concepts, keep harnesses scenario-owned and DB-classifying, preserve RWO-N17 as canonical multi-session simulator regression. | `threat_model_invariants`, fixture self-tests, harness smoke. | Static gates should not become a dumping ground for local unit assertions. |
+| CLC-9 | Complete | +2 normalized (+5 planning effort) | `packages/agent/tests/`, `packages/agent/src/**/tests*`, `packages/agent/tests/fixtures/` | Split `guardrails/tests.rs` into concern-owned test modules for serialization, pattern/path/resource rules, context/composite rules, and engine/audit/integration checks; kept shared guardrail fixtures in `tests/mod.rs`; fixed `rwo_n15_live_worker_fixture.py --self-test` so live session validation does not block fixture self-tests; added the CLC-9 harness/static split gate. | `guardrails --lib`; fixture self-tests for RWO-N7, RWO-N15, and terminal guard; `threat_model_invariants`; formatting and diff checks. | Remaining large test matrices stay audited with budgets; CLC-10 must close or explicitly defer every final large-file row. |
 | CLC-10 | Not started | +1 normalized (+3 planning effort) | Whole repo | Target: final file-size report, close or defer rows explicitly, run broad verification appropriate to touched areas, update README only for changed canonical modules/CLI/contracts/events/settings/schema. | Broad verification by touched area. | Final score requires every open exception to be closed or explicitly deferred. |
 
 ## CLC-0 Dev Workflow Reliability
@@ -809,6 +813,33 @@ CLC-8 verification evidence from 2026-05-30:
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`: passed.
 - `git diff --check`: passed.
 
+## CLC-9 Tests, Harnesses, And Static Gates
+
+CLC-9 is complete and has awarded **+2 normalized** points. The original
+planning row called this **+5** effort; the normalized score keeps CLC-10 as
+the final required closeout before the cleanup campaign reaches 100/100.
+
+Accepted decomposition and harness hardening:
+
+- `packages/agent/src/domains/agent/runner/guardrails/tests.rs` is deleted.
+  Shared fixtures live in `guardrails/tests/mod.rs`, and concern-owned test
+  modules live in `serialization.rs`, `pattern_path_resource.rs`,
+  `context_composite.rs`, and `engine_audit.rs`. Every guardrails test file is
+  below 1,000 LOC.
+- `rwo_n15_live_worker_fixture.py --self-test` now runs before live
+  session/workspace visibility validation, matching the fixture self-test
+  contract used by the other DB-classifying harness helpers.
+- `test_harness_boundaries_stay_split` gates the guardrails split, fixture
+  self-test surfaces, and RWO-N17 current-model simulator/deep-link
+  multi-session evidence markers.
+
+CLC-9 verification evidence from 2026-05-30:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml guardrails --lib -- --nocapture`: passed, 139 selected tests.
+- `python3 packages/agent/tests/fixtures/rwo_n7_live_worker_fixture.py --self-test`: passed.
+- `python3 packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py --self-test`: passed.
+- `python3 packages/agent/tests/fixtures/session_terminal_guard.py --self-test`: passed.
+
 ## Large-File Audit
 
 Baseline command:
@@ -819,17 +850,16 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 6841 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, and CLC-8 split-boundary gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, and Mac script/startup/platform subtree checks. | 6950 | CLC-9 |
+| `packages/agent/tests/threat_model_invariants.rs` | 6917 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, and CLC-9 split-boundary gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 7050 | CLC-9 |
 | `packages/agent/tests/integration/tests.rs` | 3108 | CLC-9 harnesses | Transport e2e suite with shared WebSocket harness. | 3150 | CLC-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2848 | CLC-9 iOS tests | Event transformer matrix should split only when concepts separate. | 2900 | CLC-9 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-9 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-9 |
 | `packages/agent/src/engine/tests/generated_ui.rs` | 1865 | CLC-9 engine tests | Generated UI primitive matrix. | 1900 | CLC-9 |
-| `packages/agent/src/domains/agent/runner/guardrails/tests.rs` | 1695 | CLC-9 runner tests | Guardrail rule-pattern matrix. | 1725 | CLC-9 |
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1571 | CLC-9 session tests | SQLite event repository query matrix. | 1600 | CLC-9 |
 | `packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests.rs` | 1545 | CLC-9 runner tests | Subagent manager orchestration matrix. | 1575 | CLC-9 |
-| `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | 1384 | CLC-9 auth tests | Credential storage scenario matrix moved out of the implementation root during CLC-6. | 1425 | CLC-9 |
+| `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | 1383 | CLC-9 auth tests | Credential storage scenario matrix moved out of the implementation root during CLC-6. | 1425 | CLC-9 |
 | `packages/agent/src/engine/tests/module_activation/source_trust.rs` | 1364 | CLC-9 engine tests | Module source-trust scenario matrix. | 1400 | CLC-9 |
-| `packages/agent/src/domains/skills/implementation/runtime/tracker/tests.rs` | 1302 | CLC-9 skills tests | Skill runtime tracking scenario matrix moved out of the implementation root during CLC-6. | 1350 | CLC-9 |
+| `packages/agent/src/domains/skills/implementation/runtime/tracker/tests.rs` | 1301 | CLC-9 skills tests | Skill runtime tracking scenario matrix moved out of the implementation root during CLC-6. | 1350 | CLC-9 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs` | 1239 | CLC-9 worktree tests | Rebase-on-main conflict/recovery matrix. | 1275 | CLC-9 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1207 | CLC-9 engine tests | Resource-kernel matrix. | 1250 | CLC-9 |
 | `packages/agent/skills/vault/scripts/vault.sh` | 1200 | CLC-10 managed skills | Single managed skill entrypoint; split only with packaging/selftest verification. | 1225 | CLC-10 |

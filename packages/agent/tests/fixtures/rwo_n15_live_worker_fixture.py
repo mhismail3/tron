@@ -363,10 +363,6 @@ def main(argv):
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     args = parse_args(argv)
-    if args.visibility == "session" and not args.session_id:
-        raise SystemExit("--session-id is required for session visibility")
-    if args.visibility == "workspace" and not args.workspace_id:
-        raise SystemExit("--workspace-id is required for workspace visibility")
     if args.self_test:
         token = worker_token(args)
         assert function_definition(args)["allowed_delivery_modes"] == ["Sync", "Enqueue"]
@@ -381,6 +377,10 @@ def main(argv):
             "failureMode": args.failure_mode,
         }))
         return 0
+    if args.visibility == "session" and not args.session_id:
+        raise SystemExit("--session-id is required for session visibility")
+    if args.visibility == "workspace" and not args.workspace_id:
+        raise SystemExit("--workspace-id is required for workspace visibility")
     failure_state = {"invocations": 0}
     outcome = run_fixture(args, failure_state)
     if (
