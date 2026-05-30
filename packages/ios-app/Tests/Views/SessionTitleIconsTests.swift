@@ -68,27 +68,37 @@ final class SessionTitleIconsTests: XCTestCase {
         XCTAssertEqual(icons, [.fork, .branch])
     }
 
-    // T44 — worktree on base (no icons from worktree)
-    func test_icons_worktreeOnBase_suppressed() {
+    // T44 — clean worktree on base (no icons from worktree)
+    func test_icons_cleanWorktreeOnBase_suppressed() {
+        let clean = makeInfo(branch: "main", baseBranch: "main", hasUncommittedChanges: false)
+        let icons = SessionTitleIcons.iconsShown(isFork: false, worktree: clean)
+        XCTAssertEqual(icons, [])
+    }
+
+    func test_icons_dirtyWorktreeOnBase_showsDot() {
         let w = makeInfo(branch: "main", baseBranch: "main", hasUncommittedChanges: true)
         let icons = SessionTitleIcons.iconsShown(isFork: false, worktree: w)
-        XCTAssertEqual(icons, [])
+        XCTAssertEqual(icons, [.dot])
     }
 
     // Non-isolated (passthrough) → also suppressed
     func test_icons_nonIsolated_suppressed() {
-        let w = makeInfo(isolated: false, branch: "main", baseBranch: nil, hasUncommittedChanges: true)
+        let w = makeInfo(isolated: false, branch: "main", baseBranch: nil, hasUncommittedChanges: false)
         let icons = SessionTitleIcons.iconsShown(isFork: false, worktree: w)
         XCTAssertEqual(icons, [])
     }
 
-    // Dot alone is never emitted without the branch icon
-    func test_icons_dotRequiresBranch() {
-        // On-base with uncommitted → no icons at all
-        let onBaseDirty = makeInfo(branch: "main", baseBranch: "main", hasUncommittedChanges: true)
+    func test_icons_dirtyNonIsolatedWorktree_showsDot() {
+        let w = makeInfo(isolated: false, branch: "main", baseBranch: nil, hasUncommittedChanges: true)
+        let icons = SessionTitleIcons.iconsShown(isFork: false, worktree: w)
+        XCTAssertEqual(icons, [.dot])
+    }
+
+    func test_accessibilityDescriptors_matchVisibleMetadata() {
+        let w = makeInfo(branch: "session/feature", baseBranch: "main", hasUncommittedChanges: true)
         XCTAssertEqual(
-            SessionTitleIcons.iconsShown(isFork: false, worktree: onBaseDirty),
-            []
+            SessionTitleIcons.accessibilityDescriptors(isFork: true, worktree: w),
+            ["forked", "branch feature", "dirty worktree"]
         )
     }
 }

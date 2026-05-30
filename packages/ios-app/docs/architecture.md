@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-26 (capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -427,6 +427,15 @@ application errors still flow through `ErrorHandler` so real failures remain
 visible. The server owns the dashboard query contract: iOS may pass
 `workingDirectory`, `limit`, `offset`, and `includeArchived`, then caches only
 the returned server-authoritative metadata for the active paired origin.
+Dashboard session rows are projections over two server-owned sources:
+`session::list` supplies title, activity lines, token/cost/model metadata,
+archive state, and `isRunning`; `worktree::get_status` supplies fork/branch and
+dirty metadata. The local sessions table persists `is_processing` so a relaunch
+cannot lose an active processing bar between the server list refresh and local
+cache reload. The sidebar preloads filtered session ids only after the engine is
+connected; row labels and title icons both read through `SessionTitleIcons`, so
+visual fork/branch/dirty affordances and accessibility descriptors stay aligned
+with the same `WorktreeInfo` snapshot.
 
 ## File Placement Guidelines
 

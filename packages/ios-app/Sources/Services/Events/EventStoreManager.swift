@@ -67,8 +67,8 @@ final class EventStoreManager {
     )
 
     /// Per-session worktree status, shared by the chat toolbar and the sidebar.
-    /// Populated lazily by `.task` on sidebar rows and kept live by routing
-    /// worktree events through `handleGlobalEventV2`.
+    /// The sidebar preloads its current session list after the engine is
+    /// connected, and worktree events stay live through `handleGlobalEventV2`.
     @ObservationIgnored
     private(set) lazy var worktreeStatusCache: WorktreeStatusCache = {
         WorktreeStatusCache(fetch: { [weak self] id in

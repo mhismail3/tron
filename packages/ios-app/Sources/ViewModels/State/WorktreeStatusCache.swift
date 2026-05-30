@@ -85,6 +85,14 @@ final class WorktreeStatusCache {
         await task.value
     }
 
+    func ensureLoaded(sessionIds: [String]) async {
+        var seen: Set<String> = []
+        let uniqueIds = sessionIds.filter { seen.insert($0).inserted }
+        for sessionId in uniqueIds {
+            await ensureLoaded(sessionId: sessionId)
+        }
+    }
+
     private func performFetch(sessionId: String) async {
         do {
             try await gate.wait()

@@ -42,6 +42,17 @@ struct SessionSidebar: View {
         return eventStoreManager.sortedSessions.filter { $0.workingDirectory == workspace }
     }
 
+    private var filteredSessionIds: [String] {
+        filteredSessions.map(\.id)
+    }
+
+    private var worktreePreloadKey: SessionSidebarWorktreePreloadKey {
+        SessionSidebarWorktreePreloadKey(
+            sessionIds: filteredSessionIds,
+            isConnected: eventStoreManager.engineClient.connectionState.isConnected
+        )
+    }
+
     private var workspaceFilterPills: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -138,6 +149,11 @@ struct SessionSidebar: View {
                         .allowsHitTesting(false)
                     }
                 }
+                .task(id: worktreePreloadKey) {
+                    let key = worktreePreloadKey
+                    guard key.isConnected else { return }
+                    await eventStoreManager.worktreeStatusCache.ensureLoaded(sessionIds: key.sessionIds)
+                }
             }
 
             // Bottom floating bar
@@ -189,6 +205,11 @@ struct SessionSidebar: View {
 
 }
 
+private struct SessionSidebarWorktreePreloadKey: Equatable {
+    let sessionIds: [String]
+    let isConnected: Bool
+}
+
 // MARK: - Floating New Session Button (iOS 26 Liquid Glass)
 
 @available(iOS 26.0, *)
@@ -223,14 +244,24 @@ struct CachedSessionSidebarRow: View {
     let streamManager: DashboardStreamManager
     let worktreeCache: WorktreeStatusCache
 
+    private func accessibilityLabel(worktree: WorktreeInfo?) -> String {
+        let metadata = SessionTitleIcons.accessibilityDescriptors(
+            isFork: session.isFork == true,
+            worktree: worktree
+        )
+        let metadataText = metadata.isEmpty ? "" : ", \(metadata.joined(separator: ", "))"
+        return "\(session.displayTitle)\(metadataText), \(session.messageCount) messages, \(session.formattedDate)"
+    }
+
     var body: some View {
+        let worktree = worktreeCache.status(for: session.id)?.worktree
         VStack(alignment: .leading, spacing: 4) {
             // Header: title
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
                     SessionTitleIcons(
                         isFork: session.isFork == true,
-                        worktree: worktreeCache.status(for: session.id)?.worktree
+                        worktree: worktree
                     )
                     Text(session.displayTitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -240,7 +271,7 @@ struct CachedSessionSidebarRow: View {
                     Spacer()
                 }
                 .animation(.smooth(duration: 0.25),
-                           value: worktreeCache.status(for: session.id)?.worktree)
+                           value: worktree)
             }
 
             // Mini-chat content — single data source for both live and persisted
@@ -288,11 +319,8 @@ struct CachedSessionSidebarRow: View {
         .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))
         .hoverEffect(.highlight)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(session.displayTitle)\(session.isFork == true ? ", forked" : ""), \(session.messageCount) messages, \(session.formattedDate)")
+        .accessibilityLabel(accessibilityLabel(worktree: worktree))
         .accessibilityAddTraits(.isButton)
-        .task(id: session.id) {
-            await worktreeCache.ensureLoaded(sessionId: session.id)
-        }
     }
 }
 

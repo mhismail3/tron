@@ -320,6 +320,30 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(retrieved?.outputTokens, 200)
     }
 
+    func testSessionPersistenceRoundTripsProcessingFlag() async throws {
+        try await database.sessions.insert(CachedSession(
+            id: "processing-session",
+            workspaceId: "/test/workspace",
+            rootEventId: nil,
+            headEventId: nil,
+            title: "Processing Session",
+            latestModel: "gemma4:e4b",
+            workingDirectory: "/test/workspace",
+            createdAt: "2024-01-01T00:00:00Z",
+            lastActivityAt: "2024-01-01T00:00:00Z",
+            eventCount: 1,
+            messageCount: 1,
+            inputTokens: 0,
+            outputTokens: 0,
+            lastTurnInputTokens: 0,
+            cost: 0.0,
+            isProcessing: true
+        ))
+
+        let retrieved = try await database.sessions.get("processing-session")
+        XCTAssertEqual(retrieved?.isProcessing, true)
+    }
+
     func testGetAllSessions() async throws {
         try await database.sessions.insert(CachedSession(
             id: "s1", workspaceId: "/test", rootEventId: nil, headEventId: nil,

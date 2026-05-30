@@ -8,7 +8,7 @@ enum DatabaseSchema {
     /// Current schema version. Stored as `PRAGMA user_version` after a
     /// successful migration so subsequent app launches can short-circuit
     /// the create-table / column-add IF-NOT-EXISTS dance.
-    static let version: Int32 = 12
+    static let version: Int32 = 13
 
     // MARK: - Public API
 
@@ -101,6 +101,7 @@ enum DatabaseSchema {
                 cache_read_tokens INTEGER DEFAULT 0,
                 cache_creation_tokens INTEGER DEFAULT 0,
                 cost REAL DEFAULT 0,
+                is_processing INTEGER DEFAULT 0,
                 profile TEXT
             )
         """)
@@ -115,8 +116,18 @@ enum DatabaseSchema {
         // Migration: Add cost column
         try addColumnIfNotExists(db: db, table: "sessions", column: "cost", definition: "REAL DEFAULT 0")
 
+        // Migration: Remove provider, status columns; rename model to latest_model.
+        // Run this rebuild before current-column ADD COLUMN migrations so the
+        // rebuilt table cannot drop newer metadata columns.
+        if try columnExists(table: "sessions", column: "provider", db: db) {
+            try migrateSessionsTableSchema(db: db)
+        }
+
         // Migration: Add is_fork column
         try addColumnIfNotExists(db: db, table: "sessions", column: "is_fork", definition: "INTEGER DEFAULT 0")
+
+        // Migration: Add is_processing for dashboard rows seeded from server session list state
+        try addColumnIfNotExists(db: db, table: "sessions", column: "is_processing", definition: "INTEGER DEFAULT 0")
 
         // Migration: Add last_turn_input_tokens for context size tracking
         try addColumnIfNotExists(db: db, table: "sessions", column: "last_turn_input_tokens", definition: "INTEGER DEFAULT 0")
@@ -133,12 +144,6 @@ enum DatabaseSchema {
         // always read and discarded — dead column, removed with schema v11.
         if try columnExists(table: "sessions", column: "is_chat", db: db) {
             try execute(db: db, "ALTER TABLE sessions DROP COLUMN is_chat")
-        }
-
-        // Migration: Remove provider, status columns; rename model to latest_model
-        // Only needed for very old databases with the provider column
-        if try columnExists(table: "sessions", column: "provider", db: db) {
-            try migrateSessionsTableSchema(db: db)
         }
 
         // Migration: Rename ended_at to archived_at (sessions no longer "end")

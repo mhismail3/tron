@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Small metadata icons shown immediately before a session's title:
 /// coral `tuningfork` for a forked session, amber `arrow.triangle.branch`
-/// when the worktree is off its base branch, with an amber dot when the
+/// when the worktree is off its base branch, and an amber dot whenever the
 /// worktree has uncommitted changes.
 ///
 /// Shared by the chat toolbar and the sidebar row so both read from the same
@@ -30,8 +30,10 @@ struct SessionTitleIcons: View {
     static func iconsShown(isFork: Bool, worktree: WorktreeInfo?) -> Set<Icon> {
         var icons: Set<Icon> = []
         if isFork { icons.insert(.fork) }
-        if let w = worktree, !w.isOnBaseBranch {
-            icons.insert(.branch)
+        if let w = worktree {
+            if !w.isOnBaseBranch {
+                icons.insert(.branch)
+            }
             if w.hasUncommittedChanges == true {
                 icons.insert(.dot)
             }
@@ -39,9 +41,24 @@ struct SessionTitleIcons: View {
         return icons
     }
 
+    static func accessibilityDescriptors(isFork: Bool, worktree: WorktreeInfo?) -> [String] {
+        var descriptors: [String] = []
+        if isFork { descriptors.append("forked") }
+        if let w = worktree {
+            if !w.isOnBaseBranch {
+                descriptors.append("branch \(w.shortBranch)")
+            }
+            if w.hasUncommittedChanges == true {
+                descriptors.append("dirty worktree")
+            }
+        }
+        return descriptors
+    }
+
     var body: some View {
+        let icons = Self.iconsShown(isFork: isFork, worktree: worktree)
         HStack(alignment: .center, spacing: 6) {
-            if isFork {
+            if icons.contains(.fork) {
                 Image(systemName: "tuningfork")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -50,14 +67,16 @@ struct SessionTitleIcons: View {
                     .transition(.opacity)
                     .accessibilityHidden(true)
             }
-            if let w = worktree, !w.isOnBaseBranch {
+            if icons.contains(.branch) || icons.contains(.dot) {
                 HStack(spacing: 2) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 11, height: 11)
-                        .foregroundStyle(Self.worktreeColor)
-                    if w.hasUncommittedChanges == true {
+                    if icons.contains(.branch) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 11, height: 11)
+                            .foregroundStyle(Self.worktreeColor)
+                    }
+                    if icons.contains(.dot) {
                         Circle()
                             .fill(Self.worktreeColor)
                             .frame(width: 5, height: 5)
@@ -67,5 +86,6 @@ struct SessionTitleIcons: View {
                 .accessibilityHidden(true)
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }

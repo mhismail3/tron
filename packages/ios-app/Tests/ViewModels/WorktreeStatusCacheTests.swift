@@ -77,6 +77,19 @@ final class WorktreeStatusCacheTests: XCTestCase {
         XCTAssertEqual(cache.status(for: "y")?.worktree?.branch, "session/y")
     }
 
+    func test_ensureLoaded_sessionListFetchesEveryMissingSession() async {
+        mock.getStatusResultBySession["a"] = .fixture(worktree: .fixture(branch: "session/a"))
+        mock.getStatusResultBySession["b"] = .fixture(worktree: .fixture(branch: "session/b"))
+        mock.getStatusResultBySession["c"] = .fixture(worktree: .fixture(branch: "session/c"))
+
+        await cache.ensureLoaded(sessionIds: ["a", "b", "a", "c"])
+
+        XCTAssertEqual(mock.getStatusCallCount, 3)
+        XCTAssertEqual(cache.status(for: "a")?.worktree?.branch, "session/a")
+        XCTAssertEqual(cache.status(for: "b")?.worktree?.branch, "session/b")
+        XCTAssertEqual(cache.status(for: "c")?.worktree?.branch, "session/c")
+    }
+
     // T6 — engine protocol error does not poison the cache
     func test_rpcError_leavesStatusNil_andAllowsRetry() async {
         mock.getStatusError = MockWorktreeError.simulated
