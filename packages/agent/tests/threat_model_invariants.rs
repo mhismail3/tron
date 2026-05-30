@@ -1428,6 +1428,13 @@ fn grant_manifest_resource_and_ui_hardening_tests_stay_in_owning_boundaries() {
             .expect("failed to read resource kernel tests");
     let generated_ui = std::fs::read_to_string(crate_root.join("src/engine/tests/generated_ui.rs"))
         .expect("failed to read generated UI tests");
+    let grants_path = crate_root.join("src/engine/grants.rs");
+    let grants = std::fs::read_to_string(&grants_path).expect("failed to read grants root");
+    let grant_model = std::fs::read_to_string(crate_root.join("src/engine/grants/model.rs"))
+        .expect("failed to read grant model boundary");
+    let grant_sqlite =
+        std::fs::read_to_string(crate_root.join("src/engine/grants/sqlite_codec.rs"))
+            .expect("failed to read grant SQLite codec boundary");
 
     assert!(
         engine_tests.contains("mod grant_authority;")
@@ -1465,6 +1472,32 @@ fn grant_manifest_resource_and_ui_hardening_tests_stay_in_owning_boundaries() {
             && generated_ui
                 .contains("ui_prompt_collection_actions_submit_through_stored_surface_coordinates"),
         "generated UI action hardening tests must live in generated_ui.rs"
+    );
+    assert!(
+        grants.contains("mod model;")
+            && grants.contains("mod sqlite_codec;")
+            && grants.contains("pub use model::")
+            && grants.contains("pub struct InMemoryEngineGrantStore")
+            && grants.contains("pub struct SqliteEngineGrantStore")
+            && line_count(&grants_path) <= 1_000
+            && !grants.contains("pub struct EngineGrant")
+            && !grants.contains("fn row_to_grant(")
+            && !grants.contains("fn json_string"),
+        "grant root must stay a store/policy boundary below 1,000 LOC"
+    );
+    assert!(
+        grant_model.contains("pub struct EngineGrant")
+            && grant_model.contains("pub struct DeriveGrant")
+            && grant_model.contains("pub const BOOTSTRAP_GRANT_IDS")
+            && grant_model.contains("pub(super) fn grant_event("),
+        "grant model boundary must own records, requests, bootstrap grants, and event builders"
+    );
+    assert!(
+        grant_sqlite.contains("pub(super) fn row_to_grant(")
+            && grant_sqlite.contains("pub(super) fn json_string")
+            && grant_sqlite.contains("pub(super) fn sqlite_err")
+            && grant_sqlite.contains("pub(super) fn risk_as_str"),
+        "grant SQLite codec boundary must own row/risk/JSON conversion helpers"
     );
 }
 
