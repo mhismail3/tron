@@ -585,7 +585,8 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **99/100**",
+        "Current score: **100/100**",
+        "Status: **CLC-10 complete; cleanup scorecard at 100/100**",
         "Score normalization note",
         "## Operating Rules",
         "## Review Rubric",
@@ -603,6 +604,9 @@ fn codebase_cleanup_scorecard_stays_formalized() {
         "| CLC-8 |",
         "| CLC-9 |",
         "| CLC-10 |",
+        "## CLC-10 Final Whole-Repo Sweep",
+        "cleanup campaign is now at **100/100**",
+        "## Maintenance State",
         "New cleanup exceptions require scorecard rows",
         "search_visible_content_contains_actionable_recipe",
         "RUST_LOG=info,ort=error",
@@ -630,6 +634,10 @@ fn codebase_cleanup_scorecard_stays_formalized() {
             "cleanup scorecard missing required checkpoint text: {required}"
         );
     }
+    assert!(
+        !scorecard.contains("Next checkpoint: **CLC-7"),
+        "cleanup scorecard must not point future sessions back at a completed checkpoint"
+    );
 
     let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
     assert!(

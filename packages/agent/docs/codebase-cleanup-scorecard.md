@@ -4,9 +4,9 @@ Created: 2026-05-30
 
 Initial cleanup score: **0/100**
 
-Current score: **99/100**
+Current score: **100/100**
 
-Status: **CLC-9 complete; CLC-10 next**
+Status: **CLC-10 complete; cleanup scorecard at 100/100**
 
 This scorecard is the repo-local maintainability plan. It is separate from
 `collapsed-engine-hardening-scorecard.md`, which remains at **100/100** for
@@ -155,7 +155,7 @@ cleanup gates:
 | CLC-7 | Complete | +10 | `packages/ios-app/Sources/Views/`, `packages/ios-app/Sources/Services/Network/`, `packages/ios-app/Sources/Models/`, `packages/ios-app/docs/`, `packages/agent/tests/` | Split Engine Console section/component bodies, capability invocation display/presentation models, capability detail/result renderers, new-session flow types/components, and engine connection types/protocol frames out of broad Swift roots; trimmed redundant transport comments instead of widening private state-machine internals. | `xcodegen generate`; targeted `xcodebuild test` for capability invocation display, new-session flow, engine connection reconnect, and Engine Console state; `ios_thin_client_boundaries_stay_split`. | No chat/session navigation behavior changed, so simulator deep-link smoke was not required for this checkpoint. Large iOS test matrices remain audited rows for the test/harness cleanup lane rather than CLC-7 production-source blockers. |
 | CLC-8 | Complete | +3 normalized (+8 planning effort) | `scripts/`, `packages/mac-app/docs/`, `README.md`, `packages/agent/src/main*.rs`, `packages/agent/src/platform/`, `packages/agent/tests/` | Split `scripts/tron` into `scripts/tron.d/{workspace,quality,dev,deploy,automation}.sh` and `scripts/tron-lib.sh` into `scripts/tron-lib.d/{service,bundle,logs,auth}.sh`; kept service health/restore logic centralized in `service.sh`; updated install/deploy/setup to copy runtime library modules; split the binary startup root into `main.rs`, `main_cli.rs`, and `main_runtime.rs`; moved updater and APNS push-helper test matrices out of production roots. | `bash -n` for CLI scripts; `scripts/tron status --json`; `scripts/tron dev -bd --json --wait 30`; `curl /health`; focused `cli_default_host`, `parse_triple`, and `to_apns_notification_maps_all_fields`; `mac_script_boundaries_stay_split`. | None for CLC-8; `main_runtime.rs` remains below 1,000 LOC and should be split again if future startup work makes it grow. |
 | CLC-9 | Complete | +2 normalized (+5 planning effort) | `packages/agent/tests/`, `packages/agent/src/**/tests*`, `packages/agent/tests/fixtures/` | Split `guardrails/tests.rs` into concern-owned test modules for serialization, pattern/path/resource rules, context/composite rules, and engine/audit/integration checks; kept shared guardrail fixtures in `tests/mod.rs`; fixed `rwo_n15_live_worker_fixture.py --self-test` so live session validation does not block fixture self-tests; added the CLC-9 harness/static split gate. | `guardrails --lib`; fixture self-tests for RWO-N7, RWO-N15, and terminal guard; `threat_model_invariants`; formatting and diff checks. | Remaining large test matrices stay audited with budgets; CLC-10 must close or explicitly defer every final large-file row. |
-| CLC-10 | Not started | +1 normalized (+3 planning effort) | Whole repo | Target: final file-size report, close or defer rows explicitly, run broad verification appropriate to touched areas, update README only for changed canonical modules/CLI/contracts/events/settings/schema. | Broad verification by touched area. | Final score requires every open exception to be closed or explicitly deferred. |
+| CLC-10 | Complete | +1 normalized (+3 planning effort) | Whole repo, `packages/agent/docs/`, `packages/agent/tests/` | Closed the stale next-scenario guidance, reran the final large-file report, confirmed every remaining >1,000 LOC file has an explicit owner/budget/decomposition row, and upgraded the static scorecard gate to enforce the final 100/100 state. | Final large-file report; `guardrails --lib`; fixture self-tests for RWO-N7, RWO-N15, and terminal guard; `threat_model_invariants`; formatting and diff checks. | Remaining large files are explicitly budgeted maintenance exceptions. Future work that grows or touches them must decompose them or update this scorecard with a new owner row. |
 
 ## CLC-0 Dev Workflow Reliability
 
@@ -759,9 +759,9 @@ Closed CLC-7 acceptance:
 ## CLC-8 Mac App And Scripts Cleanup
 
 CLC-8 is complete and has awarded **+3 normalized** points. The original
-planning row called this **+8** effort; the normalized score keeps the total
+planning row called this **+8** effort; the normalized score kept the total
 cleanup score bounded at 100 while preserving the requirement that CLC-9 and
-CLC-10 still close before the campaign is complete.
+CLC-10 close before the campaign completed.
 
 Accepted decomposition:
 
@@ -839,6 +839,41 @@ CLC-9 verification evidence from 2026-05-30:
 - `python3 packages/agent/tests/fixtures/rwo_n7_live_worker_fixture.py --self-test`: passed.
 - `python3 packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py --self-test`: passed.
 - `python3 packages/agent/tests/fixtures/session_terminal_guard.py --self-test`: passed.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`: passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`: passed, 64 tests.
+- `git diff --check`: passed.
+
+## CLC-10 Final Whole-Repo Sweep
+
+CLC-10 is complete and has awarded the final **+1 normalized** point. The
+cleanup campaign is now at **100/100**.
+
+Final sweep results:
+
+- The final top-line large-file report matches the audit table below. Every
+  Rust, Swift, and shell/script file over 1,000 LOC has an explicit owner,
+  reason, budget, and checkpoint row.
+- No implementation file newly crosses 1,000 LOC from the CLC-9 split or CLC-10
+  closeout.
+- Remaining large files are deliberate maintenance exceptions, not hidden open
+  cleanup work. Any future growth beyond the listed budget must either split
+  the file or add a new scorecard row explaining the owner and target.
+- The stale `Next Scenario` pointer has been replaced with the maintenance
+  state below so future sessions do not restart completed phases.
+- `codebase_cleanup_scorecard_stays_formalized` now gates the final 100/100
+  state and rejects the stale CLC-7 next-scenario pointer.
+
+CLC-10 verification evidence from 2026-05-30:
+
+- Final large-file report: matched the table below; no unaudited file over
+  1,000 LOC.
+- `cargo test --manifest-path packages/agent/Cargo.toml guardrails --lib -- --nocapture`: passed, 139 selected tests.
+- `python3 packages/agent/tests/fixtures/rwo_n7_live_worker_fixture.py --self-test`: passed.
+- `python3 packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py --self-test`: passed.
+- `python3 packages/agent/tests/fixtures/session_terminal_guard.py --self-test`: passed.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`: passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`: passed, 64 tests.
+- `git diff --check`: passed.
 
 ## Large-File Audit
 
@@ -850,7 +885,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 6917 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, and CLC-9 split-boundary gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 7050 | CLC-9 |
+| `packages/agent/tests/threat_model_invariants.rs` | 6925 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, and CLC-10 split-boundary/final-state gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 7050 | CLC-10 |
 | `packages/agent/tests/integration/tests.rs` | 3108 | CLC-9 harnesses | Transport e2e suite with shared WebSocket harness. | 3150 | CLC-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2848 | CLC-9 iOS tests | Event transformer matrix should split only when concepts separate. | 2900 | CLC-9 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-9 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-9 |
@@ -900,14 +935,11 @@ Escalate to:
   work should use the verified dev takeover path until the installed helper is
   updated.
 
-## Next Scenario
+## Maintenance State
 
-Next checkpoint: **CLC-7 iOS Thin Client Cleanup**.
-
-Begin the thin-client audit with `packages/ios-app/Sources/Views/`,
-`packages/ios-app/Sources/ViewModels/`,
-`packages/ios-app/Sources/Services/Network/`, and
-`packages/ios-app/Sources/Models/`. Decompose large Swift presentation,
-view-model, and transport files without moving policy, routing, approval,
-generated UI semantics, or product truth into Swift. Preserve RWO-N17
-deep-link/chat parity behavior for any navigation or session-view changes.
+The cleanup scorecard is complete at **100/100**. Future cleanup work should
+start from the large-file audit table and static gates above, not from a new
+phase ledger. If a future change grows a file beyond its budget, adds a new
+file over 1,000 LOC, or reintroduces broad catch-all test/implementation files,
+the owning change must either decompose the file or add a new scorecard row
+with an explicit owner, reason, budget, and target checkpoint.
