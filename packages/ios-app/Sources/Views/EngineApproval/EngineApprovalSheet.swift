@@ -41,7 +41,7 @@ struct EngineApprovalSheet: View {
                     }
 
                     // Action buttons (only for pending)
-                    if !readOnly {
+                    if capabilityData.status.allowsDecision && !readOnly {
                         actionButtons
                     }
                 }
@@ -168,6 +168,7 @@ struct EngineApprovalSheet: View {
         HStack(spacing: 12) {
             // Deny button
             Button {
+                guard capabilityData.status.allowsDecision else { return }
                 let note = noteText.isEmpty ? nil : noteText
                 onSubmit(.denied, note)
                 dismiss()
@@ -194,6 +195,7 @@ struct EngineApprovalSheet: View {
 
             // Approve button
             Button {
+                guard capabilityData.status.allowsDecision else { return }
                 let note = noteText.isEmpty ? nil : noteText
                 onSubmit(.approved, note)
                 dismiss()
@@ -226,6 +228,7 @@ struct EngineApprovalSheet: View {
     private var accentColor: Color {
         switch capabilityData.status {
         case .pending: return .tronAmber
+        case .resolving: return .tronAmber
         case .approved: return .tronSuccess
         case .denied, .failed: return .tronError
         }
@@ -235,7 +238,9 @@ struct EngineApprovalSheet: View {
         switch capabilityData.decision {
         case .approved: return "Approved"
         case .denied: return "Denied"
-        case nil: return capabilityData.status == .failed ? "Failed" : "Approval"
+        case nil:
+            if capabilityData.status == .resolving { return "Resolving" }
+            return capabilityData.status == .failed ? "Failed" : "Approval"
         }
     }
 

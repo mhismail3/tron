@@ -21,8 +21,8 @@ struct EngineApprovalChipView: View {
 
                 riskBadge
 
-                // Chevron for tappable states
-                if data.status != .failed {
+                // Chevron for viewable states
+                if data.status.isViewable {
                     Image(systemName: "chevron.right")
                         .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
                         .foregroundStyle(textColor.opacity(0.6))
@@ -34,8 +34,8 @@ struct EngineApprovalChipView: View {
         }
         .buttonStyle(.plain)
         .chipStyle(tintColor)
-        .disabled(data.status == .failed)
-        .opacity(data.status == .failed ? 0.75 : 1.0)
+        .disabled(!data.status.isViewable)
+        .opacity(data.status.isViewable ? 1.0 : 0.75)
     }
 
     @ViewBuilder
@@ -43,6 +43,10 @@ struct EngineApprovalChipView: View {
         switch data.status {
         case .pending:
             Image(systemName: "checkmark.shield")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronAmber)
+        case .resolving:
+            Image(systemName: "hourglass")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                 .foregroundStyle(.tronAmber)
         case .approved:
@@ -64,6 +68,8 @@ struct EngineApprovalChipView: View {
         switch data.status {
         case .pending:
             return "Confirm action"
+        case .resolving:
+            return "Resolving"
         case .approved:
             return "Approved"
         case .denied:
@@ -96,7 +102,7 @@ struct EngineApprovalChipView: View {
 
     private var textColor: Color {
         switch data.status {
-        case .pending: return .tronAmber
+        case .pending, .resolving: return .tronAmber
         case .approved: return .tronSuccess
         case .denied, .failed: return .tronError
         }
@@ -104,7 +110,7 @@ struct EngineApprovalChipView: View {
 
     private var tintColor: Color {
         switch data.status {
-        case .pending: return .tronAmber
+        case .pending, .resolving: return .tronAmber
         case .approved: return .tronSuccess
         case .denied, .failed: return .tronError
         }

@@ -29,21 +29,35 @@ enum EngineApprovalUserDecision: String, Codable, Equatable {
 enum EngineApprovalChipStatus: Equatable {
     /// Awaiting user response; the approval chip is actionable.
     case pending
-    /// User approved the action.
+    /// User submitted a decision and the engine is resolving it.
+    case resolving
+    /// The engine accepted approval for the action.
     case approved
-    /// User denied the action.
+    /// The engine accepted denial for the action.
     case denied
     /// Engine attempted the approved action and recorded a failure.
     case failed
+
+    var allowsDecision: Bool {
+        self == .pending
+    }
+
+    var isReadOnly: Bool {
+        self != .pending
+    }
+
+    var isViewable: Bool {
+        self != .failed
+    }
 }
 
-/// The complete local rendering result from a user approval decision.
+/// The complete rendering result from a server-accepted approval decision.
 struct EngineApprovalResult: Codable, Equatable {
-    /// The user's decision
+    /// The accepted decision.
     let decision: EngineApprovalUserDecision
-    /// Optional note from the user
+    /// Optional note from the user.
     let note: String?
-    /// ISO 8601 timestamp of when the result was submitted
+    /// ISO 8601 timestamp from the server-owned state transition.
     let submittedAt: String
 }
 

@@ -99,7 +99,57 @@ final class EngineApprovalStateTests: XCTestCase {
         }
     }
 
-    private func approvalData(approvalId: String) -> EngineApprovalData {
+    func testApprovalSubmissionWaitsForServerResolveBeforeDecidedChip() {
+        let viewModel = ChatViewModel(
+            engineClient: EngineClient(serverURL: URL(string: "ws://localhost:0")!),
+            sessionId: "session-1"
+        )
+        let pending = approvalData(approvalId: "approval-1")
+        viewModel.messages = [ChatMessage(role: .assistant, content: .engineApproval(pending))]
+        viewModel.engineApprovalState.currentData = pending
+        viewModel.engineApprovalState.showSheet = true
+
+        viewModel.prepareEngineApprovalSubmission(.approved, note: "ok")
+
+        XCTAssertFalse(viewModel.engineApprovalState.showSheet)
+        XCTAssertEqual(viewModel.engineApprovalState.pendingSubmission?.engineApprovalId, "approval-1")
+        if case .engineApproval(let data) = viewModel.messages.first?.content {
+            XCTAssertEqual(data.status, .resolving)
+            XCTAssertNil(data.decision)
+            XCTAssertNil(data.result)
+            XCTAssertEqual(data.note, "ok")
+        } else {
+            XCTFail("expected resolving engine approval chip")
+        }
+    }
+
+    func testResolvingApprovalCannotBeSubmittedAgain() {
+        let viewModel = ChatViewModel(
+            engineClient: EngineClient(serverURL: URL(string: "ws://localhost:0")!),
+            sessionId: "session-1"
+        )
+        let resolving = approvalData(approvalId: "approval-1", status: .resolving)
+        viewModel.messages = [ChatMessage(role: .assistant, content: .engineApproval(resolving))]
+        viewModel.engineApprovalState.currentData = resolving
+        viewModel.engineApprovalState.showSheet = true
+
+        viewModel.prepareEngineApprovalSubmission(.denied, note: nil)
+
+        XCTAssertFalse(viewModel.engineApprovalState.showSheet)
+        XCTAssertNil(viewModel.engineApprovalState.currentData)
+        XCTAssertNil(viewModel.engineApprovalState.pendingSubmission)
+        if case .engineApproval(let data) = viewModel.messages.first?.content {
+            XCTAssertEqual(data.status, .resolving)
+            XCTAssertNil(data.decision)
+        } else {
+            XCTFail("expected resolving engine approval chip")
+        }
+    }
+
+    private func approvalData(
+        approvalId: String,
+        status: EngineApprovalChipStatus = .pending
+    ) -> EngineApprovalData {
         EngineApprovalData(
             invocationId: "engine-approval:\(approvalId)",
             params: EngineApprovalParams(
@@ -107,7 +157,7 @@ final class EngineApprovalStateTests: XCTestCase {
                 reason: "Requires approval",
                 riskLevel: .high
             ),
-            status: .pending,
+            status: status,
             engineApprovalId: approvalId,
             engineFunctionId: "process::run"
         )

@@ -160,7 +160,7 @@ struct ChatSheetContent: View {
                 onDismiss: {
                     viewModel.dismissEngineApprovalSheet()
                 },
-                readOnly: data.status == .approved || data.status == .denied
+                readOnly: data.status.isReadOnly
             )
         } else {
             EmptyView()

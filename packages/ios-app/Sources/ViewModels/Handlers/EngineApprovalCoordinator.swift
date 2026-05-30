@@ -29,8 +29,9 @@ final class EngineApprovalCoordinator {
 
     /// Open the engine approval sheet.
     func openSheet(for data: EngineApprovalData, context: EngineApprovalContext) {
-        // Allow opening for pending (to decide) or approved/denied (to view)
-        guard data.status == .pending || data.status == .approved || data.status == .denied else {
+        // Allow opening for pending (to decide), resolving (to view), or terminal
+        // accepted decisions. Failed approvals are represented by the chip only.
+        guard data.status.isViewable else {
             context.logInfo("Not opening EngineApproval sheet - status is \(data.status)")
             return
         }
@@ -38,7 +39,7 @@ final class EngineApprovalCoordinator {
         context.engineApprovalState.currentData = data
         context.engineApprovalState.showSheet = true
 
-        let mode = (data.status == .approved || data.status == .denied) ? "read-only" : "interactive"
+        let mode = data.status.allowsDecision ? "interactive" : "read-only"
         context.logInfo("Opened EngineApproval sheet (\(mode)) for action: \(data.params.action.prefix(50))")
     }
 
@@ -69,7 +70,7 @@ final class EngineApprovalCoordinator {
             return
         }
 
-        guard data.status == .pending else {
+        guard data.status.allowsDecision else {
             context.logWarning("Cannot submit decision - engine approval status is \(data.status)")
             context.showError("This approval is no longer active")
             context.engineApprovalState.showSheet = false
@@ -77,20 +78,16 @@ final class EngineApprovalCoordinator {
             return
         }
 
-        let result = EngineApprovalResult(
-            decision: decision,
-            note: note,
-            submittedAt: DateParser.now
-        )
-
         context.logInfo("Preparing EngineApproval decision=\(decision.rawValue) for invocationId=\(data.invocationId)")
 
-        // Update the chip status immediately (visible while sheet animates away)
-        updateMessageToDecided(
+        // Mark the chip as resolving without locally approving or denying it.
+        // The final decision is rendered only from approval::resolve or stream truth.
+        updateMessageStatus(
             invocationId: data.invocationId,
-            decision: decision,
+            status: .resolving,
+            decision: nil,
             note: note,
-            result: result,
+            result: nil,
             context: context
         )
 
@@ -102,6 +99,14 @@ final class EngineApprovalCoordinator {
             engineApprovalId: data.engineApprovalId,
             engineFunctionId: data.engineFunctionId
         )
+
+        if var current = context.engineApprovalState.currentData {
+            current.status = .resolving
+            current.decision = nil
+            current.note = note
+            current.result = nil
+            context.engineApprovalState.currentData = current
+        }
 
         // Keep currentData alive — the sheet reads it during its dismiss animation.
         context.engineApprovalState.showSheet = false
@@ -128,18 +133,29 @@ final class EngineApprovalCoordinator {
                 let decision = submission.decision == EngineApprovalUserDecision.approved.rawValue
                     ? EngineApprovalDecision.approve
                     : EngineApprovalDecision.deny
-                _ = try await context.engineClient.approval.resolve(
+                let result = try await context.engineClient.approval.resolve(
                     approvalId: approvalId,
                     decision: decision,
                     idempotencyKey: EngineIdempotencyKey(
                         rawValue: "ios:approval.resolve:\(approvalId):\(decision.rawValue)"
                     )
                 )
+                updateMessageFromServerApproval(
+                    result.approval,
+                    fallbackNote: submission.note,
+                    context: context
+                )
                 context.logInfo(
                     "Engine approval \(approvalId) for \(submission.engineFunctionId ?? "unknown") resolved through approval::resolve"
                 )
             } catch {
                 context.logError("Failed to resolve engine approval: \(error.localizedDescription)")
+                if let approvalId = submission.engineApprovalId {
+                    restoreMessageToPending(
+                        invocationId: "engine-approval:\(approvalId)",
+                        context: context
+                    )
+                }
                 context.showError("Failed to resolve approval: \(error.localizedDescription)")
             }
         }
@@ -147,21 +163,79 @@ final class EngineApprovalCoordinator {
 
     // MARK: - Private Helpers
 
-    private func updateMessageToDecided(
+    private func updateMessageStatus(
         invocationId: String,
-        decision: EngineApprovalUserDecision,
+        status: EngineApprovalChipStatus,
+        decision: EngineApprovalUserDecision?,
         note: String?,
-        result: EngineApprovalResult,
+        result: EngineApprovalResult?,
         context: EngineApprovalContext
     ) {
         if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: invocationId, in: context.messages) {
             if case .engineApproval(var capabilityData) = context.messages[index].content {
-                capabilityData.status = decision == .approved ? .approved : .denied
+                capabilityData.status = status
                 capabilityData.decision = decision
                 capabilityData.note = note
                 capabilityData.result = result
                 context.messages[index].content = .engineApproval(capabilityData)
             }
+        }
+    }
+
+    private func updateMessageFromServerApproval(
+        _ approval: EngineApprovalRecordDTO,
+        fallbackNote: String?,
+        context: EngineApprovalContext
+    ) {
+        let invocationId = "engine-approval:\(approval.approvalId)"
+        let status: EngineApprovalChipStatus
+        let decision: EngineApprovalUserDecision?
+        switch approval.status {
+        case .pending:
+            status = .pending
+            decision = nil
+        case .approved, .executed:
+            status = .approved
+            decision = .approved
+        case .denied:
+            status = .denied
+            decision = .denied
+        case .failed:
+            status = .failed
+            decision = .approved
+        }
+        let result = decision.map {
+            EngineApprovalResult(
+                decision: $0,
+                note: fallbackNote,
+                submittedAt: approval.decidedAt ?? approval.updatedAt ?? DateParser.now
+            )
+        }
+        updateMessageStatus(
+            invocationId: invocationId,
+            status: status,
+            decision: decision,
+            note: fallbackNote,
+            result: result,
+            context: context
+        )
+    }
+
+    private func restoreMessageToPending(
+        invocationId: String,
+        context: EngineApprovalContext
+    ) {
+        if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: invocationId, in: context.messages),
+           case .engineApproval(let data) = context.messages[index].content,
+           data.status == .resolving {
+            updateMessageStatus(
+                invocationId: invocationId,
+                status: .pending,
+                decision: nil,
+                note: nil,
+                result: nil,
+                context: context
+            )
         }
     }
 }

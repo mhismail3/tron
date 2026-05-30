@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -182,12 +182,15 @@ delivered cursors for ACK coalescing and diagnostics, not as the source of
 session catch-up. The same session-scoped subscription setup also subscribes to
 the engine `approvals` topic so high-risk capability gates surface from the
 approval primitive worker instead of through a separate UI-only approval path.
-User decisions invoke canonical `approval::resolve`; iOS does not mutate approval
-state locally. When a live approval event reaches a terminal status, the chat
-chip updates from the engine record and any matching approval sheet is dismissed
-so stale local UI cannot remain actionable after server truth advances. ACKs are
-coalesced to the latest cursor per subscription so bursts do not turn into one
-engine request per event.
+User decisions invoke canonical `approval::resolve`; iOS never accepts or denies
+approval locally. After the user submits a decision, the chip may render a
+transient read-only `resolving` state while the engine request is in flight, but
+the final approved, denied, executed, or failed state must come from the
+`approval::resolve` response or the approval stream. Non-pending approval sheets
+hide decision controls, and matching terminal approval events dismiss any open
+sheet so stale local UI cannot remain actionable after server truth advances.
+ACKs are coalesced to the latest cursor per subscription so bursts do not turn
+into one engine request per event.
 Large client files are split by client-owned concern only: transport state
 types and wire frames stay beside `EngineConnection`, Engine Console components
 stay beside the console view, and capability invocation display/presentation
