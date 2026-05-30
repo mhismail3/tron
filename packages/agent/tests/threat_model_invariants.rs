@@ -59,7 +59,7 @@ const LARGE_TEST_FILE_AUDIT: &[(&str, &str, usize)] = &[
     (
         "packages/agent/tests/threat_model_invariants.rs",
         "cross-cutting static architecture gates",
-        6_150,
+        6_200,
     ),
     (
         "packages/agent/tests/integration/tests.rs",
@@ -4184,9 +4184,13 @@ fn module_package_activation_gates_stay_on() {
     );
     let host = std::fs::read_to_string(crate_root.join("src/engine/host.rs"))
         .expect("failed to read engine host");
+    let host_module_jobs =
+        std::fs::read_to_string(crate_root.join("src/engine/host/module_jobs.rs"))
+            .expect("failed to read engine host module jobs");
     assert!(
-        host.contains("primitives::module::trust_audit_current_due_bucket")
-            && host.contains("primitives::module::trust_audit_evidence_matches_due_bucket")
+        host_module_jobs.contains("primitives::module::trust_audit_current_due_bucket")
+            && host_module_jobs
+                .contains("primitives::module::trust_audit_evidence_matches_due_bucket")
             && !host.contains("parse_trust_audit_wall_clock_time")
             && !host.contains("trust_audit_day_of_week_number"),
         "host queue projection must use module-owned trust audit due-bucket and completed-evidence helpers"
@@ -4751,6 +4755,21 @@ fn primitive_workers_are_owned_outside_host_bucket() {
     let host_runtime_host =
         std::fs::read_to_string(crate_root.join("src/engine/host/runtime_host.rs"))
             .expect("failed to read engine host runtime host boundary");
+    let host_catalog_handle =
+        std::fs::read_to_string(crate_root.join("src/engine/host/catalog_handle.rs"))
+            .expect("failed to read engine host catalog handle boundary");
+    let host_module_jobs =
+        std::fs::read_to_string(crate_root.join("src/engine/host/module_jobs.rs"))
+            .expect("failed to read engine host module jobs boundary");
+    let host_invocation_handle =
+        std::fs::read_to_string(crate_root.join("src/engine/host/invocation_handle.rs"))
+            .expect("failed to read engine host invocation handle boundary");
+    let host_invocation_support =
+        std::fs::read_to_string(crate_root.join("src/engine/host/invocation_support.rs"))
+            .expect("failed to read engine host invocation support boundary");
+    let host_substrate_handle =
+        std::fs::read_to_string(crate_root.join("src/engine/host/substrate_handle.rs"))
+            .expect("failed to read engine host substrate handle boundary");
     assert!(
         host.contains("mod meta;")
             && host.contains("pub use meta::{CatalogWatchRequest, CatalogWatchResponse};")
@@ -4774,6 +4793,29 @@ fn primitive_workers_are_owned_outside_host_bucket() {
             && host_runtime_host.contains("fn stored_log_values(")
             && !host.contains("impl primitives::runtime::PrimitiveRuntimeHost for EngineHost"),
         "engine host primitive runtime implementation must stay in host/runtime_host.rs"
+    );
+    assert!(
+        host.lines().count() < 1_000
+            && host.contains("mod catalog_handle;")
+            && host.contains("mod module_jobs;")
+            && host.contains("mod invocation_handle;")
+            && host.contains("mod invocation_support;")
+            && host.contains("mod substrate_handle;")
+            && host_catalog_handle.contains("pub async fn register_worker(")
+            && host_catalog_handle.contains("pub async fn promote_function_visibility(")
+            && host_module_jobs.contains("enqueue_due_module_health_checks")
+            && host_module_jobs.contains("enqueue_due_module_trust_audits")
+            && host_invocation_handle.contains("pub async fn invoke(&self")
+            && host_invocation_handle.contains("invoke_queue_target")
+            && host_invocation_handle.contains("execute_prepared_regular_with_recording_policy")
+            && host_invocation_support.contains("pub(super) fn lease_request_from_requirement")
+            && host_invocation_support.contains("pub(super) fn can_resolve_approval")
+            && host_substrate_handle.contains("pub async fn request_approval(")
+            && host_substrate_handle.contains("pub async fn enqueue_invocation(")
+            && !host.contains("pub async fn invoke(&self, invocation: Invocation)")
+            && !host.contains("pub async fn enqueue_due_module_health_checks")
+            && !host.contains("pub async fn request_approval("),
+        "EngineHost root must stay a host/type spine while handle catalog, module jobs, invocation, lease helpers, and substrate stores live in focused host submodules"
     );
     for removed in [
         "struct StreamPrimitiveHandler",
