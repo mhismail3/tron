@@ -875,6 +875,36 @@ CLC-10 verification evidence from 2026-05-30:
 - `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`: passed, 64 tests.
 - `git diff --check`: passed.
 
+Post-cleanup verification evidence from 2026-05-30:
+
+- High-signal spot checks after the full cleanup found no architecture or
+  runtime regression, but did expose cleanup fallout in static ownership tests
+  and clippy.
+- Root-cause fixes stayed behavior-preserving: the protocol event doc comment
+  now attaches directly to the generated catalog module, the split event-store
+  test module owns a single `unused_results` allowance, generated-UI resource
+  filtering uses the canonical slice membership helper, binary startup static
+  tests read `main_runtime.rs` instead of the thin `main.rs` shim, and the
+  relay-env guard checks the split script owners (`scripts/tron`,
+  `scripts/tron.d/workspace.sh`, and `scripts/tron.d/dev.sh`).
+- `scripts/tron ci fmt check clippy test`: passed after those fixes
+  (`5809` lib tests, `46` binary tests, `12` `db_path_guard` tests, `64`
+  `threat_model_invariants` tests, and `80` integration tests).
+- Focused Rust/domain spot checks also passed for capability, engine, session
+  event-store, model providers, agent runner, storage/profile, worktree, cron,
+  process, auth, settings, skills, MCP product protocol, and engine transport.
+- Fixture self-tests passed for RWO-N7, RWO-N15, and terminal guard.
+- Focused iOS simulator suite passed on the existing booted iPhone 17 Pro
+  simulator: `162` tests, `0` failures.
+- App-path smoke launched `com.tron.mobile.beta`, opened
+  `tron://session/sess_019e7665-2b83-7190-82ac-272cf9c7c92d`, and Computer Use
+  confirmed the RWO-N17 visible session rendered the user prompt, assistant
+  terminal marker, and `Sonnet 4.6` chip.
+- Real dev server stayed healthy in dev takeover mode on PID `9241`; post-smoke
+  DB classification found `159` successful engine invocations, `0` failed
+  invocations, `0` pending approvals, `0` open queues, `0` `compact.*` events,
+  and no WARN/ERROR logs after reconnect stabilization.
+
 ## Large-File Audit
 
 Baseline command:

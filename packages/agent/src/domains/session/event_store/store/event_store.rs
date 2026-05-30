@@ -100,5 +100,4 @@ impl EventStore {
 
 #[cfg(test)]
 #[path = "tests.rs"]
-#[allow(unused_results)]
 mod tests;

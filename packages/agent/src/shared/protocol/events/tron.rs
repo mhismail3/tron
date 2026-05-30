@@ -107,7 +107,6 @@ pub enum CompactionReason {
 ///
 /// Adding a new variant requires ONE edit (inside this invocation).
 /// The compiler enforces exhaustive matching everywhere else.
-
 #[path = "tron/catalog.rs"]
 mod catalog;
 

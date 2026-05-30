@@ -823,7 +823,7 @@ fn startup_ensures_bearer_token_exists() {
 
 #[test]
 fn ordinary_startup_delegates_to_constitution_seeders() {
-    let source = include_str!("main.rs");
+    let source = include_str!("main_runtime.rs");
     assert!(source.contains("ensure_tron_home"));
     assert!(!source.contains("startup_system_subdirs"));
 }
@@ -851,11 +851,11 @@ fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
 
 #[test]
 fn ordinary_startup_does_not_probe_tcc_permissions() {
-    let source = include_str!("main.rs");
+    let source = include_str!("main_runtime.rs");
     let spawn_body = source
         .split("fn spawn_background_tasks")
         .nth(1)
-        .and_then(|tail| tail.split("#[tokio::main]").next())
+        .and_then(|tail| tail.split("pub async fn run_server").next())
         .expect("spawn_background_tasks body should be discoverable");
 
     for forbidden in ["Privacy_AllFiles", "x-apple.systempreferences"] {

@@ -324,20 +324,27 @@ fn mac_bundle_script_loads_gitignored_local_relay_env() {
 fn tron_dev_loads_same_gitignored_local_relay_env() {
     let root = repo_root();
     let script_path = root.join("scripts/tron");
+    let workspace_script_path = root.join("scripts/tron.d/workspace.sh");
+    let dev_script_path = root.join("scripts/tron.d/dev.sh");
     let script = std::fs::read_to_string(&script_path).unwrap();
+    let workspace_script = std::fs::read_to_string(&workspace_script_path).unwrap();
+    let dev_script = std::fs::read_to_string(&dev_script_path).unwrap();
 
     assert!(
         script.contains("MAC_APP_LOCAL_ENV_FILE=\"$PROJECT_DIR/packages/mac-app/.env.local\""),
         "{} should use the same ignored relay env file as the Mac bundle build",
         script_path.display()
     );
-    assert!(script.contains("load_dev_relay_env"));
-    assert!(script.contains("prepare_dev_relay_env"));
-    assert!(script.contains("TRON_RELAY_URL"));
-    assert!(script.contains("TRON_RELAY_SECRET"));
-    assert!(script.contains("TRON_RELAY_ENVIRONMENT"));
+    assert!(workspace_script.contains("load_dev_relay_env"));
+    assert!(workspace_script.contains("prepare_dev_relay_env"));
+    assert!(workspace_script.contains("TRON_RELAY_URL"));
+    assert!(workspace_script.contains("TRON_RELAY_SECRET"));
+    assert!(workspace_script.contains("TRON_RELAY_ENVIRONMENT"));
+
+    let prepare_call_count = workspace_script.matches("prepare_dev_relay_env").count()
+        + dev_script.matches("prepare_dev_relay_env").count();
     assert!(
-        script.matches("prepare_dev_relay_env").count() >= 3,
+        prepare_call_count >= 3,
         "dev build, foreground takeover, and background takeover must all load relay env"
     );
 }

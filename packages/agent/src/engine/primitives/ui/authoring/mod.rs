@@ -658,9 +658,7 @@ pub(super) fn current_resource_payloads_by_prefix(
     let mut projections = Vec::new();
     for resource in resources.into_iter().filter(|resource| {
         resource.resource_id.starts_with(resource_id_prefix)
-            && !excluded_lifecycles
-                .iter()
-                .any(|lifecycle| resource.lifecycle.as_str() == *lifecycle)
+            && !excluded_lifecycles.contains(&resource.lifecycle.as_str())
             && resource.current_version_id.is_some()
     }) {
         let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
