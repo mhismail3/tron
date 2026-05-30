@@ -131,14 +131,12 @@ pub(crate) async fn session_reconstruct_value(
         .and_then(|p| p.get("limit"))
         .and_then(Value::as_u64)
         .map(|value| value as i64);
-    let before_sequence = params
-        .and_then(|p| p.get("beforeSequence"))
-        .and_then(Value::as_i64);
+    let before_event_id = opt_string(params, "beforeEventId");
     crate::domains::session::reconstruct::SessionReconstructService::reconstruct(
         deps,
         session_id,
         limit,
-        before_sequence,
+        before_event_id,
     )
     .await
 }

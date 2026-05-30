@@ -27,7 +27,7 @@ extension ChatViewModel {
 
         // 1. Reconstruct full session state (messages + config + subagent state)
         //    Uses reconstructSessionState() as single source of truth.
-        let state = UnifiedEventTransformer.reconstructSessionState(from: result.events)
+        let state = UnifiedEventTransformer.reconstructSessionState(from: result.events, presorted: true)
         applyReconstructedConfig(state)
 
         // 2. Rebuild the full timeline before selecting the visible slice.
@@ -52,7 +52,7 @@ extension ChatViewModel {
         }
 
         // 3. Track oldest sequence for load-more pagination
-        reconstructionOldestSequence = result.oldestSequence
+        reconstructionOldestEventId = result.oldestEventId
 
         // 4. Update session metadata from reconstruction
         if let turnCount = result.metadata.turnCount {
@@ -464,8 +464,8 @@ extension ChatViewModel {
         isLoadingMoreMessages = true
         defer { isLoadingMoreMessages = false }
 
-        guard let oldestSeq = reconstructionOldestSequence else {
-            logger.warning("[RECONSTRUCT] loadMore: no oldestSequence tracked, cannot paginate", category: .session)
+        guard let oldestEventId = reconstructionOldestEventId else {
+            logger.warning("[RECONSTRUCT] loadMore: no oldestEventId tracked, cannot paginate", category: .session)
             hasMoreMessages = false
             return
         }
@@ -474,15 +474,15 @@ extension ChatViewModel {
             let result = try await engineClient.session.reconstruct(
                 sessionId: sessionId,
                 limit: Self.additionalMessageBatchSize,
-                beforeSequence: oldestSeq
+                beforeEventId: oldestEventId
             )
 
-            let olderMessages = UnifiedEventTransformer.transformPersistedEvents(result.events)
+            let olderMessages = UnifiedEventTransformer.transformPersistedEvents(result.events, presorted: true)
             allReconstructedMessages.insert(contentsOf: olderMessages, at: 0)
             insertAtFrontOfMessages(olderMessages)
             displayedMessageCount += olderMessages.count
             hasMoreMessages = result.hasMoreEvents
-            reconstructionOldestSequence = result.oldestSequence
+            reconstructionOldestEventId = result.oldestEventId
         } catch {
             logger.warning("Failed to load more messages: \(error)", category: .session)
         }

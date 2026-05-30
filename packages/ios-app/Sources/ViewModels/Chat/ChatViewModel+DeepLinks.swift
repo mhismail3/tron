@@ -4,6 +4,8 @@ import Foundation
 
 extension ChatViewModel {
 
+    private static let maxDeepLinkPaginationBatches = 100
+
     /// Find the message UUID for a given scroll target.
     /// Used by deep linking to scroll to a specific capability invocation or event.
     ///
@@ -48,6 +50,43 @@ extension ChatViewModel {
             // Caller should use "bottom" anchor directly instead
             return nil
         }
+    }
+
+    /// Resolve a deep-link target, fetching older reconstructed pages until the
+    /// target is available in the displayed message tree.
+    func resolveMessageIdForDeepLink(
+        _ target: ScrollTarget,
+        loadMore: (() async -> Void)? = nil
+    ) async -> UUID? {
+        if let id = findMessageId(for: target) {
+            return id
+        }
+
+        var pagesLoaded = 0
+        while hasMoreMessages && pagesLoaded < Self.maxDeepLinkPaginationBatches {
+            let previousCount = allReconstructedMessages.count
+            pagesLoaded += 1
+
+            if let loadMore {
+                await loadMore()
+            } else {
+                await loadMoreMessagesFromServer()
+            }
+
+            if let id = findMessageId(for: target) {
+                return id
+            }
+
+            guard allReconstructedMessages.count > previousCount else {
+                break
+            }
+        }
+
+        if pagesLoaded >= Self.maxDeepLinkPaginationBatches {
+            logger.warning("Deep link pagination stopped after \(pagesLoaded) pages for target: \(target)", category: .notification)
+        }
+
+        return nil
     }
 
     // MARK: - Private Helpers

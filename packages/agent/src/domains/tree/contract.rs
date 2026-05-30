@@ -25,7 +25,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .build()?,
         CapabilityContract::new("tree::get_ancestors", "tree", EffectClass::PureRead, RiskLevel::Low, Some("tree.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"eventId":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["eventId"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"events":{"type":"array"}},"required":["events"],"type":"object"}))
             .build()?,
         CapabilityContract::new("tree::compare_branches", "tree", EffectClass::PureRead, RiskLevel::Low, Some("tree.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"branchA":{"type":"string"},"branchB":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["branchA","branchB"],"type":"object"}))

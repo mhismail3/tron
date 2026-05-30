@@ -58,7 +58,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
         CapabilityContract::new("session::reconstruct", "session", EffectClass::PureRead, RiskLevel::Low, Some("session.read"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"beforeSequence":{"type":"integer"},"limit":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"beforeEventId":{"type":"string"},"limit":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
         CapabilityContract::new("session::archive", "session", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("session.write"))

@@ -162,8 +162,8 @@ final class ChatViewModel {
     var eventBuffer: [ParsedEventV2] = []
     /// Highest processed event sequence number. Events with seq <= this are dropped (dedup).
     var sequenceHighWaterMark: Int64 = -1
-    /// Oldest sequence from the last reconstruction (for pagination cursor).
-    var reconstructionOldestSequence: Int64?
+    /// Oldest event ID from the last reconstruction (for pagination cursor).
+    var reconstructionOldestEventId: String?
     /// Snapshot of the live streaming message captured in
     /// `cleanUpStreamingState` so reconstruction can reuse its UUID
     /// when the in-flight streaming text continues from the same point.

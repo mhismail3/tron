@@ -667,7 +667,7 @@ def run_harness(args):
         )
         prompt, before_sequence, prompt_value, prompt_child = send_prompt(ws, fixture)
         result["prompt"] = prompt
-        result["beforeSequence"] = before_sequence
+        result["prePromptSequence"] = before_sequence
         result["promptValue"] = prompt_value
         result["promptChild"] = prompt_child
         result["terminalEvent"] = wait_end_turn(session_id, args.timeout_seconds)

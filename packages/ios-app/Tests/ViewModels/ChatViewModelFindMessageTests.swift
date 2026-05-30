@@ -298,6 +298,52 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         XCTAssertEqual(found, targetId)
     }
 
+    func testResolveMessageIdForDeepLinkLoadsOlderHistoryUntilTargetExists() async {
+        let targetId = UUID()
+        let targetMessage = ChatMessage(
+            id: targetId,
+            role: .assistant,
+            content: .capabilityInvocation(testCapabilityInvocation(id: "toolu_target", status: .success))
+        )
+
+        viewModel.allReconstructedMessages = [
+            ChatMessage(id: UUID(), role: .user, content: .text("Recent")),
+        ]
+        viewModel.messages = viewModel.allReconstructedMessages
+        viewModel.displayedMessageCount = 1
+        viewModel.hasMoreMessages = true
+
+        var loadCount = 0
+        let found = await viewModel.resolveMessageIdForDeepLink(.capabilityInvocation(id: "toolu_target")) {
+            loadCount += 1
+            self.viewModel.allReconstructedMessages.insert(targetMessage, at: 0)
+            self.viewModel.insertAtFrontOfMessages([targetMessage])
+            self.viewModel.displayedMessageCount += 1
+            self.viewModel.hasMoreMessages = false
+        }
+
+        XCTAssertEqual(found, targetId)
+        XCTAssertEqual(loadCount, 1)
+        XCTAssertTrue(viewModel.messages.contains(where: { $0.id == targetId }))
+    }
+
+    func testResolveMessageIdForDeepLinkStopsWhenPaginationMakesNoProgress() async {
+        viewModel.allReconstructedMessages = [
+            ChatMessage(id: UUID(), role: .user, content: .text("Recent")),
+        ]
+        viewModel.messages = viewModel.allReconstructedMessages
+        viewModel.displayedMessageCount = 1
+        viewModel.hasMoreMessages = true
+
+        var loadCount = 0
+        let found = await viewModel.resolveMessageIdForDeepLink(.event(id: "evt_missing")) {
+            loadCount += 1
+        }
+
+        XCTAssertNil(found)
+        XCTAssertEqual(loadCount, 1)
+    }
+
     func testFindMessageIdExpandsWindowForOldMessage() {
         // Given: A deep link target that's beyond the displayed window
         let targetId = UUID()

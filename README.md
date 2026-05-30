@@ -943,6 +943,12 @@ records. Stateless stream polling and non-session catch-up remain explicit curso
 operations. Stream polling applies engine visibility before pagination, so a
 session subscriber is never blocked behind older stream rows owned by unrelated
 sessions.
+`session::reconstruct` paginates with `beforeEventId` / `oldestEventId` event
+IDs, not session-local sequence cursors. Forked sessions reconstruct from the
+ordered ancestor chain ending at the child head so inherited parent history and
+child events arrive in one server-authored timeline. `tree::get_ancestors`
+returns resolved wire `events` for the same reason: clients inspect lineage
+without maintaining a second tree-only event shape.
 
 High-risk engine capabilities publish `approval.pending` records to the
 `approvals` stream only after the target payload and authority preflight pass.

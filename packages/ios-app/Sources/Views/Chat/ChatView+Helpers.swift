@@ -51,9 +51,17 @@ extension ChatView {
     // MARK: - Deep Link Scroll
 
     /// Perform scroll to deep link target
-    func performDeepLinkScroll(to target: ScrollTarget) {
-        if let messageId = viewModel.findMessageId(for: target) {
-            scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
+    func performDeepLinkScroll(to target: ScrollTarget) async {
+        scrollCoordinator.beginTargetNavigation()
+        var foundTarget = false
+        defer { scrollCoordinator.endTargetNavigation(foundTarget: foundTarget) }
+
+        if let messageId = await viewModel.resolveMessageIdForDeepLink(target) {
+            foundTarget = true
+            for delay in [75, 150, 300] {
+                await layoutDelay(milliseconds: delay)
+                scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
+            }
             logger.info("Deep link scroll to message: \(messageId)", category: .notification)
         } else {
             logger.warning("Deep link target not found: \(target)", category: .notification)
@@ -93,7 +101,7 @@ extension ChatView {
 
             scrollProxy?.scrollTo("bottom", anchor: .bottom)
             await layoutDelay(milliseconds: 100)
-            performDeepLinkScroll(to: target)
+            await performDeepLinkScroll(to: target)
             return
         }
 

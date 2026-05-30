@@ -231,7 +231,7 @@ final class MockConnectionContext: ConnectionContext {
         if let error = resumeSessionError { throw error }
     }
 
-    func reconstructSession(sessionId: String, limit: Int?, beforeSequence: Int64?) async throws -> SessionReconstructResult {
+    func reconstructSession(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult {
         reconstructSessionCalled = true
         if reconstructShouldFail { throw ConnectionTestError.generic }
 
@@ -239,7 +239,7 @@ final class MockConnectionContext: ConnectionContext {
         {
             "events": [],
             "hasMoreEvents": false,
-            "oldestSequence": null,
+            "oldestEventId": null,
             "inFlight": null,
             "lastSequence": \(reconstructResultLastSequence),
             "isRunning": \(reconstructResultIsRunning),

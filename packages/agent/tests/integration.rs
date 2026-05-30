@@ -918,5 +918,7 @@ fn ping_params() -> Value {
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+#[path = "integration/navigation_reconstruction.rs"]
+mod navigation_reconstruction;
 #[path = "integration/tests.rs"]
 mod tests;

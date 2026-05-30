@@ -160,6 +160,7 @@
 		303159AC42DB072B95960DD3 /* ReconnectProbePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6B08299E790B7585A368421 /* ReconnectProbePolicy.swift */; };
 		30456C7A0CFBDDC7D277003B /* AnyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF9F3268BAE29886A797885 /* AnyCodable.swift */; };
 		3049389587AE30E22F5F213E /* SQLiteHelpersTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD59FE438B711CE19468E658 /* SQLiteHelpersTests.swift */; };
+		307B5999C90FA350CEE5579A /* UnifiedEventTransformerReconstructionOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88FC6BA4355CDFB0CA86DBDC /* UnifiedEventTransformerReconstructionOrderTests.swift */; };
 		30AA67700A85E0F95EEE58E1 /* SessionSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EAF3CC5CEDDEE4223E641CC /* SessionSidebar.swift */; };
 		30E964BB00B69B945ABFD88A /* InteractionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B914B25FDB1B89D753A05711 /* InteractionPolicy.swift */; };
 		31647A59C6DD9902FB536B6B /* RetryTurnTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0BD89F687759733E8D02DB2 /* RetryTurnTests.swift */; };
@@ -1310,6 +1311,7 @@
 		8878C9A16390B62C79B0C2A3 /* TypewriterAnimationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterAnimationState.swift; sourceTree = "<group>"; };
 		887FAA60E6696C5099018531 /* EventDatabaseProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabaseProtocol.swift; sourceTree = "<group>"; };
 		88BA14D5A667445C7EC8347C /* ImportClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportClient.swift; sourceTree = "<group>"; };
+		88FC6BA4355CDFB0CA86DBDC /* UnifiedEventTransformerReconstructionOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformerReconstructionOrderTests.swift; sourceTree = "<group>"; };
 		8991F9313A206B5CCF36C2A6 /* EventDispatchContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDispatchContext.swift; sourceTree = "<group>"; };
 		8A207053588B523BE2876318 /* ContextMarkdownContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextMarkdownContent.swift; sourceTree = "<group>"; };
 		8A37640E7C6E6D4795595EA2 /* DurationFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurationFormatter.swift; sourceTree = "<group>"; };
@@ -1794,6 +1796,7 @@
 				AC6DB4A977BF74642CDD207E /* EventRegistryReferenceCycleTests.swift */,
 				BB137B2A993C51ABB75D88B6 /* MessagePayloadTests.swift */,
 				42B5221F1C55EB7298073D33 /* TokenRecordParsingTests.swift */,
+				88FC6BA4355CDFB0CA86DBDC /* UnifiedEventTransformerReconstructionOrderTests.swift */,
 				97D271408092ACB8F933FF8B /* UnifiedEventTransformerTests.swift */,
 				18DA313483A2C55E9DF91E01 /* Plugins */,
 			);
@@ -4553,6 +4556,7 @@
 				5FBFDBA2E52517DAA17F6AB0 /* TurnLifecycleCoordinatorTests.swift in Sources */,
 				38317572307F17BBC0A3869D /* TypewriterAnimationStateTests.swift in Sources */,
 				CED95D67E671E58659E757BE /* UIUpdateQueueTests.swift in Sources */,
+				307B5999C90FA350CEE5579A /* UnifiedEventTransformerReconstructionOrderTests.swift in Sources */,
 				D23BB4288D88F43D51E030B3 /* UnifiedEventTransformerTests.swift in Sources */,
 				8B3B738C03B9D0781AB579BB /* UserInteractionCoordinatorTests.swift in Sources */,
 				C1FC880A02C98EFDD5DA1CC3 /* UserInteractionStateTests.swift in Sources */,

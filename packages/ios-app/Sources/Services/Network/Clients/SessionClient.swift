@@ -136,14 +136,14 @@ final class SessionClient: EngineDomainClient {
     func reconstruct(
         sessionId: String,
         limit: Int? = nil,
-        beforeSequence: Int64? = nil
+        beforeEventId: String? = nil
     ) async throws -> SessionReconstructResult {
         _ = try requireTransport().requireConnection()
 
         let params = SessionReconstructParams(
             sessionId: sessionId,
             limit: limit,
-            beforeSequence: beforeSequence
+            beforeEventId: beforeEventId
         )
 
         let result: SessionReconstructResult = try await invokeRead(

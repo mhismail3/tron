@@ -75,6 +75,7 @@ final class DeepLinkRouter {
     /// Examples:
     /// - `tron://session/sess_123` → host="session", path="/sess_123"
     /// - `tron://settings` → host="settings", path=""
+    /// - `tron://notification/cap_123` → host="notification", path="/cap_123"
     ///
     /// - Parameter url: The URL to handle
     /// - Returns: true if the URL was handled, false otherwise
@@ -94,6 +95,9 @@ final class DeepLinkRouter {
         case "session":
             return handleSessionURL(url: url)
 
+        case "notification":
+            return handleNotificationURL(url: url)
+
         case "settings":
             pendingIntent = .settings
             TronLogger.shared.info("Deep link intent set: settings", category: .notification)
@@ -112,7 +116,6 @@ final class DeepLinkRouter {
 
     /// Handle session URL (tron://session/{sessionId})
     /// The session ID is the first path component after the host.
-    /// NOTE: Scroll-to-capability functionality (via ?capability= or ?event= query params) is disabled for now.
     private func handleSessionURL(url: URL) -> Bool {
         // Path components include "/" as first element, then the actual path segments
         // e.g., tron://session/sess_123 has path="/sess_123", pathComponents=["/", "sess_123"]
@@ -123,11 +126,46 @@ final class DeepLinkRouter {
             return false
         }
 
-        // NOTE: Scroll-to-capability functionality is disabled for now due to complexity.
-        // Query params like ?capability= and ?event= are ignored.
-        pendingIntent = .session(id: sessionId, scrollTo: nil)
-        TronLogger.shared.info("Deep link intent set: session=\(sessionId)", category: .notification)
+        let scrollTarget = Self.scrollTarget(from: url)
+        pendingIntent = .session(id: sessionId, scrollTo: scrollTarget)
+        TronLogger.shared.info("Deep link intent set: session=\(sessionId), scrollTo=\(String(describing: scrollTarget))", category: .notification)
         return true
+    }
+
+    /// Handle notification URL (tron://notification/{invocationId})
+    private func handleNotificationURL(url: URL) -> Bool {
+        let pathComponents = url.pathComponents.filter { $0 != "/" }
+
+        guard let invocationId = pathComponents.first, !invocationId.isEmpty else {
+            TronLogger.shared.warning("Notification deep link missing invocationId", category: .notification)
+            return false
+        }
+
+        pendingIntent = .notification(invocationId: invocationId)
+        TronLogger.shared.info("Deep link intent set: notification invocationId=\(invocationId)", category: .notification)
+        return true
+    }
+
+    private static func scrollTarget(from url: URL) -> ScrollTarget? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems
+        else { return nil }
+
+        if let capabilityId = nonEmptyQueryValue("capability", in: queryItems) {
+            return .capabilityInvocation(id: capabilityId)
+        }
+        if let eventId = nonEmptyQueryValue("event", in: queryItems) {
+            return .event(id: eventId)
+        }
+        return nil
+    }
+
+    private static func nonEmptyQueryValue(_ name: String, in queryItems: [URLQueryItem]) -> String? {
+        queryItems
+            .first { $0.name == name }?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
     }
 
     // MARK: - Intent Consumption

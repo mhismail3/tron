@@ -554,4 +554,36 @@ struct ScrollStateCoordinatorTests {
         #expect(!coordinator.hasUnseenContent)
         #expect(!coordinator.shouldShowNewContentPill)
     }
+
+    @Test("Target navigation suppresses bottom auto-scroll while history loads")
+    func testTargetNavigationSuppressesAutoScrollDuringHistoryLoad() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.beginTargetNavigation()
+        coordinator.contentDidArrive()
+
+        #expect(coordinator.userScrolledAway)
+        #expect(!coordinator.hasUnseenContent)
+        #expect(!coordinator.shouldShowNewContentPill)
+        #expect(!coordinator.shouldAutoScroll)
+
+        coordinator.endTargetNavigation()
+
+        #expect(!coordinator.hasUnseenContent)
+        #expect(!coordinator.shouldShowNewContentPill)
+        #expect(!coordinator.shouldAutoScroll)
+    }
+
+    @Test("Failed target navigation restores prior bottom state")
+    func testFailedTargetNavigationRestoresPriorState() {
+        let coordinator = ScrollStateCoordinator()
+
+        coordinator.beginTargetNavigation()
+        coordinator.contentDidArrive()
+        coordinator.endTargetNavigation(foundTarget: false)
+
+        #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.hasUnseenContent)
+        #expect(coordinator.shouldAutoScroll)
+    }
 }

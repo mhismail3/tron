@@ -24,8 +24,8 @@ extension ChatViewModel: ConnectionContext {
         )
     }
 
-    func reconstructSession(sessionId: String, limit: Int?, beforeSequence: Int64?) async throws -> SessionReconstructResult {
-        try await engineClient.session.reconstruct(sessionId: sessionId, limit: limit, beforeSequence: beforeSequence)
+    func reconstructSession(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult {
+        try await engineClient.session.reconstruct(sessionId: sessionId, limit: limit, beforeEventId: beforeEventId)
     }
 
     /// Clear state that refers to an in-flight turn (streaming text,

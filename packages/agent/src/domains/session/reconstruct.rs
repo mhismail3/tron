@@ -2,8 +2,10 @@
 //!
 //! Replaces ad hoc client-side reconstruction from separate session/event
 //! calls. The server is the single source of truth: persisted history
-//! events + in-flight state are returned in one response with monotonic sequence
-//! numbers for deterministic dedup.
+//! events + in-flight state are returned in one response. Non-forked sessions
+//! use session-local sequence order; forked sessions use the ordered ancestor
+//! chain, not just events physically owned by the child session, so clients
+//! render inherited history at the fork point.
 //!
 //! ## In-flight reconciliation
 //!
@@ -16,9 +18,9 @@
 //!
 //! ```text
 //! {
-//!   events: [...],           // persisted events in sequence order
+//!   events: [...],           // persisted events in server-authored chain order
 //!   hasMoreEvents: bool,     // true if older events exist (pagination)
-//!   oldestSequence: i64?,    // sequence of earliest event in response
+//!   oldestEventId: string?,  // event-id cursor for cross-session pagination
 //!   inFlight: {...}?,        // non-null only when agent is running
 //!   lastSequence: i64,       // highest sequence (includes non-persisted events)
 //!   isRunning: bool,
@@ -34,6 +36,7 @@ use tracing::{debug, instrument};
 
 use crate::domains::agent::prompt_queue::PromptQueueService;
 use crate::domains::session::Deps;
+use crate::domains::session::event_store::sqlite::row_types::EventRow;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, CapabilityError};
 use crate::shared::server::events::event_row_to_wire_with_payload;
@@ -46,10 +49,40 @@ use crate::shared::server::events::event_row_to_wire_with_payload;
 /// trivial self-DoS. 10k events is roughly 25–50 turns of history for a
 /// typical Tron session, which more than covers any UX that needs the full
 /// state up front. Clients that want older events paginate via
-/// `beforeSequence`.
+/// `beforeEventId`.
 pub const MAX_RECONSTRUCT_EVENTS: i64 = 10_000;
 
 pub(crate) struct SessionReconstructService;
+
+fn paginate_ordered_chain(
+    mut events: Vec<EventRow>,
+    before_event_id: Option<&str>,
+    limit: i64,
+) -> Result<(Vec<EventRow>, bool), CapabilityError> {
+    if let Some(cursor) = before_event_id {
+        let cursor_index = events
+            .iter()
+            .position(|event| event.id == cursor)
+            .ok_or_else(|| CapabilityError::NotFound {
+                code: errors::EVENT_NOT_FOUND.into(),
+                message: format!("Event '{cursor}' not found in reconstruction chain"),
+            })?;
+        events.truncate(cursor_index);
+    }
+
+    let limit = usize::try_from(limit).unwrap_or(0);
+    if limit == 0 {
+        return Ok((Vec::new(), !events.is_empty()));
+    }
+
+    let has_more = events.len() > limit;
+    if has_more {
+        let keep_from = events.len() - limit;
+        events = events.split_off(keep_from);
+    }
+
+    Ok((events, has_more))
+}
 
 impl SessionReconstructService {
     /// Reconstruct the full session state for a reconnecting client.
@@ -58,7 +91,7 @@ impl SessionReconstructService {
         deps: &Deps,
         session_id: String,
         limit: Option<i64>,
-        before_sequence: Option<i64>,
+        before_event_id: Option<String>,
     ) -> Result<Value, CapabilityError> {
         // INVARIANT: client-supplied `limit` is always clamped to
         // [0, MAX_RECONSTRUCT_EVENTS]. `None` means "give me the default
@@ -73,6 +106,7 @@ impl SessionReconstructService {
         let session_manager = deps.session_manager.clone();
         let orchestrator = deps.orchestrator.clone();
         let sid = session_id.clone();
+        let cursor_event_id = before_event_id.clone();
 
         // 1. Load events and pending queue from DB (blocking — SQLite)
         let (events, has_more, session_metadata, pending_queue) =
@@ -88,23 +122,65 @@ impl SessionReconstructService {
                         message: format!("Session '{sid}' not found"),
                     })?;
 
-                // Load events with pagination (limit clamped above).
-                let events = if let Some(before_seq) = before_sequence {
-                    event_store.get_events_before(&sid, before_seq, limit)
+                // Load events with pagination (limit clamped above). Forked
+                // sessions need the ancestor chain ending at the child head:
+                // session-local sequence pagination cannot describe parent
+                // rows whose sequence counters belong to another session.
+                let (events, has_more) = if session.parent_session_id.is_some() {
+                    let head_id = session.head_event_id.as_deref().ok_or_else(|| {
+                        CapabilityError::Internal {
+                            message: "Forked session has no head event".into(),
+                        }
+                    })?;
+                    let ancestors = event_store.get_ancestors(head_id).map_err(|e| {
+                        CapabilityError::Internal {
+                            message: format!("Failed to load fork ancestors: {e}"),
+                        }
+                    })?;
+                    paginate_ordered_chain(ancestors, cursor_event_id.as_deref(), effective_limit)?
+                } else if let Some(before_id) = cursor_event_id.as_deref() {
+                    let cursor = event_store
+                        .get_event(before_id)
+                        .map_err(|e| CapabilityError::Internal {
+                            message: format!("Failed to load cursor event: {e}"),
+                        })?
+                        .ok_or_else(|| CapabilityError::NotFound {
+                            code: errors::EVENT_NOT_FOUND.into(),
+                            message: format!("Event '{before_id}' not found"),
+                        })?;
+                    if cursor.session_id != sid {
+                        return Err(CapabilityError::NotFound {
+                            code: errors::EVENT_NOT_FOUND.into(),
+                            message: format!("Event '{before_id}' is not in session '{sid}'"),
+                        });
+                    }
+                    let events = event_store
+                        .get_events_before(&sid, cursor.sequence, limit)
+                        .map_err(|e| CapabilityError::Internal {
+                            message: format!("Failed to load events: {e}"),
+                        })?;
+                    let has_more = if let Some(first) = events.first() {
+                        event_store
+                            .has_events_before(&sid, first.sequence)
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    (events, has_more)
                 } else {
-                    event_store.get_latest_events(&sid, limit)
-                }
-                .map_err(|e| CapabilityError::Internal {
-                    message: format!("Failed to load events: {e}"),
-                })?;
-
-                // Determine if there are older events
-                let has_more = if let Some(first) = events.first() {
-                    event_store
-                        .has_events_before(&sid, first.sequence)
-                        .unwrap_or(false)
-                } else {
-                    false
+                    let events = event_store.get_latest_events(&sid, limit).map_err(|e| {
+                        CapabilityError::Internal {
+                            message: format!("Failed to load events: {e}"),
+                        }
+                    })?;
+                    let has_more = if let Some(first) = events.first() {
+                        event_store
+                            .has_events_before(&sid, first.sequence)
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    (events, has_more)
                 };
 
                 // Build metadata from session row (already has aggregated counters)
@@ -183,7 +259,7 @@ impl SessionReconstructService {
             .current_sequence(&session_id)
             .unwrap_or_else(|| events.last().map(|e| e.sequence).unwrap_or(0));
 
-        let oldest_sequence = events.first().map(|e| e.sequence);
+        let oldest_event_id = events.first().map(|e| e.id.clone());
 
         // 5. Convert events to wire format
         let resolved_payloads =
@@ -216,7 +292,7 @@ impl SessionReconstructService {
         Ok(json!({
             "events": wire_events,
             "hasMoreEvents": has_more,
-            "oldestSequence": oldest_sequence,
+            "oldestEventId": oldest_event_id,
             "inFlight": in_flight,
             "lastSequence": last_sequence,
             "isRunning": is_running,

@@ -225,13 +225,16 @@ The `session::reconstruct` engine protocol supports cursor-based pagination:
 | Field | Type | Purpose |
 |-------|------|---------|
 | `limit` | `Int?` | Max events to return per page |
-| `beforeSequence` | `Int64?` | Fetch events older than this sequence number |
+| `beforeEventId` | `String?` | Fetch events older than this event in the reconstructed chain |
 | `hasMoreEvents` | `Bool` | Whether older pages exist |
-| `oldestSequence` | `Int64?` | Sequence of the earliest event in the response (use as next `beforeSequence`) |
+| `oldestEventId` | `String?` | Event ID of the earliest event in the response (use as next `beforeEventId`) |
 
 `ChatViewModel+Reconstruction.swift` drives the pagination loop: on initial
 load it requests the most recent page, then on scroll-up it passes
-`oldestSequence` as `beforeSequence` to fetch the next older page.
+`oldestEventId` as `beforeEventId` to fetch the next older page. Forked
+sessions use the same cursor shape over the server-ordered ancestor chain, so
+the visible page can include parent-session history followed by child-session
+events without client-side stitching.
 
 ## Adding a New Event
 

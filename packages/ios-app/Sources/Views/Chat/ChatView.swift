@@ -288,8 +288,9 @@ struct ChatView: View {
                 return
             }
 
-            // Find and scroll to the target message
-            performDeepLinkScroll(to: target)
+            Task {
+                await performDeepLinkScroll(to: target)
+            }
         }
     }
 

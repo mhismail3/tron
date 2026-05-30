@@ -33,7 +33,7 @@ protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrack
     func resumeSession(sessionId: String) async throws
 
     /// Reconstruct full session state from the server
-    func reconstructSession(sessionId: String, limit: Int?, beforeSequence: Int64?) async throws -> SessionReconstructResult
+    func reconstructSession(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult
 
     /// Process the reconstruction result (events → messages, in-flight → streaming)
     func processReconstructionResult(_ result: SessionReconstructResult) async
@@ -106,7 +106,7 @@ final class ConnectionCoordinator {
             let result = try await context.reconstructSession(
                 sessionId: context.sessionId,
                 limit: 50,
-                beforeSequence: nil
+                beforeEventId: nil
             )
 
             // Clean up stale streaming state from previous connection

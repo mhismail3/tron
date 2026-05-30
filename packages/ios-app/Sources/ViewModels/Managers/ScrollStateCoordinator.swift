@@ -56,6 +56,7 @@ final class ScrollStateCoordinator {
     var isPrependingHistory = false
 
     private var anchoredItemId: UUID?
+    private var targetNavigationSnapshot: TargetNavigationSnapshot?
 
     // MARK: - Scroll Phase
 
@@ -117,6 +118,39 @@ final class ScrollStateCoordinator {
         returnToBottom()
     }
 
+    func beginTargetNavigation() {
+        targetNavigationSnapshot = TargetNavigationSnapshot(
+            userScrolledAway: userScrolledAway,
+            hasUnseenContent: hasUnseenContent,
+            hadUserInteraction: hadUserInteraction,
+            isPrependingHistory: isPrependingHistory
+        )
+        userScrolledAway = true
+        hasUnseenContent = false
+        hadUserInteraction = false
+        isPrependingHistory = true
+    }
+
+    func endTargetNavigation(foundTarget: Bool = true) {
+        defer { targetNavigationSnapshot = nil }
+
+        guard foundTarget else {
+            if let snapshot = targetNavigationSnapshot {
+                userScrolledAway = snapshot.userScrolledAway
+                hasUnseenContent = snapshot.hasUnseenContent
+                hadUserInteraction = snapshot.hadUserInteraction
+                isPrependingHistory = snapshot.isPrependingHistory
+            } else {
+                isPrependingHistory = false
+                hasUnseenContent = false
+            }
+            return
+        }
+
+        isPrependingHistory = false
+        hasUnseenContent = false
+    }
+
     // MARK: - History Loading
 
     func willPrependHistory(firstVisibleId: UUID?) {
@@ -160,5 +194,12 @@ final class ScrollStateCoordinator {
         userScrolledAway = false
         hasUnseenContent = false
         hadUserInteraction = false
+    }
+
+    private struct TargetNavigationSnapshot {
+        let userScrolledAway: Bool
+        let hasUnseenContent: Bool
+        let hadUserInteraction: Bool
+        let isPrependingHistory: Bool
     }
 }

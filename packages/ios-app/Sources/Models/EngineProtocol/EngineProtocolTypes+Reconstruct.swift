@@ -6,7 +6,7 @@ import Foundation
 struct SessionReconstructParams: Encodable {
     let sessionId: String
     let limit: Int?
-    let beforeSequence: Int64?
+    let beforeEventId: String?
 }
 
 /// Response from `session::reconstruct`.
@@ -17,10 +17,10 @@ struct SessionReconstructParams: Encodable {
 struct SessionReconstructResult: Decodable {
     /// Persisted events in sequence order.
     let events: [RawEvent]
-    /// True if older events exist (for pagination via `beforeSequence`).
+    /// True if older events exist (for pagination via `beforeEventId`).
     let hasMoreEvents: Bool
-    /// Sequence number of the earliest event in this response.
-    let oldestSequence: Int64?
+    /// Event ID of the earliest event in this response.
+    let oldestEventId: String?
     /// In-flight turn state (non-null only when agent is running).
     let inFlight: InFlightState?
     /// Highest assigned sequence (includes non-persisted events).

@@ -51,18 +51,21 @@ struct UnifiedEventTransformer {
     /// This generic implementation works with any `EventTransformable` type,
     /// including `RawEvent` (from server engine protocol) and `SessionEvent` (from SQLite).
     ///
-    /// Events are sorted by sequence number, then turn number within each turn
-    /// (text before capability invocations) to preserve the logical order of Claude's responses.
+    /// Events are sorted by sequence number unless the caller passes a server-
+    /// ordered chain. Forked session reconstruction crosses session boundaries,
+    /// so sequence numbers can reset and the server's ancestor order is the
+    /// chronology contract.
     ///
     /// **Important**: Capability invocations (`capability.invocation.started`) are combined with their results
     /// (`capability.invocation.completed`) into a single message. This matches the streaming UI
     /// behavior where capability invocations show their results inline.
     ///
-    /// - Parameter events: Events conforming to EventTransformable
+    /// - Parameters:
+    ///   - events: Events conforming to EventTransformable
+    ///   - presorted: Whether `events` already arrive in chronological chain order.
     /// - Returns: Array of ChatMessages in chronological order
-    static func transformPersistedEvents<E: EventTransformable>(_ events: [E]) -> [ChatMessage] {
-        // Sort by turn number, then timestamp, then sequence
-        let sorted = EventSorter.sortBySequence(events)
+    static func transformPersistedEvents<E: EventTransformable>(_ events: [E], presorted: Bool = false) -> [ChatMessage] {
+        let sorted = presorted ? events : EventSorter.sortBySequence(events)
 
         // Build maps for capability invocation rendering.
         let maps = buildCapabilityInvocationMaps(from: sorted)
@@ -84,15 +87,19 @@ struct UnifiedEventTransformer {
 
             // message.assistant: process content blocks in order (preserves interleaving)
             if event.type == PersistedEventType.messageAssistant.rawValue {
-                let interleaved = InterleavedContentProcessor.transform(
+                var interleaved = InterleavedContentProcessor.transform(
                     payload: event.payload,
                     timestamp: parseTimestamp(event.timestamp),
                     startedInvocations: startedInvocations,
                     completedInvocations: completedInvocations
                 )
+                if !interleaved.isEmpty {
+                    interleaved[0].eventId = event.id
+                }
                 messages.append(contentsOf: interleaved)
             } else {
-                if let msg = transformPersistedEvent(event) {
+                if var msg = transformPersistedEvent(event) {
+                    msg.eventId = event.id
                     messages.append(msg)
                 }
             }

@@ -289,9 +289,9 @@ UI updates via @Observable
 ### History Loading (Session Reconstruction)
 
 ```
-SessionClient.reconstruct(sessionId, limit, beforeSequence)
+SessionClient.reconstruct(sessionId, limit, beforeEventId)
     ↓  (calls session::reconstruct engine protocol)
-SessionReconstructResult (events, isRunning, hasMoreEvents, oldestSequence)
+SessionReconstructResult (events, isRunning, hasMoreEvents, oldestEventId)
     ↓
 UnifiedEventTransformer.reconstructSessionState(from: events)
     ↓
@@ -304,9 +304,20 @@ ChatViewModel.messages (batched for pagination)
 ChatView renders
 ```
 
-Pagination: older history is loaded on demand via `beforeSequence`, passing the
-`oldestSequence` from the previous page. `hasMoreEvents` controls whether the
-"load more" UI is shown.
+Pagination: older history is loaded on demand via `beforeEventId`, passing the
+`oldestEventId` from the previous page. `hasMoreEvents` controls whether the
+"load more" UI is shown. Forked session reconstruction is server-ordered from
+the ancestor chain ending at the child head, so inherited history and child
+events arrive as one timeline.
+
+Session deep links can target the session itself or a `capability` / `event`
+query item. The app resolves target IDs against the current reconstructed
+window, then pages older history through `beforeEventId` until the target is
+visible or the server reports no older page. While target resolution is loading
+older windows, `ScrollStateCoordinator` suppresses bottom auto-scroll and the
+new-content pill so the target scroll is not overridden by history prepends.
+Notification URLs use the same pending-deep-link route and carry the target
+session into the chat view after the notification detail is opened.
 
 `session::reconstruct` returns approval records separately from the persisted
 session event rows because the approval primitive owns approval lifecycle. The

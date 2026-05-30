@@ -25,7 +25,6 @@ final class DeepLinkRouterTests: XCTestCase {
     }
 
     func testHandleNotificationWithEventId_IgnoresEventId() {
-        // Scroll-to-capability functionality is disabled - eventId is ignored
         let router = DeepLinkRouter()
         router.handle(notificationPayload: [
             "sessionId": "sess_123",
@@ -73,23 +72,35 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleURLWithCapabilityQuery_IgnoresCapabilityQuery() {
-        // Scroll-to-capability functionality is disabled - capability query param is ignored
+    func testHandleURLWithCapabilityQueryRoutesScrollTarget() {
         let router = DeepLinkRouter()
         let url = URL(string: "tron://session/sess_123?capability=cap_abc")!
 
         XCTAssertTrue(router.handle(url: url))
-        // Should just open session without scroll target
-        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .capabilityInvocation(id: "cap_abc")))
     }
 
-    func testHandleURLWithEventQuery_IgnoresEventQuery() {
-        // Scroll-to-capability functionality is disabled - event query param is ignored
+    func testHandleURLWithEventQueryRoutesScrollTarget() {
         let router = DeepLinkRouter()
         let url = URL(string: "tron://session/sess_123?event=evt_xyz")!
 
         XCTAssertTrue(router.handle(url: url))
-        // Should just open session without scroll target
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .event(id: "evt_xyz")))
+    }
+
+    func testHandleURLWithCapabilityAndEventQueryUsesCapability() {
+        let router = DeepLinkRouter()
+        let url = URL(string: "tron://session/sess_123?capability=cap_abc&event=evt_xyz")!
+
+        XCTAssertTrue(router.handle(url: url))
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .capabilityInvocation(id: "cap_abc")))
+    }
+
+    func testHandleURLWithEmptyScrollQueryIgnoresTarget() {
+        let router = DeepLinkRouter()
+        let url = URL(string: "tron://session/sess_123?capability=&event=")!
+
+        XCTAssertTrue(router.handle(url: url))
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
@@ -115,6 +126,22 @@ final class DeepLinkRouterTests: XCTestCase {
 
         XCTAssertTrue(router.handle(url: url))
         XCTAssertEqual(router.pendingIntent, .settings)
+    }
+
+    func testHandleURLNotification() {
+        let router = DeepLinkRouter()
+        let url = URL(string: "tron://notification/cap_abc")!
+
+        XCTAssertTrue(router.handle(url: url))
+        XCTAssertEqual(router.pendingIntent, .notification(invocationId: "cap_abc"))
+    }
+
+    func testHandleURLNotificationWithMissingInvocationId() {
+        let router = DeepLinkRouter()
+        let url = URL(string: "tron://notification")!
+
+        XCTAssertFalse(router.handle(url: url))
+        XCTAssertNil(router.pendingIntent)
     }
 
     func testHandleURLVoiceNotesIsRetired() {
