@@ -580,7 +580,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "Initial cleanup score: **0/100**",
-        "Current score: **52/100**",
+        "Current score: **62/100**",
         "## Operating Rules",
         "## Review Rubric",
         "## Static Gates",
@@ -609,6 +609,7 @@ fn codebase_cleanup_scorecard_stays_formalized() {
         "gemma4:e4b",
         "larger local models",
         "session_storage_protocol_boundaries_stay_split",
+        "model_provider_profile_boundaries_stay_split",
         "events/tron/catalog.rs",
     ] {
         assert!(
@@ -829,6 +830,131 @@ fn session_storage_protocol_boundaries_stay_split() {
             && stream_projection.contains("pub(super) fn protocol_event_value(")
             && outbound.contains("pub(super) fn send_engine_ws_value("),
         "engine WebSocket root must stay on session flow while wire/projection/outbound concerns stay split"
+    );
+}
+
+#[test]
+fn model_provider_profile_boundaries_stay_split() {
+    let crate_root = crate_root();
+    let read = |relative: &str| {
+        let path = crate_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+
+    for relative in [
+        "src/domains/model/providers/openai/types.rs",
+        "src/domains/model/providers/openai/stream_handler.rs",
+        "src/domains/model/providers/anthropic/types.rs",
+        "src/domains/model/providers/anthropic/stream_handler.rs",
+        "src/domains/model/providers/anthropic/message_converter.rs",
+        "src/domains/model/providers/anthropic/provider.rs",
+        "src/domains/model/providers/google/types.rs",
+        "src/domains/model/providers/google/provider.rs",
+        "src/domains/model/providers/ollama/message_converter.rs",
+        "src/shared/foundation/profile.rs",
+    ] {
+        assert!(
+            crate_root.join(relative).is_file() && line_count(&crate_root.join(relative)) <= 1_000,
+            "CLC-4 provider/profile parent must stay below 1,000 LOC: {relative}"
+        );
+    }
+
+    for relative in [
+        "src/domains/model/providers/openai/types/config.rs",
+        "src/domains/model/providers/openai/types/models.rs",
+        "src/domains/model/providers/openai/types/responses.rs",
+        "src/domains/model/providers/openai/types/tests.rs",
+        "src/domains/model/providers/openai/types/models/catalog.rs",
+        "src/domains/model/providers/openai/types/models/catalog/frontier.rs",
+        "src/domains/model/providers/openai/types/models/catalog/retired.rs",
+        "src/domains/model/providers/openai/types/models/catalog/specialized.rs",
+        "src/domains/model/providers/openai/types/models/catalog/standard.rs",
+        "src/domains/model/providers/openai/stream_handler/tests.rs",
+        "src/domains/model/providers/anthropic/types/tests.rs",
+        "src/domains/model/providers/anthropic/stream_handler/tests.rs",
+        "src/domains/model/providers/anthropic/message_converter/tests.rs",
+        "src/domains/model/providers/anthropic/provider/tests.rs",
+        "src/domains/model/providers/google/types/tests.rs",
+        "src/domains/model/providers/google/provider/tests.rs",
+        "src/domains/model/providers/ollama/message_converter/tests.rs",
+        "src/shared/foundation/profile/validation.rs",
+        "src/shared/foundation/profile/tests.rs",
+    ] {
+        assert!(
+            crate_root.join(relative).is_file(),
+            "CLC-4 split boundary file must exist: {relative}"
+        );
+    }
+
+    let openai_types = read("src/domains/model/providers/openai/types.rs");
+    assert!(
+        openai_types.contains("#[path = \"types/config.rs\"]")
+            && openai_types.contains("#[path = \"types/models.rs\"]")
+            && openai_types.contains("#[path = \"types/responses.rs\"]")
+            && openai_types.contains("#[path = \"types/tests.rs\"]")
+            && !openai_types.contains("pub struct ResponsesRequest")
+            && !openai_types.contains("pub static OPENAI_MODELS")
+            && !openai_types.contains("pub enum OpenAIAuth"),
+        "OpenAI types root must stay a facade over config, model registry, Responses DTOs, and tests"
+    );
+
+    let openai_config = read("src/domains/model/providers/openai/types/config.rs");
+    let openai_models = read("src/domains/model/providers/openai/types/models.rs");
+    let openai_responses = read("src/domains/model/providers/openai/types/responses.rs");
+    let openai_catalog = read("src/domains/model/providers/openai/types/models/catalog.rs");
+    assert!(
+        openai_config.contains("pub enum OpenAIAuthPath")
+            && openai_config.contains("pub enum OpenAIAuth")
+            && openai_config.contains("pub struct OpenAIConfig")
+            && openai_models.contains("pub struct OpenAIModelInfo")
+            && openai_models.contains("pub use catalog::OPENAI_MODELS")
+            && openai_models.contains("pub fn get_openai_model(")
+            && !openai_models.contains("ResponsesRequest")
+            && !openai_models.contains("m.insert(")
+            && openai_responses.contains("pub struct ResponsesRequest")
+            && openai_responses.contains("pub struct ResponsesSseEvent")
+            && openai_responses.contains("pub enum ResponsesInputItem")
+            && openai_responses.contains("pub enum ResponsesToolEntry")
+            && openai_catalog.contains("frontier::insert")
+            && openai_catalog.contains("retired::insert")
+            && openai_catalog.contains("specialized::insert")
+            && openai_catalog.contains("standard::insert"),
+        "OpenAI auth/config, model registry, catalog shards, and Responses DTOs must stay separated"
+    );
+
+    for relative in [
+        "src/domains/model/providers/openai/stream_handler.rs",
+        "src/domains/model/providers/anthropic/types.rs",
+        "src/domains/model/providers/anthropic/stream_handler.rs",
+        "src/domains/model/providers/anthropic/message_converter.rs",
+        "src/domains/model/providers/anthropic/provider.rs",
+        "src/domains/model/providers/google/types.rs",
+        "src/domains/model/providers/google/provider.rs",
+        "src/domains/model/providers/ollama/message_converter.rs",
+        "src/shared/foundation/profile.rs",
+    ] {
+        let text = read(relative);
+        assert!(
+            text.contains("#[path =") && !text.contains("mod tests {"),
+            "CLC-4 parent must keep extracted tests in a child module: {relative}"
+        );
+    }
+
+    let profile = read("src/shared/foundation/profile.rs");
+    let profile_validation = read("src/shared/foundation/profile/validation.rs");
+    assert!(
+        profile.contains("#[path = \"profile/validation.rs\"]")
+            && profile.contains("#[path = \"profile/tests.rs\"]")
+            && !profile.contains("fn validate_profile(")
+            && !profile.contains("struct ContextBlockManifest")
+            && profile_validation.contains("pub(super) enum ContextBlockProviderSurface")
+            && profile_validation.contains("#[serde(rename = \"capability\")]")
+            && profile_validation.contains("provider_surface: Option<ContextBlockProviderSurface>")
+            && profile_validation.contains("pub(crate) const CAPABILITY_SCHEMA_PROVIDER_SURFACE")
+            && profile_validation.contains("pub(crate) fn validate_context_block_manifest")
+            && profile_validation.contains("pub(super) fn validate_profile"),
+        "profile root must stay on profile loading while typed validation owns context provider surfaces"
     );
 }
 

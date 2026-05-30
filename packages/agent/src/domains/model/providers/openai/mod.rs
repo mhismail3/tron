@@ -12,7 +12,7 @@
 //! | [`provider`]          | [`OpenAIProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::provider`]); stream, retry, capability invocation parsing |
 //! | [`message_converter`] | `Vec<Message>` → Responses `input` array with role mapping and capability-result normalisation |
 //! | [`stream_handler`]    | OpenAI SSE → `StreamEvent` ([`crate::shared::events`]); handles output deltas, capability invocations, and terminal events |
-//! | [`types`]             | [`OpenAIAuth`], [`OpenAIConfig`], [`ApiEndpoint`], and endpoint-aware model profiles |
+//! | [`types`]             | [`OpenAIAuth`], [`OpenAIConfig`], [`ApiEndpoint`], endpoint-aware model profiles, and Responses wire DTOs split by owned surface |
 //!
 //! ## Re-exports
 //!

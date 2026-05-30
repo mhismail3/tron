@@ -1,0 +1,300 @@
+//! OpenAI model catalog shard.
+
+use std::collections::HashMap;
+
+use super::super::*;
+
+#[allow(unused_results)]
+pub(super) fn insert(m: &mut HashMap<&'static str, OpenAIModelInfo>) {
+    m.insert(
+        "gpt-4o",
+        model(
+            "gpt-4o",
+            "GPT-4o",
+            "GPT-4o",
+            "GPT-4o",
+            "standard",
+            "Retired GPT-4o multimodal model for the Platform Responses path.",
+            &[
+                "gpt-4o-2024-11-20",
+                "gpt-4o-2024-08-06",
+                "gpt-4o-2024-05-13",
+            ],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                2.50,
+                10.0,
+                Some(1.25),
+            )],
+            70,
+            false,
+            true,
+            false,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4o-mini",
+        model(
+            "gpt-4o-mini",
+            "GPT-4o Mini",
+            "GPT-4o Mini",
+            "GPT-4o",
+            "standard",
+            "Small GPT-4o multimodal model for the Platform Responses path.",
+            &["gpt-4o-mini-2024-07-18"],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                0.15,
+                0.60,
+                Some(0.075),
+            )],
+            71,
+            false,
+            true,
+            false,
+            None,
+            Some("gpt-4.1-mini"),
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4.5-preview",
+        model(
+            "gpt-4.5-preview",
+            "GPT-4.5 Preview",
+            "GPT-4.5 Preview",
+            "GPT-4.5",
+            "flagship",
+            "Retired GPT-4.5 preview model kept selectable while the Platform API still serves it.",
+            &["gpt-4.5-preview-2025-02-27"],
+            vec![platform_text_profile(
+                128_000,
+                16_384,
+                true,
+                true,
+                75.0,
+                150.0,
+                Some(37.50),
+            )],
+            72,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-4.1"),
+            false,
+            true,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4-turbo",
+        model(
+            "gpt-4-turbo",
+            "GPT-4 Turbo",
+            "GPT-4 Turbo",
+            "GPT-4",
+            "standard",
+            "Retired GPT-4 Turbo vision model that still fits the streaming Platform Responses path.",
+            &["gpt-4-turbo-2024-04-09"],
+            vec![platform_text_profile(
+                128_000,
+                4_096,
+                true,
+                true,
+                10.0,
+                30.0,
+                None,
+            )],
+            73,
+            false,
+            true,
+            false,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2023-12-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4-turbo-preview",
+        model(
+            "gpt-4-turbo-preview",
+            "GPT-4 Turbo Preview",
+            "GPT-4 Turbo Preview",
+            "GPT-4",
+            "standard",
+            "Retired GPT-4 Turbo preview; hidden because it does not support streaming Responses.",
+            &["gpt-4-0125-preview", "gpt-4-1106-preview"],
+            vec![platform_non_streaming_profile(
+                128_000,
+                4_096,
+                true,
+                false,
+                NO_REASONING,
+                "none",
+                10.0,
+                30.0,
+            )],
+            74,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-4-turbo"),
+            true,
+            true,
+            Some("2023-12-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-4",
+        model(
+            "gpt-4",
+            "GPT-4",
+            "GPT-4",
+            "GPT-4",
+            "standard",
+            "Retired GPT-4 text model for existing Platform sessions.",
+            &["gpt-4-0613", "gpt-4-0314"],
+            vec![platform_text_profile(
+                8_192, 8_192, false, false, 30.0, 60.0, None,
+            )],
+            75,
+            false,
+            true,
+            false,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2021-09-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-3.5-turbo",
+        model(
+            "gpt-3.5-turbo",
+            "GPT-3.5 Turbo",
+            "GPT-3.5 Turbo",
+            "GPT-3.5",
+            "standard",
+            "Retired GPT-3.5 chat model; hidden because it does not support streaming Responses.",
+            &["gpt-3.5-turbo-0125", "gpt-3.5-turbo-1106"],
+            vec![platform_non_streaming_profile(
+                16_385,
+                4_096,
+                false,
+                false,
+                NO_REASONING,
+                "none",
+                0.50,
+                1.50,
+            )],
+            76,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-4.1-mini"),
+            true,
+            false,
+            Some("2021-09-01"),
+        ),
+    );
+
+    m.insert(
+        "chatgpt-4o-latest",
+        model(
+            "chatgpt-4o-latest",
+            "ChatGPT-4o Latest",
+            "ChatGPT-4o",
+            "GPT-4o",
+            "standard",
+            "Retired ChatGPT-4o model snapshot exposed on the Platform API for provider testing.",
+            &[],
+            vec![platform_text_profile(
+                128_000, 16_384, false, true, 5.0, 15.0, None,
+            )],
+            77,
+            false,
+            true,
+            true,
+            None,
+            Some("gpt-4.1"),
+            false,
+            false,
+            Some("2023-10-01"),
+        ),
+    );
+
+    m.insert(
+        "gpt-oss-120b",
+        model(
+            "gpt-oss-120b",
+            "GPT-OSS 120B",
+            "GPT-OSS 120B",
+            "GPT-OSS",
+            "standard",
+            "Open-weight text model exposed through the Platform Responses API.",
+            &[],
+            vec![platform_text_profile(
+                131_072, 131_072, true, false, 0.0, 0.0, None,
+            )],
+            80,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            None,
+        ),
+    );
+
+    m.insert(
+        "gpt-oss-20b",
+        model(
+            "gpt-oss-20b",
+            "GPT-OSS 20B",
+            "GPT-OSS 20B",
+            "GPT-OSS",
+            "standard",
+            "Smaller open-weight text model exposed through the Platform Responses API.",
+            &[],
+            vec![platform_text_profile(
+                131_072, 131_072, true, false, 0.0, 0.0, None,
+            )],
+            81,
+            false,
+            true,
+            false,
+            None,
+            None,
+            false,
+            false,
+            None,
+        ),
+    );
+}
