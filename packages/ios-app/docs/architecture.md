@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -440,6 +440,20 @@ cache reload. The sidebar preloads filtered session ids only after the engine is
 connected; row labels and title icons both read through `SessionTitleIcons`, so
 visual fork/branch/dirty affordances and accessibility descriptors stay aligned
 with the same `WorktreeInfo` snapshot.
+
+### Audio Capture
+
+`AudioCaptureEngine` is the single capture backend for chat transcription and
+voice-note recording. Device builds use `AVAudioEngine` with a prewarm path so
+the sheet can start recording immediately and keep pre-roll audio. iOS Simulator
+builds use a compile-time simulator backend that never touches CoreAudio input;
+it preserves the same `prepare -> start -> stop/cancel` state machine and writes
+a bounded silent WAV for downstream transcription/voice-note flows. This keeps
+simulator UI tests on the real app workflow while avoiding simulator-only
+CoreAudio aborts. Transcription and voice-note persistence remain server-owned
+through `transcription::audio` and voice-note media capabilities; Swift only
+captures the local file and projects the returned result or no-speech/error
+state.
 
 ## File Placement Guidelines
 

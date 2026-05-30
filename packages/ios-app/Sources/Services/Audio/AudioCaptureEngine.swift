@@ -70,11 +70,25 @@ final class AudioCaptureEngine {
     nonisolated static let sessionOptions: AVAudioSession.CategoryOptions = [.defaultToSpeaker, .mixWithOthers]
 
     /// Thread-safe audio level (written by tap, read by UI timers).
-    var currentAudioLevel: Float { levelMeter.read() }
+    var currentAudioLevel: Float {
+        if Self.usesSimulatorSafeCaptureBackend, isRunning {
+            return 0.12
+        }
+        return levelMeter.read()
+    }
 
     private var engine: AVAudioEngine?
     private let captureBuffer = AudioCaptureBuffer()
     private let levelMeter = AudioLevelMeter()
+    private var simulatorRecordingStartedAt: Date?
+
+    nonisolated static var usesSimulatorSafeCaptureBackend: Bool {
+        #if targetEnvironment(simulator)
+        true
+        #else
+        false
+        #endif
+    }
 
     // MARK: - Permission
 
@@ -105,6 +119,15 @@ final class AudioCaptureEngine {
     /// the user taps record.
     func prepare() async throws {
         guard !isPrepared, !isRunning else { return }
+
+        if Self.usesSimulatorSafeCaptureBackend {
+            sampleRate = 44_100
+            captureBuffer.discard()
+            levelMeter.reset()
+            isPrepared = true
+            log.info("[AudioCaptureEngine] PREPARED — simulator-safe capture backend", category: .audio)
+            return
+        }
 
         let session = AVAudioSession.sharedInstance()
         do {
@@ -149,10 +172,21 @@ final class AudioCaptureEngine {
     func start() async throws {
         guard !isRunning else { return }
 
+        if Self.usesSimulatorSafeCaptureBackend {
+            sampleRate = 44_100
+            captureBuffer.discard()
+            isPrepared = false
+            isRunning = true
+            simulatorRecordingStartedAt = Date()
+            log.info("[AudioCaptureEngine] RECORDING STARTED (simulator-safe capture backend)", category: .audio)
+            return
+        }
+
         if isPrepared {
             // Engine already running — just mark as recording. Pre-roll audio in the buffer
             // is kept so the first word is captured even if the user spoke before tapping.
             isRunning = true
+            simulatorRecordingStartedAt = nil
             log.info("[AudioCaptureEngine] RECORDING STARTED (pre-warmed, 0ms latency)", category: .audio)
             return
         }
@@ -199,6 +233,22 @@ final class AudioCaptureEngine {
     /// Stop recording and return the WAV file URL. Returns nil if no data captured.
     @discardableResult
     func stop() -> URL? {
+        if Self.usesSimulatorSafeCaptureBackend {
+            guard isRunning || isPrepared else { return nil }
+            isRunning = false
+            isPrepared = false
+            let startedAt = simulatorRecordingStartedAt
+            simulatorRecordingStartedAt = nil
+            let pcmData = Self.simulatorSilentPCMData(
+                sampleRate: sampleRate,
+                elapsed: startedAt.map { Date().timeIntervalSince($0) } ?? 0.25
+            )
+            let url = Self.writeWAVFile(pcmData: pcmData, sampleRate: sampleRate)
+            levelMeter.reset()
+            log.info("[AudioCaptureEngine] RECORDING STOPPED — simulator-safe pcmBytes=\(pcmData.count), sampleRate=\(sampleRate)", category: .audio)
+            return url
+        }
+
         guard isRunning || isPrepared, let audioEngine = engine else { return nil }
         isRunning = false
         isPrepared = false
@@ -223,6 +273,16 @@ final class AudioCaptureEngine {
 
     /// Discard buffer and deactivate session without producing a file.
     func cancel() {
+        if Self.usesSimulatorSafeCaptureBackend {
+            isRunning = false
+            isPrepared = false
+            simulatorRecordingStartedAt = nil
+            captureBuffer.discard()
+            levelMeter.reset()
+            log.info("[AudioCaptureEngine] recording cancelled — simulator-safe capture backend", category: .audio)
+            return
+        }
+
         if let audioEngine = engine {
             audioEngine.inputNode.removeTap(onBus: 0)
             audioEngine.stop()
@@ -283,6 +343,12 @@ final class AudioCaptureEngine {
             try? FileManager.default.removeItem(at: url)
             return nil
         }
+    }
+
+    private static func simulatorSilentPCMData(sampleRate: Double, elapsed: TimeInterval) -> Data {
+        let boundedSeconds = min(max(elapsed, 0.25), 5.0)
+        let frameCount = max(4_096, Int(sampleRate * boundedSeconds))
+        return Data(count: frameCount * 2)
     }
 
     // MARK: - Private
