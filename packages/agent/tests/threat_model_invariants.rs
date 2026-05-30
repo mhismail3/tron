@@ -3651,6 +3651,7 @@ fn module_package_activation_gates_stay_on() {
     let module_grants = read_module_file("src/engine/primitives/module/grants.rs");
     let module_manifest = read_module_file("src/engine/primitives/module/manifest.rs");
     let module_registrations = read_module_file("src/engine/primitives/module/registrations.rs");
+    let module_resources = read_module_file("src/engine/primitives/module/resources.rs");
     let module_trust_review = read_module_file("src/engine/primitives/module/trust_review.rs");
     let module_trust_audit = read_module_file("src/engine/primitives/module/trust_audit.rs");
     let module_trust_audit_schedule =
@@ -3665,6 +3666,7 @@ fn module_package_activation_gates_stay_on() {
         module_grants.as_str(),
         module_manifest.as_str(),
         module_registrations.as_str(),
+        module_resources.as_str(),
         module_trust_review.as_str(),
         module_trust_audit.as_str(),
         module_trust_audit_schedule.as_str(),
@@ -3718,6 +3720,20 @@ fn module_package_activation_gates_stay_on() {
             && !module.contains("fn module_read(")
             && !module.contains("fn module_write("),
         "module function registration catalogue must stay in registrations.rs"
+    );
+    assert!(
+        module.contains("mod resources;")
+            && module_resources.contains("pub(super) fn upsert_resource(")
+            && module_resources.contains("pub(super) fn resource_scope_and_token(")
+            && module_resources.contains("pub(super) fn require_inspection(")
+            && module_resources.contains("pub(super) fn resource_ref_from_resource(")
+            && module_resources.contains("pub(super) fn link_if_possible(")
+            && !module.contains("fn upsert_resource(")
+            && !module.contains("fn resource_scope_and_token(")
+            && !module.contains("fn require_inspection(")
+            && !module.contains("fn resource_ref_from_resource(")
+            && !module.contains("fn link_if_possible("),
+        "module resource mutation and projection helpers must stay in resources.rs"
     );
     assert!(
         module.contains("mod source_trust;") && module.contains("mod health_integrity;"),
@@ -4048,6 +4064,7 @@ fn module_package_activation_gates_stay_on() {
         crate_root.join("src/engine/primitives/module.rs"),
         crate_root.join("src/engine/primitives/module/grants.rs"),
         crate_root.join("src/engine/primitives/module/manifest.rs"),
+        crate_root.join("src/engine/primitives/module/resources.rs"),
         crate_root.join("src/engine/primitives/module/trust_review.rs"),
         crate_root.join("src/engine/primitives/module/trust_audit.rs"),
         crate_root.join("src/engine/primitives/module/health_integrity.rs"),

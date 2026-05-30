@@ -49,6 +49,7 @@ mod grants;
 mod health_integrity;
 mod manifest;
 mod registrations;
+mod resources;
 mod source_trust;
 mod trust_audit;
 mod trust_review;
@@ -69,6 +70,15 @@ use manifest::{
     validate_registered_capabilities, validate_runtime_entrypoint,
 };
 pub(super) use registrations::registrations;
+use resources::{
+    UpsertResource, activation_resource_id, activation_trust_summary, config_resource_id,
+    current_payload, current_payload_from_json_inspection, current_version, decision_summary,
+    ensure_expected_current_version, ensure_version_is_current, filter_resources_by_package,
+    link_if_possible, next_config_revision, package_resource_id, package_resource_id_from_payload,
+    package_trust_summary, require_inspection, resource_ref_from_resource,
+    resource_ref_from_version, resource_scope_and_token, trust_decision_metadata,
+    trust_target_status, trust_warnings_for_status, upsert_resource, version_payload,
+};
 use source_trust::{
     approve_source_schema, audit_policy_schema, enforce_revocation_schema,
     expire_trust_decision_schema, inspect_trust_schema, policy_audit_response_schema,
@@ -1322,69 +1332,6 @@ fn ensure_config_matches_package(
     Ok(())
 }
 
-struct UpsertResource {
-    resource_id: String,
-    kind: &'static str,
-    lifecycle: &'static str,
-    scope: EngineResourceScope,
-    payload: Value,
-    expected_current_version_id: Option<String>,
-    trace_id: crate::engine::TraceId,
-    invocation_id: Option<crate::engine::InvocationId>,
-    actor_id: ActorId,
-}
-
-fn upsert_resource(
-    host: &ModulePrimitiveHandler,
-    request: UpsertResource,
-) -> Result<(EngineResource, EngineResourceVersion, &'static str)> {
-    if let Some(existing) = host.inspect_resource(&request.resource_id)? {
-        let version = host.update_resource(UpdateResource {
-            resource_id: request.resource_id,
-            expected_current_version_id: request
-                .expected_current_version_id
-                .or(existing.resource.current_version_id.clone()),
-            lifecycle: Some(request.lifecycle.to_owned()),
-            payload: request.payload,
-            state: None,
-            locations: Vec::new(),
-            trace_id: request.trace_id,
-            invocation_id: request.invocation_id,
-        })?;
-        let resource = host
-            .inspect_resource(&version.resource_id)?
-            .expect("updated resource must exist")
-            .resource;
-        Ok((resource, version, "updated"))
-    } else {
-        let resource = host.create_resource(CreateResource {
-            resource_id: Some(request.resource_id),
-            kind: request.kind.to_owned(),
-            schema_id: None,
-            scope: request.scope,
-            owner_worker_id: WorkerId::new(MODULE_WORKER_ID)?,
-            owner_actor_id: request.actor_id,
-            lifecycle: Some(request.lifecycle.to_owned()),
-            policy: json!({"managedBy": "module"}),
-            initial_payload: Some(request.payload),
-            locations: Vec::new(),
-            trace_id: request.trace_id,
-            invocation_id: request.invocation_id,
-        })?;
-        let inspection = host
-            .inspect_resource(&resource.resource_id)?
-            .expect("created resource must be inspectable");
-        let version =
-            current_version(&inspection)
-                .cloned()
-                .ok_or_else(|| EngineError::LedgerFailure {
-                    operation: "module.upsert",
-                    message: "created resource missing initial version".to_owned(),
-                })?;
-        Ok((resource, version, "created"))
-    }
-}
-
 fn required_object<'a>(
     value: Option<&'a Value>,
     field: &str,
@@ -1444,34 +1391,6 @@ fn hash_json(value: &Value) -> Result<String> {
         message: error.to_string(),
     })?;
     Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
-}
-
-fn ensure_expected_current_version(
-    inspection: &EngineResourceInspection,
-    expected: &str,
-) -> Result<()> {
-    if inspection.resource.current_version_id.as_deref() == Some(expected) {
-        Ok(())
-    } else {
-        Err(EngineError::PolicyViolation(format!(
-            "expectedCurrentVersionId {expected} does not match current version {:?}",
-            inspection.resource.current_version_id
-        )))
-    }
-}
-
-fn ensure_version_is_current(
-    inspection: &EngineResourceInspection,
-    version_id: &str,
-) -> Result<()> {
-    if inspection.resource.current_version_id.as_deref() == Some(version_id) {
-        Ok(())
-    } else {
-        Err(EngineError::PolicyViolation(format!(
-            "versionId {version_id} is not current version {:?}",
-            inspection.resource.current_version_id
-        )))
-    }
 }
 
 fn append_string_array(existing: Option<&Value>, additions: Vec<String>) -> Value {
@@ -1603,279 +1522,6 @@ fn collect_secret_refs_inner(value: &Value, refs: &mut Vec<String>) {
     }
 }
 
-fn resource_scope_and_token(invocation: &Invocation) -> Result<(EngineResourceScope, String)> {
-    match optional_string(invocation.payload.get("scope"))?
-        .unwrap_or_else(|| "workspace".to_owned())
-        .as_str()
-    {
-        "system" => Ok((EngineResourceScope::System, "system".to_owned())),
-        "workspace" => {
-            let workspace_id = optional_string(invocation.payload.get("workspaceId"))?
-                .or(invocation.causal_context.workspace_id.clone())
-                .ok_or_else(|| {
-                    EngineError::PolicyViolation(
-                        "workspace-scoped module resource requires workspaceId".to_owned(),
-                    )
-                })?;
-            if workspace_id.trim().is_empty() {
-                return Err(EngineError::PolicyViolation(
-                    "workspaceId must not be empty".to_owned(),
-                ));
-            }
-            Ok((
-                EngineResourceScope::Workspace(workspace_id.clone()),
-                workspace_id,
-            ))
-        }
-        "session" => {
-            let session_id = optional_string(invocation.payload.get("sessionId"))?
-                .or(invocation.causal_context.session_id.clone())
-                .ok_or_else(|| {
-                    EngineError::PolicyViolation(
-                        "session-scoped module resource requires sessionId".to_owned(),
-                    )
-                })?;
-            if session_id.trim().is_empty() {
-                return Err(EngineError::PolicyViolation(
-                    "sessionId must not be empty".to_owned(),
-                ));
-            }
-            Ok((EngineResourceScope::Session(session_id.clone()), session_id))
-        }
-        other => Err(EngineError::PolicyViolation(format!(
-            "unsupported module resource scope {other}"
-        ))),
-    }
-}
-
-fn next_config_revision(host: &ModulePrimitiveHandler, resource_id: &str) -> Result<u64> {
-    Ok(host
-        .inspect_resource(resource_id)?
-        .and_then(|inspection| current_payload(&inspection))
-        .and_then(|payload| payload.get("configRevision").and_then(Value::as_u64))
-        .unwrap_or(0)
-        .saturating_add(1))
-}
-
-fn package_resource_id_from_payload(payload: &Value) -> Result<String> {
-    if let Some(resource_id) = optional_string(payload.get("packageResourceId"))? {
-        return Ok(resource_id);
-    }
-    let package_id = required_str(payload, "packageId")?;
-    Ok(package_resource_id(package_id))
-}
-
-pub(in crate::engine) fn package_resource_id(package_id: &str) -> String {
-    format!("worker-package:{package_id}")
-}
-
-fn config_resource_id(scope: &str, package_id: &str) -> String {
-    format!("module-config:{scope}:{package_id}")
-}
-
-fn activation_resource_id(scope: &str, package_id: &str) -> String {
-    format!("activation:{scope}:{package_id}")
-}
-
-fn require_inspection(
-    host: &ModulePrimitiveHandler,
-    resource_id: &str,
-    expected_kind: &str,
-) -> Result<EngineResourceInspection> {
-    let inspection = host
-        .inspect_resource(resource_id)?
-        .ok_or_else(|| EngineError::NotFound {
-            kind: "resource",
-            id: resource_id.to_owned(),
-        })?;
-    if inspection.resource.kind != expected_kind {
-        return Err(EngineError::PolicyViolation(format!(
-            "resource {resource_id} is {}, expected {expected_kind}",
-            inspection.resource.kind
-        )));
-    }
-    Ok(inspection)
-}
-
-fn current_payload(inspection: &EngineResourceInspection) -> Option<Value> {
-    current_version(inspection).map(|version| version.payload.clone())
-}
-
-fn current_payload_from_json_inspection(inspection: &Value) -> Option<&Value> {
-    let current = inspection
-        .get("resource")?
-        .get("currentVersionId")?
-        .as_str()?;
-    inspection
-        .get("versions")?
-        .as_array()?
-        .iter()
-        .find(|version| version.get("versionId").and_then(Value::as_str) == Some(current))?
-        .get("payload")
-}
-
-fn current_version(inspection: &EngineResourceInspection) -> Option<&EngineResourceVersion> {
-    let current = inspection.resource.current_version_id.as_ref()?;
-    inspection
-        .versions
-        .iter()
-        .find(|version| &version.version_id == current)
-}
-
-fn version_payload(inspection: &EngineResourceInspection, version_id: &str) -> Result<Value> {
-    inspection
-        .versions
-        .iter()
-        .find(|version| version.version_id == version_id)
-        .map(|version| version.payload.clone())
-        .ok_or_else(|| EngineError::NotFound {
-            kind: "resource_version",
-            id: version_id.to_owned(),
-        })
-}
-
-fn resource_ref_from_resource(resource: &EngineResource, role: &str) -> Value {
-    json!({
-        "resourceId": resource.resource_id,
-        "kind": resource.kind,
-        "versionId": resource.current_version_id,
-        "role": role,
-        "contentHash": Value::Null,
-    })
-}
-
-fn resource_ref_from_version(version: &EngineResourceVersion, kind: &str, role: &str) -> Value {
-    json!({
-        "resourceId": version.resource_id,
-        "kind": kind,
-        "versionId": version.version_id,
-        "role": role,
-        "contentHash": version.content_hash,
-    })
-}
-
-fn filter_resources_by_package(
-    host: &ModulePrimitiveHandler,
-    resources: Vec<EngineResource>,
-    package_id: Option<&str>,
-) -> Result<Vec<Value>> {
-    let Some(package_id) = package_id else {
-        return Ok(Vec::new());
-    };
-    let mut filtered = Vec::new();
-    for resource in resources {
-        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-            continue;
-        };
-        let Some(payload) = current_payload(&inspection) else {
-            continue;
-        };
-        if payload.get("packageId").and_then(Value::as_str) == Some(package_id)
-            || payload
-                .get("packageResourceId")
-                .and_then(Value::as_str)
-                .is_some_and(|id| id == package_resource_id(package_id))
-        {
-            filtered.push(json!(inspection));
-        }
-    }
-    Ok(filtered)
-}
-
-fn trust_decision_metadata<'a>(
-    payload: &'a Value,
-    expected_type: &str,
-) -> Result<&'a serde_json::Map<String, Value>> {
-    let metadata = payload
-        .get("metadata")
-        .and_then(Value::as_object)
-        .ok_or_else(|| {
-            EngineError::PolicyViolation(format!("{expected_type} decision is missing metadata"))
-        })?;
-    if metadata.get("decisionType").and_then(Value::as_str) != Some(expected_type) {
-        return Err(EngineError::PolicyViolation(format!(
-            "expected decisionType {expected_type}"
-        )));
-    }
-    Ok(metadata)
-}
-
-fn package_trust_summary(inspection: &EngineResourceInspection) -> Result<Value> {
-    let payload = current_payload(inspection).ok_or_else(|| {
-        EngineError::PolicyViolation(format!(
-            "package {} has no current payload",
-            inspection.resource.resource_id
-        ))
-    })?;
-    Ok(json!({
-        "packageResourceId": inspection.resource.resource_id,
-        "packageVersionId": inspection.resource.current_version_id,
-        "packageId": payload.get("packageId").cloned().unwrap_or(Value::Null),
-        "packageDigest": payload.get("packageDigest").cloned().unwrap_or(Value::Null),
-        "sourceTrustStatus": payload.get("sourceTrustStatus").cloned().unwrap_or(Value::Null),
-        "signatureKeyRef": payload.get("signatureKeyRef").cloned().unwrap_or(Value::Null),
-    }))
-}
-
-fn activation_trust_summary(inspection: &EngineResourceInspection) -> Result<Value> {
-    let payload = current_payload(inspection).ok_or_else(|| {
-        EngineError::PolicyViolation(format!(
-            "activation {} has no current payload",
-            inspection.resource.resource_id
-        ))
-    })?;
-    Ok(json!({
-        "activationResourceId": inspection.resource.resource_id,
-        "activationVersionId": inspection.resource.current_version_id,
-        "lifecycle": inspection.resource.lifecycle,
-        "packageId": payload.get("packageId").cloned().unwrap_or(Value::Null),
-        "packageResourceId": payload.get("packageResourceId").cloned().unwrap_or(Value::Null),
-        "activationStatus": payload.get("activationStatus").cloned().unwrap_or(Value::Null),
-        "derivedGrantId": payload.get("derivedGrantId").cloned().unwrap_or(Value::Null),
-        "workerId": payload.get("workerId").cloned().unwrap_or(Value::Null),
-    }))
-}
-
-fn decision_summary(inspection: &EngineResourceInspection) -> Result<Value> {
-    let payload = current_payload(inspection).ok_or_else(|| {
-        EngineError::PolicyViolation(format!(
-            "decision {} has no current payload",
-            inspection.resource.resource_id
-        ))
-    })?;
-    Ok(json!({
-        "resourceId": inspection.resource.resource_id,
-        "versionId": inspection.resource.current_version_id,
-        "lifecycle": inspection.resource.lifecycle,
-        "status": payload.get("status").cloned().unwrap_or(Value::Null),
-        "decisionType": payload
-            .get("metadata")
-            .and_then(|metadata| metadata.get("decisionType"))
-            .cloned()
-            .unwrap_or(Value::Null),
-    }))
-}
-
-fn trust_target_status(payload: &Value) -> &'static str {
-    match payload.get("status").and_then(Value::as_str) {
-        Some("active") | Some("approved") => "active",
-        Some("expired") | Some("revoked") => "stale",
-        Some("rejected") => "denied",
-        _ => "inspectable",
-    }
-}
-
-fn trust_warnings_for_status(status: &str) -> Vec<Value> {
-    if matches!(status, "stale" | "denied") {
-        vec![json!({
-            "code": "trust_not_current",
-            "message": "target trust decision is not active"
-        })]
-    } else {
-        Vec::new()
-    }
-}
-
 fn module_actions_for_trust_target(target_type: &str, target_resource_id: &str) -> Vec<Value> {
     let mut actions = vec![
         module_action(
@@ -1958,23 +1604,6 @@ fn module_action(
         risk,
         approval_required,
     )
-}
-
-fn link_if_possible(
-    host: &ModulePrimitiveHandler,
-    source: &str,
-    target: &str,
-    relation: &str,
-    invocation: &Invocation,
-) {
-    let _ = host.link_resources(LinkResources {
-        source_resource_id: source.to_owned(),
-        target_resource_id: target.to_owned(),
-        relation: relation.to_owned(),
-        metadata: json!({"source": "module"}),
-        trace_id: invocation.causal_context.trace_id.clone(),
-        invocation_id: Some(invocation.id.clone()),
-    });
 }
 
 fn module_actions_for_package(package_id: Option<&str>) -> Vec<Value> {
