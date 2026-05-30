@@ -3648,6 +3648,7 @@ fn module_package_activation_gates_stay_on() {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"))
     };
     let module = read_module_file("src/engine/primitives/module.rs");
+    let module_registrations = read_module_file("src/engine/primitives/module/registrations.rs");
     let module_trust_review = read_module_file("src/engine/primitives/module/trust_review.rs");
     let module_trust_audit = read_module_file("src/engine/primitives/module/trust_audit.rs");
     let module_trust_audit_schedule =
@@ -3659,6 +3660,7 @@ fn module_package_activation_gates_stay_on() {
         read_module_file("src/engine/primitives/module/activation_runtime.rs");
     let module_tree = [
         module.as_str(),
+        module_registrations.as_str(),
         module_trust_review.as_str(),
         module_trust_audit.as_str(),
         module_trust_audit_schedule.as_str(),
@@ -3670,6 +3672,16 @@ fn module_package_activation_gates_stay_on() {
     assert!(
         module.contains("mod activation_runtime;"),
         "module primitive must declare the activation runtime ownership boundary"
+    );
+    assert!(
+        module.contains("mod registrations;")
+            && module.contains("pub(super) use registrations::registrations;")
+            && module_registrations.contains("pub(in crate::engine::primitives) fn registrations(")
+            && module_registrations.contains("fn module_read(")
+            && module_registrations.contains("fn module_write(")
+            && !module.contains("fn module_read(")
+            && !module.contains("fn module_write("),
+        "module function registration catalogue must stay in registrations.rs"
     );
     assert!(
         module.contains("mod source_trust;") && module.contains("mod health_integrity;"),
