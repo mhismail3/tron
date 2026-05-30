@@ -6,7 +6,7 @@ Initial cleanup score: **0/100**
 
 Current score: **25/100**
 
-Status: **CLC-2 next**
+Status: **CLC-2 in progress**
 
 This scorecard is the repo-local maintainability plan. It is separate from
 `collapsed-engine-hardening-scorecard.md`, which remains at **100/100** for
@@ -70,6 +70,10 @@ cleanup gates:
 - CLC-1 capability boundaries must stay split, including the recipe-owned
   display model used by search, inspect/schema guidance, primer, and execute
   discovery rendering.
+- CLC-2 resource primitive boundaries must stay split: the parent
+  `resource.rs` remains below 1,000 LOC while artifact/goal curation,
+  materialized-file and patch mutation, payload parsing, shared resource-ref
+  helpers, and schemas stay in focused submodules.
 
 ## Scenario Ledger
 
@@ -77,7 +81,7 @@ cleanup gates:
 |----|--------|-------------|-----------------|--------------------|-------|----------------|
 | CLC-0 | Complete | +10 | `scripts/`, `packages/agent/src/domains/capability/`, `packages/agent/src/shared/foundation/`, `packages/agent/tests/`, `README.md`, `packages/agent/docs/` | Replaced optimistic installed-service restore prints with one health-gated helper; moved the brittle recipe assertion to schema/display invariants instead of exact wording; made the capability schema provider surface a named contract. | `search_visible_content_contains_actionable_recipe`; `default_context_block_manifest_declares_capability_schema_surface`; `threat_model_invariants`; `scripts/tron dev -bd --json --wait 30`; `curl /health` | Installed `/Applications/Tron.app` can still be stale; no fallback compatibility is added, so the diagnostic requires reinstall/update. |
 | CLC-1 | Complete | +15 | `packages/agent/src/domains/capability/operations/`, `packages/agent/src/domains/capability/registry/`, `packages/agent/src/domains/capability_support/` | Extracted `operations/{schema_validation,presentation,policy_profile,admin}.rs`, cutting `operations/mod.rs` from 4,917 to 959 LOC; extracted `operations/execute/{input,result,trigger_metadata}.rs`, cutting `operations/execute.rs` from 2,091 to 851 LOC; extracted `registry/{store,search_policy}.rs`, cutting `registry/mod.rs` from 4,960 to 936 LOC; split `registry/store.rs` into memory, projection, schema, SQLite helper, and SQLite runtime modules, cutting the root from 2,441 to 172 LOC; added the recipe-owned `AgentCapabilityRecipeDisplay` model so search, inspect/schema guidance, primer, and execute discovery rendering no longer rebuild recipe display rules locally; split registry, operations root, execute, and capability-support trait tests into concern-owned modules. | `search_visible_content_contains_actionable_recipe`, capability operations tests, capability registry tests, capability support trait tests, full `domains::capability`, and CLC-1 static gates passed after extraction. | None for CLC-1; future changes must keep all capability implementation files under budget or add a new scorecard exception. |
-| CLC-2 | Not started | +15 | `packages/agent/src/engine/`, `packages/agent/src/engine/primitives/`, `packages/agent/src/engine/resources/` | Target: split host/module/resource/registry/ledger/queue/approval/grants by ownership boundary, separate orchestration from mutation, make transitions atomic. | Queue/resource/module/generated UI tests and side-channel static gates. | Terminal-state behavior is sensitive; run focused harnesses before broad cleanup. |
+| CLC-2 | In progress | +0 awarded / +15 pending | `packages/agent/src/engine/`, `packages/agent/src/engine/primitives/`, `packages/agent/src/engine/resources/` | Split the resource primitive by ownership boundary: the parent `resource.rs` is now a registration/dispatch spine below 1,000 LOC, with artifact/goal curation, common wrapper/resource-ref helpers, payload parsing, materialized-file/patch mutation, and schemas in focused submodules. Remaining target: split host/module/registry/ledger/queue/approval/grants by ownership boundary, separate orchestration from mutation, make transitions atomic. | `engine::tests::resource_kernel` passed for the resource split; CLC-2 resource primitive static gate added. Queue/module/generated UI and broader engine gates still pending for final CLC-2 award. | Terminal-state behavior is sensitive; CLC-2 remains unawarded until the remaining engine-fabric hotspots are decomposed and verified. |
 | CLC-3 | Not started | +12 | `packages/agent/src/domains/session/`, `packages/agent/src/shared/protocol/`, `packages/agent/src/shared/storage.rs` | Target: separate DTOs from reconstruction/mutation, remove stringly event handling when a typed dispatcher exists, keep README schema list accurate. | Session/event-store tests and README contract gates. | DB schema docs can drift quickly if migrations move. |
 | CLC-4 | Not started | +10 | `packages/agent/src/domains/model/providers/`, `packages/agent/src/domains/model/provider_protocol/`, `packages/agent/src/domains/model/providers/shared/`, `packages/agent/src/shared/foundation/profile.rs`, `packages/agent/src/shared/foundation/constitution.rs` | Target: split provider wire concerns, isolate provider spellings at boundaries, make context-block provider surfaces explicit and typed. | Provider parsing tests and RWO-N14 provider parity harness availability. | Local `gemma4:e4b` is substrate smoke only; hosted high-capability models stay primary scored path. |
 | CLC-5 | Not started | +12 | `packages/agent/src/domains/agent/runner/`, `packages/agent/src/domains/agent/runtime/`, `packages/agent/src/domains/context/` | Target: reduce turn-runner, compaction, hook, and capability invocation executor sprawl; separate turn orchestration from provider result handling and continuation state. | Context, compaction, stream processor, subagent, and simulator terminal-state harnesses. | Chat/engine parity issues remain tracked for later UI polish but cannot introduce product-state side channels. |
@@ -217,6 +221,44 @@ Closed CLC-1 acceptance audit:
 - Recipe/search/rendering conditionals are owned by
   `AgentCapabilityRecipeDisplay`; callers consume the typed projection.
 
+## CLC-2 Engine Fabric Simplification
+
+CLC-2 is in progress and has awarded **+0** of its **+15** points.
+
+Accepted partial decomposition:
+
+- `primitives/resource.rs` now owns only resource primitive registration,
+  function metadata, and dispatch. It is below the 1,000 LOC review-smell
+  threshold.
+- `primitives/resource/artifact.rs` owns artifact split/compose/merge/search
+  behavior and goal working-set projection.
+- `primitives/resource/common.rs` owns shared wrapper mutation, lifecycle,
+  inspection-kind checks, current-payload lookup, and resource-ref shaping.
+- `primitives/resource/input.rs` owns scope, versioning, location, worker-id,
+  and string-array payload parsing.
+- `primitives/resource/materialized_file.rs` owns materialized-file create,
+  update, read, hash-verify, artifact materialization, patch proposal/apply,
+  canonical path resolution, and hash helpers.
+- `primitives/resource/schemas.rs` owns resource, wrapper, artifact, goal,
+  attach, materialized-file, patch, and resource-ref schemas.
+- `resource_kernel_and_generated_ui_ownership_boundaries_stay_split` now gates
+  the resource primitive split and rejects those helpers returning to the
+  parent dispatcher.
+
+CLC-2 partial verification evidence from 2026-05-30:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::resource_kernel --lib -- --nocapture`: passed, 18 tests.
+
+Open CLC-2 acceptance work:
+
+- Split the next engine-fabric hotspots by ownership boundary:
+  `primitives/module.rs`, `host.rs`, `primitives/module/source_trust.rs`,
+  `registry.rs`, `ledger.rs`, `queue.rs`, `approval.rs`, `grants.rs`, and
+  resource-store/generate-UI files where the audit finds a direct simplification
+  path.
+- Run focused queue/resource/module/generated UI tests and static gates before
+  awarding CLC-2 points.
+
 ## Large-File Audit
 
 Baseline command:
@@ -238,7 +280,6 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/agent/src/engine/primitives/module/source_trust.rs` | 2738 | CLC-2 module trust | Source trust scenario logic is large. | 2800 | CLC-2 |
 | `packages/agent/src/domains/worktree/implementation/scm/git.rs` | 2726 | CLC-6 worktree | Git coordinator carries many command families. | 2750 | CLC-6 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-6 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-6 |
-| `packages/agent/src/engine/primitives/resource.rs` | 2578 | CLC-2 resources | Resource mutation/state logic needs narrower files. | 2600 | CLC-2 |
 | `packages/agent/src/domains/session/event_store/event/reconstruct.rs` | 2377 | CLC-3 event reconstruction | Reconstruction and DTO interpretation are concentrated. | 2400 | CLC-3 |
 | `packages/agent/src/shared/foundation/profile.rs` | 2041 | CLC-4 profile surface | Profile parsing, context contracts, and tests are dense. | 2050 | CLC-4 |
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/session.rs` | 1996 | CLC-3 session repository | Session repository mixes query and mutation behavior. | 2050 | CLC-3 |

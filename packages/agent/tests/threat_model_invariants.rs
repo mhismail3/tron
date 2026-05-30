@@ -3284,6 +3284,25 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
         .expect("failed to read resource UI-surface validation");
     let resource_store = std::fs::read_to_string(resources_dir.join("store.rs"))
         .expect("failed to read resource store");
+    let resource_primitive_path = crate_root.join("src/engine/primitives/resource.rs");
+    let resource_primitive = std::fs::read_to_string(&resource_primitive_path)
+        .expect("failed to read resource primitive root");
+    let resource_primitive_artifact =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/resource/artifact.rs"))
+            .expect("failed to read resource primitive artifact boundary");
+    let resource_primitive_common =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/resource/common.rs"))
+            .expect("failed to read resource primitive common boundary");
+    let resource_primitive_input =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/resource/input.rs"))
+            .expect("failed to read resource primitive input boundary");
+    let resource_primitive_materialized = std::fs::read_to_string(
+        crate_root.join("src/engine/primitives/resource/materialized_file.rs"),
+    )
+    .expect("failed to read resource primitive materialized-file boundary");
+    let resource_primitive_schemas =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/resource/schemas.rs"))
+            .expect("failed to read resource primitive schema boundary");
 
     for module_name in [
         "mod definitions;",
@@ -3345,6 +3364,65 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
             && resource_ui_surface.contains("scan_ui_value_for_forbidden_content")
             && !resource_store.contains("validate_ui_surface_payload"),
         "UI surface payload validation must live in resources/ui_surface.rs"
+    );
+    assert!(
+        resource_primitive.contains("mod artifact;")
+            && resource_primitive.contains("mod common;")
+            && resource_primitive.contains("mod input;")
+            && resource_primitive.contains("mod materialized_file;")
+            && resource_primitive.contains("mod schemas;"),
+        "resource primitive root must keep focused CLC-2 artifact/common/input/materialized/schema boundaries"
+    );
+    assert!(
+        line_count(&resource_primitive_path) <= 1_000,
+        "resource primitive root must stay below the 1,000 LOC review-smell threshold after CLC-2 extraction"
+    );
+    for forbidden in [
+        "fn artifact_split_response(",
+        "fn materialized_file_create_response(",
+        "fn register_type_schema(",
+        "fn resource_scope_from_payload(",
+        "fn resource_ref_from_resource(",
+    ] {
+        assert!(
+            !resource_primitive.contains(forbidden),
+            "resource primitive root must not regain extracted CLC-2 helper `{forbidden}`"
+        );
+    }
+    assert!(
+        resource_primitive_artifact.contains("fn artifact_split_response(")
+            && resource_primitive_artifact.contains("fn artifact_compose_response(")
+            && resource_primitive_artifact.contains("fn artifact_merge_response(")
+            && resource_primitive_artifact.contains("fn artifact_search_response(")
+            && resource_primitive_artifact.contains("fn goal_working_set_response("),
+        "resource primitive artifact boundary must own artifact curation and goal working-set helpers"
+    );
+    assert!(
+        resource_primitive_common.contains("fn create_typed_resource(")
+            && resource_primitive_common.contains("fn lifecycle_resource_by_id(")
+            && resource_primitive_common.contains("fn resource_ref_from_resource(")
+            && resource_primitive_common.contains("fn wrapper_create_response("),
+        "resource primitive common boundary must own wrapper mutation and resource-ref helpers"
+    );
+    assert!(
+        resource_primitive_input.contains("fn resource_scope_from_payload(")
+            && resource_primitive_input.contains("fn versioning_mode(")
+            && resource_primitive_input.contains("fn optional_string_array("),
+        "resource primitive input boundary must own payload parsing helpers"
+    );
+    assert!(
+        resource_primitive_materialized.contains("fn materialized_file_create_response(")
+            && resource_primitive_materialized.contains("fn artifact_materialize_response(")
+            && resource_primitive_materialized.contains("fn patch_apply_response(")
+            && resource_primitive_materialized.contains("fn sha256_hex("),
+        "resource primitive materialized-file boundary must own file, artifact materialization, patch, and hash helpers"
+    );
+    assert!(
+        resource_primitive_schemas.contains("fn register_type_schema(")
+            && resource_primitive_schemas.contains("fn resource_refs_schema(")
+            && resource_primitive_schemas.contains("fn materialized_file_create_schema(")
+            && resource_primitive_schemas.contains("fn patch_propose_schema("),
+        "resource primitive schema boundary must own request/response schemas"
     );
     for forbidden in [
         "dynamic catalog",
