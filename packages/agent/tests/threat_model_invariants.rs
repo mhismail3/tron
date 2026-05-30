@@ -902,6 +902,9 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability/operations/mod.rs",
         "src/domains/capability/operations/admin.rs",
         "src/domains/capability/operations/execute.rs",
+        "src/domains/capability/operations/execute/input.rs",
+        "src/domains/capability/operations/execute/result.rs",
+        "src/domains/capability/operations/execute/trigger_metadata.rs",
         "src/domains/capability/operations/execute/tests/mod.rs",
         "src/domains/capability/operations/execute/tests/discovery.rs",
         "src/domains/capability/operations/execute/tests/normalization.rs",
@@ -998,12 +1001,81 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         std::fs::read_to_string(crate_root.join("src/domains/capability/operations/execute.rs"))
             .expect("read capability execute root");
     assert!(
-        capability_execute.contains("mod tests;"),
-        "capability execute root must keep tests in an adjacent CLC-1 test module"
+        capability_execute.contains("mod input;")
+            && capability_execute.contains("mod result;")
+            && capability_execute.contains("mod trigger_metadata;")
+            && capability_execute.contains("mod tests;"),
+        "capability execute root must declare focused CLC-1 input/result/trigger-metadata/test boundaries"
     );
     assert!(
-        !capability_execute.contains("mod tests {"),
-        "capability execute root must not regain its broad inline test module"
+        line_count(&crate_root.join("src/domains/capability/operations/execute.rs")) <= 1_000,
+        "capability execute root must stay below the 1,000 LOC review-smell threshold after CLC-1 extraction"
+    );
+    for forbidden in [
+        "mod tests {",
+        "struct OrchestratedExecuteInput",
+        "const EXECUTE_WRAPPER_KEYS",
+        "fn parse_orchestrated_execute_input(",
+        "fn trigger_metadata_target_guidance_for_visible_catalog(",
+        "fn trigger_metadata_target_guidance_for_intent(",
+        "fn trigger_metadata_target_message(",
+        "fn orchestration_result(",
+        "fn attach_orchestration_details(",
+        "fn capability_error_details(",
+    ] {
+        assert!(
+            !capability_execute.contains(forbidden),
+            "capability execute root must not regain extracted CLC-1 helper `{forbidden}`"
+        );
+    }
+    let capability_execute_input = std::fs::read_to_string(
+        crate_root.join("src/domains/capability/operations/execute/input.rs"),
+    )
+    .expect("read capability execute input");
+    for required in [
+        "struct OrchestratedExecuteInput",
+        "const EXECUTE_WRAPPER_KEYS",
+        "fn parse_orchestrated_execute_input(",
+        "fn normalize_live_resource_inventory_operation(",
+    ] {
+        assert!(
+            capability_execute_input.contains(required),
+            "capability execute input boundary must own CLC-1 input helper `{required}`"
+        );
+    }
+    let capability_execute_result = std::fs::read_to_string(
+        crate_root.join("src/domains/capability/operations/execute/result.rs"),
+    )
+    .expect("read capability execute result");
+    for required in [
+        "fn orchestration_result(",
+        "fn attach_orchestration_details(",
+        "fn capability_error_details(",
+        "fn enrich_orchestration_with_result(",
+    ] {
+        assert!(
+            capability_execute_result.contains(required),
+            "capability execute result boundary must own CLC-1 result helper `{required}`"
+        );
+    }
+    let capability_execute_trigger_metadata = std::fs::read_to_string(
+        crate_root.join("src/domains/capability/operations/execute/trigger_metadata.rs"),
+    )
+    .expect("read capability execute trigger metadata");
+    for required in [
+        "fn trigger_metadata_target_guidance_for_visible_catalog(",
+        "fn trigger_metadata_target_guidance_for_intent(",
+        "fn trigger_metadata_target_message(",
+        "fn trigger_metadata_target_phase_details(",
+    ] {
+        assert!(
+            capability_execute_trigger_metadata.contains(required),
+            "capability execute trigger-metadata boundary must own CLC-1 helper `{required}`"
+        );
+    }
+    assert!(
+        capability_execute.contains("mod tests;"),
+        "capability execute root must keep tests in an adjacent CLC-1 test module"
     );
     let capability_registry =
         std::fs::read_to_string(crate_root.join("src/domains/capability/registry/mod.rs"))

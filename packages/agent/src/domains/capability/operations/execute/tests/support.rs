@@ -1,10 +1,16 @@
+pub(super) use super::super::super::capability_result_value;
 pub(super) use super::super::super::target_arguments::IntentFileReadRequest;
 pub(super) use super::super::*;
+pub(super) use crate::domains::capability::registry::{
+    CapabilityRegistryEntry, CapabilityRegistrySnapshot,
+};
 pub(super) use crate::domains::capability::types::CapabilityBindingDecision;
 pub(super) use crate::engine::resources::{ACTIVATION_RECORD_KIND, WORKER_PACKAGE_KIND};
 pub(super) use crate::engine::{
     ActorId, AuthorityGrantId, CausalContext, FunctionDefinition, FunctionId, TraceId,
 };
+pub(super) use crate::shared::content::CapabilityResultContent;
+pub(super) use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 
 pub(super) fn test_invocation_with_session_context() -> Invocation {
     Invocation::new_sync(
