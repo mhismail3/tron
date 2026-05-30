@@ -6,7 +6,7 @@ Initial cleanup score: **0/100**
 
 Current score: **10/100**
 
-Status: **CLC-0 complete**
+Status: **CLC-1 in progress**
 
 This scorecard is the repo-local maintainability plan. It is separate from
 `collapsed-engine-hardening-scorecard.md`, which remains at **100/100** for
@@ -73,7 +73,7 @@ cleanup gates:
 | ID | Status | Score delta | Touched folders | Deleted complexity | Tests | Residual risks |
 |----|--------|-------------|-----------------|--------------------|-------|----------------|
 | CLC-0 | Complete | +10 | `scripts/`, `packages/agent/src/domains/capability/`, `packages/agent/src/shared/foundation/`, `packages/agent/tests/`, `README.md`, `packages/agent/docs/` | Replaced optimistic installed-service restore prints with one health-gated helper; moved the brittle recipe assertion to schema/display invariants instead of exact wording; made the capability schema provider surface a named contract. | `search_visible_content_contains_actionable_recipe`; `default_context_block_manifest_declares_capability_schema_surface`; `threat_model_invariants`; `scripts/tron dev -bd --json --wait 30`; `curl /health` | Installed `/Applications/Tron.app` can still be stale; no fallback compatibility is added, so the diagnostic requires reinstall/update. |
-| CLC-1 | Not started | +15 | `packages/agent/src/domains/capability/operations/`, `packages/agent/src/domains/capability/registry/`, `packages/agent/src/domains/capability_support/` | Target: decompose `operations/mod.rs` and `registry/mod.rs`, remove fixture sprawl, keep `execute.rs` as orchestration spine, consolidate recipe/search/rendering conditionals behind typed recipe/display models. | Targeted `capability_` lib tests plus DB evidence for search/execute parity. | Capability files remain above budget until decomposition lands. |
+| CLC-1 | In progress | +0 awarded, +15 pending | `packages/agent/src/domains/capability/operations/`, `packages/agent/src/domains/capability/registry/`, `packages/agent/src/domains/capability_support/` | Extracted `operations/{schema_validation,presentation,policy_profile}.rs`, cutting `operations/mod.rs` from 4,917 to 4,251 LOC while keeping call sites stable; remaining target is registry decomposition, fixture/test extraction, and typed recipe/display consolidation. | `search_visible_content_contains_actionable_recipe` passed after extraction; full CLC-1 verification pending. | Registry root remains above budget, `execute.rs` remains large, and CLC-1 receives no score until the full acceptance set is closed. |
 | CLC-2 | Not started | +15 | `packages/agent/src/engine/`, `packages/agent/src/engine/primitives/`, `packages/agent/src/engine/resources/` | Target: split host/module/resource/registry/ledger/queue/approval/grants by ownership boundary, separate orchestration from mutation, make transitions atomic. | Queue/resource/module/generated UI tests and side-channel static gates. | Terminal-state behavior is sensitive; run focused harnesses before broad cleanup. |
 | CLC-3 | Not started | +12 | `packages/agent/src/domains/session/`, `packages/agent/src/shared/protocol/`, `packages/agent/src/shared/storage.rs` | Target: separate DTOs from reconstruction/mutation, remove stringly event handling when a typed dispatcher exists, keep README schema list accurate. | Session/event-store tests and README contract gates. | DB schema docs can drift quickly if migrations move. |
 | CLC-4 | Not started | +10 | `packages/agent/src/domains/model/providers/`, `packages/agent/src/domains/model/provider_protocol/`, `packages/agent/src/domains/model/providers/shared/`, `packages/agent/src/shared/foundation/profile.rs`, `packages/agent/src/shared/foundation/constitution.rs` | Target: split provider wire concerns, isolate provider spellings at boundaries, make context-block provider surfaces explicit and typed. | Provider parsing tests and RWO-N14 provider parity harness availability. | Local `gemma4:e4b` is substrate smoke only; hosted high-capability models stay primary scored path. |
@@ -129,6 +129,42 @@ CLC-0 verification evidence from 2026-05-30:
 - `curl -fsS http://localhost:9847/health`: passed with `{"status":"ok"}`.
 - LaunchAgent plist evidence: `EnvironmentVariables.RUST_LOG=info,ort=error`.
 
+## CLC-1 Capability Domain Simplification
+
+CLC-1 is in progress and has **not** awarded its +15 points yet.
+
+Accepted partial decomposition:
+
+- `operations/schema_validation.rs` now owns target payload schema validation,
+  schema violation shaping, and execute-argument repair guidance.
+- `operations/presentation.rs` now owns model-visible search summaries,
+  inspection summaries, and missing freshness-material error text.
+- `operations/policy_profile.rs` now owns capability execution policy payload
+  validation, active-profile TOML writes, rollback, and profile reload.
+- `operations/mod.rs` remains the admin operation/root orchestration file and
+  now declares those focused helper modules instead of carrying their bodies.
+- `critical_execution_and_ui_boundaries_stay_split` now gates the new CLC-1
+  boundaries and rejects those helper bodies returning to `operations/mod.rs`.
+
+CLC-1 partial verification evidence from 2026-05-30:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::operations --lib -- --nocapture`: passed, 103 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::capability --lib -- --nocapture`: passed, 248 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`: passed, 56 tests.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`: passed.
+- `git diff --check`: passed.
+
+Remaining CLC-1 work:
+
+- Decompose `registry/mod.rs`, especially concrete store persistence,
+  registry projection helpers, and registry-owned tests.
+- Move broad test-only fixtures out of implementation roots without creating
+  new unaudited >1,000 LOC files.
+- Keep `execute.rs` as an orchestration spine by pushing any remaining
+  target-specific guidance into recipe/schema/display owners.
+- Consolidate repeated recipe/search/rendering conditionals behind explicit
+  typed recipe/display models before awarding the +15.
+
 ## Large-File Audit
 
 Baseline command:
@@ -139,9 +175,9 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | LOC @ CLC-0 | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 5400 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement. | 5700 | CLC-9 |
+| `packages/agent/tests/threat_model_invariants.rs` | 5428 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement. | 5700 | CLC-9 |
 | `packages/agent/src/domains/capability/registry/mod.rs` | 4960 | CLC-1 capability registry | Broad registry, search, recipe, and test ownership mixed together. | 5000 | CLC-1 |
-| `packages/agent/src/domains/capability/operations/mod.rs` | 4917 | CLC-1 capability operations | Parent operation file still owns too much search/render/test behavior. | 4950 | CLC-1 |
+| `packages/agent/src/domains/capability/operations/mod.rs` | 4251 | CLC-1 capability operations | Parent operation file still owns admin orchestration and test fixtures, but target payload guidance, presentation, and profile-policy persistence are now split out. | 4300 | CLC-1 |
 | `packages/agent/src/engine/primitives/module.rs` | 3832 | CLC-2 engine primitives | Module lifecycle, trust, and policy orchestration need ownership splits. | 3900 | CLC-2 |
 | `packages/agent/src/domains/model/providers/openai/types.rs` | 3576 | CLC-4 providers | Provider DTO shapes and conversion concerns are too concentrated. | 3650 | CLC-4 |
 | `packages/agent/src/engine/host.rs` | 3387 | CLC-2 engine host | Host orchestration and mutation concerns remain dense. | 3450 | CLC-2 |

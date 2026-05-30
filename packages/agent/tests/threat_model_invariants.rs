@@ -902,6 +902,9 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         "src/domains/capability/operations/mod.rs",
         "src/domains/capability/operations/execute.rs",
         "src/domains/capability/operations/target_arguments.rs",
+        "src/domains/capability/operations/schema_validation.rs",
+        "src/domains/capability/operations/presentation.rs",
+        "src/domains/capability/operations/policy_profile.rs",
         "src/domains/capability/operations/run.rs",
         "src/domains/capability/operations/search.rs",
         "src/domains/capability/operations/inspect.rs",
@@ -928,6 +931,31 @@ fn critical_execution_and_ui_boundaries_stay_split() {
         assert!(
             !crate_root.join(removed_file).exists(),
             "oversized retired single-file boundary must stay split: {removed_file}"
+        );
+    }
+    let capability_operations =
+        std::fs::read_to_string(crate_root.join("src/domains/capability/operations/mod.rs"))
+            .expect("read capability operations root");
+    for required in [
+        "mod schema_validation;",
+        "mod presentation;",
+        "mod policy_profile;",
+    ] {
+        assert!(
+            capability_operations.contains(required),
+            "capability operations root must declare focused CLC-1 boundary `{required}`"
+        );
+    }
+    for forbidden in [
+        "fn validate_target_payload(",
+        "fn render_search_summary(",
+        "fn render_inspection_summary(",
+        "fn validate_capability_execution_policy_payload(",
+        "fn write_capability_execution_policy_to_profile_and_reload(",
+    ] {
+        assert!(
+            !capability_operations.contains(forbidden),
+            "capability operations root must not regain extracted CLC-1 helper `{forbidden}`"
         );
     }
 

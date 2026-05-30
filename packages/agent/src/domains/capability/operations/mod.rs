@@ -5,14 +5,14 @@
 //! stable contract plus one concrete implementation. Future plugin manifests
 //! can add richer contract/binding rows without changing the model-facing
 //! single `execute` surface. Target-specific argument affordances are isolated in
-//! `target_arguments`, while deterministic route and argument-fit heuristics
-//! live in `target_resolution`, so the shared execute flow does not grow new
-//! per-capability branches unnoticed.
+//! `target_arguments`, deterministic route and argument-fit heuristics live in
+//! `target_resolution`, target payload guidance lives in `schema_validation`,
+//! model-visible summaries live in `presentation`, and profile policy
+//! persistence lives in `policy_profile`, so the shared execute flow does not
+//! grow new per-capability branches unnoticed.
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::Deps;
@@ -23,7 +23,7 @@ use super::registry::{
     requires_fresh_revision, string_field, u64_field,
 };
 use super::types::{
-    CapabilityBindingDecision, CapabilityIndexHit, CapabilityIndexStatus, CapabilityPluginManifest,
+    CapabilityBindingDecision, CapabilityIndexStatus, CapabilityPluginManifest,
     CapabilityRejectedCandidate,
 };
 use crate::domains::capability_support::implementations::primitive_surface::{
@@ -43,18 +43,19 @@ use crate::shared::content::CapabilityResultContent;
 use crate::shared::model_capabilities::CapabilityResult;
 #[cfg(test)]
 use crate::shared::model_capabilities::CapabilityResultBody;
-use crate::shared::paths::files;
 use crate::shared::profile::CapabilityExecutionPolicySpec;
 use crate::shared::server::context::run_blocking_task;
-use crate::shared::server::error_mapping::engine_error_to_capability_error;
-use crate::shared::server::errors::{self as capability_error_codes, CapabilityError};
+use crate::shared::server::errors::CapabilityError;
 
 static IN_FLIGHT_VECTOR_WARMUP_SIGNATURE: AtomicU64 = AtomicU64::new(0);
 
 mod audit;
 mod execute;
 mod inspect;
+mod policy_profile;
+mod presentation;
 mod run;
+mod schema_validation;
 mod search;
 mod target_arguments;
 mod target_resolution;
@@ -68,12 +69,20 @@ use execute::{parse_orchestrated_execute_input, prepared_execute_payload};
 #[cfg(test)]
 use inspect::inspect_targets;
 pub(crate) use inspect::{inspect_value, status_value};
+use policy_profile::{
+    current_profile_toml_path, validate_capability_execution_policy_payload, validate_profile_id,
+    write_capability_execution_policy_to_profile_and_reload,
+};
+use presentation::{
+    missing_inspection_requirements_error, render_inspection_summary, render_search_summary,
+};
 #[cfg(test)]
 use run::{
     approval_child_invocation_ids_from_records, approval_was_replayed_for_invocation,
     approved_execution_result, child_execute_causal_context, payload_preflight_status,
     policy_preflight_status, preflight_rejection_result,
 };
+use schema_validation::validate_target_payload;
 pub(crate) use search::search_value;
 #[cfg(test)]
 use search::{render_search_result_value, search_queries};
@@ -1373,117 +1382,6 @@ fn ensure_claim_covers_id(
     })
 }
 
-fn validate_capability_execution_policy_payload(raw_policy: Value) -> Value {
-    match serde_json::from_value::<CapabilityExecutionPolicySpec>(raw_policy) {
-        Ok(policy) => json!({
-            "valid": true,
-            "policy": policy,
-            "errors": []
-        }),
-        Err(error) => json!({
-            "valid": false,
-            "errors": [error.to_string()]
-        }),
-    }
-}
-
-fn validate_profile_id(policy_id: &str) -> Result<(), CapabilityError> {
-    validate_nonempty_id("policyId", policy_id)?;
-    let valid = policy_id
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | ':'));
-    if valid {
-        return Ok(());
-    }
-    Err(CapabilityError::InvalidParams {
-        message: "policyId contains unsupported characters".to_owned(),
-    })
-}
-
-fn current_profile_toml_path(deps: &Deps) -> PathBuf {
-    deps.profile_runtime
-        .current()
-        .profile
-        .active_dir
-        .join(files::PROFILE_TOML)
-}
-
-fn write_capability_execution_policy_to_profile_and_reload(
-    path: &Path,
-    policy_id: &str,
-    policy: &CapabilityExecutionPolicySpec,
-    runtime: &crate::domains::agent::runner::profile_runtime::ProfileRuntime,
-) -> Result<(), CapabilityError> {
-    let previous = fs::read_to_string(path).map_err(|error| CapabilityError::Internal {
-        message: format!("read profile TOML {}: {error}", path.display()),
-    })?;
-    write_capability_execution_policy_to_profile_inner(path, policy_id, policy, &previous)?;
-    if let Err(error) = runtime.reload_now("capability::policy_update") {
-        atomic_write(path, previous.as_bytes())?;
-        let _ = runtime.reload_now("capability::policy_update.rollback");
-        return Err(CapabilityError::Internal {
-            message: format!(
-                "profile runtime rejected updated capability policy; profile TOML was rolled back: {error}"
-            ),
-        });
-    }
-    Ok(())
-}
-
-fn write_capability_execution_policy_to_profile_inner(
-    path: &Path,
-    policy_id: &str,
-    policy: &CapabilityExecutionPolicySpec,
-    previous: &str,
-) -> Result<(), CapabilityError> {
-    let mut value: toml::Value =
-        toml::from_str(previous).map_err(|error| CapabilityError::InvalidParams {
-            message: format!("profile TOML is invalid and cannot be updated: {error}"),
-        })?;
-    let Some(table) = value.as_table_mut() else {
-        return Err(CapabilityError::InvalidParams {
-            message: "profile TOML root must be a table".to_owned(),
-        });
-    };
-    let policies = table
-        .entry("capabilityExecutionPolicies".to_owned())
-        .or_insert_with(|| toml::Value::Table(Default::default()));
-    let Some(policies_table) = policies.as_table_mut() else {
-        return Err(CapabilityError::InvalidParams {
-            message: "profile capabilityExecutionPolicies must be a table".to_owned(),
-        });
-    };
-    let policy_value =
-        toml::Value::try_from(policy).map_err(|error| CapabilityError::Internal {
-            message: format!("serialize capability execution policy to TOML: {error}"),
-        })?;
-    policies_table.insert(policy_id.to_owned(), policy_value);
-    let next = toml::to_string_pretty(&value).map_err(|error| CapabilityError::Internal {
-        message: format!("serialize profile TOML: {error}"),
-    })?;
-    atomic_write(path, next.as_bytes())
-}
-
-fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), CapabilityError> {
-    let parent = path.parent().ok_or_else(|| CapabilityError::Internal {
-        message: format!("path {} has no parent", path.display()),
-    })?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("profile.toml");
-    let tmp = parent.join(format!(
-        ".{file_name}.tmp-{}",
-        uuid::Uuid::now_v7().as_simple()
-    ));
-    fs::write(&tmp, bytes).map_err(|error| CapabilityError::Internal {
-        message: format!("write temporary profile TOML {}: {error}", tmp.display()),
-    })?;
-    fs::rename(&tmp, path).map_err(|error| CapabilityError::Internal {
-        message: format!("replace profile TOML {}: {error}", path.display()),
-    })
-}
-
 fn actor_from_invocation(invocation: &Invocation) -> Result<ActorContext, CapabilityError> {
     let mut actor = ActorContext::new(
         invocation.causal_context.actor_id.clone(),
@@ -1610,330 +1508,6 @@ fn enforce_execution_policy(
     })
 }
 
-fn validate_target_payload(
-    entry: &CapabilityRegistryEntry,
-    payload: &Value,
-) -> Result<(), CapabilityError> {
-    let function = &entry.function;
-    if let Some(schema) = &function.request_schema {
-        crate::engine::schema::validate_payload(&function.id, "request", schema, payload)
-            .map_err(|error| recipe_validation_error_for_payload(entry, payload, error))?;
-    }
-    Ok(())
-}
-
-fn recipe_validation_error_for_payload(
-    entry: &CapabilityRegistryEntry,
-    payload: &Value,
-    error: crate::engine::EngineError,
-) -> CapabilityError {
-    let schema_details = schema_violation_details(
-        &error,
-        entry.function.request_schema.as_ref(),
-        Some(payload),
-    );
-    recipe_validation_error_with_schema_details(entry, error, schema_details)
-}
-
-fn recipe_validation_error_with_schema_details(
-    entry: &CapabilityRegistryEntry,
-    error: crate::engine::EngineError,
-    schema_details: Option<Value>,
-) -> CapabilityError {
-    let mapped = engine_error_to_capability_error(error);
-    let recipe = entry.agent_recipe();
-    let example = serde_json::to_string(&recipe.execute_template).unwrap_or_else(|_| {
-        format!(
-            "{{\"mode\":\"invoke\",\"contractId\":\"{}\",\"payload\":{{}}}}",
-            recipe.contract_id
-        )
-    });
-    let guidance = format!(
-        "Invalid arguments for {}. Put target arguments inside execute.arguments. Required arguments: {}. Optional arguments: {}.{} Example: {}",
-        entry.contract_id,
-        if recipe.required_payload.is_empty() {
-            "none".to_owned()
-        } else {
-            recipe.required_payload.join("; ")
-        },
-        if recipe.optional_payload.is_empty() {
-            "none".to_owned()
-        } else {
-            recipe.optional_payload.join("; ")
-        },
-        conditional_argument_guidance(entry),
-        example
-    );
-    match mapped {
-        CapabilityError::InvalidParams { message } => {
-            let message = format!("{message}. {guidance}");
-            if let Some(details) = schema_details {
-                CapabilityError::Custom {
-                    code: capability_error_codes::INVALID_PARAMS.to_owned(),
-                    message,
-                    details: Some(details),
-                }
-            } else {
-                CapabilityError::InvalidParams { message }
-            }
-        }
-        CapabilityError::Custom {
-            code,
-            message,
-            details,
-        } => CapabilityError::Custom {
-            code,
-            message: format!("{message}. {guidance}"),
-            details: merge_validation_details(details, schema_details),
-        },
-        other => other,
-    }
-}
-
-fn schema_violation_details(
-    error: &crate::engine::EngineError,
-    schema: Option<&Value>,
-    payload: Option<&Value>,
-) -> Option<Value> {
-    let crate::engine::EngineError::SchemaViolation {
-        path,
-        message,
-        direction,
-        ..
-    } = error
-    else {
-        return None;
-    };
-    let argument_path = schema_path_to_argument_path(path);
-    let mut details = json!({
-        "schemaPath": path,
-        "schemaDirection": direction,
-        "schemaMessage": message,
-        "argumentPath": argument_path,
-    });
-    if message == "required field is missing" {
-        let parent_path = schema_path_parent(path);
-        let missing = schema_path_leaf(path);
-        let (missing_fields, missing_argument_paths) =
-            missing_required_arguments(schema, payload, &parent_path).unwrap_or_else(|| {
-                (
-                    vec![missing.clone()],
-                    vec![schema_path_to_argument_path(path)],
-                )
-            });
-        details["validationKind"] = json!("missing_required_argument");
-        details["missingFields"] = json!(missing_fields);
-        details["missingArgumentPaths"] = json!(missing_argument_paths);
-    } else if (message.starts_with("string shorter than minLength ")
-        && required_string_field_is_empty(schema, payload, path).unwrap_or(false))
-        || (message.starts_with("expected type ")
-            && required_field_is_null(schema, payload, path).unwrap_or(false))
-    {
-        let field = schema_path_leaf(path);
-        details["validationKind"] = json!("missing_required_argument");
-        details["missingFields"] = json!([field.clone()]);
-        details["missingArgumentPaths"] = json!([schema_path_to_argument_path(path)]);
-    }
-    Some(details)
-}
-
-fn required_string_field_is_empty(
-    schema: Option<&Value>,
-    payload: Option<&Value>,
-    path: &str,
-) -> Option<bool> {
-    let parent_path = schema_path_parent(path);
-    let field = schema_path_leaf(path);
-    let schema_parent = schema_node_at_path(schema?, &parent_path)?;
-    let required = schema_parent.get("required")?.as_array()?;
-    if !required.iter().any(|item| item.as_str() == Some(&field)) {
-        return Some(false);
-    }
-    let payload_value = payload_node_at_path(payload?, path)?;
-    Some(payload_value.as_str().is_some_and(str::is_empty))
-}
-
-fn required_field_is_null(
-    schema: Option<&Value>,
-    payload: Option<&Value>,
-    path: &str,
-) -> Option<bool> {
-    let parent_path = schema_path_parent(path);
-    let field = schema_path_leaf(path);
-    let schema_parent = schema_node_at_path(schema?, &parent_path)?;
-    let required = schema_parent.get("required")?.as_array()?;
-    if !required.iter().any(|item| item.as_str() == Some(&field)) {
-        return Some(false);
-    }
-    let payload_value = payload_node_at_path(payload?, path)?;
-    Some(payload_value.is_null())
-}
-
-fn missing_required_arguments(
-    schema: Option<&Value>,
-    payload: Option<&Value>,
-    parent_path: &str,
-) -> Option<(Vec<String>, Vec<String>)> {
-    let schema_parent = schema_node_at_path(schema?, parent_path)?;
-    let payload_parent = payload_node_at_path(payload?, parent_path)?;
-    let required = schema_parent.get("required")?.as_array()?;
-    let payload_object = payload_parent.as_object()?;
-    let mut missing_fields = Vec::new();
-    let mut missing_argument_paths = Vec::new();
-    for item in required {
-        let field = item.as_str()?;
-        if !payload_object.contains_key(field) {
-            missing_fields.push(field.to_owned());
-            missing_argument_paths.push(argument_path_for_field(parent_path, field));
-        }
-    }
-    if missing_fields.is_empty() {
-        None
-    } else {
-        Some((missing_fields, missing_argument_paths))
-    }
-}
-
-fn schema_node_at_path<'a>(schema: &'a Value, path: &str) -> Option<&'a Value> {
-    let mut node = schema;
-    for token in schema_path_tokens(path) {
-        match token {
-            SchemaPathToken::Property(name) => {
-                node = node.get("properties")?.get(name)?;
-            }
-            SchemaPathToken::Index(_) => {
-                node = node.get("items")?;
-            }
-        }
-    }
-    Some(node)
-}
-
-fn payload_node_at_path<'a>(payload: &'a Value, path: &str) -> Option<&'a Value> {
-    let mut node = payload;
-    for token in schema_path_tokens(path) {
-        match token {
-            SchemaPathToken::Property(name) => {
-                node = node.as_object()?.get(name)?;
-            }
-            SchemaPathToken::Index(index) => {
-                node = node.as_array()?.get(index)?;
-            }
-        }
-    }
-    Some(node)
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum SchemaPathToken<'a> {
-    Property(&'a str),
-    Index(usize),
-}
-
-fn schema_path_tokens(path: &str) -> Vec<SchemaPathToken<'_>> {
-    let mut tokens = Vec::new();
-    let Some(mut rest) = path.strip_prefix('$') else {
-        return tokens;
-    };
-    while !rest.is_empty() {
-        if let Some(after_dot) = rest.strip_prefix('.') {
-            let next_dot = after_dot.find('.');
-            let next_bracket = after_dot.find('[');
-            let end = match (next_dot, next_bracket) {
-                (Some(dot), Some(bracket)) => dot.min(bracket),
-                (Some(dot), None) => dot,
-                (None, Some(bracket)) => bracket,
-                (None, None) => after_dot.len(),
-            };
-            if end == 0 {
-                break;
-            }
-            tokens.push(SchemaPathToken::Property(&after_dot[..end]));
-            rest = &after_dot[end..];
-            continue;
-        }
-        if let Some(after_bracket) = rest.strip_prefix('[') {
-            let Some(end) = after_bracket.find(']') else {
-                break;
-            };
-            if let Ok(index) = after_bracket[..end].parse::<usize>() {
-                tokens.push(SchemaPathToken::Index(index));
-            }
-            rest = &after_bracket[end + 1..];
-            continue;
-        }
-        break;
-    }
-    tokens
-}
-
-fn merge_validation_details(
-    details: Option<Value>,
-    schema_details: Option<Value>,
-) -> Option<Value> {
-    match (details, schema_details) {
-        (Some(Value::Object(mut base)), Some(Value::Object(extra))) => {
-            for (key, value) in extra {
-                base.insert(key, value);
-            }
-            Some(Value::Object(base))
-        }
-        (Some(details), None) => Some(details),
-        (None, Some(schema_details)) => Some(schema_details),
-        (Some(details), Some(schema_details)) => Some(json!({
-            "original": details,
-            "schema": schema_details,
-        })),
-        (None, None) => None,
-    }
-}
-
-fn schema_path_to_argument_path(path: &str) -> String {
-    let trimmed = path.strip_prefix("$.").unwrap_or(path);
-    if trimmed == "$" || trimmed.is_empty() {
-        "arguments".to_owned()
-    } else {
-        format!("arguments.{trimmed}")
-    }
-}
-
-fn schema_path_parent(path: &str) -> String {
-    let Some(last_dot) = path.rfind('.') else {
-        return "$".to_owned();
-    };
-    if last_dot == 0 {
-        "$".to_owned()
-    } else {
-        path[..last_dot].to_owned()
-    }
-}
-
-fn argument_path_for_field(parent_path: &str, field: &str) -> String {
-    if parent_path == "$" || parent_path.is_empty() {
-        format!("arguments.{field}")
-    } else {
-        format!("{}.{}", schema_path_to_argument_path(parent_path), field)
-    }
-}
-
-fn schema_path_leaf(path: &str) -> String {
-    let trimmed = path.strip_prefix("$.").unwrap_or(path);
-    trimmed
-        .rsplit('.')
-        .next()
-        .filter(|leaf| !leaf.is_empty() && *leaf != "$")
-        .unwrap_or(trimmed)
-        .to_owned()
-}
-
-fn conditional_argument_guidance(entry: &CapabilityRegistryEntry) -> &'static str {
-    if entry.contract_id.as_str() == "process::run" {
-        " For sandbox_materialized process::run, include expectedOutputs: [{\"path\":\"<relative-output-path>\"}] and verify the returned materializedOutputs summary before guessing follow-up commands."
-    } else {
-        ""
-    }
-}
-
 fn requires_fresh_revision_for_payload(
     function: &FunctionDefinition,
     invocation_payload: &Value,
@@ -2034,246 +1608,6 @@ fn child_idempotency_required(function: &FunctionDefinition, payload: &Value) ->
         return false;
     }
     function.effect_class.is_mutating()
-}
-
-fn render_search_summary(query: &str, results: &[CapabilityIndexHit]) -> String {
-    if results.is_empty() {
-        return if query.trim().is_empty() {
-            "No visible capabilities found.".to_owned()
-        } else {
-            format!("No visible capabilities found for '{query}'.")
-        };
-    }
-    let mut lines = vec![format!(
-        "Found {} visible capabilities. Use one `execute` call with intent, optional target, and target arguments inside `arguments`. Do not wrap another `capability::execute` call, and do not run example/probe calls unless the user requested that exact action. Inspect is an operator detail view; model-facing execution prepares freshness internally.",
-        results.len()
-    )];
-    let full_recipe_count = results.len().min(5);
-    for result in results.iter().take(full_recipe_count) {
-        lines.push(render_search_hit_recipe(result));
-    }
-    if results.len() > full_recipe_count {
-        lines.push("Additional compact matches:".to_owned());
-        for result in results.iter().skip(full_recipe_count).take(10) {
-            lines.push(format!(
-                "- `{}` via `{}` ({})",
-                result.contract_id, result.function_id, result.matched_by
-            ));
-        }
-    }
-    lines.join("\n")
-}
-
-fn render_search_hit_recipe(hit: &CapabilityIndexHit) -> String {
-    let Some(recipe) = hit.recipe.as_ref() else {
-        return format!(
-            "- `{}` via `{}`. Inspect this {} result for invocation details.",
-            hit.contract_id, hit.function_id, hit.kind
-        );
-    };
-    let mut lines = Vec::new();
-    lines.push(format!(
-        "\n### `{}` — {}",
-        recipe.contract_id, recipe.display_name
-    ));
-    lines.push(format!("Use when: {}", recipe.use_when));
-    if let Ok(template) = serde_json::to_string(&recipe.execute_template) {
-        lines.push(format!("Execute:\n```json\n{template}\n```"));
-    }
-    if !recipe.required_payload.is_empty() {
-        lines.push(format!(
-            "Required arguments: {}.",
-            recipe.required_payload.join("; ")
-        ));
-    }
-    if !recipe.optional_payload.is_empty() {
-        let optional = recipe
-            .optional_payload
-            .iter()
-            .take(8)
-            .cloned()
-            .collect::<Vec<_>>();
-        lines.push(format!("Optional payload: {}.", optional.join("; ")));
-    }
-    if recipe.inspect_required {
-        lines
-            .push("Freshness is required for elevated-risk work; model-facing execute prepares it before approval.".to_owned());
-    } else {
-        lines.push(format!("Direct execution: {}.", recipe.direct_execution));
-    }
-    if recipe.approval_behavior != "none" {
-        lines.push(format!("Approval: {}.", recipe.approval_behavior));
-    }
-    lines.push(format!("Result: {}", recipe.result_summary));
-    lines.join("\n")
-}
-
-fn render_inspection_summary(details: &Value) -> String {
-    let implementation = &details["implementation"];
-    let contract = &details["contract"];
-    let recipe = &details["recipe"];
-    let requirements = &details["executionRequirements"];
-    let function_id = implementation["functionId"].as_str().unwrap_or("<unknown>");
-    let contract_id = contract["contractId"].as_str().unwrap_or("<unknown>");
-    let effect = contract["effectClass"].as_str().unwrap_or("unknown");
-    let risk = contract["riskLevel"].as_str().unwrap_or("unknown");
-    let expected_revision = requirements["expectedRevision"]
-        .as_u64()
-        .unwrap_or_default();
-    let mut summary = format!(
-        "{contract_id} is implemented by {function_id}. effect={effect}, risk={risk}, expectedRevision={expected_revision}."
-    );
-
-    if let Some(use_when) = recipe["useWhen"].as_str() {
-        summary.push_str(&format!("\nUse when: {use_when}"));
-    }
-    if let Ok(template) = serde_json::to_string(&recipe["executeTemplate"])
-        && template != "null"
-    {
-        summary.push_str(&format!("\nExecute:\n```json\n{template}\n```"));
-        summary.push_str(
-            "\nCall the `execute` primitive with this target and arguments shape; do not set target to `capability::execute`, and do not run example/probe calls unless they are the requested action.",
-        );
-    }
-
-    if requirements["freshInspectionRequired"]
-        .as_bool()
-        .unwrap_or(false)
-    {
-        let inspection_handle = requirements["inspectionHandle"]
-            .as_str()
-            .unwrap_or("<missing>");
-        let expected_schema_digest = requirements["expectedSchemaDigest"]
-            .as_str()
-            .unwrap_or("<missing>");
-        summary.push_str("\nFreshness material prepared by model-facing execute:");
-        summary.push_str(&format!("\n- inspectionHandle={inspection_handle}"));
-        summary.push_str(&format!("\n- expectedRevision={expected_revision}"));
-        summary.push_str(&format!(
-            "\n- expectedSchemaDigest={expected_schema_digest}"
-        ));
-    }
-
-    let required_payload_fields = recipe["requiredPayload"]
-        .as_array()
-        .map(|fields| {
-            fields
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect::<Vec<_>>()
-        })
-        .filter(|fields| !fields.is_empty())
-        .unwrap_or_else(|| required_payload_fields(contract));
-    if !required_payload_fields.is_empty() {
-        summary.push_str(&format!(
-            "\nExecute arguments must include: {}.",
-            required_payload_fields.join(", ")
-        ));
-    }
-    let optional_payload_fields = recipe["optionalPayload"]
-        .as_array()
-        .map(|fields| {
-            fields
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if !optional_payload_fields.is_empty() {
-        summary.push_str(&format!(
-            "\nOptional arguments include: {}.",
-            optional_payload_fields
-                .iter()
-                .take(8)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    if contract_id == "process::run" {
-        summary.push_str(
-            "\nFor sandbox_materialized process::run, include expectedOutputs exactly as an array of objects like [{\"path\":\"result.txt\"}]. The result includes materializedOutputs with targetPath, resourceId, versionId, file content hash, and bounded contentPreview for verification.",
-        );
-    }
-
-    if requirements["idempotencyKeyRequired"]
-        .as_bool()
-        .unwrap_or(false)
-    {
-        summary.push_str(
-            "\n- idempotencyKey is required; choose a stable key for this intended action.",
-        );
-    }
-
-    if requirements["approvalRequired"].as_bool().unwrap_or(false) {
-        summary.push_str("\n- approvalRequired=true; execution may pause for user approval.");
-    } else if requirements["approvalMode"].as_str() == Some("conditional") {
-        summary.push_str(
-            "\n- approvalMode=conditional; safe read-only payloads run directly, while risky payloads pause for user approval.",
-        );
-    }
-
-    summary
-}
-
-fn required_payload_fields(contract: &Value) -> Vec<String> {
-    contract["inputSchema"]["required"]
-        .as_array()
-        .map(|fields| {
-            fields
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn missing_inspection_requirements_error(
-    function: &FunctionDefinition,
-    entry: &CapabilityRegistryEntry,
-    expected_revision: Option<u64>,
-    expected_schema_digest: Option<&str>,
-    inspection_handle: Option<&str>,
-) -> CapabilityError {
-    let mut missing_fields = Vec::new();
-    if inspection_handle.is_none() {
-        missing_fields.push("inspectionHandle");
-    }
-    if expected_revision.is_none() {
-        missing_fields.push("expectedRevision");
-    }
-    if expected_schema_digest.is_none() {
-        missing_fields.push("expectedSchemaDigest");
-    }
-
-    CapabilityError::Custom {
-        code: "INSPECTION_REQUIRED".to_owned(),
-        message: format!(
-            "{} is mutating or elevated-risk; inspect it first and copy inspectionHandle, expectedRevision={}, and expectedSchemaDigest={} into execute",
-            function.id.as_str(),
-            function.revision.0,
-            entry.schema_digest
-        ),
-        details: Some(json!({
-            "functionId": function.id.as_str(),
-            "missingFields": missing_fields,
-            "inspect": {
-                "functionId": function.id.as_str(),
-                "expectedRevision": function.revision.0,
-                "expectedSchemaDigest": entry.schema_digest,
-                "copyFieldsFromInspection": [
-                    "inspectionHandle",
-                    "expectedRevision",
-                    "expectedSchemaDigest"
-                ]
-            },
-            "riskLevel": format!("{:?}", function.risk_level),
-            "effectClass": format!("{:?}", function.effect_class)
-        })),
-    }
 }
 
 fn capability_result_value(result: CapabilityResult) -> Result<Value, CapabilityError> {

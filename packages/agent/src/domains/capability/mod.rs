@@ -14,7 +14,7 @@
 //! | `deps` | Narrow dependency bundle for catalog, registry-store, embedding, and invocation access |
 //! | `embeddings` | Embedded first-party ONNX/tokenizer provider for offline local search |
 //! | `handlers` | Declarative operation bindings for model primitives plus capability admin/console functions |
-//! | `operations` | Operator/internal capability operations; `operations/execute.rs` owns the model-facing orchestration spine, `operations/target_arguments.rs` owns target argument affordances, `operations/target_resolution.rs` owns deterministic route and argument-fit heuristics, `operations/run.rs` owns child execution/approval projection, and `operations/{search,inspect,audit}.rs` own operator discovery, inspection, and audit query boundaries |
+//! | `operations` | Operator/internal capability operations; `operations/execute.rs` owns the model-facing orchestration spine, `operations/target_arguments.rs` owns target argument affordances, `operations/target_resolution.rs` owns deterministic route and argument-fit heuristics, `operations/run.rs` owns child execution/approval projection, `operations/{search,inspect,audit}.rs` own operator discovery, inspection, and audit query boundaries, and `operations/{schema_validation,presentation,policy_profile}.rs` own target payload guidance, model-visible summaries, and profile-policy persistence |
 //! | `registry` | Durable catalog projection, plugin manifests, binding decisions, inspection handles, pause/run records, and program runs; search ranking lives in `registry/index.rs`, primer rendering in `registry/primer.rs`, and recipes in `registry/recipes.rs` |
 //! | `types` | Typed contract, implementation, binding, inspection, execution, lifecycle, and program-run records |
 //!
