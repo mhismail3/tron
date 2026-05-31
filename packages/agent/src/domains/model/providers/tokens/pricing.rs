@@ -43,6 +43,12 @@ pub fn calculate_pricing(model: &str, usage: &TokenUsage) -> PricingRecord {
     let Some(tier) = get_pricing_tier(model) else {
         return PricingRecord::unavailable(model, "unsupported_model_pricing");
     };
+    let Some(provider) = usage.provider_type else {
+        return PricingRecord::unavailable(model, "missing_provider_for_pricing");
+    };
+    if provider == crate::shared::messages::Provider::Unknown {
+        return PricingRecord::unavailable(model, "unknown_provider_for_pricing");
+    }
 
     let input = usage.input_tokens;
     let output = usage.output_tokens;
@@ -54,7 +60,6 @@ pub fn calculate_pricing(model: &str, usage: &TokenUsage) -> PricingRecord {
     let cache_5min = usage.cache_creation_5m_tokens.unwrap_or(0);
     let cache_1hr = usage.cache_creation_1h_tokens.unwrap_or(0);
 
-    let provider = usage.provider_type.unwrap_or_default();
     let base_input = match provider {
         crate::shared::messages::Provider::Anthropic
         | crate::shared::messages::Provider::MiniMax => input,
@@ -520,6 +525,7 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 1_000_000,
             output_tokens: 100_000,
+            provider_type: Some(Provider::Anthropic),
             ..Default::default()
         };
         let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
@@ -536,17 +542,18 @@ mod tests {
             output_tokens: 100_000,
             cache_read_tokens: Some(800_000),
             cache_creation_tokens: Some(100_000),
+            provider_type: Some(Provider::OpenAi),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
+        let cost = calculate_cost("gpt-5.5", &usage).unwrap();
 
-        // base = 1M - 800K - 100K = 100K @ $3/M = $0.30
-        // cache creation = 100K @ $3/M * 1.25 = $0.375
-        // cache read = 800K @ $3/M * 0.1 = $0.24
-        // output = 100K @ $15/M = $1.50
-        let expected_input = 0.30 + 0.375 + 0.24;
+        // base = 1M - 800K - 100K = 100K @ $5/M = $0.50
+        // cache creation = 100K @ $5/M = $0.50
+        // cache read = 800K @ $5/M * 0.1 = $0.40
+        // output = 100K @ $30/M = $3.00
+        let expected_input = 0.50 + 0.50 + 0.40;
         assert!((cost.input_cost - expected_input).abs() < 0.001);
-        assert!((cost.output_cost - 1.5).abs() < 0.001);
+        assert!((cost.output_cost - 3.0).abs() < 0.001);
     }
 
     #[test]
@@ -558,6 +565,7 @@ mod tests {
             cache_creation_tokens: Some(200_000),
             cache_creation_5m_tokens: Some(100_000),
             cache_creation_1h_tokens: Some(100_000),
+            provider_type: Some(Provider::Anthropic),
             ..Default::default()
         };
         let cost = calculate_cost("claude-opus-4-6", &usage).unwrap();
@@ -566,10 +574,11 @@ mod tests {
         // 5m: 100K @ $5/M * 1.25 = $0.625
         // 1h: 100K @ $5/M * 2.0 = $1.00
         // cache creation total = $1.625
-        // base = 500K - 0 - 200K = 300K @ $5/M = $1.50
+        // Anthropic input_tokens already excludes cache write/read buckets.
+        // base = 500K @ $5/M = $2.50
         // cache read = 0
         // output = 50K @ $25/M = $1.25
-        let expected_input = 1.50 + 0.625 + 1.00;
+        let expected_input = 2.50 + 0.625 + 1.00;
         assert!((cost.input_cost - expected_input).abs() < 0.001);
         assert!((cost.output_cost - 1.25).abs() < 0.001);
     }
@@ -594,7 +603,10 @@ mod tests {
 
     #[test]
     fn cost_zero_usage() {
-        let usage = TokenUsage::default();
+        let usage = TokenUsage {
+            provider_type: Some(Provider::Anthropic),
+            ..Default::default()
+        };
         let cost = calculate_cost("claude-opus-4-6", &usage).unwrap();
         assert_float_eq(cost.total, 0.0);
     }
@@ -607,12 +619,29 @@ mod tests {
             output_tokens: 0,
             cache_read_tokens: Some(200),
             cache_creation_tokens: Some(200),
+            provider_type: Some(Provider::OpenAi),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
+        let cost = calculate_cost("gpt-5.5", &usage).unwrap();
         // Base input saturates to 0, but cache costs are still counted
         assert!(cost.input_cost >= 0.0);
         assert!(cost.total >= 0.0);
+    }
+
+    #[test]
+    fn cost_missing_provider_returns_unavailable() {
+        let usage = TokenUsage {
+            input_tokens: 1000,
+            output_tokens: 1000,
+            ..Default::default()
+        };
+        let pricing = calculate_pricing("claude-sonnet-4-5", &usage);
+        assert!(!pricing.available);
+        assert_eq!(
+            pricing.reason.as_deref(),
+            Some("missing_provider_for_pricing")
+        );
+        assert!(calculate_cost("claude-sonnet-4-5", &usage).is_none());
     }
 
     #[test]
@@ -620,6 +649,7 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 1000,
             output_tokens: 1000,
+            provider_type: Some(Provider::Anthropic),
             ..Default::default()
         };
         assert!(calculate_cost("totally-unknown-model", &usage).is_none());
@@ -754,6 +784,7 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 1_000_000,
             output_tokens: 500_000,
+            provider_type: Some(Provider::Ollama),
             ..Default::default()
         };
         let cost = calculate_cost("gemma4:e4b", &usage).unwrap();

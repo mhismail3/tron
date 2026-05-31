@@ -860,7 +860,7 @@ fn token_accounting_hardening_scorecard_stays_formalized() {
         "\"toolUsePromptTokens\"",
         "\"totalTokens\"",
         "\"providerType\"",
-        "calculate_pricing(model, usage)",
+        "calculate_pricing(model, &pricing_usage)",
         "context_segment_id",
         "baseline_reset_reason",
     ] {
@@ -869,6 +869,19 @@ fn token_accounting_hardening_scorecard_stays_formalized() {
             "server token serialization missing canonical field or pricing hook: {required}"
         );
     }
+    let turn_persistence = read_crate("src/domains/agent/runner/agent/turn_runner/persistence.rs");
+    assert!(
+        !turn_persistence.contains("json!({\"inputTokens\": 0, \"outputTokens\": 0})")
+            && turn_persistence
+                .contains("without provider usage must not persist synthetic zero-token usage"),
+        "turn_end persistence must not synthesize zero-token usage when provider usage is absent"
+    );
+    let event_log = read_crate("src/domains/session/event_store/store/event_store/event_log.rs");
+    assert!(
+        event_log.contains("contextWindowTokens")
+            && !event_log.contains(".or_else(|| tu.get(\"inputTokens\")"),
+        "session last_turn_input_tokens must come from tokenRecord.contextWindowTokens only"
+    );
 
     let token_mod = read_crate("src/domains/model/providers/tokens/mod.rs");
     assert!(

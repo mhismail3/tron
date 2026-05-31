@@ -129,16 +129,13 @@ pub(super) fn append_event_in_tx(
         }
     }
 
-    if opts.event_type == EventType::MessageAssistant
-        && let Some(tu) = opts.payload.get("tokenUsage")
-    {
+    if opts.event_type == EventType::MessageAssistant {
         counters.last_turn_input_tokens = opts
             .payload
             .get("tokenRecord")
             .and_then(|r| r.get("computed"))
             .and_then(|c| c.get("contextWindowTokens"))
-            .and_then(Value::as_i64)
-            .or_else(|| tu.get("inputTokens").and_then(Value::as_i64));
+            .and_then(Value::as_i64);
     }
 
     let _ = SessionRepo::increment_counters(tx, opts.session_id, &counters)?;

@@ -414,17 +414,14 @@ pub(super) async fn emit_turn_end(
     parent_invocation_id: Option<&InvocationId>,
 ) {
     if let Some(persister) = persister {
-        let token_usage_object = stream_result.token_usage.as_ref().map_or_else(
-            || json!({"inputTokens": 0, "outputTokens": 0}),
-            persistence::build_token_usage_json,
-        );
-
         let mut payload = json!({
             "turn": turn,
-            "tokenUsage": token_usage_object,
             "stopReason": &stream_result.stop_reason,
             "contextLimit": context_limit,
         });
+        if let Some(token_usage) = stream_result.token_usage.as_ref() {
+            payload["tokenUsage"] = persistence::build_token_usage_json(token_usage);
+        }
         if let Some(ref token_record) = token_record_json {
             payload["tokenRecord"] = token_record.clone();
         }
@@ -565,6 +562,16 @@ mod tests {
             .into_iter()
             .filter(|e| e.event_type == event_type)
             .map(|e| e.sequence)
+            .collect()
+    }
+
+    fn persisted_payloads(store: &EventStore, sid: &str, event_type: &str) -> Vec<Value> {
+        store
+            .get_events_by_session(sid, &ListEventsOptions::default())
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.event_type == event_type)
+            .map(|e| serde_json::from_str(&e.payload).expect("valid persisted event payload"))
             .collect()
     }
 
@@ -740,8 +747,13 @@ mod tests {
 
         h.persister.flush().await.unwrap();
         let persisted = persisted_events(&h.store, &h.session_id, "stream.turn_end");
+        let payloads = persisted_payloads(&h.store, &h.session_id, "stream.turn_end");
 
         assert_eq!(persisted.len(), 1);
+        assert!(
+            payloads[0].get("tokenUsage").is_none(),
+            "turn_end without provider usage must not persist synthetic zero-token usage"
+        );
         assert!(
             persisted[0] < broadcast_seq,
             "persist (seq {}) must precede broadcast (seq {})",

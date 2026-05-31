@@ -106,7 +106,9 @@ pub fn build_token_record(
         normalized_at: String::new(),
     };
     let mut record = normalize_tokens(source, previous_baseline, meta);
-    record.pricing = calculate_pricing(model, usage);
+    let mut pricing_usage = usage.clone();
+    pricing_usage.provider_type = Some(provider_type);
+    record.pricing = calculate_pricing(model, &pricing_usage);
     serde_json::to_value(&record).unwrap_or_default()
 }
 
@@ -329,6 +331,23 @@ mod tests {
         assert!(record.get("meta").is_some());
         assert_eq!(record["meta"]["sessionId"], "sess-1");
         assert_eq!(record["meta"]["turn"], 3);
+    }
+
+    #[test]
+    fn build_token_record_prices_with_explicit_provider_argument() {
+        let usage = TokenUsage {
+            input_tokens: 100_000,
+            output_tokens: 100_000,
+            cache_read_tokens: Some(800_000),
+            cache_creation_tokens: Some(100_000),
+            ..Default::default()
+        };
+        let record =
+            build_token_record(&usage, Provider::Anthropic, "s1", 1, 0, "claude-sonnet-4-6");
+        assert_eq!(record["pricing"]["available"], true);
+        assert_eq!(record["pricing"]["cost"]["baseInputTokens"], 100_000);
+        assert_eq!(record["pricing"]["cost"]["cacheReadTokens"], 800_000);
+        assert_eq!(record["pricing"]["cost"]["cacheWriteTokens"], 100_000);
     }
 
     #[test]

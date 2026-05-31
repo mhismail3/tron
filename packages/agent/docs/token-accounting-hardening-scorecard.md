@@ -4,9 +4,9 @@ Created: 2026-05-31
 
 Initial score: **0/100**
 
-Current score: **45/100 in progress**
+Current score: **75/100 in progress**
 
-Status: **Phase 1 complete; server and iOS hardening in progress**
+Status: **Phase 2 complete; iOS hardening and live/manual verification open**
 
 This scorecard owns the token-accounting hardening pass across the Rust
 server, provider adapters, event persistence, session counters, pricing, and
@@ -120,6 +120,11 @@ time-sensitive:
 - `message.assistant` reconstruction must not rebuild token totals from legacy
   `tokenUsage` when a canonical `tokenRecord` is absent.
 - `TurnEndPlugin` must not default missing turn numbers to `1`.
+- `stream.turn_end` must not persist synthetic zero-token usage when provider
+  usage is absent.
+- `sessions.last_turn_input_tokens` must come from
+  `tokenRecord.computed.contextWindowTokens`, never legacy
+  `tokenUsage.inputTokens`.
 - MiniMax must keep explicit prompt-cache markers and strip unsupported 1-hour
   TTL from MiniMax requests.
 
@@ -128,9 +133,9 @@ time-sensitive:
 | ID | Status | Score delta | Scope | Tests/evidence | Residual risks |
 |----|--------|-------------|-------|----------------|----------------|
 | TAH-0 | Complete | +10 | Scorecard, glossary, provider-doc audit, and static-gate plan | This scorecard plus README and invariant-test updates | Provider docs can drift; rerun the doc audit before changing pricing again. |
-| TAH-1 | In progress | +15 | Canonical Rust `TokenRecord`, provider raw fields, computed buckets, and pricing records | Rust token/provider fixture tests in progress | Full cross-event consistency matrix still open. |
-| TAH-2 | In progress | +15 | Provider adapter decoding and cache request markers for OpenAI, Anthropic, Google, MiniMax, Kimi, and Ollama | Focused token, Kimi, and MiniMax tests passing during implementation | Live provider canaries still open. |
-| TAH-3 | In progress | +15 | Session persistence, denormalized columns, counters, context baselines, interruption, resume, provider switch | Cargo check passing; targeted server invariants still expanding | Need DB/event-log evidence from live canaries. |
+| TAH-1 | Complete | +15 | Canonical Rust `TokenRecord`, provider raw fields, computed buckets, and pricing records | `cargo test --manifest-path packages/agent/Cargo.toml tokens --lib -- --nocapture` passed 221 tests; pricing now requires explicit provider identity and returns unavailable for missing provider. | Live provider canaries still open. |
+| TAH-2 | Complete | +15 | Provider adapter decoding and cache request markers for OpenAI, Anthropic, Google, MiniMax, Kimi, and Ollama | Focused provider filters passed: `anthropic` 215, `openai` 248, `google` 146, `kimi` 93, `minimax` 66, and `ollama` 107 tests. MiniMax sends 5-minute cache markers only. | Live provider canaries still open. |
+| TAH-3 | Complete | +15 | Session persistence, denormalized columns, counters, context baselines, interruption, resume, provider switch | `turn_runner::persistence` 12 tests, `append_counters` 19 tests, `event_store` 572 tests, focused static gate, and `cargo check` passed. `stream.turn_end` no longer fabricates zero-token usage and `last_turn_input_tokens` requires canonical `tokenRecord.computed.contextWindowTokens`. | Need DB/event-log evidence from live canaries. |
 | TAH-4 | In progress | +15 | iOS strict DTOs, analytics, message metadata, context displays, and removal of local pricing | Swift tests drafted; xcodebuild verification pending | Need full compile/test pass and visual fit checks. |
 | TAH-5 | Pending | +10 | Automated verification sweep | Planned: `cargo fmt`, `cargo check`, focused Rust suites, `xcodegen generate`, targeted iPhone XCTest/Swift Testing | Broad CI may be expensive; run focused suites first and escalate on shared-contract failures. |
 | TAH-6 | Pending | +10 | Live provider matrix | Planned: deterministic fixtures first, then small canaries for every configured credentialed provider | Missing credentials or provider outages are recorded as unavailable evidence, not hidden. |
@@ -160,7 +165,6 @@ Required flow:
 | Phase | Status | Checkpoint contract |
 |-------|--------|---------------------|
 | Phase 1 | Complete | Scorecard, glossary, provider-doc audit, and failing/static coverage added; open loops recorded. |
-| Phase 2 | In progress | Server canonical schema, adapters, pricing, persistence, counters, and context baselines. |
+| Phase 2 | Complete | Server canonical schema, adapters, pricing, persistence, counters, and context baselines. |
 | Phase 3 | In progress | iOS DTO/UI cleanup and removal of legacy fallback/pricing logic. |
 | Phase 4 | Pending | Full automated tests, live provider matrix, iPhone manual evidence, docs/README updates, ledger entry, and final commit. |
-

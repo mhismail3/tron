@@ -176,13 +176,13 @@ fn last_turn_input_tokens_prefers_context_window_tokens() {
 }
 
 #[test]
-fn last_turn_input_tokens_falls_back_to_input_tokens() {
+fn last_turn_input_tokens_requires_canonical_token_record() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
         .unwrap();
 
-    // No tokenRecord — should fall back to tokenUsage.inputTokens
+    // No tokenRecord — tokenUsage is not enough to update context state.
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
@@ -200,7 +200,7 @@ fn last_turn_input_tokens_falls_back_to_input_tokens() {
         .unwrap();
 
     let session = store.get_session(&cr.session.id).unwrap().unwrap();
-    assert_eq!(session.last_turn_input_tokens, 800);
+    assert_eq!(session.last_turn_input_tokens, 0);
 }
 
 #[test]
