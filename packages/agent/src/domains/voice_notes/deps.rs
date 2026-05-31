@@ -1,12 +1,10 @@
 //! Domain-specific dependency bundle for the voice_notes worker.
 
 use crate::domains::worker::DomainRegistrationContext;
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
-    pub(super) transcription_engine:
-        Arc<std::sync::OnceLock<Arc<crate::domains::transcription::MlxEngine>>>,
+    pub(super) transcription_engine: crate::domains::transcription::SharedTranscriptionEngine,
     pub(super) engine_host: crate::engine::EngineHostHandle,
 }
 

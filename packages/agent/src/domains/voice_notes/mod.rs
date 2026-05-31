@@ -4,7 +4,8 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 //! Durable note state is represented by `artifact` and `materialized_file`
 //! resources; the Markdown file path is a materialized location, not source
-//! truth.
+//! truth. `voice_notes::save` requires a loaded transcription backend and
+//! fails before resource writes when transcription is disabled or unavailable.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -108,7 +109,7 @@ async fn save(invocation: &Invocation, deps: &Deps) -> Result<Value, CapabilityE
         })?;
     let result =
         super::transcription::transcribe_audio(&deps.transcription_engine, &audio_bytes, mime_type)
-            .await;
+            .await?;
 
     let content = format!(
         "---\ntype: voice-note\ncreated: {}\nduration: {:.1}\nlanguage: {}\n---\n\n{}\n",

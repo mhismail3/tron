@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rwo_n7_live_worker_fixture as base
 
 DEFAULT_ENDPOINT = base.DEFAULT_ENDPOINT
-DEFAULT_AUTH_PATH = base.DEFAULT_AUTH_PATH
+DEFAULT_AUTH_PATH = os.environ.get("TRON_ENGINE_WORKER_AUTH_PATH", base.DEFAULT_AUTH_PATH)
 DEFAULT_WORKER_ID = "rwo-n15-fixture-worker"
 DEFAULT_FUNCTION_ID = "rwo_n15::queued_echo"
 DEFAULT_TRIGGER_ID = "manual:rwo_n15.queued_echo"

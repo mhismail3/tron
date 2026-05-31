@@ -24,7 +24,6 @@ struct BrowserGetStatusResult: Decodable {
 struct VoiceNotesSaveParams: Encodable {
     let audioBase64: String
     let mimeType: String?
-    let fileName: String?
 }
 
 struct VoiceNotesSaveResult: Decodable {

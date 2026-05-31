@@ -2,28 +2,241 @@
 """Live agent harness for RWO-N16 pre-terminal worker retry evidence."""
 
 import argparse
+import atexit
 import base64
 import datetime as dt
 import json
 import os
+import shutil
 import socket
 import sqlite3
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
-DB_PATH = os.path.expanduser("~/.tron/internal/database/tron.sqlite")
-AUTH_PATH = os.path.expanduser("~/.tron/profiles/auth.json")
-SERVER = "ws://127.0.0.1:9847/engine"
-HEALTH = "http://127.0.0.1:9847/health"
+DB_PATH = os.environ.get(
+    "TRON_HARNESS_DB_PATH",
+    os.path.expanduser("~/.tron/internal/database/tron.sqlite"),
+)
+AUTH_PATH = os.environ.get(
+    "TRON_HARNESS_AUTH_PATH",
+    os.path.expanduser("~/.tron/profiles/auth.json"),
+)
+SERVER = os.environ.get("TRON_HARNESS_ENGINE_URL", "ws://127.0.0.1:9847/engine")
+HEALTH = os.environ.get("TRON_HARNESS_HEALTH_URL", "http://127.0.0.1:9847/health")
 DEFAULT_SIM_UDID = os.environ.get("TRON_RWO_SIM_UDID", "booted")
 TERMINAL_STOP_REASON = "end_turn"
 TERMINAL_QUEUE_STATUSES = ("completed", "cancelled", "dead_lettered")
 HARNESS_PREFIX = "rwo-n16-agent-"
+
+
+def configure_runtime(db_path, auth_path, server, health):
+    global DB_PATH, AUTH_PATH, SERVER, HEALTH
+    DB_PATH = str(db_path)
+    AUTH_PATH = str(auth_path)
+    SERVER = str(server)
+    HEALTH = str(health)
+    os.environ["TRON_HARNESS_DB_PATH"] = DB_PATH
+    os.environ["TRON_HARNESS_AUTH_PATH"] = AUTH_PATH
+    os.environ["TRON_HARNESS_ENGINE_URL"] = SERVER
+    os.environ["TRON_HARNESS_HEALTH_URL"] = HEALTH
+    os.environ["TRON_ENGINE_WORKER_ENDPOINT"] = worker_endpoint()
+    os.environ["TRON_ENGINE_WORKER_AUTH_PATH"] = AUTH_PATH
+
+
+def worker_endpoint():
+    return SERVER.replace("/engine", "/engine/workers", 1)
+
+
+def free_loopback_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def run_cmd_env(argv, env=None, timeout=60):
+    started = dt.datetime.now(dt.UTC).isoformat()
+    proc = subprocess.run(
+        argv,
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        timeout=timeout,
+    )
+    return {
+        "argv": argv,
+        "returncode": proc.returncode,
+        "started": started,
+        "finished": dt.datetime.now(dt.UTC).isoformat(),
+        "output": proc.stdout[-8000:],
+    }
+
+
+def copy_profiles_to_isolated_home(tron_home):
+    source = Path(os.environ.get("TRON_DATA_DIR", Path.home() / ".tron")) / "profiles"
+    destination = tron_home / "profiles"
+    if not source.exists():
+        raise RuntimeError(f"profile directory missing: {source}")
+    shutil.copytree(source, destination, dirs_exist_ok=True)
+
+
+def wait_health_url(url, timeout=45):
+    deadline = time.monotonic() + timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                body = response.read().decode("utf-8")
+            data = json.loads(body)
+            if data.get("status") == "ok":
+                return data
+        except Exception as error:
+            last_error = str(error)
+        time.sleep(0.5)
+    raise TimeoutError(f"server did not become healthy at {url}: {last_error}")
+
+
+def start_isolated_server(stamp, harness_name, build=True, port=None):
+    build_result = None
+    if build:
+        build_result = run_cmd_env(
+            [
+                "cargo",
+                "build",
+                "--profile",
+                "dev-server",
+                "--manifest-path",
+                "packages/agent/Cargo.toml",
+            ],
+            timeout=600,
+        )
+        if build_result["returncode"] != 0:
+            raise RuntimeError(f"dev-server build failed: {build_result['output']}")
+
+    home_root = Path(tempfile.mkdtemp(prefix=f"{harness_name}-home-{stamp}-"))
+    tron_home = home_root / ".tron"
+    tron_home.mkdir(parents=True, exist_ok=True)
+    copy_profiles_to_isolated_home(tron_home)
+
+    binary = ROOT / "packages/agent/target/dev-server/tron"
+    if not binary.exists():
+        raise RuntimeError(f"server binary missing: {binary}")
+
+    actual_port = port or free_loopback_port()
+    env = os.environ.copy()
+    env["TRON_DATA_DIR"] = str(tron_home)
+    env.pop("TRON_RELAY_URL", None)
+    env.pop("TRON_RELAY_SECRET", None)
+    env.pop("TRON_RELAY_ENVIRONMENT", None)
+    proc = subprocess.Popen(
+        [
+            str(binary),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(actual_port),
+            "--quiet",
+            "--log-level",
+            "info",
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    atexit.register(lambda: stop_isolated_server(proc))
+    health_url = f"http://127.0.0.1:{actual_port}/health"
+    try:
+        health = wait_health_url(health_url)
+    except Exception:
+        stop_isolated_server(proc)
+        raise
+
+    server_url = f"ws://127.0.0.1:{actual_port}/engine"
+    auth_path = tron_home / "profiles/auth.json"
+    db_path = tron_home / "internal/database/tron.sqlite"
+    configure_runtime(db_path, auth_path, server_url, health_url)
+    return {
+        "build": build_result,
+        "homeRoot": str(home_root),
+        "tronHome": str(tron_home),
+        "dbPath": str(db_path),
+        "authPath": str(auth_path),
+        "server": server_url,
+        "healthUrl": health_url,
+        "pid": proc.pid,
+        "port": actual_port,
+        "health": health,
+        "process": proc,
+    }
+
+
+def stop_isolated_server(proc):
+    if proc is None:
+        return None
+    if proc.poll() is None:
+        proc.terminate()
+        try:
+            output = proc.communicate(timeout=10)[0] or ""
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            output = proc.communicate(timeout=10)[0] or ""
+    else:
+        output = proc.communicate(timeout=1)[0] or ""
+    return {"returncode": proc.returncode, "output": output[-8000:]}
+
+
+def public_server_info(server):
+    if not server:
+        return None
+    return {
+        key: value
+        for key, value in server.items()
+        if key not in {"process", "authPath", "build"}
+    }
+
+
+def maybe_start_isolated_server(args, stamp, harness_name):
+    if args.use_current_server:
+        return None
+    return start_isolated_server(
+        stamp,
+        harness_name,
+        build=not args.no_build,
+        port=args.isolated_port,
+    )
+
+
+def add_runtime_args(parser):
+    parser.add_argument(
+        "--use-current-server",
+        action="store_true",
+        help=(
+            "Run against the user's currently paired server. By default live "
+            "harness sessions are created in an isolated temporary server so "
+            "they do not appear in the user's dashboard."
+        ),
+    )
+    parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="Use the existing dev-server binary for the isolated harness server.",
+    )
+    parser.add_argument(
+        "--isolated-port",
+        type=int,
+        default=None,
+        help="Loopback port for the isolated harness server; defaults to a free port.",
+    )
 
 
 class RawWebSocket:
@@ -271,6 +484,10 @@ def start_fixture(fixture):
     cmd = [
         sys.executable,
         str(ROOT / "packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py"),
+        "--endpoint",
+        worker_endpoint(),
+        "--auth-path",
+        AUTH_PATH,
         "--session-id",
         fixture["sessionId"],
         "--worker-id",
@@ -505,6 +722,8 @@ def run_terminal_guard(session_id, timeout_seconds):
             str(ROOT / "packages/agent/tests/fixtures/session_terminal_guard.py"),
             "--session-id",
             session_id,
+            "--db",
+            DB_PATH,
             "--wait",
             "--timeout-seconds",
             str(timeout_seconds),
@@ -750,6 +969,7 @@ def run_harness(args):
     stamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     namespace = f"rwo_n16_agent_{stamp}"
     run_log = f"/tmp/rwo_n16_agent_run_{stamp}.json"
+    isolated_server = maybe_start_isolated_server(args, stamp, "rwo-n16")
     fixture = {
         "stamp": stamp,
         "workerId": f"rwo-n16-agent-worker-{stamp}",
@@ -768,6 +988,8 @@ def run_harness(args):
         "stamp": stamp,
         "runLog": run_log,
         "fixture": fixture,
+        "serverMode": "current_user" if args.use_current_server else "isolated",
+        "isolatedServer": public_server_info(isolated_server),
         "serverHealthBefore": run_cmd(["curl", "-fsS", HEALTH], timeout=10),
         "startCursor": db_scalar("SELECT coalesce(max(cursor), 0) FROM engine_stream_events"),
         "startTimestamp": dt.datetime.now(dt.UTC).isoformat(),
@@ -775,6 +997,7 @@ def run_harness(args):
     ws = None
     fixture_proc = None
     fixture_stdout = None
+    error = None
     try:
         ws, hello = ws_hello("rwo-n16-hello")
         result["hello"] = hello
@@ -797,6 +1020,9 @@ def run_harness(args):
         result["promptValue"] = prompt_value
         result["promptChild"] = prompt_child
         result["terminalEvent"] = wait_end_turn(session_id, args.timeout_seconds)
+    except Exception as exc:
+        error = repr(exc)
+        result["error"] = error
     finally:
         stop_fixture(fixture_proc, fixture_stdout)
         if fixture.get("sessionId"):
@@ -826,6 +1052,8 @@ def run_harness(args):
         )
         result["serverHealthAfter"] = run_cmd(["curl", "-fsS", HEALTH], timeout=10)
         result["db"] = collect(fixture, result["startCursor"], result["startTimestamp"])
+    if isolated_server is not None:
+        result["isolatedServerStop"] = stop_isolated_server(isolated_server["process"])
     with open(run_log, "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
     summary = {
@@ -835,8 +1063,11 @@ def run_harness(args):
         "screenshot": fixture["screenshot"],
         "terminalGuard": result.get("terminalGuard"),
         "dbSummary": result.get("db", {}).get("summary"),
+        "error": error,
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
+    if error:
+        return 3
     guard = result.get("terminalGuard") or {}
     if guard.get("returncode") != 0:
         return 2
@@ -856,6 +1087,7 @@ def parse_args(argv):
         action="store_true",
         help="Deep-link the newly-created session into the visible Simulator and capture a screenshot. Leave unset for backend-only harness runs.",
     )
+    add_runtime_args(parser)
     return parser.parse_args(argv)
 
 

@@ -15,7 +15,6 @@ use crate::domains::worker::DomainWorkerModule;
 use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
 use serde_json::json;
-use std::sync::Arc;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
@@ -146,30 +145,20 @@ pub(super) fn normalize_base64(input: &str) -> &str {
 }
 
 pub(super) async fn transcribe_audio(
-    transcription_engine: &Arc<std::sync::OnceLock<Arc<crate::domains::transcription::MlxEngine>>>,
+    transcription_engine: &crate::domains::transcription::SharedTranscriptionEngine,
     audio_bytes: &[u8],
     mime_type: &str,
-) -> TranscriptionResult {
-    if let Ok(response) = transcribe_audio_full(transcription_engine, audio_bytes, mime_type).await
-    {
-        TranscriptionResult {
-            text: response.text,
-            language: response.language,
-            duration_seconds: response.duration_seconds,
-        }
-    } else {
-        #[allow(clippy::cast_precision_loss)]
-        let estimated_duration = (audio_bytes.len() as f64) / 16_000.0;
-        TranscriptionResult {
-            text: "(transcription not available)".into(),
-            language: "en".into(),
-            duration_seconds: estimated_duration,
-        }
-    }
+) -> Result<TranscriptionResult, CapabilityError> {
+    let response = transcribe_audio_full(transcription_engine, audio_bytes, mime_type).await?;
+    Ok(TranscriptionResult {
+        text: response.text,
+        language: response.language,
+        duration_seconds: response.duration_seconds,
+    })
 }
 
 async fn transcribe_audio_full(
-    transcription_engine: &Arc<std::sync::OnceLock<Arc<crate::domains::transcription::MlxEngine>>>,
+    transcription_engine: &crate::domains::transcription::SharedTranscriptionEngine,
     audio_bytes: &[u8],
     mime_type: &str,
 ) -> Result<TranscribeResponse, CapabilityError> {

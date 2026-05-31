@@ -48,8 +48,7 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) mcp_router: Option<Arc<tokio::sync::RwLock<crate::domains::mcp::router::McpRouter>>>,
     pub(crate) device_request_broker:
         Option<Arc<crate::platform::device_broker::DeviceRequestBroker>>,
-    pub(crate) transcription_engine:
-        Arc<std::sync::OnceLock<Arc<crate::domains::transcription::MlxEngine>>>,
+    pub(crate) transcription_engine: crate::domains::transcription::SharedTranscriptionEngine,
     pub(crate) cron_scheduler: Option<Arc<crate::domains::cron::CronScheduler>>,
     pub(crate) release_fetcher: Option<Arc<dyn crate::platform::updater::ReleaseFetcher>>,
     pub(crate) hook_abort_tracker:

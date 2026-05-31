@@ -30,4 +30,7 @@ pub mod types;
 pub mod venv;
 
 pub use mlx::MlxEngine;
-pub use types::{ResultExt, TranscriptionError, TranscriptionResult};
+pub use types::{
+    ResultExt, SharedTranscriptionEngine, TranscriptionEngine, TranscriptionError,
+    TranscriptionResult,
+};

@@ -14,7 +14,7 @@ use crate::domains::model::providers::ProviderHealthTracker;
 use crate::domains::model::providers::provider::ProviderFactory;
 use crate::domains::session::event_store::EventStore;
 use crate::domains::skills::registry::SkillRegistry;
-use crate::domains::transcription::MlxEngine;
+use crate::domains::transcription::SharedTranscriptionEngine;
 use crate::engine::EngineHostHandle;
 use metrics::{counter, histogram};
 use parking_lot::{Mutex, RwLock};
@@ -239,8 +239,8 @@ pub struct ServerRuntimeContext {
     pub capability_support_config: CapabilitySupportConfig,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
-    /// MLX transcription engine (lazily loaded via `OnceLock`).
-    pub transcription_engine: Arc<OnceLock<Arc<MlxEngine>>>,
+    /// Transcription engine (lazily loaded via `OnceLock`).
+    pub transcription_engine: SharedTranscriptionEngine,
     /// Subagent manager for spawning subsessions (None = keyword summarizer mode).
     pub subagent_manager: Option<Arc<SubagentManager>>,
     /// Provider health tracker for rolling-window error rate monitoring.

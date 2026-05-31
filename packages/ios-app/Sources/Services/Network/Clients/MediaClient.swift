@@ -38,7 +38,6 @@ final class MediaClient: EngineDomainClient {
     func saveVoiceNote(
         audioData: Data,
         mimeType: String = "audio/wav",
-        fileName: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> VoiceNotesSaveResult {
         _ = try requireTransport().requireConnection()
@@ -50,8 +49,7 @@ final class MediaClient: EngineDomainClient {
 
         let params = VoiceNotesSaveParams(
             audioBase64: audioBase64,
-            mimeType: mimeType,
-            fileName: fileName
+            mimeType: mimeType
         )
 
         return try await invokeWrite(

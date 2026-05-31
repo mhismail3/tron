@@ -16,13 +16,24 @@ import time
 import urllib.parse
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import rwo_n16_live_agent_harness as n16
+
+ROOT = n16.ROOT
 DB_PATH = os.path.expanduser("~/.tron/internal/database/tron.sqlite")
 AUTH_PATH = os.path.expanduser("~/.tron/profiles/auth.json")
 SERVER = "ws://127.0.0.1:9847/engine"
 HEALTH = "http://127.0.0.1:9847/health"
 BASE_MODELS = ["claude-sonnet-4-6", "gpt-5.5"]
 TERMINAL_STOP_REASON = "end_turn"
+
+
+def configure_from_shared_runtime():
+    global DB_PATH, AUTH_PATH, SERVER, HEALTH
+    DB_PATH = n16.DB_PATH
+    AUTH_PATH = n16.AUTH_PATH
+    SERVER = n16.SERVER
+    HEALTH = n16.HEALTH
 
 
 class RawWebSocket:
@@ -494,9 +505,13 @@ def validate_model_result(model, resource_id, db):
 def run_matrix(args):
     stamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     run_log = f"/tmp/roc2_hosted_model_matrix_{stamp}.json"
+    isolated_server = n16.maybe_start_isolated_server(args, stamp, "roc2")
+    configure_from_shared_runtime()
     result = {
         "stamp": stamp,
         "runLog": run_log,
+        "serverMode": "current_user" if args.use_current_server else "isolated",
+        "isolatedServer": n16.public_server_info(isolated_server),
         "serverHealthBefore": run_cmd(["curl", "-fsS", HEALTH], timeout=10),
         "models": {},
         "validationProblems": [],
@@ -558,6 +573,8 @@ def run_matrix(args):
         if ws is not None:
             ws.close()
     result["serverHealthAfter"] = run_cmd(["curl", "-fsS", HEALTH], timeout=10)
+    if isolated_server is not None:
+        result["isolatedServerStop"] = n16.stop_isolated_server(isolated_server["process"])
     with open(run_log, "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
     summary = {
@@ -582,6 +599,7 @@ def parse_args(argv):
     parser.add_argument("--model", dest="models", action="append", help="Model to test; may be repeated.")
     parser.add_argument("--gemini-model", help="Gemini model to use instead of the current model::list recommendation.")
     parser.add_argument("--timeout-seconds", type=int, default=900)
+    n16.add_runtime_args(parser)
     return parser.parse_args(argv)
 
 

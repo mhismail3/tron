@@ -17,14 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rwo_n16_live_agent_harness as n16
 
 ROOT = n16.ROOT
-DB_PATH = n16.DB_PATH
-HEALTH = n16.HEALTH
 DEFAULT_SIM_UDID = "267F6468-09AE-471D-9157-29144173EB82"
 TERMINAL_QUEUE_STATUSES = ("completed", "cancelled", "dead_lettered")
 
 
 def db_json(query, params=()):
-    with sqlite3.connect(DB_PATH, timeout=10) as db:
+    with sqlite3.connect(n16.DB_PATH, timeout=10) as db:
         db.row_factory = sqlite3.Row
         return [dict(row) for row in db.execute(query, params)]
 
@@ -534,6 +532,7 @@ def run_harness(args):
     workspace = tempfile.mkdtemp(prefix=f"roc5-workspace-{stamp}-")
     run_log = f"/tmp/roc5_resource_truth_matrix_{stamp}.json"
     screenshot = f"/tmp/roc5-resource-truth-iphone-{stamp}.png"
+    isolated_server = n16.maybe_start_isolated_server(args, stamp, "roc5")
     ids = {
         "stamp": stamp,
         "workspace": workspace,
@@ -552,7 +551,9 @@ def run_harness(args):
         "workspace": workspace,
         "screenshot": screenshot,
         "ids": ids,
-        "serverHealthBefore": n16.run_cmd(["curl", "-fsS", HEALTH], timeout=10),
+        "serverMode": "current_user" if args.use_current_server else "isolated",
+        "isolatedServer": n16.public_server_info(isolated_server),
+        "serverHealthBefore": n16.run_cmd(["curl", "-fsS", n16.HEALTH], timeout=10),
         "startTimestamp": dt.datetime.now(dt.UTC).isoformat(),
     }
     ws = None
@@ -625,7 +626,7 @@ def run_harness(args):
         args.screenshot_delay_seconds,
         args.open_session_in_simulator,
     )
-    result["serverHealthAfter"] = n16.run_cmd(["curl", "-fsS", HEALTH], timeout=10)
+    result["serverHealthAfter"] = n16.run_cmd(["curl", "-fsS", n16.HEALTH], timeout=10)
     result["db"] = collect(result["sessionId"], result["startTimestamp"], ids)
     summary = result["db"]["summary"]
     damaged = summary["damagedResourceRow"] or {}
@@ -655,6 +656,8 @@ def run_harness(args):
         ),
     }
     result["validation"]["passed"] = all(result["validation"].values())
+    if isolated_server is not None:
+        result["isolatedServerStop"] = n16.stop_isolated_server(isolated_server["process"])
     with open(run_log, "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
     printed = {
@@ -683,6 +686,7 @@ def parse_args(argv):
         help="Deep-link the newly-created session into the visible Simulator and capture a screenshot. Leave unset for non-UI backend runs.",
     )
     parser.add_argument("--cleanup-workspace", action="store_true")
+    n16.add_runtime_args(parser)
     return parser.parse_args(argv)
 
 

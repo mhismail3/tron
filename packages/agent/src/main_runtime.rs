@@ -345,7 +345,7 @@ struct ServiceState {
     job_manager: Arc<dyn tron::domains::capability_support::implementations::traits::JobManagerOps>,
     output_buffer_registry:
         Arc<tron::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
-    transcription_engine: Arc<std::sync::OnceLock<Arc<tron::domains::transcription::MlxEngine>>>,
+    transcription_engine: tron::domains::transcription::SharedTranscriptionEngine,
 }
 
 /// Build core services: orchestrator, session manager, providers, capabilities, subagent manager.
@@ -520,7 +520,7 @@ async fn init_provider_factory(
 fn register_transcription_sidecar(
     enabled: bool,
     shutdown: &Arc<tron::app::shutdown::ShutdownCoordinator>,
-    transcription_engine: Arc<std::sync::OnceLock<Arc<tron::domains::transcription::MlxEngine>>>,
+    transcription_engine: tron::domains::transcription::SharedTranscriptionEngine,
 ) {
     if !enabled {
         tracing::info!("transcription sidecar disabled");
@@ -533,6 +533,7 @@ fn register_transcription_sidecar(
             engine = tron::domains::transcription::MlxEngine::new() => {
                 match engine {
                     Ok(engine) => {
+                        let engine: Arc<dyn tron::domains::transcription::TranscriptionEngine> = engine;
                         let _ = cell.set(engine);
                         tracing::info!("transcription sidecar ready (parakeet-mlx)");
                     }

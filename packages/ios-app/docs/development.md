@@ -106,8 +106,11 @@ xcodebuild test \
 
 ### Simulator Deep-Link Harnessing
 
-Use the simulator deep-link path when a server-side harness creates or drives a
-real session and the test needs visible iOS evidence for that exact session.
+Use the simulator deep-link path only when a scenario is explicitly testing
+navigation/deep-link handling, or when visible iOS evidence for an exact
+server-created session is intentionally called out. Backend evidence harnesses
+should default to isolated temporary server homes and must not populate the
+user's normal dashboard or jump the visible Simulator without an explicit flag.
 The active post-100 UI/UX scorecard lives at
 `packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
 scenario ledger for broad simulator evidence, owner classification, and
@@ -133,7 +136,7 @@ xcrun simctl install booted /tmp/tron-ios-beta-derived/Build/Products/Beta-iphon
 # Launch the installed local beta app.
 xcrun simctl launch booted com.tron.mobile.beta
 
-# Open the exact server session in the app.
+# Open the exact server session in the app only for intentional deep-link evidence.
 xcrun simctl openurl booted "tron://session/<session_id>"
 
 # Capture the visible state as a test artifact.
@@ -142,7 +145,9 @@ xcrun simctl io booted screenshot /tmp/<scenario>-simulator.png
 
 Harnesses must treat a nonzero `simctl openurl` return code or screenshot
 return code as invalid app-path evidence, even when the server DB reaches a
-terminal state. Reset the old paired simulator or classify the run as
+terminal state. For non-navigation backend evidence, keep sessions in the
+isolated harness server and collect DB truth without opening them in the user's
+visible Simulator. Reset the old paired simulator or classify the run as
 `ios_rendering`/harness evidence failure instead of passing from stale UI state.
 Cold-start session routes are consumed through the pending deep-link path on
 `ContentView.onAppear`; if the app opens to the session list after a successful

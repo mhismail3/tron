@@ -14,8 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import rwo_n16_live_agent_harness as n16
 
 ROOT = n16.ROOT
-DB_PATH = n16.DB_PATH
-HEALTH = n16.HEALTH
 DEFAULT_SIM_UDID = "267F6468-09AE-471D-9157-29144173EB82"
 TERMINAL_QUEUE_STATUSES = ("completed", "cancelled", "dead_lettered")
 HARNESS_PREFIX = "rwo-n17-"
@@ -29,7 +27,7 @@ BENIGN_POST_TURN_FUNCTIONS = {
 
 
 def db_json(query, params=()):
-    with sqlite3.connect(DB_PATH, timeout=10) as db:
+    with sqlite3.connect(n16.DB_PATH, timeout=10) as db:
         db.row_factory = sqlite3.Row
         return [dict(row) for row in db.execute(query, params)]
 
@@ -65,6 +63,10 @@ def start_fixture(fixture):
     cmd = [
         sys.executable,
         str(ROOT / "packages/agent/tests/fixtures/rwo_n15_live_worker_fixture.py"),
+        "--endpoint",
+        n16.worker_endpoint(),
+        "--auth-path",
+        n16.AUTH_PATH,
         "--session-id",
         fixture["sessionId"],
         "--worker-id",
@@ -625,6 +627,7 @@ def run_harness(args):
     stamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     namespace = f"rwo_n17_background_{stamp}"
     run_log = f"/tmp/rwo_n17_multi_session_run_{stamp}.json"
+    isolated_server = n16.maybe_start_isolated_server(args, stamp, "rwo-n17")
     visible_resource_id = f"evidence:rwo-n17-visible:{stamp}"
     fixture = {
         "stamp": stamp,
@@ -647,7 +650,9 @@ def run_harness(args):
         "visibleScreenshotBefore": f"/tmp/rwo_n17_visible_before_{stamp}.png",
         "backgroundScreenshot": f"/tmp/rwo_n17_background_{stamp}.png",
         "visibleScreenshotAfter": f"/tmp/rwo_n17_visible_after_{stamp}.png",
-        "serverHealthBefore": n16.run_cmd(["curl", "-fsS", HEALTH], timeout=10),
+        "serverMode": "current_user" if args.use_current_server else "isolated",
+        "isolatedServer": n16.public_server_info(isolated_server),
+        "serverHealthBefore": n16.run_cmd(["curl", "-fsS", n16.HEALTH], timeout=10),
         "startCursor": n16.db_scalar("SELECT coalesce(max(cursor), 0) FROM engine_stream_events"),
         "startTimestamp": dt.datetime.now(dt.UTC).isoformat(),
     }
@@ -763,7 +768,7 @@ def run_harness(args):
             args.screenshot_delay_seconds,
             args.open_session_in_simulator,
         )
-        result["serverHealthAfterBackgroundOpen"] = n16.run_cmd(["curl", "-fsS", HEALTH], timeout=10)
+        result["serverHealthAfterBackgroundOpen"] = n16.run_cmd(["curl", "-fsS", n16.HEALTH], timeout=10)
     if visible_session_id:
         result["visibleSimulatorAfter"] = open_simulator_session(
             args.sim_udid,
@@ -772,7 +777,7 @@ def run_harness(args):
             args.screenshot_delay_seconds,
             args.open_session_in_simulator,
         )
-        result["serverHealthAfter"] = n16.run_cmd(["curl", "-fsS", HEALTH], timeout=10)
+        result["serverHealthAfter"] = n16.run_cmd(["curl", "-fsS", n16.HEALTH], timeout=10)
 
     if visible_session_id and background_session_id:
         identifiers = {
@@ -842,6 +847,9 @@ def run_harness(args):
             },
         }
 
+    if isolated_server is not None:
+        result["isolatedServerStop"] = n16.stop_isolated_server(isolated_server["process"])
+
     with open(run_log, "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
 
@@ -884,6 +892,7 @@ def parse_args(argv):
         action="store_true",
         help="Deep-link newly-created sessions into the visible Simulator and capture screenshots. Leave unset for backend-only harness runs.",
     )
+    n16.add_runtime_args(parser)
     return parser.parse_args(argv)
 
 

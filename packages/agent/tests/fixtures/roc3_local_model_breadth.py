@@ -261,9 +261,13 @@ Final answer: include marker {marker}, say whether README.md line 1 was read, an
 def run_harness(args):
     stamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
     run_log = f"/tmp/roc3_local_model_breadth_{stamp}.json"
+    isolated_server = harness.n16.maybe_start_isolated_server(args, stamp, "roc3")
+    harness.configure_from_shared_runtime()
     result = {
         "stamp": stamp,
         "runLog": run_log,
+        "serverMode": "current_user" if args.use_current_server else "isolated",
+        "isolatedServer": harness.n16.public_server_info(isolated_server),
         "serverHealthBefore": harness.run_cmd(["curl", "-fsS", harness.HEALTH], timeout=10),
         "ollamaList": ollama_list(),
         "validationProblems": [],
@@ -309,6 +313,10 @@ def run_harness(args):
         if ws is not None:
             ws.close()
     result["serverHealthAfter"] = harness.run_cmd(["curl", "-fsS", harness.HEALTH], timeout=10)
+    if isolated_server is not None:
+        result["isolatedServerStop"] = harness.n16.stop_isolated_server(
+            isolated_server["process"]
+        )
     with open(run_log, "w", encoding="utf-8") as handle:
         json.dump(result, handle, indent=2, sort_keys=True)
     summary = {
@@ -340,6 +348,7 @@ def parse_args(argv):
         default=True,
         help="Attempt one execute call and classify small-model misses separately.",
     )
+    harness.n16.add_runtime_args(parser)
     return parser.parse_args(argv)
 
 

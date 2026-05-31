@@ -20,10 +20,8 @@
 //! alongside. To remove one: only valid if the trade-off itself has
 //! been hardened out of existence (e.g. real rate limiting replaces
 //! the L7 documentation).
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-
 /// Sites that must document a trusted-local trust boundary.
 ///
 /// Format: `(relative_path, required_substring_case_insensitive)`.
@@ -42,14 +40,12 @@ const TRUST_BOUNDARY_SITES: &[(&str, &str)] = &[
         "trusted-local",
     ),
 ];
-
 /// Sites outside the Rust crate (e.g. shell scripts) — keyed on the
 /// repo root rather than `CARGO_MANIFEST_DIR`. Resolved separately.
 const TRUST_BOUNDARY_REPO_SITES: &[(&str, &str)] = &[
     // L3 — launchd plist is user-writable
     ("scripts/tron.d/deploy.sh", "trusted-local"),
 ];
-
 const LARGE_TEST_FILE_LIMIT_LINES: usize = 1_000;
 
 /// Rust test files that intentionally remain above the large-file threshold.
@@ -725,8 +721,8 @@ fn post_100_operating_scorecard_stays_formalized() {
         "scripts/tron ci fmt check clippy test",
         "scripts/tron dev -bd --json --wait 30",
         "curl -fsS http://localhost:9847/health",
-        "Do not deep-link newly created harness sessions into the visible Simulator by",
-        "Reserve `xcrun simctl openurl ... tron://session/<session_id>`",
+        "Do not create backend evidence sessions in the user's normal dashboard",
+        "`xcrun simctl openurl ... tron://session/<session_id>`",
         "Computer Use confirmation",
         "`notifications::mark_read`",
         "`notifications::mark_all_read`",
@@ -6586,12 +6582,20 @@ fn operator_consequence_and_voice_note_resource_boundaries_stay_enforced() {
         "voice_notes_save_list_and_delete_are_resource_backed",
         "voice_notes_save_idempotency_does_not_duplicate_resources",
         "voice_notes_invalid_audio_fails_without_accepted_resource_refs",
+        "voice_notes_save_rejects_unavailable_transcription_without_resource_refs",
     ] {
         assert!(
             domain_output_tests.contains(required),
             "domain output hardening test `{required}` must remain present"
         );
     }
+    assert!(
+        !domain_output_tests.contains("(transcription not available)")
+            && !std::fs::read_to_string(root.join("src/domains/transcription/mod.rs"))
+                .expect("read transcription worker")
+                .contains("(transcription not available)"),
+        "voice-note save must fail visibly when transcription is unavailable, not persist a placeholder transcript"
+    );
 }
 
 #[test]

@@ -1,5 +1,38 @@
 use super::*;
 use base64::Engine;
+use std::sync::Arc;
+
+struct FakeTranscriptionEngine;
+
+#[async_trait::async_trait]
+impl crate::domains::transcription::TranscriptionEngine for FakeTranscriptionEngine {
+    async fn transcribe(
+        &self,
+        _audio_bytes: &[u8],
+        _mime_type: &str,
+    ) -> std::result::Result<
+        crate::domains::transcription::TranscriptionResult,
+        crate::domains::transcription::TranscriptionError,
+    > {
+        Ok(crate::domains::transcription::TranscriptionResult {
+            text: "hello voice note".to_owned(),
+            language: "en".to_owned(),
+            duration_seconds: 1.25,
+        })
+    }
+}
+
+fn enable_fake_transcription(ctx: &crate::shared::server::context::ServerRuntimeContext) {
+    let mut settings = (*crate::domains::settings::get_settings()).clone();
+    settings.server.transcription.enabled = true;
+    crate::domains::settings::init_settings(settings);
+    let engine: Arc<dyn crate::domains::transcription::TranscriptionEngine> =
+        Arc::new(FakeTranscriptionEngine);
+    assert!(
+        ctx.transcription_engine.set(engine).is_ok(),
+        "test transcription engine should install once"
+    );
+}
 
 fn voice_write_context(key: &str) -> CausalContext {
     mutating_causal(key).with_scope("voice_notes.write")
@@ -426,6 +459,7 @@ async fn capability_execute_reports_failed_child_invocation_lineage() {
 #[tokio::test]
 async fn voice_notes_save_list_and_delete_are_resource_backed() {
     let ctx = crate::shared::server::test_support::make_test_context();
+    enable_fake_transcription(&ctx);
     let handle = ctx.engine_host.clone();
     let audio = base64::engine::general_purpose::STANDARD.encode(b"hello voice note");
 
@@ -475,10 +509,7 @@ async fn voice_notes_save_list_and_delete_are_resource_backed() {
     let list_value = listed.value.as_ref().unwrap();
     assert_eq!(list_value["totalCount"], 1);
     assert_eq!(list_value["notes"][0]["filename"], filename);
-    assert_eq!(
-        list_value["notes"][0]["transcript"],
-        "(transcription not available)"
-    );
+    assert_eq!(list_value["notes"][0]["transcript"], "Hello voice note");
 
     let deleted = handle
         .invoke(host_invocation(
@@ -518,6 +549,7 @@ async fn voice_notes_save_list_and_delete_are_resource_backed() {
 #[tokio::test]
 async fn voice_notes_save_idempotency_does_not_duplicate_resources() {
     let ctx = crate::shared::server::test_support::make_test_context();
+    enable_fake_transcription(&ctx);
     let handle = ctx.engine_host.clone();
     let audio = base64::engine::general_purpose::STANDARD.encode(b"same voice note");
     let payload = json!({"audioBase64": audio, "mimeType": "audio/wav"});
@@ -566,6 +598,40 @@ async fn voice_notes_invalid_audio_fails_without_accepted_resource_refs() {
     assert!(matches!(
         failed.error,
         Some(EngineError::DomainFailure { message, .. }) if message.contains("Invalid base64")
+    ));
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    let record = records
+        .iter()
+        .find(|record| record.invocation_id == failed.invocation_id)
+        .expect("failed voice note invocation should remain inspectable");
+    assert!(!record.succeeded);
+    assert!(record.produced_resource_refs.is_empty());
+    assert!(voice_note_resources(&handle, "artifact").await.is_empty());
+    assert!(
+        voice_note_resources(&handle, "materialized_file")
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn voice_notes_save_rejects_unavailable_transcription_without_resource_refs() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let handle = ctx.engine_host.clone();
+    let audio = base64::engine::general_purpose::STANDARD.encode(b"hello voice note");
+
+    let failed = handle
+        .invoke(host_invocation(
+            "voice_notes::save",
+            json!({"audioBase64": audio, "mimeType": "audio/wav"}),
+            voice_write_context("voice-notes-transcription-unavailable"),
+        ))
+        .await;
+
+    assert!(matches!(
+        failed.error,
+        Some(EngineError::DomainFailure { message, .. })
+            if message.contains("Transcription")
     ));
     let records = handle.lock().await.catalog().invocations().to_vec();
     let record = records

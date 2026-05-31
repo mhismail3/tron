@@ -9,7 +9,10 @@ import sys
 import time
 from dataclasses import dataclass
 
-DEFAULT_DB_PATH = os.path.expanduser("~/.tron/internal/database/tron.sqlite")
+DEFAULT_DB_PATH = os.environ.get(
+    "TRON_HARNESS_DB_PATH",
+    os.path.expanduser("~/.tron/internal/database/tron.sqlite"),
+)
 TERMINAL_STOP_REASON = "end_turn"
 TERMINAL_QUEUE_STATUSES = ("completed", "cancelled", "dead_lettered")
 

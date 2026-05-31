@@ -1,5 +1,9 @@
 //! Core types for the transcription engine.
 
+use std::sync::{Arc, OnceLock};
+
+use async_trait::async_trait;
+
 /// Result of transcribing an audio file.
 #[derive(Debug, Clone)]
 pub struct TranscriptionResult {
@@ -26,6 +30,20 @@ pub enum TranscriptionError {
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 }
+
+/// Runtime boundary for a loaded transcription backend.
+#[async_trait]
+pub trait TranscriptionEngine: Send + Sync {
+    /// Transcribe audio bytes with the supplied MIME type.
+    async fn transcribe(
+        &self,
+        audio_bytes: &[u8],
+        mime_type: &str,
+    ) -> Result<TranscriptionResult, TranscriptionError>;
+}
+
+/// Shared lazily-loaded transcription backend cell.
+pub type SharedTranscriptionEngine = Arc<OnceLock<Arc<dyn TranscriptionEngine>>>;
 
 /// Extension trait to reduce `.map_err()` boilerplate.
 pub trait ResultExt<T> {

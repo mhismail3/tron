@@ -24,7 +24,9 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
-use crate::domains::transcription::types::{TranscriptionError, TranscriptionResult};
+use crate::domains::transcription::types::{
+    TranscriptionEngine, TranscriptionError, TranscriptionResult,
+};
 use crate::domains::transcription::venv;
 use crate::shared::paths;
 
@@ -409,6 +411,17 @@ impl MlxEngine {
                 ))
             }
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl TranscriptionEngine for MlxEngine {
+    async fn transcribe(
+        &self,
+        audio_bytes: &[u8],
+        mime_type: &str,
+    ) -> Result<TranscriptionResult, TranscriptionError> {
+        MlxEngine::transcribe(self, audio_bytes, mime_type).await
     }
 }
 
