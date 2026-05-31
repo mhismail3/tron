@@ -4166,6 +4166,9 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
         crate_root.join("src/engine/primitives/resource/materialized_file.rs"),
     )
     .expect("failed to read resource primitive materialized-file boundary");
+    let resource_primitive_registrations =
+        std::fs::read_to_string(crate_root.join("src/engine/primitives/resource/registrations.rs"))
+            .expect("failed to read resource primitive registration boundary");
     let resource_primitive_schemas =
         std::fs::read_to_string(crate_root.join("src/engine/primitives/resource/schemas.rs"))
             .expect("failed to read resource primitive schema boundary");
@@ -4236,8 +4239,9 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
             && resource_primitive.contains("mod common;")
             && resource_primitive.contains("mod input;")
             && resource_primitive.contains("mod materialized_file;")
+            && resource_primitive.contains("mod registrations;")
             && resource_primitive.contains("mod schemas;"),
-        "resource primitive root must keep focused CLC-2 artifact/common/input/materialized/schema boundaries"
+        "resource primitive root must keep focused CLC-2 artifact/common/input/materialized/registration/schema boundaries"
     );
     assert!(
         line_count(&resource_primitive_path) <= 1_000,
@@ -4246,6 +4250,7 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
     for forbidden in [
         "fn artifact_split_response(",
         "fn materialized_file_create_response(",
+        "fn resource_wrapper_registrations(",
         "fn register_type_schema(",
         "fn resource_scope_from_payload(",
         "fn resource_ref_from_resource(",
@@ -4282,6 +4287,13 @@ fn resource_kernel_and_generated_ui_ownership_boundaries_stay_split() {
             && resource_primitive_materialized.contains("fn patch_apply_response(")
             && resource_primitive_materialized.contains("fn sha256_hex("),
         "resource primitive materialized-file boundary must own file, artifact materialization, patch, and hash helpers"
+    );
+    assert!(
+        resource_primitive_registrations.contains("fn resource_wrapper_registrations(")
+            && resource_primitive_registrations.contains("ARTIFACT_SPLIT_FUNCTION")
+            && resource_primitive_registrations.contains("GOAL_WORKING_SET_FUNCTION")
+            && resource_primitive_registrations.contains("MATERIALIZED_FILE_HASH_VERIFY_FUNCTION"),
+        "resource primitive registration boundary must own wrapper function catalog wiring"
     );
     assert!(
         resource_primitive_schemas.contains("fn register_type_schema(")

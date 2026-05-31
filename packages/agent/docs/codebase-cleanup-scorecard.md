@@ -79,9 +79,9 @@ cleanup gates:
 - CLC-2 resource, resource-store, queue, approval, engine-type, generated-UI,
   control, ledger, grant, primitive-runtime, engine-registry, and module
   manifest/grant/registration/schema/payload/action/trust-audit boundaries must stay split: parent roots remain below 1,000 LOC while
-  artifact/goal curation, materialized-file and patch mutation, payload
-  parsing, shared resource-ref helpers, resource/UI schemas, generated-UI
-  action authoring, resource-store events/ids, SQLite schemas/codecs, store
+  artifact/goal curation, materialized-file and patch mutation, wrapper
+  function catalog wiring, payload parsing, shared resource-ref helpers,
+  resource/UI schemas, generated-UI action authoring, resource-store events/ids, SQLite schemas/codecs, store
   tests, queue draining, queue lifecycle stream projection, approval tests,
   catalog change DTOs, control action catalogs, stored outcome projection,
   grant records/bootstrap/event builders, and worker protocol guide/template
@@ -294,9 +294,9 @@ CLC-2 is complete and has awarded its **+15** points.
 
 Accepted decomposition:
 
-- `primitives/resource.rs` now owns only resource primitive registration,
-  function metadata, and dispatch. It is below the 1,000 LOC review-smell
-  threshold.
+- `primitives/resource.rs` now owns only core resource primitive registration,
+  shared function metadata, and dispatch. It is below the 1,000 LOC
+  review-smell threshold.
 - `primitives/resource/artifact.rs` owns artifact split/compose/merge/search
   behavior and goal working-set projection.
 - `primitives/resource/common.rs` owns shared wrapper mutation, lifecycle,
@@ -306,6 +306,9 @@ Accepted decomposition:
 - `primitives/resource/materialized_file.rs` owns materialized-file create,
   update, read, hash-verify, artifact materialization, patch proposal/apply,
   canonical path resolution, and hash helpers.
+- `primitives/resource/registrations.rs` owns wrapper function catalog wiring
+  for artifact, goal, claim, evidence, decision, materialized-file, and patch
+  resource surfaces.
 - `primitives/resource/schemas.rs` owns resource, wrapper, artifact, goal,
   attach, materialized-file, patch, and resource-ref schemas.
 - `resource_kernel_and_generated_ui_ownership_boundaries_stay_split` now gates
@@ -916,7 +919,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 6885 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, and CLC-10 split-boundary/final-state gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 6900 | CLC-10 |
+| `packages/agent/tests/threat_model_invariants.rs` | 6897 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, and CLC-10 split-boundary/final-state gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 6900 | CLC-10 |
 | `packages/agent/tests/integration/tests.rs` | 3108 | CLC-9 harnesses | Transport e2e suite with shared WebSocket harness. | 3150 | CLC-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2848 | CLC-9 iOS tests | Event transformer matrix should split only when concepts separate. | 2900 | CLC-9 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-9 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-9 |
