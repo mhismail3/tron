@@ -982,8 +982,11 @@ the owning change must either decompose the file or add a new scorecard row
 with an explicit owner, reason, budget, and target checkpoint.
 
 2026-05-31 cleanup follow-up: near-threshold inline unit suites were extracted
-from `shared/protocol/messages.rs` to `shared/protocol/messages/tests.rs` and
-from `domains/skills/implementation/discovery/loader.rs` to
-`domains/skills/implementation/discovery/loader/tests.rs`. Keep future large
-wire-format and filesystem-discovery matrices in those sibling test modules so
-the production files remain focused on the public contracts and scanner logic.
+from `shared/protocol/messages.rs` to `shared/protocol/messages/tests.rs`, from
+`domains/skills/implementation/discovery/loader.rs` to
+`domains/skills/implementation/discovery/loader/tests.rs`, and from
+`domains/mcp/product_protocol/server_manager.rs` to
+`domains/mcp/product_protocol/server_manager/tests.rs`. Keep future large
+wire-format, filesystem-discovery, and MCP lifecycle matrices in those sibling
+test modules so the production files remain focused on the public contracts,
+scanner logic, and lifecycle manager.

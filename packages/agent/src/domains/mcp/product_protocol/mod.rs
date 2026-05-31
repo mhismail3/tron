@@ -17,7 +17,9 @@
 //! - [`types`] — MCP protocol types (JSON-RPC, capability schemas, server config)
 //! - [`client`] — Transport and protocol implementation
 //! - [`capability_projection`] — MCP result conversion helper
-//! - [`server_manager`] — Lifecycle management for MCP servers
+//! - [`server_manager`] — Lifecycle management for MCP servers.
+//!   Its lifecycle/health tests live beside the implementation in
+//!   `server_manager/tests.rs`.
 //! - [`capability_index`] — Searchable in-memory tool index
 //! - [`schemas`] — Pure drift-detection between two tool-definition sets
 //! - [`router`] — Central coordinator (`McpServerManager` + `McpCapabilityIndex`)
