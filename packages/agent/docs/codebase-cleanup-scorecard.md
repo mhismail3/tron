@@ -69,7 +69,8 @@ cleanup gates:
   default `RUST_LOG=info,ort=error`, a default background health wait of 30s,
   and installed-service restore success gated on `/health`.
 - Large Rust, Swift, and shell/script files over 1,000 LOC must have a row in
-  the large-file audit table and stay below that row's budget.
+  the large-file audit table, keep the table's `Current LOC` value exact, and
+  stay below that row's budget.
 - New cleanup exceptions require scorecard rows before they can pass the static
   gate.
 - CLC-1 capability boundaries must stay split, including the recipe-owned
@@ -915,7 +916,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 6925 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, and CLC-10 split-boundary/final-state gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 7050 | CLC-10 |
+| `packages/agent/tests/threat_model_invariants.rs` | 6851 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, and CLC-10 split-boundary/final-state gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 6900 | CLC-10 |
 | `packages/agent/tests/integration/tests.rs` | 3108 | CLC-9 harnesses | Transport e2e suite with shared WebSocket harness. | 3150 | CLC-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2848 | CLC-9 iOS tests | Event transformer matrix should split only when concepts separate. | 2900 | CLC-9 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-9 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-9 |
@@ -925,14 +926,14 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | 1383 | CLC-9 auth tests | Credential storage scenario matrix moved out of the implementation root during CLC-6. | 1425 | CLC-9 |
 | `packages/agent/src/engine/tests/module_activation/source_trust.rs` | 1364 | CLC-9 engine tests | Module source-trust scenario matrix. | 1400 | CLC-9 |
 | `packages/agent/src/domains/skills/implementation/runtime/tracker/tests.rs` | 1301 | CLC-9 skills tests | Skill runtime tracking scenario matrix moved out of the implementation root during CLC-6. | 1350 | CLC-9 |
-| `packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs` | 1239 | CLC-9 worktree tests | Rebase-on-main conflict/recovery matrix. | 1275 | CLC-9 |
+| `packages/agent/src/domains/worktree/implementation/runtime/coordinator/rebase_on_main_tests.rs` | 1256 | CLC-9 worktree tests | Rebase-on-main conflict/recovery matrix. | 1275 | CLC-9 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1207 | CLC-9 engine tests | Resource-kernel matrix. | 1250 | CLC-9 |
 | `packages/agent/skills/vault/scripts/vault.sh` | 1200 | CLC-10 managed skills | Single managed skill entrypoint; split only with packaging/selftest verification. | 1225 | CLC-10 |
 | `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | 1177 | CLC-9 runner tests | Stream processor event-shape matrix. | 1200 | CLC-9 |
 | `packages/agent/src/domains/agent/runner/context/context_manager_tests.rs` | 1164 | CLC-9 context tests | Context manager policy/rules matrix. | 1200 | CLC-9 |
-| `packages/agent/src/shared/protocol/events/tron/catalog.rs` | 1153 | CLC-3 protocol | Exhaustive generated `TronEvent` enum catalog and accessors stay together for serde tagging, grep-ability, and match exhaustiveness without introducing a compatibility macro layer. | 1200 | CLC-3 |
+| `packages/agent/src/shared/protocol/events/tron/catalog.rs` | 1156 | CLC-3 protocol | Exhaustive generated `TronEvent` enum catalog and accessors stay together for serde tagging, grep-ability, and match exhaustiveness without introducing a compatibility macro layer. | 1200 | CLC-3 |
 | `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | 1127 | CLC-9 context tests | Compaction engine scenario matrix. | 1175 | CLC-9 |
-| `packages/ios-app/Tests/Infrastructure/EventDatabaseTests.swift` | 1038 | CLC-9 iOS tests | Event database test matrix. | 1075 | CLC-9 |
+| `packages/ios-app/Tests/Infrastructure/EventDatabaseTests.swift` | 1062 | CLC-9 iOS tests | Event database test matrix. | 1075 | CLC-9 |
 
 ## Test Plan
 
