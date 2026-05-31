@@ -253,6 +253,11 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             runtimeInfo: runtime,
             currentParentBundleVersion: Self.currentParentBundleVersion(),
             canManageLaunchAgent: TronPaths.canManageLaunchAgent
+        ) || Self.shouldRefreshRegistrationForLaunchConstraints(
+            status: status,
+            currentVariant: currentVariant,
+            runtimeInfo: runtime,
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent
         )
 
         if let outcome = Self.preRegistrationOutcome(
@@ -435,6 +440,21 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         return registeredVersion != currentParentBundleVersion
     }
 
+    static func shouldRefreshRegistrationForLaunchConstraints(
+        status: ExistingInstallDetector.ServiceRegistrationStatus,
+        currentVariant: MacRuntimeVariant,
+        runtimeInfo: LaunchAgentRuntimeInfo?,
+        canManageLaunchAgent: Bool = true
+    ) -> Bool {
+        guard canManageLaunchAgent,
+              status == .enabled,
+              let runtimeInfo,
+              runtimeInfo.parentBundleIdentifier == currentVariant.expectedParentBundleIdentifier else {
+            return false
+        }
+        return runtimeInfo.needsLaunchConstraintRefresh
+    }
+
     static func currentParentBundleVersion(bundle: Bundle = .main) -> String? {
         bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     }
@@ -522,7 +542,8 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             ),
             parentBundleVersion: parseLaunchctlValue(named: "parent bundle version", from: result.stdout),
             programIdentifier: parseLaunchctlValue(named: "program identifier", from: result.stdout),
-            executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout)
+            executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout),
+            needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update")
         )
     }
 

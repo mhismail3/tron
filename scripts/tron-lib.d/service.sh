@@ -102,6 +102,21 @@ ensure_restartable_prod_server() {
 }
 
 service_start() {
+    if release_wrapper_available; then
+        print_status "Starting service..."
+        if "$RELEASE_APP_BINARY" --tron-start-server-and-quit >/dev/null 2>&1 \
+            && wait_for_service_health 5; then
+            local pid
+            pid="$(listener_pid_for_port "$PROD_PORT")"
+            print_success "Service started (PID: ${pid:-unknown})"
+            echo "  Server: http://localhost:$PROD_PORT"
+            echo "  Health: http://localhost:$PROD_PORT/health"
+            return 0
+        fi
+        print_installed_service_restart_diagnostic
+        return 1
+    fi
+
     if [ ! -f "$PLIST_PATH" ]; then
         print_error "Service not installed. Run: tron install"
         return 1

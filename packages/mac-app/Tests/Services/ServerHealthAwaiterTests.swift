@@ -40,6 +40,12 @@ struct ServerHealthAwaiterTests {
         #expect(result == .malformedResponse)
         #expect(calls.count == 3)
     }
+
+    @Test("live start policy covers cold replacement starts")
+    func liveStartPolicyCoversColdReplacementStarts() {
+        #expect(EnvironmentSetup.live.serverStartHealthCheckAttempts >= 60)
+        #expect(EnvironmentSetup.live.serverStartHealthCheckDelayNanoseconds == 1_000_000_000)
+    }
 }
 
 private final class PingCallCounter: @unchecked Sendable {

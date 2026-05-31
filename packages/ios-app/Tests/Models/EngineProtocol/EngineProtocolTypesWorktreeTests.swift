@@ -163,6 +163,19 @@ struct WorktreeInfoTests {
         #expect(WorktreeGetStatusResult(hasWorktree: true, worktree: info).canQueryRepoMetadata == true)
         #expect(WorktreeGetStatusResult(hasWorktree: false, worktree: info).canQueryRepoMetadata == false)
 
+        let passthrough = WorktreeInfo(
+            isolated: false,
+            branch: "main",
+            baseCommit: "abc",
+            path: "/tmp/repo",
+            baseBranch: nil,
+            repoRoot: "/tmp/repo",
+            hasUncommittedChanges: nil,
+            commitCount: nil,
+            isMerged: nil
+        )
+        #expect(WorktreeGetStatusResult(hasWorktree: true, worktree: passthrough).canQueryRepoMetadata == false)
+
         let missingRepo = WorktreeInfo(
             isolated: true,
             branch: "session/sess_abc12345",

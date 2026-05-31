@@ -233,6 +233,39 @@ struct MockLaunchAgentManagerTests {
         )
     }
 
+    @Test("installed release refreshes same-bundle registration when launch constraints are stale")
+    func installedReleaseRefreshesStaleLaunchConstraints() {
+        let runtime = LaunchAgentRuntimeInfo(
+            parentBundleIdentifier: "com.tron.mac",
+            parentBundleVersion: "7",
+            needsLaunchConstraintRefresh: true
+        )
+        #expect(
+            LiveLaunchAgentManager.shouldRefreshRegistrationForLaunchConstraints(
+                status: .enabled,
+                currentVariant: .installedRelease,
+                runtimeInfo: runtime
+            )
+        )
+        #expect(
+            LiveLaunchAgentManager.preRegistrationOutcome(
+                for: .enabled,
+                currentVariant: .installedRelease,
+                runtimeInfo: runtime,
+                shouldRefreshCurrentRegistration: true
+            ) == nil
+        )
+        #expect(
+            LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
+                status: .enabled,
+                runningParentBundleIdentifier: "com.tron.mac",
+                shouldReplaceStaleRuntime: false,
+                shouldTakeOverRuntime: false,
+                shouldRefreshCurrentRegistration: true
+            )
+        )
+    }
+
     @Test("debug companion cannot repair stale production registration")
     func debugCompanionCannotRepairProductionRegistration() {
         let runtime = LaunchAgentRuntimeInfo(

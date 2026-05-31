@@ -63,28 +63,17 @@ struct AgentControlView: View {
 
     // MARK: - Session Computed Properties
 
-    private var stagedFiles: [DiffFileEntry] {
-        diffResult?.files?.filter { $0.fileStagingArea == .staged } ?? []
-    }
-
-    private var unstagedFiles: [DiffFileEntry] {
-        diffResult?.files?.filter { $0.fileStagingArea == .unstaged } ?? []
-    }
-
-    private var totalFiles: Int {
-        stagedFiles.count + unstagedFiles.count
-    }
-
-    private var totalAdditions: Int {
-        (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.additions }
-    }
-
-    private var totalDeletions: Int {
-        (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.deletions }
-    }
-
     private var hasEvents: Bool {
         !sessionEvents.isEmpty
+    }
+
+    private var sourceControlCardState: SourceControlCardState {
+        SourceControlCardState(
+            worktreeStatus: worktreeStatus,
+            diffResult: diffResult,
+            isLoading: isLoading,
+            workspacePath: detailedSnapshot?.environment?.workingDirectory
+        )
     }
 
     private var analyticsTotalTokens: Int {
@@ -215,15 +204,11 @@ struct AgentControlView: View {
 
                     // Source control card
                     SourceControlCardView(
-                        branchName: worktreeStatus?.worktree?.shortBranch ?? diffResult?.branch,
-                        totalFiles: totalFiles,
-                        totalAdditions: totalAdditions,
-                        totalDeletions: totalDeletions,
-                        isGitRepo: diffResult?.isGitRepo,
-                        isLoading: isLoading,
-                        workspacePath: detailedSnapshot?.environment?.workingDirectory,
+                        state: sourceControlCardState,
                         onTap: {
-                            showSourceControl = true
+                            if sourceControlCardState.isEnabled {
+                                showSourceControl = true
+                            }
                         }
                     )
                     .padding(.horizontal)
@@ -296,11 +281,17 @@ struct AgentControlView: View {
 
     private func loadChanges() async {
         do {
-            async let diff = engineClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
-            async let status: WorktreeGetStatusResult? = { try? await engineClient.worktree.getStatus(sessionId: sessionId) }()
-            diffResult = try await diff
-            worktreeStatus = await status
+            let status = try await engineClient.worktree.getStatus(sessionId: sessionId)
+            worktreeStatus = status
+
+            guard status.hasIsolatedWorktree else {
+                diffResult = nil
+                return
+            }
+
+            diffResult = try await engineClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
         } catch {
+            diffResult = nil
             errorMessage = "Failed to load changes: \(error.localizedDescription)"
         }
     }

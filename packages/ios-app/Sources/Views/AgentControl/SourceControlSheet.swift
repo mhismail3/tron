@@ -75,6 +75,10 @@ struct SourceControlSheet: View {
         diffResult?.files?.filter { $0.fileStagingArea == .unstaged } ?? []
     }
 
+    private var hasNoSessionWorktree: Bool {
+        worktreeStatus.map { !$0.hasIsolatedWorktree } ?? false
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -84,7 +88,10 @@ struct SourceControlSheet: View {
                 GeometryReader { geometry in
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 16) {
-                            if let info = worktreeStatus?.worktree {
+                            if hasNoSessionWorktree {
+                                noWorktreeContent
+                                    .sheetSection()
+                            } else if let info = worktreeStatus?.worktree {
                                 SourceControlStatusHeader(
                                     branch: info.branch,
                                     worktreePath: info.path,
@@ -106,19 +113,28 @@ struct SourceControlSheet: View {
                                     }
                                 )
                                 .sheetSection()
-                            }
 
-                            gitActionsCard
+                                gitActionsCard
+                                    .sheetSection()
+
+                                SessionChangesSection(
+                                    diffResult: diffResult,
+                                    worktreeStatus: worktreeStatus,
+                                    stagedFiles: stagedFiles,
+                                    unstagedFiles: unstagedFiles,
+                                    onFileSelected: { selectedFileDetail = $0 }
+                                )
                                 .sheetSection()
-
-                            SessionChangesSection(
-                                diffResult: diffResult,
-                                worktreeStatus: worktreeStatus,
-                                stagedFiles: stagedFiles,
-                                unstagedFiles: unstagedFiles,
-                                onFileSelected: { selectedFileDetail = $0 }
-                            )
-                            .sheetSection()
+                            } else {
+                                SessionChangesSection(
+                                    diffResult: diffResult,
+                                    worktreeStatus: worktreeStatus,
+                                    stagedFiles: stagedFiles,
+                                    unstagedFiles: unstagedFiles,
+                                    onFileSelected: { selectedFileDetail = $0 }
+                                )
+                                .sheetSection()
+                            }
                         }
                         .padding(.vertical)
                         .frame(width: geometry.size.width)
@@ -164,8 +180,8 @@ struct SourceControlSheet: View {
                 // metadata depends on the server-reported worktree status, so
                 // it runs after `loadData()` has established whether a repo
                 // owner exists for this session.
-                diffResult = initialDiffResult
                 worktreeStatus = initialWorktreeStatus
+                diffResult = initialWorktreeStatus?.hasIsolatedWorktree == true ? initialDiffResult : nil
                 async let data: Void = loadData()
                 async let defaults: Void = loadGitDefaults()
                 _ = await (data, defaults)
@@ -229,6 +245,15 @@ struct SourceControlSheet: View {
     }
 
     // MARK: - Git Actions Card
+
+    private var noWorktreeContent: some View {
+        GitHeroCard(
+            icon: "arrow.triangle.branch",
+            title: "No Session Worktree",
+            description: "This session is running without a source-control worktree.",
+            accent: .tronTeal
+        )
+    }
 
     /// Two rows of three tiles each. Row 1 — Commit · Merge · Sessions.
     /// Row 2 — Rebase · Pull · Push. Every tile mirrors a server-side
@@ -514,11 +539,21 @@ struct SourceControlSheet: View {
 
     private func loadData() async {
         do {
-            async let diff = engineClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
-            async let status = engineClient.worktree.getStatus(sessionId: sessionId)
-            diffResult = try await diff
-            worktreeStatus = try await status
+            let status = try await engineClient.worktree.getStatus(sessionId: sessionId)
+            worktreeStatus = status
+
+            guard status.hasIsolatedWorktree else {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    diffResult = nil
+                    divergence = nil
+                    repoSessionCount = 0
+                }
+                return
+            }
+
+            diffResult = try await engineClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
         } catch {
+            diffResult = nil
             errorMessage = friendlyGitError(error, action: .load)
         }
     }

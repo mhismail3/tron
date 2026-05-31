@@ -41,7 +41,7 @@ struct CommitSubSheet: View {
     }
 
     private var hasWorktree: Bool {
-        worktreeStatus?.hasWorktree == true
+        worktreeStatus?.hasIsolatedWorktree == true
     }
 
     private var hasChanges: Bool {

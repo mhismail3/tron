@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, passthrough source-control gating, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -362,7 +362,13 @@ Liquid Glass container bounds do not inherit presentation springs or stretch
 during the sheet's own open animation.
 The Source Control card uses the branch glyph as its primary icon and remains a
 thin projection of `worktree::get_status`; branch, dirty, conflict, and action
-counts come from server status rather than local git inspection.
+counts come from server status rather than local git inspection. A passthrough
+repo status (`hasWorktree=true` with `worktree.isolated=false`) is branch
+context only: it does not count as a session-owned worktree, does not show
+dirty-worktree dashboard metadata, does not fetch Source Control diffs, and
+does not open the Source Control action sheet. Source-control actions and repo
+metadata are only available when `worktree.get_status` reports an isolated
+session worktree.
 
 ## Dependency Injection
 
@@ -420,8 +426,11 @@ active `sessionId` in both the request payload and the engine invocation context
 then the server owns idempotency, authorization, leases, ledger attempts, and
 stream publication. Source-control repo metadata follows the same shape: iOS
 first reads `worktree::get_status` and only asks repo capabilities for
-divergence or sibling-session data when the server reports an active worktree
-with a repo root.
+divergence or sibling-session data when the server reports an isolated active
+worktree with a repo root. Passthrough sessions can render general branch
+context from the status payload, but iOS must not call repo metadata or
+worktree mutation capabilities for them because the server will reject those
+as outside the session-worktree domain.
 Source-control action defaults are also server-owned. Merge strategy, session
 branch policy, auto-upstream behavior, and protected branches are decoded from
 `settings::get`; Source Control disables merge and push affordances until those

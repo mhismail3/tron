@@ -24,6 +24,17 @@ final class WorktreeIsolationStateTests: XCTestCase {
         XCTAssertNotNil(state.status)
     }
 
+    func test_passthroughStatusDoesNotCountAsWorktreeIsolation() {
+        cache.set(
+            .fixture(worktree: .fixture(isolated: false, branch: "main", baseBranch: nil)),
+            for: "a"
+        )
+        let state = WorktreeIsolationState(sessionId: "a", cache: cache)
+
+        XCTAssertFalse(state.hasWorktree)
+        XCTAssertEqual(state.worktree?.branch, "main")
+    }
+
     // T34 — state reflects cache updates
     func test_state_reflectsCacheUpdates() {
         let state = WorktreeIsolationState(sessionId: "a", cache: cache)

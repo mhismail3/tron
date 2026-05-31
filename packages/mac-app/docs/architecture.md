@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-05-30 (menu dev takeover controls, health-gated starts, and isolated helper registration)
+> Last verified: 2026-05-30 (menu dev takeover controls, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
 
 ## Overview
 
@@ -291,8 +291,8 @@ GitHub issue opens with a short note.
 4. Register:      SMAppService.agent(plistName: "<active-label>.plist").register()
    - Installed Release manages `com.tron.server` on port `9847`; the isolated install scheme manages `com.tron.server.dev` on port `9848`.
    - Default Xcode Debug is companion-only. If it reaches the Install step it fails before mutating Login Items and tells the contributor to use `/Applications/Tron.app` or the isolated install-testing scheme.
-   - Before registration, `LiveLaunchAgentManager` reads `launchctl print` to identify the loaded job's parent bundle and event-trigger executable. An enabled SMAppService registration without a loaded launchd job, or one pointing at a missing/mismatched helper path, is treated as registered-but-not-ready. A manager build replaces that registration through SMAppService, then the pipeline waits for ping.
-5. Await ping:    poll setup.pingServer(token) for 30s on 1s cadence, ignoring connection events
+   - Before registration, `LiveLaunchAgentManager` reads `launchctl print` to identify the loaded job's parent bundle, event-trigger executable, and launch-constraint state. An enabled SMAppService registration without a loaded launchd job, one pointing at a missing/mismatched helper path, one owned by a stale parent bundle build, or one reporting launch-constraint drift such as `needs LWCR update` is treated as registered-but-not-ready. A manager build replaces that registration through SMAppService, then the pipeline waits for ping.
+5. Await ping:    poll setup.pingServer(token) for 30s on 1s cadence, ignoring connection events; menu-bar and command-mode update finalization write `internal/run/mac-app-version.json` only after this health gate passes
 → state.installOutcome set; Pairing step unblocks only when .success
 
 The UI intentionally paces quick stages for a few hundred milliseconds
@@ -382,7 +382,7 @@ Wrapper ownership is explicit: installed Release owns production registration; d
 
 If no LaunchAgent owns `com.tron.server` but port `9847` is already bound or `~/.tron/internal/database/log.db.lock` is held, registration stops with an "another Tron server is running" error. The app never chooses an alternate port and never treats a direct dev server as a successful install.
 
-**Result**: a contributor can have the production DMG installed, run the default Xcode Debug wrapper for UI work, and switch to `tron dev` to iterate on the agent without uninstalling anything. Both wrappers observe the production port. While `tron dev` owns the port the menu bar shows `Dev Server active`; quitting `tron dev` calls `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which syncs bundled managed skills, registers/starts through `SMAppService`, and exits without showing the wizard. The same menu-bar startup sync is what makes a replaced `/Applications/Tron.app` refresh managed skills after a DMG update. Managed-skill sync is serialized within the wrapper process and skips directories whose bundled and installed contents already match, so an idle menu-bar launch does not rewrite `~/.tron/skills/`.
+**Result**: a contributor can have the production DMG installed, run the default Xcode Debug wrapper for UI work, and switch to `tron dev` to iterate on the agent without uninstalling anything. Both wrappers observe the production port. While `tron dev` owns the port the menu bar shows `Dev Server active`; quitting `tron dev` calls `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, which syncs bundled managed skills, registers/starts through `SMAppService`, records the finalized app-version marker only after `/health` passes, and exits without showing the wizard. The same menu-bar startup sync is what makes a replaced `/Applications/Tron.app` refresh managed skills after a DMG update. Managed-skill sync is serialized within the wrapper process and skips directories whose bundled and installed contents already match, so an idle menu-bar launch does not rewrite `~/.tron/skills/`.
 
 ### Switching between workflows
 

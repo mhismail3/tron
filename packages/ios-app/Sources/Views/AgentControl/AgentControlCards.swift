@@ -36,16 +36,29 @@ private struct CardChrome: ViewModifier {
     var tintOpacity: Double = 0.15
     var onTap: (() -> Void)?
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        let base = content
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .glassEffect(
-                .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .onTapGesture { onTap?() }
+
+        if let onTap {
+            base
+                .glassEffect(
+                    .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
+                    in: shape
+                )
+                .contentShape(shape)
+                .onTapGesture(perform: onTap)
+        } else {
+            base
+                .glassEffect(
+                    .regular.tint(tintColor.opacity(tintOpacity)),
+                    in: shape
+                )
+                .contentShape(shape)
+        }
     }
 }
 
@@ -173,13 +186,7 @@ struct ModelControlView: View {
 
 @available(iOS 26.0, *)
 struct SourceControlCardView: View {
-    var branchName: String?
-    var totalFiles: Int
-    var totalAdditions: Int
-    var totalDeletions: Int
-    var isGitRepo: Bool?
-    var isLoading: Bool
-    var workspacePath: String?
+    var state: SourceControlCardState
     var onTap: (() -> Void)?
 
     var body: some View {
@@ -191,14 +198,14 @@ struct SourceControlCardView: View {
 
                 Spacer()
 
-                if isGitRepo == false {
-                    Text("Untracked")
+                if state.isGitRepo == false {
+                    Text(state.branchLabel)
                         .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                         .foregroundStyle(.tronTeal)
                 } else {
-                    Text(branchName ?? "Loading...")
+                    Text(state.branchLabel)
                         .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                        .foregroundStyle(branchName != nil ? .tronTeal : .tronTextMuted)
+                        .foregroundStyle(state.isEnabled ? .tronTeal : .tronTextMuted)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
                 }
@@ -208,38 +215,44 @@ struct SourceControlCardView: View {
             HStack {
                 Spacer()
 
-                if isLoading && isGitRepo == nil {
-                    Text("Loading...")
+                if state.isLoading && state.isGitRepo == nil {
+                    Text(state.detailLabel)
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
-                } else if isGitRepo == false {
-                    Text(workspacePath?.abbreviatingHomeDirectory ?? "–")
+                } else if state.isGitRepo == false {
+                    Text(state.detailLabel)
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
-                } else if totalFiles > 0 {
+                } else if state.totalFiles > 0 {
                     HStack(spacing: 6) {
-                        Text("\(totalFiles) \(totalFiles == 1 ? "file" : "files")")
+                        Text(state.detailLabel)
                             .foregroundStyle(.tronTextMuted)
-                        if totalAdditions > 0 {
-                            Text("+\(totalAdditions)")
+                        if state.totalAdditions > 0 {
+                            Text("+\(state.totalAdditions)")
                                 .foregroundStyle(.tronSuccess)
                         }
-                        if totalDeletions > 0 {
-                            Text("−\(totalDeletions)")
+                        if state.totalDeletions > 0 {
+                            Text("−\(state.totalDeletions)")
                                 .foregroundStyle(.tronError)
                         }
                     }
                     .font(TronTypography.codeCaption)
                 } else {
-                    Text("No changes")
+                    Text(state.detailLabel)
                         .font(TronTypography.codeCaption)
                         .foregroundStyle(.tronTextMuted)
                 }
             }
         }
-        .cardChrome(.tronTeal, onTap: onTap)
+        .cardChrome(
+            .tronTeal,
+            opacity: state.isEnabled ? 0.15 : 0.08,
+            onTap: state.isEnabled ? onTap : nil
+        )
+        .opacity(state.isEnabled || state.isLoading ? 1.0 : 0.65)
+        .accessibilityHint(state.isEnabled ? "" : state.detailLabel)
     }
 }
 

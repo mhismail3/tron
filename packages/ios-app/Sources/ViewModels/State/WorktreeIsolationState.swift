@@ -19,6 +19,6 @@ final class WorktreeIsolationState {
     }
 
     var status: WorktreeGetStatusResult? { cache.status(for: sessionId) }
-    var hasWorktree: Bool { status?.hasWorktree ?? false }
+    var hasWorktree: Bool { status?.hasIsolatedWorktree ?? false }
     var worktree: WorktreeInfo? { status?.worktree }
 }

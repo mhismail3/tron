@@ -43,14 +43,17 @@ final class WorktreeStatusCache {
     }
 
     func shouldShowWorktreeIcon(sessionId: String) -> Bool {
-        guard let s = statuses[sessionId], s.hasWorktree, let w = s.worktree else {
+        guard let s = statuses[sessionId], s.hasIsolatedWorktree, let w = s.worktree else {
             return false
         }
         return !w.isOnBaseBranch
     }
 
     func shouldShowUncommittedDot(sessionId: String) -> Bool {
-        statuses[sessionId]?.worktree?.hasUncommittedChanges == true
+        guard let status = statuses[sessionId], status.hasIsolatedWorktree else {
+            return false
+        }
+        return status.worktree?.hasUncommittedChanges == true
     }
 
     // MARK: Write

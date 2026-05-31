@@ -673,6 +673,18 @@ fn codebase_cleanup_scorecard_stays_formalized() {
                 .contains("print_success \"Installed service restarted (PID: ${pid:-unknown})\""),
         "installed-service restore must be health-gated and carry the stale-installed-app diagnostic"
     );
+    let release_wrapper_start = tron_service
+        .find("if release_wrapper_available; then")
+        .expect("release wrapper start branch");
+    let contributor_start = tron_service
+        .find("if [ ! -f \"$PLIST_PATH\" ]; then")
+        .expect("contributor plist fallback");
+    assert!(
+        release_wrapper_start < contributor_start
+            && tron_service.contains("\"$RELEASE_APP_BINARY\" --tron-start-server-and-quit")
+            && tron_service.contains("wait_for_service_health 5"),
+        "tron start must prefer the health-gated installed SMAppService wrapper before contributor plist fallback"
+    );
 
     let budgets = cleanup_scorecard_large_file_budgets(&scorecard);
     let large_files = cleanup_scorecard_large_files(&repo_root, &crate_root);

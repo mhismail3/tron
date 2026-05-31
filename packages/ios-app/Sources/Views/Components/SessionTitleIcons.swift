@@ -30,7 +30,7 @@ struct SessionTitleIcons: View {
     static func iconsShown(isFork: Bool, worktree: WorktreeInfo?) -> Set<Icon> {
         var icons: Set<Icon> = []
         if isFork { icons.insert(.fork) }
-        if let w = worktree {
+        if let w = worktree, w.isolated {
             if !w.isOnBaseBranch {
                 icons.insert(.branch)
             }
@@ -44,7 +44,7 @@ struct SessionTitleIcons: View {
     static func accessibilityDescriptors(isFork: Bool, worktree: WorktreeInfo?) -> [String] {
         var descriptors: [String] = []
         if isFork { descriptors.append("forked") }
-        if let w = worktree {
+        if let w = worktree, w.isolated {
             if !w.isOnBaseBranch {
                 descriptors.append("branch \(w.shortBranch)")
             }

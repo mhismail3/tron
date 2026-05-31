@@ -88,10 +88,18 @@ final class SessionTitleIconsTests: XCTestCase {
         XCTAssertEqual(icons, [])
     }
 
-    func test_icons_dirtyNonIsolatedWorktree_showsDot() {
+    func test_icons_dirtyNonIsolatedWorktree_suppressed() {
         let w = makeInfo(isolated: false, branch: "main", baseBranch: nil, hasUncommittedChanges: true)
         let icons = SessionTitleIcons.iconsShown(isFork: false, worktree: w)
-        XCTAssertEqual(icons, [.dot])
+        XCTAssertEqual(icons, [])
+    }
+
+    func test_accessibilityDescriptors_nonIsolatedWorktree_suppressed() {
+        let w = makeInfo(isolated: false, branch: "main", baseBranch: nil, hasUncommittedChanges: true)
+        XCTAssertEqual(
+            SessionTitleIcons.accessibilityDescriptors(isFork: false, worktree: w),
+            []
+        )
     }
 
     func test_accessibilityDescriptors_matchVisibleMetadata() {

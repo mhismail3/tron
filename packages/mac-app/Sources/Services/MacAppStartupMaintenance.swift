@@ -107,7 +107,7 @@ enum MacAppStartupMaintenance {
             )
             if context == .wizardCompletion,
                setup.canManageLaunchAgent {
-                record(currentVersion, setup: setup)
+                recordCurrentVersion(currentVersion, setup: setup)
                 return .recordedCurrentVersion
             }
             return .skipped(reason)
@@ -141,7 +141,7 @@ enum MacAppStartupMaintenance {
         switch outcome {
         case .ok, .alreadyLoaded:
             if let health, case .success = health {
-                record(currentVersion, setup: setup)
+                recordCurrentVersion(currentVersion, setup: setup)
             } else {
                 return .restartUnhealthy(outcome, health ?? .unreachable)
             }
@@ -165,11 +165,19 @@ enum MacAppStartupMaintenance {
         return .versionAlreadyRecorded
     }
 
-    private static func record(_ version: MacAppVersionIdentity, setup: EnvironmentSetup) {
+    @discardableResult
+    static func recordCurrentVersion(setup: EnvironmentSetup) -> Bool {
+        recordCurrentVersion(setup.currentAppVersion(), setup: setup)
+    }
+
+    @discardableResult
+    private static func recordCurrentVersion(_ version: MacAppVersionIdentity, setup: EnvironmentSetup) -> Bool {
         do {
             try setup.writeRecordedAppVersion(version)
+            return true
         } catch {
             NSLog("[Tron] Failed to record Mac app version marker: %@", error.localizedDescription)
+            return false
         }
     }
 }

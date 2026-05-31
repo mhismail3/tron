@@ -277,45 +277,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Darwin.exit(exitCode)
                 }
             }
-            let setup = EnvironmentSetup.live
-            if let problem = setup.validateApplicationLocation() {
+            let result = await MacCommandModeServerStarter.start(setup: EnvironmentSetup.live)
+            switch result {
+            case .ok:
+                exitCode = 0
+            case .invalidApplicationLocation(let problem):
                 NSLog("[Tron] Cannot start server from command mode: %@", problem)
-                return
-            }
-            if let problem = setup.validateBundledHelper() {
+            case .invalidBundledHelper(let problem):
                 NSLog("[Tron] Cannot start server from command mode: %@", problem)
-                return
-            }
-            guard setup.canManageLaunchAgent else {
+            case .unmanagedWrapper:
                 NSLog("[Tron] Cannot start server from command mode: Debug companion mode does not manage the production server")
-                return
-            }
-            switch await setup.syncManagedSkills() {
-            case .synced:
-                break
-            case .failed(let message):
+            case .managedSkillSyncFailed(let message):
                 NSLog("[Tron] Cannot start server from command mode: failed to sync managed skills: %@", message)
-                return
-            }
-
-            let outcome = await InstallLaunchAgentRunner.ensureLoaded(
-                manager: setup.launchAgentManager,
-                plistPath: setup.launchAgentPlistPath,
-                label: setup.launchAgentLabel
-            )
-            if outcome != .ok, outcome != .alreadyLoaded {
+            case .launchAgentFailed(let outcome):
                 NSLog("[Tron] Command-mode server start returned %@", String(describing: outcome))
-                return
-            }
-            let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
-            guard case .success = health else {
+            case .unhealthy(let health):
                 NSLog(
                     "[Tron] Command-mode server start loaded the Login Item but /health did not pass: %@",
                     String(describing: health)
                 )
-                return
             }
-            exitCode = 0
         }
     }
 

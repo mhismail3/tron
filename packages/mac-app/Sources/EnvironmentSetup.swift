@@ -72,7 +72,7 @@ struct EnvironmentSetup: Sendable {
 
     /// Health wait policy after menu-bar start/restart/resume actions.
     /// Tests can lower these to keep stale-helper paths deterministic.
-    var serverStartHealthCheckAttempts: Int = 30
+    var serverStartHealthCheckAttempts: Int = 60
     var serverStartHealthCheckDelayNanoseconds: UInt64 = 1_000_000_000
 
     /// LaunchAgent control surface - load/unload/restart/check.

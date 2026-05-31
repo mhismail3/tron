@@ -193,6 +193,12 @@ final class WorktreeStatusCacheTests: XCTestCase {
         XCTAssertFalse(cache.shouldShowWorktreeIcon(sessionId: "x"))
     }
 
+    func test_uncommittedDot_passthrough_notIsolated_false() {
+        cache.set(.fixture(worktree: .fixture(isolated: false, branch: "main", baseBranch: nil, hasUncommittedChanges: true)),
+                  for: "x")
+        XCTAssertFalse(cache.shouldShowUncommittedDot(sessionId: "x"))
+    }
+
     // T19 — isolated + nil baseBranch → off-base per existing semantic
     func test_showIcon_isolated_nilBaseBranch_true() {
         cache.set(.fixture(worktree: .fixture(isolated: true, branch: "session/a", baseBranch: nil)),
