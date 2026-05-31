@@ -572,7 +572,7 @@ fn get_state_at_head_with_agentic_loop() {
 }
 
 #[test]
-fn get_state_at_head_with_compaction() {
+fn get_state_at_head_with_compaction_boundary() {
     let store = setup();
     let cr = store
         .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
@@ -590,8 +590,18 @@ fn get_state_at_head_with_compaction() {
     store
         .append(&AppendOptions {
             session_id: &cr.session.id,
-            event_type: EventType::CompactSummary,
-            payload: serde_json::json!({"summary": "User said hello"}),
+            event_type: EventType::CompactBoundary,
+            payload: serde_json::json!({
+                "originalTokens": 100,
+                "compactedTokens": 25,
+                "compressionRatio": 0.25,
+                "reason": "threshold_exceeded",
+                "summary": "User said hello",
+                "estimatedContextTokens": 25,
+                "preservedTurns": 1,
+                "summarizedTurns": 1,
+                "preservedMessages": 1,
+            }),
             parent_id: None,
             sequence: None,
         })

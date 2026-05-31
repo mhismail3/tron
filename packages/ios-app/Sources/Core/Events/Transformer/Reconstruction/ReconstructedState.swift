@@ -174,7 +174,6 @@ extension ReconstructedState {
     /// Context compaction state
     struct CompactionState {
         var boundaries: [Boundary]
-        var summaries: [Summary]
 
         struct Boundary {
             let rangeFrom: String?
@@ -184,17 +183,8 @@ extension ReconstructedState {
             let timestamp: Date
         }
 
-        struct Summary {
-            let summary: String
-            let boundaryEventId: String
-            let keyDecisions: [String]?
-            let filesModified: [String]?
-            let timestamp: Date
-        }
-
         init() {
             self.boundaries = []
-            self.summaries = []
         }
 
         /// Total compactions applied

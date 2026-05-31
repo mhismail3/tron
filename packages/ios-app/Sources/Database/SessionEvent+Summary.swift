@@ -131,9 +131,6 @@ extension SessionEvent {
         case .compactBoundary:
             return "Context compacted"
 
-        case .compactSummary:
-            return "Context summarized"
-
         case .rulesLoaded:
             let count = payload.int("count") ?? 0
             if count > 0 {

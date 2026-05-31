@@ -1,7 +1,7 @@
 //! Event type definitions for the Tron event sourcing system.
 //!
-//! - [`EventType`]: 79-variant enum of all session event type discriminators
-//!   (count regression-guarded by the `ALL_EVENT_TYPES.len() == 79` assertion
+//! - [`EventType`]: 80-variant enum of all session event type discriminators
+//!   (count regression-guarded by the `ALL_EVENT_TYPES.len() == 80` assertion
 //!   in `generated.rs` tests — keep this line in sync when that number changes).
 //! - [`SessionEvent`]: Flat struct with base fields + opaque `payload` JSON.
 //! - [`SessionEventPayload`]: Typed payload access via [`SessionEvent::typed_payload()`].

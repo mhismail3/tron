@@ -400,17 +400,6 @@ extension UnifiedEventTransformer {
                     state.lastTurnInputTokens = parsed.estimatedContextTokens ?? parsed.compactedTokens
                 }
 
-            case .compactSummary:
-                if let parsed = CompactSummaryPayload(from: event.payload) {
-                    state.compaction.summaries.append(ReconstructedState.CompactionState.Summary(
-                        summary: parsed.summary,
-                        boundaryEventId: parsed.boundaryEventId,
-                        keyDecisions: parsed.keyDecisions,
-                        filesModified: parsed.filesModified,
-                        timestamp: parseTimestamp(event.timestamp)
-                    ))
-                }
-
             case .metadataUpdate, .metadataTag, .llmHookResult:
                 handleMetadataEvent(eventType, payload: event.payload,
                                     timestamp: event.timestamp, state: &state)

@@ -236,6 +236,115 @@ fn list_user_only_excludes_cron() {
 }
 
 #[test]
+fn list_user_only_excludes_unstarted_chat_drafts() {
+    let (conn, ws_id) = setup();
+    let normal = create_default_session(&conn, &ws_id);
+
+    let draft = SessionRepo::create(
+        &conn,
+        &CreateSessionOptions {
+            workspace_id: &ws_id,
+            model: "gpt-5.5",
+            working_directory: "/tmp/test",
+            title: Some("Chat"),
+            tags: None,
+            parent_session_id: None,
+            fork_from_event_id: None,
+            spawning_session_id: None,
+            spawn_type: None,
+            spawn_task: None,
+            origin: None,
+            profile: Some(crate::shared::profile::CHAT_PROFILE),
+            source: Some("chat"),
+            use_worktree: None,
+        },
+    )
+    .unwrap();
+    SessionRepo::increment_counters(
+        &conn,
+        &draft.id,
+        &IncrementCounters {
+            event_count: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let active_chat = SessionRepo::create(
+        &conn,
+        &CreateSessionOptions {
+            workspace_id: &ws_id,
+            model: "gpt-5.5",
+            working_directory: "/tmp/test",
+            title: Some("Chat"),
+            tags: None,
+            parent_session_id: None,
+            fork_from_event_id: None,
+            spawning_session_id: None,
+            spawn_type: None,
+            spawn_task: None,
+            origin: None,
+            profile: Some(crate::shared::profile::CHAT_PROFILE),
+            source: Some("chat"),
+            use_worktree: None,
+        },
+    )
+    .unwrap();
+    SessionRepo::increment_counters(
+        &conn,
+        &active_chat.id,
+        &IncrementCounters {
+            event_count: Some(3),
+            message_count: Some(1),
+            turn_count: Some(1),
+            input_tokens: Some(12),
+            output_tokens: Some(4),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let import = SessionRepo::create(
+        &conn,
+        &CreateSessionOptions {
+            workspace_id: &ws_id,
+            model: "gpt-5.5",
+            working_directory: "/tmp/test",
+            title: Some("Imported Empty Transcript"),
+            tags: None,
+            parent_session_id: None,
+            fork_from_event_id: None,
+            spawning_session_id: None,
+            spawn_type: None,
+            spawn_task: None,
+            origin: None,
+            profile: None,
+            source: Some("import"),
+            use_worktree: None,
+        },
+    )
+    .unwrap();
+
+    let user_only = SessionRepo::list(
+        &conn,
+        &ListSessionsOptions {
+            user_only: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let ids: std::collections::HashSet<&str> = user_only
+        .iter()
+        .map(|session| session.id.as_str())
+        .collect();
+
+    assert!(ids.contains(normal.id.as_str()));
+    assert!(ids.contains(active_chat.id.as_str()));
+    assert!(ids.contains(import.id.as_str()));
+    assert!(!ids.contains(draft.id.as_str()));
+}
+
+#[test]
 fn list_without_user_only_shows_all() {
     let (conn, ws_id) = setup();
     create_default_session(&conn, &ws_id);

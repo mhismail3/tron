@@ -174,26 +174,6 @@ struct CompactBoundaryPayload {
     }
 }
 
-/// Payload for compact.summary event
-/// Server: CompactSummaryEvent.payload
-struct CompactSummaryPayload {
-    let summary: String
-    let keyDecisions: [String]?
-    let filesModified: [String]?
-    let boundaryEventId: String
-
-    init?(from payload: [String: AnyCodable]) {
-        guard let summary = payload.string("summary"),
-              let boundaryEventId = payload.string("boundaryEventId") else {
-            return nil
-        }
-        self.summary = summary
-        self.boundaryEventId = boundaryEventId
-        self.keyDecisions = payload.stringArray("keyDecisions")
-        self.filesModified = payload.stringArray("filesModified")
-    }
-}
-
 /// Payload for context.cleared event
 /// Server: ContextClearedEvent.payload
 struct ContextClearedPayload {

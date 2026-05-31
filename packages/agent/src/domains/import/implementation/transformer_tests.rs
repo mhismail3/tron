@@ -79,7 +79,7 @@ fn make_meta_item(turn: i64) -> AssembledItem {
     }
 }
 
-fn make_compact_summary_item(summary: &str, turn: i64) -> AssembledItem {
+fn make_imported_summary_item(summary: &str, turn: i64) -> AssembledItem {
     AssembledItem::UserMessage {
         record: serde_json::from_value(json!({
             "type": "user",
@@ -180,16 +180,18 @@ fn meta_user_skipped() {
 }
 
 #[test]
-fn compact_summary_emits_boundary_and_summary() {
-    let items = vec![make_compact_summary_item("The session covered X and Y.", 1)];
+fn imported_summary_record_emits_boundary_with_summary() {
+    let items = vec![make_imported_summary_item(
+        "The session covered X and Y.",
+        1,
+    )];
     let result = transform(items);
 
-    assert_eq!(result.events.len(), 2);
+    assert_eq!(result.events.len(), 1);
     assert_eq!(result.events[0].event_type, EventType::CompactBoundary);
     assert_eq!(result.events[0].payload["originalTokens"], 0);
-    assert_eq!(result.events[1].event_type, EventType::CompactSummary);
     assert_eq!(
-        result.events[1].payload["summary"],
+        result.events[0].payload["summary"],
         "The session covered X and Y."
     );
 }

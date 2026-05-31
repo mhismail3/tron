@@ -200,13 +200,6 @@ final class SessionEventForkableTests: XCTestCase {
         XCTAssertFalse(event.isForkable)
     }
 
-    func testCompactSummary_isNotForkable() {
-        let event = makeEvent(type: "compact.summary", payload: [
-            "summary": AnyCodable("Previous context summary"),
-        ])
-        XCTAssertFalse(event.isForkable)
-    }
-
     func testErrorAgent_isNotForkable() {
         let event = makeEvent(type: "error.agent", payload: [
             "error": AnyCodable("Something went wrong"),

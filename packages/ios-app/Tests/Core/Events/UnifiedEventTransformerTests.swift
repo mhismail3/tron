@@ -637,7 +637,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             .subagentSpawned, .subagentCompleted, .subagentFailed,
             .fileRead, .fileWrite, .fileEdit,
             .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged, .worktreeRenamed,
-            .compactBoundary, .compactSummary,
+            .compactBoundary,
             .metadataUpdate, .metadataTag,
             .llmHookResult
         ]

@@ -65,8 +65,6 @@ define_events! {
         /// attempted. Reconstruction ignores a staging event without a
         /// matching successor `CompactBoundary`.
         CompactSummaryStaging => "compact.summary_staging" => payloads::compact::CompactSummaryStagingPayload,
-        /// Compaction summary.
-        CompactSummary => "compact.summary" => payloads::compact::CompactSummaryPayload,
         /// Context cleared.
         ContextCleared => "context.cleared" => payloads::context::ContextClearedPayload,
         /// Skill activated in session (server-owned state).
@@ -228,7 +226,7 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 81] = [
+    const EXPECTED: [(EventType, &str); 80] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
@@ -271,7 +269,6 @@ mod tests {
             "notification.interrupted",
         ),
         (EventType::CompactBoundary, "compact.boundary"),
-        (EventType::CompactSummary, "compact.summary"),
         (EventType::CompactSummaryStaging, "compact.summary_staging"),
         (EventType::ContextCleared, "context.cleared"),
         (EventType::SkillActivated, "skill.activated"),
@@ -377,7 +374,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 81);
+        assert_eq!(ALL_EVENT_TYPES.len(), 80);
     }
 
     #[test]
@@ -460,6 +457,11 @@ mod tests {
         // the variants.
         assert!("spell.cast".parse::<EventType>().is_err());
         assert!("spell.consumed".parse::<EventType>().is_err());
+    }
+
+    #[test]
+    fn from_str_rejects_retired_compact_summary_type() {
+        assert!("compact.summary".parse::<EventType>().is_err());
     }
 
     #[test]

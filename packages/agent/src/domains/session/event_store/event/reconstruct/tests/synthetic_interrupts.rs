@@ -20,8 +20,13 @@ fn compaction_then_new_messages() {
         ),
         // Compaction
         ev(
-            EventType::CompactSummary,
-            serde_json::json!({"summary": "User asked a question. Assistant answered."}),
+            EventType::CompactBoundary,
+            serde_json::json!({
+                "originalTokens": 1200,
+                "compactedTokens": 200,
+                "reason": "threshold_exceeded",
+                "summary": "User asked a question. Assistant answered."
+            }),
         ),
         // Post-compaction new conversation
         ev(

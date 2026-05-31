@@ -72,7 +72,11 @@ pub struct ListSessionsOptions<'a> {
     pub offset: Option<i64>,
     /// Filter by server origin.
     pub origin: Option<&'a str>,
-    /// Show only user-created sessions (exclude cron, etc.).
+    /// Show only user-visible sessions.
+    ///
+    /// This excludes background sources and abandoned chat drafts that contain
+    /// only the root `session.start` event. The rows remain reconstructable by
+    /// ID, but they do not clutter dashboard-style session lists.
     pub user_only: Option<bool>,
 }
 
@@ -216,7 +220,18 @@ impl SessionRepo {
             param_values.push(Box::new(origin.to_string()));
         }
         if opts.user_only == Some(true) {
-            sql.push_str(" AND (source IS NULL OR source IN ('chat', 'import'))");
+            sql.push_str(
+                " AND (source IS NULL OR source = 'import' OR (
+                    source = 'chat'
+                    AND NOT (
+                        message_count = 0
+                        AND turn_count = 0
+                        AND total_input_tokens = 0
+                        AND total_output_tokens = 0
+                        AND event_count <= 1
+                    )
+                ))",
+            );
         }
         sql.push_str(" ORDER BY last_activity_at DESC");
         if let Some(limit) = opts.limit {

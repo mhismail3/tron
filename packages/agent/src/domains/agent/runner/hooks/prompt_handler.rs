@@ -612,7 +612,7 @@ fn should_generate_title_with_store(
 
     // Check for compaction or memory events since last title gen
     let trigger_events = store
-        .get_events_by_type(session_id, &["compact.summary", "memory.retained"], None)
+        .get_events_by_type(session_id, &["compact.boundary", "memory.retained"], None)
         .unwrap_or_default();
 
     trigger_events.iter().any(|e| e.sequence > last_gen_seq)

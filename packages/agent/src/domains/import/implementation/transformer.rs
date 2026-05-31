@@ -362,18 +362,8 @@ fn normalize_assistant_block(block: &Value) -> Option<Value> {
     None
 }
 
-/// Emit compact.boundary + compact.summary from a compact summary user record.
+/// Emit a canonical compact.boundary from a compact summary user record.
 fn emit_compact_from_user(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>) {
-    events.push(TronEventSpec {
-        event_type: EventType::CompactBoundary,
-        payload: json!({
-            "originalTokens": 0,
-            "compactedTokens": 0,
-            // Source logs don't carry the original trigger — tag as `imported`.
-            "reason": "imported",
-        }),
-    });
-
     let summary = record
         .message
         .as_ref()
@@ -383,10 +373,13 @@ fn emit_compact_from_user(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>
         .to_string();
 
     events.push(TronEventSpec {
-        event_type: EventType::CompactSummary,
+        event_type: EventType::CompactBoundary,
         payload: json!({
+            "originalTokens": 0,
+            "compactedTokens": 0,
+            // Source logs don't carry the original trigger — tag as `imported`.
+            "reason": "imported",
             "summary": summary,
-            "boundaryEventId": null,
         }),
     });
 }

@@ -18,7 +18,7 @@ final class EventIconProviderTests: XCTestCase {
             "notification.interrupted",
             "skills::activated", "skills::deactivated",
             "rules.loaded", "rules.activated",
-            "compact.boundary", "compact.summary",
+            "compact.boundary",
             "context.cleared",
             "metadata.update", "metadata.tag",
             "file.read", "file.write", "file.edit",

@@ -9,12 +9,7 @@ pub(crate) fn collect_dynamic_rule_paths(
     let events = event_store
         .get_events_by_type(
             session_id,
-            &[
-                "rules.activated",
-                "compact.boundary",
-                "compact.summary",
-                "context.cleared",
-            ],
+            &["rules.activated", "compact.boundary", "context.cleared"],
             None,
         )
         .unwrap_or_default();
@@ -23,10 +18,7 @@ pub(crate) fn collect_dynamic_rule_paths(
     let mut ordered_paths = Vec::new();
 
     for event in events {
-        if event.event_type == "compact.boundary"
-            || event.event_type == "compact.summary"
-            || event.event_type == "context.cleared"
-        {
+        if event.event_type == "compact.boundary" || event.event_type == "context.cleared" {
             seen_paths.clear();
             ordered_paths.clear();
             continue;

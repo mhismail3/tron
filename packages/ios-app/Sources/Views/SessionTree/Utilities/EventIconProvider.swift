@@ -37,7 +37,7 @@ enum EventIconProvider {
             return "clear.fill"
         case .skillActivated, .skillDeactivated:
             return "sparkles"
-        case .compactBoundary, .compactSummary:
+        case .compactBoundary:
             return "arrow.down.right.and.arrow.up.left"
         case .configModelSwitch:
             return "arrow.triangle.2.circlepath"
@@ -126,7 +126,7 @@ enum EventIconProvider {
             return .tronSuccess
         case .skillDeactivated:
             return .tronWarning
-        case .compactBoundary, .compactSummary:
+        case .compactBoundary:
             return .tronCyan
         case .configModelSwitch:
             return .tronPurple

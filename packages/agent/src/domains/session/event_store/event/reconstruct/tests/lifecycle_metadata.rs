@@ -3,7 +3,7 @@ use super::*;
 // ── Compaction ───────────────────────────────────────────────────
 
 #[test]
-fn compaction_clears_and_injects_synthetic_pair() {
+fn compaction_boundary_clears_and_injects_synthetic_pair() {
     let events = vec![
         session_start(),
         ev(
@@ -19,8 +19,18 @@ fn compaction_clears_and_injects_synthetic_pair() {
             }),
         ),
         ev(
-            EventType::CompactSummary,
-            serde_json::json!({"summary": "Previous conversation summary"}),
+            EventType::CompactBoundary,
+            serde_json::json!({
+                "originalTokens": 1200,
+                "compactedTokens": 200,
+                "compressionRatio": 0.16,
+                "reason": "threshold_exceeded",
+                "summary": "Previous conversation summary",
+                "estimatedContextTokens": 200,
+                "preservedTurns": 1,
+                "summarizedTurns": 1,
+                "preservedMessages": 2,
+            }),
         ),
         ev(
             EventType::MessageUser,
@@ -54,12 +64,42 @@ fn compaction_clears_and_injects_synthetic_pair() {
 }
 
 #[test]
+fn compaction_boundary_without_summary_is_not_a_context_cut() {
+    let events = vec![
+        session_start(),
+        ev(
+            EventType::MessageUser,
+            serde_json::json!({"content": "Old message"}),
+        ),
+        ev(
+            EventType::CompactBoundary,
+            serde_json::json!({
+                "originalTokens": 1200,
+                "compactedTokens": 200,
+                "reason": "imported",
+            }),
+        ),
+    ];
+
+    let result = reconstruct_from_events(&events);
+    let msgs = get_messages(&result);
+
+    assert_eq!(msgs.len(), 1);
+    assert_eq!(msgs[0].content, "Old message");
+}
+
+#[test]
 fn compaction_synthetic_messages_have_none_event_ids() {
     let events = vec![
         session_start(),
         ev(
-            EventType::CompactSummary,
-            serde_json::json!({"summary": "Summary text"}),
+            EventType::CompactBoundary,
+            serde_json::json!({
+                "originalTokens": 1200,
+                "compactedTokens": 200,
+                "reason": "threshold_exceeded",
+                "summary": "Summary text"
+            }),
         ),
     ];
 
@@ -91,8 +131,13 @@ fn compaction_clears_pending_capability_results() {
         ),
         // Compaction clears everything including pending capability results
         ev(
-            EventType::CompactSummary,
-            serde_json::json!({"summary": "Summary"}),
+            EventType::CompactBoundary,
+            serde_json::json!({
+                "originalTokens": 1200,
+                "compactedTokens": 200,
+                "reason": "threshold_exceeded",
+                "summary": "Summary"
+            }),
         ),
     ];
 

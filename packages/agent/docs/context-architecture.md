@@ -244,8 +244,9 @@ runtime reconstruction:
 - `rules.loaded`, `rules.indexed`, and `rules.activated` explain rules context.
 - `skill.activated`, `skill.deactivated`, and `skills.cleared` explain skill
   context.
-- `compact.boundary` and `compact.summary` explain why older messages are
-  replaced by summaries.
+- `compact.summary_staging` records the produced summary before commit, and
+  `compact.boundary` commits the summary used to replace older runtime context
+  during reconstruction.
 - Subagent/process/job notifications can become one-turn job-result context.
 
 ### Constitution Audit Tables

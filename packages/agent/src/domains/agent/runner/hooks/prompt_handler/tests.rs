@@ -363,8 +363,11 @@ mod title_schedule {
         store
             .append(&AppendOptions {
                 session_id,
-                event_type: EventType::CompactSummary,
+                event_type: EventType::CompactBoundary,
                 payload: serde_json::json!({
+                    "originalTokens": 100,
+                    "compactedTokens": 25,
+                    "reason": "threshold_exceeded",
                     "summary": "Session compacted",
                     "timestamp": "2026-01-01T00:00:00Z"
                 }),

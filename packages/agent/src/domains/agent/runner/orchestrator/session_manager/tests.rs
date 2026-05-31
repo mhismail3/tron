@@ -355,6 +355,45 @@ async fn list_sessions_user_only() {
 }
 
 #[tokio::test]
+async fn list_sessions_user_only_hides_unstarted_chat_drafts() {
+    let pool = crate::domains::session::event_store::new_in_memory(
+        &crate::domains::session::event_store::ConnectionConfig::default(),
+    )
+    .unwrap();
+    {
+        let conn = pool.get().unwrap();
+        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
+    }
+    let store = Arc::new(EventStore::new(pool));
+    let mgr = SessionManager::new(store.clone());
+
+    let user_sid = mgr
+        .create_session("test-model", "/tmp", Some("user session"), None)
+        .unwrap();
+    let chat_draft_sid = mgr
+        .create_session_with_profile_and_worktree_override(
+            "gpt-5.5",
+            "/tmp",
+            Some("Chat"),
+            Some("chat"),
+            Some(crate::shared::profile::CHAT_PROFILE),
+            None,
+        )
+        .unwrap();
+
+    let filtered = mgr
+        .list_sessions(&SessionFilter {
+            user_only: true,
+            ..Default::default()
+        })
+        .unwrap();
+    let ids: Vec<&str> = filtered.iter().map(|s| s.id.as_str()).collect();
+
+    assert!(ids.contains(&user_sid.as_str()));
+    assert!(!ids.contains(&chat_draft_sid.as_str()));
+}
+
+#[tokio::test]
 async fn list_sessions_default_shows_all() {
     let pool = crate::domains::session::event_store::new_in_memory(
         &crate::domains::session::event_store::ConnectionConfig::default(),

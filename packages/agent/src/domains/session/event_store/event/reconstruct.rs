@@ -24,7 +24,7 @@ use crate::domains::session::event_store::types::base::SessionEvent;
 use crate::domains::session::event_store::types::payloads::TokenTotals;
 use crate::domains::session::event_store::types::state::{Message, MessageWithEventId};
 
-/// Prefix for compaction summary messages, matching TypeScript `context/constants.ts`.
+/// Prefix for compaction boundary summary messages, matching TypeScript `context/constants.ts`.
 pub const COMPACTION_SUMMARY_PREFIX: &str = "[Context from earlier in this conversation]";
 /// Assistant acknowledgement text after compaction, matching TypeScript `context/constants.ts`.
 pub const COMPACTION_ACK_TEXT: &str =
@@ -153,7 +153,7 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
             continue;
         }
         match event.event_type {
-            EventType::CompactSummary => handle_compact_summary(event, &mut st),
+            EventType::CompactBoundary => handle_compact_boundary(event, &mut st),
             EventType::ContextCleared => handle_context_cleared(&mut st),
             EventType::CapabilityInvocationCompleted => handle_capability_result(event, &mut st),
             EventType::MessageUser => handle_message_user(event, &mut st),
@@ -187,13 +187,15 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
     }
 }
 
-/// Handle `compact.summary`: clear all state, inject synthetic pair.
-fn handle_compact_summary(event: &SessionEvent, st: &mut BuildState) {
-    let summary = event
-        .payload
-        .get("summary")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+/// Handle `compact.boundary`: clear older context and inject the durable summary pair.
+fn handle_compact_boundary(event: &SessionEvent, st: &mut BuildState) {
+    let Some(summary) = event.payload.get("summary").and_then(Value::as_str) else {
+        return;
+    };
+    inject_compaction_summary_pair(summary, st);
+}
+
+fn inject_compaction_summary_pair(summary: &str, st: &mut BuildState) {
     st.combined.clear();
     st.pending_capability_results.clear();
 

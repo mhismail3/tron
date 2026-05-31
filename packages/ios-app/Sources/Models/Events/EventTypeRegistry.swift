@@ -57,7 +57,6 @@ enum PersistedEventType: String, CaseIterable {
 
     // Compaction/summarization
     case compactBoundary = "compact.boundary"
-    case compactSummary = "compact.summary"
 
     // Context clearing
     case contextCleared = "context.cleared"
@@ -151,7 +150,6 @@ enum PersistedEventType: String, CaseIterable {
         case .rulesActivated:          return .init(true,    false,   false,   false,  "Rules activated")
         // Compaction
         case .compactBoundary:         return .init(true,    true,    false,   true,   "Compact boundary")
-        case .compactSummary:          return .init(false,   true,    false,   true,   "Compact summary")
         // Context
         case .contextCleared:          return .init(true,    false,   false,   false,  "Context cleared")
         // Metadata

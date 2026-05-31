@@ -34,6 +34,7 @@ fn live_harness_sessions_stay_out_of_user_dashboard_by_default() {
         "roc2_hosted_model_matrix.py",
         "roc3_local_model_breadth.py",
         "roc5_resource_truth_matrix.py",
+        "roc7_long_running_compaction.py",
         "rwo_n15_live_agent_harness.py",
         "rwo_n16_live_agent_harness.py",
         "rwo_n16b_live_agent_harness.py",

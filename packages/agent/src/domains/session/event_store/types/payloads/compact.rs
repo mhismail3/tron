@@ -1,4 +1,4 @@
-//! Compaction event payloads: boundary, summary.
+//! Compaction event payloads: committed boundary and pre-commit staging.
 
 use serde::{Deserialize, Serialize};
 
@@ -50,22 +50,6 @@ pub struct CompactRange {
     pub from: String,
     /// Last event in range.
     pub to: String,
-}
-
-/// Payload for `compact.summary` events.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CompactSummaryPayload {
-    /// Compacted summary text.
-    pub summary: String,
-    /// Key decisions preserved.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub key_decisions: Option<Vec<String>>,
-    /// Files modified in compacted range.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub files_modified: Option<Vec<String>>,
-    /// Event ID of the corresponding boundary event.
-    pub boundary_event_id: String,
 }
 
 /// Payload for `compact.summary_staging` events.

@@ -106,7 +106,6 @@ enum SessionEventType: String, Codable, Sendable {
     case skillsCleared = "skills.cleared"
 
     case compactBoundary = "compact.boundary"
-    case compactSummary = "compact.summary"
 
     // Rules tracking
     case rulesLoaded = "rules.loaded"

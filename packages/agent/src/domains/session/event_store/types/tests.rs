@@ -185,21 +185,26 @@ mod session_event_tests {
     }
 
     #[test]
-    fn typed_payload_compact_summary() {
+    fn typed_payload_compact_summary_staging() {
         let event = make_event(
-            EventType::CompactSummary,
+            EventType::CompactSummaryStaging,
             json!({
+                "originalTokens": 50000,
+                "compactedTokens": 5000,
+                "reason": "threshold_exceeded",
                 "summary": "The user asked about Rust...",
-                "boundaryEventId": "evt-42"
+                "timestamp": "2026-05-31T00:00:00Z"
             }),
         );
         let payload = event.typed_payload().unwrap();
         match payload {
-            SessionEventPayload::CompactSummary(p) => {
-                assert_eq!(p.boundary_event_id, "evt-42");
+            SessionEventPayload::CompactSummaryStaging(p) => {
+                assert_eq!(p.original_tokens, 50000);
+                assert_eq!(p.compacted_tokens, 5000);
+                assert_eq!(p.reason, "threshold_exceeded");
                 assert!(p.summary.contains("Rust"));
             }
-            other => panic!("expected CompactSummary, got {other:?}"),
+            other => panic!("expected CompactSummaryStaging, got {other:?}"),
         }
     }
 
@@ -394,8 +399,8 @@ mod session_event_tests {
                 json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10, "reason": "manual"}),
             ),
             (
-                EventType::CompactSummary,
-                json!({"summary": "s", "boundaryEventId": "e"}),
+                EventType::CompactSummaryStaging,
+                json!({"originalTokens": 100, "compactedTokens": 10, "reason": "manual", "summary": "s", "timestamp": "t"}),
             ),
             (
                 EventType::ContextCleared,
@@ -592,7 +597,10 @@ mod type_guard_tests {
     #[test]
     fn compact_guards() {
         assert_eq!(EventType::CompactBoundary, EventType::CompactBoundary);
-        assert_eq!(EventType::CompactSummary, EventType::CompactSummary);
+        assert_eq!(
+            EventType::CompactSummaryStaging,
+            EventType::CompactSummaryStaging
+        );
     }
 
     #[test]
