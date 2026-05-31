@@ -22,6 +22,8 @@ SERVER = "ws://127.0.0.1:9847/engine"
 HEALTH = "http://127.0.0.1:9847/health"
 DEFAULT_SIM_UDID = os.environ.get("TRON_RWO_SIM_UDID", "booted")
 TERMINAL_STOP_REASON = "end_turn"
+TERMINAL_QUEUE_STATUSES = ("completed", "cancelled", "dead_lettered")
+HARNESS_PREFIX = "rwo-n16-agent-"
 
 
 class RawWebSocket:
@@ -265,6 +267,34 @@ def stop_fixture(proc, stdout):
         stdout.close()
 
 
+def wait_catalog_unregistered(session_id, worker_id, function_id, trigger_id, timeout=30):
+    expected = {
+        worker_id: '"WorkerUnregistered"',
+        function_id: '"FunctionUnregistered"',
+        trigger_id: '"TriggerUnregistered"',
+    }
+    deadline = time.monotonic() + timeout
+    latest_rows = []
+    while time.monotonic() < deadline:
+        rows = db_json(
+            """
+            SELECT after_revision, subject_id, kind_json, owner_worker_id, timestamp
+            FROM engine_catalog_changes
+            WHERE session_id = ? AND subject_id IN (?, ?, ?)
+            ORDER BY after_revision
+            """,
+            (session_id, worker_id, function_id, trigger_id),
+        )
+        latest_rows = rows
+        latest_by_subject = {}
+        for row in rows:
+            latest_by_subject[row["subject_id"]] = row["kind_json"]
+        if all(latest_by_subject.get(subject_id) == kind for subject_id, kind in expected.items()):
+            return rows
+        time.sleep(0.25)
+    raise TimeoutError(f"worker unregistration not visible; last={latest_rows}")
+
+
 def wait_registration(session_id, worker_id, function_id, trigger_id, timeout=30):
     deadline = time.monotonic() + timeout
     last = []
@@ -506,6 +536,16 @@ def collect(fixture, start_cursor, start_ts):
         """,
         (session_id,),
     )
+    subscriptions = db_json(
+        """
+        SELECT subscription_id, topic, cursor, visibility, session_id, workspace_id,
+               active, created_at
+        FROM engine_stream_subscriptions
+        WHERE session_id = ?
+        ORDER BY created_at
+        """,
+        (session_id,),
+    )
     resources = db_json(
         """
         SELECT resource_id, kind, scope_kind, scope_value, lifecycle,
@@ -574,6 +614,7 @@ def collect(fixture, start_cursor, start_ts):
     )
     failed = [row for row in invocations if row["succeeded"] == 0]
     target_queues = [row for row in queues if row["function_id"] == fixture["functionId"]]
+    target_queue = target_queues[0] if target_queues else None
     receipt_ids = [row["receipt_id"] for row in target_queues]
     queue_fail_events = [
         row
@@ -591,6 +632,64 @@ def collect(fixture, start_cursor, start_ts):
         row for row in streams if "rwoN16Retry" in (row["payload_preview"] or "")
     ]
     compact_events = [row for row in events if row["type"].startswith("compact.")]
+    open_queues = [row for row in queues if row["status"] not in TERMINAL_QUEUE_STATUSES]
+    active_harness_subscriptions = [
+        row
+        for row in subscriptions
+        if row["active"] and row["subscription_id"].startswith(HARNESS_PREFIX)
+    ]
+    active_leases = [row for row in leases if row["status"] == "active"]
+    error_logs = [
+        row for row in logs if str(row["level"]).lower() in {"error", "fatal"}
+    ]
+    resource_ids = {row["resource_id"] for row in resources}
+    latest_catalog = {}
+    for row in catalog_changes:
+        latest_catalog[row["subject_id"]] = row["kind_json"]
+    summary = {
+        "failedInvocationCount": len(failed),
+        "failedInvocations": failed,
+        "approvalCount": len(approvals),
+        "pendingApprovals": [row for row in approvals if row["status"] == "pending"],
+        "compactEventCount": len(compact_events),
+        "targetQueues": target_queues,
+        "queueFailEventCount": len(queue_fail_events),
+        "queueCompleteEventCount": len(queue_complete_events),
+        "workerRetryEventCount": len(worker_retry_events),
+        "openQueueRows": open_queues,
+        "activeHarnessSubscriptionCount": len(active_harness_subscriptions),
+        "activeResourceLeaseCount": len(active_leases),
+        "errorLogCount": len(error_logs),
+        "resourcePresent": fixture["resourceId"] in resource_ids,
+        "workerUnregistered": latest_catalog.get(fixture["workerId"]) == '"WorkerUnregistered"',
+        "functionUnregistered": latest_catalog.get(fixture["functionId"]) == '"FunctionUnregistered"',
+        "triggerUnregistered": latest_catalog.get(fixture["triggerId"]) == '"TriggerUnregistered"',
+        "workerId": fixture["workerId"],
+        "functionId": fixture["functionId"],
+        "triggerId": fixture["triggerId"],
+        "resourceId": fixture["resourceId"],
+    }
+    summary["passed"] = (
+        target_queue is not None
+        and target_queue["status"] == "completed"
+        and target_queue["attempts"] == 1
+        and target_queue["lease_owner"] is None
+        and target_queue["lease_expires_at"] is None
+        and summary["queueFailEventCount"] >= 1
+        and summary["queueCompleteEventCount"] >= 1
+        and summary["workerRetryEventCount"] >= 1
+        and summary["resourcePresent"]
+        and summary["workerUnregistered"]
+        and summary["functionUnregistered"]
+        and summary["triggerUnregistered"]
+        and summary["failedInvocationCount"] == 0
+        and summary["approvalCount"] == 0
+        and summary["compactEventCount"] == 0
+        and len(open_queues) == 0
+        and len(active_harness_subscriptions) == 0
+        and len(active_leases) == 0
+        and summary["errorLogCount"] == 0
+    )
     return {
         "invocations": invocations,
         "queues": queues,
@@ -600,23 +699,10 @@ def collect(fixture, start_cursor, start_ts):
         "resources": resources,
         "resourceVersions": versions,
         "resourceLeases": leases,
+        "streamSubscriptions": subscriptions,
         "catalogChanges": catalog_changes,
         "logs": logs,
-        "summary": {
-            "failedInvocationCount": len(failed),
-            "failedInvocations": failed,
-            "approvalCount": len(approvals),
-            "pendingApprovals": [row for row in approvals if row["status"] == "pending"],
-            "compactEventCount": len(compact_events),
-            "targetQueues": target_queues,
-            "queueFailEventCount": len(queue_fail_events),
-            "queueCompleteEventCount": len(queue_complete_events),
-            "workerRetryEventCount": len(worker_retry_events),
-            "workerId": fixture["workerId"],
-            "functionId": fixture["functionId"],
-            "triggerId": fixture["triggerId"],
-            "resourceId": fixture["resourceId"],
-        },
+        "summary": summary,
     }
 
 
@@ -635,7 +721,7 @@ def run_harness(args):
         "resourceId": f"evidence:rwo-n16-agent:{stamp}",
         "log": f"/tmp/rwo_n16_agent_worker_fixture_{stamp}.jsonl",
         "stdout": f"/tmp/rwo_n16_agent_worker_fixture_{stamp}.stdout.log",
-        "screenshot": f"/tmp/rwo_n16_{stamp}_old_simulator.png",
+        "screenshot": f"/tmp/rwo_n16_{stamp}_iphone.png",
         "sessionId": None,
     }
     result = {
@@ -673,6 +759,17 @@ def run_harness(args):
         result["terminalEvent"] = wait_end_turn(session_id, args.timeout_seconds)
     finally:
         stop_fixture(fixture_proc, fixture_stdout)
+        if fixture.get("sessionId"):
+            try:
+                result["unregistration"] = wait_catalog_unregistered(
+                    fixture["sessionId"],
+                    fixture["workerId"],
+                    fixture["functionId"],
+                    fixture["triggerId"],
+                    timeout=30,
+                )
+            except Exception as exc:
+                result["unregistrationError"] = repr(exc)
         if ws is not None:
             ws.close()
     if fixture["sessionId"]:
@@ -708,6 +805,8 @@ def run_harness(args):
     guard = result.get("terminalGuard") or {}
     if guard.get("returncode") != 0:
         return 2
+    if not result.get("db", {}).get("summary", {}).get("passed"):
+        return 1
     return 0
 
 

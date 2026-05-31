@@ -16,7 +16,7 @@ import rwo_n16_live_agent_harness as n16
 ROOT = n16.ROOT
 DB_PATH = n16.DB_PATH
 HEALTH = n16.HEALTH
-OLD_SIM_UDID = "267F6468-09AE-471D-9157-29144173EB82"
+DEFAULT_SIM_UDID = "267F6468-09AE-471D-9157-29144173EB82"
 TERMINAL_QUEUE_STATUSES = ("completed", "cancelled", "dead_lettered")
 HARNESS_PREFIX = "rwo-n17-"
 BENIGN_POST_TURN_FUNCTIONS = {
@@ -426,6 +426,9 @@ def collect_session(session_id, start_cursor, start_ts, identifiers):
     )
     failed = [row for row in invocations if row["succeeded"] == 0]
     compact_events = [row for row in events if row["type"].startswith("compact.")]
+    error_logs = [
+        row for row in logs if str(row["level"]).lower() in {"error", "fatal"}
+    ]
     open_queues = [row for row in queues if row["status"] not in TERMINAL_QUEUE_STATUSES]
     active_harness_subscriptions = [
         row for row in subscriptions if row["active"] and row["subscription_id"].startswith(HARNESS_PREFIX)
@@ -485,6 +488,7 @@ def collect_session(session_id, start_cursor, start_ts, identifiers):
             "approvalCount": len(approvals),
             "pendingApprovals": [row for row in approvals if row["status"] == "pending"],
             "compactEventCount": len(compact_events),
+            "errorLogCount": len(error_logs),
             "openQueueRows": open_queues,
             "activeHarnessSubscriptionCount": len(active_harness_subscriptions),
             "activeClientSubscriptionCount": len(active_client_subscriptions),
@@ -537,6 +541,7 @@ def classify_visible(visible, visible_resource_id):
         "noFailures": summary["failedInvocationCount"] == 0,
         "noApprovals": summary["approvalCount"] == 0,
         "noCompactEvents": summary["compactEventCount"] == 0,
+        "noErrorLogs": summary["errorLogCount"] == 0,
         "noOpenQueues": len(summary["openQueueRows"]) == 0,
         "noActiveLeases": summary["activeResourceLeaseCount"] == 0,
         "hasPromptQueueDrain": summary["promptQueueDrainCount"] >= 1,
@@ -583,6 +588,7 @@ def classify_background(background, fixture):
         "noFailures": summary["failedInvocationCount"] == 0,
         "noApprovals": summary["approvalCount"] == 0,
         "noCompactEvents": summary["compactEventCount"] == 0,
+        "noErrorLogs": summary["errorLogCount"] == 0,
         "noOpenQueues": len(summary["openQueueRows"]) == 0,
         "noActiveHarnessSubscriptions": summary["activeHarnessSubscriptionCount"] == 0,
         "noActiveLeases": summary["activeResourceLeaseCount"] == 0,
@@ -873,7 +879,7 @@ def run_harness(args):
 def parse_args(argv):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="claude-sonnet-4-6")
-    parser.add_argument("--sim-udid", default=OLD_SIM_UDID)
+    parser.add_argument("--sim-udid", default=DEFAULT_SIM_UDID)
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--visible-hold-seconds", type=float, default=2.0)
     parser.add_argument("--screenshot-delay-seconds", type=float, default=6.0)
