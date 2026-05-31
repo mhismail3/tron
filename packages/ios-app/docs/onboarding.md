@@ -6,14 +6,14 @@
 
 The iOS app always opens to the normal dashboard after initialization.
 Fresh installs present a medium-detent onboarding sheet above the
-dashboard when `@AppStorage("onboardingComplete")` is false. The sheet
-is swipeable: welcome, install Tailscale on iPhone, install Tron Server
-on Mac, connect, then a short settings setup flow for workspace,
-credentials, services, and default model. Setup pages are locked until
-the Mac connection succeeds. The sheet follows the app's
-standard Liquid Glass chrome: hidden drag handle, principal toolbar
-title, and a compact floating progress-dot indicator that sits low at the
-bottom of the sheet.
+dashboard when `@AppStorage("onboardingComplete")` is false. The sheet is a
+paged flow: welcome, install Tailscale on iPhone, install Tron Server on Mac,
+connect, then a short settings setup flow for workspace, credentials, services,
+and default model. Setup pages are locked until the Mac connection succeeds.
+The sheet follows the app's standard Liquid Glass chrome: hidden drag handle,
+principal toolbar title, explicit Back/Next controls for paged navigation, and
+a compact floating progress-dot indicator that sits low at the bottom of the
+sheet.
 
 The three preparation pages set expectations before pairing. Welcome
 introduces Tron as a local, private AI agent controlled from iPhone, then
@@ -160,7 +160,8 @@ After pairing succeeds, onboarding continues with optional setup pages:
 Pairing hydrates an in-memory `OnboardingSetupSnapshot` from the newly active
 server before the setup pages unlock. Existing server preferences from
 `settings.get` prefill workspace and model choices, so pairing a forgotten but
-still-running Mac can be completed by reviewing each page and swiping forward.
+still-running Mac can be completed by reviewing each page and using Next or the
+page gesture to advance.
 Existing provider and service credentials from `auth.get` are shown
 only as server-returned labels and masked hints; secrets are never copied into
 iOS storage. If `auth.get` fails after `settings.get` succeeds, onboarding

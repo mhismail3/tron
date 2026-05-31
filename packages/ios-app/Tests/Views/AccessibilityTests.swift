@@ -44,6 +44,19 @@ struct AccessibilityTests {
         }
     }
 
+    @Test("floating new session control has explicit accessibility copy")
+    func floatingNewSessionAccessibility() {
+        #expect(FloatingNewSessionButtonAccessibility.label == "New Session")
+        #expect(FloatingNewSessionButtonAccessibility.hint == "Opens the new session sheet")
+    }
+
+    @Test("floating voice note control has explicit accessibility copy")
+    func floatingVoiceNotesAccessibility() {
+        #expect(FloatingVoiceNotesButtonAccessibility.label == "Voice Note")
+        #expect(FloatingVoiceNotesButtonAccessibility.availableHint == "Opens voice note recording")
+        #expect(FloatingVoiceNotesButtonAccessibility.unavailableHint == "Voice note recording is unavailable")
+    }
+
     // MARK: - Helper
 
     /// Replicates the chipAccessibility label construction logic for testing

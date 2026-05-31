@@ -192,6 +192,33 @@ final class OnboardingState {
         currentStep = canSelectStep(step) ? step : .connect
     }
 
+    var previousStep: Step? {
+        Step(rawValue: currentStep.rawValue - 1)
+    }
+
+    var nextStep: Step? {
+        Step(rawValue: currentStep.rawValue + 1)
+    }
+
+    var canNavigateBackward: Bool {
+        previousStep != nil
+    }
+
+    var canNavigateForward: Bool {
+        guard let nextStep else { return false }
+        return canSelectStep(nextStep)
+    }
+
+    func goBack() {
+        guard let previousStep else { return }
+        selectStep(previousStep)
+    }
+
+    func goForward() {
+        guard let nextStep else { return }
+        selectStep(nextStep)
+    }
+
     /// Prepares the dismissible Settings-launched onboarding sheet.
     ///
     /// Settings can reopen onboarding after first-run completion. That path

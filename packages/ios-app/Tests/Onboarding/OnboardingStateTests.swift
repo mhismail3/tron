@@ -96,6 +96,9 @@ struct OnboardingStateTests {
         #expect(OnboardingPageDotsMetrics.dotHeight == 6)
         #expect(OnboardingPageDotsMetrics.horizontalPadding == 10)
         #expect(OnboardingPageDotsMetrics.verticalPadding == 6)
+        #expect(OnboardingNavigationMetrics.footerSpacing == 8)
+        #expect(OnboardingNavigationMetrics.buttonHeight == 42)
+        #expect(OnboardingNavigationMetrics.buttonMinWidth == 112)
     }
 
     @Test("complete() flips the AppStorage flag")
@@ -264,6 +267,51 @@ struct OnboardingStateTests {
         state.selectStep(.workspace)
 
         #expect(state.currentStep == .workspace)
+    }
+
+    @Test("explicit navigation advances through unlocked pages and stops at locked setup")
+    func explicitNavigationHonorsSetupLock() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+
+        #expect(state.canNavigateBackward == false)
+        #expect(state.canNavigateForward == true)
+
+        state.goForward()
+        #expect(state.currentStep == .installTailscale)
+        #expect(state.canNavigateBackward == true)
+
+        state.goForward()
+        state.goForward()
+        #expect(state.currentStep == .connect)
+        #expect(state.canNavigateForward == false)
+
+        state.goForward()
+        #expect(state.currentStep == .connect)
+
+        state.hasPairedMac = true
+        #expect(state.canNavigateForward == true)
+
+        state.goForward()
+        #expect(state.currentStep == .workspace)
+
+        state.goBack()
+        #expect(state.currentStep == .connect)
+    }
+
+    @Test("explicit navigation reaches model only after pairing and never runs past the final step")
+    func explicitNavigationStopsAtModel() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        state.hasPairedMac = true
+
+        while state.canNavigateForward {
+            state.goForward()
+        }
+
+        #expect(state.currentStep == .model)
+        #expect(state.canNavigateForward == false)
+
+        state.goForward()
+        #expect(state.currentStep == .model)
     }
 
     @Test("pairing connect eligibility follows the current form values")

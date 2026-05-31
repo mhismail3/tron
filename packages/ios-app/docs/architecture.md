@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -344,6 +344,12 @@ repository when not in Quick Chat mode. Imports preserve
 the imported model and do not force the sheet's selected model. While switching
 workspaces, the worktree card keeps its previous visibility until the new
 git-repo probe resolves, then animates any actual appear/disappear change.
+On iPhone the sheet opens at the large detent because the primary setup cards
+and toolbar action must remain visually reachable without relying on a hidden
+sheet resize gesture. Decorative card icons are hidden from accessibility so
+VoiceOver lands on the actionable controls rather than glyphs.
+The dashboard empty-state captions use the secondary text token rather than
+the subtle/decorative token so the copy remains readable in dark appearance.
 
 ### Agent Control Sheet
 
@@ -542,6 +548,10 @@ model pickers hide the control because they do not own reasoning-level writes.
 When Settings launches server onboarding, `ContentView` records the requested
 prefill, dismisses Settings, and posts the onboarding launch from the sheet's
 dismiss callback so SwiftUI never drops the second modal presentation.
+First-run onboarding also exposes explicit Back/Next controls backed by
+`OnboardingState`, with setup pages still locked until the pairing probe and
+setup hydration succeed. The page gesture remains available, but forward
+progress never depends on a hidden swipe affordance.
 The settings toolbar exposes Logs in every build configuration. Production and
 TestFlight builds can still inspect and copy redacted in-memory client logs
 while the production logger keeps its lower-volume `.info` default. During

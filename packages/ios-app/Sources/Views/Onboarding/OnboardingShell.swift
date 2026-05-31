@@ -4,7 +4,7 @@ import UIKit
 /// Shared building blocks for the first-run onboarding sheet.
 ///
 /// The dashboard always remains mounted underneath this sheet. Onboarding is
-/// a short swipeable overlay: three lightweight preparation pages, then
+/// a short paged overlay: three lightweight preparation pages, then
 /// the pairing form that performs the actual connection.
 
 @available(iOS 26.0, *)
@@ -32,7 +32,7 @@ struct OnboardingPage<Content: View>: View {
             }
             .padding(.horizontal, TronSpacing.xlarge)
             .padding(.top, TronSpacing.lg)
-            .padding(.bottom, 76)
+            .padding(.bottom, 126)
             .frame(maxWidth: 620, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }

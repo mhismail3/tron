@@ -20,6 +20,7 @@ struct NewSessionCardIcon: View {
             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
             .foregroundStyle(color)
             .frame(width: 16)
+            .accessibilityHidden(true)
     }
 }
 

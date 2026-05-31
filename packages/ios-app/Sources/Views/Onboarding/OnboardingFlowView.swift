@@ -101,8 +101,12 @@ struct OnboardingFlowView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
 
-                OnboardingPageDots(currentStep: state.currentStep)
-                    .padding(.bottom, OnboardingPageDotsMetrics.bottomPadding)
+                VStack(spacing: OnboardingNavigationMetrics.footerSpacing) {
+                    OnboardingNavigationControls(state: state)
+                    OnboardingPageDots(currentStep: state.currentStep)
+                }
+                .padding(.horizontal, TronSpacing.xlarge)
+                .padding(.bottom, OnboardingPageDotsMetrics.bottomPadding)
             }
             .animation(.snappy(duration: 0.28), value: state.currentStep)
             .navigationBarTitleDisplayMode(.inline)
@@ -217,6 +221,64 @@ internal enum OnboardingPageDotsMetrics {
     static let dotHeight: CGFloat = 6
     static let horizontalPadding: CGFloat = 10
     static let verticalPadding: CGFloat = 6
+}
+
+internal enum OnboardingNavigationMetrics {
+    static let footerSpacing: CGFloat = 8
+    static let buttonHeight: CGFloat = 42
+    static let buttonMinWidth: CGFloat = 112
+}
+
+@available(iOS 26.0, *)
+private struct OnboardingNavigationControls: View {
+    let state: OnboardingState
+
+    var body: some View {
+        HStack(spacing: TronSpacing.sm) {
+            if state.canNavigateBackward {
+                navigationButton(
+                    title: "Back",
+                    systemImage: "chevron.left",
+                    accessibilityLabel: "Back",
+                    action: state.goBack
+                )
+            }
+
+            Spacer(minLength: TronSpacing.sm)
+
+            if state.canNavigateForward {
+                navigationButton(
+                    title: "Next",
+                    systemImage: "chevron.right",
+                    accessibilityLabel: "Next",
+                    action: state.goForward
+                )
+            }
+        }
+        .frame(maxWidth: 620)
+    }
+
+    private func navigationButton(
+        title: String,
+        systemImage: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            withAnimation(.snappy(duration: 0.24)) {
+                action()
+            }
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .frame(minWidth: OnboardingNavigationMetrics.buttonMinWidth)
+                .frame(height: OnboardingNavigationMetrics.buttonHeight)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.14)), in: Capsule())
+        .accessibilityLabel(accessibilityLabel)
+    }
 }
 
 @available(iOS 26.0, *)

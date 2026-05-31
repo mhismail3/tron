@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import TronMobile
 
@@ -23,6 +24,10 @@ final class NewSessionFlowTests: XCTestCase {
             recommended: recommended,
             available: available
         )
+    }
+
+    func testNewSessionFlowUsesLargeInitialPresentation() {
+        XCTAssertEqual(NewSessionFlowPresentation.detents, [.large])
     }
 
     func testChatIntentUsesChatSourceAndNoWorktreeOverride() {

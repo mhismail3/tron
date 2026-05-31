@@ -353,7 +353,7 @@ struct ContentView: View {
                     // Subtle tagline
                     Text("Choose a session")
                         .font(TronTypography.messageBody)
-                        .foregroundStyle(.tronTextMuted)
+                        .foregroundStyle(.tronTextSecondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -60)
@@ -530,7 +530,7 @@ struct WelcomePage: View {
                     // Subtle tagline
                     Text("Start talking")
                         .font(TronTypography.messageBody)
-                        .foregroundStyle(.tronTextMuted)
+                        .foregroundStyle(.tronTextSecondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -60)
