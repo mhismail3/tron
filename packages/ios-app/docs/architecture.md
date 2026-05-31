@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-30 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, passthrough source-control gating, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-05-31 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, passthrough source-control gating with no Agent Control Source Control affordance for non-isolated sessions, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -354,8 +354,9 @@ the subtle/decorative token so the copy remains readable in dark appearance.
 ### Agent Control Sheet
 
 The chat input-bar pill opens `AgentControlView`, a medium/large detent sheet
-that summarizes context, model, source control, analytics, and history. Its card
-containers use the shared `CardEntranceModifier` from `Views/Components/` for a
+that summarizes context, model, analytics, history, and source control only
+when the session owns an isolated worktree. Its card containers use the shared
+`CardEntranceModifier` from `Views/Components/` for a
 short opacity/vertical-offset reveal. The modifier owns that entrance animation
 directly and clears inherited sheet transactions before applying it, so iOS 26
 Liquid Glass container bounds do not inherit presentation springs or stretch
@@ -364,11 +365,11 @@ The Source Control card uses the branch glyph as its primary icon and remains a
 thin projection of `worktree::get_status`; branch, dirty, conflict, and action
 counts come from server status rather than local git inspection. A passthrough
 repo status (`hasWorktree=true` with `worktree.isolated=false`) is branch
-context only: it does not count as a session-owned worktree, does not show
-dirty-worktree dashboard metadata, does not fetch Source Control diffs, and
-does not open the Source Control action sheet. Source-control actions and repo
-metadata are only available when `worktree.get_status` reports an isolated
-session worktree.
+context only: it does not count as a session-owned worktree, does not render an
+Agent Control Source Control card, does not show dirty-worktree dashboard
+metadata, does not fetch Source Control diffs, and does not open the Source
+Control action sheet. Source-control actions and repo metadata are only
+available when `worktree.get_status` reports an isolated session worktree.
 
 ## Dependency Injection
 

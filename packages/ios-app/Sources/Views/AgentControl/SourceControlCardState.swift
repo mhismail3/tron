@@ -4,14 +4,14 @@ import Foundation
 ///
 /// `worktree.get_status` decides whether source-control actions exist for a
 /// session. A session without a worktree must not reuse a previously fetched
-/// diff or open a sheet that can only fail server-side.
+/// diff, render source-control affordances, or open a sheet that can only fail
+/// server-side.
 struct SourceControlCardState: Equatable {
     let branchLabel: String
     let detailLabel: String
     let isGitRepo: Bool?
     let isLoading: Bool
-    let isEnabled: Bool
-    let shouldQueryDiff: Bool
+    let isVisible: Bool
     let totalFiles: Int
     let totalAdditions: Int
     let totalDeletions: Int
@@ -28,8 +28,7 @@ struct SourceControlCardState: Equatable {
             branchLabel = "Loading..."
             detailLabel = "Loading..."
             isGitRepo = nil
-            isEnabled = false
-            shouldQueryDiff = false
+            isVisible = false
             totalFiles = 0
             totalAdditions = 0
             totalDeletions = 0
@@ -40,16 +39,14 @@ struct SourceControlCardState: Equatable {
             branchLabel = "No Worktree"
             detailLabel = "No session worktree"
             isGitRepo = nil
-            isEnabled = false
-            shouldQueryDiff = false
+            isVisible = false
             totalFiles = 0
             totalAdditions = 0
             totalDeletions = 0
             return
         }
 
-        shouldQueryDiff = true
-        isEnabled = true
+        isVisible = true
         isGitRepo = diffResult?.isGitRepo
 
         if diffResult?.isGitRepo == false {

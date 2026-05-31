@@ -198,17 +198,11 @@ struct SourceControlCardView: View {
 
                 Spacer()
 
-                if state.isGitRepo == false {
-                    Text(state.branchLabel)
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                        .foregroundStyle(.tronTeal)
-                } else {
-                    Text(state.branchLabel)
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                        .foregroundStyle(state.isEnabled ? .tronTeal : .tronTextMuted)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                }
+                Text(state.branchLabel)
+                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                    .foregroundStyle(.tronTeal)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
             }
 
             // Row 2: file stats (bottom right)
@@ -248,11 +242,9 @@ struct SourceControlCardView: View {
         }
         .cardChrome(
             .tronTeal,
-            opacity: state.isEnabled ? 0.15 : 0.08,
-            onTap: state.isEnabled ? onTap : nil
+            opacity: 0.15,
+            onTap: onTap
         )
-        .opacity(state.isEnabled || state.isLoading ? 1.0 : 0.65)
-        .accessibilityHint(state.isEnabled ? "" : state.detailLabel)
     }
 }
 

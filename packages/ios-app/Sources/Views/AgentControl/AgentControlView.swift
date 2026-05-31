@@ -202,17 +202,17 @@ struct AgentControlView: View {
                     .padding(.horizontal)
                     .cardEntrance(visible: cardsVisible, index: 1)
 
-                    // Source control card
-                    SourceControlCardView(
-                        state: sourceControlCardState,
-                        onTap: {
-                            if sourceControlCardState.isEnabled {
+                    if sourceControlCardState.isVisible {
+                        // Source control card
+                        SourceControlCardView(
+                            state: sourceControlCardState,
+                            onTap: {
                                 showSourceControl = true
                             }
-                        }
-                    )
-                    .padding(.horizontal)
-                    .cardEntrance(visible: cardsVisible, index: 2)
+                        )
+                        .padding(.horizontal)
+                        .cardEntrance(visible: cardsVisible, index: 2)
+                    }
 
                     // Analytics card
                     AnalyticsCardView(

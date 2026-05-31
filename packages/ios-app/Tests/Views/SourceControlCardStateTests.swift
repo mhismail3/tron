@@ -30,8 +30,7 @@ struct SourceControlCardStateTests {
             workspacePath: "/tmp/testspace"
         )
 
-        #expect(state.isEnabled == false)
-        #expect(state.shouldQueryDiff == false)
+        #expect(state.isVisible == false)
         #expect(state.branchLabel == "No Worktree")
         #expect(state.detailLabel == "No session worktree")
         #expect(state.isGitRepo == nil)
@@ -80,8 +79,7 @@ struct SourceControlCardStateTests {
             workspacePath: "/tmp/repo"
         )
 
-        #expect(state.isEnabled == true)
-        #expect(state.shouldQueryDiff == true)
+        #expect(state.isVisible == true)
         #expect(state.branchLabel == "feature-card")
         #expect(state.detailLabel == "2 files")
         #expect(state.isGitRepo == true)
@@ -124,8 +122,7 @@ struct SourceControlCardStateTests {
             workspacePath: "/tmp/repo"
         )
 
-        #expect(state.isEnabled == false)
-        #expect(state.shouldQueryDiff == false)
+        #expect(state.isVisible == false)
         #expect(state.branchLabel == "No Worktree")
         #expect(state.detailLabel == "No session worktree")
         #expect(state.totalFiles == 0)
@@ -140,8 +137,7 @@ struct SourceControlCardStateTests {
             workspacePath: "/tmp/repo"
         )
 
-        #expect(state.isEnabled == false)
-        #expect(state.shouldQueryDiff == false)
+        #expect(state.isVisible == false)
         #expect(state.branchLabel == "Loading...")
         #expect(state.detailLabel == "Loading...")
         #expect(state.isGitRepo == nil)
