@@ -4,6 +4,8 @@
 //! message tracking, token estimation, pre-turn validation,
 //! compaction, capability result processing, model switching, and system
 //! prompt management.
+//! Snapshot and compaction dependency projections live in child modules so this
+//! file stays focused on manager state and lifecycle behavior.
 
 use std::sync::Arc;
 
@@ -14,7 +16,7 @@ use super::compaction_engine::{CompactionDeps, CompactionEngine};
 use super::constants::{
     CAPABILITY_RESULT_MAX_CHARS, CAPABILITY_RESULT_MIN_TOKENS, CHARS_PER_TOKEN, Thresholds,
 };
-use super::context_snapshot_builder::{ContextSnapshotBuilder, SnapshotDeps};
+use super::context_snapshot_builder::ContextSnapshotBuilder;
 use super::local_policy;
 use super::message_store::MessageStore;
 use super::rules_index::RulesIndex;
@@ -22,10 +24,16 @@ use super::rules_tracker::RulesTracker;
 use super::summarizer::Summarizer;
 use super::token_estimator;
 use super::types::{
-    CapabilitySummary, CompactionPreview, CompactionResult, ContextManagerConfig, ContextSnapshot,
+    CompactionPreview, CompactionResult, ContextManagerConfig, ContextSnapshot,
     DetailedContextSnapshot, ExportedState, ExtractedData, PreTurnValidation,
     ProcessedCapabilityResult, SessionMemoryEntry,
 };
+
+mod compaction_deps;
+mod snapshot_deps;
+
+use compaction_deps::ManagerCompactionDeps;
+use snapshot_deps::ManagerSnapshotDeps;
 
 // =============================================================================
 // ContextManager
@@ -861,137 +869,6 @@ impl ContextManager {
             capabilities: self.config.capabilities.clone(),
             messages: self.get_messages(),
         }
-    }
-}
-
-// =============================================================================
-// Snapshot deps projection
-// =============================================================================
-
-/// Adapts `&ContextManager` to [`SnapshotDeps`].
-struct ManagerSnapshotDeps<'a> {
-    manager: &'a ContextManager,
-}
-
-impl SnapshotDeps for ManagerSnapshotDeps<'_> {
-    fn get_current_tokens(&self) -> u64 {
-        self.manager.get_current_tokens()
-    }
-    fn get_context_limit(&self) -> u64 {
-        self.manager.get_context_limit()
-    }
-    fn get_messages(&self) -> Vec<Message> {
-        self.manager.get_messages()
-    }
-    fn estimate_system_prompt_tokens(&self) -> u64 {
-        self.manager.estimate_system_prompt_tokens()
-    }
-    fn estimate_capabilities_tokens(&self) -> u64 {
-        self.manager.estimate_capabilities_tokens()
-    }
-    fn estimate_rules_tokens(&self) -> u64 {
-        self.manager.estimate_rules_tokens()
-    }
-    fn estimate_skill_index_tokens(&self) -> u64 {
-        self.manager.estimate_skill_index_tokens()
-    }
-    fn estimate_memory_tokens(&self) -> u64 {
-        self.manager.estimate_memory_tokens()
-    }
-    fn estimate_environment_tokens(&self) -> u64 {
-        self.manager.estimate_environment_tokens()
-    }
-    fn get_volatile_skill_context_tokens(&self) -> u64 {
-        self.manager.volatile_skill_context_tokens
-    }
-    fn get_volatile_skill_removal_tokens(&self) -> u64 {
-        self.manager.volatile_skill_removal_tokens
-    }
-    fn get_volatile_job_results_tokens(&self) -> u64 {
-        if self.manager.context_policy().strip_job_results() {
-            0
-        } else {
-            self.manager.volatile_job_results_tokens
-        }
-    }
-    fn get_messages_tokens(&self) -> u64 {
-        self.manager.get_messages_tokens()
-    }
-    fn get_message_tokens(&self, msg: &Message) -> u64 {
-        self.manager.get_message_tokens(msg)
-    }
-    fn get_system_prompt(&self) -> String {
-        self.manager.get_system_prompt().to_owned()
-    }
-    fn get_capability_clarification(&self) -> Option<String> {
-        None
-    }
-    fn get_capability_summaries(&self) -> Vec<CapabilitySummary> {
-        self.manager
-            .config
-            .capabilities
-            .iter()
-            .map(|t| CapabilitySummary {
-                name: t.name.clone(),
-                description: crate::shared::text::first_sentence(&t.description).to_owned(),
-            })
-            .collect()
-    }
-    fn is_local_model(&self) -> bool {
-        self.manager.is_local_model()
-    }
-}
-
-// =============================================================================
-// Compaction deps projection
-// =============================================================================
-
-/// Adapts context manager state for the compaction engine.
-///
-/// Uses interior mutability (`parking_lot::Mutex`) so `CompactionEngine` can
-/// modify messages during compaction. `parking_lot::Mutex` is used instead of
-/// `std::sync::Mutex` to avoid lock poisoning on panic.
-struct ManagerCompactionDeps {
-    messages: parking_lot::Mutex<Vec<Message>>,
-    current_tokens: u64,
-    context_limit: u64,
-    system_prompt_tokens: u64,
-    capabilities_tokens: u64,
-}
-
-impl ManagerCompactionDeps {
-    fn from_manager(manager: &ContextManager) -> Self {
-        Self {
-            messages: parking_lot::Mutex::new(manager.messages_slice().to_vec()),
-            current_tokens: manager.get_current_tokens(),
-            context_limit: manager.get_context_limit(),
-            system_prompt_tokens: manager.estimate_system_prompt_tokens(),
-            capabilities_tokens: manager.estimate_capabilities_tokens(),
-        }
-    }
-}
-
-impl CompactionDeps for ManagerCompactionDeps {
-    fn get_messages(&self) -> Vec<Message> {
-        self.messages.lock().clone()
-    }
-    fn set_messages(&self, messages: Vec<Message>) {
-        *self.messages.lock() = messages;
-    }
-    fn get_current_tokens(&self) -> u64 {
-        self.current_tokens
-    }
-    fn get_context_limit(&self) -> u64 {
-        self.context_limit
-    }
-    fn estimate_system_prompt_tokens(&self) -> u64 {
-        self.system_prompt_tokens
-    }
-    fn estimate_capabilities_tokens(&self) -> u64 {
-        self.capabilities_tokens
-    }
-    fn get_message_tokens(&self, msg: &Message) -> u64 {
-        u64::from(token_estimator::estimate_message_tokens(msg))
     }
 }
 
