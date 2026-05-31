@@ -5,7 +5,8 @@
 //! This module provides the shared vocabulary that all other Tron modules depend on:
 //!
 //! - **Branded IDs**: [`ids::EventId`], [`ids::SessionId`], [`ids::WorkspaceId`] as newtypes
-//! - **Messages**: [`messages::Message`] enum with `User`, `Assistant`, `CapabilityResult` variants
+//! - **Messages**: [`messages::Message`] enum with `User`, `Assistant`, `CapabilityResult` variants.
+//!   Wire-format coverage lives beside the implementation in `protocol/messages/tests.rs`.
 //! - **Content blocks**: [`content::UserContent`], [`content::AssistantContent`], etc.
 //! - **Capability results**: [`model_capabilities::CapabilityResult`] with content, details, error/stop flags
 //! - **Errors**: [`errors::TronError`] hierarchy via `thiserror`, capability error codes

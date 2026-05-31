@@ -980,3 +980,10 @@ phase ledger. If a future change grows a file beyond its budget, adds a new
 file over 1,000 LOC, or reintroduces broad catch-all test/implementation files,
 the owning change must either decompose the file or add a new scorecard row
 with an explicit owner, reason, budget, and target checkpoint.
+
+2026-05-31 cleanup follow-up: near-threshold inline unit suites were extracted
+from `shared/protocol/messages.rs` to `shared/protocol/messages/tests.rs` and
+from `domains/skills/implementation/discovery/loader.rs` to
+`domains/skills/implementation/discovery/loader/tests.rs`. Keep future large
+wire-format and filesystem-discovery matrices in those sibling test modules so
+the production files remain focused on the public contracts and scanner logic.

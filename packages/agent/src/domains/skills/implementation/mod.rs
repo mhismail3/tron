@@ -23,7 +23,8 @@
 //! ## Module Overview
 //!
 //! - [`parser`] — Parse SKILL.md files (YAML frontmatter + markdown body)
-//! - [`loader`] — Recursive filesystem discovery and scanning
+//! - [`loader`] — Recursive filesystem discovery and scanning.
+//!   Its filesystem matrix lives beside the implementation in `discovery/loader/tests.rs`.
 //! - [`registry`] — In-memory skill cache with source precedence and staleness detection
 //! - [`injector`] — `@reference` extraction and `<skills>` XML context building
 //! - [`tracker`] — Per-session skill tracking with event-sourced reconstruction.
