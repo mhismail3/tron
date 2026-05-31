@@ -483,6 +483,14 @@ connected; row labels and title icons both read through `SessionTitleIcons`, so
 visual fork/branch/dirty affordances and accessibility descriptors stay aligned
 with the same `WorktreeInfo` snapshot.
 
+Token, cache, cost, provider, and model metadata are also server-owned display
+data. iOS may render provisional live totals during a streaming turn, but
+persisted message metadata, Agent Control Analytics, context views, dashboard
+rows, and import previews consume the server `tokenRecord` or session-list
+projection. The app does not maintain local pricing tables or recompute
+persisted cost, and missing required turn/token fields are omitted or decoded as
+invalid instead of defaulting to a misleading turn number or guessed price.
+
 ### Audio Capture
 
 `AudioCaptureEngine` is the single capture backend for chat transcription and

@@ -279,7 +279,7 @@ pub(super) fn add_assistant_message_to_context(
 
     context_manager.add_message(crate::shared::messages::Message::Assistant {
         content: stream_result.message.content.clone(),
-        usage: stream_result.token_usage.clone(),
+        usage: stream_result.token_usage.clone().map(Box::new),
         cost: None,
         stop_reason: stop_reason_for_context,
         thinking: thinking_text,

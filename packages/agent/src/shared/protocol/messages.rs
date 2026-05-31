@@ -302,7 +302,7 @@ pub enum Message {
         content: Vec<AssistantContent>,
         /// Token usage.
         #[serde(skip_serializing_if = "Option::is_none")]
-        usage: Option<TokenUsage>,
+        usage: Option<Box<TokenUsage>>,
         /// Cost.
         #[serde(skip_serializing_if = "Option::is_none")]
         cost: Option<Cost>,

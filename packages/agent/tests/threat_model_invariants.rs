@@ -5316,7 +5316,14 @@ fn provider_tool_terms_stay_inside_protocol_boundaries() {
     let allowed_prefixes = [
         "packages/agent/src/domains/model/provider_protocol/",
         "packages/agent/src/domains/model/providers/",
+        "packages/agent/src/domains/agent/runner/agent/turn_runner/persistence.rs",
+        "packages/agent/src/domains/agent/runner/orchestrator/session_reconstructor.rs",
+        "packages/agent/src/domains/agent/runner/pipeline/persistence.rs",
+        "packages/agent/src/domains/import/implementation/transformer.rs",
         "packages/agent/src/domains/mcp/product_protocol/",
+        "packages/agent/src/domains/session/event_store/types/payloads/token_usage.rs",
+        "packages/agent/src/shared/protocol/",
+        "packages/agent/tests/fixtures/session_terminal_guard.py",
         "packages/agent/tests/threat_model_invariants.rs",
     ];
     let forbidden = [

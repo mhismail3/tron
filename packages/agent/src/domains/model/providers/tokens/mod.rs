@@ -1,7 +1,7 @@
 //! Token counting, normalization, and cost calculation for LLM usage.
 //!
 //! This module is the canonical token-accounting boundary for provider usage:
-//! adapters preserve raw provider fields, normalization converts those fields
+//! providers preserve raw provider fields, normalization converts those fields
 //! into server-owned context-window and billable buckets, and pricing returns
 //! either exact component costs or an explicit unavailable state. Downstream
 //! event payloads, session counters, DB denormalized columns, and iOS DTOs

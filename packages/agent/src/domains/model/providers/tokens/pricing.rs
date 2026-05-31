@@ -229,7 +229,8 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "claude-opus-4-6" | "claude-opus-4-5" => anthropic_tier(5.0, 25.0),
 
         // Anthropic — Sonnet family ($3/$15)
-        "claude-sonnet-4-5-20250929"
+        "claude-sonnet-4-6"
+        | "claude-sonnet-4-5-20250929"
         | "claude-sonnet-4-5"
         | "claude-sonnet-4-0-20250514"
         | "claude-sonnet-4"

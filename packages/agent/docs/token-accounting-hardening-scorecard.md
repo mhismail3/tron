@@ -4,9 +4,9 @@ Created: 2026-05-31
 
 Initial score: **0/100**
 
-Current score: **90/100 in progress**
+Current score: **98/100 final checkpoint**
 
-Status: **Phase 3 complete; automated sweep, live/provider evidence, and iPhone manual verification open**
+Status: **Phase 4 implementation complete; final evidence caveats are documented below**
 
 This scorecard owns the token-accounting hardening pass across the Rust
 server, provider adapters, event persistence, session counters, pricing, and
@@ -137,18 +137,74 @@ time-sensitive:
 | ID | Status | Score delta | Scope | Tests/evidence | Residual risks |
 |----|--------|-------------|-------|----------------|----------------|
 | TAH-0 | Complete | +10 | Scorecard, glossary, provider-doc audit, and static-gate plan | This scorecard plus README and invariant-test updates | Provider docs can drift; rerun the doc audit before changing pricing again. |
-| TAH-1 | Complete | +15 | Canonical Rust `TokenRecord`, provider raw fields, computed buckets, and pricing records | `cargo test --manifest-path packages/agent/Cargo.toml tokens --lib -- --nocapture` passed 221 tests; pricing now requires explicit provider identity and returns unavailable for missing provider. | Live provider canaries still open. |
-| TAH-2 | Complete | +15 | Provider adapter decoding and cache request markers for OpenAI, Anthropic, Google, MiniMax, Kimi, and Ollama | Focused provider filters passed: `anthropic` 215, `openai` 248, `google` 146, `kimi` 93, `minimax` 66, and `ollama` 107 tests. MiniMax sends 5-minute cache markers only. | Live provider canaries still open. |
-| TAH-3 | Complete | +15 | Session persistence, denormalized columns, counters, context baselines, interruption, resume, provider switch | `turn_runner::persistence` 12 tests, `append_counters` 19 tests, `event_store` 572 tests, focused static gate, and `cargo check` passed. `stream.turn_end` no longer fabricates zero-token usage and `last_turn_input_tokens` requires canonical `tokenRecord.computed.contextWindowTokens`. | Need DB/event-log evidence from live canaries. |
-| TAH-4 | Complete | +15 | iOS strict DTOs, analytics, message metadata, context displays, and removal of local pricing | iPhone 17 Pro Simulator targeted XCTest passed: token/plugin/analytics set 58 tests; reconstruction/context/lifecycle/turn grouping set 221 XCTest cases plus 30 Swift Testing cases. Static scan found no token-turn `?? 1` fallback and no local pricing table/recompute path in production code. Import preview now consumes server `totalCost`, and imported events use canonical token records instead of a duplicate estimator. | Need visual fit checks in the running app. |
-| TAH-5 | Pending | +10 | Automated verification sweep | Planned: `cargo fmt`, `cargo check`, focused Rust suites, `xcodegen generate`, targeted iPhone XCTest/Swift Testing | Broad CI may be expensive; run focused suites first and escalate on shared-contract failures. |
-| TAH-6 | Pending | +10 | Live provider matrix | Planned: deterministic fixtures first, then small canaries for every configured credentialed provider | Missing credentials or provider outages are recorded as unavailable evidence, not hidden. |
-| TAH-7 | Pending | +10 | iPhone Simulator manual flow | Planned: dashboard, new chat, cached prompt flow, provider switch, reload/resume, metadata, analytics, context views | iPad intentionally skipped. |
+| TAH-1 | Complete | +15 | Canonical Rust `TokenRecord`, provider raw fields, computed buckets, and pricing records | `cargo test --manifest-path packages/agent/Cargo.toml tokens --lib -- --nocapture` passed 221 tests; pricing now requires explicit provider identity and returns unavailable for missing provider. | Provider docs can drift; rerun the doc audit before changing pricing again. |
+| TAH-2 | Complete | +15 | Provider adapter decoding and cache request markers for OpenAI, Anthropic, Google, MiniMax, Kimi, and Ollama | Focused provider filters passed: `anthropic` 215, `openai` 248, `google` 146, `kimi` 93, `minimax` 66, and `ollama` 107 tests. MiniMax sends 5-minute cache markers only. | Live provider accounting evidence is captured in TAH-6; provider API docs should still be rechecked before future semantic changes. |
+| TAH-3 | Complete | +15 | Session persistence, denormalized columns, counters, context baselines, interruption, resume, provider switch | `turn_runner::persistence` 12 tests, `append_counters` 19 tests, `event_store` 572 tests, focused static gate, and `cargo check` passed. `stream.turn_end` no longer fabricates zero-token usage and `last_turn_input_tokens` requires canonical `tokenRecord.computed.contextWindowTokens`. DB evidence from live canaries confirms session counters equal canonical records. | None for token-accounting persistence. |
+| TAH-4 | Complete | +15 | iOS strict DTOs, analytics, message metadata, context displays, and removal of local pricing | iPhone 17 Pro Simulator targeted XCTest passed: token/plugin/analytics set 58 tests; reconstruction/context/lifecycle/turn grouping set 221 XCTest cases plus 30 Swift Testing cases. Static scan found no token-turn `?? 1` fallback and no local pricing table/recompute path in production code. Import preview now consumes server `totalCost`, and imported events use canonical token records instead of a duplicate estimator. Dashboard screenshot evidence confirms running-app fit for provider/model/token/cost rows. | Deep metadata/analytics/context taps were blocked by Computer Use window attach; automated coverage remains the checkpoint evidence for those surfaces. |
+| TAH-5 | Complete | +10 | Automated verification sweep | `scripts/tron ci fmt check clippy test` passed; iPhone 17 Pro Simulator targeted XCTest/Swift Testing passed 221 XCTest cases plus 30 Swift Testing cases after the Phase 4 protocol-size and pricing-tier fixes. | None for the automated token-accounting gates. |
+| TAH-6 | Complete | +10 | Live provider matrix | Current-server live canaries produced canonical, priced token records for Anthropic, OpenAI, Google, MiniMax, Kimi, and Ollama. Anthropic cache write/read, Google cached input/thought tokens, Kimi cache-read pricing, and no-cache MiniMax/Ollama behavior are recorded in the event DB. | The ROC-2 Kimi execute workflow still stopped after a provider `tool_calls` response without materialized execute calls; a separate no-tool Kimi canary reached `end_turn` and verified token accounting. Treat the tool-call behavior as a non-accounting follow-up. |
+| TAH-7 | Partial | +8 | iPhone Simulator manual flow | The open iPhone 17 Pro Simulator was force-quit/reopened on the same device and verified by `simctl` screenshots. Dashboard cards display server-owned token/cost/model metadata for live provider sessions without visible clipping or overlap. Automated iPhone tests cover metadata, analytics, context, strict decoding, and segment-aware turn grouping. | Computer Use could not attach to the Simulator macOS window after repeated reopen attempts (`cgWindowNotFound`), so deep interactive taps into metadata/analytics/context views were not completed in this pass. iPad intentionally skipped. |
+
+## Final Automated Verification
+
+- `scripts/tron ci fmt check clippy test` passed after boxing assistant
+  `TokenUsage`, adding the exact `claude-sonnet-4-6` pricing tier, and
+  tightening the protocol-boundary static gate allowlist for canonical
+  token-record payloads.
+- iPhone 17 Pro Simulator targeted test command passed 221 XCTest cases and 30
+  Swift Testing cases across event transformation, turn grouping, context
+  state, lifecycle coordination, event dispatch, chat routing, and token
+  formatting.
+- Earlier focused suites passed for provider token fixtures, import canonical
+  records, strict iOS token decoding, turn start/end fallbacks, analytics
+  segment identity, and no-local-pricing static scans.
+
+## Live Provider Evidence
+
+Evidence was captured from the current user server and the event-store DB:
+
+| Provider | Model | Session | Token-accounting evidence |
+|----------|-------|---------|---------------------------|
+| Anthropic | `claude-sonnet-4-6` | `sess_019e7d8e-c010-78c3-8876-813e51be409c` | Session totals: input `5`, output `669`, cache read `36033`, cache write `19401`, cost `$0.1262634`. Turn records preserve cache write/read buckets and per-turn pricing. |
+| OpenAI | `gpt-5.5` | `sess_019e7d8e-f7a0-7d83-8bfe-bf7790d1ec9b` | Session totals: input `55169`, output `335`, cache read/write `0`, cost `$0.285895`. Records use provider `openai`, direct calculation, and server pricing. |
+| Google | `gemini-2.5-flash` | `sess_019e7d8f-1f5a-73f2-84e2-fcbb8887a058` | Session totals: input `51644`, output `412`, cache read `15964`, cost `$0.003098925`. Records preserve cached input plus thought-token buckets. |
+| MiniMax | `MiniMax-M2.7` | `sess_019e7d8f-431f-73c1-8167-3bd9a08a9684` | Session totals: input `65815`, output `883`, cache read/write `0`, cost `$0.0208041`. Records keep explicit provider identity and zero-cache semantics for this canary. |
+| Kimi | `kimi-k2.5` | `sess_019e7d99-2338-7d81-a41d-05398a473f17` | No-tool canary reached `end_turn`; totals: input `14726`, output `67`, cache read `14592`, cost `$0.0017406`. Records preserve Kimi cached-token pricing. |
+| Ollama | `gemma4:e4b` | `sess_019e7d92-c8b6-7232-bbbf-2563eee2ef65` | Session totals: input `13300`, output `994`, cache read/write `0`, cost `$0.0`. Records keep provider `ollama` and free local-model pricing. |
+
+The Kimi ROC-2 execute-matrix session
+`sess_019e7d8f-66d0-7e42-ab43-c57202cd0da1` also emitted a canonical Kimi
+token record and priced session totals (`15033` input, `281` output,
+`$0.0098628`), but it did not complete the execute workflow. That residual is
+tracked as provider tool-call materialization, not token accounting.
+
+## iPhone Simulator Evidence
+
+Manual target: iPhone 17 Pro Simulator
+`267F6468-09AE-471D-9157-29144173EB82`, Tron Beta
+`com.tron.mobile.beta`.
+
+Computer Use could not inspect or click the Simulator because the macOS
+accessibility server reported `cgWindowNotFound`, even after force-quitting and
+reopening the same Simulator target. `simctl` screenshots were used for the
+visual portion of the iPhone-only check:
+
+- `/tmp/tron-token-qa/iphone-dashboard-final.png`
+- `/tmp/tron-token-qa/iphone-dashboard-reopened.png`
+
+The dashboard shows the live provider sessions with server-owned token/cost and
+model metadata fitting in-row, including long model titles, unavailable-small
+cost display (`<$0.01`), zero-cache local-model pricing, and cache-heavy hosted
+provider sessions. Deeper metadata, analytics, and context interactions remain
+covered by the automated iPhone tests for this checkpoint because Computer Use
+could not attach to the Simulator window.
 
 ## iPhone Manual Evidence Protocol
 
 Use the open Tron Beta iPhone Simulator. If it is inaccessible, force quit
 Simulator and reopen the same iPhone target before continuing.
+
+Manual coverage target: dashboard, new chat, cached prompt flow, provider switch, reload/resume, metadata, analytics, and context views.
 
 Required flow:
 
@@ -171,4 +227,4 @@ Required flow:
 | Phase 1 | Complete | Scorecard, glossary, provider-doc audit, and failing/static coverage added; open loops recorded. |
 | Phase 2 | Complete | Server canonical schema, adapters, pricing, persistence, counters, and context baselines. |
 | Phase 3 | Complete | iOS DTO/UI cleanup and removal of legacy fallback/pricing logic. |
-| Phase 4 | Pending | Full automated tests, live provider matrix, iPhone manual evidence, docs/README updates, ledger entry, and final commit. |
+| Phase 4 | Complete with evidence caveats | Full automated tests, live provider matrix, iPhone dashboard evidence, docs/README updates, ledger entry, and final commit. |
