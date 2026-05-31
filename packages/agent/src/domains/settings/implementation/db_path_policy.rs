@@ -1,76 +1,77 @@
-//! Production database path policy.
+//! Runtime database path policy.
 //!
-//! Production startup is intentionally strict: the server may only open the
-//! canonical `tron.sqlite` path under `~/.tron/internal/database`.
+//! Startup is intentionally strict: the server may only open the canonical
+//! `tron.sqlite` path under the resolved Tron home's `internal/database`
+//! directory. Normal production resolves that home to `~/.tron`; explicit
+//! developer/test modes may resolve it to another home such as `~/.tron-dev`.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-/// The only database filename allowed in production startup.
+/// The only database filename allowed in server startup.
 pub const PRODUCTION_DB_FILENAME: &str = crate::shared::storage::UNIFIED_DB_FILENAME;
 
-/// Default production database directory for a given home directory.
+/// Default database directory for a resolved Tron home directory.
 #[must_use]
-pub fn production_db_dir_from_home(home: &Path) -> PathBuf {
+pub fn production_db_dir_from_tron_home(tron_home: &Path) -> PathBuf {
     use crate::shared::paths::dirs;
-    home.join(".tron").join(dirs::INTERNAL).join(dirs::DB)
+    tron_home.join(dirs::INTERNAL).join(dirs::DB)
 }
 
-/// Default production database path for a given home directory.
+/// Default database path for a resolved Tron home directory.
 #[must_use]
-pub fn default_production_db_path_for_home(home: &Path) -> PathBuf {
-    production_db_dir_from_home(home).join(PRODUCTION_DB_FILENAME)
+pub fn default_production_db_path_for_tron_home(tron_home: &Path) -> PathBuf {
+    production_db_dir_from_tron_home(tron_home).join(PRODUCTION_DB_FILENAME)
 }
 
-/// Default production database path from `$HOME`.
+/// Default database path from the resolved Tron home.
 #[must_use]
 pub fn default_production_db_path() -> PathBuf {
-    let home = crate::shared::paths::home_dir();
-    default_production_db_path_for_home(&PathBuf::from(home))
+    default_production_db_path_for_tron_home(&crate::shared::paths::tron_home())
 }
 
-/// Resolve and validate the production database path using `$HOME`.
+/// Resolve and validate the database path using the resolved Tron home.
 ///
-/// Returns the canonical allowed path (`~/.tron/internal/database/tron.sqlite`) when valid.
+/// Returns the canonical allowed path (`<tron-home>/internal/database/tron.sqlite`) when valid.
 pub fn resolve_production_db_path(cli_db_path: Option<PathBuf>) -> Result<PathBuf> {
-    let home = crate::shared::paths::home_dir();
-    resolve_production_db_path_for_home(cli_db_path, &PathBuf::from(home))
+    resolve_production_db_path_for_tron_home(cli_db_path, &crate::shared::paths::tron_home())
 }
 
-/// Resolve and validate the production database path for a specific home dir.
+/// Resolve and validate the database path for a specific resolved Tron home.
 ///
 /// This is split out for deterministic testing without mutating process env.
-pub fn resolve_production_db_path_for_home(
+pub fn resolve_production_db_path_for_tron_home(
     cli_db_path: Option<PathBuf>,
-    home: &Path,
+    tron_home: &Path,
 ) -> Result<PathBuf> {
-    let requested = cli_db_path.unwrap_or_else(|| default_production_db_path_for_home(home));
-    validate_production_db_path_for_home(&requested, home)?;
+    let requested =
+        cli_db_path.unwrap_or_else(|| default_production_db_path_for_tron_home(tron_home));
+    validate_production_db_path_for_tron_home(&requested, tron_home)?;
 
-    let expected_dir = production_db_dir_from_home(home);
+    let expected_dir = production_db_dir_from_tron_home(tron_home);
     std::fs::create_dir_all(&expected_dir).with_context(|| {
         format!(
-            "Failed to create production DB directory: {}",
+            "Failed to create database directory: {}",
             expected_dir.display()
         )
     })?;
     let canonical_expected_dir = expected_dir.canonicalize().with_context(|| {
         format!(
-            "Failed to canonicalize production DB directory: {}",
+            "Failed to canonicalize database directory: {}",
             expected_dir.display()
         )
     })?;
     Ok(canonical_expected_dir.join(PRODUCTION_DB_FILENAME))
 }
 
-/// Validate that a requested DB path matches the production policy.
+/// Validate that a requested DB path matches the runtime policy.
 ///
 /// Rules:
 /// - filename must be exactly `tron.sqlite`
-/// - parent directory must resolve exactly to `~/.tron/internal/database`
+/// - parent directory must resolve exactly to `<tron-home>/internal/database`
 /// - symlink DB files are rejected
-pub fn validate_production_db_path_for_home(db_path: &Path, home: &Path) -> Result<()> {
+pub fn validate_production_db_path_for_tron_home(db_path: &Path, tron_home: &Path) -> Result<()> {
     let filename_ok = db_path
         .file_name()
         .and_then(std::ffi::OsStr::to_str)
@@ -83,16 +84,16 @@ pub fn validate_production_db_path_for_home(db_path: &Path, home: &Path) -> Resu
         );
     }
 
-    let expected_dir = production_db_dir_from_home(home);
+    let expected_dir = production_db_dir_from_tron_home(tron_home);
     std::fs::create_dir_all(&expected_dir).with_context(|| {
         format!(
-            "Failed to create production DB directory: {}",
+            "Failed to create database directory: {}",
             expected_dir.display()
         )
     })?;
     let expected_dir_canonical = expected_dir.canonicalize().with_context(|| {
         format!(
-            "Failed to canonicalize production DB directory: {}",
+            "Failed to canonicalize database directory: {}",
             expected_dir.display()
         )
     })?;
@@ -120,7 +121,7 @@ pub fn validate_production_db_path_for_home(db_path: &Path, home: &Path) -> Resu
     })?;
     if parent_canonical != expected_dir_canonical {
         anyhow::bail!(
-            "Invalid db path '{}': production server only allows DBs under '{}'",
+            "Invalid db path '{}': server only allows DBs under '{}'",
             db_path.display(),
             expected_dir_canonical.display()
         );

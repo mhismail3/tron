@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Darwin
 
 @main
 struct TronMacApp: App {
@@ -268,7 +269,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startServerAndQuit() {
         NSApp.setActivationPolicy(.accessory)
         Task { @MainActor in
-            defer { NSApp.terminate(nil) }
+            var exitCode: Int32 = 1
+            defer {
+                if exitCode == 0 {
+                    NSApp.terminate(nil)
+                } else {
+                    Darwin.exit(exitCode)
+                }
+            }
             let setup = EnvironmentSetup.live
             if let problem = setup.validateApplicationLocation() {
                 NSLog("[Tron] Cannot start server from command mode: %@", problem)
@@ -297,7 +305,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             if outcome != .ok, outcome != .alreadyLoaded {
                 NSLog("[Tron] Command-mode server start returned %@", String(describing: outcome))
+                return
             }
+            let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
+            guard case .success = health else {
+                NSLog(
+                    "[Tron] Command-mode server start loaded the Login Item but /health did not pass: %@",
+                    String(describing: health)
+                )
+                return
+            }
+            exitCode = 0
         }
     }
 

@@ -97,10 +97,27 @@ targets:
           rm -rf "$CONSTITUTION_DST"
           mkdir -p "$CONSTITUTION_DST"
           ditto "$CONSTITUTION_SRC" "$CONSTITUTION_DST"
-          HELPER="$DST/LoginItems/Tron Server.app"
-          if [ -d "$HELPER" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
+          if [ -d "$DST/LoginItems" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
-            codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$HELPER"
+            for HELPER in "$DST"/LoginItems/*.app; do
+              [ -d "$HELPER" ] || continue
+              codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$HELPER"
+            done
+            if [ -n "${CODESIGNING_FOLDER_PATH:-}" ] \
+              && [ -d "$CODESIGNING_FOLDER_PATH" ] \
+              && [ ! -d "$CODESIGNING_FOLDER_PATH/Contents/PlugIns" ]; then
+              ENTITLEMENTS_PATH=""
+              if [ -f "$TARGET_TEMP_DIR/$PRODUCT_NAME.app.xcent" ]; then
+                ENTITLEMENTS_PATH="$TARGET_TEMP_DIR/$PRODUCT_NAME.app.xcent"
+              elif [ -n "${CODE_SIGN_ENTITLEMENTS:-}" ] && [ -f "$SRCROOT/$CODE_SIGN_ENTITLEMENTS" ]; then
+                ENTITLEMENTS_PATH="$SRCROOT/$CODE_SIGN_ENTITLEMENTS"
+              fi
+              if [ -n "$ENTITLEMENTS_PATH" ]; then
+                codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none --entitlements "$ENTITLEMENTS_PATH" "$CODESIGNING_FOLDER_PATH"
+              else
+                codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$CODESIGNING_FOLDER_PATH"
+              fi
+            fi
           fi
 
   TronMacTests:

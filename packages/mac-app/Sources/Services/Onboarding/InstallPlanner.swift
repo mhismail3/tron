@@ -37,6 +37,8 @@ enum InstallPlanner {
         var plistPath: URL
         var label: String
         var port: Int
+        var environmentVariables: [String: String] = TronPaths.launchAgentEnvironmentVariables
+        var associatedBundleIDs: [String] = TronPaths.associatedWrapperBundleIDs
     }
 
     /// Renders the LaunchAgent plist body. Mirrors
@@ -45,6 +47,13 @@ enum InstallPlanner {
     /// is relative to the outer app bundle, and `ProgramArguments`
     /// contains only argv items.
     static func renderPlist(paths: TargetPaths) -> String {
+        let bundleProgram = "Contents/Library/LoginItems/\(paths.helperBundle.lastPathComponent)/Contents/MacOS/tron"
+        let environment = paths.environmentVariables.keys.sorted().map { key in
+            """
+                    <key>\(key.xmlEscaped)</key>
+                    <string>\(paths.environmentVariables[key, default: ""].xmlEscaped)</string>
+            """
+        }.joined(separator: "\n")
         return """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -62,7 +71,7 @@ enum InstallPlanner {
             </array>
 
             <key>BundleProgram</key>
-            <string>Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron</string>
+            <string>\(bundleProgram.xmlEscaped)</string>
 
             <key>RunAtLoad</key>
             <true/>
@@ -80,8 +89,7 @@ enum InstallPlanner {
 
             <key>EnvironmentVariables</key>
             <dict>
-                <key>RUST_LOG</key>
-                <string>info</string>
+        \(environment)
             </dict>
 
             <key>SoftResourceLimits</key>
@@ -92,8 +100,7 @@ enum InstallPlanner {
 
             <key>AssociatedBundleIdentifiers</key>
             <array>
-                <string>\(MacRuntimeVariant.releaseBundleIdentifier.xmlEscaped)</string>
-                <string>\(MacRuntimeVariant.debugBundleIdentifier.xmlEscaped)</string>
+        \(paths.associatedBundleIDs.map { "        <string>\($0.xmlEscaped)</string>" }.joined(separator: "\n"))
             </array>
         </dict>
         </plist>

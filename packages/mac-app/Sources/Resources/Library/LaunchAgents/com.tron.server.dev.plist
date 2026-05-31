@@ -14,7 +14,7 @@
     </array>
 
     <key>BundleProgram</key>
-    <string>Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron</string>
+    <string>Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -46,8 +46,8 @@
 
     <key>AssociatedBundleIdentifiers</key>
     <array>
-        <string>com.tron.mac</string>
         <string>com.tron.mac.dev</string>
+        <string>com.tron.mac</string>
     </array>
 </dict>
 </plist>

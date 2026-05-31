@@ -30,7 +30,10 @@ enum TronPaths {
     }()
 
     static let tronHome: URL = {
-        let environment = ProcessInfo.processInfo.environment
+        tronHome(environment: ProcessInfo.processInfo.environment)
+    }()
+
+    static func tronHome(environment: [String: String]) -> URL {
         if let override = environment[tronDataDirEnv], !override.isEmpty {
             precondition(override.hasPrefix("/"), "\(tronDataDirEnv) must be an absolute path")
             return URL(fileURLWithPath: override, isDirectory: true)
@@ -43,7 +46,7 @@ enum TronPaths {
             return homeDirectory.appendingPathComponent(".tron-dev", isDirectory: true)
         }
         return homeDirectory.appendingPathComponent(".tron", isDirectory: true)
-    }()
+    }
 
     static var internalDir: URL { tronHome.appendingPathComponent(HomeComponent.internalDir, isDirectory: true) }
     static var profilesDir: URL { tronHome.appendingPathComponent(HomeComponent.profilesDir, isDirectory: true) }
@@ -63,7 +66,7 @@ enum TronPaths {
             .appendingPathComponent("Contents/Library/LoginItems", isDirectory: true)
     }
     static var serverHelperBundle: URL {
-        loginItemsDir.appendingPathComponent("\(agentDisplayName).app", isDirectory: true)
+        loginItemsDir.appendingPathComponent("\(agentBundleName).app", isDirectory: true)
     }
     static var serverHelperBinary: URL {
         serverHelperBundle
@@ -123,6 +126,14 @@ enum TronPaths {
             .appendingPathComponent("\(launchAgentLabel).plist", isDirectory: false)
     }
 
+    static var serverHelperBundleProgram: String {
+        serverHelperBundleProgram(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func serverHelperBundleProgram(environment: [String: String]) -> String {
+        "Contents/Library/LoginItems/\(agentBundleName(environment: environment)).app/Contents/MacOS/tron"
+    }
+
     static var autoDeployPlistPath: URL {
         homeDirectory
             .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
@@ -130,37 +141,82 @@ enum TronPaths {
     }
 
     static var launchAgentLabel: String {
-        isIsolatedInstallMode() ? isolatedLaunchAgentLabel : productionLaunchAgentLabel
+        launchAgentLabel(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func launchAgentLabel(environment: [String: String]) -> String {
+        isIsolatedInstallMode(environment: environment) ? isolatedLaunchAgentLabel : productionLaunchAgentLabel
     }
 
     static var defaultServerPort: Int {
-        return isIsolatedInstallMode() ? isolatedServerPort : productionServerPort
+        defaultServerPort(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func defaultServerPort(environment: [String: String]) -> Int {
+        isIsolatedInstallMode(environment: environment) ? isolatedServerPort : productionServerPort
+    }
+
+    static var launchAgentEnvironmentVariables: [String: String] {
+        launchAgentEnvironmentVariables(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func launchAgentEnvironmentVariables(environment: [String: String]) -> [String: String] {
+        if isIsolatedInstallMode(environment: environment) {
+            return ["RUST_LOG": "info", tronHomeNameEnv: ".tron-dev"]
+        }
+        return ["RUST_LOG": "info"]
     }
 
     static var canManageLaunchAgent: Bool {
         MacRuntimeVariant.detect().canManageLaunchAgent(isIsolatedInstallMode: isIsolatedInstallMode())
     }
-    /// Bundle identifier for the embedded server helper
-    /// (`Contents/Library/LoginItems/Tron Server.app`), not the
-    /// menu-bar wrapper. Intentionally matches the production
-    /// LaunchAgent label so launchd diagnostics and helper signature
-    /// checks name the same service. The isolated install-test label is
-    /// `com.tron.server.dev`; it reuses the same signed helper bundle
-    /// but runs under a separate LaunchAgent plist.
-    static let bundleID = "com.tron.server"
+    /// Bundle identifier for the active embedded server helper, not the
+    /// menu-bar wrapper. It intentionally matches the active LaunchAgent label
+    /// so launchd diagnostics and helper signature checks name the same
+    /// service in both production and isolated install-test modes.
+    static var bundleID: String {
+        bundleID(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func bundleID(environment: [String: String]) -> String {
+        launchAgentLabel(environment: environment)
+    }
     /// User-facing display name for the agent in System Settings, Activity
     /// Monitor, and the Dock (if it ever surfaced). Kept separate from the
     /// wrapper's "Tron" name so the three permission panes never show two
     /// entries titled "Tron".
-    static let agentDisplayName = "Tron Server"
+    static var agentDisplayName: String {
+        agentDisplayName(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func agentDisplayName(environment: [String: String]) -> String {
+        agentBundleName(environment: environment)
+    }
+    static var agentBundleName: String {
+        agentBundleName(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func agentBundleName(environment: [String: String]) -> String {
+        isIsolatedInstallMode(environment: environment) ? "Tron Server Dev" : "Tron Server"
+    }
     /// Wrapper bundle identifiers that may own the SMAppService
     /// registration. launchd uses the active parent bundle as the
     /// responsible app for some TCC services, so the LaunchAgent plist
     /// associates the service with wrapper variants instead of the helper.
-    static let associatedWrapperBundleIDs = [
-        MacRuntimeVariant.releaseBundleIdentifier,
-        MacRuntimeVariant.debugBundleIdentifier,
-    ]
+    static var associatedWrapperBundleIDs: [String] {
+        associatedWrapperBundleIDs(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func associatedWrapperBundleIDs(
+        environment: [String: String]
+    ) -> [String] {
+        let release = MacRuntimeVariant.releaseBundleIdentifier
+        let debug = MacRuntimeVariant.debugBundleIdentifier
+        if isIsolatedInstallMode(environment: environment) {
+            return [debug, release]
+        }
+        return [release, debug]
+    }
 
     static func isIsolatedInstallMode(
         environment: [String: String] = ProcessInfo.processInfo.environment

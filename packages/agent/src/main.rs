@@ -29,7 +29,7 @@
 //! 4. Session writes are serialized per-session via in-process locks
 //! 5. `agent.filesystem_ready` is emitted AFTER `agent.complete` (iOS send button)
 //! 6. Compaction always runs before ledger writing (deterministic DB ordering)
-//! 7. Production DB target is strictly `~/.tron/internal/database/tron.sqlite`
+//! 7. DB target is strictly `<resolved-tron-home>/internal/database/tron.sqlite`
 //! 8. Server shutdown is signal-owned (`SIGINT`/`SIGTERM` on Unix) so managed
 //!    children are stopped before Tron exits.
 

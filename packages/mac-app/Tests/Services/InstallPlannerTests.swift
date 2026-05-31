@@ -100,15 +100,56 @@ struct InstallPlannerTests {
         ])
     }
 
-    private func makePaths(in tmp: URL, port: Int = 9847) -> InstallPlanner.TargetPaths {
+    @Test("plist rendering follows the supplied isolated helper and environment")
+    func plistRenderingUsesIsolatedHelper() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let paths = makePaths(
+            in: tmp,
+            helperName: "Tron Server Dev.app",
+            label: "com.tron.server.dev",
+            port: 9848,
+            environmentVariables: ["RUST_LOG": "info", "TRON_HOME_NAME": ".tron-dev"],
+            associatedBundleIDs: ["com.tron.mac.dev", "com.tron.mac"]
+        )
+
+        let plist = InstallPlanner.renderPlist(paths: paths)
+        let data = try #require(plist.data(using: .utf8))
+        let decoded = try #require(
+            PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any]
+        )
+
+        #expect(decoded["Label"] as? String == "com.tron.server.dev")
+        #expect(decoded["BundleProgram"] as? String == "Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron")
+        #expect(decoded["ProgramArguments"] as? [String] == ["tron", "--port", "9848", "--quiet"])
+        #expect((decoded["EnvironmentVariables"] as? [String: String]) == [
+            "RUST_LOG": "info",
+            "TRON_HOME_NAME": ".tron-dev",
+        ])
+        #expect(decoded["AssociatedBundleIdentifiers"] as? [String] == [
+            "com.tron.mac.dev",
+            "com.tron.mac",
+        ])
+    }
+
+    private func makePaths(
+        in tmp: URL,
+        helperName: String = "Tron Server.app",
+        label: String = "com.tron.server",
+        port: Int = 9847,
+        environmentVariables: [String: String] = ["RUST_LOG": "info"],
+        associatedBundleIDs: [String] = ["com.tron.mac", "com.tron.mac.dev"]
+    ) -> InstallPlanner.TargetPaths {
         let app = tmp.appendingPathComponent("Tron.app", isDirectory: true)
-        let helper = app.appendingPathComponent("Contents/Library/LoginItems/Tron Server.app", isDirectory: true)
+        let helper = app.appendingPathComponent("Contents/Library/LoginItems/\(helperName)", isDirectory: true)
         return InstallPlanner.TargetPaths(
             helperBundle: helper,
             helperBinary: helper.appendingPathComponent("Contents/MacOS/tron", isDirectory: false),
-            plistPath: app.appendingPathComponent("Contents/Library/LaunchAgents/com.tron.server.plist", isDirectory: false),
-            label: "com.tron.server",
-            port: port
+            plistPath: app.appendingPathComponent("Contents/Library/LaunchAgents/\(label).plist", isDirectory: false),
+            label: label,
+            port: port,
+            environmentVariables: environmentVariables,
+            associatedBundleIDs: associatedBundleIDs
         )
     }
 

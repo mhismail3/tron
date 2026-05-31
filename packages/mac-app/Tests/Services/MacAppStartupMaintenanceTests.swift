@@ -11,6 +11,7 @@ struct MacAppStartupMaintenanceTests {
         onboarded: Bool = true,
         canManageLaunchAgent: Bool = true,
         serverProcess: ServerProcessInfo? = nil,
+        pingResult: ServerPingResult? = nil,
         launchAgentManager: MockLaunchAgentManager = MockLaunchAgentManager()
     ) -> EnvironmentSetup {
         let marker = tmp.appendingPathComponent("internal/run/mac-app-version.json", isDirectory: false)
@@ -39,7 +40,11 @@ struct MacAppStartupMaintenanceTests {
             detectExistingInstall: { .none },
             validateApplicationLocation: { nil },
             validateBundledHelper: { nil },
-            pingServer: { _ in .success(ServerInfo(version: currentVersion.canonicalVersion, port: 9847, paired: true)) },
+            pingServer: { _ in
+                pingResult ?? .success(ServerInfo(version: currentVersion.canonicalVersion, port: 9847, paired: true))
+            },
+            serverStartHealthCheckAttempts: 1,
+            serverStartHealthCheckDelayNanoseconds: 0,
             launchAgentManager: launchAgentManager,
             probeServerProcess: { _ in serverProcess },
             syncManagedSkills: {
@@ -87,6 +92,31 @@ struct MacAppStartupMaintenanceTests {
         #expect(result == .restarted(.ok))
         #expect(mock.calls.map(\.kind) == [.load, .restart, .runtimeInfo])
         #expect(setup.readRecordedAppVersion() == current)
+    }
+
+    @Test("existing onboarded launch does not record update marker until health passes")
+    func missingMarkerDoesNotRecordUnhealthyRestart() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
+        let mock = MockLaunchAgentManager()
+        mock.loadOutcome = .alreadyLoaded
+        let setup = Self.makeSetup(
+            tmp: tmp,
+            currentVersion: current,
+            pingResult: .unreachable,
+            launchAgentManager: mock
+        )
+
+        let result = await MacAppStartupMaintenance.run(
+            setup: setup,
+            controller: nil,
+            context: .existingOnboardedLaunch
+        )
+
+        #expect(result == .restartUnhealthy(.ok, .unreachable))
+        #expect(mock.calls.map(\.kind) == [.load, .restart, .isLoaded])
+        #expect(setup.readRecordedAppVersion() == nil)
     }
 
     @Test("existing onboarded launch skips when version is already recorded")

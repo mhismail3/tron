@@ -108,19 +108,25 @@ final class MenuBarActionHandler {
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel
         )
-        await refreshStatus()
         switch outcome {
         case .ok, .alreadyLoaded:
-            await MenuBarNotifier.post(title: "Tron server restarted", body: "The menu bar status has been refreshed.")
+            await finishServerStartAction(
+                successTitle: "Tron server restarted",
+                successBody: "The menu bar status has been refreshed.",
+                failureTitle: "Restart failed"
+            )
             return
         case .requiresApproval(let message):
+            await refreshStatus()
             LoginItemsSettingsOpener.open()
             await MenuBarNotifier.post(title: "Restart blocked", body: message)
             await presentNonBlockingError(title: "Restart blocked", message: message)
         case .launchdRefused(let message), .unknown(let message):
+            await refreshStatus()
             await MenuBarNotifier.post(title: "Restart failed", body: message)
             await presentNonBlockingError(title: "Restart failed", message: message)
         case .binaryMissing(let path):
+            await refreshStatus()
             let message = "Binary missing: \(path)"
             await MenuBarNotifier.post(title: "Restart failed", body: message)
             await presentNonBlockingError(title: "Restart failed", message: message)
@@ -160,19 +166,25 @@ final class MenuBarActionHandler {
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel
         )
-        await refreshStatus()
         switch outcome {
         case .ok, .alreadyLoaded:
-            await MenuBarNotifier.post(title: "Tron server resumed", body: "The menu bar status has been refreshed.")
+            await finishServerStartAction(
+                successTitle: "Tron server resumed",
+                successBody: "The menu bar status has been refreshed.",
+                failureTitle: "Resume failed"
+            )
             return
         case .requiresApproval(let message):
+            await refreshStatus()
             LoginItemsSettingsOpener.open()
             await MenuBarNotifier.post(title: "Resume blocked", body: message)
             await presentNonBlockingError(title: "Resume blocked", message: message)
         case .launchdRefused(let message), .unknown(let message):
+            await refreshStatus()
             await MenuBarNotifier.post(title: "Resume failed", body: message)
             await presentNonBlockingError(title: "Resume failed", message: message)
         case .binaryMissing(let path):
+            await refreshStatus()
             let message = "Binary missing: \(path)"
             await MenuBarNotifier.post(title: "Resume failed", body: message)
             await presentNonBlockingError(title: "Resume failed", message: message)
@@ -193,18 +205,24 @@ final class MenuBarActionHandler {
                 }
             }
             let outcome = await resumeServerAfterDevStop()
-            await refreshStatus()
             switch outcome {
             case .ok, .alreadyLoaded:
-                await MenuBarNotifier.post(title: "Dev server stopped", body: "The installed Tron Server is running again.")
+                await finishServerStartAction(
+                    successTitle: "Dev server stopped",
+                    successBody: "The installed Tron Server is running again.",
+                    failureTitle: "Resume failed"
+                )
             case .requiresApproval(let message):
+                await refreshStatus()
                 LoginItemsSettingsOpener.open()
                 await MenuBarNotifier.post(title: "Resume blocked", body: message)
                 await presentNonBlockingError(title: "Resume blocked", message: message)
             case .launchdRefused(let message), .unknown(let message):
+                await refreshStatus()
                 await MenuBarNotifier.post(title: "Resume failed", body: message)
                 await presentNonBlockingError(title: "Resume failed", message: message)
             case .binaryMissing(let path):
+                await refreshStatus()
                 let message = "Binary missing: \(path)"
                 await MenuBarNotifier.post(title: "Resume failed", body: message)
                 await presentNonBlockingError(title: "Resume failed", message: message)
@@ -345,6 +363,35 @@ final class MenuBarActionHandler {
         guard let controller = menuBarController else { return }
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         controller.applySnapshot(snapshot)
+    }
+
+    private func finishServerStartAction(
+        successTitle: String,
+        successBody: String,
+        failureTitle: String
+    ) async {
+        let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
+        await refreshStatus()
+
+        if case .success = health {
+            await MenuBarNotifier.post(title: successTitle, body: successBody)
+            return
+        }
+
+        let message = unhealthyStartMessage(result: health)
+        await MenuBarNotifier.post(title: failureTitle, body: message)
+        await presentNonBlockingError(title: failureTitle, message: message)
+    }
+
+    private func unhealthyStartMessage(result: ServerPingResult) -> String {
+        switch result {
+        case .success:
+            return "The server is running."
+        case .unauthorized:
+            return "The Tron Server started but rejected the local bearer token. Re-pair or restart after updating /Applications/Tron.app."
+        case .unreachable, .timeout, .malformedResponse:
+            return "The Tron Server was loaded by ServiceManagement, but /health never became reachable. Update or reinstall /Applications/Tron.app, then restart the server."
+        }
     }
 
     private func applyBusy(_ action: ServerBusyAction) {

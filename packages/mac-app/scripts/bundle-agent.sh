@@ -3,9 +3,9 @@
 # bundle-agent.sh — stage the Rust agent binaries as the embedded
 # `Tron Server.app` Login Item used by `SMAppService`.
 #
-# The executables are staged at:
-# `packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron`.
-# `packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker`.
+# The executables are staged in both helper bundles:
+# `packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/`
+# `packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/`
 # `project.yml` copies `Sources/Resources/Library` into
 # `Tron.app/Contents/Library` after compile, yielding the production path
 # required by `SMAppService.agent(plistName:)`.
@@ -48,11 +48,19 @@ HELPER_BUNDLE="$LIBRARY_DIR/LoginItems/Tron Server.app"
 HELPER_CONTENTS="$HELPER_BUNDLE/Contents"
 HELPER_MACOS="$HELPER_CONTENTS/MacOS"
 HELPER_RESOURCES="$HELPER_CONTENTS/Resources"
+DEV_HELPER_BUNDLE="$LIBRARY_DIR/LoginItems/Tron Server Dev.app"
+DEV_HELPER_CONTENTS="$DEV_HELPER_BUNDLE/Contents"
+DEV_HELPER_MACOS="$DEV_HELPER_CONTENTS/MacOS"
+DEV_HELPER_RESOURCES="$DEV_HELPER_CONTENTS/Resources"
 LAUNCH_AGENT_DIR="$LIBRARY_DIR/LaunchAgents"
 STAGING_PATH="$HELPER_MACOS/tron"
 STAGING_WORKER_PATH="$HELPER_MACOS/tron-program-worker"
+DEV_STAGING_PATH="$DEV_HELPER_MACOS/tron"
+DEV_STAGING_WORKER_PATH="$DEV_HELPER_MACOS/tron-program-worker"
 HELPER_INFO_PLIST="$HELPER_CONTENTS/Info.plist"
+DEV_HELPER_INFO_PLIST="$DEV_HELPER_CONTENTS/Info.plist"
 LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.tron.server.plist"
+DEV_LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.tron.server.dev.plist"
 
 # --- argv parser ---------------------------------------------------------
 
@@ -81,8 +89,8 @@ done
 # --- clean mode ----------------------------------------------------------
 
 if [ "$do_clean" -eq 1 ]; then
-    rm -rf "$HELPER_BUNDLE" "$LAUNCH_AGENT_PLIST"
-    echo "cleaned $HELPER_BUNDLE and $LAUNCH_AGENT_PLIST"
+    rm -rf "$HELPER_BUNDLE" "$DEV_HELPER_BUNDLE" "$LAUNCH_AGENT_PLIST" "$DEV_LAUNCH_AGENT_PLIST"
+    echo "cleaned helper bundles and launch agent plists"
     exit 0
 fi
 
@@ -239,7 +247,7 @@ fi
 
 # --- staging -------------------------------------------------------------
 
-mkdir -p "$HELPER_MACOS" "$HELPER_RESOURCES" "$LAUNCH_AGENT_DIR" || {
+mkdir -p "$HELPER_MACOS" "$HELPER_RESOURCES" "$DEV_HELPER_MACOS" "$DEV_HELPER_RESOURCES" "$LAUNCH_AGENT_DIR" || {
     echo "error: cannot create helper staging directories" >&2
     exit 3
 }
@@ -272,6 +280,35 @@ cat > "$HELPER_INFO_PLIST" <<'PLIST'
 PLIST
 
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_RESOURCES/AppIcon.icns"
+
+cat > "$DEV_HELPER_INFO_PLIST" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>tron</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.tron.server.dev</string>
+    <key>CFBundleName</key>
+    <string>Tron Server Dev</string>
+    <key>CFBundleDisplayName</key>
+    <string>Tron Server Dev</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon.icns</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>LSUIElement</key>
+    <true/>
+</dict>
+</plist>
+PLIST
+
+cp "$RESOURCES_DIR/AppIcon.icns" "$DEV_HELPER_RESOURCES/AppIcon.icns"
 
 cat > "$LAUNCH_AGENT_PLIST" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -327,17 +364,81 @@ cat > "$LAUNCH_AGENT_PLIST" <<'PLIST'
 </plist>
 PLIST
 
+cat > "$DEV_LAUNCH_AGENT_PLIST" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tron.server.dev</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>tron</string>
+        <string>--port</string>
+        <string>9848</string>
+        <string>--quiet</string>
+    </array>
+
+    <key>BundleProgram</key>
+    <string>Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>info</string>
+        <key>TRON_HOME_NAME</key>
+        <string>.tron-dev</string>
+    </dict>
+
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>com.tron.mac.dev</string>
+        <string>com.tron.mac</string>
+    </array>
+</dict>
+</plist>
+PLIST
+
 # Atomic stage: copy to tempfile then rename, matching the pattern used
 # by the Rust agent's own atomic-write helper.
 tmp="$HELPER_MACOS/.tron.tmp.$$"
 worker_tmp="$HELPER_MACOS/.tron-program-worker.tmp.$$"
-trap 'rm -f "$tmp" "$worker_tmp"' EXIT
+dev_tmp="$DEV_HELPER_MACOS/.tron.tmp.$$"
+dev_worker_tmp="$DEV_HELPER_MACOS/.tron-program-worker.tmp.$$"
+trap 'rm -f "$tmp" "$worker_tmp" "$dev_tmp" "$dev_worker_tmp"' EXIT
 cp "$source_bin" "$tmp"
 chmod 0755 "$tmp"
 mv -f "$tmp" "$STAGING_PATH"
 cp "$worker_source_bin" "$worker_tmp"
 chmod 0755 "$worker_tmp"
 mv -f "$worker_tmp" "$STAGING_WORKER_PATH"
+cp "$source_bin" "$dev_tmp"
+chmod 0755 "$dev_tmp"
+mv -f "$dev_tmp" "$DEV_STAGING_PATH"
+cp "$worker_source_bin" "$dev_worker_tmp"
+chmod 0755 "$dev_worker_tmp"
+mv -f "$dev_worker_tmp" "$DEV_STAGING_WORKER_PATH"
 trap - EXIT
 
 # --- report --------------------------------------------------------------
@@ -354,3 +455,4 @@ echo "staged $STAGING_WORKER_PATH"
 echo "  from:   $worker_source_bin"
 echo "  size:   $worker_size_bytes bytes"
 echo "  sha256: $worker_sha"
+echo "staged isolated helper bundle at $DEV_HELPER_BUNDLE"

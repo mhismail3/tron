@@ -12,8 +12,8 @@ use tron::domains::model::providers::provider::ProviderFactory;
 use tron::domains::session::event_store::{ConnectionConfig, EventStore};
 use tron::domains::settings::TronSettings;
 use tron::domains::settings::db_path_policy::{
-    PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_home,
-    validate_production_db_path_for_home,
+    PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_tron_home,
+    validate_production_db_path_for_tron_home,
 };
 use tron::domains::skills::registry::SkillRegistry;
 use tron::shared::server::context::ServerRuntimeContext;
@@ -197,33 +197,33 @@ async fn factory_unknown_model_returns_unsupported_model_error() {
 #[test]
 fn db_policy_accepts_expected_home_path() {
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join("home");
-    std::fs::create_dir_all(&home).unwrap();
-    let db_path = production_db_dir_from_home(&home).join(PRODUCTION_DB_FILENAME);
-    validate_production_db_path_for_home(&db_path, &home).unwrap();
+    let tron_home = dir.path().join(".tron-dev");
+    std::fs::create_dir_all(&tron_home).unwrap();
+    let db_path = production_db_dir_from_tron_home(&tron_home).join(PRODUCTION_DB_FILENAME);
+    validate_production_db_path_for_tron_home(&db_path, &tron_home).unwrap();
 }
 
 #[test]
 fn db_policy_rejects_alternate_filename() {
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join("home");
-    std::fs::create_dir_all(&home).unwrap();
-    let db_path = production_db_dir_from_home(&home).join("not-beta.db");
-    let err = validate_production_db_path_for_home(&db_path, &home).unwrap_err();
+    let tron_home = dir.path().join(".tron-dev");
+    std::fs::create_dir_all(&tron_home).unwrap();
+    let db_path = production_db_dir_from_tron_home(&tron_home).join("not-beta.db");
+    let err = validate_production_db_path_for_tron_home(&db_path, &tron_home).unwrap_err();
     assert!(err.to_string().contains(PRODUCTION_DB_FILENAME));
 }
 
 #[test]
 fn db_policy_rejects_wrong_directory_without_creating_it() {
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join("home");
-    std::fs::create_dir_all(&home).unwrap();
+    let tron_home = dir.path().join(".tron-dev");
+    std::fs::create_dir_all(&tron_home).unwrap();
 
-    let bad_parent = home.join("other-db-dir");
+    let bad_parent = tron_home.join("other-db-dir");
     let bad_path = bad_parent.join(PRODUCTION_DB_FILENAME);
     assert!(!bad_parent.exists());
 
-    let err = validate_production_db_path_for_home(&bad_path, &home).unwrap_err();
+    let err = validate_production_db_path_for_tron_home(&bad_path, &tron_home).unwrap_err();
     assert!(err.to_string().contains("does not exist"));
     assert!(!bad_parent.exists());
 }
@@ -234,10 +234,10 @@ fn db_policy_rejects_symlink_db_file() {
     use std::os::unix::fs::symlink;
 
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join("home");
-    std::fs::create_dir_all(&home).unwrap();
+    let tron_home = dir.path().join(".tron-dev");
+    std::fs::create_dir_all(&tron_home).unwrap();
 
-    let prod_dir = production_db_dir_from_home(&home);
+    let prod_dir = production_db_dir_from_tron_home(&tron_home);
     std::fs::create_dir_all(&prod_dir).unwrap();
 
     let target = dir.path().join("escape.db");
@@ -245,7 +245,7 @@ fn db_policy_rejects_symlink_db_file() {
     let symlink_path = prod_dir.join(PRODUCTION_DB_FILENAME);
     symlink(&target, &symlink_path).unwrap();
 
-    let err = validate_production_db_path_for_home(&symlink_path, &home).unwrap_err();
+    let err = validate_production_db_path_for_tron_home(&symlink_path, &tron_home).unwrap_err();
     assert!(err.to_string().contains("symlink"));
 }
 

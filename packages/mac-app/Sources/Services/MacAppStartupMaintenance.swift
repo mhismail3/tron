@@ -52,6 +52,7 @@ enum MacAppStartupSkipReason: Equatable, Sendable {
 
 enum MacAppStartupMaintenanceResult: Equatable, Sendable {
     case restarted(LaunchAgentOutcome)
+    case restartUnhealthy(LaunchAgentOutcome, ServerPingResult)
     case recordedCurrentVersion
     case skipped(MacAppStartupSkipReason)
 }
@@ -126,13 +127,24 @@ enum MacAppStartupMaintenance {
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel
         )
+        let health: ServerPingResult?
+        switch outcome {
+        case .ok, .alreadyLoaded:
+            health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
+        case .requiresApproval, .launchdRefused, .binaryMissing, .unknown:
+            health = nil
+        }
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         await MainActor.run {
             controller?.applySnapshot(snapshot)
         }
         switch outcome {
         case .ok, .alreadyLoaded:
-            record(currentVersion, setup: setup)
+            if let health, case .success = health {
+                record(currentVersion, setup: setup)
+            } else {
+                return .restartUnhealthy(outcome, health ?? .unreachable)
+            }
         case .requiresApproval, .launchdRefused, .binaryMissing, .unknown:
             break
         }

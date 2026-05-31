@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-05-30 (menu dev takeover controls and CLI command-module split)
+> Last verified: 2026-05-30 (menu dev takeover controls, health-gated starts, and isolated helper registration)
 
 ## Overview
 
@@ -16,7 +16,7 @@ to the visible wizard/menu state.
 
 The switch is driven entirely by the `.onboarded` sentinel file — no UserDefaults flag on the Mac side.
 
-`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. Release helper executables are produced by `cargo build --release --bin tron --bin tron-program-worker` and staged into the bundled helper app at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/`; `tron` is the LaunchAgent entrypoint and `tron-program-worker` is the required sibling process for `execute(mode: "program")`. The helper is signed before the outer app. The agent binary embeds the first-party capability-search ONNX/tokenizer bundle during the Rust build, so semantic capability search is offline and independent of mutable runtime model files. The app bundle also carries managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under `~/.tron/internal/transcription/` after the user enables transcription. See [development.md](./development.md) for the build pipeline.
+`Tron.app` does NOT embed the full Rust toolchain or build the agent at runtime. Helper executables are produced by `cargo build --release --bin tron --bin tron-program-worker` and staged into two bundled helper apps: `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/` for production/local Release and `Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/` for isolated Debug install testing. `tron` is the LaunchAgent entrypoint and `tron-program-worker` is the required sibling process for `execute(mode: "program")`. Helpers are signed first, then the outer wrapper is re-signed after copying the `Contents/Library` tree so ServiceManagement can verify the bundled LaunchAgent plists as sealed resources. The agent binary embeds the first-party capability-search ONNX/tokenizer bundle during the Rust build, so semantic capability search is offline and independent of mutable runtime model files. The app bundle also carries managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the transcription sidecar source files (`worker.py`, `requirements.txt`) under `Contents/Resources/Transcription/`; the venv and model cache are mutable user data under the active Tron home after the user enables transcription. See [development.md](./development.md) for the build pipeline.
 
 ## Directory Structure
 
@@ -66,6 +66,7 @@ packages/mac-app/
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
 │   │   └── Server/
 │   │       ├── BearerTokenReader.swift     # reads auth.json bearerToken; caches pairing Tailscale IP in profile.toml
+│   │       ├── ServerHealthAwaiter.swift   # bounded /health polling after SMAppService start/load
 │   │       ├── ServerPing.swift            # one-shot string-id system::ping over WS → ServerPingResult; skips broadcast/event frames
 │   │       ├── ServerStatusPoller.swift    # 30s periodic poll for menu bar
 │   │       ├── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
@@ -236,6 +237,12 @@ for PID/uptime, so `tron dev` takeover reports the `Tron-Dev.app` process
 instead of stale LaunchAgent metadata and marks the header `Dev Server active`.
 If `system::ping` fails, the poller asks launchd whether `com.tron.server` is
 loaded; unloaded maps to paused, loaded-but-unreachable maps to failed.
+Explicit menu actions that should leave the server running (`Restart server`,
+`Resume server`, and `Stop dev server` recovery) share the bounded
+`ServerHealthAwaiter` path after SMAppService reports loaded. They only post a
+success notification after `/health` returns healthy; loaded-but-unreachable
+helpers keep the menu in the failed state and surface an update/reinstall
+message instead of claiming the server is running.
 
 ### Menu-bar auxiliary windows
 
@@ -264,7 +271,9 @@ server`. Pause, restart, and uninstall remain disabled during dev takeover. The
 stop action re-probes the port owner before signaling anything, sends TERM then
 KILL only to the verified dev PID if needed, and then resumes the installed
 Login Item through the same `SMAppService` load path as the normal Resume
-action.
+action. If the installed helper loads but never becomes healthy, the action
+shows a `Resume failed` alert and leaves the refreshed menu state failed rather
+than advertising a successful recovery.
 Menu rows use native `NSMenuItem` rendering with no item images, so the popup
 keeps the standard macOS menu spacing used by apps like 1Password.
 "Send feedback" builds a prefilled GitHub issue with app/server context and a
@@ -277,7 +286,7 @@ GitHub issue opens with a short note.
 0. Wait for user: Install CTA increments WizardState.installRequestID; no disk or launchd mutation happens before this
    - WizardState.handledInstallRequestID suppresses replay when the install page remounts after back/forward navigation
 1. Validate location: Release builds must run from `/Applications/Tron.app`; Debug builds may run from DerivedData.
-2. Validate helper: Ensure bundled `Tron Server.app`, both helper executables, LaunchAgent plist, `BundleProgram`, wrapper `AssociatedBundleIdentifiers`, and signature are present.
+2. Validate helper: Ensure the active bundled helper app (`Tron Server.app` or `Tron Server Dev.app`), both helper executables, LaunchAgent plist, `BundleProgram`, wrapper `AssociatedBundleIdentifiers`, and signature are present.
 3. Plan:          InstallPlanner.plan(…) → Result<InstallPlan, Failure>
 4. Register:      SMAppService.agent(plistName: "<active-label>.plist").register()
    - Installed Release manages `com.tron.server` on port `9847`; the isolated install scheme manages `com.tron.server.dev` on port `9848`.
@@ -319,14 +328,14 @@ files are still preserved.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper registers the service.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.
-- **The helper app must be signed before registration.** Release validation fails loudly if `Tron Server.app`, its binary, the bundled LaunchAgent plist, or the helper signature is missing/corrupt. The helper keeps bundle id `com.tron.server`; the LaunchAgent associates with the wrapper bundle ids because macOS presents some TCC services under the responsible wrapper app.
+- **The helper app must be signed before registration.** Validation fails loudly if the active helper app, its binary, the bundled LaunchAgent plist, or the helper signature is missing/corrupt. Production/local Release use `Tron Server.app` with bundle id `com.tron.server`; isolated Debug uses `Tron Server Dev.app` with bundle id `com.tron.server.dev`. The helper bundle id intentionally matches the active LaunchAgent label, while the LaunchAgent associates with the wrapper bundle ids because macOS presents some TCC services under the responsible wrapper app.
 - **Uninstall preserves user data.** Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` unregister the SMAppService agent and clear runtime state. Default Debug companion mode refuses to uninstall production. Menu-bar uninstall may clear `[settings]` overrides from `profiles/user/profile.toml` and/or remove `auth.json` only when the user explicitly checks the matching reset option; it never removes the database or workspace.
 - **A loaded LaunchAgent label is not proof that the correct helper is running.** Registration inspects `launchctl print` for the loaded job's parent bundle identifier and event-trigger executable before deciding whether to reuse, repair, or fail. Missing/mismatched helper executables are stale registrations and manager builds repair them; default Debug companion builds never repair or own production registration.
 - **Permission checks are wrapper-owned and probe-only.** The Permissions step records when it opened System Settings only to decide whether to show the visible "Checking permissions..." activity state on return. App activation, Re-check, and the gear-button watcher call native wrapper probes without `launchctl kickstart`, and transient `.probeUnavailable` snapshots preserve the last concrete badge state instead of turning the page gray. The only permission-time restart is the one-time helper restart after all rows are green and the user presses Continue.
 - **Transcription is opt-in user data.** `worker.py` and `requirements.txt` ship read-only in the app bundle, and the wizard copies them to `~/.tron/internal/transcription/` when the user applies the Transcription step. The app bundle never contains the Python venv or Parakeet model cache, and skipping the step leaves the server setting false.
 - **App bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/internal/run`; `Tron.app` is only replaced by a new notarized DMG.
 - **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth.json`, `profile.toml`, `run/.onboarded`) or a engine protocol call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
-- **Production uses one port (`9847`) and one LaunchAgent label (`com.tron.server`).** The DMG-installed `Tron.app` (`com.tron.mac`), local Release copies, the default Xcode Debug companion (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) all target the production `~/.tron` data tree. Debug companion observes production but does not manage its Login Item; `tron dev` is the explicit server takeover path and stops the production LaunchAgent before binding 9847. The isolated install scheme is the exception by design: it uses `com.tron.server.dev`, port `9848`, and `~/.tron-dev`.
+- **Production uses one port (`9847`) and one LaunchAgent label (`com.tron.server`).** The DMG-installed `Tron.app` (`com.tron.mac`), local Release copies, the default Xcode Debug companion (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) all target the production `~/.tron` data tree. Debug companion observes production but does not manage its Login Item; `tron dev` is the explicit server takeover path and stops the production LaunchAgent before binding 9847. The isolated install scheme is the exception by design: it uses `com.tron.server.dev`, `Tron Server Dev.app`, port `9848`, and `~/.tron-dev`.
 - **TronPaths is the single source of truth.** If any path is referenced elsewhere, that's a bug. See `packages/agent/src/core/foundation/paths.rs` for the Rust-side mirror.
 
 ## Workflows & Variants
@@ -340,7 +349,7 @@ Production workflows operate against the same `~/.tron/internal/` data tree and 
 | **1. Production (DMG)** | End users downloading from GitHub Releases | `Tron.app` (notarized + stapled DMG) | `com.tron.mac` | `/Applications/Tron.app` | SwiftUI wrapper (wizard + menu bar), embedded headless agent, and transcription source files | `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` inside `/Applications/Tron.app` |
 | **2. Local Release test** | Contributors validating a Release build without the DMG wrapper | `Tron.app` (Release build copied into place) | `com.tron.mac` | `/Applications/Tron.app` | Same runtime shape as Production, usually not notarized | Same installed-release helper path inside `/Applications/Tron.app` |
 | **3. Debug companion (default Xcode Run)** | Contributors testing wrapper UI while production stays installed | `TronMac.app` (Debug build, Xcode/xcodebuild) | `com.tron.mac.dev` | `~/Library/Developer/Xcode/DerivedData/TronMac-*/Build/Products/Debug/TronMac.app` | Same SwiftUI wrapper as Production with a debug-profile bundled helper and transcription source files | Observes the production server on port 9847; does not register or mutate `com.tron.server` |
-| **4. Isolated install test** | Contributors testing first-run/reinstall flows from Xcode | `TronMac.app` with `TRON_MAC_INSTALL_MODE=isolated` | `com.tron.mac.dev` | DerivedData | Debug wrapper and helper, separate install target | Registers `com.tron.server.dev`, runs port 9848, uses `~/.tron-dev` via `TRON_HOME_NAME=.tron-dev` |
+| **4. Isolated install test** | Contributors testing first-run/reinstall flows from Xcode | `TronMac.app` with `TRON_MAC_INSTALL_MODE=isolated` | `com.tron.mac.dev` | DerivedData | Debug wrapper and `Tron Server Dev.app`, separate install target | Registers `com.tron.server.dev`, runs port 9848, uses `~/.tron-dev` via `TRON_HOME_NAME=.tron-dev` |
 | **5. Agent dev (`tron dev`)** | Contributors iterating on the Rust agent without wrapper UI | `Tron-Dev.app` (no SwiftUI — just a `.app` bundle wrapping the dev Rust binary) | `com.tron.agent` | `~/.tron/internal/run/Tron-Dev.app` | Headless Rust agent only (no menu bar, no wizard) | Takes over port 9847 in-process; the production LaunchAgent is stopped first |
 
 > **Naming guard.** `TronMac.app` (workflows 3 and 4's build product) and `Tron-Dev.app` (workflow 5's agent bundle) are unrelated. `TronMac.app` is the wrapper UI compiled in Debug mode; `Tron-Dev.app` is just the Rust agent recompiled in dev. They share neither code nor purpose.
@@ -350,7 +359,7 @@ Production workflows operate against the same `~/.tron/internal/` data tree and 
 ### What every workflow shares
 
 - **Port `9847`** — the production WS bind. Always exclusive — see "Mutual exclusion" below. Workflow 4 uses `9848`.
-- **LaunchAgent label `com.tron.server`** — the launchd job that owns the installed production server. Workflows 1 and 2 register it through `SMAppService`; workflow 3 observes it; workflow 5 stops it before binding the port itself. Workflow 4 registers only `com.tron.server.dev`.
+- **LaunchAgent label `com.tron.server`** — the launchd job that owns the installed production server. Workflows 1 and 2 register it through `SMAppService`; workflow 3 observes it; workflow 5 stops it before binding the port itself. Workflow 4 registers only `com.tron.server.dev` and points `BundleProgram` at `Tron Server Dev.app`.
 - **`~/.tron/` Constitution home** — production profiles/auth, memory, workspace data, log database, and `internal/run/` state. Workflows 1, 2, 3, and 5 use it. Workflow 4 uses `~/.tron-dev`.
 - **`auth.json.bearerToken`** — bearer issued by the agent on first start. Same token regardless of which workflow started the agent.
 - **`~/.tron/skills/`** — managed skills synced from the wrapper's bundled `Contents/Resources/Skills/` by production install/menu-bar start paths, and from `packages/agent/skills/` by `tron install` / `tron dev`. Same-name user-owned directories without `.managed` are preserved; stale `.managed` directories disappear when the bundled set no longer contains them.

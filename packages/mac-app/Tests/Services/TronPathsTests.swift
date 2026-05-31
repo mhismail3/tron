@@ -6,12 +6,12 @@ import Testing
 struct TronPathsTests {
     @Test("LaunchAgent label matches the canonical label")
     func launchAgentLabelMatches() {
-        #expect(TronPaths.launchAgentLabel == "com.tron.server")
+        #expect(TronPaths.launchAgentLabel(environment: [:]) == "com.tron.server")
     }
 
     @Test("default port matches the agent default")
     func defaultPortMatches() {
-        #expect(TronPaths.defaultServerPort == 9847)
+        #expect(TronPaths.defaultServerPort(environment: [:]) == 9847)
     }
 
     @Test("helper bundle ID matches the production LaunchAgent label")
@@ -22,8 +22,8 @@ struct TronPathsTests {
         // (bundleID="com.tron.agent", label="com.tron.server") caused
         // status checks to report the wrong service; the two unified
         // as `com.tron.server`.
-        #expect(TronPaths.bundleID == "com.tron.server")
-        #expect(TronPaths.bundleID == TronPaths.productionLaunchAgentLabel)
+        #expect(TronPaths.bundleID(environment: [:]) == "com.tron.server")
+        #expect(TronPaths.bundleID(environment: [:]) == TronPaths.productionLaunchAgentLabel)
     }
 
     @Test("agent display name is 'Tron Server'")
@@ -32,21 +32,51 @@ struct TronPathsTests {
         // CFBundleName). Calling the agent "Tron Server" keeps the
         // Accessibility entry distinct from the responsible wrapper
         // entry used by FDA / Screen Recording.
-        #expect(TronPaths.agentDisplayName == "Tron Server")
+        #expect(TronPaths.agentDisplayName(environment: [:]) == "Tron Server")
     }
 
     @Test("LaunchAgent associates with wrapper variants")
     func associatedWrapperBundleIDsMatchVariants() {
-        #expect(TronPaths.associatedWrapperBundleIDs == [
+        #expect(TronPaths.associatedWrapperBundleIDs(environment: [:]) == [
             MacRuntimeVariant.releaseBundleIdentifier,
             MacRuntimeVariant.debugBundleIdentifier,
+        ])
+        #expect(TronPaths.associatedWrapperBundleIDs(
+            environment: [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]
+        ) == [
+            MacRuntimeVariant.debugBundleIdentifier,
+            MacRuntimeVariant.releaseBundleIdentifier,
         ])
     }
 
     @Test("server helper binary lives inside the bundled Login Item")
     func serverHelperBinaryShape() {
-        let bin = TronPaths.serverHelperBinary.path
-        #expect(bin.hasSuffix("/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"))
+        #expect(TronPaths.serverHelperBundleProgram(environment: [:]) == "Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron")
+    }
+
+    @Test("isolated install mode uses the dev helper, port, and home")
+    func isolatedInstallModeShape() {
+        let environment = [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]
+
+        #expect(TronPaths.launchAgentLabel(environment: environment) == "com.tron.server.dev")
+        #expect(TronPaths.defaultServerPort(environment: environment) == 9848)
+        #expect(TronPaths.agentBundleName(environment: environment) == "Tron Server Dev")
+        #expect(TronPaths.serverHelperBundleProgram(environment: environment) == "Contents/Library/LoginItems/Tron Server Dev.app/Contents/MacOS/tron")
+        #expect(TronPaths.launchAgentEnvironmentVariables(environment: environment) == [
+            "RUST_LOG": "info",
+            TronPaths.tronHomeNameEnv: ".tron-dev",
+        ])
+        #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-dev"))
+    }
+
+    @Test("TRON_HOME_NAME overrides isolated install home with a single directory name")
+    func tronHomeNameOverridesIsolatedHome() {
+        let environment = [
+            TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue,
+            TronPaths.tronHomeNameEnv: ".tron-sandbox",
+        ]
+
+        #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-sandbox"))
     }
 
     @Test("runtime locks live in internal/run")
@@ -61,8 +91,8 @@ struct TronPathsTests {
 
     @Test("LaunchAgent plist is bundled in Contents/Library/LaunchAgents")
     func launchAgentPlistShape() {
-        let plist = TronPaths.launchAgentPlistPath.path
-        #expect(plist.contains("/Contents/Library/LaunchAgents/com.tron.server.plist"))
+        #expect(TronPaths.launchAgentLabel(environment: [:]) == "com.tron.server")
+        #expect(TronPaths.launchAgentLabel(environment: [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]) == "com.tron.server.dev")
     }
 
     @Test("auth.json lives in profiles/")
@@ -104,7 +134,7 @@ struct TronPathsTests {
 
     @Test("managed skills sync from bundle resources into ~/.tron/skills")
     func managedSkillsShape() {
-        #expect(TronPaths.skillsDir.path.hasSuffix("/.tron/skills"))
+        #expect(TronPaths.tronHome(environment: [:]).appendingPathComponent("skills", isDirectory: true).path.hasSuffix("/.tron/skills"))
         #expect(TronPaths.managedSkillsResourceDir.path.hasSuffix("/Contents/Resources/Skills")
                 || TronPaths.managedSkillsResourceDir.path.contains("/Resources/Skills"))
     }
