@@ -285,7 +285,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     );
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
-    let stream_options = build_stream_options(run_context);
+    let stream_options = build_stream_options(run_context, session_id);
 
     if let Some(persister) = persister {
         let context_blocks =
@@ -595,9 +595,11 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             build_interrupted_message_payload(
                 &stream_result.message,
                 stream_result.token_usage.as_ref(),
+                session_id,
                 turn,
                 provider.model(),
                 provider.provider_type(),
+                previous_context_baseline,
             ),
             sequence_counter,
         )
@@ -684,6 +686,12 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // Persist succeeded — safe to commit the assistant turn to local context
     // and tell iOS the response is complete.
     let _ = add_assistant_message_to_context(context_manager, &stream_result);
+    if let Some(context_window_tokens) = token_record_json
+        .as_ref()
+        .and_then(|r| r["computed"]["contextWindowTokens"].as_u64())
+    {
+        context_manager.set_api_context_tokens(context_window_tokens);
+    }
     emit_response_complete(
         emitter,
         session_id,

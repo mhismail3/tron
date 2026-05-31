@@ -322,6 +322,7 @@ fn completed_emits_text_end_and_done() {
         Some(ResponsesUsage {
             input_tokens: 100,
             output_tokens: 50,
+            ..Default::default()
         }),
     );
 
@@ -375,6 +376,7 @@ fn completed_emits_toolcall_end_with_capability_invocation_stop_reason() {
         Some(ResponsesUsage {
             input_tokens: 50,
             output_tokens: 30,
+            ..Default::default()
         }),
     );
 
@@ -485,6 +487,7 @@ fn completed_with_thinking_emits_thinking_end_before_done() {
         Some(ResponsesUsage {
             input_tokens: 50,
             output_tokens: 30,
+            ..Default::default()
         }),
     );
 
@@ -525,6 +528,7 @@ fn completed_malformed_function_call_arguments_emit_error_without_invocation() {
         Some(ResponsesUsage {
             input_tokens: 50,
             output_tokens: 30,
+            ..Default::default()
         }),
     );
 
@@ -571,6 +575,7 @@ fn completed_discovers_capability_invocations_not_seen_in_deltas() {
         Some(ResponsesUsage {
             input_tokens: 50,
             output_tokens: 30,
+            ..Default::default()
         }),
     );
 
@@ -707,6 +712,7 @@ fn done_event_has_openai_provider_type() {
         Some(ResponsesUsage {
             input_tokens: 10,
             output_tokens: 5,
+            ..Default::default()
         }),
     );
 

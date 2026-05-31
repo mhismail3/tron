@@ -113,7 +113,6 @@ pub fn normalize_is_error(block: &Value) -> bool {
 #[serde(rename_all = "kebab-case")]
 pub enum Provider {
     /// Anthropic (Claude).
-    #[default]
     Anthropic,
     /// `OpenAI`.
     #[serde(rename = "openai")]
@@ -133,6 +132,7 @@ pub enum Provider {
     #[serde(rename = "ollama")]
     Ollama,
     /// Unrecognized provider (defensive deserialization).
+    #[default]
     #[serde(other, rename = "unknown")]
     Unknown,
 }
@@ -180,13 +180,25 @@ impl std::str::FromStr for Provider {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenUsage {
-    /// Input tokens (new tokens for Anthropic, full context for others).
+    /// Provider-reported input tokens.
+    ///
+    /// Anthropic reports uncached input tokens here while `cache_read_tokens`
+    /// and `cache_creation_tokens` hold the cached buckets. OpenAI and Google
+    /// report the full effective prompt/context here, including cached input.
     pub input_tokens: u64,
     /// Output tokens generated.
     pub output_tokens: u64,
     /// Tokens read from prompt cache.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<u64>,
+    /// Cached input tokens as a provider-native field.
+    ///
+    /// This intentionally mirrors `cache_read_tokens` for providers that only
+    /// expose cached input rather than a cache-read billing bucket. Keeping the
+    /// raw field lets audits distinguish provider vocabulary from normalized
+    /// cache billing buckets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<u64>,
     /// Tokens written to prompt cache.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_tokens: Option<u64>,
@@ -196,6 +208,18 @@ pub struct TokenUsage {
     /// 1-hour TTL cache creation tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_1h_tokens: Option<u64>,
+    /// Output tokens spent on hidden reasoning, when the provider reports them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_output_tokens: Option<u64>,
+    /// Output tokens spent on provider thinking, when reported separately.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought_tokens: Option<u64>,
+    /// Prompt tokens attributed to tool-use scaffolding, when reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use_prompt_tokens: Option<u64>,
+    /// Provider-reported total tokens for this model call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_tokens: Option<u64>,
     /// Provider type for normalization.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_type: Option<Provider>,

@@ -200,9 +200,19 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     input_tokens: am.usage.input_tokens.max(0) as u64,
                     output_tokens: am.usage.output_tokens.max(0) as u64,
                     cache_read_tokens: Some(am.usage.cache_read_input_tokens.max(0) as u64),
+                    cached_input_tokens: Some(am.usage.cache_read_input_tokens.max(0) as u64),
                     cache_creation_tokens: Some(am.usage.cache_creation_input_tokens.max(0) as u64),
                     cache_creation_5m_tokens: None,
                     cache_creation_1h_tokens: None,
+                    reasoning_output_tokens: None,
+                    thought_tokens: None,
+                    tool_use_prompt_tokens: None,
+                    total_tokens: Some(
+                        am.usage.input_tokens.max(0) as u64
+                            + am.usage.output_tokens.max(0) as u64
+                            + am.usage.cache_read_input_tokens.max(0) as u64
+                            + am.usage.cache_creation_input_tokens.max(0) as u64,
+                    ),
                     provider_type: Some(Provider::Anthropic),
                 };
                 let token_record = build_token_record(
@@ -211,6 +221,7 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     "import",
                     am.turn.max(0) as u32,
                     previous_baseline,
+                    "imported/anthropic",
                 );
                 // Update baseline for next turn's delta calculation
                 if let Some(computed) = token_record.get("computed") {

@@ -312,6 +312,9 @@ fn process_completed_response(
     if let Some(usage) = &response.usage {
         state.acc.input_tokens = usage.input_tokens;
         state.acc.output_tokens = usage.output_tokens;
+        state.acc.cache_read_tokens = usage.input_tokens_details.cached_tokens;
+        state.acc.reasoning_output_tokens = usage.output_tokens_details.reasoning_tokens;
+        state.acc.total_tokens = usage.total_tokens;
     }
 
     // Process output items from completed response
@@ -482,12 +485,20 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
             token_usage: Some(TokenUsage {
                 input_tokens: state.acc.input_tokens,
                 output_tokens: state.acc.output_tokens,
+                cache_read_tokens: nonzero(state.acc.cache_read_tokens),
+                cached_input_tokens: nonzero(state.acc.cache_read_tokens),
+                reasoning_output_tokens: nonzero(state.acc.reasoning_output_tokens),
+                total_tokens: nonzero(state.acc.total_tokens),
                 provider_type: Some(crate::shared::messages::Provider::OpenAi),
                 ..TokenUsage::default()
             }),
         },
         stop_reason: stop_reason.into(),
     }
+}
+
+fn nonzero(value: u64) -> Option<u64> {
+    (value > 0).then_some(value)
 }
 
 fn parse_openai_capability_arguments(

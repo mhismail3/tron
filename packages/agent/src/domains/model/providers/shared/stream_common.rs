@@ -49,6 +49,12 @@ pub struct StreamAccumulator {
     pub input_tokens: u64,
     /// Output token count.
     pub output_tokens: u64,
+    /// Tokens read from cache/cached input.
+    pub cache_read_tokens: u64,
+    /// Hidden reasoning output tokens.
+    pub reasoning_output_tokens: u64,
+    /// Provider-reported total tokens.
+    pub total_tokens: u64,
 }
 
 impl StreamAccumulator {
@@ -64,6 +70,9 @@ impl StreamAccumulator {
             capability_invocations: Vec::new(),
             input_tokens: 0,
             output_tokens: 0,
+            cache_read_tokens: 0,
+            reasoning_output_tokens: 0,
+            total_tokens: 0,
         }
     }
 

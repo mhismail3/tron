@@ -12,15 +12,24 @@ struct ConsolidatedAnalytics {
         let cacheCreationTokens: Int
         let cacheCreation5mTokens: Int
         let cacheCreation1hTokens: Int
-        let cost: Double
+        let providerTotalTokens: Int
+        let cost: Double?
+        let pricingAvailable: Bool
+        let pricingUnavailableReason: String?
         let latency: Int
         let capabilityCount: Int
         let capabilities: [String]
         let errorCount: Int
         let errors: [String]
         let model: String?
+        let baseInputCost: Double
+        let outputCost: Double
+        let cacheReadCost: Double
+        let cacheWriteCost: Double
+        let baseInputTokens: Int
 
         var totalTokens: Int {
+            if providerTotalTokens > 0 { return providerTotalTokens }
             let cacheWrite = hasPerTTLBreakdown
                 ? (cacheCreation5mTokens + cacheCreation1hTokens)
                 : cacheCreationTokens
@@ -73,10 +82,6 @@ struct ConsolidatedAnalytics {
     }
 
     var costBreakdown: CostBreakdown {
-        let dominantModel = turns.first(where: { $0.model != nil })?.model
-        let pricing = Self.getPricing(for: dominantModel)
-
-        let inputTokens = totalInputTokens
         let outputTokens = totalOutputTokens
         let cacheRead = totalCacheReadTokens
         let cacheCreation = totalCacheCreationTokens
@@ -84,40 +89,28 @@ struct ConsolidatedAnalytics {
         let cache1h = totalCacheCreation1hTokens
 
         let hasPerTTL = cache5m > 0 || cache1h > 0
-        let baseInput = max(0, inputTokens - cacheRead - cacheCreation)
-
-        let baseInputCost = (Double(baseInput) / 1_000_000) * pricing.inputPerMillion
-        let outCost = (Double(outputTokens) / 1_000_000) * pricing.outputPerMillion
-        let cacheReadCost = (Double(cacheRead) / 1_000_000) * pricing.inputPerMillion * pricing.cacheReadMultiplier
-
-        let write5mCost: Double
-        let write1hCost: Double
-        let writeDefaultTtlCost: Double
         let defaultTtlTokens: Int
 
         if hasPerTTL {
-            write5mCost = (Double(cache5m) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
-            write1hCost = (Double(cache1h) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite1hMultiplier
-            writeDefaultTtlCost = 0
             defaultTtlTokens = 0
         } else {
-            write5mCost = 0
-            write1hCost = 0
-            writeDefaultTtlCost = (Double(cacheCreation) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
             defaultTtlTokens = cacheCreation
         }
 
-        let total = baseInputCost + outCost + cacheReadCost + write5mCost + write1hCost + writeDefaultTtlCost
-        let fullPriceCacheRead = (Double(cacheRead) / 1_000_000) * pricing.inputPerMillion
-        let savings = fullPriceCacheRead - cacheReadCost
+        let baseInput = turns.reduce(0) { $0 + $1.baseInputTokens }
+        let baseInputCost = turns.reduce(0) { $0 + $1.baseInputCost }
+        let outCost = turns.reduce(0) { $0 + $1.outputCost }
+        let cacheReadCost = turns.reduce(0) { $0 + $1.cacheReadCost }
+        let cacheWriteCost = turns.reduce(0) { $0 + $1.cacheWriteCost }
+        let total = baseInputCost + outCost + cacheReadCost + cacheWriteCost
 
         return CostBreakdown(
             baseInputCost: baseInputCost,
             outputCost: outCost,
             cacheReadCost: cacheReadCost,
-            cacheWrite5mCost: write5mCost,
-            cacheWrite1hCost: write1hCost,
-            cacheWriteDefaultTtlCost: writeDefaultTtlCost,
+            cacheWrite5mCost: hasPerTTL ? cacheWriteCost : 0,
+            cacheWrite1hCost: 0,
+            cacheWriteDefaultTtlCost: hasPerTTL ? 0 : cacheWriteCost,
             totalCost: total,
             baseInputTokens: baseInput,
             outputTokens: outputTokens,
@@ -126,32 +119,16 @@ struct ConsolidatedAnalytics {
             cacheWrite1hTokens: cache1h,
             cacheWriteDefaultTtlTokens: defaultTtlTokens,
             hasPerTTLBreakdown: hasPerTTL,
-            cacheSavings: savings
+            cacheSavings: 0
         )
     }
 
     static func turnCostBreakdown(for turn: TurnData) -> TurnCostBreakdown {
-        let pricing = getPricing(for: turn.model)
-        let baseInput = max(0, turn.inputTokens - turn.cacheReadTokens - turn.cacheCreationTokens)
-
-        let inputCost = (Double(baseInput) / 1_000_000) * pricing.inputPerMillion
-        let outputCost = (Double(turn.outputTokens) / 1_000_000) * pricing.outputPerMillion
-        let cacheReadCost = (Double(turn.cacheReadTokens) / 1_000_000) * pricing.inputPerMillion * pricing.cacheReadMultiplier
-
-        let cacheWriteCost: Double
-        if turn.hasPerTTLBreakdown {
-            let cost5m = (Double(turn.cacheCreation5mTokens) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
-            let cost1h = (Double(turn.cacheCreation1hTokens) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite1hMultiplier
-            cacheWriteCost = cost5m + cost1h
-        } else {
-            cacheWriteCost = (Double(turn.cacheCreationTokens) / 1_000_000) * pricing.inputPerMillion * pricing.cacheWrite5mMultiplier
-        }
-
         return TurnCostBreakdown(
-            inputCost: inputCost,
-            outputCost: outputCost,
-            cacheReadCost: cacheReadCost,
-            cacheWriteCost: cacheWriteCost
+            inputCost: turn.baseInputCost,
+            outputCost: turn.outputCost,
+            cacheReadCost: turn.cacheReadCost,
+            cacheWriteCost: turn.cacheWriteCost
         )
     }
 
@@ -165,105 +142,48 @@ struct ConsolidatedAnalytics {
         return nil
     }
 
-    /// Extract Double from Any (handles Double, Int, NSNumber, and String from JSON)
-    private static func extractDouble(_ value: Any?) -> Double? {
-        if let doubleVal = value as? Double { return doubleVal }
-        if let intVal = value as? Int { return Double(intVal) }
-        if let nsNumber = value as? NSNumber { return nsNumber.doubleValue }
-        // Handle case where value comes as a String (e.g., from JSON serialization)
-        if let stringVal = value as? String, let parsed = Double(stringVal) { return parsed }
-        return nil
+    private struct ExtractedTokenUsage {
+        let input: Int
+        let output: Int
+        let cacheRead: Int
+        let cacheCreation: Int
+        let cacheCreation5m: Int
+        let cacheCreation1h: Int
+        let providerTotal: Int
+        let cost: Double?
+        let pricingAvailable: Bool
+        let pricingUnavailableReason: String?
+        let baseInputTokens: Int
+        let baseInputCost: Double
+        let outputCost: Double
+        let cacheReadCost: Double
+        let cacheWriteCost: Double
     }
 
-    /// Extract token usage from event payload's tokenRecord, falling back to tokenUsage.
-    ///
-    /// Live sessions emit tokenRecord (with source.rawInputTokens etc.).
-    /// Imported sessions only emit tokenUsage (with inputTokens etc.).
-    private static func extractTokenUsage(from payload: [String: AnyCodable]) -> (input: Int, output: Int, cacheRead: Int, cacheCreation: Int, cacheCreation5m: Int, cacheCreation1h: Int)? {
-        // Prefer tokenRecord (live sessions)
-        if let tokenRecord = payload["tokenRecord"]?.value as? [String: Any],
-           let source = tokenRecord["source"] as? [String: Any] {
-            let input = extractInt(source["rawInputTokens"]) ?? 0
-            let output = extractInt(source["rawOutputTokens"]) ?? 0
-            let cacheRead = extractInt(source["rawCacheReadTokens"]) ?? 0
-            let cacheCreation = extractInt(source["rawCacheCreationTokens"]) ?? 0
-            let cacheCreation5m = extractInt(source["rawCacheCreation5mTokens"]) ?? 0
-            let cacheCreation1h = extractInt(source["rawCacheCreation1hTokens"]) ?? 0
-            return (input, output, cacheRead, cacheCreation, cacheCreation5m, cacheCreation1h)
+    private static func extractTokenUsage(from payload: [String: AnyCodable]) -> ExtractedTokenUsage? {
+        guard let tokenRecordDict = payload["tokenRecord"]?.value as? [String: Any],
+              let tokenRecord = TokenRecord.from(dict: tokenRecordDict) else {
+            return nil
         }
 
-        // Fallback to tokenUsage (imported sessions)
-        if let tokenUsage = payload["tokenUsage"]?.value as? [String: Any] {
-            let input = extractInt(tokenUsage["inputTokens"]) ?? 0
-            let output = extractInt(tokenUsage["outputTokens"]) ?? 0
-            let cacheRead = extractInt(tokenUsage["cacheReadTokens"]) ?? 0
-            let cacheCreation = extractInt(tokenUsage["cacheCreationTokens"]) ?? 0
-            return (input, output, cacheRead, cacheCreation, 0, 0)
-        }
-
-        return nil
-    }
-
-    // MARK: - Cost Breakdown Pricing (display-only)
-
-    /// Model pricing per million tokens (USD).
-    /// Used only for the analytics cost breakdown display — total cost comes from the server.
-    struct ModelPricing {
-        let inputPerMillion: Double
-        let outputPerMillion: Double
-        let cacheWrite5mMultiplier: Double  // 1.25x for 5-min TTL
-        let cacheWrite1hMultiplier: Double  // 2.0x for 1-hour TTL
-        let cacheReadMultiplier: Double     // 0.1x (90% discount)
-
-        static let defaultPricing = ModelPricing(
-            inputPerMillion: 3.0,
-            outputPerMillion: 15.0,
-            cacheWrite5mMultiplier: 1.25,
-            cacheWrite1hMultiplier: 2.0,
-            cacheReadMultiplier: 0.1
+        let cost = tokenRecord.pricing.cost
+        return ExtractedTokenUsage(
+            input: tokenRecord.source.rawInputTokens,
+            output: tokenRecord.source.rawOutputTokens,
+            cacheRead: tokenRecord.source.rawCacheReadTokens,
+            cacheCreation: tokenRecord.source.rawCacheCreationTokens,
+            cacheCreation5m: tokenRecord.source.rawCacheCreation5mTokens,
+            cacheCreation1h: tokenRecord.source.rawCacheCreation1hTokens,
+            providerTotal: tokenRecord.source.rawTotalTokens,
+            cost: cost?.totalCost,
+            pricingAvailable: tokenRecord.pricing.available,
+            pricingUnavailableReason: tokenRecord.pricing.reason,
+            baseInputTokens: cost?.baseInputTokens ?? 0,
+            baseInputCost: cost?.baseInputCost ?? 0,
+            outputCost: cost?.outputCost ?? 0,
+            cacheReadCost: cost?.cacheReadCost ?? 0,
+            cacheWriteCost: cost?.cacheWriteCost ?? 0
         )
-    }
-
-    /// Get pricing for a model (display-only, for analytics cost breakdown visualization).
-    /// Total cost is always server-provided — this is only used to estimate component proportions.
-    static func getPricing(for model: String?) -> ModelPricing {
-        guard let model = model?.lowercased() else { return .defaultPricing }
-
-        if model.contains("opus-4-5") || model.contains("opus-4.5") || model.contains("opus 4.5") {
-            return ModelPricing(inputPerMillion: 5.0, outputPerMillion: 25.0, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
-        }
-        if model.contains("opus") {
-            return ModelPricing(inputPerMillion: 15.0, outputPerMillion: 75.0, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
-        }
-        if model.contains("sonnet") {
-            return ModelPricing(inputPerMillion: 3.0, outputPerMillion: 15.0, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
-        }
-        if model.contains("haiku-4-5") || model.contains("haiku-4.5") || model.contains("haiku 4.5") {
-            return ModelPricing(inputPerMillion: 1.0, outputPerMillion: 5.0, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
-        }
-        if model.contains("haiku") {
-            return ModelPricing(inputPerMillion: 0.25, outputPerMillion: 1.25, cacheWrite5mMultiplier: 1.25, cacheWrite1hMultiplier: 2.0, cacheReadMultiplier: 0.1)
-        }
-        if model.contains("gpt-4o-mini") {
-            return ModelPricing(inputPerMillion: 0.15, outputPerMillion: 0.60, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.5)
-        }
-        if model.contains("gpt-4o") || model.contains("gpt-4.1") {
-            return ModelPricing(inputPerMillion: 2.50, outputPerMillion: 10.0, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.5)
-        }
-        if model.contains("o3") {
-            return ModelPricing(inputPerMillion: 10.0, outputPerMillion: 40.0, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.5)
-        }
-        if model.contains("o4-mini") {
-            return ModelPricing(inputPerMillion: 1.10, outputPerMillion: 4.40, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.5)
-        }
-        if model.contains("gemini-2.5-pro") {
-            return ModelPricing(inputPerMillion: 1.25, outputPerMillion: 10.0, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.25)
-        }
-        if model.contains("gemini-2.5-flash") {
-            return ModelPricing(inputPerMillion: 0.15, outputPerMillion: 0.60, cacheWrite5mMultiplier: 1.0, cacheWrite1hMultiplier: 1.0, cacheReadMultiplier: 0.25)
-        }
-
-        return .defaultPricing
     }
 
     // MARK: - Initialization
@@ -276,20 +196,27 @@ struct ConsolidatedAnalytics {
             var cacheCreation: Int = 0
             var cacheCreation5m: Int = 0
             var cacheCreation1h: Int = 0
+            var providerTotal: Int = 0
             var cost: Double? = nil
+            var pricingAvailable: Bool = false
+            var pricingUnavailableReason: String? = nil
+            var baseInputTokens: Int = 0
+            var baseInputCost: Double = 0
+            var outputCost: Double = 0
+            var cacheReadCost: Double = 0
+            var cacheWriteCost: Double = 0
             var latency: Int = 0
             var capabilities: [String] = []
             var errors: [String] = []
             var model: String? = nil
         }
 
-        // Sequential array — each message.assistant appends a new entry (no collisions).
-        // turnNumberToLatestIndex maps turn number → latest array index so that
-        // stream.turn_end / capability.invocation.started / errors route to the correct entry.
-        // Cleared on detected "turn reset" so multi-model conversations (where
-        // each model restarts turn numbering at 1) get distinct entries.
+        // Sequential array: each canonical token segment appends or updates a
+        // server-owned turn record. The segment-aware key prevents provider
+        // switches or resumes with repeated turn numbers from colliding.
         var turnEntries: [TurnAccumulator] = []
-        var turnNumberToLatestIndex: [Int: Int] = [:]
+        var turnKeyToLatestIndex: [String: Int] = [:]
+        var turnToLatestIndexes: [Int: [Int]] = [:]
         var previousTurn: Int? = nil
         var previousModel: String? = nil
         var latencySum = 0
@@ -302,6 +229,7 @@ struct ConsolidatedAnalytics {
             case .messageAssistant:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value) else { continue }
                 let newModel = event.payload["model"]?.value as? String
+                guard let turnKey = Self.turnKey(payload: event.payload) else { continue }
 
                 // Detect "turn reset" — start of a new conversation segment with
                 // overlapping turn numbers:
@@ -323,7 +251,8 @@ struct ConsolidatedAnalytics {
                 }()
 
                 if isReset {
-                    turnNumberToLatestIndex.removeAll()
+                    turnKeyToLatestIndex.removeAll()
+                    turnToLatestIndexes.removeAll()
                 }
                 previousTurn = turn
                 if let newModel = newModel {
@@ -332,7 +261,7 @@ struct ConsolidatedAnalytics {
 
                 // If this turn already has an entry (multiple assistant messages per turn,
                 // common in imported sessions), accumulate into the existing entry.
-                if let existingIndex = turnNumberToLatestIndex[turn] {
+                if let existingIndex = turnKeyToLatestIndex[turnKey] {
                     if let tokens = Self.extractTokenUsage(from: event.payload) {
                         turnEntries[existingIndex].input += tokens.input
                         turnEntries[existingIndex].output += tokens.output
@@ -340,6 +269,15 @@ struct ConsolidatedAnalytics {
                         turnEntries[existingIndex].cacheCreation += tokens.cacheCreation
                         turnEntries[existingIndex].cacheCreation5m += tokens.cacheCreation5m
                         turnEntries[existingIndex].cacheCreation1h += tokens.cacheCreation1h
+                        turnEntries[existingIndex].providerTotal += tokens.providerTotal
+                        turnEntries[existingIndex].cost = (turnEntries[existingIndex].cost ?? 0) + (tokens.cost ?? 0)
+                        turnEntries[existingIndex].pricingAvailable = turnEntries[existingIndex].pricingAvailable || tokens.pricingAvailable
+                        turnEntries[existingIndex].pricingUnavailableReason = tokens.pricingUnavailableReason
+                        turnEntries[existingIndex].baseInputTokens += tokens.baseInputTokens
+                        turnEntries[existingIndex].baseInputCost += tokens.baseInputCost
+                        turnEntries[existingIndex].outputCost += tokens.outputCost
+                        turnEntries[existingIndex].cacheReadCost += tokens.cacheReadCost
+                        turnEntries[existingIndex].cacheWriteCost += tokens.cacheWriteCost
                     }
                     if let latency = Self.extractInt(event.payload["latency"]?.value), latency > 0 {
                         turnEntries[existingIndex].latency += latency
@@ -359,6 +297,15 @@ struct ConsolidatedAnalytics {
                         acc.cacheCreation = tokens.cacheCreation
                         acc.cacheCreation5m = tokens.cacheCreation5m
                         acc.cacheCreation1h = tokens.cacheCreation1h
+                        acc.providerTotal = tokens.providerTotal
+                        acc.cost = tokens.cost
+                        acc.pricingAvailable = tokens.pricingAvailable
+                        acc.pricingUnavailableReason = tokens.pricingUnavailableReason
+                        acc.baseInputTokens = tokens.baseInputTokens
+                        acc.baseInputCost = tokens.baseInputCost
+                        acc.outputCost = tokens.outputCost
+                        acc.cacheReadCost = tokens.cacheReadCost
+                        acc.cacheWriteCost = tokens.cacheWriteCost
                     }
 
                     if let latency = Self.extractInt(event.payload["latency"]?.value), latency > 0 {
@@ -373,12 +320,14 @@ struct ConsolidatedAnalytics {
 
                     let index = turnEntries.count
                     turnEntries.append(acc)
-                    turnNumberToLatestIndex[turn] = index
+                    turnKeyToLatestIndex[turnKey] = index
+                    turnToLatestIndexes[turn, default: []].append(index)
                 }
 
             case .streamTurnEnd:
-                guard let turn = Self.extractInt(event.payload["turn"]?.value),
-                      let index = turnNumberToLatestIndex[turn] else { continue }
+                guard let turn = Self.extractInt(event.payload["turn"]?.value) else { continue }
+                guard let turnKey = Self.turnKey(payload: event.payload),
+                      let index = turnKeyToLatestIndex[turnKey] else { continue }
 
                 if let tokens = Self.extractTokenUsage(from: event.payload) {
                     if turnEntries[index].input == 0 { turnEntries[index].input = tokens.input }
@@ -387,10 +336,15 @@ struct ConsolidatedAnalytics {
                     turnEntries[index].cacheCreation = max(turnEntries[index].cacheCreation, tokens.cacheCreation)
                     turnEntries[index].cacheCreation5m = max(turnEntries[index].cacheCreation5m, tokens.cacheCreation5m)
                     turnEntries[index].cacheCreation1h = max(turnEntries[index].cacheCreation1h, tokens.cacheCreation1h)
-                }
-
-                if let cost = Self.extractDouble(event.payload["cost"]?.value) {
-                    turnEntries[index].cost = cost
+                    turnEntries[index].providerTotal = max(turnEntries[index].providerTotal, tokens.providerTotal)
+                    turnEntries[index].cost = tokens.cost
+                    turnEntries[index].pricingAvailable = tokens.pricingAvailable
+                    turnEntries[index].pricingUnavailableReason = tokens.pricingUnavailableReason
+                    turnEntries[index].baseInputTokens = tokens.baseInputTokens
+                    turnEntries[index].baseInputCost = tokens.baseInputCost
+                    turnEntries[index].outputCost = tokens.outputCost
+                    turnEntries[index].cacheReadCost = tokens.cacheReadCost
+                    turnEntries[index].cacheWriteCost = tokens.cacheWriteCost
                 }
 
                 if turnEntries[index].model == nil, let model = event.payload["model"]?.value as? String {
@@ -400,7 +354,7 @@ struct ConsolidatedAnalytics {
             case .capabilityInvocationStarted:
                 guard let turn = Self.extractInt(event.payload["turn"]?.value),
                       let modelPrimitiveName = event.payload["modelPrimitiveName"]?.value as? String,
-                      let index = turnNumberToLatestIndex[turn] else { continue }
+                      let index = Self.latestIndex(for: turn, in: turnToLatestIndexes) else { continue }
 
                 if !turnEntries[index].capabilities.contains(modelPrimitiveName) {
                     turnEntries[index].capabilities.append(modelPrimitiveName)
@@ -410,20 +364,14 @@ struct ConsolidatedAnalytics {
             case .errorAgent, .errorProvider, .errorCapability:
                 let errorMsg = (event.payload["error"]?.value as? String) ?? "Unknown error"
                 if let turn = Self.extractInt(event.payload["turn"]?.value),
-                   let index = turnNumberToLatestIndex[turn] {
+                   let index = Self.latestIndex(for: turn, in: turnToLatestIndexes) {
                     turnEntries[index].errors.append(errorMsg)
                 }
                 totalErrs += 1
 
             case .messageUser:
-                // A new user message signals the start of a new prompt cycle. In
-                // live sessions subsequent assistants may reuse prior turn numbers
-                // (e.g. the server restarting turn numbering per cycle), so clear
-                // the lookup to prevent collapsing into the previous cycle's entry.
-                // Imported sessions do not interleave user messages between
-                // multiple assistants for the same turn, so this does not affect
-                // the import-accumulation path.
-                turnNumberToLatestIndex.removeAll()
+                turnKeyToLatestIndex.removeAll()
+                turnToLatestIndexes.removeAll()
 
             default:
                 break
@@ -439,20 +387,40 @@ struct ConsolidatedAnalytics {
                 cacheCreationTokens: value.cacheCreation,
                 cacheCreation5mTokens: value.cacheCreation5m,
                 cacheCreation1hTokens: value.cacheCreation1h,
-                cost: value.cost ?? 0,
+                providerTotalTokens: value.providerTotal,
+                cost: value.cost,
+                pricingAvailable: value.pricingAvailable,
+                pricingUnavailableReason: value.pricingUnavailableReason,
                 latency: value.latency,
                 capabilityCount: value.capabilities.count,
                 capabilities: value.capabilities,
                 errorCount: value.errors.count,
                 errors: value.errors,
-                model: value.model?.shortModelName
+                model: value.model?.shortModelName,
+                baseInputCost: value.baseInputCost,
+                outputCost: value.outputCost,
+                cacheReadCost: value.cacheReadCost,
+                cacheWriteCost: value.cacheWriteCost,
+                baseInputTokens: value.baseInputTokens
             )
         }
 
-        self.totalCost = self.turns.reduce(0) { $0 + $1.cost }
+        self.totalCost = self.turns.reduce(0) { $0 + ($1.cost ?? 0) }
         self.totalTurns = self.turns.count
         self.totalCapabilityInvocations = totalCapabilities
         self.totalErrors = totalErrs
         self.avgLatency = latencyCount > 0 ? latencySum / latencyCount : 0
+    }
+
+    private static func turnKey(payload: [String: AnyCodable]) -> String? {
+        guard let tokenRecordDict = payload["tokenRecord"]?.value as? [String: Any],
+              let tokenRecord = TokenRecord.from(dict: tokenRecordDict) else {
+            return nil
+        }
+        return "\(tokenRecord.meta.contextSegmentId):\(tokenRecord.meta.turn)"
+    }
+
+    private static func latestIndex(for turn: Int, in index: [Int: [Int]]) -> Int? {
+        index[turn]?.last
     }
 }

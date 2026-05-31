@@ -102,6 +102,9 @@ Current living entry points:
 - `packages/agent/docs/codebase-cleanup-scorecard.md`: completed repo-local
   cleanup scorecard, large-file budget ledger, and module-by-module
   maintainability plan at 100/100.
+- `packages/agent/docs/token-accounting-hardening-scorecard.md`: active
+  server-authoritative token accounting, pricing, provider-cache, and
+  iPhone-only UI hardening scorecard.
 - `packages/agent/docs/capability-orchestration-test-scorecard.md`:
   historical covered-path evidence for the single `execute` portal.
 - `packages/agent/src/domains/cron/implementation/mod.rs`: decision-backed

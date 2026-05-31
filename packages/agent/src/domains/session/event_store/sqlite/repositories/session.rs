@@ -295,7 +295,7 @@ impl SessionRepo {
     pub fn update_latest_model(conn: &Connection, session_id: &str, model: &str) -> Result<bool> {
         let now = chrono::Utc::now().to_rfc3339();
         let changed = conn.execute(
-            "UPDATE sessions SET latest_model = ?1, last_activity_at = ?2 WHERE id = ?3",
+            "UPDATE sessions SET latest_model = ?1, last_activity_at = ?2, last_turn_input_tokens = 0 WHERE id = ?3",
             params![model, now, session_id],
         )?;
         Ok(changed > 0)

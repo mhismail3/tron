@@ -1,14 +1,143 @@
 import XCTest
 @testable import TronMobile
 
-/// Tests for TokenRecord JSON parsing
-/// Verifies iOS correctly parses the agent's tokenRecord wire format
 final class TokenRecordTests: XCTestCase {
+    func testDecodesCompleteAnthropicTokenRecord() throws {
+        let record = try decodeRecord(
+            provider: "anthropic",
+            input: 502,
+            output: 53,
+            cacheRead: 17_332,
+            cachedInput: 17_332,
+            cacheCreation: 0,
+            cache5m: 0,
+            cache1h: 0,
+            reasoning: 0,
+            total: 17_887,
+            context: 17_834,
+            newInput: 502,
+            method: "anthropic_cache_aware",
+            pricing: Self.pricing(cost: Self.cost(total: 0.012))
+        )
 
-    // MARK: - JSON Decoding Tests
+        XCTAssertEqual(record.source.provider, "anthropic")
+        XCTAssertEqual(record.source.rawInputTokens, 502)
+        XCTAssertEqual(record.source.rawOutputTokens, 53)
+        XCTAssertEqual(record.source.rawCacheReadTokens, 17_332)
+        XCTAssertEqual(record.source.rawCachedInputTokens, 17_332)
+        XCTAssertEqual(record.source.rawTotalTokens, 17_887)
+        XCTAssertEqual(record.computed.contextWindowTokens, 17_834)
+        XCTAssertEqual(record.computed.newInputTokens, 502)
+        XCTAssertEqual(record.meta.model, "claude-sonnet-4-5")
+        XCTAssertEqual(record.meta.contextSegmentId, "sess_abc123:anthropic:claude-sonnet-4-5")
+        XCTAssertTrue(record.pricing.available)
+        XCTAssertEqual(record.pricing.cost?.totalCost, 0.012)
+    }
 
-    func testDecodesCompleteTokenRecord() throws {
-        let json = """
+    func testDecodesOpenAIReasoningAndCachedTokens() throws {
+        let record = try decodeRecord(
+            provider: "openai",
+            input: 5_000,
+            output: 200,
+            cacheRead: 3_000,
+            cachedInput: 3_000,
+            cacheCreation: 0,
+            cache5m: 0,
+            cache1h: 0,
+            reasoning: 75,
+            total: 5_200,
+            context: 5_000,
+            newInput: 1_000,
+            previous: 4_000,
+            method: "direct",
+            pricing: Self.pricing(cost: Self.cost(baseInputTokens: 2_000, total: 0.02))
+        )
+
+        XCTAssertEqual(record.source.provider, "openai")
+        XCTAssertEqual(record.source.rawReasoningOutputTokens, 75)
+        XCTAssertEqual(record.source.rawCachedInputTokens, 3_000)
+        XCTAssertEqual(record.computed.contextWindowTokens, 5_000)
+        XCTAssertEqual(record.computed.newInputTokens, 1_000)
+    }
+
+    func testDecodesGoogleThoughtAndToolUseTokens() throws {
+        let record = try decodeRecord(
+            provider: "google",
+            input: 8_000,
+            output: 300,
+            cacheRead: 1_500,
+            cachedInput: 1_500,
+            cacheCreation: 0,
+            cache5m: 0,
+            cache1h: 0,
+            thought: 120,
+            toolUse: 64,
+            total: 8_420,
+            context: 8_000,
+            newInput: 8_000,
+            method: "direct",
+            pricing: Self.pricing(cost: Self.cost(baseInputTokens: 6_500, total: 0.018))
+        )
+
+        XCTAssertEqual(record.source.provider, "google")
+        XCTAssertEqual(record.source.rawThoughtTokens, 120)
+        XCTAssertEqual(record.source.rawToolUsePromptTokens, 64)
+        XCTAssertEqual(record.source.rawTotalTokens, 8_420)
+    }
+
+    func testDecodesAnthropicPerTTLCacheWrites() throws {
+        let record = try decodeRecord(
+            provider: "anthropic",
+            input: 500,
+            output: 100,
+            cacheRead: 0,
+            cachedInput: 0,
+            cacheCreation: 8_000,
+            cache5m: 3_000,
+            cache1h: 5_000,
+            total: 8_600,
+            context: 8_500,
+            newInput: 8_500,
+            method: "anthropic_cache_aware",
+            pricing: Self.pricing(cost: Self.cost(cacheWriteTokens: 8_000, cache5m: 3_000, cache1h: 5_000, total: 0.03))
+        )
+
+        XCTAssertEqual(record.source.rawCacheCreationTokens, 8_000)
+        XCTAssertEqual(record.source.rawCacheCreation5mTokens, 3_000)
+        XCTAssertEqual(record.source.rawCacheCreation1hTokens, 5_000)
+        XCTAssertEqual(record.computed.contextWindowTokens, 8_500)
+        XCTAssertEqual(record.formattedCacheWrite, 8_000.formattedTokenCount)
+    }
+
+    func testUnavailablePricingDecodesWithoutLocalCostGuess() throws {
+        let record = try decodeRecord(
+            provider: "ollama",
+            input: 10,
+            output: 5,
+            cacheRead: 0,
+            cachedInput: 0,
+            cacheCreation: 0,
+            cache5m: 0,
+            cache1h: 0,
+            total: 15,
+            context: 10,
+            newInput: 10,
+            method: "direct",
+            pricing: Self.pricing(available: false, reason: "unsupported_model_pricing", cost: nil)
+        )
+
+        XCTAssertFalse(record.pricing.available)
+        XCTAssertEqual(record.pricing.reason, "unsupported_model_pricing")
+        XCTAssertNil(record.pricing.cost)
+    }
+
+    func testTokenSourceTotalTokensUsesProviderTotal() throws {
+        let source = try JSONDecoder().decode(TokenSource.self, from: sourceJSON(total: 999))
+        XCTAssertEqual(source.totalTokens, 999)
+    }
+
+    func testMissingRequiredTokenRecordFieldsFail() throws {
+        let data = """
         {
             "source": {
                 "provider": "anthropic",
@@ -20,7 +149,7 @@ final class TokenRecordTests: XCTestCase {
             },
             "computed": {
                 "contextWindowTokens": 17834,
-                "newInputTokens": 17834,
+                "newInputTokens": 502,
                 "previousContextBaseline": 0,
                 "calculationMethod": "anthropic_cache_aware"
             },
@@ -33,376 +162,185 @@ final class TokenRecordTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        // Verify source
-        XCTAssertEqual(record.source.provider, "anthropic")
-        XCTAssertEqual(record.source.rawInputTokens, 502)
-        XCTAssertEqual(record.source.rawOutputTokens, 53)
-        XCTAssertEqual(record.source.rawCacheReadTokens, 17332)
-        XCTAssertEqual(record.source.rawCacheCreationTokens, 0)
-
-        // Verify computed
-        XCTAssertEqual(record.computed.contextWindowTokens, 17834)
-        XCTAssertEqual(record.computed.newInputTokens, 17834)
-        XCTAssertEqual(record.computed.previousContextBaseline, 0)
-        XCTAssertEqual(record.computed.calculationMethod, "anthropic_cache_aware")
-
-        // Verify meta
-        XCTAssertEqual(record.meta.turn, 1)
-        XCTAssertEqual(record.meta.sessionId, "sess_abc123")
+        XCTAssertThrowsError(try JSONDecoder().decode(TokenRecord.self, from: data))
     }
 
-    func testDecodesOpenAITokenRecord() throws {
-        let json = """
-        {
-            "source": {
-                "provider": "openai",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 5000,
-                "rawOutputTokens": 200,
-                "rawCacheReadTokens": 0,
-                "rawCacheCreationTokens": 0
-            },
-            "computed": {
-                "contextWindowTokens": 5000,
-                "newInputTokens": 1000,
-                "previousContextBaseline": 4000,
-                "calculationMethod": "direct"
-            },
-            "meta": {
-                "turn": 2,
-                "sessionId": "sess_xyz789",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
+    func testDictionaryFactoryFailsForPartialOrWrongTypedRecords() {
+        var dict = fullRecordDict()
+        dict["source"] = ["provider": "openai"] as [String: Any]
+        XCTAssertNil(TokenRecord.from(dict: dict))
 
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
+        dict = fullRecordDict()
+        dict["meta"] = ["sessionId": "sess_partial"] as [String: Any]
+        XCTAssertNil(TokenRecord.from(dict: dict))
 
-        XCTAssertEqual(record.source.provider, "openai")
-        XCTAssertEqual(record.computed.contextWindowTokens, 5000)
-        XCTAssertEqual(record.computed.newInputTokens, 1000)
-        XCTAssertEqual(record.computed.calculationMethod, "direct")
+        dict = fullRecordDict()
+        dict["source"] = [
+            "provider": "anthropic",
+            "timestamp": "2024-01-15T10:30:00.000Z",
+            "rawInputTokens": "not_a_number",
+            "rawOutputTokens": "also_not",
+            "rawCacheReadTokens": true,
+            "rawCachedInputTokens": 0,
+            "rawCacheCreationTokens": 0,
+            "rawCacheCreation5mTokens": 0,
+            "rawCacheCreation1hTokens": 0,
+            "rawReasoningOutputTokens": 0,
+            "rawThoughtTokens": 0,
+            "rawToolUsePromptTokens": 0,
+            "rawTotalTokens": 0
+        ] as [String: Any]
+        XCTAssertNil(TokenRecord.from(dict: dict))
     }
 
-    func testDecodesGoogleTokenRecord() throws {
-        let json = """
-        {
-            "source": {
-                "provider": "google",
+    private func decodeRecord(
+        provider: String,
+        input: Int,
+        output: Int,
+        cacheRead: Int,
+        cachedInput: Int,
+        cacheCreation: Int,
+        cache5m: Int,
+        cache1h: Int,
+        reasoning: Int = 0,
+        thought: Int = 0,
+        toolUse: Int = 0,
+        total: Int,
+        context: Int,
+        newInput: Int,
+        previous: Int = 0,
+        method: String,
+        pricing: [String: Any]
+    ) throws -> TokenRecord {
+        let data = try JSONSerialization.data(withJSONObject: fullRecordDict(
+            provider: provider,
+            input: input,
+            output: output,
+            cacheRead: cacheRead,
+            cachedInput: cachedInput,
+            cacheCreation: cacheCreation,
+            cache5m: cache5m,
+            cache1h: cache1h,
+            reasoning: reasoning,
+            thought: thought,
+            toolUse: toolUse,
+            total: total,
+            context: context,
+            newInput: newInput,
+            previous: previous,
+            method: method,
+            pricing: pricing
+        ))
+        return try JSONDecoder().decode(TokenRecord.self, from: data)
+    }
+
+    private func fullRecordDict(
+        provider: String = "anthropic",
+        input: Int = 502,
+        output: Int = 53,
+        cacheRead: Int = 17_332,
+        cachedInput: Int = 17_332,
+        cacheCreation: Int = 0,
+        cache5m: Int = 0,
+        cache1h: Int = 0,
+        reasoning: Int = 0,
+        thought: Int = 0,
+        toolUse: Int = 0,
+        total: Int = 17_887,
+        context: Int = 17_834,
+        newInput: Int = 502,
+        previous: Int = 0,
+        method: String = "anthropic_cache_aware",
+        pricing: [String: Any] = TokenRecordTests.pricing(cost: TokenRecordTests.cost(total: 0.012))
+    ) -> [String: Any] {
+        [
+            "source": [
+                "provider": provider,
                 "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 8000,
-                "rawOutputTokens": 300,
-                "rawCacheReadTokens": 0,
-                "rawCacheCreationTokens": 0
-            },
-            "computed": {
-                "contextWindowTokens": 8000,
-                "newInputTokens": 8000,
-                "previousContextBaseline": 0,
-                "calculationMethod": "direct"
-            },
-            "meta": {
+                "rawInputTokens": input,
+                "rawOutputTokens": output,
+                "rawCacheReadTokens": cacheRead,
+                "rawCachedInputTokens": cachedInput,
+                "rawCacheCreationTokens": cacheCreation,
+                "rawCacheCreation5mTokens": cache5m,
+                "rawCacheCreation1hTokens": cache1h,
+                "rawReasoningOutputTokens": reasoning,
+                "rawThoughtTokens": thought,
+                "rawToolUsePromptTokens": toolUse,
+                "rawTotalTokens": total
+            ] as [String: Any],
+            "computed": [
+                "contextWindowTokens": context,
+                "newInputTokens": newInput,
+                "previousContextBaseline": previous,
+                "calculationMethod": method
+            ] as [String: Any],
+            "meta": [
                 "turn": 1,
-                "sessionId": "sess_google",
+                "sessionId": "sess_abc123",
+                "model": "claude-sonnet-4-5",
+                "contextSegmentId": "sess_abc123:\(provider):claude-sonnet-4-5",
+                "baselineResetReason": previous == 0 ? "initial_or_reset" : "none",
                 "extractedAt": "2024-01-15T10:30:00.000Z",
                 "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        XCTAssertEqual(record.source.provider, "google")
-        XCTAssertEqual(record.computed.contextWindowTokens, 8000)
+            ] as [String: Any],
+            "pricing": pricing
+        ]
     }
 
-    func testDecodesWithCacheCreationTokens() throws {
-        // Test case where cache is being written (billing indicator)
-        let json = """
-        {
-            "source": {
-                "provider": "anthropic",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 500,
-                "rawOutputTokens": 100,
-                "rawCacheReadTokens": 0,
-                "rawCacheCreationTokens": 8000
-            },
-            "computed": {
-                "contextWindowTokens": 500,
-                "newInputTokens": 500,
-                "previousContextBaseline": 0,
-                "calculationMethod": "anthropic_cache_aware"
-            },
-            "meta": {
-                "turn": 1,
-                "sessionId": "sess_cache",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        // cacheCreationTokens is billing info, NOT added to context
-        XCTAssertEqual(record.source.rawCacheCreationTokens, 8000)
-        XCTAssertEqual(record.computed.contextWindowTokens, 500) // NOT 8500
+    private static func pricing(
+        available: Bool = true,
+        reason: String? = nil,
+        cost: [String: Any]?
+    ) -> [String: Any] {
+        [
+            "available": available,
+            "model": "claude-sonnet-4-5",
+            "reason": reason ?? NSNull(),
+            "cost": cost ?? NSNull()
+        ]
     }
 
-    // MARK: - TokenSource Tests
+    private static func cost(
+        baseInputTokens: Int = 502,
+        outputTokens: Int = 53,
+        cacheReadTokens: Int = 0,
+        cacheWriteTokens: Int = 0,
+        cache5m: Int = 0,
+        cache1h: Int = 0,
+        total: Double
+    ) -> [String: Any] {
+        [
+            "baseInputTokens": baseInputTokens,
+            "outputTokens": outputTokens,
+            "cacheReadTokens": cacheReadTokens,
+            "cacheWriteTokens": cacheWriteTokens,
+            "cacheWrite5mTokens": cache5m,
+            "cacheWrite1hTokens": cache1h,
+            "baseInputCost": 0.001,
+            "outputCost": 0.002,
+            "cacheReadCost": 0.003,
+            "cacheWriteCost": 0.004,
+            "totalCost": total,
+            "currency": "USD"
+        ]
+    }
 
-    func testTokenSourceTotalTokens() throws {
-        let json = """
-        {
+    private func sourceJSON(total: Int) throws -> Data {
+        try JSONSerialization.data(withJSONObject: [
             "provider": "anthropic",
             "timestamp": "2024-01-15T10:30:00.000Z",
             "rawInputTokens": 500,
             "rawOutputTokens": 100,
             "rawCacheReadTokens": 0,
-            "rawCacheCreationTokens": 0
-        }
-        """.data(using: .utf8)!
-
-        let source = try JSONDecoder().decode(TokenSource.self, from: json)
-
-        XCTAssertEqual(source.totalTokens, 600) // 500 + 100
-    }
-
-    // MARK: - Equatable Tests
-
-    func testTokenRecordEquality() throws {
-        let json = """
-        {
-            "source": {
-                "provider": "anthropic",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 500,
-                "rawOutputTokens": 100,
-                "rawCacheReadTokens": 0,
-                "rawCacheCreationTokens": 0
-            },
-            "computed": {
-                "contextWindowTokens": 500,
-                "newInputTokens": 500,
-                "previousContextBaseline": 0,
-                "calculationMethod": "anthropic_cache_aware"
-            },
-            "meta": {
-                "turn": 1,
-                "sessionId": "sess_test",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record1 = try JSONDecoder().decode(TokenRecord.self, from: json)
-        let record2 = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        XCTAssertEqual(record1, record2)
-    }
-
-    // MARK: - Separate Cache Read/Write Formatting
-
-    func testFormattedCacheReadSeparate() throws {
-        let json = """
-        {
-            "source": {
-                "provider": "anthropic",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 10,
-                "rawOutputTokens": 261,
-                "rawCacheReadTokens": 12561,
-                "rawCacheCreationTokens": 498
-            },
-            "computed": {
-                "contextWindowTokens": 12571,
-                "newInputTokens": 10,
-                "previousContextBaseline": 12561,
-                "calculationMethod": "anthropic_cache_aware"
-            },
-            "meta": {
-                "turn": 1,
-                "sessionId": "sess_test",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        // formattedCacheRead should return formatted cache read tokens
-        XCTAssertNotNil(record.formattedCacheRead)
-        XCTAssertEqual(record.formattedCacheRead, 12561.formattedTokenCount)
-    }
-
-    func testFormattedCacheWriteSeparate() throws {
-        let json = """
-        {
-            "source": {
-                "provider": "anthropic",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 10,
-                "rawOutputTokens": 261,
-                "rawCacheReadTokens": 12561,
-                "rawCacheCreationTokens": 498
-            },
-            "computed": {
-                "contextWindowTokens": 12571,
-                "newInputTokens": 10,
-                "previousContextBaseline": 12561,
-                "calculationMethod": "anthropic_cache_aware"
-            },
-            "meta": {
-                "turn": 1,
-                "sessionId": "sess_test",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        // formattedCacheWrite should return formatted cache creation tokens
-        XCTAssertNotNil(record.formattedCacheWrite)
-        XCTAssertEqual(record.formattedCacheWrite, 498.formattedTokenCount)
-    }
-
-    func testFormattedCacheReadZeroReturnsNil() throws {
-        let json = """
-        {
-            "source": {
-                "provider": "openai",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 5000,
-                "rawOutputTokens": 200,
-                "rawCacheReadTokens": 0,
-                "rawCacheCreationTokens": 0
-            },
-            "computed": {
-                "contextWindowTokens": 5000,
-                "newInputTokens": 5000,
-                "previousContextBaseline": 0,
-                "calculationMethod": "direct"
-            },
-            "meta": {
-                "turn": 1,
-                "sessionId": "sess_test",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        XCTAssertNil(record.formattedCacheRead, "Zero cache read should return nil")
-    }
-
-    func testFormattedCacheWriteZeroReturnsNil() throws {
-        let json = """
-        {
-            "source": {
-                "provider": "anthropic",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 500,
-                "rawOutputTokens": 100,
-                "rawCacheReadTokens": 17332,
-                "rawCacheCreationTokens": 0
-            },
-            "computed": {
-                "contextWindowTokens": 17832,
-                "newInputTokens": 500,
-                "previousContextBaseline": 17332,
-                "calculationMethod": "anthropic_cache_aware"
-            },
-            "meta": {
-                "turn": 2,
-                "sessionId": "sess_test",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        XCTAssertNil(record.formattedCacheWrite, "Zero cache write should return nil")
-        XCTAssertNotNil(record.formattedCacheRead, "Non-zero cache read should still work")
-    }
-
-    // MARK: - Edge Cases
-
-    func testDecodesWithZeroTokens() throws {
-        // Edge case: empty response
-        let json = """
-        {
-            "source": {
-                "provider": "anthropic",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 0,
-                "rawOutputTokens": 0,
-                "rawCacheReadTokens": 0,
-                "rawCacheCreationTokens": 0
-            },
-            "computed": {
-                "contextWindowTokens": 0,
-                "newInputTokens": 0,
-                "previousContextBaseline": 0,
-                "calculationMethod": "anthropic_cache_aware"
-            },
-            "meta": {
-                "turn": 1,
-                "sessionId": "sess_empty",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        XCTAssertEqual(record.source.rawInputTokens, 0)
-        XCTAssertEqual(record.computed.contextWindowTokens, 0)
-    }
-
-    func testDecodesLargeTokenCounts() throws {
-        // Edge case: large context (close to limit)
-        let json = """
-        {
-            "source": {
-                "provider": "anthropic",
-                "timestamp": "2024-01-15T10:30:00.000Z",
-                "rawInputTokens": 190000,
-                "rawOutputTokens": 5000,
-                "rawCacheReadTokens": 0,
-                "rawCacheCreationTokens": 0
-            },
-            "computed": {
-                "contextWindowTokens": 190000,
-                "newInputTokens": 1000,
-                "previousContextBaseline": 189000,
-                "calculationMethod": "anthropic_cache_aware"
-            },
-            "meta": {
-                "turn": 50,
-                "sessionId": "sess_large",
-                "extractedAt": "2024-01-15T10:30:00.000Z",
-                "normalizedAt": "2024-01-15T10:30:00.001Z"
-            }
-        }
-        """.data(using: .utf8)!
-
-        let record = try JSONDecoder().decode(TokenRecord.self, from: json)
-
-        XCTAssertEqual(record.source.rawInputTokens, 190000)
-        XCTAssertEqual(record.computed.contextWindowTokens, 190000)
-        XCTAssertEqual(record.meta.turn, 50)
+            "rawCachedInputTokens": 0,
+            "rawCacheCreationTokens": 0,
+            "rawCacheCreation5mTokens": 0,
+            "rawCacheCreation1hTokens": 0,
+            "rawReasoningOutputTokens": 0,
+            "rawThoughtTokens": 0,
+            "rawToolUsePromptTokens": 0,
+            "rawTotalTokens": total
+        ] as [String: Any])
     }
 }

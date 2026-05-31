@@ -33,6 +33,10 @@ pub struct StreamState {
     pub unique_prefix: String,
     /// Set of capability invocation IDs already completed (to avoid duplicates).
     pub completed_tool_ids: HashSet<String>,
+    /// Token count for tool-use prompt scaffolding.
+    pub tool_use_prompt_tokens: u64,
+    /// Provider-reported total token count.
+    pub total_tokens: u64,
 }
 
 /// State for an in-progress capability invocation.
@@ -57,6 +61,8 @@ pub fn create_stream_state() -> StreamState {
         capability_invocation_index: 0,
         unique_prefix: prefix,
         completed_tool_ids: HashSet::new(),
+        tool_use_prompt_tokens: 0,
+        total_tokens: 0,
     }
 }
 
@@ -92,6 +98,10 @@ pub fn process_stream_chunk(
     if let Some(ref usage) = chunk.usage_metadata {
         state.acc.input_tokens = u64::from(usage.prompt_token_count);
         state.acc.output_tokens = u64::from(usage.candidates_token_count);
+        state.acc.cache_read_tokens = u64::from(usage.cached_content_token_count);
+        state.acc.reasoning_output_tokens = u64::from(usage.thoughts_token_count);
+        state.tool_use_prompt_tokens = u64::from(usage.tool_use_prompt_token_count);
+        state.total_tokens = u64::from(usage.total_token_count);
     }
 
     // Process candidates
@@ -292,10 +302,15 @@ fn handle_finish(
             token_usage: Some(TokenUsage {
                 input_tokens: state.acc.input_tokens,
                 output_tokens: state.acc.output_tokens,
-                cache_read_tokens: None,
+                cache_read_tokens: nonzero(state.acc.cache_read_tokens),
+                cached_input_tokens: nonzero(state.acc.cache_read_tokens),
                 cache_creation_tokens: None,
                 cache_creation_5m_tokens: None,
                 cache_creation_1h_tokens: None,
+                reasoning_output_tokens: None,
+                thought_tokens: nonzero(state.acc.reasoning_output_tokens),
+                tool_use_prompt_tokens: nonzero(state.tool_use_prompt_tokens),
+                total_tokens: nonzero(state.total_tokens),
                 provider_type: Some(Provider::Google),
             }),
         },
@@ -303,6 +318,10 @@ fn handle_finish(
     });
 
     events
+}
+
+fn nonzero(value: u64) -> Option<u64> {
+    (value > 0).then_some(value)
 }
 
 /// Synthesize a done event when the stream ends without a finish reason.
@@ -389,6 +408,7 @@ mod tests {
                 prompt_token_count: 100,
                 candidates_token_count: 50,
                 total_token_count: 150,
+                ..Default::default()
             }),
             ..empty_chunk()
         };

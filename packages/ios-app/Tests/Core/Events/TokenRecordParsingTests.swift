@@ -1,155 +1,79 @@
 import XCTest
 @testable import TronMobile
 
-/// Tests for TokenRecord.from(dict:) factory method
-/// Verifies parsing from [String: Any] dictionaries (event payload format)
 final class TokenRecordParsingTests: XCTestCase {
-
-    // MARK: - Valid Parsing
-
     func testParseValidTokenRecord() {
-        let dict = makeFullTokenRecordDict()
-
-        let record = TokenRecord.from(dict: dict)
+        let record = TokenRecord.from(dict: makeFullTokenRecordDict())
 
         XCTAssertNotNil(record)
         XCTAssertEqual(record?.source.provider, "anthropic")
-        XCTAssertEqual(record?.source.timestamp, "2024-01-15T10:30:00.000Z")
         XCTAssertEqual(record?.source.rawInputTokens, 502)
-        XCTAssertEqual(record?.source.rawOutputTokens, 53)
-        XCTAssertEqual(record?.source.rawCacheReadTokens, 17332)
-        XCTAssertEqual(record?.source.rawCacheCreationTokens, 0)
-        XCTAssertEqual(record?.computed.contextWindowTokens, 17834)
-        XCTAssertEqual(record?.computed.newInputTokens, 17834)
-        XCTAssertEqual(record?.computed.previousContextBaseline, 0)
-        XCTAssertEqual(record?.computed.calculationMethod, "anthropic_cache_aware")
+        XCTAssertEqual(record?.source.rawCachedInputTokens, 17_332)
+        XCTAssertEqual(record?.source.rawCacheCreation5mTokens, 0)
+        XCTAssertEqual(record?.source.rawReasoningOutputTokens, 0)
+        XCTAssertEqual(record?.source.rawTotalTokens, 17_887)
+        XCTAssertEqual(record?.computed.contextWindowTokens, 17_834)
         XCTAssertEqual(record?.meta.turn, 1)
-        XCTAssertEqual(record?.meta.sessionId, "sess_abc123")
-        XCTAssertEqual(record?.meta.extractedAt, "2024-01-15T10:30:00.000Z")
-        XCTAssertEqual(record?.meta.normalizedAt, "2024-01-15T10:30:00.001Z")
+        XCTAssertEqual(record?.meta.model, "claude-sonnet-4-5")
+        XCTAssertEqual(record?.meta.contextSegmentId, "sess_abc123:anthropic:claude-sonnet-4-5")
+        XCTAssertTrue(record?.pricing.available == true)
+        XCTAssertEqual(record?.pricing.cost?.totalCost, 0.012)
     }
 
-    // MARK: - Missing Required Sections
-
-    func testParseTokenRecordMissingSource() {
-        var dict = makeFullTokenRecordDict()
-        dict.removeValue(forKey: "source")
-
-        XCTAssertNil(TokenRecord.from(dict: dict))
+    func testMissingRequiredSectionsFail() {
+        for key in ["source", "computed", "meta", "pricing"] {
+            var dict = makeFullTokenRecordDict()
+            dict.removeValue(forKey: key)
+            XCTAssertNil(TokenRecord.from(dict: dict), "missing \(key) should fail")
+        }
     }
 
-    func testParseTokenRecordMissingComputed() {
-        var dict = makeFullTokenRecordDict()
-        dict.removeValue(forKey: "computed")
-
-        XCTAssertNil(TokenRecord.from(dict: dict))
-    }
-
-    func testParseTokenRecordMissingMeta() {
-        var dict = makeFullTokenRecordDict()
-        dict.removeValue(forKey: "meta")
-
-        XCTAssertNil(TokenRecord.from(dict: dict))
-    }
-
-    // MARK: - Nil / Empty Input
-
-    func testParseTokenRecordNilDict() {
+    func testNilEmptyAndMalformedInputsFail() {
         XCTAssertNil(TokenRecord.from(dict: nil))
-    }
-
-    func testParseTokenRecordEmptyDict() {
         XCTAssertNil(TokenRecord.from(dict: [:]))
+
+        var dict = makeFullTokenRecordDict()
+        dict["source"] = "not a dict"
+        XCTAssertNil(TokenRecord.from(dict: dict))
+
+        dict = makeFullTokenRecordDict()
+        dict["computed"] = 42
+        XCTAssertNil(TokenRecord.from(dict: dict))
     }
 
-    // MARK: - Partial Data (uses defaults)
-
-    func testParseTokenRecordPartialSource() {
+    func testPartialAndWrongTypedDataFailsInsteadOfDefaulting() {
         var dict = makeFullTokenRecordDict()
-        // Source with only provider — other fields should default
         dict["source"] = ["provider": "openai"] as [String: Any]
+        XCTAssertNil(TokenRecord.from(dict: dict))
 
-        let record = TokenRecord.from(dict: dict)
-
-        XCTAssertNotNil(record)
-        XCTAssertEqual(record?.source.provider, "openai")
-        XCTAssertEqual(record?.source.timestamp, "")
-        XCTAssertEqual(record?.source.rawInputTokens, 0)
-        XCTAssertEqual(record?.source.rawOutputTokens, 0)
-        XCTAssertEqual(record?.source.rawCacheReadTokens, 0)
-        XCTAssertEqual(record?.source.rawCacheCreationTokens, 0)
-    }
-
-    func testParseTokenRecordPartialMeta() {
-        var dict = makeFullTokenRecordDict()
-        // Meta with only sessionId — turn should default to 1
+        dict = makeFullTokenRecordDict()
         dict["meta"] = ["sessionId": "sess_partial"] as [String: Any]
+        XCTAssertNil(TokenRecord.from(dict: dict))
 
-        let record = TokenRecord.from(dict: dict)
+        dict = makeFullTokenRecordDict()
+        dict["computed"] = ["contextWindowTokens": 5_000] as [String: Any]
+        XCTAssertNil(TokenRecord.from(dict: dict))
 
-        XCTAssertNotNil(record)
-        XCTAssertEqual(record?.meta.turn, 1)
-        XCTAssertEqual(record?.meta.sessionId, "sess_partial")
-        XCTAssertEqual(record?.meta.extractedAt, "")
-        XCTAssertEqual(record?.meta.normalizedAt, "")
-    }
-
-    func testParseTokenRecordPartialComputed() {
-        var dict = makeFullTokenRecordDict()
-        // Computed with only contextWindowTokens
-        dict["computed"] = ["contextWindowTokens": 5000] as [String: Any]
-
-        let record = TokenRecord.from(dict: dict)
-
-        XCTAssertNotNil(record)
-        XCTAssertEqual(record?.computed.contextWindowTokens, 5000)
-        XCTAssertEqual(record?.computed.newInputTokens, 0)
-        XCTAssertEqual(record?.computed.previousContextBaseline, 0)
-        XCTAssertEqual(record?.computed.calculationMethod, "")
-    }
-
-    // MARK: - Wrong Types (graceful defaults)
-
-    func testParseTokenRecordWrongTypes() {
-        var dict = makeFullTokenRecordDict()
-        // Source fields as strings instead of ints — should default to 0
+        dict = makeFullTokenRecordDict()
         dict["source"] = [
             "provider": "anthropic",
             "timestamp": "2024-01-15T10:30:00.000Z",
             "rawInputTokens": "not_a_number",
             "rawOutputTokens": "also_not",
             "rawCacheReadTokens": true,
-            "rawCacheCreationTokens": 3.14
+            "rawCachedInputTokens": 0,
+            "rawCacheCreationTokens": 0,
+            "rawCacheCreation5mTokens": 0,
+            "rawCacheCreation1hTokens": 0,
+            "rawReasoningOutputTokens": 0,
+            "rawThoughtTokens": 0,
+            "rawToolUsePromptTokens": 0,
+            "rawTotalTokens": 0
         ] as [String: Any]
-
-        let record = TokenRecord.from(dict: dict)
-
-        XCTAssertNotNil(record)
-        XCTAssertEqual(record?.source.rawInputTokens, 0)
-        XCTAssertEqual(record?.source.rawOutputTokens, 0)
-        XCTAssertEqual(record?.source.rawCacheReadTokens, 0)
-        XCTAssertEqual(record?.source.rawCacheCreationTokens, 0)
-    }
-
-    // MARK: - Non-Dict Section Values
-
-    func testParseTokenRecordSourceNotDict() {
-        var dict = makeFullTokenRecordDict()
-        dict["source"] = "not a dict"
-
         XCTAssertNil(TokenRecord.from(dict: dict))
     }
 
-    func testParseTokenRecordComputedNotDict() {
-        var dict = makeFullTokenRecordDict()
-        dict["computed"] = 42
-
-        XCTAssertNil(TokenRecord.from(dict: dict))
-    }
-
-    // MARK: - Extra Keys (ignored)
-
-    func testParseTokenRecordExtraKeysIgnored() {
+    func testExtraKeysAreIgnored() {
         var dict = makeFullTokenRecordDict()
         dict["extraField"] = "ignored"
         if var source = dict["source"] as? [String: Any] {
@@ -163,8 +87,6 @@ final class TokenRecordParsingTests: XCTestCase {
         XCTAssertEqual(record?.source.provider, "anthropic")
     }
 
-    // MARK: - Helpers
-
     private func makeFullTokenRecordDict() -> [String: Any] {
         [
             "source": [
@@ -172,20 +94,49 @@ final class TokenRecordParsingTests: XCTestCase {
                 "timestamp": "2024-01-15T10:30:00.000Z",
                 "rawInputTokens": 502,
                 "rawOutputTokens": 53,
-                "rawCacheReadTokens": 17332,
-                "rawCacheCreationTokens": 0
+                "rawCacheReadTokens": 17_332,
+                "rawCachedInputTokens": 17_332,
+                "rawCacheCreationTokens": 0,
+                "rawCacheCreation5mTokens": 0,
+                "rawCacheCreation1hTokens": 0,
+                "rawReasoningOutputTokens": 0,
+                "rawThoughtTokens": 0,
+                "rawToolUsePromptTokens": 0,
+                "rawTotalTokens": 17_887
             ] as [String: Any],
             "computed": [
-                "contextWindowTokens": 17834,
-                "newInputTokens": 17834,
+                "contextWindowTokens": 17_834,
+                "newInputTokens": 502,
                 "previousContextBaseline": 0,
                 "calculationMethod": "anthropic_cache_aware"
             ] as [String: Any],
             "meta": [
                 "turn": 1,
                 "sessionId": "sess_abc123",
+                "model": "claude-sonnet-4-5",
+                "contextSegmentId": "sess_abc123:anthropic:claude-sonnet-4-5",
+                "baselineResetReason": "initial_or_reset",
                 "extractedAt": "2024-01-15T10:30:00.000Z",
                 "normalizedAt": "2024-01-15T10:30:00.001Z"
+            ] as [String: Any],
+            "pricing": [
+                "available": true,
+                "model": "claude-sonnet-4-5",
+                "reason": NSNull(),
+                "cost": [
+                    "baseInputTokens": 502,
+                    "outputTokens": 53,
+                    "cacheReadTokens": 17_332,
+                    "cacheWriteTokens": 0,
+                    "cacheWrite5mTokens": 0,
+                    "cacheWrite1hTokens": 0,
+                    "baseInputCost": 0.001,
+                    "outputCost": 0.002,
+                    "cacheReadCost": 0.009,
+                    "cacheWriteCost": 0,
+                    "totalCost": 0.012,
+                    "currency": "USD"
+                ] as [String: Any]
             ] as [String: Any]
         ]
     }

@@ -19,6 +19,9 @@ pub struct TokenUsage {
     /// Tokens read from prompt cache.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<i64>,
+    /// Provider-native cached input tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<i64>,
     /// Tokens written to prompt cache.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_tokens: Option<i64>,
@@ -28,6 +31,18 @@ pub struct TokenUsage {
     /// 1-hour cache creation tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_1h_tokens: Option<i64>,
+    /// Hidden reasoning output tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_output_tokens: Option<i64>,
+    /// Provider thinking tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thought_tokens: Option<i64>,
+    /// Tool-use prompt tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use_prompt_tokens: Option<i64>,
+    /// Provider-reported total tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_tokens: Option<i64>,
 }
 
 /// Aggregate token totals accumulated from multiple events.
@@ -47,11 +62,8 @@ pub struct TokenTotals {
     pub cache_creation_tokens: i64,
 }
 
-/// Canonical token record with source, computed, and metadata fields.
-///
-/// Stored as `tokenRecord` on assistant message and streaming turn-end events.
-/// Kept as opaque JSON because the schema is defined in `tron-tokens` crate.
-pub type TokenRecord = serde_json::Value;
+/// Canonical token record with source, computed, metadata, and pricing fields.
+pub type TokenRecord = crate::domains::model::providers::tokens::types::TokenRecord;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -68,17 +80,27 @@ mod tests {
             input_tokens: 1000,
             output_tokens: 500,
             cache_read_tokens: Some(200),
+            cached_input_tokens: Some(200),
             cache_creation_tokens: Some(100),
             cache_creation_5m_tokens: Some(50),
             cache_creation_1h_tokens: Some(25),
+            reasoning_output_tokens: Some(12),
+            thought_tokens: Some(13),
+            tool_use_prompt_tokens: Some(14),
+            total_tokens: Some(1700),
         };
         let json = serde_json::to_value(&usage).unwrap();
         assert_eq!(json["inputTokens"], 1000);
         assert_eq!(json["outputTokens"], 500);
         assert_eq!(json["cacheReadTokens"], 200);
+        assert_eq!(json["cachedInputTokens"], 200);
         assert_eq!(json["cacheCreationTokens"], 100);
         assert_eq!(json["cacheCreation5mTokens"], 50);
         assert_eq!(json["cacheCreation1hTokens"], 25);
+        assert_eq!(json["reasoningOutputTokens"], 12);
+        assert_eq!(json["thoughtTokens"], 13);
+        assert_eq!(json["toolUsePromptTokens"], 14);
+        assert_eq!(json["totalTokens"], 1700);
 
         let back: TokenUsage = serde_json::from_value(json).unwrap();
         assert_eq!(usage, back);

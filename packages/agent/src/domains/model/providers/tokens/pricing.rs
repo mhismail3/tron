@@ -1,26 +1,20 @@
 //! Model pricing tables and cost calculation.
 //!
-//! Pricing data is organized by provider family. Cost calculation handles
-//! Anthropic's per-TTL cache pricing (5-minute and 1-hour tiers), Google's
-//! flat pricing, and `OpenAI`'s model-registry pricing.
+//! Pricing data is explicit per supported model. Cost calculation handles
+//! Anthropic's per-TTL cache pricing (5-minute and 1-hour tiers), prompt-cache
+//! hit/write buckets for cache-aware providers, and unavailable pricing for any
+//! model not listed here.
 
 use crate::shared::messages::{Cost, TokenUsage};
 
-use super::types::PricingTier;
+use super::types::{PricingRecord, PricingTier, TokenCostBreakdown};
 
 /// Look up the pricing tier for a model identifier.
 ///
-/// Uses exact-match first, then prefix/pattern matching.
 /// Returns `None` for unknown models (no implicit default pricing).
 #[must_use]
 pub fn get_pricing_tier(model: &str) -> Option<PricingTier> {
-    // Exact match first
-    if let Some(tier) = exact_match(model) {
-        return Some(tier);
-    }
-
-    // Pattern match (prefix-based)
-    pattern_match(model)
+    exact_match(model)
 }
 
 /// Calculate cost for a given model and token usage.
@@ -32,19 +26,42 @@ pub fn get_pricing_tier(model: &str) -> Option<PricingTier> {
 #[must_use]
 #[allow(clippy::cast_precision_loss)] // Token counts never approach 2^52
 pub fn calculate_cost(model: &str, usage: &TokenUsage) -> Option<Cost> {
-    let tier = get_pricing_tier(model)?;
+    let pricing = calculate_pricing(model, usage);
+    let cost = pricing.cost?;
+    Some(Cost {
+        input_cost: cost.base_input_cost + cost.cache_read_cost + cost.cache_write_cost,
+        output_cost: cost.output_cost,
+        total: cost.total_cost,
+        currency: cost.currency,
+    })
+}
+
+/// Calculate server-authoritative component pricing for a token record.
+#[must_use]
+#[allow(clippy::cast_precision_loss)] // Token counts never approach 2^52
+pub fn calculate_pricing(model: &str, usage: &TokenUsage) -> PricingRecord {
+    let Some(tier) = get_pricing_tier(model) else {
+        return PricingRecord::unavailable(model, "unsupported_model_pricing");
+    };
 
     let input = usage.input_tokens;
     let output = usage.output_tokens;
-    let cache_read = usage.cache_read_tokens.unwrap_or(0);
+    let cache_read = usage
+        .cache_read_tokens
+        .or(usage.cached_input_tokens)
+        .unwrap_or(0);
     let cache_creation = usage.cache_creation_tokens.unwrap_or(0);
     let cache_5min = usage.cache_creation_5m_tokens.unwrap_or(0);
     let cache_1hr = usage.cache_creation_1h_tokens.unwrap_or(0);
 
-    // Base input tokens = total input minus cache components
-    let base_input = input
-        .saturating_sub(cache_read)
-        .saturating_sub(cache_creation);
+    let provider = usage.provider_type.unwrap_or_default();
+    let base_input = match provider {
+        crate::shared::messages::Provider::Anthropic
+        | crate::shared::messages::Provider::MiniMax => input,
+        _ => input
+            .saturating_sub(cache_read)
+            .saturating_sub(cache_creation),
+    };
     let base_input_cost = base_input as f64 / 1_000_000.0 * tier.input_per_million;
 
     // Cache creation cost: per-TTL if available, else aggregate
@@ -70,12 +87,25 @@ pub fn calculate_cost(model: &str, usage: &TokenUsage) -> Option<Cost> {
     let output_cost = output as f64 / 1_000_000.0 * tier.output_per_million;
     let total = input_cost + output_cost;
 
-    Some(Cost {
-        input_cost,
-        output_cost,
-        total,
-        currency: "USD".to_string(),
-    })
+    PricingRecord {
+        available: true,
+        model: model.to_string(),
+        reason: None,
+        cost: Some(TokenCostBreakdown {
+            base_input_tokens: base_input,
+            output_tokens: output,
+            cache_read_tokens: cache_read,
+            cache_write_tokens: cache_creation,
+            cache_write_5m_tokens: cache_5min,
+            cache_write_1h_tokens: cache_1hr,
+            base_input_cost,
+            output_cost,
+            cache_read_cost,
+            cache_write_cost: cache_creation_cost,
+            total_cost: total,
+            currency: "USD".to_string(),
+        }),
+    }
 }
 
 /// Format a cost value for display.
@@ -115,30 +145,29 @@ pub fn format_tokens(n: u64) -> String {
 
 /// Detect provider type from a model identifier string.
 #[must_use]
-pub fn detect_provider(model: &str) -> crate::shared::messages::Provider {
+pub fn detect_provider(model: &str) -> Option<crate::shared::messages::Provider> {
     use crate::shared::messages::Provider;
     let m = model.to_lowercase();
     if m.contains("claude") {
-        Provider::Anthropic
+        Some(Provider::Anthropic)
     } else if m.contains("codex")
         || m.starts_with("o1")
         || m.starts_with("o3")
         || m.starts_with("o4")
     {
-        Provider::OpenAiCodex
+        Some(Provider::OpenAiCodex)
     } else if m.contains("gpt") || m.contains("openai/") {
-        Provider::OpenAi
+        Some(Provider::OpenAi)
     } else if m.contains("gemini") || m.contains("google/") {
-        Provider::Google
+        Some(Provider::Google)
     } else if m.contains("minimax") {
-        Provider::MiniMax
+        Some(Provider::MiniMax)
     } else if m.contains("kimi") || m.contains("moonshot") {
-        Provider::Kimi
+        Some(Provider::Kimi)
     } else if m.contains("gemma4") || m.contains("ollama") {
-        Provider::Ollama
+        Some(Provider::Ollama)
     } else {
-        // Default to Anthropic
-        Provider::Anthropic
+        None
     }
 }
 
@@ -274,28 +303,28 @@ fn exact_match(model: &str) -> Option<PricingTier> {
         "chatgpt-4o-latest" => openai_uncached_tier(5.0, 15.0),
         "gpt-oss-120b" | "gpt-oss-20b" => openai_uncached_tier(0.0, 0.0),
 
-        // MiniMax — $0.3/M input, $1.2/M output (no cache)
-        "MiniMax-M2.5"
-        | "MiniMax-M2.5-highspeed"
-        | "MiniMax-M2.1"
-        | "MiniMax-M2.1-highspeed"
-        | "MiniMax-M2" => minimax_tier(0.3, 1.2),
+        // MiniMax — Anthropic-compatible prompt caching.
+        "MiniMax-M2.7" => minimax_tier(0.3, 1.2, 0.2),
+        "MiniMax-M2.7-highspeed" => minimax_tier(0.3, 2.4, 0.2),
+        "MiniMax-M2.5" | "MiniMax-M2.1" | "MiniMax-M2" => minimax_tier(0.3, 1.2, 0.1),
+        "MiniMax-M2.5-highspeed" | "MiniMax-M2.1-highspeed" => minimax_tier(0.3, 2.4, 0.1),
 
-        // Kimi — K2.5 ($0.60/$3.00)
-        "kimi-k2.5" => kimi_tier(0.60, 3.00),
+        // Kimi — K2.6 / K2.5.
+        "kimi-k2.6" => kimi_tier(0.95, 4.00, Some(0.16)),
+        "kimi-k2.5" => kimi_tier(0.60, 3.00, Some(0.10)),
 
         // Kimi — K2 standard ($0.60/$2.50)
         "kimi-k2-0905-preview" | "kimi-k2-0711-preview" | "kimi-k2-thinking" => {
-            kimi_tier(0.60, 2.50)
+            kimi_tier(0.60, 2.50, Some(0.15))
         }
 
         // Kimi — K2 turbo ($1.15/$8.00)
-        "kimi-k2-turbo-preview" | "kimi-k2-thinking-turbo" => kimi_tier(1.15, 8.00),
+        "kimi-k2-turbo-preview" | "kimi-k2-thinking-turbo" => kimi_tier(1.15, 8.00, Some(0.15)),
 
         // Kimi — Moonshot V1 retired generation.
-        "moonshot-v1-8k" => kimi_tier(0.20, 2.00),
-        "moonshot-v1-32k" => kimi_tier(1.00, 3.00),
-        "moonshot-v1-128k" => kimi_tier(2.00, 5.00),
+        "moonshot-v1-8k" => kimi_tier(0.20, 2.00, None),
+        "moonshot-v1-32k" => kimi_tier(1.00, 3.00, None),
+        "moonshot-v1-128k" => kimi_tier(2.00, 5.00, None),
 
         // Ollama — local models (free)
         "gemma4:e4b" | "gemma4:26b" => free_tier(),
@@ -304,25 +333,25 @@ fn exact_match(model: &str) -> Option<PricingTier> {
     })
 }
 
-/// Create a `MiniMax` pricing tier (no separate cache pricing).
-fn minimax_tier(input: f64, output: f64) -> PricingTier {
+/// Create a `MiniMax` pricing tier.
+fn minimax_tier(input: f64, output: f64, cache_read_multiplier: f64) -> PricingTier {
     PricingTier {
         input_per_million: input,
         output_per_million: output,
-        cache_write_5m_multiplier: 1.0,
-        cache_write_1h_multiplier: 1.0,
-        cache_read_multiplier: 1.0,
+        cache_write_5m_multiplier: 1.25,
+        cache_write_1h_multiplier: 1.25,
+        cache_read_multiplier,
     }
 }
 
-/// Create a Kimi pricing tier (cache read handled server-side).
-fn kimi_tier(input: f64, output: f64) -> PricingTier {
+/// Create a Kimi pricing tier.
+fn kimi_tier(input: f64, output: f64, cache_read: Option<f64>) -> PricingTier {
     PricingTier {
         input_per_million: input,
         output_per_million: output,
         cache_write_5m_multiplier: 1.0,
         cache_write_1h_multiplier: 1.0,
-        cache_read_multiplier: 1.0,
+        cache_read_multiplier: cache_read.map_or(1.0, |price| price / input),
     }
 }
 
@@ -335,166 +364,6 @@ fn free_tier() -> PricingTier {
         cache_write_1h_multiplier: 1.0,
         cache_read_multiplier: 1.0,
     }
-}
-
-/// Prefix/pattern-based matching for model families.
-fn pattern_match(model: &str) -> Option<PricingTier> {
-    let m = model.to_lowercase();
-
-    // Claude family patterns
-    if m.contains("opus-4-6") || m.contains("opus-4-5") {
-        return Some(anthropic_tier(5.0, 25.0));
-    }
-    if m.contains("sonnet-4-5") || m.contains("sonnet-4") || m.contains("sonnet-3-7") {
-        return Some(anthropic_tier(3.0, 15.0));
-    }
-    if m.contains("haiku-4-5") {
-        return Some(anthropic_tier(1.0, 5.0));
-    }
-    if m.contains("opus-4-1") || m.contains("opus-4") {
-        return Some(anthropic_tier(15.0, 75.0));
-    }
-    if m.contains("haiku-3") {
-        return Some(anthropic_tier(0.25, 1.25));
-    }
-
-    // Gemini family patterns
-    if m.contains("gemini") && m.contains("pro") {
-        return Some(google_tier(1.25, 5.0));
-    }
-    if m.contains("gemini") && m.contains("flash") {
-        return Some(google_tier(0.075, 0.3));
-    }
-
-    // OpenAI patterns
-    if m.contains("gpt-5.5-pro") {
-        return Some(openai_uncached_tier(30.0, 180.0));
-    }
-    if m.contains("gpt-5.5") {
-        return Some(openai_cached_tier(5.0, 30.0, 0.50));
-    }
-    if m.contains("gpt-5.4-pro") {
-        return Some(openai_uncached_tier(30.0, 180.0));
-    }
-    if m.contains("gpt-5.4-mini") {
-        return Some(openai_cached_tier(0.75, 4.50, 0.075));
-    }
-    if m.contains("gpt-5.4-nano") {
-        return Some(openai_cached_tier(0.20, 1.25, 0.020));
-    }
-    if m.contains("gpt-5.4") {
-        return Some(openai_cached_tier(2.50, 15.0, 0.25));
-    }
-    if m.contains("gpt-5.2-pro") {
-        return Some(openai_uncached_tier(21.0, 168.0));
-    }
-    if m.contains("gpt-5.3-codex") || m.contains("gpt-5.2") {
-        return Some(openai_cached_tier(1.75, 14.0, 0.175));
-    }
-    if m.contains("gpt-5.1-codex-mini") {
-        return Some(openai_cached_tier(0.25, 2.0, 0.025));
-    }
-    if m.contains("gpt-5.1-codex-max") {
-        return Some(openai_cached_tier(1.25, 10.0, 0.125));
-    }
-    if m.contains("gpt-5.1") || m.contains("gpt-5-codex") || m.contains("gpt-5-chat") {
-        return Some(openai_cached_tier(1.25, 10.0, 0.125));
-    }
-    if m.contains("gpt-5-mini") {
-        return Some(openai_cached_tier(0.25, 2.0, 0.025));
-    }
-    if m.contains("gpt-5-nano") {
-        return Some(openai_cached_tier(0.05, 0.40, 0.005));
-    }
-    if m.contains("gpt-5-pro") {
-        return Some(openai_uncached_tier(15.0, 120.0));
-    }
-    if m.contains("gpt-5") {
-        return Some(openai_cached_tier(1.25, 10.0, 0.125));
-    }
-    if m.contains("codex-mini-latest") {
-        return Some(openai_cached_tier(1.50, 6.0, 0.375));
-    }
-    if m.starts_with("o3-pro") {
-        return Some(openai_uncached_tier(20.0, 80.0));
-    }
-    if m.starts_with("o3-mini") {
-        return Some(openai_cached_tier(1.10, 4.40, 0.55));
-    }
-    if m.starts_with("o3") {
-        return Some(openai_cached_tier(2.0, 8.0, 0.50));
-    }
-    if m.starts_with("o4") {
-        return Some(openai_cached_tier(1.10, 4.40, 0.275));
-    }
-    if m.starts_with("o1-pro") {
-        return Some(openai_uncached_tier(150.0, 600.0));
-    }
-    if m.starts_with("o1-mini") {
-        return Some(openai_cached_tier(1.10, 4.40, 0.55));
-    }
-    if m.starts_with("o1") {
-        return Some(openai_cached_tier(15.0, 60.0, 7.50));
-    }
-    if m.contains("gpt-4.5") {
-        return Some(openai_cached_tier(75.0, 150.0, 37.50));
-    }
-    if m.contains("gpt-4-turbo") || m.contains("gpt-4-0125") || m.contains("gpt-4-1106") {
-        return Some(openai_uncached_tier(10.0, 30.0));
-    }
-    if m.contains("gpt-4.1-nano") {
-        return Some(openai_cached_tier(0.10, 0.40, 0.025));
-    }
-    if m.contains("gpt-4.1-mini") {
-        return Some(openai_cached_tier(0.40, 1.60, 0.10));
-    }
-    if m.contains("gpt-4.1") {
-        return Some(openai_cached_tier(2.0, 8.0, 0.50));
-    }
-    if m.contains("gpt-4o-mini") {
-        return Some(openai_cached_tier(0.15, 0.60, 0.075));
-    }
-    if m.contains("chatgpt-4o-latest") {
-        return Some(openai_uncached_tier(5.0, 15.0));
-    }
-    if m.contains("gpt-4o") {
-        return Some(openai_cached_tier(2.50, 10.0, 1.25));
-    }
-    if m.contains("gpt-4") {
-        return Some(openai_uncached_tier(30.0, 60.0));
-    }
-    if m.contains("gpt-3.5") {
-        return Some(openai_uncached_tier(0.50, 1.50));
-    }
-    if m.contains("gpt-oss") {
-        return Some(openai_uncached_tier(0.0, 0.0));
-    }
-
-    // MiniMax family patterns
-    if m.contains("minimax") {
-        return Some(minimax_tier(0.3, 1.2));
-    }
-
-    // Kimi family patterns
-    if m.contains("kimi-k2.5") {
-        return Some(kimi_tier(0.60, 3.00));
-    }
-    if m.contains("kimi-k2") && m.contains("turbo") {
-        return Some(kimi_tier(1.15, 8.00));
-    }
-    if m.contains("kimi-k2") {
-        return Some(kimi_tier(0.60, 2.50));
-    }
-    if m.contains("moonshot") {
-        return Some(kimi_tier(1.00, 3.00));
-    }
-
-    // Ollama — local models (free)
-    if m.contains("gemma4") {
-        return Some(free_tier());
-    }
-
-    None
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -639,12 +508,9 @@ mod tests {
     }
 
     #[test]
-    fn pricing_pattern_match_partial_names() {
-        let tier = get_pricing_tier("claude-opus-4-6-extended").unwrap();
-        assert_float_eq(tier.input_per_million, 5.0);
-
-        let tier = get_pricing_tier("gemini-2-5-pro-latest").unwrap();
-        assert_float_eq(tier.input_per_million, 1.25);
+    fn pricing_does_not_guess_partial_names() {
+        assert!(get_pricing_tier("claude-opus-4-6-extended").is_none());
+        assert!(get_pricing_tier("gemini-2-5-pro-latest").is_none());
     }
 
     // ── Cost calculation ──
@@ -706,6 +572,24 @@ mod tests {
         let expected_input = 1.50 + 0.625 + 1.00;
         assert!((cost.input_cost - expected_input).abs() < 0.001);
         assert!((cost.output_cost - 1.25).abs() < 0.001);
+    }
+
+    #[test]
+    fn cost_anthropic_base_input_uses_uncached_input_bucket() {
+        let usage = TokenUsage {
+            input_tokens: 100_000,
+            output_tokens: 100_000,
+            cache_read_tokens: Some(800_000),
+            cache_creation_tokens: Some(100_000),
+            provider_type: Some(Provider::Anthropic),
+            ..Default::default()
+        };
+        let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
+
+        // Anthropic input_tokens already excludes cache read/write buckets.
+        let expected_input = 0.30 + 0.375 + 0.24;
+        assert!((cost.input_cost - expected_input).abs() < 0.001);
+        assert!((cost.output_cost - 1.5).abs() < 0.001);
     }
 
     #[test]
@@ -783,38 +667,41 @@ mod tests {
 
     #[test]
     fn detect_anthropic() {
-        assert_eq!(detect_provider("claude-opus-4-6"), Provider::Anthropic);
+        assert_eq!(
+            detect_provider("claude-opus-4-6"),
+            Some(Provider::Anthropic)
+        );
         assert_eq!(
             detect_provider("claude-sonnet-4-5-20250929"),
-            Provider::Anthropic
+            Some(Provider::Anthropic)
         );
     }
 
     #[test]
     fn detect_google() {
-        assert_eq!(detect_provider("gemini-2-5-pro"), Provider::Google);
+        assert_eq!(detect_provider("gemini-2-5-pro"), Some(Provider::Google));
     }
 
     #[test]
     fn detect_openai() {
-        assert_eq!(detect_provider("gpt-4.1"), Provider::OpenAi);
-        assert_eq!(detect_provider("gpt-5.5"), Provider::OpenAi);
+        assert_eq!(detect_provider("gpt-4.1"), Some(Provider::OpenAi));
+        assert_eq!(detect_provider("gpt-5.5"), Some(Provider::OpenAi));
     }
 
     #[test]
     fn detect_openai_codex() {
-        assert_eq!(detect_provider("o3"), Provider::OpenAiCodex);
-        assert_eq!(detect_provider("o4-mini"), Provider::OpenAiCodex);
+        assert_eq!(detect_provider("o3"), Some(Provider::OpenAiCodex));
+        assert_eq!(detect_provider("o4-mini"), Some(Provider::OpenAiCodex));
     }
 
     #[test]
     fn detect_minimax() {
-        assert_eq!(detect_provider("MiniMax-M2.5"), Provider::MiniMax);
+        assert_eq!(detect_provider("MiniMax-M2.5"), Some(Provider::MiniMax));
     }
 
     #[test]
     fn detect_minimax_lowercase() {
-        assert_eq!(detect_provider("minimax-m2.5"), Provider::MiniMax);
+        assert_eq!(detect_provider("minimax-m2.5"), Some(Provider::MiniMax));
     }
 
     #[test]
@@ -822,19 +709,37 @@ mod tests {
         let tier = get_pricing_tier("MiniMax-M2.5").unwrap();
         assert!((tier.input_per_million - 0.3).abs() < f64::EPSILON);
         assert!((tier.output_per_million - 1.2).abs() < f64::EPSILON);
+        assert!((tier.cache_read_multiplier - 0.1).abs() < f64::EPSILON);
+        assert!((tier.cache_write_5m_multiplier - 1.25).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn detect_unknown_defaults_to_anthropic() {
-        assert_eq!(detect_provider("some-unknown-model"), Provider::Anthropic);
+    fn pricing_minimax_m2_7_has_explicit_read_price() {
+        let tier = get_pricing_tier("MiniMax-M2.7").unwrap();
+        assert_float_eq(tier.input_per_million, 0.3);
+        assert_float_eq(tier.output_per_million, 1.2);
+        assert_float_eq(tier.cache_read_multiplier, 0.2);
+    }
+
+    #[test]
+    fn pricing_kimi_cache_hit_rates_are_explicit() {
+        let tier = get_pricing_tier("kimi-k2.6").unwrap();
+        assert_float_eq(tier.input_per_million, 0.95);
+        assert_float_eq(tier.output_per_million, 4.0);
+        assert!((tier.cache_read_multiplier - (0.16 / 0.95)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn detect_unknown_returns_none() {
+        assert_eq!(detect_provider("some-unknown-model"), None);
     }
 
     // ── Ollama ──
 
     #[test]
     fn detect_ollama_gemma4() {
-        assert_eq!(detect_provider("gemma4:e4b"), Provider::Ollama);
-        assert_eq!(detect_provider("gemma4:26b"), Provider::Ollama);
+        assert_eq!(detect_provider("gemma4:e4b"), Some(Provider::Ollama));
+        assert_eq!(detect_provider("gemma4:26b"), Some(Provider::Ollama));
     }
 
     #[test]

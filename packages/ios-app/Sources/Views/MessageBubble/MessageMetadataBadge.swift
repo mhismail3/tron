@@ -18,6 +18,24 @@ struct TokenBadge: View {
                     .font(TronTypography.labelSM)
                 Text(record.formattedOutput)
             }
+
+            if let cache = record.formattedCache {
+                HStack(spacing: 2) {
+                    Image(systemName: "externaldrive")
+                        .font(TronTypography.labelSM)
+                    Text(cache)
+                }
+            }
+
+            if let cost = record.pricing.cost {
+                HStack(spacing: 2) {
+                    Image(systemName: "dollarsign")
+                        .font(TronTypography.labelSM)
+                    Text(formatCost(cost.totalCost))
+                }
+            } else if !record.pricing.available {
+                Text("cost unavailable")
+            }
         }
         .font(TronTypography.codeSM)
         .foregroundStyle(.tronTextMuted)

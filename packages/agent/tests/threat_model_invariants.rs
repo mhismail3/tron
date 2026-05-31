@@ -759,6 +759,198 @@ fn post_100_operating_scorecard_stays_formalized() {
 }
 
 #[test]
+fn token_accounting_hardening_scorecard_stays_formalized() {
+    let repo_root = repo_root();
+    let crate_root = crate_root();
+    let read_repo = |relative: &str| {
+        let path = repo_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+    let read_crate = |relative: &str| {
+        let path = crate_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+
+    let scorecard_path =
+        repo_root.join("packages/agent/docs/token-accounting-hardening-scorecard.md");
+    assert!(
+        scorecard_path.is_file(),
+        "token-accounting hardening scorecard must exist"
+    );
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+
+    for required in [
+        "Initial score: **0/100**",
+        "Current score: **",
+        "server is the single source of truth",
+        "iPhone Simulator is the only manual UI target",
+        "iPad coverage is\n  intentionally skipped",
+        "## Canonical Glossary",
+        "rawCacheCreation5mTokens",
+        "rawCacheCreation1hTokens",
+        "rawReasoningOutputTokens",
+        "rawThoughtTokens",
+        "rawToolUsePromptTokens",
+        "contextSegmentId",
+        "baselineResetReason",
+        "## Provider-Doc Audit",
+        "OpenAI Responses",
+        "Anthropic",
+        "Google Gemini",
+        "MiniMax",
+        "Kimi",
+        "Ollama",
+        "## Static Gates",
+        "Provider::default()` must remain `Unknown`",
+        "TurnEndPlugin` must not default missing turn numbers to `1`",
+        "## Scenario Ledger",
+        "| TAH-0 |",
+        "| TAH-1 |",
+        "| TAH-2 |",
+        "| TAH-3 |",
+        "| TAH-4 |",
+        "| TAH-5 |",
+        "| TAH-6 |",
+        "| TAH-7 |",
+        "## iPhone Manual Evidence Protocol",
+        "dashboard, new chat, cached prompt flow, provider switch, reload/resume",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "token-accounting scorecard missing required checkpoint text: {required}"
+        );
+    }
+
+    let readme = read_repo("README.md");
+    assert!(
+        readme.contains("packages/agent/docs/token-accounting-hardening-scorecard.md")
+            && readme.contains("server-authoritative token accounting, pricing, provider-cache")
+            && readme.contains("iPhone-only UI hardening scorecard"),
+        "README living-doc map must link the token-accounting hardening scorecard"
+    );
+
+    let messages = read_crate("src/shared/protocol/messages.rs");
+    assert!(
+        messages.contains("#[derive(Clone, Copy, Debug, Default")
+            && messages
+                .contains("#[default]\n    #[serde(other, rename = \"unknown\")]\n    Unknown")
+            && !messages.contains("#[default]\n    Anthropic"),
+        "Provider::default must remain Unknown, never Anthropic"
+    );
+
+    let token_payload = read_crate("src/domains/session/event_store/types/payloads/token_usage.rs");
+    assert!(
+        token_payload.contains(
+            "pub type TokenRecord = crate::domains::model::providers::tokens::types::TokenRecord"
+        ) && !token_payload.contains("pub type TokenRecord = serde_json::Value")
+            && !token_payload.contains("opaque"),
+        "event-store TokenRecord payload must stay typed and non-opaque"
+    );
+
+    let persistence = read_crate("src/domains/agent/runner/pipeline/persistence.rs");
+    for required in [
+        "\"cachedInputTokens\"",
+        "\"cacheCreation5mTokens\"",
+        "\"cacheCreation1hTokens\"",
+        "\"reasoningOutputTokens\"",
+        "\"thoughtTokens\"",
+        "\"toolUsePromptTokens\"",
+        "\"totalTokens\"",
+        "\"providerType\"",
+        "calculate_pricing(model, usage)",
+        "context_segment_id",
+        "baseline_reset_reason",
+    ] {
+        assert!(
+            persistence.contains(required),
+            "server token serialization missing canonical field or pricing hook: {required}"
+        );
+    }
+
+    let token_mod = read_crate("src/domains/model/providers/tokens/mod.rs");
+    assert!(
+        token_mod.contains("token accounting is server-authoritative")
+            && token_mod.contains("TokenRecord")
+            && token_mod.contains("explicit unavailable state"),
+        "token module docs must declare the server-authoritative accounting invariant"
+    );
+
+    let minimax = read_crate("src/domains/model/providers/minimax/provider.rs");
+    assert!(
+        minimax.contains("strip_cache_ttls")
+            && minimax.contains("apply_cache_to_last_user_message")
+            && minimax.contains("cache_control")
+            && minimax.contains(
+                "MiniMax explicit prompt caching currently exposes a 5-minute ephemeral cache"
+            ),
+        "MiniMax provider must keep explicit 5-minute prompt-cache request markers"
+    );
+
+    let token_record_swift = read_repo("packages/ios-app/Sources/Models/Tokens/TokenRecord.swift");
+    assert!(
+        token_record_swift.contains("let pricing: PricingRecord")
+            && token_record_swift.contains("let rawCachedInputTokens: Int")
+            && token_record_swift.contains("let rawCacheCreation5mTokens: Int")
+            && token_record_swift.contains("let rawCacheCreation1hTokens: Int")
+            && token_record_swift.contains("let rawReasoningOutputTokens: Int")
+            && token_record_swift.contains("let rawThoughtTokens: Int")
+            && token_record_swift.contains("let rawToolUsePromptTokens: Int")
+            && token_record_swift.contains("let rawTotalTokens: Int")
+            && token_record_swift.contains("let contextSegmentId: String")
+            && token_record_swift.contains("let baselineResetReason: String")
+            && token_record_swift.contains("JSONDecoder().decode(TokenRecord.self"),
+        "iOS TokenRecord must strictly decode the full server schema"
+    );
+
+    let analytics =
+        read_repo("packages/ios-app/Sources/Views/AgentControl/ConsolidatedAnalytics.swift");
+    for forbidden in [
+        "ModelPricing",
+        "inputPerMillion",
+        "costPerMillion",
+        "estimatedCost",
+        "legacy:",
+    ] {
+        assert!(
+            !analytics.contains(forbidden),
+            "iOS analytics must not contain local pricing or legacy token fallback marker `{forbidden}`"
+        );
+    }
+    assert!(
+        analytics.contains("TokenRecord.from(dict:")
+            && analytics.contains("tokenRecord.pricing.cost")
+            && analytics.contains("tokenRecord.meta.contextSegmentId")
+            && analytics.contains("providerTotalTokens"),
+        "iOS analytics must consume server tokenRecord pricing, segment, and provider total"
+    );
+
+    let transformer = read_repo("packages/ios-app/Sources/Models/UnifiedEventTransformer.swift");
+    assert!(
+        !transformer.contains("Fallback for imported sessions")
+            && !transformer.contains("parsed.tokenUsage")
+            && transformer
+                .contains("let parsedPayload = AssistantMessagePayload(from: event.payload)")
+            && transformer
+                .contains("if let parsed = parsedPayload, let record = parsed.tokenRecord"),
+        "UnifiedEventTransformer must not restore legacy tokenUsage fallback reconstruction"
+    );
+
+    let turn_end =
+        read_repo("packages/ios-app/Sources/Core/Events/Plugins/Streaming/TurnEndPlugin.swift");
+    assert!(
+        !turn_end.contains("?? 1")
+            && turn_end.contains("var number: Int? { turn ?? turnNumber }")
+            && turn_end.contains(
+                "guard let data = event.data, let turnNumber = data.number else { return nil }"
+            ),
+        "TurnEndPlugin must fail missing turn data instead of defaulting to turn 1"
+    );
+}
+
+#[test]
 fn ios_thin_client_boundaries_stay_split() {
     let repo_root = repo_root();
     let read = |relative: &str| {

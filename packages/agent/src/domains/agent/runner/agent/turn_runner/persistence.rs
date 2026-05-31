@@ -104,9 +104,11 @@ pub(super) async fn emit_turn_start(
 pub(super) fn build_interrupted_message_payload(
     message: &AssistantMessage,
     token_usage: Option<&TokenUsage>,
+    session_id: &str,
     turn: u32,
     model: &str,
     provider_type: Provider,
+    previous_context_baseline: u64,
 ) -> Option<Value> {
     let content_json = persistence::build_content_json(&message.content);
     if content_json.is_empty() {
@@ -124,6 +126,14 @@ pub(super) fn build_interrupted_message_payload(
     });
     if let Some(token_usage) = token_usage {
         payload["tokenUsage"] = persistence::build_token_usage_json(token_usage);
+        payload["tokenRecord"] = persistence::build_token_record(
+            token_usage,
+            provider_type,
+            session_id,
+            turn,
+            previous_context_baseline,
+            model,
+        );
     }
     Some(payload)
 }
@@ -161,31 +171,23 @@ pub(super) fn build_token_record_json(
     previous_context_baseline: u64,
     model: &str,
 ) -> (Option<Value>, Option<f64>) {
-    let mut token_record_json = token_usage.map(|usage| {
+    let token_record_json = token_usage.map(|usage| {
         persistence::build_token_record(
             usage,
             provider_type,
             session_id,
             turn,
             previous_context_baseline,
+            model,
         )
     });
 
-    let cost = token_usage.and_then(|usage| {
-        crate::domains::model::providers::tokens::calculate_cost(model, usage).map(|c| c.total)
-    });
-
-    if let Some(record) = token_record_json.as_mut() {
-        record["pricing"] = if cost.is_some() {
-            json!({ "available": true })
-        } else {
-            json!({
-                "available": false,
-                "reason": "unsupported_model_pricing",
-                "model": model,
-            })
-        };
-    }
+    let cost = token_record_json
+        .as_ref()
+        .and_then(|record| record.get("pricing"))
+        .and_then(|pricing| pricing.get("cost"))
+        .and_then(|cost| cost.get("totalCost"))
+        .and_then(Value::as_f64);
 
     (token_record_json, cost)
 }
@@ -205,10 +207,15 @@ pub(super) fn emit_response_complete(
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
         cache_read_tokens: u.cache_read_tokens,
+        cached_input_tokens: u.cached_input_tokens,
         cache_creation_tokens: u.cache_creation_tokens,
         cache_creation_5m_tokens: u.cache_creation_5m_tokens,
         cache_creation_1h_tokens: u.cache_creation_1h_tokens,
-        provider_type: None,
+        reasoning_output_tokens: u.reasoning_output_tokens,
+        thought_tokens: u.thought_tokens,
+        tool_use_prompt_tokens: u.tool_use_prompt_tokens,
+        total_tokens: u.total_tokens,
+        provider_type: u.provider_type,
     });
 
     emit_maybe_sequenced(
@@ -277,11 +284,6 @@ pub(super) fn add_assistant_message_to_context(
         stop_reason: stop_reason_for_context,
         thinking: thinking_text,
     });
-
-    if let Some(token_usage) = stream_result.token_usage.as_ref() {
-        context_manager
-            .set_api_context_tokens(token_usage.input_tokens + token_usage.output_tokens);
-    }
 
     has_thinking
 }
@@ -412,18 +414,10 @@ pub(super) async fn emit_turn_end(
     parent_invocation_id: Option<&InvocationId>,
 ) {
     if let Some(persister) = persister {
-        let mut token_usage_object = json!({
-            "inputTokens": stream_result.token_usage.as_ref().map_or(0, |u| u.input_tokens),
-            "outputTokens": stream_result.token_usage.as_ref().map_or(0, |u| u.output_tokens),
-        });
-        if let Some(token_usage) = stream_result.token_usage.as_ref() {
-            if let Some(cache_read_tokens) = token_usage.cache_read_tokens {
-                token_usage_object["cacheReadTokens"] = json!(cache_read_tokens);
-            }
-            if let Some(cache_creation_tokens) = token_usage.cache_creation_tokens {
-                token_usage_object["cacheCreationTokens"] = json!(cache_creation_tokens);
-            }
-        }
+        let token_usage_object = stream_result.token_usage.as_ref().map_or_else(
+            || json!({"inputTokens": 0, "outputTokens": 0}),
+            persistence::build_token_usage_json,
+        );
 
         let mut payload = json!({
             "turn": turn,
@@ -461,8 +455,15 @@ pub(super) async fn emit_turn_end(
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
         cache_read_tokens: u.cache_read_tokens,
+        cached_input_tokens: u.cached_input_tokens,
         cache_creation_tokens: u.cache_creation_tokens,
-        ..TokenUsage::default()
+        cache_creation_5m_tokens: u.cache_creation_5m_tokens,
+        cache_creation_1h_tokens: u.cache_creation_1h_tokens,
+        reasoning_output_tokens: u.reasoning_output_tokens,
+        thought_tokens: u.thought_tokens,
+        tool_use_prompt_tokens: u.tool_use_prompt_tokens,
+        total_tokens: u.total_tokens,
+        provider_type: u.provider_type,
     });
 
     emit_maybe_sequenced(

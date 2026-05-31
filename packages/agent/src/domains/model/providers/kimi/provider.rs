@@ -113,6 +113,9 @@ impl KimiProvider {
             "stream": true,
             "stream_options": {"include_usage": true},
         });
+        if let Some(prompt_cache_key) = options.prompt_cache_key.as_ref() {
+            body["prompt_cache_key"] = json!(prompt_cache_key);
+        }
 
         // System message goes first in the messages array
         let mut api_messages: Vec<Value> = Vec::new();

@@ -707,6 +707,7 @@ fn responses_request_serde() {
         text: Some(ResponseTextConfig {
             verbosity: "low".into(),
         }),
+        prompt_cache_key: Some("tron-session-s1".into()),
     };
     let json = serde_json::to_value(&req).unwrap();
     assert_eq!(json["model"], "gpt-5.3-codex");
@@ -715,6 +716,7 @@ fn responses_request_serde() {
     assert_eq!(json["reasoning"]["effort"], "medium");
     assert_eq!(json["reasoning"]["summary"], "detailed");
     assert_eq!(json["text"]["verbosity"], "low");
+    assert_eq!(json["prompt_cache_key"], "tron-session-s1");
 }
 
 // ── SSE event types ────────────────────────────────────────────────

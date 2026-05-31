@@ -2,11 +2,8 @@ import XCTest
 @testable import TronMobile
 
 final class TurnEndPluginTests: XCTestCase {
-
-    // MARK: - Basic Parsing Tests
-
     func testParseValidEvent() throws {
-        let json = """
+        let event = try TurnEndPlugin.parse(from: jsonData("""
         {
             "type": "agent.turn_end",
             "sessionId": "session-123",
@@ -19,9 +16,7 @@ final class TurnEndPluginTests: XCTestCase {
                 "contextLimit": 200000
             }
         }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
+        """))
 
         XCTAssertEqual(event.type, "agent.turn_end")
         XCTAssertEqual(event.sessionId, "session-123")
@@ -33,7 +28,7 @@ final class TurnEndPluginTests: XCTestCase {
     }
 
     func testParseWithCostAsString() throws {
-        let json = """
+        let event = try TurnEndPlugin.parse(from: jsonData("""
         {
             "type": "agent.turn_end",
             "sessionId": "session-123",
@@ -42,114 +37,58 @@ final class TurnEndPluginTests: XCTestCase {
                 "cost": "0.0125"
             }
         }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
+        """))
 
         XCTAssertEqual(event.data?.cost, 0.0125)
     }
 
-    func testParseWithBothTurnAndTurnNumber() throws {
-        let json = """
-        {
-            "type": "agent.turn_end",
-            "data": {
-                "turn": 5,
-                "turnNumber": 10
-            }
-        }
-        """.data(using: .utf8)!
+    func testTurnNumberAliasesRequireAtLeastOneExplicitTurnField() throws {
+        let both = try TurnEndPlugin.parse(from: jsonData("""
+        {"type": "agent.turn_end", "data": {"turn": 5, "turnNumber": 10}}
+        """))
+        XCTAssertEqual(both.data?.number, 5)
 
-        let event = try TurnEndPlugin.parse(from: json)
+        let aliasOnly = try TurnEndPlugin.parse(from: jsonData("""
+        {"type": "agent.turn_end", "data": {"turnNumber": 7}}
+        """))
+        XCTAssertEqual(aliasOnly.data?.number, 7)
 
-        // Should prefer turn over turnNumber
-        XCTAssertEqual(event.data?.number, 5)
+        let missing = try TurnEndPlugin.parse(from: jsonData("""
+        {"type": "agent.turn_end", "sessionId": "session-789"}
+        """))
+        XCTAssertNil(TurnEndPlugin.transform(missing))
     }
-
-    func testParseWithTurnNumberOnly() throws {
-        let json = """
-        {
-            "type": "agent.turn_end",
-            "data": {
-                "turnNumber": 7
-            }
-        }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
-        XCTAssertEqual(event.data?.number, 7)
-    }
-
-    func testParseWithoutData() throws {
-        let json = """
-        {
-            "type": "agent.turn_end",
-            "sessionId": "session-123"
-        }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
-
-        XCTAssertNil(event.data)
-    }
-
-    // MARK: - TokenRecord Parsing Tests
 
     func testParseWithTokenRecord() throws {
-        let json = """
+        let event = try TurnEndPlugin.parse(from: jsonData("""
         {
             "type": "agent.turn_end",
             "sessionId": "session-123",
             "data": {
                 "turn": 1,
                 "duration": 2500,
-                "tokenRecord": {
-                    "source": {
-                        "provider": "anthropic",
-                        "timestamp": "2024-01-15T10:30:00.000Z",
-                        "rawInputTokens": 502,
-                        "rawOutputTokens": 53,
-                        "rawCacheReadTokens": 17332,
-                        "rawCacheCreationTokens": 0
-                    },
-                    "computed": {
-                        "contextWindowTokens": 17834,
-                        "newInputTokens": 17834,
-                        "previousContextBaseline": 0,
-                        "calculationMethod": "anthropic_cache_aware"
-                    },
-                    "meta": {
-                        "turn": 1,
-                        "sessionId": "sess_abc123",
-                        "extractedAt": "2024-01-15T10:30:00.000Z",
-                        "normalizedAt": "2024-01-15T10:30:00.001Z"
-                    }
-                },
-                "cost": 0.05,
-                "contextLimit": 200000
+                "tokenRecord": \(tokenRecordJSON(provider: "anthropic", cacheRead: 17332, context: 17834, newInput: 502))
             }
         }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
+        """))
 
         XCTAssertNotNil(event.data?.tokenRecord)
         XCTAssertEqual(event.data?.tokenRecord?.source.provider, "anthropic")
         XCTAssertEqual(event.data?.tokenRecord?.source.rawInputTokens, 502)
         XCTAssertEqual(event.data?.tokenRecord?.source.rawOutputTokens, 53)
-        XCTAssertEqual(event.data?.tokenRecord?.source.rawCacheReadTokens, 17332)
-        XCTAssertEqual(event.data?.tokenRecord?.computed.contextWindowTokens, 17834)
-        XCTAssertEqual(event.data?.tokenRecord?.computed.newInputTokens, 17834)
-        XCTAssertEqual(event.data?.tokenRecord?.computed.calculationMethod, "anthropic_cache_aware")
-        XCTAssertEqual(event.data?.tokenRecord?.meta.turn, 1)
+        XCTAssertEqual(event.data?.tokenRecord?.source.rawCacheReadTokens, 17_332)
+        XCTAssertEqual(event.data?.tokenRecord?.source.rawCachedInputTokens, 17_332)
+        XCTAssertEqual(event.data?.tokenRecord?.computed.contextWindowTokens, 17_834)
+        XCTAssertEqual(event.data?.tokenRecord?.computed.newInputTokens, 502)
+        XCTAssertEqual(event.data?.tokenRecord?.meta.model, "claude-sonnet-4-5")
     }
 
-    func testParseOpenAITokenRecord() throws {
-        let json = """
+    func testMalformedTokenRecordFailsDecode() throws {
+        XCTAssertThrowsError(try TurnEndPlugin.parse(from: jsonData("""
         {
             "type": "agent.turn_end",
             "data": {
-                "turn": 2,
+                "turn": 1,
                 "tokenRecord": {
                     "source": {
                         "provider": "openai",
@@ -174,37 +113,11 @@ final class TurnEndPluginTests: XCTestCase {
                 }
             }
         }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
-
-        XCTAssertNotNil(event.data?.tokenRecord)
-        XCTAssertEqual(event.data?.tokenRecord?.source.provider, "openai")
-        XCTAssertEqual(event.data?.tokenRecord?.computed.contextWindowTokens, 5000)
-        XCTAssertEqual(event.data?.tokenRecord?.computed.newInputTokens, 1000)
-        XCTAssertEqual(event.data?.tokenRecord?.computed.calculationMethod, "direct")
+        """)))
     }
-
-    func testParseWithoutTokenRecord() throws {
-        let json = """
-        {
-            "type": "agent.turn_end",
-            "data": {
-                "turn": 1,
-                "duration": 1000
-            }
-        }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
-
-        XCTAssertNil(event.data?.tokenRecord)
-    }
-
-    // MARK: - Transform Tests
 
     func testTransform() throws {
-        let json = """
+        let event = try TurnEndPlugin.parse(from: jsonData("""
         {
             "type": "agent.turn_end",
             "sessionId": "session-456",
@@ -216,9 +129,7 @@ final class TurnEndPluginTests: XCTestCase {
                 "contextLimit": 128000
             }
         }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
+        """))
         let result = TurnEndPlugin.transform(event)
 
         XCTAssertNotNil(result)
@@ -226,7 +137,6 @@ final class TurnEndPluginTests: XCTestCase {
             XCTFail("Expected TurnEndPlugin.Result")
             return
         }
-
         XCTAssertEqual(turnResult.turnNumber, 2)
         XCTAssertEqual(turnResult.duration, 3000)
         XCTAssertEqual(turnResult.stopReason, "capability_invocation")
@@ -235,66 +145,86 @@ final class TurnEndPluginTests: XCTestCase {
     }
 
     func testTransformWithTokenRecord() throws {
-        let json = """
+        let event = try TurnEndPlugin.parse(from: jsonData("""
         {
             "type": "agent.turn_end",
             "data": {
                 "turn": 1,
                 "duration": 2500,
-                "tokenRecord": {
-                    "source": {
-                        "provider": "anthropic",
-                        "timestamp": "2024-01-15T10:30:00.000Z",
-                        "rawInputTokens": 500,
-                        "rawOutputTokens": 100,
-                        "rawCacheReadTokens": 8000,
-                        "rawCacheCreationTokens": 0
-                    },
-                    "computed": {
-                        "contextWindowTokens": 8500,
-                        "newInputTokens": 8500,
-                        "previousContextBaseline": 0,
-                        "calculationMethod": "anthropic_cache_aware"
-                    },
-                    "meta": {
-                        "turn": 1,
-                        "sessionId": "sess_test",
-                        "extractedAt": "2024-01-15T10:30:00.000Z",
-                        "normalizedAt": "2024-01-15T10:30:00.001Z"
-                    }
-                },
-                "cost": 0.03
+                "tokenRecord": \(tokenRecordJSON(provider: "openai", cacheRead: 3000, context: 5000, newInput: 1000, method: "direct"))
             }
         }
-        """.data(using: .utf8)!
-
-        let event = try TurnEndPlugin.parse(from: json)
+        """))
         let result = TurnEndPlugin.transform(event) as? TurnEndPlugin.Result
 
-        XCTAssertNotNil(result)
         XCTAssertNotNil(result?.tokenRecord)
-        XCTAssertEqual(result?.tokenRecord?.computed.contextWindowTokens, 8500)
-        XCTAssertEqual(result?.tokenRecord?.computed.newInputTokens, 8500)
-        XCTAssertEqual(result?.tokenRecord?.source.rawInputTokens, 500)
-        XCTAssertEqual(result?.tokenRecord?.source.rawCacheReadTokens, 8000)
+        XCTAssertEqual(result?.tokenRecord?.computed.contextWindowTokens, 5_000)
+        XCTAssertEqual(result?.tokenRecord?.computed.newInputTokens, 1_000)
+        XCTAssertEqual(result?.tokenRecord?.source.rawCachedInputTokens, 3_000)
     }
 
-    func testTransformWithNilData() throws {
-        let json = """
+    private func tokenRecordJSON(
+        provider: String,
+        cacheRead: Int,
+        context: Int,
+        newInput: Int,
+        method: String = "anthropic_cache_aware"
+    ) -> String {
+        """
         {
-            "type": "agent.turn_end",
-            "sessionId": "session-789"
+            "source": {
+                "provider": "\(provider)",
+                "timestamp": "2024-01-15T10:30:00.000Z",
+                "rawInputTokens": 502,
+                "rawOutputTokens": 53,
+                "rawCacheReadTokens": \(cacheRead),
+                "rawCachedInputTokens": \(cacheRead),
+                "rawCacheCreationTokens": 0,
+                "rawCacheCreation5mTokens": 0,
+                "rawCacheCreation1hTokens": 0,
+                "rawReasoningOutputTokens": 0,
+                "rawThoughtTokens": 0,
+                "rawToolUsePromptTokens": 0,
+                "rawTotalTokens": \(502 + 53 + cacheRead)
+            },
+            "computed": {
+                "contextWindowTokens": \(context),
+                "newInputTokens": \(newInput),
+                "previousContextBaseline": 0,
+                "calculationMethod": "\(method)"
+            },
+            "meta": {
+                "turn": 1,
+                "sessionId": "sess_abc123",
+                "model": "claude-sonnet-4-5",
+                "contextSegmentId": "sess_abc123:\(provider):claude-sonnet-4-5",
+                "baselineResetReason": "initial_or_reset",
+                "extractedAt": "2024-01-15T10:30:00.000Z",
+                "normalizedAt": "2024-01-15T10:30:00.001Z"
+            },
+            "pricing": {
+                "available": true,
+                "model": "claude-sonnet-4-5",
+                "cost": {
+                    "baseInputTokens": 502,
+                    "outputTokens": 53,
+                    "cacheReadTokens": \(cacheRead),
+                    "cacheWriteTokens": 0,
+                    "cacheWrite5mTokens": 0,
+                    "cacheWrite1hTokens": 0,
+                    "baseInputCost": 0.001,
+                    "outputCost": 0.002,
+                    "cacheReadCost": 0.003,
+                    "cacheWriteCost": 0,
+                    "totalCost": 0.006,
+                    "currency": "USD"
+                }
+            }
         }
-        """.data(using: .utf8)!
+        """
+    }
 
-        let event = try TurnEndPlugin.parse(from: json)
-        let result = TurnEndPlugin.transform(event) as? TurnEndPlugin.Result
-
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.turnNumber, 1)  // Default to 1
-        XCTAssertNil(result?.duration)
-        XCTAssertNil(result?.stopReason)
-        XCTAssertNil(result?.cost)
-        XCTAssertNil(result?.tokenRecord)
+    private func jsonData(_ json: String) -> Data {
+        json.data(using: .utf8)!
     }
 }

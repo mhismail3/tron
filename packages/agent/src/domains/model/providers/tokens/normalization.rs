@@ -4,15 +4,17 @@
 //!
 //! | Provider | `input_tokens` means | Context window formula |
 //! |----------|---------------------|------------------------|
-//! | Anthropic | **New** tokens only | `input + cache_read + cache_creation` |
-//! | `OpenAI` / Google | Full context sent | `input_tokens` directly |
+//! | Anthropic / `MiniMax` Anthropic-compatible | **New** tokens only | `input + cache_read + cache_creation` |
+//! | `OpenAI` / Google / Kimi / Ollama | Full context sent | `input_tokens` directly |
 //!
 //! This module normalizes provider data into a uniform [`TokenRecord`]
 //! with correct context window size and per-turn deltas.
 
 use crate::shared::messages::Provider;
 
-use super::types::{CalculationMethod, ComputedTokens, TokenMeta, TokenRecord, TokenSource};
+use super::types::{
+    CalculationMethod, ComputedTokens, PricingRecord, TokenMeta, TokenRecord, TokenSource,
+};
 
 /// Normalize raw token data into a [`TokenRecord`].
 ///
@@ -38,17 +40,20 @@ pub fn normalize_tokens(
     let mut meta = meta;
     meta.normalized_at = chrono::Utc::now().to_rfc3339();
 
+    let pricing_model = meta.model.clone();
     TokenRecord {
         source,
         computed,
         meta,
+        pricing: PricingRecord::unavailable(pricing_model, "pricing_not_calculated"),
     }
 }
 
 /// Compute context window size based on provider type.
 ///
-/// Anthropic reports `input`/`cache_read`/`cache_creation` as three mutually
-/// exclusive buckets. Other providers report the full context in `input_tokens`.
+/// Anthropic-compatible providers report `input`/`cache_read`/`cache_creation`
+/// as three mutually exclusive buckets. Other providers report the full context
+/// in `input_tokens`.
 fn compute_context_window(source: &TokenSource) -> (u64, CalculationMethod) {
     match source.provider {
         Provider::Anthropic | Provider::MiniMax => {
@@ -68,9 +73,9 @@ fn compute_context_window(source: &TokenSource) -> (u64, CalculationMethod) {
 
 /// Compute per-turn delta (new tokens added this turn).
 ///
-/// For Anthropic/MiniMax: `raw_input + cache_creation` — uncached tokens plus
-/// tokens newly written to cache this turn. Cache *reads* are pre-existing
-/// context, not new content.
+/// For Anthropic-compatible cache-aware providers: `raw_input + cache_creation`
+/// — uncached tokens plus tokens newly written to cache this turn. Cache
+/// *reads* are pre-existing context, not new content.
 /// For other providers: use context window delta (no cache semantics).
 fn compute_new_input_tokens(
     source: &TokenSource,
@@ -99,6 +104,9 @@ mod tests {
         TokenMeta {
             turn,
             session_id: "sess_test".to_string(),
+            model: "test-model".to_string(),
+            context_segment_id: "sess_test:provider:test-model".to_string(),
+            baseline_reset_reason: "none".to_string(),
             extracted_at: "2024-01-15T12:00:00Z".to_string(),
             normalized_at: String::new(),
         }
@@ -111,9 +119,14 @@ mod tests {
             raw_input_tokens: input,
             raw_output_tokens: 100,
             raw_cache_read_tokens: cache_read,
+            raw_cached_input_tokens: cache_read,
             raw_cache_creation_tokens: cache_creation,
             raw_cache_creation_5m_tokens: 0,
             raw_cache_creation_1h_tokens: 0,
+            raw_reasoning_output_tokens: 0,
+            raw_thought_tokens: 0,
+            raw_tool_use_prompt_tokens: 0,
+            raw_total_tokens: input + cache_read + cache_creation + 100,
         }
     }
 
@@ -124,9 +137,14 @@ mod tests {
             raw_input_tokens: input,
             raw_output_tokens: 50,
             raw_cache_read_tokens: 0,
+            raw_cached_input_tokens: 0,
             raw_cache_creation_tokens: 0,
             raw_cache_creation_5m_tokens: 0,
             raw_cache_creation_1h_tokens: 0,
+            raw_reasoning_output_tokens: 0,
+            raw_thought_tokens: 0,
+            raw_tool_use_prompt_tokens: 0,
+            raw_total_tokens: input + 50,
         }
     }
 
@@ -169,9 +187,14 @@ mod tests {
             raw_input_tokens: 10_000,
             raw_output_tokens: 500,
             raw_cache_read_tokens: 8000,
+            raw_cached_input_tokens: 8000,
             raw_cache_creation_tokens: 0,
             raw_cache_creation_5m_tokens: 0,
             raw_cache_creation_1h_tokens: 0,
+            raw_reasoning_output_tokens: 0,
+            raw_thought_tokens: 0,
+            raw_tool_use_prompt_tokens: 0,
+            raw_total_tokens: 10_500,
         };
         let record = normalize_tokens(source, 0, make_meta(1));
         // OpenAI input_tokens already includes full context
@@ -179,6 +202,32 @@ mod tests {
         assert_eq!(
             record.computed.calculation_method,
             CalculationMethod::Direct
+        );
+    }
+
+    #[test]
+    fn minimax_anthropic_compatible_context_window_adds_cache() {
+        let source = TokenSource {
+            provider: Provider::MiniMax,
+            timestamp: "2024-01-15T12:00:00Z".to_string(),
+            raw_input_tokens: 50,
+            raw_output_tokens: 20,
+            raw_cache_read_tokens: 1_000,
+            raw_cached_input_tokens: 1_000,
+            raw_cache_creation_tokens: 250,
+            raw_cache_creation_5m_tokens: 250,
+            raw_cache_creation_1h_tokens: 0,
+            raw_reasoning_output_tokens: 0,
+            raw_thought_tokens: 0,
+            raw_tool_use_prompt_tokens: 0,
+            raw_total_tokens: 1_320,
+        };
+        let record = normalize_tokens(source, 1_000, make_meta(2));
+        assert_eq!(record.computed.context_window_tokens, 1_300);
+        assert_eq!(record.computed.new_input_tokens, 300);
+        assert_eq!(
+            record.computed.calculation_method,
+            CalculationMethod::AnthropicCacheAware
         );
     }
 

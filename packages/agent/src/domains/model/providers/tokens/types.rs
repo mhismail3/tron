@@ -27,12 +27,26 @@ pub struct TokenSource {
     pub raw_output_tokens: u64,
     /// Tokens read from prompt cache.
     pub raw_cache_read_tokens: u64,
+    /// Provider-native cached input tokens.
+    ///
+    /// For Anthropic this is equivalent to cache reads. For OpenAI and Google
+    /// it records the provider field that says how much of the full prompt was
+    /// cached.
+    pub raw_cached_input_tokens: u64,
     /// Tokens written to prompt cache (aggregate).
     pub raw_cache_creation_tokens: u64,
     /// 5-minute TTL cache creation tokens (Anthropic per-TTL breakdown).
     pub raw_cache_creation_5m_tokens: u64,
     /// 1-hour TTL cache creation tokens (Anthropic per-TTL breakdown).
     pub raw_cache_creation_1h_tokens: u64,
+    /// Hidden reasoning output tokens reported by reasoning models.
+    pub raw_reasoning_output_tokens: u64,
+    /// Thinking tokens reported separately by providers such as Gemini.
+    pub raw_thought_tokens: u64,
+    /// Prompt tokens attributed to tool-use scaffolding.
+    pub raw_tool_use_prompt_tokens: u64,
+    /// Provider-reported total token count.
+    pub raw_total_tokens: u64,
 }
 
 /// Method used to calculate context window size.
@@ -67,6 +81,13 @@ pub struct TokenMeta {
     pub turn: u64,
     /// Session identifier.
     pub session_id: String,
+    /// Model identifier used for this provider call.
+    pub model: String,
+    /// Stable context segment identifier. It changes when model/provider
+    /// accounting baselines reset.
+    pub context_segment_id: String,
+    /// Why the previous context baseline was reset, or `"none"`.
+    pub baseline_reset_reason: String,
     /// ISO 8601 timestamp when tokens were extracted from the provider.
     pub extracted_at: String,
     /// ISO 8601 timestamp when normalization was performed.
@@ -86,6 +107,67 @@ pub struct TokenRecord {
     pub computed: ComputedTokens,
     /// Audit metadata.
     pub meta: TokenMeta,
+    /// Server-authoritative pricing/cost status.
+    pub pricing: PricingRecord,
+}
+
+/// Server-authoritative pricing state for a token record.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PricingRecord {
+    /// Pricing is available only when the server has explicit model pricing.
+    pub available: bool,
+    /// Model identifier used for pricing lookup.
+    pub model: String,
+    /// Reason pricing is unavailable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Detailed cost breakdown when pricing is available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<TokenCostBreakdown>,
+}
+
+impl PricingRecord {
+    /// Build an unavailable pricing record with an explicit reason.
+    #[must_use]
+    pub fn unavailable(model: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            available: false,
+            model: model.into(),
+            reason: Some(reason.into()),
+            cost: None,
+        }
+    }
+}
+
+/// Component-level cost accounting for a token record.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenCostBreakdown {
+    /// Billable non-cached input tokens.
+    pub base_input_tokens: u64,
+    /// Output tokens.
+    pub output_tokens: u64,
+    /// Cache-read/cached-input tokens.
+    pub cache_read_tokens: u64,
+    /// Aggregate cache-write tokens.
+    pub cache_write_tokens: u64,
+    /// 5-minute TTL cache-write tokens.
+    pub cache_write_5m_tokens: u64,
+    /// 1-hour TTL cache-write tokens.
+    pub cache_write_1h_tokens: u64,
+    /// Base input cost.
+    pub base_input_cost: f64,
+    /// Output cost.
+    pub output_cost: f64,
+    /// Cache-read/cached-input cost.
+    pub cache_read_cost: f64,
+    /// Cache-write cost.
+    pub cache_write_cost: f64,
+    /// Total cost.
+    pub total_cost: f64,
+    /// Currency code.
+    pub currency: String,
 }
 
 /// Session-level accumulated token totals (mutable running sums).
@@ -211,9 +293,14 @@ mod tests {
             raw_input_tokens: 604,
             raw_output_tokens: 100,
             raw_cache_read_tokens: 8266,
+            raw_cached_input_tokens: 8266,
             raw_cache_creation_tokens: 0,
             raw_cache_creation_5m_tokens: 0,
             raw_cache_creation_1h_tokens: 0,
+            raw_reasoning_output_tokens: 0,
+            raw_thought_tokens: 0,
+            raw_tool_use_prompt_tokens: 0,
+            raw_total_tokens: 8970,
         };
         let json = serde_json::to_value(&source).unwrap();
         assert_eq!(json["provider"], "anthropic");
@@ -255,6 +342,9 @@ mod tests {
         let meta = TokenMeta {
             turn: 2,
             session_id: "sess_abc".to_string(),
+            model: "claude-sonnet-4-6".to_string(),
+            context_segment_id: "sess_abc:anthropic:claude-sonnet-4-6".to_string(),
+            baseline_reset_reason: "none".to_string(),
             extracted_at: "2024-01-15T12:00:00Z".to_string(),
             normalized_at: "2024-01-15T12:00:01Z".to_string(),
         };
@@ -274,9 +364,14 @@ mod tests {
                 raw_input_tokens: 500,
                 raw_output_tokens: 200,
                 raw_cache_read_tokens: 0,
+                raw_cached_input_tokens: 0,
                 raw_cache_creation_tokens: 0,
                 raw_cache_creation_5m_tokens: 0,
                 raw_cache_creation_1h_tokens: 0,
+                raw_reasoning_output_tokens: 0,
+                raw_thought_tokens: 0,
+                raw_tool_use_prompt_tokens: 0,
+                raw_total_tokens: 700,
             },
             computed: ComputedTokens {
                 context_window_tokens: 500,
@@ -287,9 +382,13 @@ mod tests {
             meta: TokenMeta {
                 turn: 1,
                 session_id: "s".to_string(),
+                model: "gemini-3-pro-preview".to_string(),
+                context_segment_id: "s:google:gemini-3-pro-preview".to_string(),
+                baseline_reset_reason: "initial_or_reset".to_string(),
                 extracted_at: "2024-01-15T12:00:00Z".to_string(),
                 normalized_at: "2024-01-15T12:00:00Z".to_string(),
             },
+            pricing: PricingRecord::unavailable("gemini-3-pro-preview", "test"),
         };
         let json = serde_json::to_string(&record).unwrap();
         let back: TokenRecord = serde_json::from_str(&json).unwrap();

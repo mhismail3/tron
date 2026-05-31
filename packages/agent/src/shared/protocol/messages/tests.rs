@@ -118,14 +118,22 @@ fn token_usage_serde() {
         input_tokens: 100,
         output_tokens: 50,
         cache_read_tokens: Some(30),
+        cached_input_tokens: Some(30),
         cache_creation_tokens: None,
         cache_creation_5m_tokens: None,
         cache_creation_1h_tokens: None,
+        reasoning_output_tokens: Some(5),
+        thought_tokens: None,
+        tool_use_prompt_tokens: None,
+        total_tokens: Some(185),
         provider_type: Some(Provider::Anthropic),
     };
     let json = serde_json::to_value(&usage).unwrap();
     assert_eq!(json["inputTokens"], 100);
     assert_eq!(json["cacheReadTokens"], 30);
+    assert_eq!(json["cachedInputTokens"], 30);
+    assert_eq!(json["reasoningOutputTokens"], 5);
+    assert_eq!(json["totalTokens"], 185);
     assert!(json.get("cacheCreationTokens").is_none());
 }
 

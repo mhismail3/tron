@@ -222,7 +222,8 @@ impl TronAgent {
         let max_turns = self.config.max_turns;
         let mut turn = 0u32;
         let mut exited_via_break = false;
-        let mut previous_context_baseline: u64 = 0;
+        let mut previous_context_baseline: u64 =
+            self.context_manager.get_api_context_tokens().unwrap_or(0);
 
         while turn < max_turns {
             turn += 1;

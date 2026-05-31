@@ -16,6 +16,21 @@ struct TokenRecord: Codable, Equatable {
 
     /// Metadata about this record
     let meta: TokenMeta
+
+    /// Server-authoritative pricing status and cost breakdown
+    let pricing: PricingRecord
+
+    init(
+        source: TokenSource,
+        computed: ComputedTokens,
+        meta: TokenMeta,
+        pricing: PricingRecord = .unavailable(model: "unknown", reason: "test_unavailable")
+    ) {
+        self.source = source
+        self.computed = computed
+        self.meta = meta
+        self.pricing = pricing
+    }
 }
 
 // MARK: - Token Source
@@ -38,8 +53,61 @@ struct TokenSource: Codable, Equatable {
     /// Tokens read from cache (Anthropic/OpenAI)
     let rawCacheReadTokens: Int
 
-    /// Tokens written to cache (Anthropic only) - billing indicator, NOT context!
+    /// Provider-native cached input tokens
+    let rawCachedInputTokens: Int
+
+    /// Tokens written to cache
     let rawCacheCreationTokens: Int
+
+    /// 5-minute TTL cache creation tokens
+    let rawCacheCreation5mTokens: Int
+
+    /// 1-hour TTL cache creation tokens
+    let rawCacheCreation1hTokens: Int
+
+    /// Hidden reasoning output tokens
+    let rawReasoningOutputTokens: Int
+
+    /// Provider thinking tokens
+    let rawThoughtTokens: Int
+
+    /// Tool-use prompt tokens
+    let rawToolUsePromptTokens: Int
+
+    /// Provider-reported total token count
+    let rawTotalTokens: Int
+
+    init(
+        provider: String,
+        timestamp: String,
+        rawInputTokens: Int,
+        rawOutputTokens: Int,
+        rawCacheReadTokens: Int,
+        rawCacheCreationTokens: Int,
+        rawCachedInputTokens: Int = 0,
+        rawCacheCreation5mTokens: Int = 0,
+        rawCacheCreation1hTokens: Int = 0,
+        rawReasoningOutputTokens: Int = 0,
+        rawThoughtTokens: Int = 0,
+        rawToolUsePromptTokens: Int = 0,
+        rawTotalTokens: Int? = nil
+    ) {
+        self.provider = provider
+        self.timestamp = timestamp
+        self.rawInputTokens = rawInputTokens
+        self.rawOutputTokens = rawOutputTokens
+        self.rawCacheReadTokens = rawCacheReadTokens
+        self.rawCachedInputTokens = rawCachedInputTokens
+        self.rawCacheCreationTokens = rawCacheCreationTokens
+        self.rawCacheCreation5mTokens = rawCacheCreation5mTokens
+        self.rawCacheCreation1hTokens = rawCacheCreation1hTokens
+        self.rawReasoningOutputTokens = rawReasoningOutputTokens
+        self.rawThoughtTokens = rawThoughtTokens
+        self.rawToolUsePromptTokens = rawToolUsePromptTokens
+        self.rawTotalTokens = rawTotalTokens ?? (
+            rawInputTokens + rawOutputTokens + rawCacheReadTokens + rawCacheCreationTokens
+        )
+    }
 }
 
 // MARK: - Computed Tokens
@@ -48,7 +116,7 @@ struct TokenSource: Codable, Equatable {
 /// These provide semantic clarity for different UI components.
 struct ComputedTokens: Codable, Equatable {
     /// Total context window size in tokens (for progress bar)
-    /// Anthropic: inputTokens + cacheReadTokens
+    /// Anthropic: inputTokens + cacheReadTokens + cacheCreationTokens
     /// Others: inputTokens
     let contextWindowTokens: Int
 
@@ -74,11 +142,66 @@ struct TokenMeta: Codable, Equatable {
     /// Session ID this record belongs to
     let sessionId: String
 
+    /// Model used for this provider call
+    let model: String
+
+    /// Context segment identifier used for baseline resets
+    let contextSegmentId: String
+
+    /// Baseline reset reason, or "none"
+    let baselineResetReason: String
+
     /// ISO8601 timestamp when tokens were extracted from API
     let extractedAt: String
 
     /// ISO8601 timestamp when normalization was computed
     let normalizedAt: String
+
+    init(
+        turn: Int,
+        sessionId: String,
+        model: String = "unknown",
+        contextSegmentId: String? = nil,
+        baselineResetReason: String = "none",
+        extractedAt: String,
+        normalizedAt: String
+    ) {
+        self.turn = turn
+        self.sessionId = sessionId
+        self.model = model
+        self.contextSegmentId = contextSegmentId ?? "\(sessionId):\(model)"
+        self.baselineResetReason = baselineResetReason
+        self.extractedAt = extractedAt
+        self.normalizedAt = normalizedAt
+    }
+}
+
+// MARK: - Pricing
+
+struct PricingRecord: Codable, Equatable {
+    let available: Bool
+    let model: String
+    let reason: String?
+    let cost: TokenCostBreakdown?
+
+    static func unavailable(model: String, reason: String) -> PricingRecord {
+        PricingRecord(available: false, model: model, reason: reason, cost: nil)
+    }
+}
+
+struct TokenCostBreakdown: Codable, Equatable {
+    let baseInputTokens: Int
+    let outputTokens: Int
+    let cacheReadTokens: Int
+    let cacheWriteTokens: Int
+    let cacheWrite5mTokens: Int
+    let cacheWrite1hTokens: Int
+    let baseInputCost: Double
+    let outputCost: Double
+    let cacheReadCost: Double
+    let cacheWriteCost: Double
+    let totalCost: Double
+    let currency: String
 }
 
 // MARK: - Dictionary Parsing
@@ -88,41 +211,20 @@ extension TokenRecord {
     /// Returns nil if the dict is nil or missing required source/computed/meta sections.
     static func from(dict: [String: Any]?) -> TokenRecord? {
         guard let dict,
-              let sourceDict = dict["source"] as? [String: Any],
-              let computedDict = dict["computed"] as? [String: Any],
-              let metaDict = dict["meta"] as? [String: Any] else {
+              JSONSerialization.isValidJSONObject(dict),
+              let data = try? JSONSerialization.data(withJSONObject: dict),
+              let record = try? JSONDecoder().decode(TokenRecord.self, from: data) else {
             return nil
         }
-
-        let source = TokenSource(
-            provider: sourceDict["provider"] as? String ?? "",
-            timestamp: sourceDict["timestamp"] as? String ?? "",
-            rawInputTokens: sourceDict["rawInputTokens"] as? Int ?? 0,
-            rawOutputTokens: sourceDict["rawOutputTokens"] as? Int ?? 0,
-            rawCacheReadTokens: sourceDict["rawCacheReadTokens"] as? Int ?? 0,
-            rawCacheCreationTokens: sourceDict["rawCacheCreationTokens"] as? Int ?? 0
-        )
-        let computed = ComputedTokens(
-            contextWindowTokens: computedDict["contextWindowTokens"] as? Int ?? 0,
-            newInputTokens: computedDict["newInputTokens"] as? Int ?? 0,
-            previousContextBaseline: computedDict["previousContextBaseline"] as? Int ?? 0,
-            calculationMethod: computedDict["calculationMethod"] as? String ?? ""
-        )
-        let meta = TokenMeta(
-            turn: metaDict["turn"] as? Int ?? 1,
-            sessionId: metaDict["sessionId"] as? String ?? "",
-            extractedAt: metaDict["extractedAt"] as? String ?? "",
-            normalizedAt: metaDict["normalizedAt"] as? String ?? ""
-        )
-        return TokenRecord(source: source, computed: computed, meta: meta)
+        return record
     }
 }
 
 // MARK: - Extensions
 
 extension TokenSource {
-    /// Total tokens (input + output)
-    var totalTokens: Int { rawInputTokens + rawOutputTokens }
+    /// Provider-reported total tokens.
+    var totalTokens: Int { rawTotalTokens }
 }
 
 // MARK: - Display Formatting Extensions

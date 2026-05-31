@@ -1,10 +1,11 @@
 //! Persistence helpers — build JSON structures for event payloads.
 //!
 //! These transform Rust types into the JSON shapes that the event store
-//! and iOS client expect. Token normalization delegates to `tron-tokens`
-//! for correct per-turn deltas.
+//! and iOS client expect. Token normalization delegates to the provider-aware
+//! token module for correct context, cache, and cost semantics.
 
 use crate::domains::model::providers::tokens::normalization::normalize_tokens;
+use crate::domains::model::providers::tokens::pricing::calculate_pricing;
 use crate::domains::model::providers::tokens::types::{TokenMeta, TokenSource};
 use crate::shared::content::AssistantContent;
 use crate::shared::messages::{Provider, TokenUsage};
@@ -27,8 +28,32 @@ pub fn build_token_usage_json(usage: &TokenUsage) -> Value {
     if let Some(cr) = usage.cache_read_tokens {
         let _ = m.insert("cacheReadTokens".into(), json!(cr));
     }
+    if let Some(cached) = usage.cached_input_tokens {
+        let _ = m.insert("cachedInputTokens".into(), json!(cached));
+    }
     if let Some(cc) = usage.cache_creation_tokens {
         let _ = m.insert("cacheCreationTokens".into(), json!(cc));
+    }
+    if let Some(cc5m) = usage.cache_creation_5m_tokens {
+        let _ = m.insert("cacheCreation5mTokens".into(), json!(cc5m));
+    }
+    if let Some(cc1h) = usage.cache_creation_1h_tokens {
+        let _ = m.insert("cacheCreation1hTokens".into(), json!(cc1h));
+    }
+    if let Some(reasoning) = usage.reasoning_output_tokens {
+        let _ = m.insert("reasoningOutputTokens".into(), json!(reasoning));
+    }
+    if let Some(thoughts) = usage.thought_tokens {
+        let _ = m.insert("thoughtTokens".into(), json!(thoughts));
+    }
+    if let Some(tool_use) = usage.tool_use_prompt_tokens {
+        let _ = m.insert("toolUsePromptTokens".into(), json!(tool_use));
+    }
+    if let Some(total) = usage.total_tokens {
+        let _ = m.insert("totalTokens".into(), json!(total));
+    }
+    if let Some(provider) = usage.provider_type {
+        let _ = m.insert("providerType".into(), json!(provider.as_str()));
     }
     obj
 }
@@ -43,6 +68,7 @@ pub fn build_token_record(
     session_id: &str,
     turn: u32,
     previous_baseline: u64,
+    model: &str,
 ) -> Value {
     let now = chrono::Utc::now().to_rfc3339();
     let source = TokenSource {
@@ -51,17 +77,36 @@ pub fn build_token_record(
         raw_input_tokens: usage.input_tokens,
         raw_output_tokens: usage.output_tokens,
         raw_cache_read_tokens: usage.cache_read_tokens.unwrap_or(0),
+        raw_cached_input_tokens: usage
+            .cached_input_tokens
+            .or(usage.cache_read_tokens)
+            .unwrap_or(0),
         raw_cache_creation_tokens: usage.cache_creation_tokens.unwrap_or(0),
         raw_cache_creation_5m_tokens: usage.cache_creation_5m_tokens.unwrap_or(0),
         raw_cache_creation_1h_tokens: usage.cache_creation_1h_tokens.unwrap_or(0),
+        raw_reasoning_output_tokens: usage.reasoning_output_tokens.unwrap_or(0),
+        raw_thought_tokens: usage.thought_tokens.unwrap_or(0),
+        raw_tool_use_prompt_tokens: usage.tool_use_prompt_tokens.unwrap_or(0),
+        raw_total_tokens: usage
+            .total_tokens
+            .unwrap_or(usage.input_tokens + usage.output_tokens),
     };
+    let context_segment_id = format!("{}:{}:{}", session_id, provider_type.as_str(), model);
     let meta = TokenMeta {
         turn: u64::from(turn),
         session_id: session_id.to_string(),
+        model: model.to_string(),
+        context_segment_id,
+        baseline_reset_reason: if previous_baseline == 0 {
+            "initial_or_reset".to_string()
+        } else {
+            "none".to_string()
+        },
         extracted_at: now,
         normalized_at: String::new(),
     };
-    let record = normalize_tokens(source, previous_baseline, meta);
+    let mut record = normalize_tokens(source, previous_baseline, meta);
+    record.pricing = calculate_pricing(model, usage);
     serde_json::to_value(&record).unwrap_or_default()
 }
 
@@ -240,13 +285,27 @@ mod tests {
             ..Default::default()
         };
 
-        let anthropic = build_token_record(&usage, Provider::Anthropic, "sess-1", 1, 0);
+        let anthropic = build_token_record(
+            &usage,
+            Provider::Anthropic,
+            "sess-1",
+            1,
+            0,
+            "claude-sonnet-4-6",
+        );
         assert_eq!(anthropic["source"]["provider"], "anthropic");
 
-        let google = build_token_record(&usage, Provider::Google, "sess-1", 1, 0);
+        let google = build_token_record(
+            &usage,
+            Provider::Google,
+            "sess-1",
+            1,
+            0,
+            "gemini-3-pro-preview",
+        );
         assert_eq!(google["source"]["provider"], "google");
 
-        let openai = build_token_record(&usage, Provider::OpenAi, "sess-1", 1, 0);
+        let openai = build_token_record(&usage, Provider::OpenAi, "sess-1", 1, 0, "gpt-5");
         assert_eq!(openai["source"]["provider"], "openai");
     }
 
@@ -257,7 +316,14 @@ mod tests {
             output_tokens: 50,
             ..Default::default()
         };
-        let record = build_token_record(&usage, Provider::Anthropic, "sess-1", 3, 0);
+        let record = build_token_record(
+            &usage,
+            Provider::Anthropic,
+            "sess-1",
+            3,
+            0,
+            "claude-sonnet-4-6",
+        );
         assert!(record.get("source").is_some());
         assert!(record.get("computed").is_some());
         assert!(record.get("meta").is_some());
@@ -274,7 +340,8 @@ mod tests {
             cache_creation_tokens: Some(5),
             ..Default::default()
         };
-        let record = build_token_record(&usage, Provider::Anthropic, "s1", 1, 0);
+        let record =
+            build_token_record(&usage, Provider::Anthropic, "s1", 1, 0, "claude-sonnet-4-6");
         // contextWindowTokens = input + cacheRead + cacheCreation
         assert_eq!(record["computed"]["contextWindowTokens"], 115);
         // Anthropic: newInputTokens = rawInput + cacheCreation (non-cached-read)
@@ -296,7 +363,14 @@ mod tests {
             ..Default::default()
         };
         // Previous baseline was 9521 (from turn 1 context window)
-        let record = build_token_record(&usage, Provider::Anthropic, "s1", 2, 9521);
+        let record = build_token_record(
+            &usage,
+            Provider::Anthropic,
+            "s1",
+            2,
+            9521,
+            "claude-sonnet-4-6",
+        );
         assert_eq!(record["computed"]["contextWindowTokens"], 9735); // 14 + 9521 + 200
         // Anthropic: newInputTokens = rawInput + cacheCreation (non-cached-read)
         assert_eq!(record["computed"]["newInputTokens"], 214);
@@ -311,7 +385,14 @@ mod tests {
             ..Default::default()
         };
         // Previous baseline was 10000, context shrank (compaction)
-        let record = build_token_record(&usage, Provider::Anthropic, "s1", 3, 10_000);
+        let record = build_token_record(
+            &usage,
+            Provider::Anthropic,
+            "s1",
+            3,
+            10_000,
+            "claude-sonnet-4-6",
+        );
         assert_eq!(record["computed"]["contextWindowTokens"], 5000);
         // Anthropic: newInputTokens = rawInput + cacheCreation (non-cached-read)
         assert_eq!(record["computed"]["newInputTokens"], 5000);
@@ -324,7 +405,8 @@ mod tests {
             output_tokens: 200,
             ..Default::default()
         };
-        let record = build_token_record(&usage, Provider::Google, "s1", 1, 0);
+        let record =
+            build_token_record(&usage, Provider::Google, "s1", 1, 0, "gemini-3-pro-preview");
         assert_eq!(record["computed"]["contextWindowTokens"], 5000);
         assert_eq!(record["computed"]["calculationMethod"], "direct");
     }
@@ -340,7 +422,8 @@ mod tests {
             cache_creation_1h_tokens: Some(3),
             ..Default::default()
         };
-        let record = build_token_record(&usage, Provider::Anthropic, "s1", 1, 0);
+        let record =
+            build_token_record(&usage, Provider::Anthropic, "s1", 1, 0, "claude-sonnet-4-6");
         let source = &record["source"];
         assert_eq!(source["rawInputTokens"], 200);
         assert_eq!(source["rawOutputTokens"], 100);
@@ -358,7 +441,8 @@ mod tests {
             output_tokens: 50,
             ..Default::default()
         };
-        let record = build_token_record(&usage, Provider::Anthropic, "s1", 1, 0);
+        let record =
+            build_token_record(&usage, Provider::Anthropic, "s1", 1, 0, "claude-sonnet-4-6");
         assert_eq!(record["source"]["rawCacheReadTokens"], 0);
         assert_eq!(record["source"]["rawCacheCreationTokens"], 0);
     }

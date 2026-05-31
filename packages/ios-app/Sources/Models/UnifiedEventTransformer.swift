@@ -309,12 +309,6 @@ extension UnifiedEventTransformer {
                 }
                 state.messages.append(contentsOf: interleaved)
 
-                // If the event decodes strictly, use its `tokenRecord` +
-                // `turn`. If it doesn't, fall through to the raw
-                // `tokenUsage` dict — both the native runtime and the
-                // import transformer always emit one of these, but native
-                // events additionally carry the turn/model/stopReason
-                // required fields that the strict decode gates on.
                 let parsedPayload = AssistantMessagePayload(from: event.payload)
                 if let parsed = parsedPayload, let record = parsed.tokenRecord {
                     state.totalTokenUsage = TokenUsage(
@@ -324,20 +318,6 @@ extension UnifiedEventTransformer {
                         cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + record.source.rawCacheCreationTokens
                     )
                     state.lastTurnInputTokens = record.computed.contextWindowTokens
-                } else if let tokenUsage = event.payload["tokenUsage"]?.value as? [String: Any] {
-                    // Fallback for imported sessions (no tokenRecord, only tokenUsage)
-                    let input = (tokenUsage["inputTokens"] as? Int) ?? (tokenUsage["inputTokens"] as? Double).map { Int($0) } ?? 0
-                    let output = (tokenUsage["outputTokens"] as? Int) ?? (tokenUsage["outputTokens"] as? Double).map { Int($0) } ?? 0
-                    let cacheRead = (tokenUsage["cacheReadTokens"] as? Int) ?? (tokenUsage["cacheReadTokens"] as? Double).map { Int($0) } ?? 0
-                    let cacheCreation = (tokenUsage["cacheCreationTokens"] as? Int) ?? (tokenUsage["cacheCreationTokens"] as? Double).map { Int($0) } ?? 0
-                    state.totalTokenUsage = TokenUsage(
-                        inputTokens: state.totalTokenUsage.inputTokens + input,
-                        outputTokens: state.totalTokenUsage.outputTokens + output,
-                        cacheReadTokens: (state.totalTokenUsage.cacheReadTokens ?? 0) + cacheRead,
-                        cacheCreationTokens: (state.totalTokenUsage.cacheCreationTokens ?? 0) + cacheCreation
-                    )
-                    // Use inputTokens as best available approximation for context window size
-                    state.lastTurnInputTokens = input
                 }
                 if let parsed = parsedPayload, parsed.turn > state.currentTurn {
                     state.currentTurn = parsed.turn

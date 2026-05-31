@@ -339,6 +339,10 @@ pub struct ProviderStreamOptions {
     /// Provider-specific profile instructions/presentation text.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_instructions: Option<String>,
+
+    /// Provider prompt-cache key for APIs that support stable cache routing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

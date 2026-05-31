@@ -2,7 +2,7 @@
 //!
 //! Uses `MiniMax`'s Anthropic-compatible endpoint with Bearer auth.
 //! Reuses Anthropic message converter, stream handler, and SSE types.
-//! No OAuth, no prompt caching, no image support, no adaptive thinking.
+//! No OAuth, no image support, no adaptive thinking.
 
 use async_trait::async_trait;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
@@ -15,9 +15,8 @@ use crate::domains::model::providers::anthropic::stream_handler::{
     create_stream_state_for, process_sse_event,
 };
 use crate::domains::model::providers::anthropic::types::{
-    AnthropicMessageParam, AnthropicRequest, AnthropicSseEvent, AnthropicTool,
+    AnthropicMessageParam, AnthropicRequest, AnthropicSseEvent, AnthropicTool, CacheControl,
 };
-use crate::domains::model::providers::compose_context_parts;
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
@@ -81,23 +80,39 @@ impl MiniMaxProvider {
         Ok(headers)
     }
 
-    /// Build the system prompt parameter — plain string, no cache breakpoints.
+    /// Build the system prompt parameter with Anthropic-compatible cache breakpoints.
     fn build_system_param(context: &Context) -> Option<Value> {
-        let parts = compose_context_parts(context);
-        if parts.is_empty() {
-            return None;
-        }
-        Some(json!(parts.join("\n\n")))
+        let mut system =
+            super::super::anthropic::message_converter::build_system_prompt_for_provider(
+                context, None,
+            )?;
+        Self::strip_cache_ttls(&mut system);
+        Some(system)
     }
 
-    /// Build tool definitions without cache control.
+    /// MiniMax explicit prompt caching currently exposes a 5-minute ephemeral cache.
+    fn strip_cache_ttls(value: &mut Value) {
+        if let Some(blocks) = value.as_array_mut() {
+            for block in blocks {
+                if let Some(cache_control) = block
+                    .as_object_mut()
+                    .and_then(|object| object.get_mut("cache_control"))
+                    .and_then(Value::as_object_mut)
+                {
+                    let _ = cache_control.remove("ttl");
+                }
+            }
+        }
+    }
+
+    /// Build tool definitions with a 5-minute cache breakpoint on the last tool.
     fn build_tools(context: &Context) -> Option<Vec<AnthropicTool>> {
         let capabilities = context.capabilities.as_ref()?;
         if capabilities.is_empty() {
             return None;
         }
 
-        let anthropic_capabilities: Vec<AnthropicTool> = capabilities
+        let mut anthropic_capabilities: Vec<AnthropicTool> = capabilities
             .iter()
             .map(|t| AnthropicTool {
                 name: t.name.clone(),
@@ -106,6 +121,13 @@ impl MiniMaxProvider {
                 cache_control: None,
             })
             .collect();
+
+        if let Some(last) = anthropic_capabilities.last_mut() {
+            last.cache_control = Some(CacheControl {
+                cache_type: "ephemeral".into(),
+                ttl: None,
+            });
+        }
 
         Some(anthropic_capabilities)
     }
@@ -153,7 +175,21 @@ impl MiniMaxProvider {
         }
     }
 
-    /// Build the request body — no `output_config`, no `cache_control`.
+    /// Apply cache control to the last user message.
+    fn apply_cache_to_last_user_message(messages: &mut [AnthropicMessageParam]) {
+        for msg in messages.iter_mut().rev() {
+            if msg.role == "user" && !msg.content.is_empty() {
+                if let Some(last_block) = msg.content.last_mut()
+                    && let Some(obj) = last_block.as_object_mut()
+                {
+                    let _ = obj.insert("cache_control".into(), json!({"type": "ephemeral"}));
+                }
+                break;
+            }
+        }
+    }
+
+    /// Build the request body.
     fn build_request(
         &self,
         context: &Context,
@@ -185,6 +221,7 @@ impl MiniMaxProvider {
 
         // Strip images — MiniMax doesn't support them
         Self::strip_images(&mut messages);
+        Self::apply_cache_to_last_user_message(&mut messages);
 
         let request = self.build_request(context, options, messages);
 
@@ -277,6 +314,7 @@ impl Provider for MiniMaxProvider {
         let sanitized = sanitize_messages(context.messages.to_vec());
         let mut messages = convert_messages(&sanitized);
         Self::strip_images(&mut messages);
+        Self::apply_cache_to_last_user_message(&mut messages);
         serde_json::to_value(self.build_request(context, options, messages))
             .map_err(ProviderError::Json)
     }
@@ -392,10 +430,16 @@ mod tests {
     // ── System prompt ───────────────────────────────────────────────────
 
     #[test]
-    fn system_param_simple_string() {
+    fn system_param_returns_cached_content_blocks() {
         let ctx = context_with_system("You are helpful.");
         let param = MiniMaxProvider::build_system_param(&ctx).unwrap();
-        assert_eq!(param.as_str().unwrap(), "You are helpful.");
+        let blocks = param.as_array().unwrap();
+        assert_eq!(blocks[0]["text"], "You are helpful.");
+        assert_eq!(
+            blocks[0]["cache_control"]["type"].as_str(),
+            Some("ephemeral")
+        );
+        assert!(blocks[0]["cache_control"].get("ttl").is_none());
     }
 
     #[test]
@@ -407,7 +451,7 @@ mod tests {
     // ── Tools ───────────────────────────────────────────────────────────
 
     #[test]
-    fn build_tools_no_cache_control() {
+    fn build_tools_marks_last_tool_cacheable() {
         let ctx = Context {
             capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
                 name: "execute".into(),
@@ -424,7 +468,18 @@ mod tests {
         };
         let capabilities = MiniMaxProvider::build_tools(&ctx).unwrap();
         assert_eq!(capabilities.len(), 1);
-        assert!(capabilities[0].cache_control.is_none());
+        assert_eq!(
+            capabilities[0].cache_control.as_ref().unwrap().cache_type,
+            "ephemeral"
+        );
+        assert!(
+            capabilities[0]
+                .cache_control
+                .as_ref()
+                .unwrap()
+                .ttl
+                .is_none()
+        );
     }
 
     #[test]

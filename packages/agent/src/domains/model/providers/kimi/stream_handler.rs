@@ -11,7 +11,7 @@ use crate::domains::model::provider_protocol::{
 };
 use crate::shared::content::AssistantContent;
 use crate::shared::events::StreamEvent;
-use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
 
 // ─── SSE chunk types ──────────────────────────────────────────────────────
 
@@ -66,12 +66,40 @@ pub struct ChunkCapabilityInvocationDraftFunction {
 }
 
 /// Token usage from the final chunk.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct ChunkUsage {
     /// Input tokens consumed.
     pub prompt_tokens: u64,
     /// Output tokens generated.
     pub completion_tokens: u64,
+    /// Total tokens reported by the provider.
+    #[serde(default)]
+    pub total_tokens: Option<u64>,
+    /// Cached input tokens reported by Kimi's chat API.
+    #[serde(default)]
+    pub cached_tokens: Option<u64>,
+    /// OpenAI-compatible prompt token details when present.
+    #[serde(default)]
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+    /// OpenAI-compatible completion token details when present.
+    #[serde(default)]
+    pub completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+/// Prompt token details from OpenAI-compatible responses.
+#[derive(Debug, Default, Deserialize)]
+pub struct PromptTokensDetails {
+    /// Cached input tokens.
+    #[serde(default)]
+    pub cached_tokens: u64,
+}
+
+/// Completion token details from OpenAI-compatible responses.
+#[derive(Debug, Default, Deserialize)]
+pub struct CompletionTokensDetails {
+    /// Hidden reasoning tokens.
+    #[serde(default)]
+    pub reasoning_tokens: u64,
 }
 
 // ─── Stream state ──────────────────────────────────────────────────────────
@@ -138,9 +166,29 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
 
     // Process usage (final chunk)
     if let Some(ref usage) = chunk.usage {
+        let cached_tokens = usage
+            .cached_tokens
+            .or_else(|| {
+                usage
+                    .prompt_tokens_details
+                    .as_ref()
+                    .map(|d| d.cached_tokens)
+            })
+            .unwrap_or(0);
+        let reasoning_tokens = usage
+            .completion_tokens_details
+            .as_ref()
+            .map_or(0, |d| d.reasoning_tokens);
         state.usage = Some(TokenUsage {
             input_tokens: usage.prompt_tokens,
             output_tokens: usage.completion_tokens,
+            cache_read_tokens: nonzero(cached_tokens),
+            cached_input_tokens: nonzero(cached_tokens),
+            reasoning_output_tokens: nonzero(reasoning_tokens),
+            total_tokens: usage
+                .total_tokens
+                .or(Some(usage.prompt_tokens + usage.completion_tokens)),
+            provider_type: Some(Provider::Kimi),
             ..Default::default()
         });
     }
@@ -278,6 +326,10 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
     }
 
     events
+}
+
+fn nonzero(value: u64) -> Option<u64> {
+    (value > 0).then_some(value)
 }
 
 /// Map Kimi finish reasons to Tron stop reasons.
@@ -427,6 +479,7 @@ mod tests {
             usage: Some(ChunkUsage {
                 prompt_tokens: prompt,
                 completion_tokens: completion,
+                ..Default::default()
             }),
         }
     }
@@ -581,6 +634,7 @@ mod tests {
             usage: Some(ChunkUsage {
                 prompt_tokens: 100,
                 completion_tokens: 50,
+                ..Default::default()
             }),
         };
         let events = process_chunk(&chunk, &mut state);
@@ -640,6 +694,7 @@ mod tests {
             usage: Some(ChunkUsage {
                 prompt_tokens: 500,
                 completion_tokens: 200,
+                ..Default::default()
             }),
         };
         let events = process_chunk(&chunk, &mut state);
@@ -653,6 +708,45 @@ mod tests {
         } else {
             panic!("expected Done event");
         }
+    }
+
+    #[test]
+    fn usage_extraction_preserves_cache_and_reasoning_details() {
+        let mut state = KimiStreamState::new();
+        let _ = process_chunk(&text_chunk("hi"), &mut state);
+        let chunk = ChatCompletionChunk {
+            choices: vec![ChunkChoice {
+                delta: ChunkDelta {
+                    content: None,
+                    reasoning_content: None,
+                    capability_invocations: None,
+                },
+                finish_reason: Some("stop".into()),
+            }],
+            usage: Some(ChunkUsage {
+                prompt_tokens: 500,
+                completion_tokens: 200,
+                total_tokens: Some(700),
+                cached_tokens: Some(300),
+                completion_tokens_details: Some(CompletionTokensDetails {
+                    reasoning_tokens: 75,
+                }),
+                ..Default::default()
+            }),
+        };
+        let events = process_chunk(&chunk, &mut state);
+        let Some(StreamEvent::Done { message, .. }) = events
+            .iter()
+            .find(|e| matches!(e, StreamEvent::Done { .. }))
+        else {
+            panic!("expected Done event");
+        };
+        let usage = message.token_usage.as_ref().unwrap();
+        assert_eq!(usage.cache_read_tokens, Some(300));
+        assert_eq!(usage.cached_input_tokens, Some(300));
+        assert_eq!(usage.reasoning_output_tokens, Some(75));
+        assert_eq!(usage.total_tokens, Some(700));
+        assert_eq!(usage.provider_type, Some(Provider::Kimi));
     }
 
     #[test]
@@ -784,6 +878,7 @@ mod tests {
             usage: Some(ChunkUsage {
                 prompt_tokens: 100,
                 completion_tokens: 50,
+                ..Default::default()
             }),
         };
         let events = process_chunk(&chunk3, &mut state);
@@ -837,6 +932,7 @@ mod tests {
             usage: Some(ChunkUsage {
                 prompt_tokens: 100,
                 completion_tokens: 50,
+                ..Default::default()
             }),
         };
         let events = process_chunk(&chunk2, &mut state);

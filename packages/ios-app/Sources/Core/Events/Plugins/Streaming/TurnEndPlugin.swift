@@ -47,7 +47,7 @@ enum TurnEndPlugin: DispatchableEventPlugin {
             }
 
             /// Unified turn number accessor (handles both field names).
-            var number: Int { turn ?? turnNumber ?? 1 }
+            var number: Int? { turn ?? turnNumber }
         }
     }
 
@@ -65,18 +65,9 @@ enum TurnEndPlugin: DispatchableEventPlugin {
     // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        guard let data = event.data else {
-            return Result(
-                turnNumber: 1,
-                duration: nil,
-                tokenRecord: nil,
-                stopReason: nil,
-                cost: nil,
-                contextLimit: nil
-            )
-        }
+        guard let data = event.data, let turnNumber = data.number else { return nil }
         return Result(
-            turnNumber: data.number,
+            turnNumber: turnNumber,
             duration: data.duration,
             tokenRecord: data.tokenRecord,
             stopReason: data.stopReason,

@@ -10,7 +10,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::domains::agent::runner::types::{ReasoningLevel, RunContext};
 
-pub(super) fn build_stream_options(run_context: &RunContext) -> ProviderStreamOptions {
+pub(super) fn build_stream_options(
+    run_context: &RunContext,
+    session_id: &str,
+) -> ProviderStreamOptions {
     ProviderStreamOptions {
         enable_thinking: Some(true),
         effort_level: run_context
@@ -32,6 +35,7 @@ pub(super) fn build_stream_options(run_context: &RunContext) -> ProviderStreamOp
                 .get("openaiCodex")
                 .map(|prompt| prompt.content.clone())
         }),
+        prompt_cache_key: Some(format!("tron-session-{session_id}")),
         ..Default::default()
     }
 }

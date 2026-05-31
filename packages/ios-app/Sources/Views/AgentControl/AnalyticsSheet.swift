@@ -108,9 +108,9 @@ struct AnalyticsSheet: View {
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(.tronRose)
 
-                    Text(formatCost(turnData.cost))
+                    Text(turnData.cost.map(formatCost) ?? "cost unavailable")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronRose)
+                        .foregroundStyle(turnData.cost == nil ? .tronTextMuted : .tronRose)
 
                     Image(systemName: "chevron.down")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))

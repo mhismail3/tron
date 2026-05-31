@@ -144,6 +144,9 @@ pub struct ResponsesRequest {
     /// Text output configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<ResponseTextConfig>,
+    /// Stable prompt-cache routing key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
 }
 
 /// Reasoning configuration for the Responses API.
@@ -209,9 +212,34 @@ pub struct ResponsesUsage {
     /// Input tokens.
     #[serde(default)]
     pub input_tokens: u64,
+    /// Input token details.
+    #[serde(default)]
+    pub input_tokens_details: InputTokensDetails,
     /// Output tokens.
     #[serde(default)]
     pub output_tokens: u64,
+    /// Output token details.
+    #[serde(default)]
+    pub output_tokens_details: OutputTokensDetails,
+    /// Total tokens.
+    #[serde(default)]
+    pub total_tokens: u64,
+}
+
+/// Detailed input token accounting from the Responses API.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct InputTokensDetails {
+    /// Prompt tokens served from cache.
+    #[serde(default)]
+    pub cached_tokens: u64,
+}
+
+/// Detailed output token accounting from the Responses API.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct OutputTokensDetails {
+    /// Hidden reasoning tokens.
+    #[serde(default)]
+    pub reasoning_tokens: u64,
 }
 
 /// Full response object (from `response.completed`).

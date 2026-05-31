@@ -25,7 +25,7 @@ use tracing::{debug, info};
 
 use crate::shared::content::AssistantContent;
 use crate::shared::events::StreamEvent;
-use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
 
 // ─── Native API chunk types ─────────────────────────────────────────────
 
@@ -238,6 +238,8 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
             state.usage = Some(TokenUsage {
                 input_tokens: prompt,
                 output_tokens: completion,
+                total_tokens: Some(prompt + completion),
+                provider_type: Some(Provider::Ollama),
                 ..Default::default()
             });
         }

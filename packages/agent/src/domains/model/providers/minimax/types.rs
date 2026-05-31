@@ -1,7 +1,7 @@
 //! `MiniMax` model registry, auth, and config types.
 //!
 //! `MiniMax` exposes an Anthropic-compatible endpoint. Models: M2.7, M2.5, M2.1, M2
-//! (plus highspeed variants). 204,800 context window, no image support.
+//! (plus highspeed variants). 204,800 context window, prompt caching, no image support.
 
 use std::collections::HashMap;
 use std::sync::LazyLock;

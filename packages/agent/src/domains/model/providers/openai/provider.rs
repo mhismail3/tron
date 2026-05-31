@@ -523,6 +523,7 @@ impl OpenAIProvider {
             max_output_tokens: self.resolve_max_output_tokens(options),
             reasoning,
             text: self.resolve_text_config(),
+            prompt_cache_key: options.prompt_cache_key.clone(),
         }
     }
 

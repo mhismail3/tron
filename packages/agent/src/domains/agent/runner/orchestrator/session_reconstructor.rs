@@ -108,6 +108,31 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
             .cache_creation_1h_tokens
             .filter(|&v| v > 0)
             .map(|v| v as u64),
+        cached_input_tokens: state
+            .token_usage
+            .cached_input_tokens
+            .filter(|&v| v > 0)
+            .map(|v| v as u64),
+        reasoning_output_tokens: state
+            .token_usage
+            .reasoning_output_tokens
+            .filter(|&v| v > 0)
+            .map(|v| v as u64),
+        thought_tokens: state
+            .token_usage
+            .thought_tokens
+            .filter(|&v| v > 0)
+            .map(|v| v as u64),
+        tool_use_prompt_tokens: state
+            .token_usage
+            .tool_use_prompt_tokens
+            .filter(|&v| v > 0)
+            .map(|v| v as u64),
+        total_tokens: state
+            .token_usage
+            .total_tokens
+            .filter(|&v| v > 0)
+            .map(|v| v as u64),
         provider_type: None,
     };
 

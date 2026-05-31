@@ -46,7 +46,7 @@ pub struct StreamState {
 impl Default for StreamState {
     fn default() -> Self {
         Self {
-            provider_type: crate::shared::messages::Provider::default(),
+            provider_type: crate::shared::messages::Provider::Anthropic,
             acc: StreamAccumulator::new(),
             current_block_type: None,
             current_invocation_id: None,
@@ -260,6 +260,11 @@ fn build_done_event(state: &mut StreamState) -> StreamEvent {
             } else {
                 None
             },
+            cached_input_tokens: if state.cache_read_tokens > 0 {
+                Some(state.cache_read_tokens)
+            } else {
+                None
+            },
             cache_creation_tokens: if state.cache_creation_tokens > 0 {
                 Some(state.cache_creation_tokens)
             } else {
@@ -275,7 +280,14 @@ fn build_done_event(state: &mut StreamState) -> StreamEvent {
             } else {
                 None
             },
+            total_tokens: Some(
+                state.acc.input_tokens
+                    + state.acc.output_tokens
+                    + state.cache_read_tokens
+                    + state.cache_creation_tokens,
+            ),
             provider_type: Some(state.provider_type),
+            ..Default::default()
         })
     } else {
         None
