@@ -629,7 +629,9 @@ fn post_100_operating_scorecard_stays_formalized() {
 
     for required in [
         "Initial score: **0/100**",
-        "Current score: **",
+        "Current score: **100/100**",
+        "Status: completed operating scorecard",
+        "post-100-ipad-ui-regression-scorecard.md",
         "collapsed-engine-hardening-scorecard.md`: **100/100**",
         "codebase-cleanup-scorecard.md`: **100/100**",
         "## Operating Loop",
@@ -681,14 +683,45 @@ fn post_100_operating_scorecard_stays_formalized() {
         );
     }
 
+    let ipad_scorecard_path =
+        repo_root.join("packages/agent/docs/post-100-ipad-ui-regression-scorecard.md");
+    assert!(
+        ipad_scorecard_path.is_file(),
+        "post-100 iPad UI regression scorecard must exist"
+    );
+    let ipad_scorecard = std::fs::read_to_string(&ipad_scorecard_path).unwrap_or_else(|error| {
+        panic!("failed to read {}: {error}", ipad_scorecard_path.display())
+    });
+    for required in [
+        "Status: future scorecard",
+        "Current score: **0/100**",
+        "post-100-operating-conditions-scorecard.md",
+        "Use Computer Use against the iPad Simulator",
+    ] {
+        assert!(
+            ipad_scorecard.contains(required),
+            "post-100 iPad scorecard missing required checkpoint text: {required}"
+        );
+    }
+    for id in 0..=10 {
+        let needle = format!("| IPD-{id} |");
+        assert!(
+            ipad_scorecard.contains(&needle),
+            "post-100 iPad scorecard missing {needle}"
+        );
+    }
+
     let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
     assert!(
         readme.contains("packages/agent/docs/post-100-operating-conditions-scorecard.md")
-            && readme
-                .contains("active\n  post-100 operating conditions and UI/UX regression scorecard")
+            && readme.contains(
+                "completed\n  post-100 operating conditions and UI/UX regression scorecard at 100/100"
+            )
+            && readme.contains("packages/agent/docs/post-100-ipad-ui-regression-scorecard.md")
+            && readme.contains("future\n  iPad-specific post-100 UI regression scorecard")
             && readme.contains("completed\n  collapsed-engine hardening scorecard")
             && readme.contains("completed repo-local\n  cleanup scorecard"),
-        "README living-doc map must name the active post-100 scorecard and completed 100/100 scorecards"
+        "README living-doc map must name the completed post-100 scorecard, iPad successor, and completed 100/100 scorecards"
     );
 
     let ios_development =
@@ -699,6 +732,7 @@ fn post_100_operating_scorecard_stays_formalized() {
             .expect("read Mac architecture docs");
     assert!(
         ios_development.contains("post-100-operating-conditions-scorecard.md")
+            && ios_development.contains("post-100-ipad-ui-regression-scorecard.md")
             && ios_development.contains("Computer Use confirmation")
             && mac_architecture.contains("post-100-operating-conditions-scorecard.md")
             && mac_architecture.contains("SMAppService evidence"),

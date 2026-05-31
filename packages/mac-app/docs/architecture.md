@@ -9,7 +9,7 @@
 - **Wizard mode** — shown on first launch, before `~/.tron/internal/run/.onboarded` exists. Walks the user through Tailscale, Login Item registration, permissions, optional local transcription setup, and pairing-info display.
 - **Menu-bar mode** — shown every launch after onboarding. An `NSStatusBar` item polls `system::ping` and exposes status + copy actions + diagnostics. Passive poll/menu-open refreshes never overwrite an explicit busy action such as "Restarting"; the action handler owns the final status refresh when the command exits.
 
-Mac wrapper regression evidence for the active post-100 operating scorecard is
+Mac wrapper regression evidence for the completed post-100 operating scorecard is
 tracked in `packages/agent/docs/post-100-operating-conditions-scorecard.md`.
 Wrapper scenarios must keep `/health`, launchd, and SMAppService evidence tied
 to the visible wizard/menu state.

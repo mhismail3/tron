@@ -111,10 +111,14 @@ navigation/deep-link handling, or when visible iOS evidence for an exact
 server-created session is intentionally called out. Backend evidence harnesses
 should default to isolated temporary server homes and must not populate the
 user's normal dashboard or jump the visible Simulator without an explicit flag.
-The active post-100 UI/UX scorecard lives at
+The completed post-100 UI/UX scorecard lives at
 `packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
-scenario ledger for broad simulator evidence, owner classification, and
-Computer Use confirmation.
+scenario ledger as the archived iPhone/mac evidence model for owner
+classification and Computer Use confirmation.
+The follow-up iPad-only regression ledger lives at
+`packages/agent/docs/post-100-ipad-ui-regression-scorecard.md`; use it for
+split-view/sidebar, popover, pointer/keyboard, and wider-viewport coverage
+instead of reopening the closed iPhone/mac scorecard.
 The app registers `tron` and `tron-mobile` URL schemes, and
 `DeepLinkRouter` handles session routes in the form
 `tron://session/<session_id>`.

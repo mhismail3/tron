@@ -92,8 +92,11 @@ Current living entry points:
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
 - `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`,
   registry, recipes, and provider export.
-- `packages/agent/docs/post-100-operating-conditions-scorecard.md`: active
-  post-100 operating conditions and UI/UX regression scorecard.
+- `packages/agent/docs/post-100-operating-conditions-scorecard.md`: completed
+  post-100 operating conditions and UI/UX regression scorecard at 100/100.
+- `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md`: future
+  iPad-specific post-100 UI regression scorecard moved out of the closed
+  iPhone/mac operating plan.
 - `packages/agent/docs/collapsed-engine-hardening-scorecard.md`: completed
   collapsed-engine hardening scorecard and scenario ledger at 100/100.
 - `packages/agent/docs/codebase-cleanup-scorecard.md`: completed repo-local
