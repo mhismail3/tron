@@ -19,7 +19,7 @@ enum TurnStartPlugin: DispatchableEventPlugin {
             let agentPhase: String?
 
             /// Unified turn number accessor (handles both field names).
-            var number: Int { turn ?? turnNumber ?? 1 }
+            var number: Int? { turn ?? turnNumber }
         }
     }
 
@@ -33,9 +33,10 @@ enum TurnStartPlugin: DispatchableEventPlugin {
     // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(
-            turnNumber: event.data?.number ?? 1,
-            agentPhase: event.data?.agentPhase ?? "processing"
+        guard let data = event.data, let turnNumber = data.number else { return nil }
+        return Result(
+            turnNumber: turnNumber,
+            agentPhase: data.agentPhase ?? "processing"
         )
     }
 

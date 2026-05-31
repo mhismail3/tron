@@ -68,7 +68,7 @@ struct ImportPreviewMessage: Decodable, Identifiable {
 struct ImportSessionStats: Decodable {
     let inputTokens: Int?
     let outputTokens: Int?
-    let estimatedCost: Double?
+    let totalCost: Double?
     let model: String?
     let hasCompaction: Bool
 }

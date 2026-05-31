@@ -90,17 +90,16 @@ extension SessionEvent {
             return status
 
         case .streamTurnStart:
-            let turn = payload.int("turn") ?? 0
+            guard let turn = payload.int("turn") else { return "Turn started" }
             return "Turn \(turn) started"
 
         case .streamTurnEnd:
-            let turn = payload.int("turn") ?? 0
-            if let tokenUsage = payload.dict("tokenUsage"),
-               let input = tokenUsage["inputTokens"] as? Int,
-               let output = tokenUsage["outputTokens"] as? Int {
-                return "Turn \(turn) • \(TokenFormatter.format(input + output, style: .uppercase)) tokens"
+            let turnLabel = payload.int("turn").map { "Turn \($0)" } ?? "Turn"
+            if let tokenRecordDict = payload["tokenRecord"]?.value as? [String: Any],
+               let tokenRecord = TokenRecord.from(dict: tokenRecordDict) {
+                return "\(turnLabel) • \(TokenFormatter.format(tokenRecord.source.rawTotalTokens, style: .uppercase)) tokens"
             }
-            return "Turn \(turn) ended"
+            return "\(turnLabel) ended"
 
         case .errorAgent:
             let code = payload.string("code") ?? "ERROR"

@@ -15,6 +15,73 @@ final class UnifiedEventTransformerTests: XCTestCase {
         return formatter.string(from: date)
     }
 
+    private func makeTokenRecordPayload(
+        inputTokens: Int,
+        outputTokens: Int,
+        cacheReadTokens: Int = 0,
+        cacheCreationTokens: Int = 0,
+        turn: Int = 1,
+        contextWindowTokens: Int? = nil,
+        newInputTokens: Int? = nil,
+        previousContextBaseline: Int = 0,
+        provider: String = "anthropic",
+        model: String = "claude-sonnet-4",
+        sessionId: String = "test-session",
+        timestamp: String = "2026-01-01T00:00:00Z"
+    ) -> [String: Any] {
+        [
+            "source": [
+                "provider": provider,
+                "timestamp": timestamp,
+                "rawInputTokens": inputTokens,
+                "rawOutputTokens": outputTokens,
+                "rawCacheReadTokens": cacheReadTokens,
+                "rawCachedInputTokens": cacheReadTokens,
+                "rawCacheCreationTokens": cacheCreationTokens,
+                "rawCacheCreation5mTokens": cacheCreationTokens,
+                "rawCacheCreation1hTokens": 0,
+                "rawReasoningOutputTokens": 0,
+                "rawThoughtTokens": 0,
+                "rawToolUsePromptTokens": 0,
+                "rawTotalTokens": inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
+            ],
+            "computed": [
+                "contextWindowTokens": contextWindowTokens ?? (inputTokens + cacheReadTokens + cacheCreationTokens),
+                "newInputTokens": newInputTokens ?? inputTokens,
+                "previousContextBaseline": previousContextBaseline,
+                "calculationMethod": "anthropic_cache_aware"
+            ],
+            "meta": [
+                "turn": turn,
+                "sessionId": sessionId,
+                "model": model,
+                "contextSegmentId": "\(sessionId):\(provider):\(model)",
+                "baselineResetReason": "none",
+                "extractedAt": timestamp,
+                "normalizedAt": timestamp
+            ],
+            "pricing": [
+                "available": true,
+                "model": model,
+                "reason": NSNull(),
+                "cost": [
+                    "baseInputTokens": inputTokens,
+                    "outputTokens": outputTokens,
+                    "cacheReadTokens": cacheReadTokens,
+                    "cacheWriteTokens": cacheCreationTokens,
+                    "cacheWrite5mTokens": cacheCreationTokens,
+                    "cacheWrite1hTokens": 0,
+                    "baseInputCost": 0,
+                    "outputCost": 0,
+                    "cacheReadCost": 0,
+                    "cacheWriteCost": 0,
+                    "totalCost": 0,
+                    "currency": "USD"
+                ]
+            ]
+        ]
+    }
+
     /// Creates a RawEvent for testing
     private func rawEvent(
         id: String = UUID().uuidString,
@@ -884,28 +951,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([["type": "text", "text": "Hi there!"] as [String: Any]]),
                 "turn": AnyCodable(1),
-                "tokenRecord": AnyCodable([
-                    "source": [
-                        "provider": "anthropic",
-                        "timestamp": timestamp(2),
-                        "rawInputTokens": 100,
-                        "rawOutputTokens": 50,
-                        "rawCacheReadTokens": 0,
-                        "rawCacheCreationTokens": 0
-                    ],
-                    "computed": [
-                        "contextWindowTokens": 100,
-                        "newInputTokens": 100,
-                        "previousContextBaseline": 0,
-                        "calculationMethod": "anthropic_cache_aware"
-                    ],
-                    "meta": [
-                        "turn": 1,
-                        "sessionId": "test-session",
-                        "extractedAt": timestamp(2),
-                        "normalizedAt": timestamp(2)
-                    ]
-                ])
+                "tokenRecord": AnyCodable(makeTokenRecordPayload(
+                    inputTokens: 100,
+                    outputTokens: 50,
+                    turn: 1,
+                    contextWindowTokens: 100,
+                    newInputTokens: 100,
+                    timestamp: timestamp(2)
+                ))
             ], timestamp: timestamp(2))
         ]
 
@@ -1056,54 +1109,27 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([["type": "text", "text": "Response 1"] as [String: Any]]),
                 "turn": AnyCodable(1),
-                "tokenRecord": AnyCodable([
-                    "source": [
-                        "provider": "anthropic",
-                        "timestamp": timestamp(1),
-                        "rawInputTokens": 100,
-                        "rawOutputTokens": 50,
-                        "rawCacheReadTokens": 0,
-                        "rawCacheCreationTokens": 0
-                    ],
-                    "computed": [
-                        "contextWindowTokens": 100,
-                        "newInputTokens": 100,
-                        "previousContextBaseline": 0,
-                        "calculationMethod": "anthropic_cache_aware"
-                    ],
-                    "meta": [
-                        "turn": 1,
-                        "sessionId": "test-session",
-                        "extractedAt": timestamp(1),
-                        "normalizedAt": timestamp(1)
-                    ]
-                ])
+                "tokenRecord": AnyCodable(makeTokenRecordPayload(
+                    inputTokens: 100,
+                    outputTokens: 50,
+                    turn: 1,
+                    contextWindowTokens: 100,
+                    newInputTokens: 100,
+                    timestamp: timestamp(1)
+                ))
             ], timestamp: timestamp(1)),
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([["type": "text", "text": "Response 2"] as [String: Any]]),
                 "turn": AnyCodable(2),
-                "tokenRecord": AnyCodable([
-                    "source": [
-                        "provider": "anthropic",
-                        "timestamp": timestamp(2),
-                        "rawInputTokens": 200,
-                        "rawOutputTokens": 100,
-                        "rawCacheReadTokens": 0,
-                        "rawCacheCreationTokens": 0
-                    ],
-                    "computed": [
-                        "contextWindowTokens": 300,
-                        "newInputTokens": 200,
-                        "previousContextBaseline": 100,
-                        "calculationMethod": "anthropic_cache_aware"
-                    ],
-                    "meta": [
-                        "turn": 2,
-                        "sessionId": "test-session",
-                        "extractedAt": timestamp(2),
-                        "normalizedAt": timestamp(2)
-                    ]
-                ])
+                "tokenRecord": AnyCodable(makeTokenRecordPayload(
+                    inputTokens: 200,
+                    outputTokens: 100,
+                    turn: 2,
+                    contextWindowTokens: 300,
+                    newInputTokens: 200,
+                    previousContextBaseline: 100,
+                    timestamp: timestamp(2)
+                ))
             ], timestamp: timestamp(2))
         ]
 
@@ -1284,28 +1310,15 @@ final class UnifiedEventTransformerTests: XCTestCase {
             sessionEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([["type": "text", "text": "Hello"]]),
                 "turn": AnyCodable(1),
-                "tokenRecord": AnyCodable([
-                    "source": [
-                        "provider": "anthropic",
-                        "timestamp": "2026-01-01T00:00:00Z",
-                        "rawInputTokens": 100,
-                        "rawOutputTokens": 50,
-                        "rawCacheReadTokens": 75,
-                        "rawCacheCreationTokens": 0
-                    ],
-                    "computed": [
-                        "contextWindowTokens": 150,
-                        "newInputTokens": 25,
-                        "previousContextBaseline": 125,
-                        "calculationMethod": "anthropic_cache_aware"
-                    ],
-                    "meta": [
-                        "turn": 1,
-                        "sessionId": "test-session",
-                        "extractedAt": "2026-01-01T00:00:00Z",
-                        "normalizedAt": "2026-01-01T00:00:00Z"
-                    ]
-                ])
+                "tokenRecord": AnyCodable(makeTokenRecordPayload(
+                    inputTokens: 100,
+                    outputTokens: 50,
+                    cacheReadTokens: 75,
+                    turn: 1,
+                    contextWindowTokens: 150,
+                    newInputTokens: 25,
+                    previousContextBaseline: 125
+                ))
             ], timestamp: timestamp(0), sequence: 1)
         ]
 
@@ -1500,28 +1513,15 @@ final class UnifiedEventTransformerTests: XCTestCase {
             rawEvent(type: "message.assistant", payload: [
                 "content": AnyCodable([["type": "text", "text": "Hello"]]),
                 "turn": AnyCodable(1),
-                "tokenRecord": AnyCodable([
-                    "source": [
-                        "provider": "anthropic",
-                        "timestamp": "2026-01-01T00:00:00Z",
-                        "rawInputTokens": 100,
-                        "rawOutputTokens": 50,
-                        "rawCacheReadTokens": 75,
-                        "rawCacheCreationTokens": 0
-                    ],
-                    "computed": [
-                        "contextWindowTokens": 150,
-                        "newInputTokens": 25,
-                        "previousContextBaseline": 125,
-                        "calculationMethod": "anthropic_cache_aware"
-                    ],
-                    "meta": [
-                        "turn": 1,
-                        "sessionId": "test-session",
-                        "extractedAt": "2026-01-01T00:00:00Z",
-                        "normalizedAt": "2026-01-01T00:00:00Z"
-                    ]
-                ])
+                "tokenRecord": AnyCodable(makeTokenRecordPayload(
+                    inputTokens: 100,
+                    outputTokens: 50,
+                    cacheReadTokens: 75,
+                    turn: 1,
+                    contextWindowTokens: 150,
+                    newInputTokens: 25,
+                    previousContextBaseline: 125
+                ))
             ], timestamp: timestamp(1), sequence: 2)
         ]
 
@@ -2043,28 +2043,16 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testTokenRecordFallbackToCapabilityInvocationWhenNoTextBlock() {
         // Turn with [thinking, capability_invocation] and no text block — tokenRecord should attach to capability message
-        let tokenRecordPayload: [String: Any] = [
-            "source": [
-                "provider": "anthropic",
-                "timestamp": "2026-01-01T00:00:00Z",
-                "rawInputTokens": 10,
-                "rawOutputTokens": 261,
-                "rawCacheReadTokens": 12561,
-                "rawCacheCreationTokens": 498
-            ],
-            "computed": [
-                "contextWindowTokens": 12571,
-                "newInputTokens": 10,
-                "previousContextBaseline": 12561,
-                "calculationMethod": "anthropic_cache_aware"
-            ],
-            "meta": [
-                "turn": 1,
-                "sessionId": "test-session",
-                "extractedAt": "2026-01-01T00:00:00Z",
-                "normalizedAt": "2026-01-01T00:00:00Z"
-            ]
-        ]
+        let tokenRecordPayload = makeTokenRecordPayload(
+            inputTokens: 10,
+            outputTokens: 261,
+            cacheReadTokens: 12_561,
+            cacheCreationTokens: 498,
+            turn: 1,
+            contextWindowTokens: 12_571,
+            newInputTokens: 10,
+            previousContextBaseline: 12_561
+        )
 
         let events = [
             sessionEvent(type: "capability.invocation.started", payload: [
@@ -2109,28 +2097,16 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testTokenRecordFallbackWithMultipleCapabilityInvocations() {
         // Turn with [thinking, capability_invocation, capability_invocation] — last capability gets tokenRecord
-        let tokenRecordPayload: [String: Any] = [
-            "source": [
-                "provider": "anthropic",
-                "timestamp": "2026-01-01T00:00:00Z",
-                "rawInputTokens": 13,
-                "rawOutputTokens": 216,
-                "rawCacheReadTokens": 13059,
-                "rawCacheCreationTokens": 928
-            ],
-            "computed": [
-                "contextWindowTokens": 13072,
-                "newInputTokens": 13,
-                "previousContextBaseline": 13059,
-                "calculationMethod": "anthropic_cache_aware"
-            ],
-            "meta": [
-                "turn": 2,
-                "sessionId": "test-session",
-                "extractedAt": "2026-01-01T00:00:00Z",
-                "normalizedAt": "2026-01-01T00:00:00Z"
-            ]
-        ]
+        let tokenRecordPayload = makeTokenRecordPayload(
+            inputTokens: 13,
+            outputTokens: 216,
+            cacheReadTokens: 13_059,
+            cacheCreationTokens: 928,
+            turn: 2,
+            contextWindowTokens: 13_072,
+            newInputTokens: 13,
+            previousContextBaseline: 13_059
+        )
 
         let events = [
             sessionEvent(type: "capability.invocation.started", payload: [
@@ -2193,28 +2169,16 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testTokenRecordOnTextBlockNotOverriddenByFallback() {
         // Turn with [thinking, text, capability_invocation] — last message (capability) gets tokenRecord
-        let tokenRecordPayload: [String: Any] = [
-            "source": [
-                "provider": "anthropic",
-                "timestamp": "2026-01-01T00:00:00Z",
-                "rawInputTokens": 14,
-                "rawOutputTokens": 787,
-                "rawCacheReadTokens": 13987,
-                "rawCacheCreationTokens": 7026
-            ],
-            "computed": [
-                "contextWindowTokens": 14001,
-                "newInputTokens": 14,
-                "previousContextBaseline": 13987,
-                "calculationMethod": "anthropic_cache_aware"
-            ],
-            "meta": [
-                "turn": 3,
-                "sessionId": "test-session",
-                "extractedAt": "2026-01-01T00:00:00Z",
-                "normalizedAt": "2026-01-01T00:00:00Z"
-            ]
-        ]
+        let tokenRecordPayload = makeTokenRecordPayload(
+            inputTokens: 14,
+            outputTokens: 787,
+            cacheReadTokens: 13_987,
+            cacheCreationTokens: 7_026,
+            turn: 3,
+            contextWindowTokens: 14_001,
+            newInputTokens: 14,
+            previousContextBaseline: 13_987
+        )
 
         let events = [
             sessionEvent(type: "capability.invocation.started", payload: [
@@ -2266,28 +2230,15 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
     func testTokenRecordFallbackIncludesModelAndLatency() {
         // Verify the fallback also attaches model and latency metadata
-        let tokenRecordPayload: [String: Any] = [
-            "source": [
-                "provider": "anthropic",
-                "timestamp": "2026-01-01T00:00:00Z",
-                "rawInputTokens": 10,
-                "rawOutputTokens": 100,
-                "rawCacheReadTokens": 5000,
-                "rawCacheCreationTokens": 0
-            ],
-            "computed": [
-                "contextWindowTokens": 5010,
-                "newInputTokens": 10,
-                "previousContextBaseline": 5000,
-                "calculationMethod": "anthropic_cache_aware"
-            ],
-            "meta": [
-                "turn": 1,
-                "sessionId": "test-session",
-                "extractedAt": "2026-01-01T00:00:00Z",
-                "normalizedAt": "2026-01-01T00:00:00Z"
-            ]
-        ]
+        let tokenRecordPayload = makeTokenRecordPayload(
+            inputTokens: 10,
+            outputTokens: 100,
+            cacheReadTokens: 5_000,
+            turn: 1,
+            contextWindowTokens: 5_010,
+            newInputTokens: 10,
+            previousContextBaseline: 5_000
+        )
 
         let events = [
             sessionEvent(type: "capability.invocation.started", payload: [
@@ -2328,33 +2279,34 @@ final class UnifiedEventTransformerTests: XCTestCase {
     func testMetadataOnLastMessageOfEveryTurn() {
         // Reconstruction must match live streaming: every turn gets stats on its
         // last message, regardless of content type (text, capability, or mixed).
-        let tokenRecord1: [String: Any] = [
-            "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
-                        "rawInputTokens": 100, "rawOutputTokens": 50,
-                        "rawCacheReadTokens": 0, "rawCacheCreationTokens": 0],
-            "computed": ["contextWindowTokens": 150, "newInputTokens": 100,
-                         "previousContextBaseline": 0, "calculationMethod": "anthropic_cache_aware"],
-            "meta": ["turn": 1, "sessionId": "s1", "extractedAt": "2026-01-01T00:00:00Z",
-                     "normalizedAt": "2026-01-01T00:00:00Z"]
-        ]
-        let tokenRecord2: [String: Any] = [
-            "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
-                        "rawInputTokens": 10, "rawOutputTokens": 200,
-                        "rawCacheReadTokens": 140, "rawCacheCreationTokens": 0],
-            "computed": ["contextWindowTokens": 350, "newInputTokens": 10,
-                         "previousContextBaseline": 150, "calculationMethod": "anthropic_cache_aware"],
-            "meta": ["turn": 2, "sessionId": "s1", "extractedAt": "2026-01-01T00:00:00Z",
-                     "normalizedAt": "2026-01-01T00:00:00Z"]
-        ]
-        let tokenRecord3: [String: Any] = [
-            "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
-                        "rawInputTokens": 15, "rawOutputTokens": 300,
-                        "rawCacheReadTokens": 335, "rawCacheCreationTokens": 0],
-            "computed": ["contextWindowTokens": 650, "newInputTokens": 15,
-                         "previousContextBaseline": 350, "calculationMethod": "anthropic_cache_aware"],
-            "meta": ["turn": 3, "sessionId": "s1", "extractedAt": "2026-01-01T00:00:00Z",
-                     "normalizedAt": "2026-01-01T00:00:00Z"]
-        ]
+        let tokenRecord1 = makeTokenRecordPayload(
+            inputTokens: 100,
+            outputTokens: 50,
+            turn: 1,
+            contextWindowTokens: 150,
+            newInputTokens: 100,
+            sessionId: "s1"
+        )
+        let tokenRecord2 = makeTokenRecordPayload(
+            inputTokens: 10,
+            outputTokens: 200,
+            cacheReadTokens: 140,
+            turn: 2,
+            contextWindowTokens: 350,
+            newInputTokens: 10,
+            previousContextBaseline: 150,
+            sessionId: "s1"
+        )
+        let tokenRecord3 = makeTokenRecordPayload(
+            inputTokens: 15,
+            outputTokens: 300,
+            cacheReadTokens: 335,
+            turn: 3,
+            contextWindowTokens: 650,
+            newInputTokens: 15,
+            previousContextBaseline: 350,
+            sessionId: "s1"
+        )
 
         let events = [
             // User prompt
@@ -2436,15 +2388,14 @@ final class UnifiedEventTransformerTests: XCTestCase {
     func testMetadataPreservedAcrossUserMessages() {
         // Multi-exchange: metadata persists on assistant messages even when
         // followed by another user message.
-        let tokenRecord: [String: Any] = [
-            "source": ["provider": "anthropic", "timestamp": "2026-01-01T00:00:00Z",
-                        "rawInputTokens": 100, "rawOutputTokens": 50,
-                        "rawCacheReadTokens": 0, "rawCacheCreationTokens": 0],
-            "computed": ["contextWindowTokens": 150, "newInputTokens": 100,
-                         "previousContextBaseline": 0, "calculationMethod": "anthropic_cache_aware"],
-            "meta": ["turn": 1, "sessionId": "s1", "extractedAt": "2026-01-01T00:00:00Z",
-                     "normalizedAt": "2026-01-01T00:00:00Z"]
-        ]
+        let tokenRecord = makeTokenRecordPayload(
+            inputTokens: 100,
+            outputTokens: 50,
+            turn: 1,
+            contextWindowTokens: 150,
+            newInputTokens: 100,
+            sessionId: "s1"
+        )
 
         let events = [
             sessionEvent(type: "message.user", payload: [

@@ -61,8 +61,10 @@ final class ThinkingRepository: @unchecked Sendable {
                             continue
                         }
 
-                        // Extract turn number from payload
-                        let turnNumber = event.payload["turn"]?.value as? Int ?? 1
+                        guard let turnNumber = event.payload["turn"]?.value as? Int else {
+                            logger.warning("Skipping thinking block without explicit turn number", category: .session)
+                            continue
+                        }
 
                         // Create preview (first 3 lines, max 120 chars)
                         let preview = thinkingText.thinkingPreview()

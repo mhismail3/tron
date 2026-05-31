@@ -42,6 +42,24 @@ fn make_assistant_item(
     })
 }
 
+fn make_assistant_item_with_usage(
+    content_blocks: Vec<Value>,
+    turn: i64,
+    model: &str,
+    stop_reason: &str,
+    usage: ClaudeUsage,
+) -> AssembledItem {
+    AssembledItem::AssistantMessage(AssembledAssistant {
+        message_id: "msg1".to_string(),
+        content_blocks,
+        model: model.to_string(),
+        stop_reason: stop_reason.to_string(),
+        usage,
+        timestamp: "2026-01-01T00:00:01Z".to_string(),
+        turn,
+    })
+}
+
 fn make_provider_capability_result_item(turn: i64) -> AssembledItem {
     AssembledItem::UserMessage {
         record: serde_json::from_value(json!({
@@ -320,7 +338,100 @@ fn assistant_cost_computed() {
         .iter()
         .find(|e| e.event_type == EventType::StreamTurnEnd)
         .unwrap();
-    assert!(turn_end.payload["cost"].as_f64().unwrap() > 0.0);
+    let turn_end_cost = turn_end.payload["cost"].as_f64().unwrap();
+    let record_cost = turn_end.payload["tokenRecord"]["pricing"]["cost"]["totalCost"]
+        .as_f64()
+        .unwrap();
+    assert!(turn_end_cost > 0.0);
+    assert!((turn_end_cost - record_cost).abs() < f64::EPSILON);
+}
+
+#[test]
+fn assistant_token_record_uses_imported_model_and_canonical_cost() {
+    let items = vec![make_assistant_item_with_usage(
+        vec![json!({"type": "text", "text": "hi"})],
+        1,
+        "claude-opus-4-6",
+        "end_turn",
+        ClaudeUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_input_tokens: 10,
+            cache_creation_input_tokens: 5,
+        },
+    )];
+    let result = transform(items);
+
+    let msg = result
+        .events
+        .iter()
+        .find(|e| e.event_type == EventType::MessageAssistant)
+        .unwrap();
+    assert_eq!(
+        msg.payload["tokenRecord"]["meta"]["model"],
+        "claude-opus-4-6"
+    );
+    assert_eq!(
+        msg.payload["tokenRecord"]["source"]["provider"],
+        "anthropic"
+    );
+    assert_eq!(msg.payload["tokenUsage"]["cachedInputTokens"], 10);
+    assert_eq!(msg.payload["tokenUsage"]["totalTokens"], 165);
+    assert_eq!(msg.payload["tokenRecord"]["pricing"]["available"], true);
+
+    let turn_end = result
+        .events
+        .iter()
+        .find(|e| e.event_type == EventType::StreamTurnEnd)
+        .unwrap();
+    assert_eq!(
+        turn_end.payload["tokenRecord"]["meta"]["model"],
+        "claude-opus-4-6"
+    );
+    assert_eq!(turn_end.payload["tokenUsage"]["providerType"], "anthropic");
+    assert_eq!(turn_end.payload["tokenUsage"]["totalTokens"], 165);
+    assert_eq!(
+        turn_end.payload["tokenRecord"]["pricing"]["cost"]["totalCost"],
+        msg.payload["tokenRecord"]["pricing"]["cost"]["totalCost"]
+    );
+}
+
+#[test]
+fn assistant_unknown_model_marks_pricing_unavailable_without_guessing() {
+    let items = vec![make_assistant_item(
+        vec![json!({"type": "text", "text": "hi"})],
+        1,
+        "claude-unlisted-future-model",
+        "end_turn",
+        1_000_000,
+        100_000,
+    )];
+    let result = transform(items);
+
+    assert_eq!(result.total_cost, 0.0);
+
+    let msg = result
+        .events
+        .iter()
+        .find(|e| e.event_type == EventType::MessageAssistant)
+        .unwrap();
+    assert_eq!(msg.payload["tokenRecord"]["pricing"]["available"], false);
+    assert_eq!(
+        msg.payload["tokenRecord"]["pricing"]["reason"],
+        "unsupported_model_pricing"
+    );
+    assert!(msg.payload["tokenRecord"]["pricing"].get("cost").is_none());
+
+    let turn_end = result
+        .events
+        .iter()
+        .find(|e| e.event_type == EventType::StreamTurnEnd)
+        .unwrap();
+    assert!(turn_end.payload.get("cost").is_none());
+    assert_eq!(
+        turn_end.payload["tokenRecord"]["pricing"]["available"],
+        false
+    );
 }
 
 #[test]

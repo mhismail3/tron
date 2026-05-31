@@ -805,7 +805,7 @@ fn token_accounting_hardening_scorecard_stays_formalized() {
         "Ollama",
         "## Static Gates",
         "Provider::default()` must remain `Unknown`",
-        "TurnEndPlugin` must not default missing turn numbers to `1`",
+        "TurnStartPlugin` and `TurnEndPlugin` must not default missing turn numbers",
         "## Scenario Ledger",
         "| TAH-0 |",
         "| TAH-1 |",
@@ -960,6 +960,32 @@ fn token_accounting_hardening_scorecard_stays_formalized() {
                 "guard let data = event.data, let turnNumber = data.number else { return nil }"
             ),
         "TurnEndPlugin must fail missing turn data instead of defaulting to turn 1"
+    );
+    let turn_start =
+        read_repo("packages/ios-app/Sources/Core/Events/Plugins/Streaming/TurnStartPlugin.swift");
+    assert!(
+        !turn_start.contains("?? 1")
+            && turn_start.contains("var number: Int? { turn ?? turnNumber }")
+            && turn_start.contains(
+                "guard let data = event.data, let turnNumber = data.number else { return nil }"
+            ),
+        "TurnStartPlugin must fail missing turn data instead of defaulting to turn 1"
+    );
+
+    let import_mod = read_repo("packages/agent/src/domains/import/implementation/mod.rs");
+    assert!(
+        !import_mod.contains("pub mod cost")
+            && !import_mod.contains("Cost estimation from tokens + model"),
+        "import pipeline must not restore a duplicate token cost estimator"
+    );
+    let import_transformer =
+        read_repo("packages/agent/src/domains/import/implementation/transformer.rs");
+    assert!(
+        !import_transformer.contains("estimate_cost")
+            && import_transformer.contains("build_token_usage_json(&usage_for_record)")
+            && import_transformer.contains("token_record_cost")
+            && import_transformer.contains("\"tokenRecord\": token_record"),
+        "import pipeline must use canonical tokenRecord serialization and server pricing"
     );
 }
 

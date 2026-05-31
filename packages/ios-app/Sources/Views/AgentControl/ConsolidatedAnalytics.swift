@@ -325,7 +325,7 @@ struct ConsolidatedAnalytics {
                 }
 
             case .streamTurnEnd:
-                guard let turn = Self.extractInt(event.payload["turn"]?.value) else { continue }
+                guard Self.extractInt(event.payload["turn"]?.value) != nil else { continue }
                 guard let turnKey = Self.turnKey(payload: event.payload),
                       let index = turnKeyToLatestIndex[turnKey] else { continue }
 

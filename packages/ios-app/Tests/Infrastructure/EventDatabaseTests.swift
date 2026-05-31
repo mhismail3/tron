@@ -27,19 +27,29 @@ final class EventDatabaseTests: XCTestCase {
         outputTokens: Int,
         cacheReadTokens: Int = 0,
         cacheCreationTokens: Int = 0,
-        turn: Int = 1
+        turn: Int = 1,
+        provider: String = "anthropic",
+        model: String = "claude-sonnet-4",
+        cost: Double = 0
     ) -> [String: Any] {
         return [
             "source": [
-                "provider": "anthropic",
+                "provider": provider,
                 "timestamp": "2024-01-01T00:00:00Z",
                 "rawInputTokens": inputTokens,
                 "rawOutputTokens": outputTokens,
                 "rawCacheReadTokens": cacheReadTokens,
-                "rawCacheCreationTokens": cacheCreationTokens
+                "rawCachedInputTokens": cacheReadTokens,
+                "rawCacheCreationTokens": cacheCreationTokens,
+                "rawCacheCreation5mTokens": cacheCreationTokens,
+                "rawCacheCreation1hTokens": 0,
+                "rawReasoningOutputTokens": 0,
+                "rawThoughtTokens": 0,
+                "rawToolUsePromptTokens": 0,
+                "rawTotalTokens": inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens
             ],
             "computed": [
-                "contextWindowTokens": inputTokens + cacheReadTokens,
+                "contextWindowTokens": inputTokens + cacheReadTokens + cacheCreationTokens,
                 "newInputTokens": inputTokens,
                 "previousContextBaseline": 0,
                 "calculationMethod": "anthropic_cache_aware"
@@ -47,8 +57,30 @@ final class EventDatabaseTests: XCTestCase {
             "meta": [
                 "turn": turn,
                 "sessionId": "test-session",
+                "model": model,
+                "contextSegmentId": "test-session:\(provider):\(model)",
+                "baselineResetReason": "none",
                 "extractedAt": "2024-01-01T00:00:00Z",
                 "normalizedAt": "2024-01-01T00:00:00Z"
+            ],
+            "pricing": [
+                "available": true,
+                "model": model,
+                "reason": NSNull(),
+                "cost": [
+                    "baseInputTokens": inputTokens,
+                    "outputTokens": outputTokens,
+                    "cacheReadTokens": cacheReadTokens,
+                    "cacheWriteTokens": cacheCreationTokens,
+                    "cacheWrite5mTokens": cacheCreationTokens,
+                    "cacheWrite1hTokens": 0,
+                    "baseInputCost": cost,
+                    "outputCost": 0,
+                    "cacheReadCost": 0,
+                    "cacheWriteCost": 0,
+                    "totalCost": cost,
+                    "currency": "USD"
+                ]
             ]
         ]
     }
@@ -694,45 +726,42 @@ final class EventDatabaseTests: XCTestCase {
     }
 
     func testConsolidatedAnalyticsCostExtraction() {
-        // Test that cost is properly extracted from stream.turn_end events
-        // including handling of Int vs Double type (JSON may serialize 0.0 as 0)
+        // Cost is read from tokenRecord.pricing on stream.turn_end records.
+        // A zero server cost remains visible instead of being treated as missing.
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1),
                 "model": AnyCodable("claude-sonnet-4"),
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000, outputTokens: 500, turn: 1))
             ]),
-            // Cost as Double (normal case)
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(1),
-                "cost": AnyCodable(0.0105),  // Double
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000, outputTokens: 500, turn: 1))
+                "cost": AnyCodable(0.0105),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000, outputTokens: 500, turn: 1, cost: 0.0105))
             ]),
             SessionEvent(id: "e3", parentId: "e2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:03:00Z", sequence: 3, payload: [
                 "turn": AnyCodable(2),
                 "model": AnyCodable("claude-sonnet-4"),
                 "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 2000, outputTokens: 1000, turn: 2))
             ]),
-            // Cost as Int (edge case when cost is 0)
             SessionEvent(id: "e4", parentId: "e3", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:04:00Z", sequence: 4, payload: [
                 "turn": AnyCodable(2),
-                "cost": AnyCodable(0),  // Int (JSON serializes 0.0 as 0)
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 2000, outputTokens: 1000, turn: 2))
+                "cost": AnyCodable(0),
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 2000, outputTokens: 1000, turn: 2, cost: 0))
             ])
         ]
 
         let analytics = ConsolidatedAnalytics(from: events)
 
         XCTAssertEqual(analytics.totalTurns, 2)
-        // First turn should have the Double cost
-        XCTAssertEqual(analytics.turns[0].cost, 0.0105, accuracy: 0.0001)
-        // Second turn should have 0 cost (extracted from Int)
-        XCTAssertEqual(analytics.turns[1].cost, 0.0, accuracy: 0.0001)
+        XCTAssertNotNil(analytics.turns[0].cost)
+        XCTAssertEqual(analytics.turns[0].cost!, 0.0105, accuracy: 0.0001)
+        XCTAssertNotNil(analytics.turns[1].cost)
+        XCTAssertEqual(analytics.turns[1].cost!, 0.0, accuracy: 0.0001)
     }
 
     func testConsolidatedAnalyticsCacheTokens() {
-        // Cache tokens are tracked from message.assistant events; cost is server-provided
-        // via stream.turn_end (no client-side fallback calculation post-thin-client migration).
+        // Cache tokens and cost come from the server-provided tokenRecord.
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1),
@@ -742,7 +771,7 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(1),
                 "cost": AnyCodable(0.01665),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 10000, outputTokens: 500, cacheReadTokens: 8000, cacheCreationTokens: 1000, turn: 1))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 10000, outputTokens: 500, cacheReadTokens: 8000, cacheCreationTokens: 1000, turn: 1, cost: 0.01665))
             ])
         ]
 
@@ -753,11 +782,12 @@ final class EventDatabaseTests: XCTestCase {
 
         XCTAssertEqual(turn.cacheReadTokens, 8000)
         XCTAssertEqual(turn.cacheCreationTokens, 1000)
-        XCTAssertEqual(turn.cost, 0.01665, accuracy: 0.001)
+        XCTAssertNotNil(turn.cost)
+        XCTAssertEqual(turn.cost!, 0.01665, accuracy: 0.001)
     }
 
     func testConsolidatedAnalyticsServerCost() {
-        // Cost is read from the server-provided `cost` field on stream.turn_end.
+        // Cost is read from the server-provided tokenRecord pricing breakdown.
         let events = [
             SessionEvent(id: "e1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1),
@@ -767,7 +797,7 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "e2", parentId: "e1", sessionId: "s1", workspaceId: "/test", type: "stream.turn_end", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(1),
                 "cost": AnyCodable(4.5),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000000, outputTokens: 100000, turn: 1))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000000, outputTokens: 100000, turn: 1, cost: 4.5))
             ])
         ]
 
@@ -785,39 +815,39 @@ final class EventDatabaseTests: XCTestCase {
             SessionEvent(id: "g1", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:01:00Z", sequence: 1, payload: [
                 "turn": AnyCodable(1), "model": AnyCodable("gpt-4o"),
                 "latency": AnyCodable(400),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000, outputTokens: 200, turn: 1))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 1000, outputTokens: 200, turn: 1, provider: "openai", model: "gpt-4o"))
             ]),
             SessionEvent(id: "g2", parentId: "g1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 2, payload: [
                 "turn": AnyCodable(2), "model": AnyCodable("gpt-4o"),
                 "latency": AnyCodable(500),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 2000, outputTokens: 300, turn: 2))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 2000, outputTokens: 300, turn: 2, provider: "openai", model: "gpt-4o"))
             ]),
             // MiniMax conversation: turns reset to 1-2
             SessionEvent(id: "m1", parentId: "g2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:03:00Z", sequence: 3, payload: [
                 "turn": AnyCodable(1), "model": AnyCodable("minimax-01"),
                 "latency": AnyCodable(600),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 3000, outputTokens: 400, turn: 1))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 3000, outputTokens: 400, turn: 1, provider: "minimax", model: "minimax-01"))
             ]),
             SessionEvent(id: "m2", parentId: "m1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:04:00Z", sequence: 4, payload: [
                 "turn": AnyCodable(2), "model": AnyCodable("minimax-01"),
                 "latency": AnyCodable(700),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 4000, outputTokens: 500, turn: 2))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 4000, outputTokens: 500, turn: 2, provider: "minimax", model: "minimax-01"))
             ]),
             // Sonnet conversation: turns reset to 1-3
             SessionEvent(id: "s1a", parentId: "m2", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:05:00Z", sequence: 5, payload: [
                 "turn": AnyCodable(1), "model": AnyCodable("claude-sonnet-4"),
                 "latency": AnyCodable(300),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 5000, outputTokens: 600, turn: 1))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 5000, outputTokens: 600, turn: 1, provider: "anthropic", model: "claude-sonnet-4"))
             ]),
             SessionEvent(id: "s2a", parentId: "s1a", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:06:00Z", sequence: 6, payload: [
                 "turn": AnyCodable(2), "model": AnyCodable("claude-sonnet-4"),
                 "latency": AnyCodable(350),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 6000, outputTokens: 700, turn: 2))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 6000, outputTokens: 700, turn: 2, provider: "anthropic", model: "claude-sonnet-4"))
             ]),
             SessionEvent(id: "s3a", parentId: "s2a", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:07:00Z", sequence: 7, payload: [
                 "turn": AnyCodable(3), "model": AnyCodable("claude-sonnet-4"),
                 "latency": AnyCodable(250),
-                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 7000, outputTokens: 800, turn: 3))
+                "tokenRecord": AnyCodable(makeTokenRecord(inputTokens: 7000, outputTokens: 800, turn: 3, provider: "anthropic", model: "claude-sonnet-4"))
             ])
         ]
 
@@ -953,11 +983,8 @@ final class EventDatabaseTests: XCTestCase {
         ]
 
         let analytics = ConsolidatedAnalytics(from: events)
-        XCTAssertEqual(analytics.totalTurns, 1)
-        XCTAssertEqual(analytics.turns[0].inputTokens, 0)
-        XCTAssertEqual(analytics.turns[0].outputTokens, 0)
-        XCTAssertEqual(analytics.turns[0].latency, 800)
-        XCTAssertNotNil(analytics.turns[0].model)
+        XCTAssertEqual(analytics.totalTurns, 0)
+        XCTAssertTrue(analytics.turns.isEmpty)
     }
 
     func testConsolidatedAnalyticsLatencyNotDoubleCounted() {

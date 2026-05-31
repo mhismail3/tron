@@ -155,7 +155,7 @@ async fn preview_session(payload: &Value, _deps: &Deps) -> Result<Value, Capabil
                 "stats": {
                     "inputTokens": result.total_input_tokens,
                     "outputTokens": result.total_output_tokens,
-                    "estimatedCost": result.total_cost,
+                    "totalCost": result.total_cost,
                     "model": result.model,
                     "hasCompaction": result.events.iter().any(|event| event.event_type == crate::domains::session::event_store::EventType::CompactBoundary),
                 },

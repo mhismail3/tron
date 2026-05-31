@@ -17,14 +17,12 @@
 //! | `parser`      | File discovery + JSONL parsing |
 //! | `tree`        | Tree linearization + turn derivation |
 //! | `assembler`   | Chunk reassembly by `message.id` |
-//! | `transformer` | Record → Tron event mapping |
-//! | `cost`        | Cost estimation from tokens + model |
+//! | `transformer` | Record → Tron event mapping with canonical token records |
 //! | `validator`   | Dry-run validation / warning surfacing (M28) |
 //! | `writer`      | Transactional DB writer with dedup |
 //! | `errors`      | `ImportError` enum |
 
 pub mod assembler;
-pub mod cost;
 pub mod errors;
 pub mod parser;
 pub mod transformer;

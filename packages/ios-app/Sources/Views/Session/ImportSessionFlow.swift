@@ -445,8 +445,8 @@ struct ImportSessionPreviewView: View {
             if let model = stats.model {
                 statChip("Model", model.shortModelName)
             }
-            if let cost = stats.estimatedCost, cost > 0 {
-                statChip("Est. Cost", String(format: "$%.2f", cost))
+            if let cost = stats.totalCost, cost > 0 {
+                statChip("Cost", String(format: "$%.2f", cost))
             }
             if let input = stats.inputTokens, input > 0 {
                 statChip("Input", formatTokens(input))

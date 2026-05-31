@@ -97,7 +97,7 @@ pub struct ImportPreview {
     pub total_input_tokens: i64,
     /// Aggregate output tokens.
     pub total_output_tokens: i64,
-    /// Aggregate estimated cost (USD).
+    /// Aggregate server-priced cost (USD), zero when pricing is unavailable.
     pub total_cost: f64,
 }
 

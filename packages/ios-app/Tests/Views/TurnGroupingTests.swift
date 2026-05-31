@@ -34,6 +34,66 @@ struct TurnGroupingTests {
         return payload
     }
 
+    private func tokenRecordPayload(
+        inputTokens: Int,
+        outputTokens: Int,
+        turn: Int = 1,
+        sessionId: String = "current",
+        segment: String
+    ) -> [String: Any] {
+        [
+            "source": [
+                "provider": "anthropic",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "rawInputTokens": inputTokens,
+                "rawOutputTokens": outputTokens,
+                "rawCacheReadTokens": 0,
+                "rawCachedInputTokens": 0,
+                "rawCacheCreationTokens": 0,
+                "rawCacheCreation5mTokens": 0,
+                "rawCacheCreation1hTokens": 0,
+                "rawReasoningOutputTokens": 0,
+                "rawThoughtTokens": 0,
+                "rawToolUsePromptTokens": 0,
+                "rawTotalTokens": inputTokens + outputTokens
+            ],
+            "computed": [
+                "contextWindowTokens": inputTokens,
+                "newInputTokens": inputTokens,
+                "previousContextBaseline": 0,
+                "calculationMethod": "anthropic_cache_aware"
+            ],
+            "meta": [
+                "turn": turn,
+                "sessionId": sessionId,
+                "model": "claude-sonnet-4",
+                "contextSegmentId": segment,
+                "baselineResetReason": "none",
+                "extractedAt": "2024-01-01T00:00:00Z",
+                "normalizedAt": "2024-01-01T00:00:00Z"
+            ],
+            "pricing": [
+                "available": true,
+                "model": "claude-sonnet-4",
+                "reason": NSNull(),
+                "cost": [
+                    "baseInputTokens": inputTokens,
+                    "outputTokens": outputTokens,
+                    "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "cacheWrite5mTokens": 0,
+                    "cacheWrite1hTokens": 0,
+                    "baseInputCost": 0,
+                    "outputCost": 0,
+                    "cacheReadCost": 0,
+                    "cacheWriteCost": 0,
+                    "totalCost": 0,
+                    "currency": "USD"
+                ]
+            ]
+        ]
+    }
+
     private let emptyAnalytics = ConsolidatedAnalytics(from: [])
 
     // MARK: - Boundary-Based Grouping
@@ -179,14 +239,12 @@ struct TurnGroupingTests {
 
     @Test("Matches analytics data by turn number")
     func matchesAnalyticsData() {
-        let tokenRecord: [String: Any] = [
-            "source": [
-                "rawInputTokens": 100,
-                "rawOutputTokens": 200,
-                "rawCacheReadTokens": 0,
-                "rawCacheCreationTokens": 0,
-            ]
-        ]
+        let tokenRecord = tokenRecordPayload(
+            inputTokens: 100,
+            outputTokens: 200,
+            turn: 1,
+            segment: "current:anthropic:claude-sonnet-4"
+        )
         let analyticsEvents = [
             makeEvent(type: "message.assistant", payload: [
                 "turn": AnyCodable(1),
@@ -535,8 +593,18 @@ struct TurnGroupingTests {
 
     @Test("Analytics data maps correctly across prompt cycle resets")
     func analyticsMapCorrectlyAcrossResets() {
-        let tokenRecord1: [String: Any] = ["source": ["rawInputTokens": 100, "rawOutputTokens": 200, "rawCacheReadTokens": 0, "rawCacheCreationTokens": 0]]
-        let tokenRecord2: [String: Any] = ["source": ["rawInputTokens": 300, "rawOutputTokens": 400, "rawCacheReadTokens": 0, "rawCacheCreationTokens": 0]]
+        let tokenRecord1 = tokenRecordPayload(
+            inputTokens: 100,
+            outputTokens: 200,
+            turn: 1,
+            segment: "current:anthropic:claude-sonnet-4:cycle-1"
+        )
+        let tokenRecord2 = tokenRecordPayload(
+            inputTokens: 300,
+            outputTokens: 400,
+            turn: 1,
+            segment: "current:anthropic:claude-sonnet-4:cycle-2"
+        )
 
         // Events used for both analytics and grouping
         let allEvents: [SessionEvent] = [

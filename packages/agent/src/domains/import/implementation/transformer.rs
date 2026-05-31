@@ -8,10 +8,11 @@
 
 use serde_json::{Value, json};
 
-use crate::domains::agent::runner::pipeline::persistence::build_token_record;
+use crate::domains::agent::runner::pipeline::persistence::{
+    build_token_record, build_token_usage_json,
+};
 use crate::domains::import::assembler::AssembledItem;
-use crate::domains::import::cost::estimate_cost;
-use crate::domains::import::types::ClaudeRecord;
+use crate::domains::import::types::{ClaudeRecord, ClaudeUsage};
 use crate::domains::session::event_store::types::EventType;
 use crate::shared::messages::{Provider, TokenUsage};
 
@@ -37,7 +38,7 @@ pub struct TransformResult {
     pub total_input_tokens: i64,
     /// Aggregate output tokens.
     pub total_output_tokens: i64,
-    /// Aggregate estimated cost (USD).
+    /// Aggregate server-priced cost (USD), zero when pricing is unavailable.
     pub total_cost: f64,
     /// Number of turns.
     pub turn_count: i64,
@@ -70,7 +71,8 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
     let mut pending_turn_output: i64 = 0;
     let mut pending_turn_cache_read: i64 = 0;
     let mut pending_turn_cache_creation: i64 = 0;
-    let mut pending_turn_cost: f64 = 0.0;
+    let mut pending_turn_baseline: u64 = 0;
+    let mut pending_turn_model = String::new();
     let mut has_pending_turn_end = false;
 
     for item in items {
@@ -94,7 +96,8 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                             pending_turn_output,
                             pending_turn_cache_read,
                             pending_turn_cache_creation,
-                            pending_turn_cost,
+                            pending_turn_baseline,
+                            &pending_turn_model,
                         );
                         has_pending_turn_end = false;
                     }
@@ -115,7 +118,8 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                         pending_turn_output,
                         pending_turn_cache_read,
                         pending_turn_cache_creation,
-                        pending_turn_cost,
+                        pending_turn_baseline,
+                        &pending_turn_model,
                     );
                     has_pending_turn_end = false;
                 }
@@ -158,7 +162,6 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     model.clone_from(&am.model);
                 }
 
-                let cost = estimate_cost(&am.model, &am.usage);
                 let has_thinking = am
                     .content_blocks
                     .iter()
@@ -173,7 +176,8 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                         pending_turn_output,
                         pending_turn_cache_read,
                         pending_turn_cache_creation,
-                        pending_turn_cost,
+                        pending_turn_baseline,
+                        &pending_turn_model,
                     );
                     has_pending_turn_end = false;
                 }
@@ -195,34 +199,18 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     .collect();
 
                 // Build tokenRecord (same structure as native sessions) so iOS
-                // can read computed.contextWindowTokens for the context pill.
-                let usage_for_record = TokenUsage {
-                    input_tokens: am.usage.input_tokens.max(0) as u64,
-                    output_tokens: am.usage.output_tokens.max(0) as u64,
-                    cache_read_tokens: Some(am.usage.cache_read_input_tokens.max(0) as u64),
-                    cached_input_tokens: Some(am.usage.cache_read_input_tokens.max(0) as u64),
-                    cache_creation_tokens: Some(am.usage.cache_creation_input_tokens.max(0) as u64),
-                    cache_creation_5m_tokens: None,
-                    cache_creation_1h_tokens: None,
-                    reasoning_output_tokens: None,
-                    thought_tokens: None,
-                    tool_use_prompt_tokens: None,
-                    total_tokens: Some(
-                        am.usage.input_tokens.max(0) as u64
-                            + am.usage.output_tokens.max(0) as u64
-                            + am.usage.cache_read_input_tokens.max(0) as u64
-                            + am.usage.cache_creation_input_tokens.max(0) as u64,
-                    ),
-                    provider_type: Some(Provider::Anthropic),
-                };
+                // can read computed.contextWindowTokens and server pricing.
+                let baseline_before_record = previous_baseline;
+                let usage_for_record = token_usage_from_claude(&am.usage);
                 let token_record = build_token_record(
                     &usage_for_record,
                     Provider::Anthropic,
                     "import",
                     am.turn.max(0) as u32,
-                    previous_baseline,
-                    "imported/anthropic",
+                    baseline_before_record,
+                    &am.model,
                 );
+                let cost = token_record_cost(&token_record).unwrap_or(0.0);
                 // Update baseline for next turn's delta calculation
                 if let Some(computed) = token_record.get("computed") {
                     if let Some(cwt) = computed.get("contextWindowTokens").and_then(Value::as_u64) {
@@ -233,15 +221,10 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                 let mut assistant_payload = json!({
                     "content": normalized_blocks,
                     "turn": am.turn,
-                    "tokenUsage": {
-                        "inputTokens": am.usage.input_tokens,
-                        "outputTokens": am.usage.output_tokens,
-                        "cacheReadTokens": am.usage.cache_read_input_tokens,
-                        "cacheCreationTokens": am.usage.cache_creation_input_tokens,
-                    },
+                    "tokenUsage": build_token_usage_json(&usage_for_record),
                     "tokenRecord": token_record,
                     "stopReason": am.stop_reason,
-                    "model": am.model,
+                    "model": am.model.clone(),
                 });
                 if has_thinking {
                     assistant_payload["hasThinking"] = json!(true);
@@ -259,14 +242,14 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                     pending_turn_output += am.usage.output_tokens;
                     pending_turn_cache_read += am.usage.cache_read_input_tokens;
                     pending_turn_cache_creation += am.usage.cache_creation_input_tokens;
-                    pending_turn_cost += cost;
                 } else {
                     pending_turn = am.turn;
                     pending_turn_input = am.usage.input_tokens;
                     pending_turn_output = am.usage.output_tokens;
                     pending_turn_cache_read = am.usage.cache_read_input_tokens;
                     pending_turn_cache_creation = am.usage.cache_creation_input_tokens;
-                    pending_turn_cost = cost;
+                    pending_turn_baseline = baseline_before_record;
+                    pending_turn_model.clone_from(&am.model);
                 }
                 has_pending_turn_end = true;
 
@@ -287,7 +270,8 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
                         pending_turn_output,
                         pending_turn_cache_read,
                         pending_turn_cache_creation,
-                        pending_turn_cost,
+                        pending_turn_baseline,
+                        &pending_turn_model,
                     );
                     has_pending_turn_end = false;
                 }
@@ -349,7 +333,8 @@ pub fn transform(items: Vec<AssembledItem>) -> TransformResult {
             pending_turn_output,
             pending_turn_cache_read,
             pending_turn_cache_creation,
-            pending_turn_cost,
+            pending_turn_baseline,
+            &pending_turn_model,
         );
     }
 
@@ -395,6 +380,36 @@ fn emit_compact_from_user(record: &ClaudeRecord, events: &mut Vec<TronEventSpec>
     });
 }
 
+fn token_usage_from_claude(usage: &ClaudeUsage) -> TokenUsage {
+    let input = usage.input_tokens.max(0) as u64;
+    let output = usage.output_tokens.max(0) as u64;
+    let cache_read = usage.cache_read_input_tokens.max(0) as u64;
+    let cache_creation = usage.cache_creation_input_tokens.max(0) as u64;
+
+    TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_tokens: Some(cache_read),
+        cached_input_tokens: Some(cache_read),
+        cache_creation_tokens: Some(cache_creation),
+        cache_creation_5m_tokens: None,
+        cache_creation_1h_tokens: None,
+        reasoning_output_tokens: None,
+        thought_tokens: None,
+        tool_use_prompt_tokens: None,
+        total_tokens: Some(input + output + cache_read + cache_creation),
+        provider_type: Some(Provider::Anthropic),
+    }
+}
+
+fn token_record_cost(token_record: &Value) -> Option<f64> {
+    token_record
+        .get("pricing")?
+        .get("cost")?
+        .get("totalCost")?
+        .as_f64()
+}
+
 /// Flush accumulated turn stats as a single `stream.turn_end`.
 fn flush_turn_end(
     events: &mut Vec<TronEventSpec>,
@@ -403,20 +418,35 @@ fn flush_turn_end(
     output: i64,
     cache_read: i64,
     cache_creation: i64,
-    cost: f64,
+    previous_baseline: u64,
+    model: &str,
 ) {
+    let usage = token_usage_from_claude(&ClaudeUsage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_input_tokens: cache_read,
+        cache_creation_input_tokens: cache_creation,
+    });
+    let token_record = build_token_record(
+        &usage,
+        Provider::Anthropic,
+        "import",
+        turn.max(0) as u32,
+        previous_baseline,
+        model,
+    );
+    let mut payload = json!({
+        "turn": turn,
+        "tokenUsage": build_token_usage_json(&usage),
+        "tokenRecord": token_record,
+    });
+    if let Some(cost) = token_record_cost(&payload["tokenRecord"]) {
+        payload["cost"] = json!(cost);
+    }
+
     events.push(TronEventSpec {
         event_type: EventType::StreamTurnEnd,
-        payload: json!({
-            "turn": turn,
-            "tokenUsage": {
-                "inputTokens": input,
-                "outputTokens": output,
-                "cacheReadTokens": cache_read,
-                "cacheCreationTokens": cache_creation,
-            },
-            "cost": cost,
-        }),
+        payload,
     });
 }
 

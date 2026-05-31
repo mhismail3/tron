@@ -16,9 +16,7 @@ struct CapabilityInvocationStartedPayload {
 
     init?(from payload: [String: AnyCodable]) {
         // invocationId can be "invocationId" or "id".
-        // `turn` is always emitted by `CapabilityInvocationStartedPayload` on the server
-        // (non-optional `i64`) — dropping the back-compat `?? 1` default
-        // keeps reconstruction from silently pinning a stray event to turn 1.
+        // `turn` is required; missing turn data makes the event invalid.
         guard let id = payload.string("invocationId") ?? payload.string("id"),
               let modelPrimitiveName = payload.string("modelPrimitiveName"),
               let turn = payload.int("turn") else {

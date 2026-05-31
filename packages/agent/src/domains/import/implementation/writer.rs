@@ -31,7 +31,7 @@ pub struct ImportResult {
     pub turn_count: i64,
     /// Number of messages (user + assistant).
     pub message_count: i64,
-    /// Estimated total cost (USD).
+    /// Server-priced total cost (USD), zero when pricing is unavailable.
     pub total_cost: f64,
     /// Primary model.
     pub model: String,
