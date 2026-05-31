@@ -14,6 +14,7 @@ const READ_ONLY_LOW_RISK_MESSAGE: &str = "process::run read_only commands must b
 const SANDBOX_OUTPUTS_REQUIRED_MESSAGE: &str = "process::run sandbox_materialized commands require expectedOutputs: [{\"path\":\"<relative-output-path>\"}] before approval";
 const SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE: &str = "process::run sandbox_materialized expectedOutputs[].path must be a relative path inside the process sandbox; do not use absolute host paths, home-relative paths, or parent-directory escapes";
 const SANDBOX_COMMAND_OUTPUT_PATH_MESSAGE: &str = "process::run sandbox_materialized command write targets must be declared relative expectedOutputs paths; do not write absolute host paths, home-relative paths, parent-directory escapes, shell-expanded paths, or undeclared output paths";
+const SANDBOX_OUTPUT_COLLISION_MESSAGE: &str = "process::run sandbox_materialized expectedOutputs must not declare duplicate output paths or duplicate targetPath destinations";
 
 /// Return true when a `process::run` payload should pause for user approval.
 pub(crate) fn run_requires_approval(payload: &Value) -> bool {
@@ -97,6 +98,8 @@ fn validate_sandbox_output_paths(payload: &Value) -> Result<(), &'static str> {
     let Some(outputs) = payload.get("expectedOutputs").and_then(Value::as_array) else {
         return Ok(());
     };
+    let mut output_paths = BTreeSet::new();
+    let mut target_paths = BTreeSet::new();
     for output in outputs {
         let Some(path) = output
             .get("path")
@@ -117,6 +120,22 @@ fn validate_sandbox_output_paths(payload: &Value) -> Result<(), &'static str> {
             })
         {
             return Err(SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE);
+        }
+        let path_text = path.to_string_lossy();
+        let Some(normalized_path) = normalized_relative_path(path_text.as_ref()) else {
+            return Err(SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE);
+        };
+        if !output_paths.insert(normalized_path.clone()) {
+            return Err(SANDBOX_OUTPUT_COLLISION_MESSAGE);
+        }
+        let target = output
+            .get("targetPath")
+            .and_then(Value::as_str)
+            .unwrap_or(path_text.as_ref());
+        if let Some(normalized_target) = normalized_relative_path(target)
+            && !target_paths.insert(normalized_target)
+        {
+            return Err(SANDBOX_OUTPUT_COLLISION_MESSAGE);
         }
     }
     Ok(())
@@ -795,6 +814,38 @@ mod tests {
 
         assert_eq!(validate_run_payload_before_approval(&payload), Ok(()));
         assert!(run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_duplicate_output_path_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "printf 'hi\\n' > result.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [
+                {"path": "result.txt"},
+                {"path": "./result.txt"}
+            ]
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("duplicate"));
+        assert!(!run_execution_requires_approval(&payload));
+    }
+
+    #[test]
+    fn sandbox_materialized_duplicate_target_path_is_invalid_before_approval() {
+        let payload = json!({
+            "command": "printf one > one.txt && printf two > two.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [
+                {"path": "one.txt", "targetPath": "shared.txt"},
+                {"path": "two.txt", "targetPath": "./shared.txt"}
+            ]
+        });
+
+        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        assert!(err.contains("duplicate"));
+        assert!(!run_execution_requires_approval(&payload));
     }
 
     #[test]

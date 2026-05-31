@@ -491,18 +491,13 @@ def run_harness(args):
             session_id,
             min(args.timeout_seconds, 180),
         )
-        result["simulatorOpen"] = n16.run_cmd(
-            ["xcrun", "simctl", "openurl", args.sim_udid, f"tron://session/{session_id}"],
-            timeout=30,
+        result["simulatorEvidence"] = n16.simulator_evidence(
+            args.sim_udid,
+            session_id,
+            fixture["screenshot"],
+            args.screenshot_delay_seconds,
+            args.open_session_in_simulator,
         )
-        time.sleep(args.screenshot_delay_seconds)
-        result["simulatorScreenshot"] = {
-            "path": fixture["screenshot"],
-            "result": n16.run_cmd(
-                ["xcrun", "simctl", "io", args.sim_udid, "screenshot", fixture["screenshot"]],
-                timeout=30,
-            ),
-        }
         result["serverHealthAfter"] = n16.run_cmd(["curl", "-fsS", HEALTH], timeout=10)
         result["db"] = collect(fixture, result["startCursor"], result["startTimestamp"])
 
@@ -534,6 +529,11 @@ def parse_args(argv):
     parser.add_argument("--sim-udid", default=DEFAULT_SIM_UDID)
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--screenshot-delay-seconds", type=float, default=2.0)
+    parser.add_argument(
+        "--open-session-in-simulator",
+        action="store_true",
+        help="Deep-link the newly-created session into the visible Simulator and capture a screenshot. Leave unset for backend-only harness runs.",
+    )
     return parser.parse_args(argv)
 
 

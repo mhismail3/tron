@@ -242,8 +242,16 @@ def safe_run_cmd(argv, timeout=60):
         }
 
 
-def open_simulator_session(sim_udid, session_id, screenshot, delay_seconds):
+def open_simulator_session(sim_udid, session_id, screenshot, delay_seconds, open_session):
+    if not open_session:
+        return {
+            "openSessionInSimulator": False,
+            "skipped": True,
+            "reason": "default harness path does not deep-link newly-created sessions into the visible simulator",
+            "screenshot": {"path": screenshot, "skipped": True},
+        }
     result = {
+        "openSessionInSimulator": True,
         "boot": safe_run_cmd(["xcrun", "simctl", "boot", sim_udid], timeout=30),
         "bootstatus": safe_run_cmd(["xcrun", "simctl", "bootstatus", sim_udid, "-b"], timeout=120),
         "open": safe_run_cmd(
@@ -260,6 +268,15 @@ def open_simulator_session(sim_udid, session_id, screenshot, delay_seconds):
         ),
     }
     return result
+
+
+def simulator_result_ok(result):
+    if result.get("skipped"):
+        return True
+    return (
+        result.get("open", {}).get("returncode") == 0
+        and result.get("screenshot", {}).get("result", {}).get("returncode") == 0
+    )
 
 
 def stream_payload(row):
@@ -670,6 +687,7 @@ def run_harness(args):
             visible_session_id,
             result["visibleScreenshotBefore"],
             args.screenshot_delay_seconds,
+            args.open_session_in_simulator,
         )
         time.sleep(args.visible_hold_seconds)
 
@@ -743,6 +761,7 @@ def run_harness(args):
             background_session_id,
             result["backgroundScreenshot"],
             args.screenshot_delay_seconds,
+            args.open_session_in_simulator,
         )
         result["serverHealthAfterBackgroundOpen"] = n16.run_cmd(["curl", "-fsS", HEALTH], timeout=10)
     if visible_session_id:
@@ -751,6 +770,7 @@ def run_harness(args):
             visible_session_id,
             result["visibleScreenshotAfter"],
             args.screenshot_delay_seconds,
+            args.open_session_in_simulator,
         )
         result["serverHealthAfter"] = n16.run_cmd(["curl", "-fsS", HEALTH], timeout=10)
 
@@ -785,33 +805,9 @@ def run_harness(args):
         background_classification = classify_background(background_db, fixture)
         cross_leakage = collect_cross_leakage(visible_db, background_db, identifiers)
         simulator_ok = (
-            result.get("visibleSimulatorBefore", {})
-            .get("open", {})
-            .get("returncode")
-            == 0
-            and result.get("visibleSimulatorBefore", {})
-            .get("screenshot", {})
-            .get("result", {})
-            .get("returncode")
-            == 0
-            and result.get("backgroundSimulator", {})
-            .get("open", {})
-            .get("returncode")
-            == 0
-            and result.get("backgroundSimulator", {})
-            .get("screenshot", {})
-            .get("result", {})
-            .get("returncode")
-            == 0
-            and result.get("visibleSimulatorAfter", {})
-            .get("open", {})
-            .get("returncode")
-            == 0
-            and result.get("visibleSimulatorAfter", {})
-            .get("screenshot", {})
-            .get("result", {})
-            .get("returncode")
-            == 0
+            simulator_result_ok(result.get("visibleSimulatorBefore", {}))
+            and simulator_result_ok(result.get("backgroundSimulator", {}))
+            and simulator_result_ok(result.get("visibleSimulatorAfter", {}))
         )
         guards_ok = (
             result.get("visibleTerminalGuardBefore", {}).get("returncode") == 0
@@ -883,6 +879,11 @@ def parse_args(argv):
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--visible-hold-seconds", type=float, default=2.0)
     parser.add_argument("--screenshot-delay-seconds", type=float, default=6.0)
+    parser.add_argument(
+        "--open-session-in-simulator",
+        action="store_true",
+        help="Deep-link newly-created sessions into the visible Simulator and capture screenshots. Leave unset for backend-only harness runs.",
+    )
     return parser.parse_args(argv)
 
 

@@ -23,12 +23,15 @@
 //! before approval so an impossible host path cannot pause for approval and
 //! fail only after execution. Shell redirection and `tee` targets in the command
 //! must match declared expected outputs; parent directories for declared outputs
-//! are prepared inside the sandbox before execution. Relative materialization
-//! targets resolve to the active session worktree so approved sandbox output
-//! never leaks into the server process cwd. Every `process::run`
-//! invocation requires active session worktree truth. Read-only command cwd/path
-//! operands and materialized output targets are bounded to that worktree, and
-//! child processes receive an allowlisted environment instead of inheriting
+//! are prepared inside the sandbox before execution. Duplicate sandbox output
+//! paths and duplicate resolved materialization targets are rejected before
+//! approval/spawn so one command cannot race two files into the same resource
+//! destination. Relative materialization targets resolve to the active session
+//! worktree so approved sandbox output never leaks into the server process cwd.
+//! Every `process::run` invocation requires active session worktree truth.
+//! Read-only command cwd/path operands and materialized output targets are
+//! bounded to that worktree, and child processes receive an allowlisted
+//! environment instead of inheriting
 //! server secrets. If a request omits `cwd`, direct read-only execution uses the
 //! active session worktree, so common shell checks stay fast without leaving the
 //! capability architecture.
@@ -40,6 +43,7 @@ pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) use deps::Deps;
 
+use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::time::Instant;
@@ -98,6 +102,9 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
         });
     }
     let active_root = require_active_session_root(invocation, deps)?;
+    if execution_mode == "sandbox_materialized" {
+        validate_expected_output_collisions(invocation, deps)?;
+    }
     let sandbox = if execution_mode == "sandbox_materialized" {
         Some(
             tempfile::tempdir().map_err(|error| CapabilityError::Internal {
@@ -364,6 +371,46 @@ fn prepare_sandbox_expected_output_dirs(
             std::fs::create_dir_all(parent).map_err(|error| CapabilityError::Internal {
                 message: format!("create declared process output directory: {error}"),
             })?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_expected_output_collisions(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<(), CapabilityError> {
+    let Some(expected) = invocation
+        .payload
+        .get("expectedOutputs")
+        .and_then(Value::as_array)
+    else {
+        return Ok(());
+    };
+    let mut sandbox_paths = BTreeSet::new();
+    let mut target_paths = BTreeSet::new();
+    for item in expected {
+        let relative = item.get("path").and_then(Value::as_str).ok_or_else(|| {
+            CapabilityError::InvalidParams {
+                message: "expectedOutputs entries require path".to_owned(),
+            }
+        })?;
+        let sandbox_path = safe_sandbox_declared_output_path(Path::new("/"), relative)?;
+        if !sandbox_paths.insert(sandbox_path) {
+            return Err(CapabilityError::InvalidParams {
+                message: "expectedOutputs must not declare duplicate output paths".to_owned(),
+            });
+        }
+        let target_path = item
+            .get("targetPath")
+            .and_then(Value::as_str)
+            .unwrap_or(relative);
+        let target_path = materialized_target_path(invocation, deps, target_path)?;
+        if !target_paths.insert(target_path) {
+            return Err(CapabilityError::InvalidParams {
+                message: "expectedOutputs must not declare duplicate targetPath destinations"
+                    .to_owned(),
+            });
         }
     }
     Ok(())

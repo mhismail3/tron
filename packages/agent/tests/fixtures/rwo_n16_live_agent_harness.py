@@ -170,6 +170,46 @@ def run_cmd(argv, timeout=60):
     }
 
 
+def simulator_evidence(
+    sim_udid,
+    session_id,
+    screenshot,
+    delay_seconds,
+    open_session,
+    boot=False,
+):
+    result = {
+        "openSessionInSimulator": open_session,
+        "path": screenshot,
+    }
+    if not open_session:
+        result["skipped"] = True
+        result["reason"] = (
+            "default harness path does not deep-link newly-created sessions "
+            "into the visible simulator"
+        )
+        return result
+    if boot:
+        result["boot"] = run_cmd(["xcrun", "simctl", "boot", sim_udid], timeout=30)
+        result["bootstatus"] = run_cmd(
+            ["xcrun", "simctl", "bootstatus", sim_udid, "-b"],
+            timeout=120,
+        )
+    result["open"] = run_cmd(
+        ["xcrun", "simctl", "openurl", sim_udid, f"tron://session/{session_id}"],
+        timeout=30,
+    )
+    time.sleep(delay_seconds)
+    result["screenshot"] = {
+        "path": screenshot,
+        "result": run_cmd(
+            ["xcrun", "simctl", "io", sim_udid, "screenshot", screenshot],
+            timeout=30,
+        ),
+    }
+    return result
+
+
 def invoke(ws, function_id, payload, request_id, idempotency_key, context=None, timeout=60):
     request = {
         "type": "invoke",
@@ -777,18 +817,13 @@ def run_harness(args):
             fixture["sessionId"],
             min(args.timeout_seconds, 180),
         )
-        result["simulatorOpen"] = run_cmd(
-            ["xcrun", "simctl", "openurl", args.sim_udid, f"tron://session/{fixture['sessionId']}"],
-            timeout=30,
+        result["simulatorEvidence"] = simulator_evidence(
+            args.sim_udid,
+            fixture["sessionId"],
+            fixture["screenshot"],
+            args.screenshot_delay_seconds,
+            args.open_session_in_simulator,
         )
-        time.sleep(args.screenshot_delay_seconds)
-        result["simulatorScreenshot"] = {
-            "path": fixture["screenshot"],
-            "result": run_cmd(
-                ["xcrun", "simctl", "io", args.sim_udid, "screenshot", fixture["screenshot"]],
-                timeout=30,
-            ),
-        }
         result["serverHealthAfter"] = run_cmd(["curl", "-fsS", HEALTH], timeout=10)
         result["db"] = collect(fixture, result["startCursor"], result["startTimestamp"])
     with open(run_log, "w", encoding="utf-8") as handle:
@@ -816,6 +851,11 @@ def parse_args(argv):
     parser.add_argument("--sim-udid", default=DEFAULT_SIM_UDID)
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--screenshot-delay-seconds", type=float, default=2.0)
+    parser.add_argument(
+        "--open-session-in-simulator",
+        action="store_true",
+        help="Deep-link the newly-created session into the visible Simulator and capture a screenshot. Leave unset for backend-only harness runs.",
+    )
     return parser.parse_args(argv)
 
 

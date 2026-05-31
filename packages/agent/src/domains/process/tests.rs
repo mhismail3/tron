@@ -574,6 +574,41 @@ async fn sandbox_materialized_nested_output_parent_is_prepared_inside_sandbox() 
 }
 
 #[tokio::test]
+async fn sandbox_materialized_duplicate_target_path_rejects_before_spawn() {
+    let store = event_store();
+    let tmp = tempfile::tempdir().unwrap();
+    let created = store
+        .create_session(
+            "gpt-5.5",
+            &tmp.path().to_string_lossy(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let deps = Deps::for_test(store);
+    let invocation = invocation(
+        json!({
+            "command": "printf one > one.txt && printf two > two.txt",
+            "executionMode": "sandbox_materialized",
+            "expectedOutputs": [
+                {"path": "one.txt", "targetPath": "collision.txt"},
+                {"path": "two.txt", "targetPath": "./collision.txt"}
+            ],
+            "retainOutput": true
+        }),
+        Some(&created.session.id),
+    );
+
+    let err = process_run_value(&invocation, &deps).await.unwrap_err();
+    assert!(
+        matches!(err, CapabilityError::InvalidParams { message } if message.contains("duplicate targetPath"))
+    );
+    assert!(!tmp.path().join("collision.txt").exists());
+}
+
+#[tokio::test]
 async fn sandbox_materialized_home_relative_command_write_rejects_before_spawn() {
     let store = event_store();
     let tmp = tempfile::tempdir().unwrap();
