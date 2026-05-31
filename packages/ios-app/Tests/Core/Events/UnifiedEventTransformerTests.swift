@@ -2039,9 +2039,9 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(capabilityMessages.count, 1, "Failed capability should show error status")
     }
 
-    // MARK: - TokenRecord Fallback Tests (Capability-Only Turns)
+    // MARK: - TokenRecord Placement Tests (Capability-Only Turns)
 
-    func testTokenRecordFallbackToCapabilityInvocationWhenNoTextBlock() {
+    func testTokenRecordPlacementOnCapabilityInvocationWhenNoTextBlock() {
         // Turn with [thinking, capability_invocation] and no text block — tokenRecord should attach to capability message
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 10,
@@ -2095,7 +2095,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    func testTokenRecordFallbackWithMultipleCapabilityInvocations() {
+    func testTokenRecordPlacementWithMultipleCapabilityInvocations() {
         // Turn with [thinking, capability_invocation, capability_invocation] — last capability gets tokenRecord
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 13,
@@ -2167,7 +2167,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    func testTokenRecordOnTextBlockNotOverriddenByFallback() {
+    func testTokenRecordOnTextBlockMovesToLastTurnMessage() {
         // Turn with [thinking, text, capability_invocation] — last message (capability) gets tokenRecord
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 14,
@@ -2228,8 +2228,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    func testTokenRecordFallbackIncludesModelAndLatency() {
-        // Verify the fallback also attaches model and latency metadata
+    func testTokenRecordPlacementIncludesModelAndLatency() {
+        // Verify final-message placement also attaches model and latency metadata
         let tokenRecordPayload = makeTokenRecordPayload(
             inputTokens: 10,
             outputTokens: 100,

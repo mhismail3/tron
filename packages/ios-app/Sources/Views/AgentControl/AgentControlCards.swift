@@ -250,11 +250,51 @@ struct SourceControlCardView: View {
 
 // MARK: - Analytics Card View
 
+enum AgentControlCardMetricText {
+    static let loadingPlaceholder = "..."
+
+    static func isEventSummaryPending(
+        isLoadingEvents: Bool,
+        sessionEventCount: Int,
+        analyticsTurnCount: Int,
+        turnGroupCount: Int,
+        currentContextTokens: Int
+    ) -> Bool {
+        if isLoadingEvents && analyticsTurnCount == 0 && turnGroupCount == 0 {
+            return true
+        }
+
+        return currentContextTokens > 0
+            && sessionEventCount == 0
+            && analyticsTurnCount == 0
+            && turnGroupCount == 0
+    }
+
+    static func analyticsTokens(_ totalTokens: Int, isLoading: Bool) -> String {
+        isLoading ? loadingPlaceholder : TokenFormatter.format(totalTokens)
+    }
+
+    static func analyticsCost(_ totalCost: Double, isLoading: Bool) -> String {
+        isLoading ? loadingPlaceholder : formatCost(totalCost)
+    }
+
+    static func historyTurns(_ totalTurns: Int, isLoading: Bool) -> String {
+        if isLoading { return loadingPlaceholder }
+        return "\(totalTurns) \(totalTurns == 1 ? "turn" : "turns")"
+    }
+
+    static func capabilityCalls(_ totalCapabilityInvocations: Int, isLoading: Bool) -> String {
+        if isLoading { return loadingPlaceholder }
+        return "\(totalCapabilityInvocations) capability \(totalCapabilityInvocations == 1 ? "call" : "calls")"
+    }
+}
+
 @available(iOS 26.0, *)
 struct AnalyticsCardView: View {
     var totalTokens: Int
     var totalCost: Double
     var totalTurns: Int
+    var isLoading: Bool = false
     var onTap: (() -> Void)?
 
     var body: some View {
@@ -266,11 +306,11 @@ struct AnalyticsCardView: View {
 
                 Spacer()
 
-                Text(TokenFormatter.format(totalTokens))
+                Text(AgentControlCardMetricText.analyticsTokens(totalTokens, isLoading: isLoading))
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronRose)
 
-                Text(formatCost(totalCost))
+                Text(AgentControlCardMetricText.analyticsCost(totalCost, isLoading: isLoading))
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronRose)
             }
@@ -298,6 +338,7 @@ struct AnalyticsCardView: View {
 struct HistoryCardView: View {
     var totalTurns: Int
     var totalCapabilityInvocations: Int
+    var isLoading: Bool = false
     var onTap: (() -> Void)?
 
     var body: some View {
@@ -309,7 +350,7 @@ struct HistoryCardView: View {
 
                 Spacer()
 
-                Text("\(totalTurns) \(totalTurns == 1 ? "turn" : "turns")")
+                Text(AgentControlCardMetricText.historyTurns(totalTurns, isLoading: isLoading))
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(.tronCoral)
             }
@@ -317,7 +358,7 @@ struct HistoryCardView: View {
             // Row 2: capability invocations
             HStack {
                 Spacer()
-                Text("\(totalCapabilityInvocations) capability \(totalCapabilityInvocations == 1 ? "call" : "calls")")
+                Text(AgentControlCardMetricText.capabilityCalls(totalCapabilityInvocations, isLoading: isLoading))
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
             }

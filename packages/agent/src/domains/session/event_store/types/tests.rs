@@ -134,8 +134,31 @@ mod session_event_tests {
         match payload {
             SessionEventPayload::MessageAssistant(p) => {
                 assert_eq!(p.stop_reason, "end_turn");
-                assert_eq!(p.token_usage.input_tokens, 100);
+                assert_eq!(p.token_usage.unwrap().input_tokens, 100);
                 assert_eq!(p.model, "claude-opus-4-6");
+            }
+            other => panic!("expected MessageAssistant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn typed_payload_message_assistant_without_provider_usage() {
+        let event = make_event(
+            EventType::MessageAssistant,
+            json!({
+                "content": [{"type": "text", "text": "Interrupted"}],
+                "turn": 1,
+                "stopReason": "interrupted",
+                "model": "claude-opus-4-6",
+                "tokenUsageAvailable": false
+            }),
+        );
+        let payload = event.typed_payload().unwrap();
+        match payload {
+            SessionEventPayload::MessageAssistant(p) => {
+                assert_eq!(p.stop_reason, "interrupted");
+                assert_eq!(p.token_usage, None);
+                assert_eq!(p.token_record, None);
             }
             other => panic!("expected MessageAssistant, got {other:?}"),
         }

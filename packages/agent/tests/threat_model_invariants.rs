@@ -849,6 +849,12 @@ fn token_accounting_hardening_scorecard_stays_formalized() {
             && !token_payload.contains("opaque"),
         "event-store TokenRecord payload must stay typed and non-opaque"
     );
+    let message_payload = read_crate("src/domains/session/event_store/types/payloads/message.rs");
+    assert!(
+        message_payload.contains("pub token_usage: Option<TokenUsage>")
+            && message_payload.contains("when the provider reported usage"),
+        "message.assistant typed payload must allow absent provider usage without synthetic zeros"
+    );
 
     let persistence = read_crate("src/domains/agent/runner/pipeline/persistence.rs");
     for required in [
@@ -867,6 +873,18 @@ fn token_accounting_hardening_scorecard_stays_formalized() {
         assert!(
             persistence.contains(required),
             "server token serialization missing canonical field or pricing hook: {required}"
+        );
+    }
+    let pricing = read_crate("src/domains/model/providers/tokens/pricing.rs");
+    for forbidden in [
+        "pub fn detect_provider",
+        "pub fn calculate_cost",
+        "pub fn format_cost",
+        "pub fn format_tokens",
+    ] {
+        assert!(
+            !pricing.contains(forbidden),
+            "token pricing must not restore dead helpers or model-string provider guessing: {forbidden}"
         );
     }
     let turn_persistence = read_crate("src/domains/agent/runner/agent/turn_runner/persistence.rs");

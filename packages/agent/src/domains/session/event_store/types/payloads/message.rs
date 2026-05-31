@@ -32,8 +32,9 @@ pub struct AssistantMessagePayload {
     pub content: Value,
     /// Turn number.
     pub turn: i64,
-    /// Token usage for this message.
-    pub token_usage: TokenUsage,
+    /// Token usage for this message, when the provider reported usage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<TokenUsage>,
     /// Canonical token record.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_record: Option<TokenRecord>,

@@ -58,6 +58,7 @@ struct AgentControlView: View {
     @State private var worktreeStatus: WorktreeGetStatusResult?
     @State private var branches: [SessionBranchInfo] = []
     @State private var sessionEvents: [SessionEvent] = []
+    @State private var isLoadingEvents = true
     @State private var cachedAnalytics = ConsolidatedAnalytics(from: [])
     @State private var cachedTurnGroups: [TurnGroup] = []
 
@@ -78,6 +79,16 @@ struct AgentControlView: View {
 
     private var analyticsTotalTokens: Int {
         cachedAnalytics.turns.reduce(0) { $0 + $1.totalTokens }
+    }
+
+    private var isEventSummaryPending: Bool {
+        AgentControlCardMetricText.isEventSummaryPending(
+            isLoadingEvents: isLoadingEvents,
+            sessionEventCount: sessionEvents.count,
+            analyticsTurnCount: cachedAnalytics.turns.count,
+            turnGroupCount: cachedTurnGroups.count,
+            currentContextTokens: detailedSnapshot?.currentTokens ?? 0
+        )
     }
 
     // MARK: - Body
@@ -217,6 +228,7 @@ struct AgentControlView: View {
                         totalTokens: analyticsTotalTokens,
                         totalCost: cachedAnalytics.totalCost,
                         totalTurns: cachedAnalytics.turns.count,
+                        isLoading: isEventSummaryPending,
                         onTap: { showAnalytics = true }
                     )
                     .padding(.horizontal)
@@ -226,6 +238,7 @@ struct AgentControlView: View {
                     HistoryCardView(
                         totalTurns: cachedTurnGroups.count,
                         totalCapabilityInvocations: cachedAnalytics.totalCapabilityInvocations,
+                        isLoading: isEventSummaryPending,
                         onTap: { showHistory = true }
                     )
                     .padding(.horizontal)
@@ -295,6 +308,11 @@ struct AgentControlView: View {
     }
 
     private func loadEvents() async {
+        if sessionEvents.isEmpty {
+            isLoadingEvents = true
+        }
+        defer { isLoadingEvents = false }
+
         do {
             try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
             let events = try await eventStoreManager.getSessionEvents(sessionId)

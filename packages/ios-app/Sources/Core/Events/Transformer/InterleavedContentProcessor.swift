@@ -93,7 +93,7 @@ enum InterleavedContentProcessor {
                         invocationStart: started,
                         contentBlock: block,
                         timestamp: timestamp,
-                        tokenRecord: nil,  // Stats only shown on text messages
+                        tokenRecord: nil,
                         model: nil,
                         turn: parsed.turn
                     ) {

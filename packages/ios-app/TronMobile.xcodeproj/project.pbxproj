@@ -661,6 +661,7 @@
 		CAD4C4C74EDDA0ED019E7A3E /* LibreBaskerville-Variable.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 6E76F13136B67A1A1C0A409F /* LibreBaskerville-Variable.ttf */; };
 		CBF5138781289C0403BB9F09 /* ConsolidatedAnalytics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D95AFDE4D54A50F673DEB30 /* ConsolidatedAnalytics.swift */; };
 		CC360EBF0879743C5FD1A331 /* CommitSubSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25AE00A3AF420339B5CA0E6B /* CommitSubSheet.swift */; };
+		CC57BFA72E2D751B0DAAA4BB /* AgentControlCardMetricTextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA87A1EF62219780060C80B5 /* AgentControlCardMetricTextTests.swift */; };
 		CC985A41B0265AB528FFA9BA /* CatchUpEventBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D0377E826F664EEC9E029C /* CatchUpEventBufferTests.swift */; };
 		CCE187E76E4B295AC067F0FA /* SheetCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622D2B21CA5C0E743DA7DBA7 /* SheetCoordinator.swift */; };
 		CCE3E95A40D19B38A7EF9424 /* ProcessSpawnedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9773BD08D8941F09C5C0A45A /* ProcessSpawnedPlugin.swift */; };
@@ -1680,6 +1681,7 @@
 		F9877164A09CA5834EAF8AE3 /* DatabaseSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseSchema.swift; sourceTree = "<group>"; };
 		F9BAC49B4C9C7243F39AE940 /* NewSessionFlowTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionFlowTypes.swift; sourceTree = "<group>"; };
 		FA626C705B9052B66955CC18 /* DecodedImageViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodedImageViewTests.swift; sourceTree = "<group>"; };
+		FA87A1EF62219780060C80B5 /* AgentControlCardMetricTextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentControlCardMetricTextTests.swift; sourceTree = "<group>"; };
 		FA88CC6B09A4508CE8FA83FA /* DependencyContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyContainer.swift; sourceTree = "<group>"; };
 		FAFA611B03297C4E8A5F765E /* ChatMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessage.swift; sourceTree = "<group>"; };
 		FB8B5E46EDE2E70DF5A62F86 /* DatabaseActorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DatabaseActorTests.swift; sourceTree = "<group>"; };
@@ -3131,6 +3133,7 @@
 			isa = PBXGroup;
 			children = (
 				07FB8888F8A4A5A2BB76BD1B /* AccessibilityTests.swift */,
+				FA87A1EF62219780060C80B5 /* AgentControlCardMetricTextTests.swift */,
 				FA626C705B9052B66955CC18 /* DecodedImageViewTests.swift */,
 				BD79522B85677C1B75E0C631 /* EventIconProviderTests.swift */,
 				D8CAAD30176960052D589E37 /* ForkButtonTests.swift */,
@@ -4337,6 +4340,7 @@
 				5A69D27D8170F37956945ED8 /* AccessibilityTests.swift in Sources */,
 				1CC559D72247E843BBE33481 /* AgentClientTests.swift in Sources */,
 				8FB7D8B7828A450F5E27FE46 /* AgentContextSettingsPageTests.swift in Sources */,
+				CC57BFA72E2D751B0DAAA4BB /* AgentControlCardMetricTextTests.swift in Sources */,
 				8D34B457F6593EB40143C801 /* AgentPhaseTests.swift in Sources */,
 				F8E45E08D499EA1CEE1A8117 /* AnimationCoordinatorTests.swift in Sources */,
 				2D9CF320832E24DC28C85BD9 /* AnyCodableExtensionsTests.swift in Sources */,

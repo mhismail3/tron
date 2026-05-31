@@ -5,7 +5,7 @@
 //! hit/write buckets for cache-aware providers, and unavailable pricing for any
 //! model not listed here.
 
-use crate::shared::messages::{Cost, TokenUsage};
+use crate::shared::messages::TokenUsage;
 
 use super::types::{PricingRecord, PricingTier, TokenCostBreakdown};
 
@@ -15,25 +15,6 @@ use super::types::{PricingRecord, PricingTier, TokenCostBreakdown};
 #[must_use]
 pub fn get_pricing_tier(model: &str) -> Option<PricingTier> {
     exact_match(model)
-}
-
-/// Calculate cost for a given model and token usage.
-///
-/// Returns a [`Cost`] with separate input/output costs and total,
-/// or `None` when pricing is unavailable for the model.
-/// Handles Anthropic per-TTL cache tiers (5-minute @ 1.25x, 1-hour @ 2.0x)
-/// and standard cache pricing for other providers.
-#[must_use]
-#[allow(clippy::cast_precision_loss)] // Token counts never approach 2^52
-pub fn calculate_cost(model: &str, usage: &TokenUsage) -> Option<Cost> {
-    let pricing = calculate_pricing(model, usage);
-    let cost = pricing.cost?;
-    Some(Cost {
-        input_cost: cost.base_input_cost + cost.cache_read_cost + cost.cache_write_cost,
-        output_cost: cost.output_cost,
-        total: cost.total_cost,
-        currency: cost.currency,
-    })
 }
 
 /// Calculate server-authoritative component pricing for a token record.
@@ -110,69 +91,6 @@ pub fn calculate_pricing(model: &str, usage: &TokenUsage) -> PricingRecord {
             total_cost: total,
             currency: "USD".to_string(),
         }),
-    }
-}
-
-/// Format a cost value for display.
-///
-/// Uses 3 decimal places for values under $0.01, 2 otherwise.
-#[must_use]
-pub fn format_cost(cost: f64) -> String {
-    if cost < 0.01 {
-        format!("${cost:.3}")
-    } else {
-        format!("${cost:.2}")
-    }
-}
-
-/// Format a token count for display (e.g., `"1.5M"`, `"50K"`, `"500"`).
-#[must_use]
-#[allow(clippy::cast_precision_loss)] // Token counts never approach 2^52
-pub fn format_tokens(n: u64) -> String {
-    if n >= 1_000_000 {
-        let m = n as f64 / 1_000_000.0;
-        if (m - m.round()).abs() < 0.05 {
-            format!("{m:.0}M")
-        } else {
-            format!("{m:.1}M")
-        }
-    } else if n >= 1_000 {
-        let k = n as f64 / 1_000.0;
-        if (k - k.round()).abs() < 0.05 {
-            format!("{k:.0}K")
-        } else {
-            format!("{k:.1}K")
-        }
-    } else {
-        n.to_string()
-    }
-}
-
-/// Detect provider type from a model identifier string.
-#[must_use]
-pub fn detect_provider(model: &str) -> Option<crate::shared::messages::Provider> {
-    use crate::shared::messages::Provider;
-    let m = model.to_lowercase();
-    if m.contains("claude") {
-        Some(Provider::Anthropic)
-    } else if m.contains("codex")
-        || m.starts_with("o1")
-        || m.starts_with("o3")
-        || m.starts_with("o4")
-    {
-        Some(Provider::OpenAiCodex)
-    } else if m.contains("gpt") || m.contains("openai/") {
-        Some(Provider::OpenAi)
-    } else if m.contains("gemini") || m.contains("google/") {
-        Some(Provider::Google)
-    } else if m.contains("minimax") {
-        Some(Provider::MiniMax)
-    } else if m.contains("kimi") || m.contains("moonshot") {
-        Some(Provider::Kimi)
-    } else if m.contains("gemma4") || m.contains("ollama") {
-        Some(Provider::Ollama)
-    } else {
-        None
     }
 }
 
@@ -519,25 +437,23 @@ mod tests {
         assert!(get_pricing_tier("gemini-2-5-pro-latest").is_none());
     }
 
-    // ── Cost calculation ──
-
     #[test]
-    fn cost_simple_no_cache() {
+    fn pricing_simple_no_cache() {
         let usage = TokenUsage {
             input_tokens: 1_000_000,
             output_tokens: 100_000,
             provider_type: Some(Provider::Anthropic),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
-        assert!((cost.input_cost - 3.0).abs() < 0.001); // 1M * $3/M
+        let cost = calculate_pricing("claude-sonnet-4-5", &usage).cost.unwrap();
+        assert!((cost.base_input_cost - 3.0).abs() < 0.001); // 1M * $3/M
         assert!((cost.output_cost - 1.5).abs() < 0.001); // 100K * $15/M
-        assert!((cost.total - 4.5).abs() < 0.001);
+        assert!((cost.total_cost - 4.5).abs() < 0.001);
         assert_eq!(cost.currency, "USD");
     }
 
     #[test]
-    fn cost_with_cache_aggregate() {
+    fn pricing_with_cache_aggregate() {
         let usage = TokenUsage {
             input_tokens: 1_000_000,
             output_tokens: 100_000,
@@ -546,19 +462,20 @@ mod tests {
             provider_type: Some(Provider::OpenAi),
             ..Default::default()
         };
-        let cost = calculate_cost("gpt-5.5", &usage).unwrap();
+        let cost = calculate_pricing("gpt-5.5", &usage).cost.unwrap();
 
         // base = 1M - 800K - 100K = 100K @ $5/M = $0.50
         // cache creation = 100K @ $5/M = $0.50
         // cache read = 800K @ $5/M * 0.1 = $0.40
         // output = 100K @ $30/M = $3.00
         let expected_input = 0.50 + 0.50 + 0.40;
-        assert!((cost.input_cost - expected_input).abs() < 0.001);
+        let actual_input = cost.base_input_cost + cost.cache_write_cost + cost.cache_read_cost;
+        assert!((actual_input - expected_input).abs() < 0.001);
         assert!((cost.output_cost - 3.0).abs() < 0.001);
     }
 
     #[test]
-    fn cost_with_per_ttl_cache() {
+    fn pricing_with_per_ttl_cache() {
         let usage = TokenUsage {
             input_tokens: 500_000,
             output_tokens: 50_000,
@@ -569,7 +486,7 @@ mod tests {
             provider_type: Some(Provider::Anthropic),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-opus-4-6", &usage).unwrap();
+        let cost = calculate_pricing("claude-opus-4-6", &usage).cost.unwrap();
 
         // Per-TTL takes precedence over aggregate
         // 5m: 100K @ $5/M * 1.25 = $0.625
@@ -580,12 +497,13 @@ mod tests {
         // cache read = 0
         // output = 50K @ $25/M = $1.25
         let expected_input = 2.50 + 0.625 + 1.00;
-        assert!((cost.input_cost - expected_input).abs() < 0.001);
+        let actual_input = cost.base_input_cost + cost.cache_write_cost + cost.cache_read_cost;
+        assert!((actual_input - expected_input).abs() < 0.001);
         assert!((cost.output_cost - 1.25).abs() < 0.001);
     }
 
     #[test]
-    fn cost_anthropic_base_input_uses_uncached_input_bucket() {
+    fn pricing_anthropic_base_input_uses_uncached_input_bucket() {
         let usage = TokenUsage {
             input_tokens: 100_000,
             output_tokens: 100_000,
@@ -594,26 +512,27 @@ mod tests {
             provider_type: Some(Provider::Anthropic),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-sonnet-4-5", &usage).unwrap();
+        let cost = calculate_pricing("claude-sonnet-4-5", &usage).cost.unwrap();
 
         // Anthropic input_tokens already excludes cache read/write buckets.
         let expected_input = 0.30 + 0.375 + 0.24;
-        assert!((cost.input_cost - expected_input).abs() < 0.001);
+        let actual_input = cost.base_input_cost + cost.cache_write_cost + cost.cache_read_cost;
+        assert!((actual_input - expected_input).abs() < 0.001);
         assert!((cost.output_cost - 1.5).abs() < 0.001);
     }
 
     #[test]
-    fn cost_zero_usage() {
+    fn pricing_zero_usage() {
         let usage = TokenUsage {
             provider_type: Some(Provider::Anthropic),
             ..Default::default()
         };
-        let cost = calculate_cost("claude-opus-4-6", &usage).unwrap();
-        assert_float_eq(cost.total, 0.0);
+        let cost = calculate_pricing("claude-opus-4-6", &usage).cost.unwrap();
+        assert_float_eq(cost.total_cost, 0.0);
     }
 
     #[test]
-    fn cost_base_input_saturates_to_zero() {
+    fn pricing_base_input_saturates_to_zero() {
         // When cache read + creation > input, base should not go negative
         let usage = TokenUsage {
             input_tokens: 100,
@@ -623,10 +542,10 @@ mod tests {
             provider_type: Some(Provider::OpenAi),
             ..Default::default()
         };
-        let cost = calculate_cost("gpt-5.5", &usage).unwrap();
+        let cost = calculate_pricing("gpt-5.5", &usage).cost.unwrap();
         // Base input saturates to 0, but cache costs are still counted
-        assert!(cost.input_cost >= 0.0);
-        assert!(cost.total >= 0.0);
+        assert!(cost.base_input_cost >= 0.0);
+        assert!(cost.total_cost >= 0.0);
     }
 
     #[test]
@@ -642,97 +561,19 @@ mod tests {
             pricing.reason.as_deref(),
             Some("missing_provider_for_pricing")
         );
-        assert!(calculate_cost("claude-sonnet-4-5", &usage).is_none());
     }
 
     #[test]
-    fn cost_unknown_model_returns_none() {
+    fn pricing_unknown_model_returns_unavailable() {
         let usage = TokenUsage {
             input_tokens: 1000,
             output_tokens: 1000,
             provider_type: Some(Provider::Anthropic),
             ..Default::default()
         };
-        assert!(calculate_cost("totally-unknown-model", &usage).is_none());
-    }
-
-    // ── Format utilities ──
-
-    #[test]
-    fn format_cost_small() {
-        assert_eq!(format_cost(0.005), "$0.005");
-        assert_eq!(format_cost(0.001), "$0.001");
-    }
-
-    #[test]
-    fn format_cost_normal() {
-        assert_eq!(format_cost(1.50), "$1.50");
-        assert_eq!(format_cost(5.00), "$5.00");
-        assert_eq!(format_cost(0.01), "$0.01");
-    }
-
-    #[test]
-    fn format_cost_zero() {
-        assert_eq!(format_cost(0.0), "$0.000");
-    }
-
-    #[test]
-    fn format_tokens_millions() {
-        assert_eq!(format_tokens(1_500_000), "1.5M");
-        assert_eq!(format_tokens(2_000_000), "2M");
-    }
-
-    #[test]
-    fn format_tokens_thousands() {
-        assert_eq!(format_tokens(50_000), "50K");
-        assert_eq!(format_tokens(1_500), "1.5K");
-    }
-
-    #[test]
-    fn format_tokens_small() {
-        assert_eq!(format_tokens(500), "500");
-        assert_eq!(format_tokens(0), "0");
-    }
-
-    // ── Provider detection ──
-
-    #[test]
-    fn detect_anthropic() {
-        assert_eq!(
-            detect_provider("claude-opus-4-6"),
-            Some(Provider::Anthropic)
-        );
-        assert_eq!(
-            detect_provider("claude-sonnet-4-5-20250929"),
-            Some(Provider::Anthropic)
-        );
-    }
-
-    #[test]
-    fn detect_google() {
-        assert_eq!(detect_provider("gemini-2-5-pro"), Some(Provider::Google));
-    }
-
-    #[test]
-    fn detect_openai() {
-        assert_eq!(detect_provider("gpt-4.1"), Some(Provider::OpenAi));
-        assert_eq!(detect_provider("gpt-5.5"), Some(Provider::OpenAi));
-    }
-
-    #[test]
-    fn detect_openai_codex() {
-        assert_eq!(detect_provider("o3"), Some(Provider::OpenAiCodex));
-        assert_eq!(detect_provider("o4-mini"), Some(Provider::OpenAiCodex));
-    }
-
-    #[test]
-    fn detect_minimax() {
-        assert_eq!(detect_provider("MiniMax-M2.5"), Some(Provider::MiniMax));
-    }
-
-    #[test]
-    fn detect_minimax_lowercase() {
-        assert_eq!(detect_provider("minimax-m2.5"), Some(Provider::MiniMax));
+        let pricing = calculate_pricing("totally-unknown-model", &usage);
+        assert!(!pricing.available);
+        assert_eq!(pricing.reason.as_deref(), Some("unsupported_model_pricing"));
     }
 
     #[test]
@@ -760,18 +601,7 @@ mod tests {
         assert!((tier.cache_read_multiplier - (0.16 / 0.95)).abs() < f64::EPSILON);
     }
 
-    #[test]
-    fn detect_unknown_returns_none() {
-        assert_eq!(detect_provider("some-unknown-model"), None);
-    }
-
     // ── Ollama ──
-
-    #[test]
-    fn detect_ollama_gemma4() {
-        assert_eq!(detect_provider("gemma4:e4b"), Some(Provider::Ollama));
-        assert_eq!(detect_provider("gemma4:26b"), Some(Provider::Ollama));
-    }
 
     #[test]
     fn pricing_ollama_free() {
@@ -781,16 +611,16 @@ mod tests {
     }
 
     #[test]
-    fn cost_ollama_is_zero() {
+    fn pricing_ollama_is_zero() {
         let usage = TokenUsage {
             input_tokens: 1_000_000,
             output_tokens: 500_000,
             provider_type: Some(Provider::Ollama),
             ..Default::default()
         };
-        let cost = calculate_cost("gemma4:e4b", &usage).unwrap();
-        assert_float_eq(cost.total, 0.0);
-        assert_float_eq(cost.input_cost, 0.0);
+        let cost = calculate_pricing("gemma4:e4b", &usage).cost.unwrap();
+        assert_float_eq(cost.total_cost, 0.0);
+        assert_float_eq(cost.base_input_cost, 0.0);
         assert_float_eq(cost.output_cost, 0.0);
     }
 }

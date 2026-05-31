@@ -38,7 +38,7 @@ pub struct TransformResult {
     pub total_input_tokens: i64,
     /// Aggregate output tokens.
     pub total_output_tokens: i64,
-    /// Aggregate server-priced cost (USD), zero when pricing is unavailable.
+    /// Sum of available server-priced token-record costs (USD).
     pub total_cost: f64,
     /// Number of turns.
     pub turn_count: i64,
