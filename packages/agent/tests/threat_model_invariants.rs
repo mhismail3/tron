@@ -1119,6 +1119,7 @@ fn model_provider_profile_boundaries_stay_split() {
         "src/domains/model/providers/google/types/tests.rs",
         "src/domains/model/providers/google/provider/tests.rs",
         "src/domains/model/providers/ollama/message_converter/tests.rs",
+        "src/shared/foundation/profile/compilation.rs",
         "src/shared/foundation/profile/validation.rs",
         "src/shared/foundation/profile/tests.rs",
     ] {
@@ -1183,10 +1184,16 @@ fn model_provider_profile_boundaries_stay_split() {
     }
 
     let profile = read("src/shared/foundation/profile.rs");
+    let profile_compilation = read("src/shared/foundation/profile/compilation.rs");
     let profile_validation = read("src/shared/foundation/profile/validation.rs");
     assert!(
-        profile.contains("#[path = \"profile/validation.rs\"]")
+        profile.contains("#[path = \"profile/compilation.rs\"]")
+            && profile.contains("#[path = \"profile/validation.rs\"]")
             && profile.contains("#[path = \"profile/tests.rs\"]")
+            && !profile.contains("fn compile_agent_execution_spec(")
+            && !profile.contains("fn agent_execution_spec_hash(")
+            && profile_compilation.contains("fn compile_agent_execution_spec(")
+            && profile_compilation.contains("fn agent_execution_spec_hash(")
             && !profile.contains("fn validate_profile(")
             && !profile.contains("struct ContextBlockManifest")
             && profile_validation.contains("pub(super) enum ContextBlockProviderSurface")
@@ -1195,7 +1202,7 @@ fn model_provider_profile_boundaries_stay_split() {
             && profile_validation.contains("pub(crate) const CAPABILITY_SCHEMA_PROVIDER_SURFACE")
             && profile_validation.contains("pub(crate) fn validate_context_block_manifest")
             && profile_validation.contains("pub(super) fn validate_profile"),
-        "profile root must stay on profile loading while typed validation owns context provider surfaces"
+        "profile root must stay on profile loading while compilation and typed validation own their focused boundaries"
     );
 }
 

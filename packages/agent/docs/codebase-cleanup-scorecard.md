@@ -591,9 +591,10 @@ Accepted CLC-4 cleanup:
 - Large provider inline tests moved to child modules for OpenAI stream/types,
   Anthropic types/stream/message conversion/provider, Google types/provider,
   and Ollama message conversion. Parent files stay on implementation logic.
-- `shared/foundation/profile.rs` now stays on profile loading and spec hashing;
-  profile validation, context-block manifest parsing, and auth/profile-ref
-  validation live in `profile/validation.rs`.
+- `shared/foundation/profile.rs` now stays on typed profile loading;
+  profile file compilation and spec hashing live in `profile/compilation.rs`,
+  while profile validation, context-block manifest parsing, and
+  auth/profile-ref validation live in `profile/validation.rs`.
 - Context-block `providerSurface` is now typed by
   `ContextBlockProviderSurface`, with the canonical capability-schema surface
   still exposed as `providerSurface = "capability"`.
@@ -919,7 +920,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 6897 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, and CLC-10 split-boundary/final-state gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 6900 | CLC-10 |
+| `packages/agent/tests/threat_model_invariants.rs` | 6904 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, and CLC-10 split-boundary/final-state gates plus full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 6925 | CLC-10 |
 | `packages/agent/tests/integration/tests.rs` | 3108 | CLC-9 harnesses | Transport e2e suite with shared WebSocket harness. | 3150 | CLC-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2848 | CLC-9 iOS tests | Event transformer matrix should split only when concepts separate. | 2900 | CLC-9 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2712 | CLC-9 worktree tests | Worktree coordinator lifecycle matrix. | 2750 | CLC-9 |
