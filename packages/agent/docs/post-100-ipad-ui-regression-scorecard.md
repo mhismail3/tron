@@ -394,6 +394,18 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   evidence in `/tmp/tron-psg-evidence/ipd7-provider-auth-redacted.json` records
   only configured provider/service flags and section names, with no secret
   values or token snippets.
+- Additional IPD-8 History/fork-control proof opened Agent Control -> History
+  after the interrupted turn. Screenshot
+  `/tmp/tron-psg-evidence/ipd8-history-sheet-after-interruption-ipad.png`
+  shows the compact iPad History sheet with pre-session activity, turns 1-4,
+  the interrupted prompt row, and a capability row. Expanding turn 1 exposed
+  detail rows and `Fork` controls without invoking them; screenshot
+  `/tmp/tron-psg-evidence/ipd8-history-expanded-fork-controls-ipad.png`.
+  DB evidence in `/tmp/tron-psg-evidence/ipd8-history-fork-controls-db.json`
+  records the session/event counts, forkable event samples, and
+  `forkControlClicked=false`. Code inspection confirmed `HistorySheet.performFork`
+  immediately forks a session, so actual fork execution remains action-time
+  confirmation-gated.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation and any remaining sidebar preload/relaunch assertions, IPD-2
@@ -402,5 +414,5 @@ IPD-3 voice-note states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 pairing/onboarding, protected branches,
 profile/auth, and unavailable-server retry details, IPD-8
-load-earlier pagination, back/session-tree behavior, and history/fork sheet
-paths, IPD-9 keyboard/pointer QA, and IPD-10 closeout.
+load-earlier pagination, back/session-tree behavior, and action-time-confirmed
+fork execution, IPD-9 keyboard/pointer QA, and IPD-10 closeout.

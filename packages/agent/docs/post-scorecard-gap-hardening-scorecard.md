@@ -297,6 +297,18 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd7-provider-auth-redacted.json` records only
   configured provider/service flags and section names, with no secret values or
   token snippets.
+- IPD-8 History/fork-control proof opened Agent Control -> History after the
+  interrupted turn. Screenshot
+  `/tmp/tron-psg-evidence/ipd8-history-sheet-after-interruption-ipad.png` shows
+  the compact History sheet with pre-session activity, turns 1-4, the
+  interrupted prompt row, and a capability row. Expanding turn 1 exposed detail
+  rows and `Fork` controls without invoking them; screenshot
+  `/tmp/tron-psg-evidence/ipd8-history-expanded-fork-controls-ipad.png`. DB
+  evidence `/tmp/tron-psg-evidence/ipd8-history-fork-controls-db.json` records
+  the session/event counts, forkable event samples, and
+  `forkControlClicked=false`. Code inspection confirmed
+  `HistorySheet.performFork` immediately forks a session, so actual fork
+  execution remains action-time confirmation-gated.
 
 ## Verification Plan
 
@@ -353,7 +365,8 @@ UDID before continuing.
   capability, event, and cold-start deep-link paths have live iPad proof; IPD-1
   processing and IPD-3 Stop Agent/interruption paths have live proof; IPD-7
   model-picker, provider-settings, and provider list rendering have live iPad
-  proof.
+  proof; IPD-8 History and fork controls have live iPad proof without invoking
+  fork execution.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
