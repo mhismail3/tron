@@ -842,6 +842,24 @@ fn post_scorecard_gap_hardening_scorecard_stays_formalized() {
             && !agent_control.contains("isolated == true"),
         "direct-branch git checkouts must remain visible in Agent Control Source Control"
     );
+
+    let token_canary = read("packages/agent/tests/fixtures/psg_token_provider_canary.py");
+    for required in [
+        "tokenRecord",
+        "pricing",
+        "contextSegmentId",
+        "baselineResetReason",
+        "total_cache_read_tokens",
+        "total_cache_creation_tokens",
+        "capability::execute",
+        "kimi-k2.5",
+        "maybe_start_isolated_server",
+    ] {
+        assert!(
+            token_canary.contains(required),
+            "PSG token canary fixture missing required evidence hook: {required}"
+        );
+    }
 }
 
 #[test]
