@@ -41,7 +41,7 @@ struct CommitSubSheet: View {
     }
 
     private var hasWorktree: Bool {
-        worktreeStatus?.hasIsolatedWorktree == true
+        worktreeStatus?.hasSourceControlCheckout == true
     }
 
     private var hasChanges: Bool {
@@ -107,7 +107,7 @@ struct CommitSubSheet: View {
 
     private var heroTitle: String {
         if !hasWorktree {
-            return "No worktree"
+            return "No source control"
         }
         if amendPrevious {
             return "Amend HEAD on \(branchLabel)"
@@ -117,7 +117,7 @@ struct CommitSubSheet: View {
 
     private var heroDescription: String {
         if !hasWorktree {
-            return "This session has no worktree — nothing to commit."
+            return "This session is not in a git checkout, so there is nothing to commit."
         }
         if amendPrevious {
             var s = "Rewrites the previous commit on \(branchLabel) in place."
@@ -192,7 +192,7 @@ struct CommitSubSheet: View {
             SettingsCard(accent: accent) {
                 VStack(alignment: .leading, spacing: 8) {
                     if !hasWorktree {
-                        Text("No worktree for this session")
+                        Text("No git checkout for this session")
                             .font(TronTypography.sans(size: TronTypography.sizeBody3))
                             .foregroundStyle(.tronTextMuted)
                     } else if !hasChanges && !amendPrevious {

@@ -147,7 +147,7 @@ struct WorktreeInfoTests {
         #expect(info.isOnBaseBranch == true)
     }
 
-    @Test("canQueryRepoMetadata requires server-owned worktree and repo root")
+    @Test("canQueryRepoMetadata requires source-control checkout and repo root")
     func canQueryRepoMetadataRequiresWorktreeRepoRoot() {
         let info = WorktreeInfo(
             isolated: true,
@@ -174,7 +174,7 @@ struct WorktreeInfoTests {
             commitCount: nil,
             isMerged: nil
         )
-        #expect(WorktreeGetStatusResult(hasWorktree: true, worktree: passthrough).canQueryRepoMetadata == false)
+        #expect(WorktreeGetStatusResult(hasWorktree: true, worktree: passthrough).canQueryRepoMetadata == true)
 
         let missingRepo = WorktreeInfo(
             isolated: true,

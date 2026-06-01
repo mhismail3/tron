@@ -1942,6 +1942,63 @@ async fn coordinator_commit_no_changes_returns_none() {
 }
 
 #[tokio::test]
+async fn coordinator_commit_for_session_commits_passthrough_checkout() {
+    use crate::domains::session::event_store::EventType;
+    use crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions;
+
+    let dir = tempdir().unwrap();
+    init_repo(dir.path()).await;
+
+    let store = make_store();
+    let session = store
+        .create_session(
+            "model",
+            &dir.path().to_string_lossy(),
+            Some("direct checkout"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let sid = session.session.id.clone();
+    let coord = Arc::new(WorktreeCoordinator::new(
+        WorktreeConfig::default(),
+        store.clone(),
+    ));
+
+    assert!(coord.get_info(&sid).is_none());
+    std::fs::write(dir.path().join("direct.txt"), "direct\n").unwrap();
+
+    let result = coord
+        .commit_for_session(
+            &sid,
+            Some(dir.path()),
+            "direct branch commit",
+            CommitOptions::default_stage_all(),
+        )
+        .await
+        .unwrap()
+        .expect("dirty passthrough checkout should commit");
+
+    assert!(!result.commit_hash.is_empty());
+    assert!(result.files_changed.iter().any(|path| path == "direct.txt"));
+    assert!(!coord.git.has_changes(dir.path()).await.unwrap());
+    assert!(coord.get_info(&sid).is_none());
+
+    let events = store
+        .get_events_by_session(&sid, &ListEventsOptions::default())
+        .unwrap_or_default();
+    let event = events
+        .iter()
+        .find(|event| event.event_type == EventType::WorktreeCommit.as_str())
+        .expect("passthrough commit should still record a worktree.commit event");
+    let payload: serde_json::Value = serde_json::from_str(&event.payload).unwrap();
+    assert_eq!(payload["message"], "direct branch commit");
+    assert_eq!(payload["totalCommitCount"], 0);
+    assert_eq!(payload["hasUncommittedChanges"], false);
+}
+
+#[tokio::test]
 async fn coordinator_commit_amend_with_no_changes_still_commits() {
     let (_dir, coord, sid, wt, _store) = acquire_for_commit_tests().await;
 

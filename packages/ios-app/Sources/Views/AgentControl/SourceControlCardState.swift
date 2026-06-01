@@ -3,9 +3,9 @@ import Foundation
 /// Server-truth projection for the compact Source Control card.
 ///
 /// `worktree.get_status` decides whether source-control actions exist for a
-/// session. A session without a worktree must not reuse a previously fetched
-/// diff, render source-control affordances, or open a sheet that can only fail
-/// server-side.
+/// session. Isolated worktrees and passthrough repo checkouts both render; a
+/// session outside git must not reuse a previously fetched diff or open a
+/// source-control sheet that can only fail server-side.
 struct SourceControlCardState: Equatable {
     let branchLabel: String
     let detailLabel: String
@@ -35,9 +35,9 @@ struct SourceControlCardState: Equatable {
             return
         }
 
-        guard worktreeStatus.hasIsolatedWorktree else {
-            branchLabel = "No Worktree"
-            detailLabel = "No session worktree"
+        guard worktreeStatus.hasSourceControlCheckout else {
+            branchLabel = "No Source Control"
+            detailLabel = "No git checkout"
             isGitRepo = nil
             isVisible = false
             totalFiles = 0
@@ -48,6 +48,7 @@ struct SourceControlCardState: Equatable {
 
         isVisible = true
         isGitRepo = diffResult?.isGitRepo
+        let isPassthrough = worktreeStatus.worktree?.isolated == false
 
         if diffResult?.isGitRepo == false {
             branchLabel = "Untracked"
@@ -76,6 +77,8 @@ struct SourceControlCardState: Equatable {
             detailLabel = "\(totalFiles) \(totalFiles == 1 ? "file" : "files")"
         } else if diffResult == nil {
             detailLabel = "Loading..."
+        } else if isPassthrough {
+            detailLabel = "Direct branch"
         } else {
             detailLabel = "No changes"
         }

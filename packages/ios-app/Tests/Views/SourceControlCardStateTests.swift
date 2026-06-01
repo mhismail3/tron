@@ -31,8 +31,8 @@ struct SourceControlCardStateTests {
         )
 
         #expect(state.isVisible == false)
-        #expect(state.branchLabel == "No Worktree")
-        #expect(state.detailLabel == "No session worktree")
+        #expect(state.branchLabel == "No Source Control")
+        #expect(state.detailLabel == "No git checkout")
         #expect(state.isGitRepo == nil)
         #expect(state.totalFiles == 0)
         #expect(state.totalAdditions == 0)
@@ -88,8 +88,8 @@ struct SourceControlCardStateTests {
         #expect(state.totalDeletions == 1)
     }
 
-    @Test("Passthrough repo status is not an actionable source-control worktree")
-    func passthroughStatusDisablesSourceControl() {
+    @Test("Passthrough repo status enables direct-branch source control")
+    func passthroughStatusEnablesDirectBranchSourceControl() {
         let status = WorktreeGetStatusResult.fixture(
             worktree: .fixture(
                 isolated: false,
@@ -122,10 +122,12 @@ struct SourceControlCardStateTests {
             workspacePath: "/tmp/repo"
         )
 
-        #expect(state.isVisible == false)
-        #expect(state.branchLabel == "No Worktree")
-        #expect(state.detailLabel == "No session worktree")
-        #expect(state.totalFiles == 0)
+        #expect(state.isVisible == true)
+        #expect(state.branchLabel == "main")
+        #expect(state.detailLabel == "1 file")
+        #expect(state.totalFiles == 1)
+        #expect(state.totalAdditions == 1)
+        #expect(state.totalDeletions == 0)
     }
 
     @Test("Unknown worktree status keeps the card inert while loading")

@@ -5,14 +5,15 @@
 //! tracks active worktrees, and delegates to specialized modules.
 //!
 //! Key operations: `maybe_acquire`, `release`, `rename_branch`, `commit`,
-//! `merge`, `get_status`, `rebuild_from_events`, `recover_orphans`.
+//! `commit_for_session`, `merge`, `get_status`, `rebuild_from_events`,
+//! `recover_orphans`.
 //!
 //! ## Submodules
 //!
 //! | Module          | Contents |
 //! |-----------------|----------|
 //! | `lifecycle`     | `maybe_acquire`, `release`, `effective_working_dir`, `rename_branch` |
-//! | `transactions`  | `commit` (accepts `CommitOptions` for amend / signoff / stage-all), `merge` |
+//! | `transactions`  | `commit` for isolated worktrees, `commit_for_session` for isolated or passthrough checkouts, `merge` |
 //! | `queries`       | `list_active`, `list_for_repo`, `get_info`, `get_status`, `list_session_branches` |
 //! | `diff`          | `get_committed_diff`, `committed_diff_for_branch` |
 //! | `branch`        | `delete_session_branch`, `prune_session_branches` — both gated by `preflight_delete_branch`, which refuses branches currently checked out in the main worktree so `remove_worktree_if_present` can never fall through to `remove_dir_all(repo_root)` |

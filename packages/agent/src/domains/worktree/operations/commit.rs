@@ -1,5 +1,7 @@
 //! Worktree workflow operations.
-use super::{CommitOperation, require_coordinator};
+use std::path::Path;
+
+use super::{CommitOperation, require_coordinator, require_session_working_dir};
 use super::{CommitOptions, instrument, map_worktree_error, require_bool};
 use crate::domains::worktree::Deps;
 use crate::shared::server::errors::CapabilityError;
@@ -18,13 +20,7 @@ impl CommitOperation {
         let session_id = require_string_param(params.as_ref(), "sessionId")?;
         let message = require_string_param(params.as_ref(), "message")?;
         let coord = require_coordinator(deps)?;
-
-        if coord.get_info(&session_id).is_none() {
-            return Err(CapabilityError::NotFound {
-                code: crate::shared::server::errors::WORKTREE_NOT_FOUND.into(),
-                message: format!("No worktree found for session '{session_id}'"),
-            });
-        }
+        let working_dir = require_session_working_dir(deps, &session_id)?;
 
         // `stageAll` is contractually required — there is no sane server-side
         // default now that iOS ships with an explicit toggle (I7). A client
@@ -38,7 +34,10 @@ impl CommitOperation {
             stage_all: require_bool(params.as_ref(), "stageAll")?,
         };
 
-        match coord.commit(&session_id, &message, opts).await {
+        match coord
+            .commit_for_session(&session_id, Some(Path::new(&working_dir)), &message, opts)
+            .await
+        {
             Ok(Some(result)) => {
                 // Record worktree.commit event for compaction progress signal detection.
                 if let Some(handler) = deps.orchestrator.get_compaction_handler(&session_id) {

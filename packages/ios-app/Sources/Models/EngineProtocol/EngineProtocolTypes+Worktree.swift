@@ -58,18 +58,24 @@ struct WorktreeGetStatusResult: Decodable {
     let hasWorktree: Bool
     let worktree: WorktreeInfo?
 
-    /// True only for a server-owned session worktree. Passthrough repo
-    /// status (`isolated == false`) can display branch context, but it cannot
-    /// satisfy source-control mutations or repo metadata calls.
+    /// True for any git checkout the server can address for this session.
+    /// This includes isolated session worktrees and passthrough sessions that
+    /// operate directly on the selected repo branch.
+    var hasSourceControlCheckout: Bool {
+        hasWorktree && worktree != nil
+    }
+
+    /// True only for a server-owned session branch/worktree. Branch-finalize,
+    /// rebase-on-main, and peer-session workflows require this stronger state.
     var hasIsolatedWorktree: Bool {
         hasWorktree && worktree?.isolated == true
     }
 
-    /// Repo-scoped source-control capabilities require a server-known
-    /// worktree and repository root. The client uses this only to avoid
-    /// sending calls the server will reject as outside the active domain.
+    /// Repo-scoped source-control reads require a server-known checkout and
+    /// repository root. Direct-branch sessions can query repo metadata even
+    /// though isolated-only mutation flows stay disabled.
     var canQueryRepoMetadata: Bool {
-        guard hasIsolatedWorktree else { return false }
+        guard hasSourceControlCheckout else { return false }
         guard let repoRoot = worktree?.repoRoot?.trimmingCharacters(in: .whitespacesAndNewlines) else {
             return false
         }

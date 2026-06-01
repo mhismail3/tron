@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 use serde_json::json;
 use tracing::debug;
 
@@ -5,7 +7,7 @@ use crate::domains::session::event_store::{AppendOptions, EventType};
 use crate::shared::events::{BaseEvent, TronEvent};
 
 use crate::domains::worktree::errors::{Result, WorktreeError};
-use crate::domains::worktree::types::{CommitOptions, MergeResult, MergeStrategy};
+use crate::domains::worktree::types::{CommitOptions, CommitResult, MergeResult, MergeStrategy};
 
 use super::WorktreeCoordinator;
 
@@ -24,7 +26,7 @@ impl WorktreeCoordinator {
         session_id: &str,
         message: &str,
         opts: CommitOptions,
-    ) -> Result<Option<crate::domains::worktree::types::CommitResult>> {
+    ) -> Result<Option<CommitResult>> {
         let info =
             self.state
                 .lock()
@@ -33,12 +35,69 @@ impl WorktreeCoordinator {
                     session_id: session_id.to_string(),
                 })?;
 
-        let has_changes = self.git.has_changes(&info.worktree_path).await?;
+        self.commit_in_checkout(
+            session_id,
+            &info.worktree_path,
+            Some(info.base_commit.as_str()),
+            message,
+            opts,
+        )
+        .await
+    }
+
+    /// Commit changes in the session checkout, falling back to the session's
+    /// original git repo when no isolated worktree is active.
+    pub async fn commit_for_session(
+        &self,
+        session_id: &str,
+        working_dir: Option<&Path>,
+        message: &str,
+        opts: CommitOptions,
+    ) -> Result<Option<CommitResult>> {
+        let active_info = self.state.lock().active_info(session_id);
+        if let Some(info) = active_info {
+            return self
+                .commit_in_checkout(
+                    session_id,
+                    &info.worktree_path,
+                    Some(info.base_commit.as_str()),
+                    message,
+                    opts,
+                )
+                .await;
+        }
+
+        let Some(working_dir) = working_dir else {
+            return Err(WorktreeError::NotFound {
+                session_id: session_id.to_string(),
+            });
+        };
+        let repo_root = self
+            .git
+            .repo_root(working_dir)
+            .await
+            .map(PathBuf::from)
+            .map_err(|_| WorktreeError::NotFound {
+                session_id: session_id.to_string(),
+            })?;
+        self.commit_in_checkout(session_id, &repo_root, None, message, opts)
+            .await
+    }
+
+    async fn commit_in_checkout(
+        &self,
+        session_id: &str,
+        checkout_dir: &Path,
+        base_commit: Option<&str>,
+        message: &str,
+        opts: CommitOptions,
+    ) -> Result<Option<CommitResult>> {
+        let has_changes = self.git.has_changes(checkout_dir).await?;
         if !has_changes && !opts.amend {
             return Ok(None);
         }
 
-        if opts.amend && !self.git.has_commits(&info.worktree_path).await {
+        if opts.amend && !self.git.has_commits(checkout_dir).await {
             return Err(WorktreeError::Git(
                 "Cannot amend: no previous commit exists".into(),
             ));
@@ -52,19 +111,16 @@ impl WorktreeCoordinator {
         // through; stats just won't be populated.
         let pre_commit = if opts.amend {
             self.git
-                .run(&info.worktree_path, &["rev-parse", "HEAD^"])
+                .run(checkout_dir, &["rev-parse", "HEAD^"])
                 .await
                 .unwrap_or_default()
         } else {
-            self.git
-                .head_commit(&info.worktree_path)
-                .await
-                .unwrap_or_default()
+            self.git.head_commit(checkout_dir).await.unwrap_or_default()
         };
 
         let sha = self
             .git
-            .commit_with_options(&info.worktree_path, message, &opts)
+            .commit_with_options(checkout_dir, message, &opts)
             .await?;
 
         // Gather files changed and diff stats between pre-commit and new HEAD
@@ -72,7 +128,7 @@ impl WorktreeCoordinator {
             Vec::new()
         } else {
             self.git
-                .changed_files_since(&info.worktree_path, &pre_commit)
+                .changed_files_since(checkout_dir, &pre_commit)
                 .await
                 .unwrap_or_default()
         };
@@ -81,23 +137,22 @@ impl WorktreeCoordinator {
             (0, 0)
         } else {
             self.git
-                .diff_numstat_total(&info.worktree_path, &pre_commit, &sha)
+                .diff_numstat_total(checkout_dir, &pre_commit, &sha)
                 .await
                 .unwrap_or((0, 0))
         };
 
         // Query server-authoritative post-commit state
         #[allow(clippy::cast_possible_truncation)]
-        let total_commit_count = self
-            .git
-            .commit_count_since(&info.worktree_path, &info.base_commit)
-            .await
-            .unwrap_or(0) as u64;
-        let has_uncommitted_changes = self
-            .git
-            .has_changes(&info.worktree_path)
-            .await
-            .unwrap_or(false);
+        let total_commit_count = if let Some(base_commit) = base_commit {
+            self.git
+                .commit_count_since(checkout_dir, base_commit)
+                .await
+                .unwrap_or(0) as u64
+        } else {
+            0
+        };
+        let has_uncommitted_changes = self.git.has_changes(checkout_dir).await.unwrap_or(false);
 
         let _ = self.event_store.append(&AppendOptions {
             session_id,
@@ -127,8 +182,14 @@ impl WorktreeCoordinator {
             has_uncommitted_changes,
         });
 
-        debug!(session_id, commit = %sha, files = files_changed.len(), "committed in worktree");
-        Ok(Some(crate::domains::worktree::types::CommitResult {
+        debug!(
+            session_id,
+            commit = %sha,
+            files = files_changed.len(),
+            checkout = %checkout_dir.display(),
+            "committed in session checkout"
+        );
+        Ok(Some(CommitResult {
             commit_hash: sha,
             files_changed,
             insertions,

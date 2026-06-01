@@ -75,8 +75,8 @@ struct SourceControlSheet: View {
         diffResult?.files?.filter { $0.fileStagingArea == .unstaged } ?? []
     }
 
-    private var hasNoSessionWorktree: Bool {
-        worktreeStatus.map { !$0.hasIsolatedWorktree } ?? false
+    private var hasNoSourceControlCheckout: Bool {
+        worktreeStatus.map { !$0.hasSourceControlCheckout } ?? false
     }
 
     // MARK: - Body
@@ -88,7 +88,7 @@ struct SourceControlSheet: View {
                 GeometryReader { geometry in
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(spacing: 16) {
-                            if hasNoSessionWorktree {
+                            if hasNoSourceControlCheckout {
                                 noWorktreeContent
                                     .sheetSection()
                             } else if let info = worktreeStatus?.worktree {
@@ -181,7 +181,7 @@ struct SourceControlSheet: View {
                 // it runs after `loadData()` has established whether a repo
                 // owner exists for this session.
                 worktreeStatus = initialWorktreeStatus
-                diffResult = initialWorktreeStatus?.hasIsolatedWorktree == true ? initialDiffResult : nil
+                diffResult = initialWorktreeStatus?.hasSourceControlCheckout == true ? initialDiffResult : nil
                 async let data: Void = loadData()
                 async let defaults: Void = loadGitDefaults()
                 _ = await (data, defaults)
@@ -249,8 +249,8 @@ struct SourceControlSheet: View {
     private var noWorktreeContent: some View {
         GitHeroCard(
             icon: "arrow.triangle.branch",
-            title: "No Session Worktree",
-            description: "This session is running without a source-control worktree.",
+            title: "No Source Control",
+            description: "This session is not running in a git checkout.",
             accent: .tronTeal
         )
     }
@@ -542,7 +542,7 @@ struct SourceControlSheet: View {
             let status = try await engineClient.worktree.getStatus(sessionId: sessionId)
             worktreeStatus = status
 
-            guard status.hasIsolatedWorktree else {
+            guard status.hasSourceControlCheckout else {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     diffResult = nil
                     divergence = nil

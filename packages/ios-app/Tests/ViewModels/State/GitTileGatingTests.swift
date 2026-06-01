@@ -124,6 +124,14 @@ struct GitTileGatingTests {
         #expect(g.isCommitEnabled == true)
     }
 
+    @Test("Commit enabled for dirty passthrough checkout")
+    func commitEnabledForDirtyPassthroughCheckout() {
+        let g = GitTileGating(
+            worktree: info(isolated: false, hasUncommittedChanges: true)
+        )
+        #expect(g.isCommitEnabled == true)
+    }
+
     @Test("Commit disabled when clean")
     func commitDisabledWhenClean() {
         let g = GitTileGating(worktree: info(hasUncommittedChanges: false))
@@ -165,6 +173,15 @@ struct GitTileGatingTests {
         #expect(g.isMergeEnabled == false)
     }
 
+    @Test("Merge disabled for passthrough checkout")
+    func mergeDisabledForPassthroughCheckout() {
+        let g = GitTileGating(
+            worktree: info(isolated: false, hasUncommittedChanges: false, commitCount: 3)
+        )
+        #expect(g.isMergeEnabled == false)
+        #expect(g.reason(for: .merge)?.contains("isolated session branches") == true)
+    }
+
     // MARK: - Sessions
 
     @Test("Sessions disabled when no peers")
@@ -184,9 +201,20 @@ struct GitTileGatingTests {
     @Test("Rebase enabled when behind main")
     func rebaseEnabledWhenBehind() {
         let g = GitTileGating(
+            worktree: info(),
             divergence: divergence(behindMain: 3)
         )
         #expect(g.isRebaseEnabled == true)
+    }
+
+    @Test("Rebase disabled for passthrough checkout")
+    func rebaseDisabledForPassthroughCheckout() {
+        let g = GitTileGating(
+            worktree: info(isolated: false),
+            divergence: divergence(behindMain: 3)
+        )
+        #expect(g.isRebaseEnabled == false)
+        #expect(g.reason(for: .rebase)?.contains("isolated session branches") == true)
     }
 
     @Test("Rebase disabled when not behind main")
@@ -227,6 +255,16 @@ struct GitTileGatingTests {
     func pushEnabledHappyPath() {
         let g = GitTileGating(
             worktree: info(branch: "feature/x"),
+            divergence: divergence(hasOrigin: true),
+            protectedBranches: ["main", "master"]
+        )
+        #expect(g.isPushEnabled == true)
+    }
+
+    @Test("Push enabled for passthrough checkout when remote exists")
+    func pushEnabledForPassthroughCheckout() {
+        let g = GitTileGating(
+            worktree: info(branch: "feature/x", isolated: false),
             divergence: divergence(hasOrigin: true),
             protectedBranches: ["main", "master"]
         )

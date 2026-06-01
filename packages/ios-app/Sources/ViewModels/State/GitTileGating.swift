@@ -97,6 +97,7 @@ struct GitTileGating: Equatable {
         // Merge
         if let info = worktree,
             workflowFree,
+            info.isolated,
             !info.isOnBaseBranch,
             (info.commitCount ?? 0) > 0,
             info.hasUncommittedChanges != true
@@ -111,7 +112,9 @@ struct GitTileGating: Equatable {
 
         // Rebase
         self.isRebaseEnabled =
-            workflowFree && ((divergence?.behindMain ?? 0) > 0)
+            workflowFree
+            && worktree?.isolated == true
+            && ((divergence?.behindMain ?? 0) > 0)
 
         // Pull
         self.isPullEnabled =
@@ -170,6 +173,9 @@ struct GitTileGating: Equatable {
             return "Nothing to commit — no uncommitted changes."
         case .merge:
             if worktree == nil { return "Worktree status is still loading…" }
+            if worktree?.isolated == false {
+                return "Merge is only available for isolated session branches."
+            }
             if worktree?.isOnBaseBranch == true {
                 return "Merge is unavailable on the base branch."
             }
@@ -183,6 +189,10 @@ struct GitTileGating: Equatable {
         case .sessions:
             return "No peer sessions in this repo yet."
         case .rebase:
+            if worktree == nil { return "Worktree status is still loading…" }
+            if worktree?.isolated == false {
+                return "Rebase is only available for isolated session branches."
+            }
             if divergence == nil { return "Divergence info still loading…" }
             return "Already up to date with the base branch."
         case .pull:

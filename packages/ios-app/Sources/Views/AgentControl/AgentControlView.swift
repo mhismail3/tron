@@ -295,7 +295,7 @@ struct AgentControlView: View {
             let status = try await engineClient.worktree.getStatus(sessionId: sessionId)
             worktreeStatus = status
 
-            guard status.hasIsolatedWorktree else {
+            guard status.hasSourceControlCheckout else {
                 diffResult = nil
                 return
             }
