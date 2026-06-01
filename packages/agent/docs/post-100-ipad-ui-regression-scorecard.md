@@ -342,10 +342,29 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `019e8556-5c0c-7ba2-8267-6cd17d4675db` at
   `2026-06-01T22:38:09.943498+00:00` returning the target notification with
   `isRead=true` and `deliveryStatus=delivery_failed`.
+- Additional IPD-8 deep-link proof used real route targets from direct-branch
+  session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087`. DB target evidence in
+  `/tmp/tron-psg-evidence/ipd8-deeplink-db-targets.json` records
+  `capability.invocation.completed` event
+  `evt_019e84dd-43e6-73f1-b45b-732360da3bff` with invocation
+  `call_eiaqjnjn`, and assistant event
+  `evt_019e84dd-4a30-7c70-a894-78c8dcf01bdd`. Opening
+  `tron://session/sess_019e84d4-8c5b-7ba1-893c-583594bb9087?capability=call_eiaqjnjn`
+  returned `openurl_exit=0` and routed the iPad split view to the selected
+  session with the `Run Command` capability card visible; screenshot
+  `/tmp/tron-psg-evidence/ipd8-session-capability-deeplink-ipad.png`. Opening
+  the event-target URL returned `openurl_exit=0` and left the event's rendered
+  assistant message area visible; screenshot
+  `/tmp/tron-psg-evidence/ipd8-session-event-deeplink-ipad.png`. After
+  terminating only `com.tron.mobile.beta`, opening
+  `tron://session/sess_019e84d4-8c5b-7ba1-893c-583594bb9087` returned
+  `openurl_exit=0` and cold-started into that session; screenshot
+  `/tmp/tron-psg-evidence/ipd8-session-cold-start-deeplink-ipad.png`.
 
 Open loops before awarding more iPad points: finish IPD-1 processing and
 archive execution confirmation, IPD-2 approval/reconnect/deep-link paths,
 IPD-3 voice-note states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
-actions and conflict resolver, IPD-7 provider/pairing details, IPD-8 deeper
-navigation/deep links, IPD-9 keyboard/pointer QA, and IPD-10 closeout.
+actions and conflict resolver, IPD-7 provider/pairing details, IPD-8
+load-earlier pagination, back/session-tree behavior, and history/fork sheet
+paths, IPD-9 keyboard/pointer QA, and IPD-10 closeout.

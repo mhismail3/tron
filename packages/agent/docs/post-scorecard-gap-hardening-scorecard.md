@@ -251,6 +251,21 @@ Owner taxonomy: `server_contract`, `client_projection`,
   shows the compact glass notification detail sheet over the dashboard, and DB
   invocation `019e8556-5c0c-7ba2-8267-6cd17d4675db` returned the target row
   with `isRead=true` and `deliveryStatus=delivery_failed`.
+- IPD-8 deep-link proof then covered real session, capability, event, and
+  cold-start routes on iPad. DB target evidence
+  `/tmp/tron-psg-evidence/ipd8-deeplink-db-targets.json` records direct-branch
+  session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087`, capability invocation
+  `call_eiaqjnjn`, completed capability event
+  `evt_019e84dd-43e6-73f1-b45b-732360da3bff`, and assistant event
+  `evt_019e84dd-4a30-7c70-a894-78c8dcf01bdd`. `xcrun simctl openurl` returned
+  `openurl_exit=0` for
+  `tron://session/sess_019e84d4-8c5b-7ba1-893c-583594bb9087?capability=call_eiaqjnjn`,
+  `tron://session/sess_019e84d4-8c5b-7ba1-893c-583594bb9087?event=evt_019e84dd-4a30-7c70-a894-78c8dcf01bdd`,
+  and the cold-start session URL after terminating only `com.tron.mobile.beta`.
+  Screenshots:
+  `/tmp/tron-psg-evidence/ipd8-session-capability-deeplink-ipad.png`,
+  `/tmp/tron-psg-evidence/ipd8-session-event-deeplink-ipad.png`, and
+  `/tmp/tron-psg-evidence/ipd8-session-cold-start-deeplink-ipad.png`.
 
 ## Verification Plan
 
@@ -303,6 +318,8 @@ UDID before continuing.
   Settings grid, archive-action discoverability, and light/Dynamic-Type visual
   QA now have partial evidence too. IPD-4 notification list/detail/read/read-all,
   delivery-failure/badge-clearing, deep-link, and iPad compact-sheet paths now
-  have live iPad proof and focused regression coverage. Remaining IPD rows must
-  still close or be explicitly successor-owned before final PSG-5 points.
+  have live iPad proof and focused regression coverage; IPD-8 session,
+  capability, event, and cold-start deep-link paths have live iPad proof.
+  Remaining IPD rows must still close or be explicitly successor-owned before
+  final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
