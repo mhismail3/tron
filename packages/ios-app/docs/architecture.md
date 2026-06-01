@@ -480,13 +480,14 @@ visible. The server owns the dashboard query contract: iOS may pass
 the returned server-authoritative metadata for the active paired origin.
 Dashboard session rows are projections over two server-owned sources:
 `session::list` supplies title, activity lines, token/cost/model metadata,
-archive state, and `isRunning`; `worktree::get_status` supplies fork/branch and
-dirty metadata. The local sessions table persists `is_processing` so a relaunch
-cannot lose an active processing bar between the server list refresh and local
-cache reload. The sidebar preloads filtered session ids only after the engine is
-connected; row labels and title icons both read through `SessionTitleIcons`, so
-visual fork/branch/dirty affordances and accessibility descriptors stay aligned
-with the same `WorktreeInfo` snapshot.
+turn count, archive state, and `isRunning`; `worktree::get_status` supplies
+fork/branch and dirty metadata. The local sessions table persists
+`is_processing` and `turn_count` so a relaunch cannot lose an active processing
+bar or server-known Agent Control History count between the server list refresh
+and local cache reload. The sidebar preloads filtered session ids only after
+the engine is connected; row labels and title icons both read through
+`SessionTitleIcons`, so visual fork/branch/dirty affordances and accessibility
+descriptors stay aligned with the same `WorktreeInfo` snapshot.
 
 Token, cache, cost, provider, and model metadata are also server-owned display
 data. iOS may render provisional live totals during a streaming turn, but

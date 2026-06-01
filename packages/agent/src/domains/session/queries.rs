@@ -86,6 +86,7 @@ impl SessionQueryService {
                         "source": session.source,
                         "profile": session.profile,
                         "eventCount": session.event_count,
+                        "turnCount": session.turn_count,
                         "messageCount": session.message_count,
                         "inputTokens": session.total_input_tokens,
                         "outputTokens": session.total_output_tokens,

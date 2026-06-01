@@ -88,7 +88,7 @@ extension ButtonStyle where Self == NoFeedbackButtonStyle {
 // MARK: - Adaptive Presentation Detents
 
 /// Custom presentation sizing that's smaller than `.page` but larger than `.form`
-/// Provides approximately 85% of the available space on iPad
+/// Provides a wide, tall floating sheet for detail-heavy iPad flows.
 @MainActor
 struct LargeFormSizing: PresentationSizing {
     nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
@@ -110,45 +110,100 @@ struct LargeFormSizing: PresentationSizing {
     }
 }
 
+/// Compact iPad form sizing for summary sheets that should not consume most
+/// of the tablet viewport.
+@MainActor
+struct CompactFormSizing: PresentationSizing {
+    nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
+        let screenBounds = MainActor.assumeIsolated {
+            UIApplication.shared.connectedScenes
+                .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
+                .first ?? .zero
+        }
+        let fallbackSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
+        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
+        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
+
+        let width = referenceWidth * 0.58
+        let height = min(referenceHeight * 0.58, 620)
+
+        return ProposedViewSize(width: width, height: height)
+    }
+}
+
 extension PresentationSizing where Self == LargeFormSizing {
     /// A presentation size larger than `.form` but smaller than `.page`
     static var largeForm: LargeFormSizing { LargeFormSizing() }
 }
 
+extension PresentationSizing where Self == CompactFormSizing {
+    /// A shorter floating iPad form for summary sheets.
+    static var compactForm: CompactFormSizing { CompactFormSizing() }
+}
+
+enum AdaptivePresentationSizing {
+    case largeForm
+    case compactForm
+}
+
 extension View {
     /// Presentation detents with adaptive sizing for iPad/iPhone:
     /// - iPad: Uses custom `.largeForm` sizing (60% width, 80% height) - smaller than page, larger than form
-    /// - iPhone: Uses `.presentationDetents` to allow medium/large sizing
-    /// - iOS 26+: Partial-height detents automatically get Liquid Glass appearance
-    /// - Large detent in light mode gets cream background to match dashboard
+    /// - iPad material background keeps floating sheets glassy so dashboard context remains visible
+    /// - iPhone keeps the existing detent sizing and background behavior
     ///
     /// On iPad, `presentationDetents` is ignored for floating modals.
-    func adaptivePresentationDetents(_ detents: Set<PresentationDetent> = [.medium, .large]) -> some View {
-        self.modifier(AdaptivePresentationModifier(detents: detents))
+    func adaptivePresentationDetents(
+        _ detents: Set<PresentationDetent> = [.medium, .large],
+        ipadSizing: AdaptivePresentationSizing = .largeForm
+    ) -> some View {
+        self.modifier(AdaptivePresentationModifier(detents: detents, ipadSizing: ipadSizing))
     }
 }
 
 private struct AdaptivePresentationModifier: ViewModifier {
     let detents: Set<PresentationDetent>
+    let ipadSizing: AdaptivePresentationSizing
     @State private var selectedDetent: PresentationDetent
+    @Environment(\.colorScheme) private var colorScheme
 
-    init(detents: Set<PresentationDetent>) {
+    init(detents: Set<PresentationDetent>, ipadSizing: AdaptivePresentationSizing) {
         self.detents = detents
+        self.ipadSizing = ipadSizing
         // Initialize to the smallest detent so the selection binding stays in sync.
         // When only [.large] is provided, this ensures the initial state matches
         // what SwiftUI will present, avoiding a stale .medium default.
         _selectedDetent = State(initialValue: detents.contains(.medium) ? .medium : .large)
     }
-    @Environment(\.colorScheme) private var colorScheme
 
-    private var needsOpaqueBackground: Bool {
+    private var isPad: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    private var needsOpaquePhoneBackground: Bool {
         selectedDetent == .large && colorScheme == .light
     }
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        content
+        let base = content
             .presentationDetents(detents, selection: $selectedDetent)
-            .presentationSizing(.largeForm)
-            .presentationBackground(needsOpaqueBackground ? Color.tronBackground : .clear)
+
+        if isPad {
+            switch ipadSizing {
+            case .largeForm:
+                base
+                    .presentationSizing(.largeForm)
+                    .presentationBackground(.ultraThinMaterial)
+            case .compactForm:
+                base
+                    .presentationSizing(.compactForm)
+                    .presentationBackground(.ultraThinMaterial)
+            }
+        } else {
+            base
+                .presentationSizing(.largeForm)
+                .presentationBackground(needsOpaquePhoneBackground ? Color.tronBackground : .clear)
+        }
     }
 }

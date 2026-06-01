@@ -17,6 +17,7 @@ final class SessionTypesTests: XCTestCase {
             "sessionId": "sess_123",
             "model": "claude-opus-4-5-20251101",
             "createdAt": "2026-01-26T00:00:00.000Z",
+            "turnCount": 7,
             "messageCount": 10,
             "inputTokens": 1500,
             "outputTokens": 500,
@@ -36,6 +37,7 @@ final class SessionTypesTests: XCTestCase {
 
         XCTAssertEqual(info.sessionId, "sess_123")
         XCTAssertEqual(info.model, "claude-opus-4-5-20251101")
+        XCTAssertEqual(info.turnCount, 7)
         XCTAssertEqual(info.messageCount, 10)
         XCTAssertEqual(info.inputTokens, 1500)
         XCTAssertEqual(info.outputTokens, 500)

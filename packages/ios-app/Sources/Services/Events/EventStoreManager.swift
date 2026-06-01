@@ -332,6 +332,7 @@ final class EventStoreManager {
             lastActivityAt: result.lastActivity,
             archivedAt: nil,
             eventCount: 0,
+            turnCount: 0,
             messageCount: result.messageCount,
             inputTokens: result.inputTokens,
             outputTokens: result.outputTokens,

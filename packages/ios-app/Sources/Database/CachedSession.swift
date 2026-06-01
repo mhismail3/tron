@@ -16,6 +16,7 @@ struct CachedSession: Identifiable, Codable, Sendable {
     /// Whether session has been archived (derived from archived_at IS NOT NULL)
     var archivedAt: String?
     var eventCount: Int
+    var turnCount: Int = 0
     var messageCount: Int
     var inputTokens: Int
     var outputTokens: Int

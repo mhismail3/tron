@@ -12,12 +12,14 @@ struct SessionInfoTests {
         cacheReadTokens: Int? = 200,
         cacheCreationTokens: Int? = 100,
         cost: Double? = 1.23,
+        turnCount: Int? = 7,
         parentSessionId: String? = nil
     ) -> SessionInfo {
         let json: [String: Any] = [
             "sessionId": sessionId,
             "model": "claude-sonnet-4-6",
             "createdAt": "2026-04-01T00:00:00Z",
+            "turnCount": turnCount as Any,
             "messageCount": 10,
             "inputTokens": inputTokens as Any,
             "outputTokens": outputTokens as Any,
@@ -53,6 +55,12 @@ struct SessionInfoTests {
     func totalInputTokensSum() {
         let info = makeSessionInfo(inputTokens: 1000, cacheReadTokens: 500)
         #expect(info.totalInputTokens == 1500)
+    }
+
+    @Test("turnCount decodes from session list payload")
+    func turnCountDecodes() {
+        let info = makeSessionInfo(turnCount: 3)
+        #expect(info.turnCount == 3)
     }
 
     @Test("totalInputTokens with nil inputTokens")

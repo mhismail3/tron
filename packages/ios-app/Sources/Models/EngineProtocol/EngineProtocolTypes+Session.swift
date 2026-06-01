@@ -50,6 +50,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let model: String
     let createdAt: String
     let eventCount: Int?
+    let turnCount: Int?
     let messageCount: Int
     let inputTokens: Int?
     let outputTokens: Int?

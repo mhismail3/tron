@@ -178,7 +178,7 @@ struct AgentControlView: View {
                 Task { await loadSourceControlSummary(forceStatusRefresh: true) }
             }
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .sheet(isPresented: $showAnalytics) {
@@ -257,6 +257,7 @@ struct AgentControlView: View {
                     HistoryCardView(
                         totalTurns: agentSummary.totalTurns,
                         totalCapabilityInvocations: agentSummary.totalCapabilityInvocations,
+                        capabilityInvocationsKnown: agentSummary.capabilityInvocationsKnown,
                         isLoading: !agentSummary.isKnown,
                         onTap: {
                             showHistory = true

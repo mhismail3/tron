@@ -321,6 +321,7 @@ struct AnalyticsCardView: View {
 struct HistoryCardView: View {
     var totalTurns: Int
     var totalCapabilityInvocations: Int
+    var capabilityInvocationsKnown: Bool = true
     var isLoading: Bool = false
     var onTap: (() -> Void)?
 
@@ -341,7 +342,7 @@ struct HistoryCardView: View {
             // Row 2: capability invocations
             HStack {
                 Spacer()
-                Text(AgentControlCardMetricText.capabilityCalls(totalCapabilityInvocations, isLoading: isLoading))
+                Text(AgentControlCardMetricText.capabilityCalls(totalCapabilityInvocations, isLoading: isLoading || !capabilityInvocationsKnown))
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
             }

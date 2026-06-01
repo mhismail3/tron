@@ -24,10 +24,10 @@ final class SessionRepository: @unchecked Sendable {
                 INSERT OR REPLACE INTO sessions
                 (id, workspace_id, root_event_id, head_event_id, title, latest_model,
                  working_directory, created_at, last_activity_at, archived_at, event_count,
-                 message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                 turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                  cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
                  activity_lines_json, source, profile)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
 
             var stmt: OpaquePointer?
@@ -47,27 +47,28 @@ final class SessionRepository: @unchecked Sendable {
             sqlite3_bind_text(stmt, 9, session.lastActivityAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
             sqliteBindOptionalText(stmt, 10, session.archivedAt)
             sqlite3_bind_int(stmt, 11, Int32(session.eventCount))
-            sqlite3_bind_int(stmt, 12, Int32(session.messageCount))
-            sqlite3_bind_int(stmt, 13, Int32(session.inputTokens))
-            sqlite3_bind_int(stmt, 14, Int32(session.outputTokens))
-            sqlite3_bind_int(stmt, 15, Int32(session.lastTurnInputTokens))
-            sqlite3_bind_int(stmt, 16, Int32(session.cacheReadTokens))
-            sqlite3_bind_int(stmt, 17, Int32(session.cacheCreationTokens))
-            sqlite3_bind_double(stmt, 18, session.cost)
-            sqlite3_bind_int(stmt, 19, Int32(session.isFork == true ? 1 : 0))
-            sqlite3_bind_int(stmt, 20, Int32(session.isProcessing == true ? 1 : 0))
-            sqliteBindOptionalText(stmt, 21, session.serverOrigin)
+            sqlite3_bind_int(stmt, 12, Int32(session.turnCount))
+            sqlite3_bind_int(stmt, 13, Int32(session.messageCount))
+            sqlite3_bind_int(stmt, 14, Int32(session.inputTokens))
+            sqlite3_bind_int(stmt, 15, Int32(session.outputTokens))
+            sqlite3_bind_int(stmt, 16, Int32(session.lastTurnInputTokens))
+            sqlite3_bind_int(stmt, 17, Int32(session.cacheReadTokens))
+            sqlite3_bind_int(stmt, 18, Int32(session.cacheCreationTokens))
+            sqlite3_bind_double(stmt, 19, session.cost)
+            sqlite3_bind_int(stmt, 20, Int32(session.isFork == true ? 1 : 0))
+            sqlite3_bind_int(stmt, 21, Int32(session.isProcessing == true ? 1 : 0))
+            sqliteBindOptionalText(stmt, 22, session.serverOrigin)
 
             // Persist activity lines as JSON
             if let lines = session.lastActivityLines,
-               let data = try? JSONEncoder().encode(lines),
-               let json = String(data: data, encoding: .utf8) {
-                sqlite3_bind_text(stmt, 22, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+                let data = try? JSONEncoder().encode(lines),
+                let json = String(data: data, encoding: .utf8) {
+                sqlite3_bind_text(stmt, 23, json, -1, SQLITE_TRANSIENT_DESTRUCTOR)
             } else {
-                sqlite3_bind_null(stmt, 22)
+                sqlite3_bind_null(stmt, 23)
             }
-            sqliteBindOptionalText(stmt, 23, session.source)
-            sqliteBindOptionalText(stmt, 24, session.profile)
+            sqliteBindOptionalText(stmt, 24, session.source)
+            sqliteBindOptionalText(stmt, 25, session.profile)
 
             guard sqlite3_step(stmt) == SQLITE_DONE else {
                 throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))
@@ -87,7 +88,7 @@ final class SessionRepository: @unchecked Sendable {
             let sql = """
                 SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                        working_directory, created_at, last_activity_at, archived_at, event_count,
-                       message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                       turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
                        activity_lines_json, source, profile
                 FROM sessions WHERE id = ?
@@ -119,7 +120,7 @@ final class SessionRepository: @unchecked Sendable {
             let sql = """
                 SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                        working_directory, created_at, last_activity_at, archived_at, event_count,
-                       message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                       turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                        cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
                        activity_lines_json, source, profile
                 FROM sessions ORDER BY last_activity_at DESC
@@ -156,7 +157,7 @@ final class SessionRepository: @unchecked Sendable {
                 sql = """
                     SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                            working_directory, created_at, last_activity_at, archived_at, event_count,
-                           message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                           turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
                            activity_lines_json, source, profile
                     FROM sessions
@@ -167,7 +168,7 @@ final class SessionRepository: @unchecked Sendable {
                 sql = """
                     SELECT id, workspace_id, root_event_id, head_event_id, title, latest_model,
                            working_directory, created_at, last_activity_at, archived_at, event_count,
-                           message_count, input_tokens, output_tokens, last_turn_input_tokens,
+                           turn_count, message_count, input_tokens, output_tokens, last_turn_input_tokens,
                            cache_read_tokens, cache_creation_tokens, cost, is_fork, is_processing, server_origin,
                            activity_lines_json, source, profile
                     FROM sessions ORDER BY last_activity_at DESC
@@ -334,26 +335,27 @@ final class SessionRepository: @unchecked Sendable {
         let lastActivityAt = String(cString: sqlite3_column_text(stmt, 8))
         let archivedAt = sqliteGetOptionalText(stmt, 9)
         let eventCount = Int(sqlite3_column_int(stmt, 10))
-        let messageCount = Int(sqlite3_column_int(stmt, 11))
-        let inputTokens = Int(sqlite3_column_int(stmt, 12))
-        let outputTokens = Int(sqlite3_column_int(stmt, 13))
-        let lastTurnInputTokens = Int(sqlite3_column_int(stmt, 14))
-        let cacheReadTokens = Int(sqlite3_column_int(stmt, 15))
-        let cacheCreationTokens = Int(sqlite3_column_int(stmt, 16))
-        let cost = sqlite3_column_double(stmt, 17)
-        let isFork = sqlite3_column_int(stmt, 18) != 0
-        let isProcessing = sqlite3_column_int(stmt, 19) != 0
-        let serverOrigin = sqliteGetOptionalText(stmt, 20)
+        let turnCount = Int(sqlite3_column_int(stmt, 11))
+        let messageCount = Int(sqlite3_column_int(stmt, 12))
+        let inputTokens = Int(sqlite3_column_int(stmt, 13))
+        let outputTokens = Int(sqlite3_column_int(stmt, 14))
+        let lastTurnInputTokens = Int(sqlite3_column_int(stmt, 15))
+        let cacheReadTokens = Int(sqlite3_column_int(stmt, 16))
+        let cacheCreationTokens = Int(sqlite3_column_int(stmt, 17))
+        let cost = sqlite3_column_double(stmt, 18)
+        let isFork = sqlite3_column_int(stmt, 19) != 0
+        let isProcessing = sqlite3_column_int(stmt, 20) != 0
+        let serverOrigin = sqliteGetOptionalText(stmt, 21)
 
         // Decode persisted activity lines from JSON
         var activityLines: [ActivityLine]?
-        if let jsonStr = sqliteGetOptionalText(stmt, 21),
+        if let jsonStr = sqliteGetOptionalText(stmt, 22),
            let data = jsonStr.data(using: .utf8) {
             activityLines = try? JSONDecoder().decode([ActivityLine].self, from: data)
         }
 
-        let source = sqliteGetOptionalText(stmt, 22)
-        let profile = sqliteGetOptionalText(stmt, 23)
+        let source = sqliteGetOptionalText(stmt, 23)
+        let profile = sqliteGetOptionalText(stmt, 24)
 
         var session = CachedSession(
             id: id,
@@ -367,6 +369,7 @@ final class SessionRepository: @unchecked Sendable {
             lastActivityAt: lastActivityAt,
             archivedAt: archivedAt,
             eventCount: eventCount,
+            turnCount: turnCount,
             messageCount: messageCount,
             inputTokens: inputTokens,
             outputTokens: outputTokens,

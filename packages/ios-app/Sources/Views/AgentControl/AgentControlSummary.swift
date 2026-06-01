@@ -23,6 +23,7 @@ struct AgentControlSummary: Equatable {
     var messageCount: Int
     var totalTurns: Int
     var totalCapabilityInvocations: Int
+    var capabilityInvocationsKnown: Bool
     var totalErrors: Int
     var freshness: Freshness
 
@@ -39,6 +40,7 @@ struct AgentControlSummary: Equatable {
         messageCount: 0,
         totalTurns: 0,
         totalCapabilityInvocations: 0,
+        capabilityInvocationsKnown: false,
         totalErrors: 0,
         freshness: .unknown
     )
@@ -54,8 +56,9 @@ struct AgentControlSummary: Equatable {
             totalCost: session.cost,
             eventCount: session.eventCount,
             messageCount: session.messageCount,
-            totalTurns: 0,
+            totalTurns: session.turnCount,
             totalCapabilityInvocations: 0,
+            capabilityInvocationsKnown: session.eventCount == 0,
             totalErrors: 0,
             freshness: freshness
         )
@@ -71,6 +74,9 @@ struct AgentControlSummary: Equatable {
         let sessionSummary = fromSession(session, freshness: freshness)
         let analyticsTokens = analytics.turns.reduce(0) { $0 + $1.totalTokens }
         let hasEventAnalytics = !analytics.turns.isEmpty
+        let eventDetailsComplete = session != nil
+            ? events.count >= sessionSummary.eventCount
+            : !events.isEmpty
         return AgentControlSummary(
             inputTokens: hasEventAnalytics ? analytics.totalInputTokens : sessionSummary.inputTokens,
             outputTokens: hasEventAnalytics ? analytics.totalOutputTokens : sessionSummary.outputTokens,
@@ -82,8 +88,9 @@ struct AgentControlSummary: Equatable {
             messageCount: max(sessionSummary.messageCount, events.filter {
                 $0.type == PersistedEventType.messageUser.rawValue || $0.type == PersistedEventType.messageAssistant.rawValue
             }.count),
-            totalTurns: turnGroups.count,
+            totalTurns: max(turnGroups.count, sessionSummary.totalTurns),
             totalCapabilityInvocations: analytics.totalCapabilityInvocations,
+            capabilityInvocationsKnown: eventDetailsComplete,
             totalErrors: analytics.totalErrors,
             freshness: freshness
         )

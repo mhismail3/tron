@@ -33,6 +33,7 @@ final class SessionRepositoryTests: XCTestCase {
         lastActivityAt: String = "2026-04-01T12:00:00Z",
         archivedAt: String? = nil,
         eventCount: Int = 10,
+        turnCount: Int = 4,
         messageCount: Int = 5,
         inputTokens: Int = 1000,
         outputTokens: Int = 500,
@@ -56,6 +57,7 @@ final class SessionRepositoryTests: XCTestCase {
             lastActivityAt: lastActivityAt,
             archivedAt: archivedAt,
             eventCount: eventCount,
+            turnCount: turnCount,
             messageCount: messageCount,
             inputTokens: inputTokens,
             outputTokens: outputTokens,
@@ -112,6 +114,7 @@ final class SessionRepositoryTests: XCTestCase {
         XCTAssertEqual(retrieved?.lastActivityAt, "2026-04-01T12:00:00Z")
         XCTAssertNil(retrieved?.archivedAt)
         XCTAssertEqual(retrieved?.eventCount, 10)
+        XCTAssertEqual(retrieved?.turnCount, 4)
         XCTAssertEqual(retrieved?.messageCount, 5)
         XCTAssertEqual(retrieved?.inputTokens, 1000)
         XCTAssertEqual(retrieved?.outputTokens, 500)

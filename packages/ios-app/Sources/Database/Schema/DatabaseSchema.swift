@@ -8,7 +8,7 @@ enum DatabaseSchema {
     /// Current schema version. Stored as `PRAGMA user_version` after a
     /// successful migration so subsequent app launches can short-circuit
     /// the create-table / column-add IF-NOT-EXISTS dance.
-    static let version: Int32 = 13
+    static let version: Int32 = 14
 
     // MARK: - Public API
 
@@ -94,6 +94,7 @@ enum DatabaseSchema {
                 last_activity_at TEXT NOT NULL,
                 archived_at TEXT,
                 event_count INTEGER DEFAULT 0,
+                turn_count INTEGER DEFAULT 0,
                 message_count INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
@@ -128,6 +129,9 @@ enum DatabaseSchema {
 
         // Migration: Add is_processing for dashboard rows seeded from server session list state
         try addColumnIfNotExists(db: db, table: "sessions", column: "is_processing", definition: "INTEGER DEFAULT 0")
+
+        // Migration: Add server turn count for local-first Agent Control history summaries
+        try addColumnIfNotExists(db: db, table: "sessions", column: "turn_count", definition: "INTEGER DEFAULT 0")
 
         // Migration: Add last_turn_input_tokens for context size tracking
         try addColumnIfNotExists(db: db, table: "sessions", column: "last_turn_input_tokens", definition: "INTEGER DEFAULT 0")
@@ -181,6 +185,7 @@ enum DatabaseSchema {
                 last_activity_at TEXT NOT NULL,
                 archived_at TEXT,
                 event_count INTEGER DEFAULT 0,
+                turn_count INTEGER DEFAULT 0,
                 message_count INTEGER DEFAULT 0,
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
@@ -194,7 +199,7 @@ enum DatabaseSchema {
             SELECT id, workspace_id, root_event_id, head_event_id, title,
                    model, working_directory, created_at, last_activity_at,
                    NULL,
-                   event_count, message_count, input_tokens, output_tokens, 0, cost
+                   event_count, 0, message_count, input_tokens, output_tokens, 0, cost
             FROM sessions
         """)
 

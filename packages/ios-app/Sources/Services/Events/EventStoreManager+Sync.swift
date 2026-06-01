@@ -102,6 +102,9 @@ extension EventStoreManager {
 
         // Update counts
         session.eventCount = events.count
+        let maxPayloadTurn = events.compactMap { $0.payload["turn"]?.intValue }.max() ?? 0
+        let streamTurnEndCount = events.filter { $0.type == PersistedEventType.streamTurnEnd.rawValue }.count
+        session.turnCount = max(session.turnCount, maxPayloadTurn, streamTurnEndCount)
         session.messageCount = events.filter {
             $0.type == PersistedEventType.messageUser.rawValue || $0.type == PersistedEventType.messageAssistant.rawValue
         }.count
@@ -131,6 +134,7 @@ extension EventStoreManager {
             createdAt: info.createdAt,
             lastActivityAt: info.lastActivity ?? info.createdAt,
             eventCount: info.eventCount ?? 0,
+            turnCount: info.turnCount ?? 0,
             messageCount: info.messageCount,
             inputTokens: info.inputTokens ?? 0,
             outputTokens: info.outputTokens ?? 0,
@@ -167,6 +171,7 @@ extension EventStoreManager {
             createdAt: serverInfo.createdAt,
             lastActivityAt: lastActivityAt,
             eventCount: max(existing.eventCount, serverInfo.eventCount ?? existing.eventCount),
+            turnCount: max(existing.turnCount, serverInfo.turnCount ?? existing.turnCount),
             messageCount: max(existing.messageCount, serverInfo.messageCount),
             inputTokens: serverInfo.inputTokens ?? existing.inputTokens,
             outputTokens: serverInfo.outputTokens ?? existing.outputTokens,

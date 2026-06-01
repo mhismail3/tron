@@ -1243,7 +1243,7 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 |-------|---------|
 | `schema_version` | Migration version tracking |
 | `workspaces` | Project/directory contexts (id, path, name, timestamps) |
-| `sessions` | Session metadata: head pointer, title, model, execution `profile`, token counts, tags, fork lineage, spawn metadata, optional `use_worktree` per-session worktree override |
+| `sessions` | Session metadata: head pointer, title, model, execution `profile`, turn/token counts, tags, fork lineage, spawn metadata, optional `use_worktree` per-session worktree override |
 | `events` | Immutable append-only event log. Denormalized columns (`role`, `model_primitive_name`, `invocation_id`, `turn`, token counts, `model`, `latency_ms`, `stop_reason`, `provider_type`, `cost`, ...) extracted from payloads for indexed queries |
 | `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, size/compression metadata) |
 | `branches` | Named positions in the event tree (root + head pointer per branch) |
