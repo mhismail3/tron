@@ -360,9 +360,26 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `tron://session/sess_019e84d4-8c5b-7ba1-893c-583594bb9087` returned
   `openurl_exit=0` and cold-started into that session; screenshot
   `/tmp/tron-psg-evidence/ipd8-session-cold-start-deeplink-ipad.png`.
+- Additional IPD-1/IPD-3 processing and stop proof used the same direct-branch
+  local-model session. Computer Use sent
+  `IPD-1 processing sidebar proof. Write 120 numbered short lines...`; while
+  the turn was active, the iPad chat showed live `Thinking`, `Stop agent`, and
+  disabled voice recording, and the selected sidebar row stayed visible with
+  the current prompt preview; screenshot
+  `/tmp/tron-psg-evidence/ipd1-sidebar-processing-active.png`. After the run
+  remained active with no new turn-end DB row, Computer Use clicked
+  `Stop agent`; the input returned to idle, the sidebar row updated to
+  `6 messages, now`, and the chat showed `Session interrupted`; screenshot
+  `/tmp/tron-psg-evidence/ipd1-processing-stopped-interrupted.png`. DB
+  evidence in `/tmp/tron-psg-evidence/ipd1-processing-interrupted-db.json`
+  shows session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` at
+  `message_count=6`, `event_count=23`, `turn_count=4`, with latest
+  `message.assistant.turn=4` and `stop_reason=interrupted`, plus a
+  `notification.interrupted` event.
 
-Open loops before awarding more iPad points: finish IPD-1 processing and
-archive execution confirmation, IPD-2 approval/reconnect/deep-link paths,
+Open loops before awarding more iPad points: finish IPD-1 archive execution
+confirmation and any remaining sidebar preload/relaunch assertions, IPD-2
+approval/reconnect/deep-link paths,
 IPD-3 voice-note states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 provider/pairing details, IPD-8

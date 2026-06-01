@@ -266,6 +266,21 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd8-session-capability-deeplink-ipad.png`,
   `/tmp/tron-psg-evidence/ipd8-session-event-deeplink-ipad.png`, and
   `/tmp/tron-psg-evidence/ipd8-session-cold-start-deeplink-ipad.png`.
+- IPD-1/IPD-3 processing and stop proof then sent a deterministic long local
+  prompt in direct-branch session
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087`. Screenshot
+  `/tmp/tron-psg-evidence/ipd1-sidebar-processing-active.png` shows the iPad
+  sidebar visible while the selected row remains present, the chat is in live
+  `Thinking`, `Stop agent` is visible, and voice recording is disabled. After
+  the run stayed active without a new turn-end DB row, Computer Use clicked
+  `Stop agent`; screenshot
+  `/tmp/tron-psg-evidence/ipd1-processing-stopped-interrupted.png` shows the
+  input back at idle, the sidebar row updated to `6 messages, now`, and the chat
+  showing `Session interrupted`. DB evidence
+  `/tmp/tron-psg-evidence/ipd1-processing-interrupted-db.json` shows
+  `message_count=6`, `event_count=23`, `turn_count=4`, latest
+  `message.assistant.turn=4`, `stop_reason=interrupted`, and a
+  `notification.interrupted` row.
 
 ## Verification Plan
 
@@ -319,7 +334,8 @@ UDID before continuing.
   QA now have partial evidence too. IPD-4 notification list/detail/read/read-all,
   delivery-failure/badge-clearing, deep-link, and iPad compact-sheet paths now
   have live iPad proof and focused regression coverage; IPD-8 session,
-  capability, event, and cold-start deep-link paths have live iPad proof.
+  capability, event, and cold-start deep-link paths have live iPad proof; IPD-1
+  processing and IPD-3 Stop Agent/interruption paths have live proof.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
