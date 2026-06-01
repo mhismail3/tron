@@ -406,6 +406,32 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `forkControlClicked=false`. Code inspection confirmed `HistorySheet.performFork`
   immediately forks a session, so actual fork execution remains action-time
   confirmation-gated.
+- Additional IPD-8 load-earlier pagination proof added deterministic fixture
+  `packages/agent/tests/fixtures/ipd8_long_history_pagination.py`, compiled
+  with `python3 -m py_compile`, and ran it against the current server through
+  canonical `/engine` calls only: one `session::create` plus 240
+  `events::append` message events for session
+  `sess_019e8594-79f2-7a72-b406-fdfc7c44aade`. Server evidence
+  `/tmp/tron-psg-evidence/ipd8-long-history-pagination.json` shows
+  `message_count=240`, `event_count=241` before the app loaded project rules,
+  `turn_count=120`, initial `session::reconstruct(limit:100)` with
+  `hasMoreEvents=true`, and event type counts of 120 user plus 120 assistant
+  messages. Opening `tron://session/sess_019e8594-79f2-7a72-b406-fdfc7c44aade`
+  after terminating only `com.tron.mobile.beta` routed the iPad app into the
+  seeded session; screenshot
+  `/tmp/tron-psg-evidence/ipd8-long-history-load-earlier-before.png` shows the
+  Load Earlier Messages control and the visible tail window around turns
+  97-120. Clicking the control loaded the earlier page around turns 47-74 while
+  preserving the chat/input layout; screenshot
+  `/tmp/tron-psg-evidence/ipd8-long-history-load-earlier-after.png`. Engine
+  ledger evidence in
+  `/tmp/tron-psg-evidence/ipd8-latest-reconstruct-invocations.json` shows the
+  app's initial reconstruct at `2026-06-01T23:46:33Z` around assistant 096 and
+  the load-earlier reconstruct at `2026-06-01T23:46:54Z` around assistant 046.
+  Sidebar selection proof
+  `/tmp/tron-psg-evidence/ipd8-long-history-sidebar-selected.png` shows the
+  selected long-history session at the top of the iPad sidebar with
+  `240 messages`, while the paginated chat stays visible.
 - Additional IPD-9 keyboard-focus proof used the same iPad Simulator window
   after it was moved and recovered by Computer Use. The split dashboard stayed
   visible with direct-branch session
@@ -426,6 +452,5 @@ IPD-3 voice-note states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 pairing/onboarding, protected branches,
 profile/auth, and unavailable-server retry details, IPD-8
-load-earlier pagination, back/session-tree behavior, and action-time-confirmed
-fork execution, IPD-9 pointer QA and full hardware-keyboard traversal, and
-IPD-10 closeout.
+back/session-tree behavior and action-time-confirmed fork execution, IPD-9
+pointer QA and full hardware-keyboard traversal, and IPD-10 closeout.

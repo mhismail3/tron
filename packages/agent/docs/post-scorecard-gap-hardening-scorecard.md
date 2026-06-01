@@ -309,6 +309,27 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `forkControlClicked=false`. Code inspection confirmed
   `HistorySheet.performFork` immediately forks a session, so actual fork
   execution remains action-time confirmation-gated.
+- IPD-8 load-earlier pagination proof added deterministic fixture
+  `packages/agent/tests/fixtures/ipd8_long_history_pagination.py`, verified it
+  with `python3 -m py_compile`, and ran it through canonical `/engine`
+  `session::create`, `events::append`, and `session::reconstruct` calls. The
+  fixture created session `sess_019e8594-79f2-7a72-b406-fdfc7c44aade` with 240
+  message events and 120 turns; evidence
+  `/tmp/tron-psg-evidence/ipd8-long-history-pagination.json` records the server
+  counters and `hasMoreEvents=true` for the 100-event reconstruction window.
+  Manual iPad proof opened the session by URL after terminating only
+  `com.tron.mobile.beta`, showed the Load Earlier Messages control around the
+  visible turn 97-120 window in
+  `/tmp/tron-psg-evidence/ipd8-long-history-load-earlier-before.png`, clicked
+  it, and verified the earlier 47-74 window in
+  `/tmp/tron-psg-evidence/ipd8-long-history-load-earlier-after.png`. Engine
+  ledger evidence
+  `/tmp/tron-psg-evidence/ipd8-latest-reconstruct-invocations.json` captures
+  the app's initial reconstruct at `2026-06-01T23:46:33Z` and load-earlier
+  reconstruct at `2026-06-01T23:46:54Z`. Sidebar navigation proof
+  `/tmp/tron-psg-evidence/ipd8-long-history-sidebar-selected.png` shows the
+  selected long-history session at the top of the iPad sidebar with
+  `240 messages` while the paginated chat remains visible.
 - IPD-9 keyboard-focus proof used the recovered iPad Simulator window with the
   split dashboard visible and direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` selected. Screenshot
@@ -376,7 +397,8 @@ UDID before continuing.
   processing and IPD-3 Stop Agent/interruption paths have live proof; IPD-7
   model-picker, provider-settings, and provider list rendering have live iPad
   proof; IPD-8 History and fork controls have live iPad proof without invoking
-  fork execution; IPD-9 input focus has partial live proof, with pointer and
+  fork execution; IPD-8 load-earlier pagination and sidebar selection now have
+  live iPad proof; IPD-9 input focus has partial live proof, with pointer and
   full hardware-keyboard traversal still open.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
