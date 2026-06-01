@@ -199,10 +199,16 @@ Owner taxonomy: `server_contract`, `client_projection`,
   chip, `68 B`, enabled Send, and separate accessibility control
   `Remove attachment, Image, 68 B`. Removal proof
   `/tmp/tron-psg-evidence/ipd3-photo-attachment-removed.png` shows the chip
-  cleared. `Add attachment -> Choose File` opened, but the Simulator Files
-  provider did not surface an injected `ipd3-attachment-fixture.txt` under
-  `On My iPad`; keep the real document-source picker path open instead of
-  claiming document-file coverage from photo-library evidence.
+  cleared. Follow-up document-file picker proof seeded the iPad Simulator
+  `Media/Downloads` file-provider root with a tiny text fixture, opened
+  `Add attachment -> Choose File`, verified the fixture under `On My iPad`,
+  selected it, and staged/removes it through the input row. Screenshots:
+  `/tmp/tron-psg-evidence/ipd3-document-picker-on-my-ipad-fixture.png`,
+  `/tmp/tron-psg-evidence/ipd3-document-attachment-staged.png`, and
+  `/tmp/tron-psg-evidence/ipd3-document-attachment-removed.png`. The staged
+  accessibility output exposed a separate remove control for
+  `ipd3-attachment-fixture.txt`, so document-file add/remove is now covered by
+  real picker evidence.
 - Additional non-destructive iPad evidence closed more PSG-5 surface area
   without changing app settings or invoking destructive actions:
   `/tmp/tron-psg-evidence/ipd1-sidebar-context-actions.txt` records that
@@ -292,7 +298,8 @@ UDID before continuing.
   additional iPad sidebar/non-git/isolated-clean Source Control proof after
   Simulator window recovery. IPD-3 text input and sidebar near-now date display
   have focused proof/fixes; queued prompts, resumed-session token-record turn
-  ordinals, and photo attachment add/remove now have live iPad proof.
+  ordinals, and photo plus document attachment add/remove now have live iPad
+  proof.
   Settings grid, archive-action discoverability, and light/Dynamic-Type visual
   QA now have partial evidence too. IPD-4 notification list/detail/read/read-all,
   delivery-failure/badge-clearing, deep-link, and iPad compact-sheet paths now

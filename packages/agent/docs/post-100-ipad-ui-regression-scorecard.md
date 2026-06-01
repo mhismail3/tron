@@ -268,10 +268,17 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd3-photo-attachment-staged.png`. Clicking that
   remove control cleared the chip and returned the input row to idle state;
   screenshot `/tmp/tron-psg-evidence/ipd3-photo-attachment-removed.png`.
-  Document-file picker smoke opened `Add attachment -> Choose File`, but the
-  Simulator Files provider did not surface the injected
-  `ipd3-attachment-fixture.txt` in `On My iPad`; keep a real document-source
-  picker pass open instead of claiming it from photo evidence.
+  Follow-up document-file picker proof seeded the iPad Simulator
+  `Media/Downloads` file-provider root with a tiny text fixture, opened
+  `Add attachment -> Choose File`, and verified the available fixture was
+  visible under `On My iPad`; screenshot
+  `/tmp/tron-psg-evidence/ipd3-document-picker-on-my-ipad-fixture.png`.
+  Selecting it staged `ipd3-attachment-fixture.txt` as a document attachment
+  with size `25 B`, enabled Send, and exposed a separate accessibility control
+  `Remove attachment, ipd3-attachment-fixture.txt, 25 B`; staged and removed
+  proof:
+  `/tmp/tron-psg-evidence/ipd3-document-attachment-staged.png` and
+  `/tmp/tron-psg-evidence/ipd3-document-attachment-removed.png`.
 - Additional IPD-7 settings proof: Computer Use opened the iPad Settings
   surface from the chat gear. Screenshot
   `/tmp/tron-psg-evidence/ipd7-settings-grid-ipad.png` shows the compact
@@ -338,7 +345,7 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
 
 Open loops before awarding more iPad points: finish IPD-1 processing and
 archive execution confirmation, IPD-2 approval/reconnect/deep-link paths,
-IPD-3 document-file picker and voice-note states, IPD-5
+IPD-3 voice-note states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 provider/pairing details, IPD-8 deeper
 navigation/deep links, IPD-9 keyboard/pointer QA, and IPD-10 closeout.
