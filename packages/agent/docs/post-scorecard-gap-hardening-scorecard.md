@@ -120,6 +120,23 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/WorktreeStatusCacheTests -only-testing:TronMobileTests/SourceControlCardStateTests`
   with 30 XCTest cases plus 6 Swift Testing checks; xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-19-03--0700.xcresult`.
+- 2026-06-01 iPad Simulator recovery and additional manual evidence: after
+  the dirty-summary checkpoint, Simulator.app exposed zero macOS windows while
+  the booted iPad framebuffer and Tron app were still alive. The required
+  force-quit/reopen path did not restore a window by itself; selecting
+  `Window -> iPad Pro 13-inch (M5) - iOS 26.4` did, after which Computer Use
+  resumed on the same UDID. Passive launch proof:
+  `/tmp/tron-psg-evidence/ipd-windowless-tron-launch-check.png`. Computer Use
+  then verified sidebar variants in
+  `/tmp/tron-psg-evidence/ipd1-sidebar-variants-after-window-recovery.png`,
+  non-git Agent Control with Source Control suppressed in
+  `/tmp/tron-psg-evidence/ipd6-nongit-agent-control-no-source-control.png`,
+  non-git DB/worktree invocation evidence in
+  `/tmp/tron-psg-evidence/ipd6-recent-worktree-invocations-after-nongit.json`,
+  isolated clean compact Agent Control in
+  `/tmp/tron-psg-evidence/ipd6-isolated-agent-control-window-recovery.png`, and
+  isolated Source Control clean drill-down gating in
+  `/tmp/tron-psg-evidence/ipd6-isolated-source-control-clean-sheet-window-recovery.png`.
 
 ## Verification Plan
 
@@ -162,8 +179,9 @@ UDID before continuing.
   canaries complete; evidence recorded here and in the ledger.
 - Checkpoint 3: Complete. PSG-3/PSG-4 Agent Control and Source Control audit
   complete with focused gates, iPhone screenshots, and DB invocation evidence.
-- Checkpoint 4: In progress. PSG-5 has IPD-0 passed and the first iPad
-  Agent Control/History/sheet regression fixed with evidence; remaining IPD
-  rows must still close or be explicitly successor-owned before checkpoint
-  commit.
+- Checkpoint 4: In progress. PSG-5 has IPD-0 passed, Agent Control
+  History/live-update/dirty-summary regressions fixed with evidence, and
+  additional iPad sidebar/non-git/isolated-clean Source Control proof after
+  Simulator window recovery. Remaining IPD rows must still close or be
+  explicitly successor-owned before final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

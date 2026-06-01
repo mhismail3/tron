@@ -162,9 +162,44 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   passed 30 XCTest cases plus 6 Swift Testing checks, including
   `test_refresh_overwritesStaleCleanStatusWithDirtyServerResult`; xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-19-03--0700.xcresult`.
+- Simulator access recovery: after the dirty-summary checkpoint, the iPad
+  Simulator framebuffer stayed booted but Simulator.app exposed zero macOS
+  windows, causing Computer Use `cgWindowNotFound`. Per the plan, Simulator was
+  force-quit and reopened on the same UDID
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`; `xcrun simctl launch` and screenshot
+  proof still worked at
+  `/tmp/tron-psg-evidence/ipd-windowless-tron-launch-check.png`. Computer Use
+  recovered after selecting `Window -> iPad Pro 13-inch (M5) - iOS 26.4`, which
+  restored one Simulator window.
+- Additional IPD-1/IPD-8/IPD-9 sidebar proof after window recovery:
+  `/tmp/tron-psg-evidence/ipd1-sidebar-variants-after-window-recovery.png`
+  shows the persistent iPad split sidebar with isolated branch-icon row,
+  forked rows, direct-branch row, long-title non-git/path row, selected-state
+  contrast, and existing session rows truncated without visible text overlap.
+- Additional IPD-6 non-git proof: selecting non-git session
+  `sess_019e84f6-3d43-7e51-9bb6-70deff30ee24` opened the chat in split view;
+  Agent Control rendered Context, Model, Analytics, History, and Session ID but
+  no Source Control card. Screenshot:
+  `/tmp/tron-psg-evidence/ipd6-nongit-agent-control-no-source-control.png`.
+  DB evidence paired with the screenshot: the session row has `use_worktree=0`,
+  working directory `/tmp/tron-ipd-nongit-visible-20260601205310`, and recent
+  `worktree::get_status` returned `{"hasWorktree":false,"worktree":null}` in
+  `/tmp/tron-psg-evidence/ipd6-recent-worktree-invocations-after-nongit.json`.
+- Additional IPD-6 isolated clean drill-down proof after window recovery:
+  `/tmp/tron-psg-evidence/ipd6-isolated-agent-control-window-recovery.png`
+  shows compact Agent Control for
+  `sess_019e84f6-3d34-70a3-b083-812988035042` with Source Control `019e84f6`,
+  `No changes`, Analytics `11.0k`/`$0.00`, and History `2 turns`.
+  `/tmp/tron-psg-evidence/ipd6-isolated-source-control-clean-sheet-window-recovery.png`
+  shows the Source Control drill-down on the isolated worktree path with
+  Working tree clean, Commit/Merge/Sessions/Pull disabled with visible help
+  text, and Rebase/Push present but not triggered because those actions require
+  action-time confirmation.
 
-Open loops before awarding more iPad points: finish IPD-1 variants, IPD-2
-approval/reconnect/deep-link paths, IPD-3 input/attachments/voice notes, IPD-4
-notifications, IPD-5 approval/generated UI details, full IPD-6 source-control
-actions, IPD-7 settings/provider/pairing, IPD-8 navigation/deep links, IPD-9
-light/accessibility/keyboard/pointer QA, and IPD-10 closeout.
+Open loops before awarding more iPad points: finish IPD-1 processing and
+archive context action evidence, IPD-2 approval/reconnect/deep-link paths,
+IPD-3 input/attachments/voice notes, IPD-4 notifications, IPD-5
+approval/generated UI details, full IPD-6 action-time-confirmed source-control
+actions and conflict resolver, IPD-7 settings/provider/pairing, IPD-8 deeper
+navigation/deep links, IPD-9 light/accessibility/keyboard/pointer QA, and
+IPD-10 closeout.
