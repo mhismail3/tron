@@ -367,9 +367,12 @@ thin projection of server truth: `WorktreeStatusCache`/`worktree::get_status`
 hydrates branch and dirty state immediately, and `worktree::get_diff_summary`
 adds aggregate file/addition/deletion counts without loading unified patch text.
 Full `worktree::get_diff` data is deferred to the Source Control drill-down
-sheet. Analytics and History cards seed from local `CachedSession` counters and
-local EventDatabase rows before background session/event refreshes reconcile
-them, so valid zero values render as values rather than loading placeholders.
+sheet; when the drill-down refreshes full status/diff data, it notifies the
+presenting Agent Control sheet and shared `WorktreeStatusCache` so the compact
+card cannot keep a stale clean/direct-branch label. Analytics and History cards
+seed from local `CachedSession` counters and local EventDatabase rows before
+background session/event refreshes reconcile them, so valid zero values render
+as values rather than loading placeholders.
 Live `session.updated` events carry server-owned event and turn counts; the app
 persists those updates and Agent Control merges the in-memory row with the local
 DB snapshot so a same-run sheet open cannot regress to stale dashboard counts.

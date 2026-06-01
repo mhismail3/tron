@@ -118,6 +118,21 @@ final class WorktreeStatusCacheTests: XCTestCase {
         XCTAssertEqual(mock.getStatusCallCount, 2)
     }
 
+    func test_refresh_overwritesStaleCleanStatusWithDirtyServerResult() async {
+        cache.set(
+            .fixture(worktree: .fixture(isolated: false, branch: "main", hasUncommittedChanges: false)),
+            for: "x"
+        )
+        mock.getStatusResultBySession["x"] = .fixture(
+            worktree: .fixture(isolated: false, branch: "main", hasUncommittedChanges: true)
+        )
+
+        await cache.refresh(sessionId: "x")
+
+        XCTAssertEqual(mock.getStatusCallCount, 1)
+        XCTAssertEqual(cache.status(for: "x")?.worktree?.hasUncommittedChanges, true)
+    }
+
     // T9 — clearAll wipes every entry
     func test_clearAll_removesEverything() async {
         mock.getStatusResultBySession["x"] = .fixture()

@@ -136,6 +136,32 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   passed 11 XCTest cases, including both persisted-newer and live-memory-newer
   Agent Control merge paths; xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-09-49--0700.xcresult`.
+- Additional IPD-6 dirty direct-branch failure found and fixed: the Source
+  Control drill-down refresh correctly loaded a dirty direct-branch diff, but
+  after closing and reopening Agent Control the compact Source Control row still
+  showed stale `Direct branch` because the drill-down reload did not refresh
+  `WorktreeStatusCache` or the presenting card summary. Fixed by routing every
+  Source Control sheet status/diff reload path back through the parent
+  `onWorktreeStatusShouldRefresh` callback. The shared cache now overwrites stale
+  clean status with dirty server results.
+- Dirty direct-branch manual evidence used a temporary untracked probe file and
+  the open iPad Simulator; the probe was deleted after proof. Before the fix,
+  the full Source Control sheet and file detail rendered the dirty untracked
+  file while the compact card remained stale. Evidence:
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-source-control-dirty-sheet.png`
+  and `/tmp/tron-psg-evidence/ipd6-direct-branch-file-diff-detail.png`.
+  After the fix and rebuilt app launch, the compact Agent Control Source
+  Control card showed dirty summary counts (`3 files`, `+31`, `-20`) for the
+  direct branch instead of `Direct branch`; screenshot
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-agent-control-dirty-summary-fixed.png`.
+  Worktree invocation evidence:
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-dirty-summary-fixed-db.txt`.
+- Additional focused tests after the dirty-summary fix passed:
+  `git diff --check`; iPad
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/WorktreeStatusCacheTests -only-testing:TronMobileTests/SourceControlCardStateTests`
+  passed 30 XCTest cases plus 6 Swift Testing checks, including
+  `test_refresh_overwritesStaleCleanStatusWithDirtyServerResult`; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-19-03--0700.xcresult`.
 
 Open loops before awarding more iPad points: finish IPD-1 variants, IPD-2
 approval/reconnect/deep-link paths, IPD-3 input/attachments/voice notes, IPD-4

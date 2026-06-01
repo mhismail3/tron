@@ -19,11 +19,10 @@ struct SourceControlSheet: View {
     /// entire sheet stack tears down and the ChatView for the new session
     /// comes into focus.
     var onDismissParent: () -> Void = {}
-    /// Invoked after every git sub-sheet (Commit/Pull/Merge/Push) is
-    /// dismissed. Callers thread this up to `ChatViewModel.requestWorktreeStatus()`
-    /// and the presenting Agent Control source-control summary refresh so
-    /// user-initiated actions refresh every copy of `worktreeStatus`
-    /// regardless of WebSocket event delivery.
+    /// Invoked after source-control status/diff reloads. Callers thread this up
+    /// to `ChatViewModel.requestWorktreeStatus()` and the presenting Agent
+    /// Control source-control summary refresh so every visible copy of
+    /// `worktreeStatus` follows the latest server read.
     var onWorktreeStatusShouldRefresh: (() async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
@@ -153,8 +152,7 @@ struct SourceControlSheet: View {
                     Button {
                         Task {
                             isReloading = true
-                            await loadData()
-                            await loadDivergence()
+                            await reloadDataAndNotifyParent()
                             isReloading = false
                         }
                     } label: {
@@ -187,14 +185,12 @@ struct SourceControlSheet: View {
                 async let defaults: Void = loadGitDefaults()
                 _ = await (data, defaults)
                 await loadDivergence()
+                await onWorktreeStatusShouldRefresh?()
             }
             // Git/worktree events bump the tick; reload both status/diff and
             // repo metadata so visible action gating follows server truth.
             .onChange(of: gitWorkflowState?.sourceControlRefreshTick ?? 0) { _, _ in
-                Task {
-                    await loadData()
-                    await loadDivergence()
-                }
+                Task { await reloadDataAndNotifyParent() }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
@@ -207,7 +203,7 @@ struct SourceControlSheet: View {
                 engineClient: engineClient,
                 sessionId: sessionId,
                 onAction: {
-                    Task { await loadData() }
+                    Task { await reloadDataAndNotifyParent() }
                 },
                 onOpenConflictResolver: {
                     selectedFileDetail = nil
@@ -218,11 +214,7 @@ struct SourceControlSheet: View {
             .adaptivePresentationDetents([.medium, .large])
         }
         .sheet(item: $activeGitAction, onDismiss: {
-            Task {
-                await loadData()
-                await loadDivergence()
-                await onWorktreeStatusShouldRefresh?()
-            }
+            Task { await reloadDataAndNotifyParent() }
         }) { action in
             gitActionSheet(for: action)
         }
@@ -513,9 +505,7 @@ struct SourceControlSheet: View {
             pendingAbortOrigin = nil
             // Refresh so UI reflects the post-abort state immediately
             // rather than waiting on the next event round-trip.
-            await loadData()
-            await loadDivergence()
-            await onWorktreeStatusShouldRefresh?()
+            await reloadDataAndNotifyParent()
         } catch {
             errorMessage = friendlyGitError(error, action: .abort)
             pendingAbortOrigin = nil
@@ -537,6 +527,12 @@ struct SourceControlSheet: View {
     }
 
     // MARK: - Data Loading
+
+    private func reloadDataAndNotifyParent() async {
+        await loadData()
+        await loadDivergence()
+        await onWorktreeStatusShouldRefresh?()
+    }
 
     private func loadData() async {
         do {

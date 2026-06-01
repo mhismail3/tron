@@ -103,6 +103,23 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AgentControlSummaryTests -only-testing:TronMobileTests/SessionUpdatedPluginTests`
   passed 11 XCTest cases, xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-09-49--0700.xcresult`.
+- 2026-06-01 IPD-6 dirty direct-branch audit then found the compact Source
+  Control row could remain stale after the Source Control drill-down refreshed a
+  dirty full diff. Root cause was client projection: ordinary
+  `SourceControlSheet.loadData()` paths did not notify the presenting Agent
+  Control summary or shared `WorktreeStatusCache`; only git sub-sheet dismissals
+  did. Fixed by routing sheet refresh, initial load, event-triggered reloads,
+  file actions, git action dismissals, and abort refreshes through the parent
+  refresh callback. Manual proof after rebuilt app launch showed the compact
+  card rendering `3 files`, `+31`, and `-20` for the dirty direct branch;
+  screenshot
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-agent-control-dirty-summary-fixed.png`,
+  invocation evidence
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-dirty-summary-fixed-db.txt`.
+  Focused iPad tests passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/WorktreeStatusCacheTests -only-testing:TronMobileTests/SourceControlCardStateTests`
+  with 30 XCTest cases plus 6 Swift Testing checks; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-19-03--0700.xcresult`.
 
 ## Verification Plan
 
