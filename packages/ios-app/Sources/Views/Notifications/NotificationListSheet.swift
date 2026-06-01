@@ -37,12 +37,12 @@ enum NotificationInboxFilter: String, CaseIterable, Identifiable {
 @available(iOS 26.0, *)
 struct NotificationListSheet: View {
     let notificationStore: NotificationStore
-    var autoOpenInvocationId: String? = nil
     var onGoToSession: ((String) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+    @Binding var autoOpenInvocationId: String?
     @State private var selectedNotification: NotificationDTO?
-    @State private var didAutoOpen = false
+    @State private var autoOpenedInvocationId: String?
     @State private var filter: NotificationInboxFilter = .all
     @State private var isMarkingAllRead = false
 
@@ -94,17 +94,21 @@ struct NotificationListSheet: View {
                 filterBar
             }
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)
         .presentationDragIndicator(.hidden)
         .task {
             await notificationStore.refresh()
-            // Auto-open matching notification for deep link
-            if !didAutoOpen, let invocationId = autoOpenInvocationId {
-                didAutoOpen = true
-                if let match = notificationStore.notifications.first(where: { $0.invocationId == invocationId }) {
-                    selectedNotification = match
-                }
+            autoOpenPendingNotification()
+        }
+        .onChange(of: autoOpenInvocationId) { _, newInvocationId in
+            if newInvocationId == nil {
+                autoOpenedInvocationId = nil
+                return
             }
+            autoOpenPendingNotification()
+        }
+        .onChange(of: notificationStore.notifications.map(\.invocationId)) { _, _ in
+            autoOpenPendingNotification()
         }
         .sheet(item: $selectedNotification) { notification in
             NotificationInboxDetailSheet(
@@ -117,6 +121,16 @@ struct NotificationListSheet: View {
                 }
             )
         }
+    }
+
+    private func autoOpenPendingNotification() {
+        guard let invocationId = autoOpenInvocationId,
+              autoOpenedInvocationId != invocationId,
+              let match = notificationStore.notifications.first(where: { $0.invocationId == invocationId })
+        else { return }
+
+        autoOpenedInvocationId = invocationId
+        selectedNotification = match
     }
 
     // MARK: - Filter Bar

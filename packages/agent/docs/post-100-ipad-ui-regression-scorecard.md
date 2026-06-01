@@ -6,7 +6,7 @@ Created: 2026-05-31
 
 Initial score: **0/100**
 
-Current score: **5/100**
+Current score: **13/100**
 
 This scorecard owns iPad-specific follow-up coverage that was explicitly moved
 out of `post-100-operating-conditions-scorecard.md` when that plan closed with
@@ -36,7 +36,7 @@ post-100 scorecard.
 | IPD-1 | Dashboard/sidebar session cards | 12 | running | Plain, forked, dirty, isolated, fork+dirty, processing, long-title/path, empty state, tap-open, archive context action, icon contrast, and sidebar preload after relaunch. |
 | IPD-2 | Chat and engine parity | 12 | running | Prompt send, streaming response, capability cards, approval pending/resolved sheets, reconnect/relaunch/deep-link parity, and DB event ordering. |
 | IPD-3 | Input, attachments, voice notes | 8 | running | Text send, queued prompt, stop, attachment add/remove, skills popup, voice-note available/unavailable/record/cancel/submit states on iPad. |
-| IPD-4 | Notifications | 8 | running | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
+| IPD-4 | Notifications | 8 | passed_after_fix | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
 | IPD-5 | Capability, approval, generated UI | 10 | pending | Detail sheets/popovers, approve/deny/double-tap, read-only terminal approvals, generated UI render/refresh/submit/stale action rejection. |
 | IPD-6 | Source control and worktree | 10 | running | Agent Control source-control card, dirty/diff rendering, commit/push/rebase/merge/pull/conflict resolver, disabled destructive actions, and DB policy truth. |
 | IPD-7 | Settings, providers, pairing | 8 | pending | Settings grid/sidebar behavior, server unavailable/retry, pairing/onboarding from Settings, providers/OAuth status, model picker, protected branches, and profile/auth truth. |
@@ -315,11 +315,30 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   APNs evidence for invalid local simulator device tokens while still creating
   inbox-visible resources, which covers the local offline/delivery-failure
   state without treating provider delivery as a UI failure.
+- Follow-up IPD-4 fix after user review found the notification inbox/detail
+  iPad sheets were visually too large and that `tron://notification/<id>` could
+  leave an already-open inbox on the list instead of auto-opening the target
+  detail after refresh. `NotificationListSheet` and
+  `NotificationInboxDetailSheet` now use iPad-only compact liquid-glass form
+  sizing while preserving iPhone detents, and the notification deep-link target
+  is a live binding that retries after notification rows refresh. Focused tests
+  passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests`
+  passed 3 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_15-37-38--0700.xcresult`.
+  Manual iPad proof used the rebuilt app launched as pid `28776`; opening
+  `tron://notification/019e8547-2b34-76d3-8fd4-baff7588277d` with
+  `xcrun simctl openurl` returned `openurl_exit=0`, Computer Use showed the
+  compact glass detail sheet over the split dashboard, and the screenshot is
+  `/tmp/tron-psg-evidence/ipd4-notification-compact-deeplink-detail-fixed.png`.
+  DB evidence includes `notifications::list` invocation
+  `019e8556-5c0c-7ba2-8267-6cd17d4675db` at
+  `2026-06-01T22:38:09.943498+00:00` returning the target notification with
+  `isRead=true` and `deliveryStatus=delivery_failed`.
 
 Open loops before awarding more iPad points: finish IPD-1 processing and
 archive execution confirmation, IPD-2 approval/reconnect/deep-link paths,
-IPD-3 document-file picker and voice-note states, IPD-4 notification deep-link
-and remaining routed notification states, IPD-5
+IPD-3 document-file picker and voice-note states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 provider/pairing details, IPD-8 deeper
 navigation/deep links, IPD-9 keyboard/pointer QA, and IPD-10 closeout.

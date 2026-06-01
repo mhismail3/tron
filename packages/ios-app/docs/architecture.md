@@ -226,7 +226,9 @@ returns, uses the server's global `unreadCount` for badge truth, and surfaces a
 toast if the action fails. Detail mark-read calls carry the row's `sessionId`
 when available; global Read All stays unscoped, while session-open auto-read
 uses `notifications::mark_all_read(sessionId:)` so one session cannot clear
-another session's unread rows.
+another session's unread rows. On iPad, notification inbox and notification
+detail presentations use compact liquid-glass form sizing so the split-view
+dashboard remains visible behind them; iPhone keeps the standard sheet detents.
 
 ### Capability Console Boundary
 

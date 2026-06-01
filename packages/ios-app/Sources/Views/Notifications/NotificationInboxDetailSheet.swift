@@ -77,7 +77,7 @@ struct NotificationInboxDetailSheet: View {
                     }
                 }
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .task {

@@ -169,15 +169,7 @@ struct ContentView: View {
             .sheet(isPresented: $showNotificationSheet, onDismiss: {
                 notificationAutoOpenInvocationId = nil
             }) {
-                NotificationListSheet(
-                    notificationStore: notificationStore,
-                    autoOpenInvocationId: notificationAutoOpenInvocationId,
-                    onGoToSession: { sessionId in
-                        showNotificationSheet = false
-                        navigationMode = .agents
-                        selectedSessionId = sessionId
-                    }
-                )
+                notificationSheet
             }
             .onChange(of: selectedSessionId) { _, newValue in
                 coordinator?.handleSessionSelection(newValue)
@@ -205,6 +197,20 @@ struct ContentView: View {
             notificationUnreadCount: notificationStore.unreadCount,
             onNotificationBell: { showNotificationSheet = true }
         )
+    }
+
+    private var notificationSheet: some View {
+        NotificationListSheet(
+            notificationStore: notificationStore,
+            onGoToSession: openNotificationSession,
+            autoOpenInvocationId: $notificationAutoOpenInvocationId
+        )
+    }
+
+    private func openNotificationSession(_ sessionId: String) {
+        showNotificationSheet = false
+        navigationMode = .agents
+        selectedSessionId = sessionId
     }
 
     @ViewBuilder
