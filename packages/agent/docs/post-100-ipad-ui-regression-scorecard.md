@@ -376,12 +376,22 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `message_count=6`, `event_count=23`, `turn_count=4`, with latest
   `message.assistant.turn=4` and `stop_reason=interrupted`, plus a
   `notification.interrupted` event.
+- Additional IPD-7 model-picker proof opened Agent Control's Model row and
+  verified the iPad Models sheet without changing the selected model. Screenshot
+  `/tmp/tron-psg-evidence/ipd7-model-picker-ollama-ipad.png` shows a compact
+  glass sheet with Anthropic, OpenAI, Google, MiniMax, Kimi, and Ollama
+  providers, the Ollama group expanded, `Gemma 4 E4B` selected, and
+  `Gemma 4 26B` visibly marked unavailable. Server evidence in
+  `/tmp/tron-psg-evidence/ipd7-model-picker-db.json` records the latest
+  `model::list` invocation plus the direct-branch session's `latest_model`
+  `gemma4:e4b`.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation and any remaining sidebar preload/relaunch assertions, IPD-2
 approval/reconnect/deep-link paths,
 IPD-3 voice-note states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
-actions and conflict resolver, IPD-7 provider/pairing details, IPD-8
+actions and conflict resolver, IPD-7 provider settings, pairing/onboarding,
+protected branches, profile/auth, and unavailable-server details, IPD-8
 load-earlier pagination, back/session-tree behavior, and history/fork sheet
 paths, IPD-9 keyboard/pointer QA, and IPD-10 closeout.

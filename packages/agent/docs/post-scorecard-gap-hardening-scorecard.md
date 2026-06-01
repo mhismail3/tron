@@ -281,6 +281,13 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `message_count=6`, `event_count=23`, `turn_count=4`, latest
   `message.assistant.turn=4`, `stop_reason=interrupted`, and a
   `notification.interrupted` row.
+- IPD-7 model-picker proof opened Agent Control's Model row without changing
+  settings. Screenshot `/tmp/tron-psg-evidence/ipd7-model-picker-ollama-ipad.png`
+  shows the compact iPad Models sheet with Anthropic, OpenAI, Google, MiniMax,
+  Kimi, and Ollama providers; Ollama expanded; `Gemma 4 E4B` selected; and
+  `Gemma 4 26B` marked unavailable. Server evidence
+  `/tmp/tron-psg-evidence/ipd7-model-picker-db.json` records the latest
+  `model::list` invocation and session `latest_model=gemma4:e4b`.
 
 ## Verification Plan
 
@@ -335,7 +342,8 @@ UDID before continuing.
   delivery-failure/badge-clearing, deep-link, and iPad compact-sheet paths now
   have live iPad proof and focused regression coverage; IPD-8 session,
   capability, event, and cold-start deep-link paths have live iPad proof; IPD-1
-  processing and IPD-3 Stop Agent/interruption paths have live proof.
+  processing and IPD-3 Stop Agent/interruption paths have live proof; IPD-7
+  model-picker/provider list rendering has live iPad proof.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
