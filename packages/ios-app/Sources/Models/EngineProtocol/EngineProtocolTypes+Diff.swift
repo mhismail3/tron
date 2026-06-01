@@ -6,6 +6,17 @@ struct WorktreeGetDiffParams: Encodable {
     let sessionId: String
 }
 
+struct WorktreeGetDiffSummaryParams: Encodable {
+    let sessionId: String
+}
+
+struct WorktreeGetDiffSummaryResult: Decodable, Equatable {
+    let isGitRepo: Bool
+    let branch: String?
+    let summary: DiffFileSummary?
+    let truncated: Bool?
+}
+
 struct WorktreeGetDiffResult: Decodable, Equatable {
     let isGitRepo: Bool
     let branch: String?

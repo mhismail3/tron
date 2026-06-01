@@ -279,6 +279,41 @@ struct WorktreeGetDiffResultDecodingTests {
     }
 }
 
+@Suite("WorktreeGetDiffSummaryResult Decoding")
+struct WorktreeGetDiffSummaryResultDecodingTests {
+    @Test("Decodes summary response without file entries")
+    func decodesSummaryResponse() throws {
+        let json = """
+        {
+            "isGitRepo": true,
+            "branch": "feature/xyz",
+            "summary": {
+                "totalFiles": 2,
+                "totalAdditions": 12,
+                "totalDeletions": 1
+            }
+        }
+        """.data(using: .utf8)!
+        let result = try JSONDecoder().decode(WorktreeGetDiffSummaryResult.self, from: json)
+        #expect(result.isGitRepo == true)
+        #expect(result.branch == "feature/xyz")
+        #expect(result.summary?.totalFiles == 2)
+        #expect(result.summary?.totalAdditions == 12)
+        #expect(result.summary?.totalDeletions == 1)
+    }
+
+    @Test("Decodes non-git summary response")
+    func decodesNonGitSummaryResponse() throws {
+        let json = """
+        { "isGitRepo": false }
+        """.data(using: .utf8)!
+        let result = try JSONDecoder().decode(WorktreeGetDiffSummaryResult.self, from: json)
+        #expect(result.isGitRepo == false)
+        #expect(result.branch == nil)
+        #expect(result.summary == nil)
+    }
+}
+
 @Suite("StagingArea Enum")
 struct StagingAreaTests {
 

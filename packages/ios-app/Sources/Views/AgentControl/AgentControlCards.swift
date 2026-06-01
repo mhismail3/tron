@@ -253,23 +253,6 @@ struct SourceControlCardView: View {
 enum AgentControlCardMetricText {
     static let loadingPlaceholder = "..."
 
-    static func isEventSummaryPending(
-        isLoadingEvents: Bool,
-        sessionEventCount: Int,
-        analyticsTurnCount: Int,
-        turnGroupCount: Int,
-        currentContextTokens: Int
-    ) -> Bool {
-        if isLoadingEvents && analyticsTurnCount == 0 && turnGroupCount == 0 {
-            return true
-        }
-
-        return currentContextTokens > 0
-            && sessionEventCount == 0
-            && analyticsTurnCount == 0
-            && turnGroupCount == 0
-    }
-
     static func analyticsTokens(_ totalTokens: Int, isLoading: Bool) -> String {
         isLoading ? loadingPlaceholder : TokenFormatter.format(totalTokens)
     }

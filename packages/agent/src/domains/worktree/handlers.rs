@@ -31,6 +31,11 @@ operation_bindings! {
         "get_diff" => |invocation, deps| {
             GetDiffOperation.run(Some(invocation.payload.clone()), deps).await
         },
+        "get_diff_summary" => |invocation, deps| {
+            GetDiffSummaryOperation
+                .run(Some(invocation.payload.clone()), deps)
+                .await
+        },
         "acquire" => |invocation, deps| {
             AcquireOperation.run(Some(invocation.payload.clone()), deps).await
         },

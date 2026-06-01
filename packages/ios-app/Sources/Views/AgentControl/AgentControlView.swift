@@ -26,8 +26,8 @@ struct AgentControlView: View {
     var gitWorkflowState: GitWorkflowState?
     /// Invoked when a source-control sub-sheet dismisses so the parent (the
     /// chat's ChatViewModel) can refresh its own `worktreeState`. We chain
-    /// this alongside the local `loadChanges()` so the Agent Control card,
-    /// the Source Control sheet, and the chat toolbar all see the same
+    /// this alongside the local source-control summary refresh so the Agent
+    /// Control card, the Source Control sheet, and the chat toolbar all see the same
     /// post-action state deterministically, without waiting on a server
     /// event that may arrive late or be dropped.
     var onWorktreeStatusShouldRefresh: (() async -> Void)?
@@ -39,7 +39,6 @@ struct AgentControlView: View {
 
     // MARK: - Context State
 
-    @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var detailedSnapshot: DetailedContextSnapshotResult?
     @State private var showContextDetail = false
@@ -54,11 +53,13 @@ struct AgentControlView: View {
 
     // MARK: - Session State
 
-    @State private var diffResult: WorktreeGetDiffResult?
+    @State private var diffSummaryResult: WorktreeGetDiffSummaryResult?
     @State private var worktreeStatus: WorktreeGetStatusResult?
     @State private var branches: [SessionBranchInfo] = []
     @State private var sessionEvents: [SessionEvent] = []
-    @State private var isLoadingEvents = true
+    @State private var isLoadingSourceControl = true
+    @State private var isRefreshingEvents = false
+    @State private var agentSummary = AgentControlSummary.unknown
     @State private var cachedAnalytics = ConsolidatedAnalytics(from: [])
     @State private var cachedTurnGroups: [TurnGroup] = []
 
@@ -71,24 +72,39 @@ struct AgentControlView: View {
     private var sourceControlCardState: SourceControlCardState {
         SourceControlCardState(
             worktreeStatus: worktreeStatus,
-            diffResult: diffResult,
-            isLoading: isLoading,
-            workspacePath: detailedSnapshot?.environment?.workingDirectory
+            diffSummaryResult: diffSummaryResult,
+            isLoading: isLoadingSourceControl,
+            workspacePath: detailedSnapshot?.environment?.workingDirectory ?? cachedSessionInMemory?.workingDirectory
         )
     }
 
-    private var analyticsTotalTokens: Int {
-        cachedAnalytics.turns.reduce(0) { $0 + $1.totalTokens }
+    private var cachedSessionInMemory: CachedSession? {
+        eventStoreManager.sessions.first { $0.id == sessionId }
     }
 
-    private var isEventSummaryPending: Bool {
-        AgentControlCardMetricText.isEventSummaryPending(
-            isLoadingEvents: isLoadingEvents,
-            sessionEventCount: sessionEvents.count,
-            analyticsTurnCount: cachedAnalytics.turns.count,
-            turnGroupCount: cachedTurnGroups.count,
-            currentContextTokens: detailedSnapshot?.currentTokens ?? 0
-        )
+    private var contextCurrentTokens: Int {
+        detailedSnapshot?.currentTokens ?? contextState?.contextWindowTokens ?? 0
+    }
+
+    private var contextLimit: Int {
+        let fallback = contextState?.currentContextWindow ?? 0
+        return detailedSnapshot?.contextLimit ?? (fallback > 0 ? fallback : 1)
+    }
+
+    private var contextUsagePercent: Double {
+        if let percent = detailedSnapshot?.usagePercent { return percent }
+        guard contextLimit > 0 else { return 0 }
+        return Double(contextCurrentTokens) / Double(contextLimit)
+    }
+
+    private var contextThresholdLevel: String {
+        if let level = detailedSnapshot?.thresholdLevel { return level }
+        switch contextUsagePercent {
+        case 0.9...: return "critical"
+        case 0.75...: return "alert"
+        case 0.6...: return "warning"
+        default: return "normal"
+        }
     }
 
     // MARK: - Body
@@ -141,12 +157,12 @@ struct AgentControlView: View {
                 SourceControlSheet(
                     engineClient: engineClient,
                     sessionId: sessionId,
-                    initialDiffResult: diffResult,
+                    initialDiffResult: nil,
                     initialWorktreeStatus: worktreeStatus,
                     gitWorkflowState: gitWorkflowState,
                     onDismissParent: { dismiss() },
                     onWorktreeStatusShouldRefresh: {
-                        await loadChanges()
+                        await loadSourceControlSummary(forceStatusRefresh: true)
                         await onWorktreeStatusShouldRefresh?()
                     }
                 )
@@ -159,7 +175,7 @@ struct AgentControlView: View {
                 Task { await reloadContextInBackground() }
             }
             .onChange(of: gitWorkflowState?.sourceControlRefreshTick ?? 0) { _, _ in
-                Task { await loadChanges() }
+                Task { await loadSourceControlSummary(forceStatusRefresh: true) }
             }
         }
         .adaptivePresentationDetents([.medium, .large])
@@ -189,10 +205,10 @@ struct AgentControlView: View {
                 VStack(spacing: 12) {
                     // Context gauge
                     ContextUsageGaugeView(
-                        currentTokens: detailedSnapshot?.currentTokens ?? 0,
-                        contextLimit: detailedSnapshot?.contextLimit ?? 1,
-                        usagePercent: detailedSnapshot?.usagePercent ?? 0,
-                        thresholdLevel: detailedSnapshot?.thresholdLevel ?? "normal",
+                        currentTokens: contextCurrentTokens,
+                        contextLimit: contextLimit,
+                        usagePercent: contextUsagePercent,
+                        thresholdLevel: contextThresholdLevel,
                         onTap: {
                             showContextDetail = true
                         }
@@ -225,21 +241,27 @@ struct AgentControlView: View {
 
                     // Analytics card
                     AnalyticsCardView(
-                        totalTokens: analyticsTotalTokens,
-                        totalCost: cachedAnalytics.totalCost,
-                        totalTurns: cachedAnalytics.turns.count,
-                        isLoading: isEventSummaryPending,
-                        onTap: { showAnalytics = true }
+                        totalTokens: agentSummary.totalTokens,
+                        totalCost: agentSummary.totalCost,
+                        totalTurns: agentSummary.totalTurns,
+                        isLoading: !agentSummary.isKnown,
+                        onTap: {
+                            showAnalytics = true
+                            Task { await refreshEventsForDetailIfNeeded() }
+                        }
                     )
                     .padding(.horizontal)
                     .cardEntrance(visible: cardsVisible, index: 3)
 
                     // History card
                     HistoryCardView(
-                        totalTurns: cachedTurnGroups.count,
-                        totalCapabilityInvocations: cachedAnalytics.totalCapabilityInvocations,
-                        isLoading: isEventSummaryPending,
-                        onTap: { showHistory = true }
+                        totalTurns: agentSummary.totalTurns,
+                        totalCapabilityInvocations: agentSummary.totalCapabilityInvocations,
+                        isLoading: !agentSummary.isKnown,
+                        onTap: {
+                            showHistory = true
+                            Task { await refreshEventsForDetailIfNeeded() }
+                        }
                     )
                     .padding(.horizontal)
                     .cardEntrance(visible: cardsVisible, index: 4)
@@ -259,89 +281,243 @@ struct AgentControlView: View {
     // MARK: - Data Loading
 
     private func loadAll() async {
-        isLoading = true
+        let sheetStart = Date()
         errorMessage = nil
 
+        await seedSummaryFromCachedSession(freshness: .cached)
+        seedSourceControlFromCache()
         cardsVisible = true
 
         async let contextTask: Void = loadContext()
-        async let changesTask: Void = loadChanges()
-        async let eventsTask: Void = loadEvents()
+        async let changesTask: Void = loadSourceControlSummary()
+        async let eventsTask: Void = loadLocalEvents()
+        async let summaryRefreshTask: Void = refreshSessionSummaryInBackground()
         async let branchTask: Void = loadBranches()
 
-        _ = await (contextTask, changesTask, eventsTask, branchTask)
-        isLoading = false
+        _ = await (contextTask, changesTask, eventsTask, summaryRefreshTask, branchTask)
+        logTiming("sheet initial load", startedAt: sheetStart)
     }
 
     private func loadContext() async {
+        let startedAt = Date()
         do {
             detailedSnapshot = try await engineClient.context.getDetailedSnapshot(sessionId: sessionId)
+            if let detailedSnapshot {
+                contextState?.syncFromServerSnapshot(
+                    currentTokens: detailedSnapshot.currentTokens,
+                    contextLimit: detailedSnapshot.contextLimit
+                )
+            }
+            logTiming("context snapshot", startedAt: startedAt)
         } catch {
             errorMessage = error.localizedDescription
+            logTiming("context snapshot failed", startedAt: startedAt)
         }
     }
 
     private func reloadContextInBackground() async {
+        let startedAt = Date()
         do {
             detailedSnapshot = try await engineClient.context.getDetailedSnapshot(sessionId: sessionId)
             pendingSkillDeletions.removeAll()
+            logTiming("context background refresh", startedAt: startedAt)
         } catch {
             errorMessage = error.localizedDescription
+            logTiming("context background refresh failed", startedAt: startedAt)
         }
     }
 
-    private func loadChanges() async {
+    private func seedSourceControlFromCache() {
+        let startedAt = Date()
+        if let cached = eventStoreManager.worktreeStatusCache.status(for: sessionId) {
+            worktreeStatus = cached
+            isLoadingSourceControl = cached.worktree?.hasUncommittedChanges == true
+            logTiming("worktree cache hit", startedAt: startedAt)
+        } else {
+            isLoadingSourceControl = true
+            logTiming("worktree cache miss", startedAt: startedAt)
+        }
+    }
+
+    private func loadSourceControlSummary(forceStatusRefresh: Bool = false) async {
+        let startedAt = Date()
+        isLoadingSourceControl = worktreeStatus == nil || worktreeStatus?.worktree?.hasUncommittedChanges == true
+
+        if forceStatusRefresh {
+            eventStoreManager.worktreeStatusCache.invalidate(sessionId: sessionId)
+            diffSummaryResult = nil
+        }
+
+        if worktreeStatus == nil || forceStatusRefresh {
+            await eventStoreManager.worktreeStatusCache.ensureLoaded(sessionId: sessionId)
+            worktreeStatus = eventStoreManager.worktreeStatusCache.status(for: sessionId)
+        }
+
+        guard let status = worktreeStatus else {
+            isLoadingSourceControl = false
+            logTiming("worktree status unavailable", startedAt: startedAt)
+            return
+        }
+
+        guard status.hasSourceControlCheckout else {
+            diffSummaryResult = nil
+            isLoadingSourceControl = false
+            logTiming("worktree no checkout", startedAt: startedAt)
+            return
+        }
+
+        guard status.worktree?.hasUncommittedChanges != false else {
+            diffSummaryResult = WorktreeGetDiffSummaryResult(
+                isGitRepo: true,
+                branch: status.worktree?.branch,
+                summary: DiffFileSummary(totalFiles: 0, totalAdditions: 0, totalDeletions: 0),
+                truncated: false
+            )
+            isLoadingSourceControl = false
+            logTiming("worktree clean status", startedAt: startedAt)
+            return
+        }
+
         do {
-            let status = try await engineClient.worktree.getStatus(sessionId: sessionId)
-            worktreeStatus = status
-
-            guard status.hasSourceControlCheckout else {
-                diffResult = nil
-                return
-            }
-
-            diffResult = try await engineClient.worktree.getWorkingDirectoryDiff(sessionId: sessionId)
+            diffSummaryResult = try await engineClient.worktree.getWorkingDirectoryDiffSummary(sessionId: sessionId)
+            isLoadingSourceControl = false
+            logTiming("worktree diff summary", startedAt: startedAt)
         } catch {
-            diffResult = nil
+            diffSummaryResult = nil
+            isLoadingSourceControl = false
             errorMessage = "Failed to load changes: \(error.localizedDescription)"
+            logTiming("worktree diff summary failed", startedAt: startedAt)
         }
     }
 
-    private func loadEvents() async {
-        if sessionEvents.isEmpty {
-            isLoadingEvents = true
+    private func loadLocalEvents() async {
+        let startedAt = Date()
+        do {
+            let events = try await eventStoreManager.getSessionEvents(sessionId)
+            await applyEventSummary(events, freshness: .cached)
+            logTiming("local events read", startedAt: startedAt)
+        } catch {
+            // Non-critical: analytics and history gracefully degrade to empty
+            logTiming("local events read failed", startedAt: startedAt)
         }
-        defer { isLoadingEvents = false }
+    }
+
+    private func refreshSessionSummaryInBackground() async {
+        let startedAt = Date()
+        if agentSummary.isKnown {
+            agentSummary = agentSummary.withFreshness(.refreshing)
+        }
+
+        await eventStoreManager.refreshSessionList()
+        await seedSummaryFromCachedSession(
+            freshness: sessionEvents.isEmpty ? .fresh : agentSummary.freshness
+        )
+
+        if agentSummary.freshness == .refreshing {
+            agentSummary = agentSummary.withFreshness(.fresh)
+        }
+        logTiming("session summary refresh", startedAt: startedAt)
+    }
+
+    private func refreshEventsForDetailIfNeeded() async {
+        guard !isRefreshingEvents else { return }
+        isRefreshingEvents = true
+        let startedAt = Date()
+        if agentSummary.isKnown {
+            agentSummary = agentSummary.withFreshness(.refreshing)
+        }
+        defer {
+            isRefreshingEvents = false
+            logTiming("remote event sync", startedAt: startedAt)
+        }
 
         do {
             try await eventStoreManager.syncSessionEvents(sessionId: sessionId)
             let events = try await eventStoreManager.getSessionEvents(sessionId)
-            sessionEvents = events
-
-            let analytics = ConsolidatedAnalytics(from: events)
-            cachedAnalytics = analytics
-
-            let filtered = events.filter { event in
-                switch event.eventType {
-                case .streamTurnStart, .streamTurnEnd, .streamTextDelta,
-                     .streamThinkingDelta, .streamThinkingComplete, .compactBoundary:
-                    return false
-                default:
-                    return true
-                }
-            }
-            cachedTurnGroups = TurnGrouping.group(
-                events: filtered,
-                analytics: analytics,
-                currentSessionId: sessionId
-            )
+            await applyEventSummary(events, freshness: .fresh)
         } catch {
-            // Non-critical: analytics and history gracefully degrade to empty
+            if agentSummary.freshness == .refreshing {
+                agentSummary = agentSummary.withFreshness(.cached)
+            }
         }
     }
 
     private func loadBranches() async {
+        let startedAt = Date()
         branches = (try? await engineClient.worktree.listSessionBranches(sessionId: sessionId)) ?? []
+        logTiming("session branches", startedAt: startedAt)
+    }
+
+    private func seedSummaryFromCachedSession(freshness: AgentControlSummary.Freshness) async {
+        let startedAt = Date()
+        guard let session = await cachedSession() else {
+            if !agentSummary.isKnown {
+                agentSummary = .unknown
+            }
+            logTiming("local session summary miss", startedAt: startedAt)
+            return
+        }
+
+        if sessionEvents.isEmpty {
+            agentSummary = AgentControlSummary.fromSession(session, freshness: freshness)
+        } else {
+            agentSummary = AgentControlSummary.fromEvents(
+                sessionEvents,
+                analytics: cachedAnalytics,
+                turnGroups: cachedTurnGroups,
+                fallbackSession: session,
+                freshness: freshness
+            )
+        }
+        logTiming("local session summary", startedAt: startedAt)
+    }
+
+    private func applyEventSummary(
+        _ events: [SessionEvent],
+        freshness: AgentControlSummary.Freshness
+    ) async {
+        let startedAt = Date()
+        sessionEvents = events
+
+        let analytics = ConsolidatedAnalytics(from: events)
+        cachedAnalytics = analytics
+
+        let filtered = events.filter { event in
+            switch event.eventType {
+            case .streamTurnStart, .streamTurnEnd, .streamTextDelta,
+                 .streamThinkingDelta, .streamThinkingComplete, .compactBoundary:
+                return false
+            default:
+                return true
+            }
+        }
+        cachedTurnGroups = TurnGrouping.group(
+            events: filtered,
+            analytics: analytics,
+            currentSessionId: sessionId
+        )
+        agentSummary = AgentControlSummary.fromEvents(
+            events,
+            analytics: analytics,
+            turnGroups: cachedTurnGroups,
+            fallbackSession: await cachedSession(),
+            freshness: freshness
+        )
+        logTiming("agent summary build", startedAt: startedAt)
+    }
+
+    private func cachedSession() async -> CachedSession? {
+        if let inMemory = cachedSessionInMemory {
+            return inMemory
+        }
+        return try? await eventStoreManager.eventDB.sessions.get(sessionId)
+    }
+
+    private func logTiming(_ label: String, startedAt: Date) {
+        #if DEBUG || BETA
+        let elapsedMs = Int(Date().timeIntervalSince(startedAt) * 1000)
+        logger.debug("[AgentControlLoad] \(label) \(elapsedMs)ms", category: .ui)
+        #endif
     }
 
     // MARK: - Retain Button

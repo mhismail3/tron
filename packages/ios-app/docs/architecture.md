@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-31 (dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-01 (Agent Control local-first card summaries, lightweight source-control diff summary loading, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -363,13 +363,19 @@ directly and clears inherited sheet transactions before applying it, so iOS 26
 Liquid Glass container bounds do not inherit presentation springs or stretch
 during the sheet's own open animation.
 The Source Control card uses the branch glyph as its primary icon and remains a
-thin projection of `worktree::get_status`; branch, dirty, conflict, and action
-counts come from server status rather than local git inspection. A passthrough
-repo status (`hasWorktree=true` with `worktree.isolated=false`) renders as a
-direct-branch checkout: the Source Control card, diff list, commit sheet, repo
-metadata, and safe direct-branch push controls stay available. Merge, rebase,
-finalize, sibling-session branch coordination, and conflict automation remain
-disabled unless `worktree.get_status` reports an isolated session worktree.
+thin projection of server truth: `WorktreeStatusCache`/`worktree::get_status`
+hydrates branch and dirty state immediately, and `worktree::get_diff_summary`
+adds aggregate file/addition/deletion counts without loading unified patch text.
+Full `worktree::get_diff` data is deferred to the Source Control drill-down
+sheet. Analytics and History cards seed from local `CachedSession` counters and
+local EventDatabase rows before background session/event refreshes reconcile
+them, so valid zero values render as values rather than loading placeholders.
+A passthrough repo status (`hasWorktree=true` with `worktree.isolated=false`)
+renders as a direct-branch checkout: the Source Control card, diff list, commit
+sheet, repo metadata, and safe direct-branch push controls stay available. Merge,
+rebase, finalize, sibling-session branch coordination, and conflict automation
+remain disabled unless `worktree.get_status` reports an isolated session
+worktree.
 
 ## Dependency Injection
 

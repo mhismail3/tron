@@ -56,6 +56,12 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .description("Read the bounded current session worktree diff, optionally limited to one file, without running shell commands.")
             .tags(vec!["diff", "changes", "git", "repo", "repository", "worktree", "uncommitted", "summary"])
             .build()?,
+        CapabilityContract::new("worktree::get_diff_summary", "worktree", EffectClass::PureRead, RiskLevel::Low, Some("worktree.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .description("Read a lightweight current session worktree change summary without unified diff text or untracked file contents.")
+            .tags(vec!["diff", "changes", "git", "repo", "repository", "worktree", "uncommitted", "summary", "fast"])
+            .build()?,
         CapabilityContract::new("worktree::acquire", "worktree", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("worktree.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))

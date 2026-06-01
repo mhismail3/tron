@@ -49,6 +49,7 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let sessionId: String
     let model: String
     let createdAt: String
+    let eventCount: Int?
     let messageCount: Int
     let inputTokens: Int?
     let outputTokens: Int?

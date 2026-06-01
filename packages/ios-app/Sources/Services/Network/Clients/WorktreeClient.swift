@@ -119,6 +119,13 @@ final class WorktreeClient: EngineDomainClient {
         return try await invokeRead("worktree::get_diff", params)
     }
 
+    /// Get a lightweight uncommitted-change summary without unified diff text
+    func getWorkingDirectoryDiffSummary(sessionId: String) async throws -> WorktreeGetDiffSummaryResult {
+        _ = try requireTransport().requireConnection()
+        let params = WorktreeGetDiffSummaryParams(sessionId: sessionId)
+        return try await invokeRead("worktree::get_diff_summary", params)
+    }
+
     // MARK: - Stage / Unstage / Discard
 
     /// Stage files in the working directory

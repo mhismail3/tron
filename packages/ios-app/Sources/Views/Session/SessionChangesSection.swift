@@ -40,15 +40,15 @@ struct SessionChangesSection: View {
     // MARK: - Section Header
 
     private var totalFiles: Int {
-        stagedFiles.count + unstagedFiles.count
+        diffResult?.summary?.totalFiles ?? (stagedFiles.count + unstagedFiles.count)
     }
 
     private var totalAdditions: Int {
-        (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.additions }
+        diffResult?.summary?.totalAdditions ?? (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.additions }
     }
 
     private var totalDeletions: Int {
-        (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.deletions }
+        diffResult?.summary?.totalDeletions ?? (stagedFiles + unstagedFiles).reduce(0) { $0 + $1.deletions }
     }
 
     private var sectionHeader: some View {

@@ -115,4 +115,25 @@ struct WorktreeClientTests {
             _ = try await client.getWorkingDirectoryDiff(sessionId: "test-session")
         }
     }
+
+    @Test("getWorkingDirectoryDiffSummary invokes summary capability")
+    func getWorkingDirectoryDiffSummaryInvokesSummaryCapability() async throws {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(serverURL: URL(string: "ws://127.0.0.1:9847/engine")!)
+        transport.connectionState = .connected
+        let client = WorktreeClient(transport: transport)
+        transport.readHandler = { functionId, payload, _ in
+            #expect(functionId.rawValue == "worktree::get_diff_summary")
+            #expect((payload as? WorktreeGetDiffSummaryParams)?.sessionId == "session-123")
+            return WorktreeGetDiffSummaryResult(
+                isGitRepo: true,
+                branch: "main",
+                summary: DiffFileSummary(totalFiles: 1, totalAdditions: 2, totalDeletions: 0),
+                truncated: false
+            )
+        }
+
+        let result = try await client.getWorkingDirectoryDiffSummary(sessionId: "session-123")
+        #expect(result.summary?.totalFiles == 1)
+    }
 }

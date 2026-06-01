@@ -18,7 +18,7 @@ struct SourceControlCardState: Equatable {
 
     init(
         worktreeStatus: WorktreeGetStatusResult?,
-        diffResult: WorktreeGetDiffResult?,
+        diffSummaryResult: WorktreeGetDiffSummaryResult?,
         isLoading: Bool,
         workspacePath: String?
     ) {
@@ -47,10 +47,10 @@ struct SourceControlCardState: Equatable {
         }
 
         isVisible = true
-        isGitRepo = diffResult?.isGitRepo
+        isGitRepo = diffSummaryResult?.isGitRepo
         let isPassthrough = worktreeStatus.worktree?.isolated == false
 
-        if diffResult?.isGitRepo == false {
+        if diffSummaryResult?.isGitRepo == false {
             branchLabel = "Untracked"
             detailLabel = workspacePath?.abbreviatingHomeDirectory ?? "Not a git repository"
             totalFiles = 0
@@ -59,24 +59,23 @@ struct SourceControlCardState: Equatable {
             return
         }
 
-        branchLabel = worktreeStatus.worktree?.shortBranch ?? diffResult?.branch ?? "Loading..."
+        branchLabel = worktreeStatus.worktree?.shortBranch ?? diffSummaryResult?.branch ?? "Loading..."
 
-        let summary = diffResult?.summary
+        let summary = diffSummaryResult?.summary
         if let summary {
             totalFiles = summary.totalFiles
             totalAdditions = summary.totalAdditions
             totalDeletions = summary.totalDeletions
         } else {
-            let files = diffResult?.files ?? []
-            totalFiles = files.count
-            totalAdditions = files.reduce(0) { $0 + $1.additions }
-            totalDeletions = files.reduce(0) { $0 + $1.deletions }
+            totalFiles = 0
+            totalAdditions = 0
+            totalDeletions = 0
         }
 
         if totalFiles > 0 {
             detailLabel = "\(totalFiles) \(totalFiles == 1 ? "file" : "files")"
-        } else if diffResult == nil {
-            detailLabel = "Loading..."
+        } else if worktreeStatus.worktree?.hasUncommittedChanges == true && diffSummaryResult == nil {
+            detailLabel = isLoading ? "Loading..." : "Changes unavailable"
         } else if isPassthrough {
             detailLabel = "Direct branch"
         } else {

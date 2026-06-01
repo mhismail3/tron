@@ -21,8 +21,9 @@ struct SourceControlSheet: View {
     var onDismissParent: () -> Void = {}
     /// Invoked after every git sub-sheet (Commit/Pull/Merge/Push) is
     /// dismissed. Callers thread this up to `ChatViewModel.requestWorktreeStatus()`
-    /// and `AgentControlView.loadChanges()` so user-initiated actions refresh
-    /// every copy of `worktreeStatus` regardless of WebSocket event delivery.
+    /// and the presenting Agent Control source-control summary refresh so
+    /// user-initiated actions refresh every copy of `worktreeStatus`
+    /// regardless of WebSocket event delivery.
     var onWorktreeStatusShouldRefresh: (() async -> Void)?
 
     @Environment(\.dismiss) private var dismiss
