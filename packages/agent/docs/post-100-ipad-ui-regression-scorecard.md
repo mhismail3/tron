@@ -104,6 +104,38 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd-history-detail-compact-glass.png` showed
   pre-session activity plus turns 1, 2, and 3, including the capability
   invocation turn, from the compact iPad sheet.
+- Additional IPD-6 live-update failure found and fixed: a newly seeded isolated
+  worktree session `sess_019e84f6-3d34-70a3-b083-812988035042` showed the
+  correct isolated Source Control branch after acquiring a worktree, but Agent
+  Control History regressed to `0 turns` after the first same-device run while
+  the server DB already had `turn_count=1`. Root cause was the live
+  `session.updated` contract and local projection: completion/model-switch
+  updates did not carry `eventCount`/`turnCount`, the model-switch path also
+  sent `event_count` as `messageCount`, and Agent Control preferred a stale
+  in-memory `CachedSession` over the freshly refreshed persisted summary.
+  Fixes added `eventCount`/`turnCount` to `TronEvent::SessionUpdated`, stream
+  projection, completion and model-switch emits, iOS `SessionUpdatedPlugin`,
+  `EventStoreManager.handleSessionUpdated`, and Agent Control summary merging.
+  Title-only session updates still omit all count fields.
+- Live iPad proof after the fix used the same open iPad Simulator and no app
+  relaunch after the second prompt. Agent Control showed Source Control
+  `019e84f6`, `No changes`, Analytics `11.0k`/`$0.00`, and History `2 turns`.
+  Screenshot:
+  `/tmp/tron-psg-evidence/ipd6-isolated-agent-control-live-turncount-fix.png`.
+  DB evidence:
+  `/tmp/tron-psg-evidence/ipd6-isolated-agent-control-live-turncount-db.txt`
+  shows `message_count=4`, `event_count=15`, `turn_count=2`,
+  `total_input_tokens=10935`, `total_output_tokens=86`, cache totals `0`,
+  cost `0.0`, plus two user messages, two assistant messages, two
+  `stream.turn_start`, two `stream.turn_end`, and one `worktree.acquired`.
+- Additional focused tests after the live-update fix passed:
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check &&
+  cargo test --manifest-path packages/agent/Cargo.toml session_updated --lib
+  -- --nocapture` passed 2 Rust tests; iPad
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AgentControlSummaryTests -only-testing:TronMobileTests/SessionUpdatedPluginTests`
+  passed 11 XCTest cases, including both persisted-newer and live-memory-newer
+  Agent Control merge paths; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-09-49--0700.xcresult`.
 
 Open loops before awarding more iPad points: finish IPD-1 variants, IPD-2
 approval/reconnect/deep-link paths, IPD-3 input/attachments/voice notes, IPD-4

@@ -282,6 +282,8 @@ final class EventStoreManager {
         updateSession(at: index) { session in
             if let title = result.title { session.title = title }
             if let model = result.model { session.latestModel = model }
+            if let count = result.eventCount { session.eventCount = count }
+            if let count = result.turnCount { session.turnCount = count }
             if let count = result.messageCount { session.messageCount = count }
             if let tokens = result.inputTokens { session.inputTokens = tokens }
             if let tokens = result.outputTokens { session.outputTokens = tokens }

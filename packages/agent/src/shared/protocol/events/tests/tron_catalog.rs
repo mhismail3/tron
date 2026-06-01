@@ -268,6 +268,8 @@ fn tron_event_all_event_types() {
             base: base.clone(),
             title: None,
             model: Some("m".into()),
+            event_count: Some(0),
+            turn_count: Some(0),
             message_count: Some(0),
             input_tokens: Some(0),
             output_tokens: Some(0),

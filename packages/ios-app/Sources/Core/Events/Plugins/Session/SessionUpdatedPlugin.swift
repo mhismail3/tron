@@ -18,6 +18,8 @@ enum SessionUpdatedPlugin: EventPlugin {
             let sessionId: String?
             let title: String?
             let model: String?
+            let eventCount: Int?
+            let turnCount: Int?
             let messageCount: Int?
             let inputTokens: Int?
             let outputTokens: Int?
@@ -40,6 +42,8 @@ enum SessionUpdatedPlugin: EventPlugin {
         let sessionId: String
         let title: String?
         let model: String?
+        let eventCount: Int?
+        let turnCount: Int?
         let messageCount: Int?
         let inputTokens: Int?
         let outputTokens: Int?
@@ -63,6 +67,8 @@ enum SessionUpdatedPlugin: EventPlugin {
             sessionId: sid,
             title: event.data?.title,
             model: event.data?.model,
+            eventCount: event.data?.eventCount,
+            turnCount: event.data?.turnCount,
             messageCount: event.data?.messageCount,
             inputTokens: event.data?.inputTokens,
             outputTokens: event.data?.outputTokens,

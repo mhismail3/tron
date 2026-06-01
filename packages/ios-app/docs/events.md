@@ -49,7 +49,7 @@ enum MyEventPlugin: DispatchableEventPlugin {
 | Streaming | `Plugins/Streaming/` | text_delta, thinking_delta, turn_start, turn_end, agent_turn |
 | Capability invocation | `Plugins/CapabilityInvocation/` | `capability.invocation.*`, `capability.resolution`, `capability.pause.*`, and `capability.run.status` transport labels carrying capability identity and lifecycle state |
 | Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, memory_auto_retain_triggered, memory_auto_retain_failed, context_cleared, message_deleted, skill_deactivated, turn_failed |
-| Session | `Plugins/Session/` | connected |
+| Session | `Plugins/Session/` | connected, session.updated, session.created, session.archived, session.unarchived, session.deleted, session.processing_changed |
 | Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
 | Browser | `Plugins/Browser/` | browser_frame, browser_closed |
 | Task | `Plugins/Task/` | task.created, task.updated, task.deleted |
@@ -132,6 +132,17 @@ extension ChatViewModel: EventDispatchTarget {
     // ... wrapper methods for existing implementations
 }
 ```
+
+### Session Metadata Updates
+
+`session.updated` is the live dashboard and Agent Control metadata refresh
+event. The server includes authoritative title/model previews, event count,
+turn count, message count, token totals, cache buckets, cost, activity lines,
+and last-activity timestamps when those fields changed. iOS applies only the
+fields present in the event, persists the resulting `CachedSession`, and lets
+Agent Control merge the live in-memory row with the persisted server summary so
+same-run sheets and relaunches show the same server-owned counts. The client
+does not synthesize missing turn counts from message counts.
 
 ## Event Transformer
 

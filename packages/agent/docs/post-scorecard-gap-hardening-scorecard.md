@@ -77,6 +77,33 @@ Owner taxonomy: `server_contract`, `client_projection`,
 | PSG-6 | Overlooked cleanup scan | 5 | pending | Scan touched token, worktree, Agent Control, event sync, and UI modules for new dead/fallback/legacy/compatibility code. | None yet. |
 | PSG-7 | Closeout | 10 | pending | Final docs, README, static gates, focused and broad tests, ledger, diff hygiene, and final commit. | None yet. |
 
+## PSG-5 Running Evidence Addendum
+
+- 2026-06-01 IPD-6 isolated-worktree live update audit found a second
+  same-device Agent Control History regression in
+  `sess_019e84f6-3d34-70a3-b083-812988035042`: after a live run, Source
+  Control correctly showed the acquired isolated branch, but History could show
+  stale turn counts because `session.updated` did not carry `eventCount` or
+  `turnCount`, model switching used `event_count` as `messageCount`, and Agent
+  Control could choose stale in-memory session metadata over a freshly persisted
+  server-list summary. Fixed in the server event contract/projection/emits and
+  iOS `SessionUpdatedPlugin`, `EventStoreManager`, and `AgentControlSummary`.
+- Manual iPad proof used iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle `com.tron.mobile.beta`, rebuilt
+  dev server PID `11330`, and the same open app instance. After the second
+  prompt, Agent Control showed Source Control `019e84f6`, `No changes`,
+  Analytics `11.0k`/`$0.00`, and History `2 turns`. Screenshot:
+  `/tmp/tron-psg-evidence/ipd6-isolated-agent-control-live-turncount-fix.png`.
+  DB evidence:
+  `/tmp/tron-psg-evidence/ipd6-isolated-agent-control-live-turncount-db.txt`.
+- Focused verification passed:
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check &&
+  cargo test --manifest-path packages/agent/Cargo.toml session_updated --lib
+  -- --nocapture`; iPad
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AgentControlSummaryTests -only-testing:TronMobileTests/SessionUpdatedPluginTests`
+  passed 11 XCTest cases, xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-09-49--0700.xcresult`.
+
 ## Verification Plan
 
 Focused automated gates:

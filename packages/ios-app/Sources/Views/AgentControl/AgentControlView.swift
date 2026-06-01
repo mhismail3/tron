@@ -508,10 +508,10 @@ struct AgentControlView: View {
     }
 
     private func cachedSession() async -> CachedSession? {
-        if let inMemory = cachedSessionInMemory {
-            return inMemory
-        }
-        return try? await eventStoreManager.eventDB.sessions.get(sessionId)
+        AgentControlSummary.mergedSessionSnapshot(
+            inMemory: cachedSessionInMemory,
+            persisted: try? await eventStoreManager.eventDB.sessions.get(sessionId)
+        )
     }
 
     private func logTiming(_ label: String, startedAt: Date) {

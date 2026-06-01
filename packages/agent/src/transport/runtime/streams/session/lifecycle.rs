@@ -37,6 +37,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
         TronEvent::SessionUpdated {
             title,
             model,
+            event_count,
+            turn_count,
             message_count,
             input_tokens,
             output_tokens,
@@ -57,6 +59,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             Some(json!({
                 "title": title,
                 "model": model,
+                "eventCount": event_count,
+                "turnCount": turn_count,
                 "messageCount": message_count,
                 "inputTokens": input_tokens,
                 "outputTokens": output_tokens,

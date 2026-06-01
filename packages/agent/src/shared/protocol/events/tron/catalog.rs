@@ -549,6 +549,10 @@ tron_events! {
         title: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        #[serde(rename = "eventCount", skip_serializing_if = "Option::is_none")]
+        event_count: Option<i64>,
+        #[serde(rename = "turnCount", skip_serializing_if = "Option::is_none")]
+        turn_count: Option<i64>,
         #[serde(rename = "messageCount", skip_serializing_if = "Option::is_none")]
         message_count: Option<i64>,
         #[serde(rename = "inputTokens", skip_serializing_if = "Option::is_none")]

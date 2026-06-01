@@ -370,6 +370,9 @@ Full `worktree::get_diff` data is deferred to the Source Control drill-down
 sheet. Analytics and History cards seed from local `CachedSession` counters and
 local EventDatabase rows before background session/event refreshes reconcile
 them, so valid zero values render as values rather than loading placeholders.
+Live `session.updated` events carry server-owned event and turn counts; the app
+persists those updates and Agent Control merges the in-memory row with the local
+DB snapshot so a same-run sheet open cannot regress to stale dashboard counts.
 A passthrough repo status (`hasWorktree=true` with `worktree.isolated=false`)
 renders as a direct-branch checkout: the Source Control card, diff list, commit
 sheet, repo metadata, and safe direct-branch push controls stay available. Merge,
@@ -480,12 +483,13 @@ visible. The server owns the dashboard query contract: iOS may pass
 the returned server-authoritative metadata for the active paired origin.
 Dashboard session rows are projections over two server-owned sources:
 `session::list` supplies title, activity lines, token/cost/model metadata,
-turn count, archive state, and `isRunning`; `worktree::get_status` supplies
+turn count, archive state, and `isRunning`; live `session.updated` events keep
+those same counters fresh during an active run; `worktree::get_status` supplies
 fork/branch and dirty metadata. The local sessions table persists
 `is_processing` and `turn_count` so a relaunch cannot lose an active processing
-bar or server-known Agent Control History count between the server list refresh
-and local cache reload. The sidebar preloads filtered session ids only after
-the engine is connected; row labels and title icons both read through
+bar or server-known Agent Control History count between live events, server list
+refreshes, and local cache reload. The sidebar preloads filtered session ids only
+after the engine is connected; row labels and title icons both read through
 `SessionTitleIcons`, so visual fork/branch/dirty affordances and accessibility
 descriptors stay aligned with the same `WorktreeInfo` snapshot.
 

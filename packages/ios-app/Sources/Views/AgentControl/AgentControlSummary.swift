@@ -64,6 +64,32 @@ struct AgentControlSummary: Equatable {
         )
     }
 
+    static func mergedSessionSnapshot(
+        inMemory: CachedSession?,
+        persisted: CachedSession?
+    ) -> CachedSession? {
+        guard var snapshot = persisted ?? inMemory else { return nil }
+        guard let inMemory, persisted != nil else { return snapshot }
+
+        snapshot.eventCount = max(snapshot.eventCount, inMemory.eventCount)
+        snapshot.turnCount = max(snapshot.turnCount, inMemory.turnCount)
+        snapshot.messageCount = max(snapshot.messageCount, inMemory.messageCount)
+        snapshot.inputTokens = max(snapshot.inputTokens, inMemory.inputTokens)
+        snapshot.outputTokens = max(snapshot.outputTokens, inMemory.outputTokens)
+        snapshot.lastTurnInputTokens = max(snapshot.lastTurnInputTokens, inMemory.lastTurnInputTokens)
+        snapshot.cacheReadTokens = max(snapshot.cacheReadTokens, inMemory.cacheReadTokens)
+        snapshot.cacheCreationTokens = max(snapshot.cacheCreationTokens, inMemory.cacheCreationTokens)
+        snapshot.cost = max(snapshot.cost, inMemory.cost)
+
+        if snapshot.title == nil {
+            snapshot.title = inMemory.title
+        }
+        if snapshot.lastActivityAt < inMemory.lastActivityAt {
+            snapshot.lastActivityAt = inMemory.lastActivityAt
+        }
+        return snapshot
+    }
+
     static func fromEvents(
         _ events: [SessionEvent],
         analytics: ConsolidatedAnalytics,

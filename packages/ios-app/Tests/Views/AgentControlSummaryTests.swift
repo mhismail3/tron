@@ -45,6 +45,68 @@ final class AgentControlSummaryTests: XCTestCase {
         XCTAssertFalse(summary.capabilityInvocationsKnown)
     }
 
+    func testMergedSnapshotPreservesFreshPersistedTurnCountOverStaleMemory() {
+        let staleMemory = makeSession(
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheCreation: 0,
+            cost: 0,
+            eventCount: 2,
+            turnCount: 0
+        )
+        let refreshedPersisted = makeSession(
+            input: 5449,
+            output: 78,
+            cacheRead: 0,
+            cacheCreation: 0,
+            cost: 0,
+            eventCount: 10,
+            turnCount: 1
+        )
+
+        let merged = AgentControlSummary.mergedSessionSnapshot(
+            inMemory: staleMemory,
+            persisted: refreshedPersisted
+        )
+
+        XCTAssertEqual(merged?.eventCount, 10)
+        XCTAssertEqual(merged?.turnCount, 1)
+        XCTAssertEqual(merged?.inputTokens, 5449)
+        XCTAssertEqual(merged?.outputTokens, 78)
+    }
+
+    func testMergedSnapshotPreservesLiveMemoryTurnCountOverStalePersistedSession() {
+        let stalePersisted = makeSession(
+            input: 5449,
+            output: 78,
+            cacheRead: 0,
+            cacheCreation: 0,
+            cost: 0,
+            eventCount: 10,
+            turnCount: 1
+        )
+        let liveMemory = makeSession(
+            input: 10935,
+            output: 86,
+            cacheRead: 0,
+            cacheCreation: 0,
+            cost: 0,
+            eventCount: 15,
+            turnCount: 2
+        )
+
+        let merged = AgentControlSummary.mergedSessionSnapshot(
+            inMemory: liveMemory,
+            persisted: stalePersisted
+        )
+
+        XCTAssertEqual(merged?.eventCount, 15)
+        XCTAssertEqual(merged?.turnCount, 2)
+        XCTAssertEqual(merged?.inputTokens, 10935)
+        XCTAssertEqual(merged?.outputTokens, 86)
+    }
+
     func testCachedEmptySessionHasKnownZeroCapabilityCount() {
         let session = makeSession(
             input: 0,

@@ -6,6 +6,8 @@ fn session_updated_event_type() {
         base: BaseEvent::now("s1"),
         title: Some("title".into()),
         model: Some("claude-opus-4-6".into()),
+        event_count: Some(8),
+        turn_count: Some(2),
         message_count: Some(5),
         input_tokens: Some(100),
         output_tokens: Some(50),
@@ -22,6 +24,9 @@ fn session_updated_event_type() {
     };
     assert_eq!(e.event_type(), "session_updated");
     assert_eq!(e.session_id(), "s1");
+    let json = serde_json::to_value(&e).unwrap();
+    assert_eq!(json["eventCount"], 8);
+    assert_eq!(json["turnCount"], 2);
 }
 
 #[test]

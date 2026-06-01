@@ -390,6 +390,8 @@ impl HookHandler for PromptHookHandler {
                                         base: BaseEvent::now(&session_id),
                                         title: Some(title),
                                         model: None,
+                                        event_count: None,
+                                        turn_count: None,
                                         message_count: None,
                                         input_tokens: None,
                                         output_tokens: None,

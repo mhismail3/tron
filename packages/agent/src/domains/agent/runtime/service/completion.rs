@@ -305,6 +305,8 @@ async fn emit_session_update(
                 base: crate::shared::events::BaseEvent::now(session_id),
                 title: update.session.title.clone(),
                 model: Some(update.session.latest_model.clone()),
+                event_count: Some(update.session.event_count),
+                turn_count: Some(update.session.turn_count),
                 message_count: Some(update.session.message_count),
                 input_tokens: Some(update.session.total_input_tokens),
                 output_tokens: Some(update.session.total_output_tokens),

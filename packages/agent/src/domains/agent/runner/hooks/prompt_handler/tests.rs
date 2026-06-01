@@ -633,6 +633,8 @@ fn title_gen_session_updated_omits_stats() {
         base: BaseEvent::now("test"),
         title: Some("New Title".to_string()),
         model: None,
+        event_count: None,
+        turn_count: None,
         message_count: None,
         input_tokens: None,
         output_tokens: None,
@@ -662,6 +664,14 @@ fn title_gen_session_updated_omits_stats() {
     assert!(
         data.get("messageCount").is_none(),
         "messageCount should be omitted when None"
+    );
+    assert!(
+        data.get("eventCount").is_none(),
+        "eventCount should be omitted when None"
+    );
+    assert!(
+        data.get("turnCount").is_none(),
+        "turnCount should be omitted when None"
     );
     assert!(
         data.get("cost").is_none(),
