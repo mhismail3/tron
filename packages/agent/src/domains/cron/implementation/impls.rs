@@ -221,6 +221,7 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
                 memory_content: None,
                 rules_index: None,
                 pre_activated_rules: vec![],
+                initial_turn_count: 0,
                 subagent_manager: self.subagent_manager.clone(),
                 compaction_trigger_config:
                     crate::domains::agent::runner::context::types::CompactionTriggerConfig::default(

@@ -201,6 +201,7 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             memory_content: None,
             rules_index: None,
             pre_activated_rules: vec![],
+            initial_turn_count: 0,
             subagent_manager: params.child_subagent_manager,
             compaction_trigger_config:
                 crate::domains::agent::runner::context::types::CompactionTriggerConfig::default(),
@@ -395,6 +396,7 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
             memory_content: None,
             rules_index: None,
             pre_activated_rules: vec![],
+            initial_turn_count: 0,
             subagent_manager: params.child_subagent_manager,
             compaction_trigger_config:
                 crate::domains::agent::runner::context::types::CompactionTriggerConfig::default(),

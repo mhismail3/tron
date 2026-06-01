@@ -89,6 +89,7 @@ pub struct TronAgent {
     emitter: Arc<EventEmitter>,
     compaction: Arc<CompactionHandler>,
     session_id: String,
+    completed_turn_offset: AtomicU32,
     current_turn: AtomicU32,
     is_running: AtomicBool,
     abort_token: CancellationToken,
@@ -142,6 +143,7 @@ impl TronAgent {
             job_manager: deps.job_manager,
             output_buffer_registry: deps.output_buffer_registry,
             engine_host: deps.engine_host,
+            completed_turn_offset: AtomicU32::new(0),
             current_turn: AtomicU32::new(0),
             is_running: AtomicBool::new(false),
             abort_token: CancellationToken::new(),
@@ -220,17 +222,19 @@ impl TronAgent {
         debug!(session_id = %self.session_id, "agent run started");
 
         let max_turns = self.config.max_turns;
-        let mut turn = 0u32;
+        let turn_offset = self.completed_turn_offset.load(Ordering::Relaxed);
+        let mut run_turn = 0u32;
         let mut exited_via_break = false;
         let mut previous_context_baseline: u64 =
             self.context_manager.get_api_context_tokens().unwrap_or(0);
 
-        while turn < max_turns {
-            turn += 1;
-            self.current_turn.store(turn, Ordering::Relaxed);
+        while run_turn < max_turns {
+            run_turn += 1;
+            let session_turn = turn_offset.saturating_add(run_turn);
+            self.current_turn.store(session_turn, Ordering::Relaxed);
 
             let result = turn_runner::execute_turn(turn_runner::TurnParams {
-                turn,
+                turn: session_turn,
                 context_manager: &mut self.context_manager,
                 provider: &self.provider,
                 primitive_surface_policy: &self.primitive_surface_policy,
@@ -278,7 +282,12 @@ impl TronAgent {
             }
 
             if !result.success {
-                error!(session_id = %self.session_id, turn, error = ?result.error, "turn failed");
+                error!(
+                    session_id = %self.session_id,
+                    turn = session_turn,
+                    error = ?result.error,
+                    "turn failed"
+                );
                 final_stop_reason = StopReason::Error;
                 error = result.error;
                 exited_via_break = true;
@@ -286,7 +295,7 @@ impl TronAgent {
             }
 
             if result.interrupted {
-                warn!(session_id = %self.session_id, turn, "agent interrupted");
+                warn!(session_id = %self.session_id, turn = session_turn, "agent interrupted");
                 final_stop_reason = StopReason::Interrupted;
                 interrupted = true;
                 exited_via_break = true;
@@ -311,11 +320,14 @@ impl TronAgent {
 
         // If the loop ended because turn >= max_turns (not via break),
         // the agent exhausted its turn budget.
-        if !exited_via_break && turn >= max_turns {
+        if !exited_via_break && run_turn >= max_turns {
             final_stop_reason = StopReason::MaxTurns;
         }
 
-        debug!(session_id = %self.session_id, turns = turn, stop_reason = ?final_stop_reason, "agent run completed");
+        self.completed_turn_offset
+            .store(turn_offset.saturating_add(run_turn), Ordering::Relaxed);
+
+        debug!(session_id = %self.session_id, turns = run_turn, stop_reason = ?final_stop_reason, "agent run completed");
 
         // Fire Stop hook (non-blocking, background)
         if let Some(hook_engine) = &self.hooks {
@@ -390,7 +402,7 @@ impl TronAgent {
         // _guard drops here, resetting is_running (even on panic)
 
         RunResult {
-            turns_executed: turn,
+            turns_executed: run_turn,
             total_token_usage: total_usage,
             stop_reason: final_stop_reason,
             interrupted,
@@ -421,6 +433,11 @@ impl TronAgent {
     /// Set the per-session sequence counter for monotonic event ordering.
     pub fn set_sequence_counter(&mut self, counter: Arc<AtomicI64>) {
         self.sequence_counter = Some(counter);
+    }
+
+    /// Seed the agent with the number of turns already persisted for the session.
+    pub fn set_completed_turn_offset(&mut self, offset: u32) {
+        self.completed_turn_offset.store(offset, Ordering::Relaxed);
     }
 
     /// Inject the per-invocation cancellation registry (owned by the orchestrator).

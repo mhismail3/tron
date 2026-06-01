@@ -16,6 +16,10 @@
 //!
 //! `turn_runner` → live catalog capability projection → LLM provider →
 //! `stream_processor` → `capability_invocation_executor` → canonical engine invocation → loop
+//!
+//! `TronAgent` receives the persisted session turn count when resumed. Runtime
+//! events and token records use `persisted_turn_count + run_turn`, while
+//! `RunResult.turns_executed` stays scoped to the current prompt run.
 
 pub mod capability_invocation_executor;
 pub mod compaction_handler;

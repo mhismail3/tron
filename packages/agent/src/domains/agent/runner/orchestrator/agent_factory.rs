@@ -51,6 +51,8 @@ pub struct CreateAgentOpts {
     pub rules_index: Option<RulesIndex>,
     /// Rule relative paths to pre-activate (from session reconstruction).
     pub pre_activated_rules: Vec<String>,
+    /// Number of turns already persisted for this session.
+    pub initial_turn_count: u32,
     /// Optional subagent manager for LLM-backed compaction summarization.
     pub subagent_manager: Option<
         std::sync::Arc<
@@ -87,6 +89,7 @@ impl AgentFactory {
     ) -> TronAgent {
         config.subagent_depth = opts.subagent_depth;
         config.subagent_max_depth = opts.subagent_max_depth;
+        let initial_turn_count = opts.initial_turn_count;
 
         let primitive_surface_policy = PrimitiveSurfacePolicy::from_profile(
             &opts.primitive_surface_policy,
@@ -130,7 +133,7 @@ impl AgentFactory {
             context_manager.finalize_rule_activations();
         }
 
-        TronAgent::new(
+        let mut agent = TronAgent::new(
             config,
             AgentDeps {
                 provider: opts.provider,
@@ -147,7 +150,9 @@ impl AgentFactory {
                 engine_host: opts.engine_host,
             },
             session_id,
-        )
+        );
+        agent.set_completed_turn_offset(initial_turn_count);
+        agent
     }
 }
 
@@ -218,6 +223,7 @@ mod tests {
             memory_content: None,
             rules_index: None,
             pre_activated_rules: vec![],
+            initial_turn_count: 0,
             subagent_manager: None,
             compaction_trigger_config:
                 crate::domains::agent::runner::context::types::CompactionTriggerConfig::default(),

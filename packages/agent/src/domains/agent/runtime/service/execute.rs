@@ -176,6 +176,13 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     .await;
 
     let messages = state.messages.clone();
+    let initial_turn_count = event_store
+        .get_session(&session_id)
+        .ok()
+        .flatten()
+        .map_or(state.turn_count, |session| {
+            u32::try_from(session.turn_count).unwrap_or(state.turn_count)
+        });
     let model_for_error = model.clone();
     let BuiltPromptAgent {
         mut agent,
@@ -200,6 +207,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         server_origin,
         prompt_context.combined_rules.clone(),
         messages,
+        initial_turn_count,
         prompt_context.memory.clone(),
         prompt_context.rules_index.clone(),
         prompt_context.pre_activated_rules.clone(),

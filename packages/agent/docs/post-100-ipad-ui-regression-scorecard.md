@@ -231,11 +231,32 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/InputBarContentAreaChipTests`
   passed 8 tests, including removable skill-chip labels; xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-45-30--0700.xcresult`.
+- Additional IPD-3 queued-prompt proof: during an active long
+  `gemma4:e4b` turn, Computer Use typed a second prompt and clicked Send.
+  The input row showed Stop Agent, voice recording disabled, and a queued chip
+  at position `1`; screenshot
+  `/tmp/tron-psg-evidence/ipd3-queued-prompt-chip-active-turn.png`. After the
+  first turn completed, the queued follow-up drained automatically and the
+  assistant answered exactly `IPD-3 queued ready.`; screenshot
+  `/tmp/tron-psg-evidence/ipd3-queued-prompt-drained-completed.png`. DB
+  evidence `/tmp/tron-psg-evidence/ipd3-queue-session-db.txt` shows one
+  `message.queued`, one `message.dequeued`, 5 turns, 10 messages, 32 events,
+  27,973 input tokens, 549 output tokens, no cache tokens, and cost `0.0`.
+- Additional token-record hardening from the same resumed iPad session:
+  the queued-prompt DB audit found older rows with session counters at 5 but
+  runtime events and `TokenRecord.meta.turn` still serialized as turn `1`.
+  Fixed the server prompt-agent construction so resumed runs are seeded from
+  persisted session `turn_count`; after rebuild, a live verifier prompt
+  returned exactly `IPD-3 turn offset ready.` and DB evidence
+  `/tmp/tron-psg-evidence/ipd3-turn-offset-verifier-db.txt` shows
+  `turn_count=6`, latest `message.assistant.turn=6`, latest
+  `stream.turn_end.turn=6`, and latest `tokenRecord.meta.turn=6`. Screenshot:
+  `/tmp/tron-psg-evidence/ipd3-turn-offset-verifier-completed.png`.
 
 Open loops before awarding more iPad points: finish IPD-1 processing and
 archive context action evidence, IPD-2 approval/reconnect/deep-link paths,
-IPD-3 queued prompt, file attachment add/remove, and voice-note states,
-IPD-4 notifications, IPD-5
+IPD-3 file attachment add/remove and voice-note states, IPD-4 notifications,
+IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 settings/provider/pairing, IPD-8 deeper
 navigation/deep links, IPD-9 light/accessibility/keyboard/pointer QA, and
