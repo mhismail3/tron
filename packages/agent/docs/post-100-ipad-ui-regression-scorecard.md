@@ -37,7 +37,7 @@ post-100 scorecard.
 | IPD-2 | Chat and engine parity | 12 | running | Prompt send, streaming response, capability cards, approval pending/resolved sheets, reconnect/relaunch/deep-link parity, and DB event ordering. |
 | IPD-3 | Input, attachments, voice notes | 8 | running | Text send, queued prompt, stop, attachment add/remove, skills popup, voice-note available/unavailable/record/cancel/submit states on iPad. |
 | IPD-4 | Notifications | 8 | passed_after_fix | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
-| IPD-5 | Capability, approval, generated UI | 10 | pending | Detail sheets/popovers, approve/deny/double-tap, read-only terminal approvals, generated UI render/refresh/submit/stale action rejection. |
+| IPD-5 | Capability, approval, generated UI | 10 | running | Detail sheets/popovers, approve/deny/double-tap, read-only terminal approvals, generated UI render/refresh/submit/stale action rejection. |
 | IPD-6 | Source control and worktree | 10 | running | Agent Control source-control card, dirty/diff rendering, commit/push/rebase/merge/pull/conflict resolver, disabled destructive actions, and DB policy truth. |
 | IPD-7 | Settings, providers, pairing | 8 | pending | Settings grid/sidebar behavior, server unavailable/retry, pairing/onboarding from Settings, providers/OAuth status, model picker, protected branches, and profile/auth truth. |
 | IPD-8 | Navigation, deep links, session tree | 8 | running | Sidebar selection, back behavior, session/capability/event/notification deep links, load-earlier pagination, history/fork sheet, cold-start routing. |
@@ -342,6 +342,24 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `019e8556-5c0c-7ba2-8267-6cd17d4675db` at
   `2026-06-01T22:38:09.943498+00:00` returning the target notification with
   `isRead=true` and `deliveryStatus=delivery_failed`.
+- Additional IPD-5 capability-detail proof opened direct-branch session
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` on the iPad Simulator and
+  tapped completed capability invocation `call_eiaqjnjn` for the read-only
+  `process::run` smoke command. Screenshot
+  `/tmp/tron-psg-evidence/ipd5-capability-card-target-before-detail.png` shows
+  the target capability card in the chat. Screenshot
+  `/tmp/tron-psg-evidence/ipd5-capability-detail-popover-ipad.png` shows the
+  compact iPad capability popover over the split dashboard, including request
+  fields, execution path, preparation, child invocation, and result output
+  `IPD-2 ready.`. Metadata expansion proof
+  `/tmp/tron-psg-evidence/ipd5-capability-detail-metadata-ipad.png` shows the
+  read-only audit metadata/raw payload disclosure. DB evidence in
+  `/tmp/tron-psg-evidence/ipd5-capability-detail-db.json` ties the started and
+  completed capability events to `call_eiaqjnjn`; engine invocation evidence
+  `/tmp/tron-psg-evidence/ipd5-capability-detail-invocations.json` records the
+  child `process::run` invocation
+  `019e84dd-43c9-7141-90f3-a6770547f239` with `exitCode=0` and stdout
+  `IPD-2 ready.`.
 - Additional IPD-8 deep-link proof used real route targets from direct-branch
   session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087`. DB target evidence in
   `/tmp/tron-psg-evidence/ipd8-deeplink-db-targets.json` records
@@ -449,7 +467,8 @@ Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation and any remaining sidebar preload/relaunch assertions, IPD-2
 approval/reconnect/deep-link paths,
 IPD-3 voice-note states, IPD-5
-approval/generated UI details, full IPD-6 action-time-confirmed source-control
+approval flows, read-only terminal approvals, and generated UI details, full
+IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 pairing/onboarding, protected branches,
 profile/auth, and unavailable-server retry details, IPD-8
 back/session-tree behavior and action-time-confirmed fork execution, IPD-9

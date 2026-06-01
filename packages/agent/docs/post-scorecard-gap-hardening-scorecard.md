@@ -251,6 +251,21 @@ Owner taxonomy: `server_contract`, `client_projection`,
   shows the compact glass notification detail sheet over the dashboard, and DB
   invocation `019e8556-5c0c-7ba2-8267-6cd17d4675db` returned the target row
   with `isRead=true` and `deliveryStatus=delivery_failed`.
+- IPD-5 capability-detail proof opened direct-branch session
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` and tapped completed
+  `capability::execute` invocation `call_eiaqjnjn` for the read-only
+  `process::run` smoke command. Screenshot
+  `/tmp/tron-psg-evidence/ipd5-capability-card-target-before-detail.png` shows
+  the target card; `/tmp/tron-psg-evidence/ipd5-capability-detail-popover-ipad.png`
+  shows the compact iPad detail popover with request, execution path,
+  preparation, child invocation, and stdout `IPD-2 ready.`; and
+  `/tmp/tron-psg-evidence/ipd5-capability-detail-metadata-ipad.png` shows the
+  read-only audit metadata expansion. DB evidence
+  `/tmp/tron-psg-evidence/ipd5-capability-detail-db.json` ties the event pair
+  to `call_eiaqjnjn`, and
+  `/tmp/tron-psg-evidence/ipd5-capability-detail-invocations.json` records the
+  child `process::run` invocation
+  `019e84dd-43c9-7141-90f3-a6770547f239` with `exitCode=0`.
 - IPD-8 deep-link proof then covered real session, capability, event, and
   cold-start routes on iPad. DB target evidence
   `/tmp/tron-psg-evidence/ipd8-deeplink-db-targets.json` records direct-branch
@@ -394,12 +409,13 @@ UDID before continuing.
   delivery-failure/badge-clearing, deep-link, and iPad compact-sheet paths now
   have live iPad proof and focused regression coverage; IPD-8 session,
   capability, event, and cold-start deep-link paths have live iPad proof; IPD-1
-  processing and IPD-3 Stop Agent/interruption paths have live proof; IPD-7
-  model-picker, provider-settings, and provider list rendering have live iPad
-  proof; IPD-8 History and fork controls have live iPad proof without invoking
-  fork execution; IPD-8 load-earlier pagination and sidebar selection now have
-  live iPad proof; IPD-9 input focus has partial live proof, with pointer and
-  full hardware-keyboard traversal still open.
+  processing and IPD-3 Stop Agent/interruption paths have live proof; IPD-5
+  completed-capability detail popover and metadata expansion have live iPad
+  proof; IPD-7 model-picker, provider-settings, and provider list rendering
+  have live iPad proof; IPD-8 History and fork controls have live iPad proof
+  without invoking fork execution; IPD-8 load-earlier pagination and sidebar
+  selection now have live iPad proof; IPD-9 input focus has partial live proof,
+  with pointer and full hardware-keyboard traversal still open.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
