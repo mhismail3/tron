@@ -15,6 +15,54 @@ struct SkillChip: View {
     private var tint: TintedColors { .skill(colorScheme) }
 
     var body: some View {
+        if showRemoveButton {
+            removableChip
+        } else {
+            readOnlyChip
+        }
+    }
+
+    private var readOnlyChip: some View {
+        skillLabel
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .chipStyleMaterial(tint.accent, tintOpacity: 0.4)
+            .contentShape(Capsule())
+            .onTapGesture {
+                onTap?()
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(SkillChipAccessibility.skillLabel(skill.name))
+            .accessibilityAddTraits(.isButton)
+    }
+
+    private var removableChip: some View {
+        HStack(spacing: 5) {
+            Button {
+                onTap?()
+            } label: {
+                skillLabel
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(SkillChipAccessibility.skillLabel(skill.name))
+
+            Button {
+                onRemove?()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody))
+                    .foregroundStyle(tint.dismiss)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Circle())
+            .accessibilityLabel(SkillChipAccessibility.removeLabel(skill.name))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .chipStyleMaterial(tint.accent, tintOpacity: 0.4)
+    }
+
+    private var skillLabel: some View {
         HStack(spacing: 5) {
             Image(systemName: "sparkles")
                 .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
@@ -26,29 +74,17 @@ struct SkillChip: View {
                 .font(TronTypography.filePath)
                 .foregroundStyle(tint.name)
                 .lineLimit(1)
+        }
+    }
+}
 
-            if showRemoveButton {
-                Button {
-                    onRemove?()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(tint.dismiss)
-                }
-                .buttonStyle(.plain)
-                .contentShape(Circle())
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .chipStyleMaterial(tint.accent, tintOpacity: 0.4)
-        .contentShape(Capsule())
-        .onTapGesture {
-            onTap?()
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Skill, \(skill.name)")
-        .accessibilityAddTraits(.isButton)
+enum SkillChipAccessibility {
+    static func skillLabel(_ name: String) -> String {
+        "Skill, \(name)"
+    }
+
+    static func removeLabel(_ name: String) -> String {
+        "Remove skill, \(name)"
     }
 }
 

@@ -40,7 +40,7 @@ final class InputBarContentAreaChipTests: XCTestCase {
         )
     }
 
-    private func render(_ view: AttachmentBubble) {
+    private func render<V: View>(_ view: V) {
         let host = UIHostingController(rootView: view)
         XCTAssertNotNil(host.view)
     }
@@ -87,6 +87,22 @@ final class InputBarContentAreaChipTests: XCTestCase {
         }
         XCTAssertEqual(skill.name, "find-skill")
         XCTAssertEqual(stagedAttachment.fileName, "notes.txt")
+    }
+
+    func testRemovableSkillChipUsesSeparateAccessibleLabels() {
+        let skill = makeSkill(name: "browse-the-web")
+
+        XCTAssertEqual(SkillChipAccessibility.skillLabel(skill.name), "Skill, browse-the-web")
+        XCTAssertEqual(SkillChipAccessibility.removeLabel(skill.name), "Remove skill, browse-the-web")
+
+        render(
+            SkillChip(
+                skill: skill,
+                showRemoveButton: true,
+                onRemove: {},
+                onTap: {}
+            )
+        )
     }
 
     func testAttachmentBubbleConstructsForDocumentChip() {

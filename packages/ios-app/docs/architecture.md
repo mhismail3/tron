@@ -11,7 +11,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Push notifications for background alerts
 - Voice transcription input
 - Capability-native invocation/result rendering for the single model-facing `execute` harness and server-owned generated UI actions
-- A staged input composer where pending skills and attachments share one wrapping chip row before send
+- A staged input composer where pending skills and attachments share one wrapping chip row before send; staged skill chips expose separate detail and remove accessibility actions while sent message skill chips stay compact
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 - A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, module package/config/activation refs, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
 - No fixed Automations or Voice Notes dashboards; reusable cron and voice-note protocol pieces remain capability modules until generated/control surfaces replace them

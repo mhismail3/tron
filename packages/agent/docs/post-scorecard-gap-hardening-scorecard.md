@@ -151,6 +151,20 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `DateParser.formatRelativeOrAbsolute` near-now path without changing iPhone
   styling; iPad `DateParserTests` passed 15 tests with xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-36-31--0700.xcresult`.
+- The IPD-3 attachment menu and skill popup pass then found a staged skill-chip
+  accessibility regression: `browse-the-web` inserted successfully, but the
+  visible remove icon was hidden inside the single chip accessibility element.
+  Fixed `SkillChip` so read-only sent-message chips remain collapsed while
+  removable staged chips expose separate skill-detail and remove controls.
+  Manual evidence:
+  `/tmp/tron-psg-evidence/ipd3-attachment-menu.png`,
+  `/tmp/tron-psg-evidence/ipd3-skill-popup.png`,
+  `/tmp/tron-psg-evidence/ipd3-skill-chip-added.png`, and
+  `/tmp/tron-psg-evidence/ipd3-skill-chip-removed-after-accessibility-fix.png`.
+  Focused iPad
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/InputBarContentAreaChipTests`
+  passed 8 tests; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-45-30--0700.xcresult`.
 
 ## Verification Plan
 

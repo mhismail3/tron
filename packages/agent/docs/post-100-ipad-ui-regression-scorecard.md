@@ -35,7 +35,7 @@ post-100 scorecard.
 | IPD-0 | Harness and baseline | 5 | passed | iPad Simulator UDID/app bundle/server PID, `/health`, DB no-error classification, screenshot path, and focused iPad `xcodebuild` smoke. |
 | IPD-1 | Dashboard/sidebar session cards | 12 | running | Plain, forked, dirty, isolated, fork+dirty, processing, long-title/path, empty state, tap-open, archive context action, icon contrast, and sidebar preload after relaunch. |
 | IPD-2 | Chat and engine parity | 12 | running | Prompt send, streaming response, capability cards, approval pending/resolved sheets, reconnect/relaunch/deep-link parity, and DB event ordering. |
-| IPD-3 | Input, attachments, voice notes | 8 | pending | Text send, queued prompt, stop, attachment add/remove, skills popup, voice-note available/unavailable/record/cancel/submit states on iPad. |
+| IPD-3 | Input, attachments, voice notes | 8 | running | Text send, queued prompt, stop, attachment add/remove, skills popup, voice-note available/unavailable/record/cancel/submit states on iPad. |
 | IPD-4 | Notifications | 8 | pending | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
 | IPD-5 | Capability, approval, generated UI | 10 | pending | Detail sheets/popovers, approve/deny/double-tap, read-only terminal approvals, generated UI render/refresh/submit/stale action rejection. |
 | IPD-6 | Source control and worktree | 10 | running | Agent Control source-control card, dirty/diff rendering, commit/push/rebase/merge/pull/conflict resolver, disabled destructive actions, and DB policy truth. |
@@ -215,10 +215,27 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/DateParserTests`
   passed 15 tests, including current and near-future regression cases; xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-36-31--0700.xcresult`.
+- Additional IPD-3 skill-popup failure found and fixed: the iPad attachment
+  menu opened correctly and Add Skill inserted `browse-the-web`, but the staged
+  chip collapsed the visible remove icon into the single `Skill,
+  browse-the-web` accessibility element. Root cause was `SkillChip` applying
+  `.accessibilityElement(children: .ignore)` even in removable input state.
+  Fixed by keeping sent-message chips collapsed while staged removable chips
+  expose separate `Skill, browse-the-web` and `Remove skill, browse-the-web`
+  controls. Evidence before/after:
+  `/tmp/tron-psg-evidence/ipd3-attachment-menu.png`,
+  `/tmp/tron-psg-evidence/ipd3-skill-popup.png`,
+  `/tmp/tron-psg-evidence/ipd3-skill-chip-added.png`, and
+  `/tmp/tron-psg-evidence/ipd3-skill-chip-removed-after-accessibility-fix.png`.
+  Focused iPad verification passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/InputBarContentAreaChipTests`
+  passed 8 tests, including removable skill-chip labels; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-45-30--0700.xcresult`.
 
 Open loops before awarding more iPad points: finish IPD-1 processing and
 archive context action evidence, IPD-2 approval/reconnect/deep-link paths,
-IPD-3 input/attachments/voice notes, IPD-4 notifications, IPD-5
+IPD-3 queued prompt, file attachment add/remove, and voice-note states,
+IPD-4 notifications, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 settings/provider/pairing, IPD-8 deeper
 navigation/deep links, IPD-9 light/accessibility/keyboard/pointer QA, and
