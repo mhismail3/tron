@@ -385,13 +385,22 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd7-model-picker-db.json` records the latest
   `model::list` invocation plus the direct-branch session's `latest_model`
   `gemma4:e4b`.
+- Additional IPD-7 provider-settings proof opened Settings -> Providers without
+  changing credentials. Screenshot
+  `/tmp/tron-psg-evidence/ipd7-providers-settings-ipad.png` shows the compact
+  iPad Providers sheet with the configured-provider summary, per-provider
+  status rows, add/clear controls, and Google Cloud fields; the accessibility
+  tree also exposed the Services section for Brave Search and Exa. Redacted auth
+  evidence in `/tmp/tron-psg-evidence/ipd7-provider-auth-redacted.json` records
+  only configured provider/service flags and section names, with no secret
+  values or token snippets.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation and any remaining sidebar preload/relaunch assertions, IPD-2
 approval/reconnect/deep-link paths,
 IPD-3 voice-note states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
-actions and conflict resolver, IPD-7 provider settings, pairing/onboarding,
-protected branches, profile/auth, and unavailable-server details, IPD-8
+actions and conflict resolver, IPD-7 pairing/onboarding, protected branches,
+profile/auth, and unavailable-server retry details, IPD-8
 load-earlier pagination, back/session-tree behavior, and history/fork sheet
 paths, IPD-9 keyboard/pointer QA, and IPD-10 closeout.

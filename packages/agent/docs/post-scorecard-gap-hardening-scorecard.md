@@ -288,6 +288,15 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `Gemma 4 26B` marked unavailable. Server evidence
   `/tmp/tron-psg-evidence/ipd7-model-picker-db.json` records the latest
   `model::list` invocation and session `latest_model=gemma4:e4b`.
+- IPD-7 provider-settings proof opened Settings -> Providers without changing
+  credentials. Screenshot `/tmp/tron-psg-evidence/ipd7-providers-settings-ipad.png`
+  shows the compact Providers sheet with configured provider summary,
+  per-provider status rows, add/clear controls, and Google Cloud fields; the
+  accessibility tree also exposed configured Brave Search and Exa services.
+  Redacted auth evidence
+  `/tmp/tron-psg-evidence/ipd7-provider-auth-redacted.json` records only
+  configured provider/service flags and section names, with no secret values or
+  token snippets.
 
 ## Verification Plan
 
@@ -343,7 +352,8 @@ UDID before continuing.
   have live iPad proof and focused regression coverage; IPD-8 session,
   capability, event, and cold-start deep-link paths have live iPad proof; IPD-1
   processing and IPD-3 Stop Agent/interruption paths have live proof; IPD-7
-  model-picker/provider list rendering has live iPad proof.
+  model-picker, provider-settings, and provider list rendering have live iPad
+  proof.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
