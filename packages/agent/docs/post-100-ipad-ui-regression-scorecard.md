@@ -176,6 +176,13 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   shows the persistent iPad split sidebar with isolated branch-icon row,
   forked rows, direct-branch row, long-title non-git/path row, selected-state
   contrast, and existing session rows truncated without visible text overlap.
+- Additional IPD-1 archive-context discoverability proof: Computer Use attempted
+  the sidebar context action on the selected session row. The Simulator did not
+  render a separate visible context menu, but the accessibility tree exposed
+  `Archive` as a secondary action on the selected session and every visible
+  sidebar row. Archive was not invoked because it is a destructive session
+  action requiring action-time confirmation. Evidence:
+  `/tmp/tron-psg-evidence/ipd1-sidebar-context-actions.txt`.
 - Additional IPD-6 non-git proof: selecting non-git session
   `sess_019e84f6-3d43-7e51-9bb6-70deff30ee24` opened the chat in split view;
   Agent Control rendered Context, Model, Analytics, History, and Session ID but
@@ -252,12 +259,42 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `turn_count=6`, latest `message.assistant.turn=6`, latest
   `stream.turn_end.turn=6`, and latest `tokenRecord.meta.turn=6`. Screenshot:
   `/tmp/tron-psg-evidence/ipd3-turn-offset-verifier-completed.png`.
+- Additional IPD-3 attachment proof: `xcrun simctl addmedia` imported a tiny
+  PNG into the iPad Simulator photo library, Computer Use opened
+  `Add attachment -> Photo Library`, selected the thumbnail, and confirmed the
+  picker. The staged input row rendered an `Image` chip, `68 B`, enabled Send,
+  and exposed a separate accessibility button
+  `Remove attachment, Image, 68 B`; screenshot
+  `/tmp/tron-psg-evidence/ipd3-photo-attachment-staged.png`. Clicking that
+  remove control cleared the chip and returned the input row to idle state;
+  screenshot `/tmp/tron-psg-evidence/ipd3-photo-attachment-removed.png`.
+  Document-file picker smoke opened `Add attachment -> Choose File`, but the
+  Simulator Files provider did not surface the injected
+  `ipd3-attachment-fixture.txt` in `On My iPad`; keep a real document-source
+  picker pass open instead of claiming it from photo evidence.
+- Additional IPD-7 settings proof: Computer Use opened the iPad Settings
+  surface from the chat gear. Screenshot
+  `/tmp/tron-psg-evidence/ipd7-settings-grid-ipad.png` shows the compact
+  glassy Settings grid with App, Server, Providers, Agent, Context, and Plugin
+  Sources cards, plus separated destructive rows for Clear Prompt History,
+  Archive All Sessions, and Reset All Settings. A mistaken tap on Reset All
+  Settings opened a confirmation dialog; Cancel was pressed and no reset
+  occurred. The sheet then moved to its lower compact position and dismissed by
+  the checkmark without changing settings.
+- Additional IPD-9 visual/accessibility proof: `xcrun simctl ui` switched the
+  iPad appearance to light and captured
+  `/tmp/tron-psg-evidence/ipd9-light-mode-sidebar-chat.png`; the app kept the
+  dark Tron theme, with readable text and no new overlap in the visible split
+  layout. Dynamic Type was then changed from `large` to
+  `accessibility-extra-extra-large` and captured at
+  `/tmp/tron-psg-evidence/ipd9-accessibility-extra-extra-large.png`; the visible
+  session sidebar, chat transcript, model pill, and input controls remained
+  stable without overlapping text. Content size was restored to `large` and
+  appearance to dark after the pass.
 
 Open loops before awarding more iPad points: finish IPD-1 processing and
-archive context action evidence, IPD-2 approval/reconnect/deep-link paths,
-IPD-3 file attachment add/remove and voice-note states, IPD-4 notifications,
-IPD-5
+archive execution confirmation, IPD-2 approval/reconnect/deep-link paths,
+IPD-3 document-file picker and voice-note states, IPD-4 notifications, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
-actions and conflict resolver, IPD-7 settings/provider/pairing, IPD-8 deeper
-navigation/deep links, IPD-9 light/accessibility/keyboard/pointer QA, and
-IPD-10 closeout.
+actions and conflict resolver, IPD-7 provider/pairing details, IPD-8 deeper
+navigation/deep links, IPD-9 keyboard/pointer QA, and IPD-10 closeout.

@@ -191,6 +191,30 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `message_count=12`, `event_count=37`, `turn_count=6`, plus latest
   `message.assistant` and `stream.turn_end` rows carrying both `turn=6` and
   `tokenRecord.meta.turn=6`.
+- IPD-3 attachment add/remove evidence then used `xcrun simctl addmedia` to
+  import a tiny PNG into the iPad Simulator photo library. Computer Use opened
+  `Add attachment -> Photo Library`, selected the thumbnail, and confirmed the
+  picker; staged proof
+  `/tmp/tron-psg-evidence/ipd3-photo-attachment-staged.png` shows an `Image`
+  chip, `68 B`, enabled Send, and separate accessibility control
+  `Remove attachment, Image, 68 B`. Removal proof
+  `/tmp/tron-psg-evidence/ipd3-photo-attachment-removed.png` shows the chip
+  cleared. `Add attachment -> Choose File` opened, but the Simulator Files
+  provider did not surface an injected `ipd3-attachment-fixture.txt` under
+  `On My iPad`; keep the real document-source picker path open instead of
+  claiming document-file coverage from photo-library evidence.
+- Additional non-destructive iPad evidence closed more PSG-5 surface area
+  without changing app settings or invoking destructive actions:
+  `/tmp/tron-psg-evidence/ipd1-sidebar-context-actions.txt` records that
+  visible sidebar rows expose `Archive` as a secondary action, but Archive was
+  not invoked without action-time confirmation;
+  `/tmp/tron-psg-evidence/ipd7-settings-grid-ipad.png` shows the compact iPad
+  Settings grid and separated destructive rows, with an accidental Reset
+  confirmation canceled; `/tmp/tron-psg-evidence/ipd9-light-mode-sidebar-chat.png`
+  and `/tmp/tron-psg-evidence/ipd9-accessibility-extra-extra-large.png` show
+  the visible split layout under light appearance request and large Dynamic
+  Type, with no new overlap or clipped controls. The Simulator appearance and
+  content size were restored after the pass.
 
 ## Verification Plan
 
@@ -237,7 +261,9 @@ UDID before continuing.
   History/live-update/dirty-summary regressions fixed with evidence, and
   additional iPad sidebar/non-git/isolated-clean Source Control proof after
   Simulator window recovery. IPD-3 text input and sidebar near-now date display
-  have focused proof/fixes; queued prompts and resumed-session token-record
-  turn ordinals now have automated and live iPad proof. Remaining IPD rows
-  must still close or be explicitly successor-owned before final PSG-5 points.
+  have focused proof/fixes; queued prompts, resumed-session token-record turn
+  ordinals, and photo attachment add/remove now have live iPad proof.
+  Settings grid, archive-action discoverability, and light/Dynamic-Type visual
+  QA now have partial evidence too. Remaining IPD rows must still close or be
+  explicitly successor-owned before final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
