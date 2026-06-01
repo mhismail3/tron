@@ -137,6 +137,20 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd6-isolated-agent-control-window-recovery.png`, and
   isolated Source Control clean drill-down gating in
   `/tmp/tron-psg-evidence/ipd6-isolated-source-control-clean-sheet-window-recovery.png`.
+- 2026-06-01 IPD-3 input audit sent a small local `gemma4:e4b` prompt through
+  Computer Use on the iPad input bar. In-flight evidence
+  `/tmp/tron-psg-evidence/ipd3-input-inflight-stop-state.png` shows the user
+  prompt, input reset, Stop Agent enabled, and voice recording disabled; final
+  evidence `/tmp/tron-psg-evidence/ipd3-input-completed-response.png` shows the
+  exact response `IPD-3 input ready.`. DB evidence
+  `/tmp/tron-psg-evidence/ipd3-input-completed-session-db.txt` shows the
+  selected isolated session at 6 messages, 20 events, 3 turns, 16,456 input
+  tokens, 94 output tokens, no cache tokens, and `$0.00`.
+- The same IPD-3 pass exposed a sidebar accessibility polish bug where fresh
+  activity could be announced as `in 0 seconds`. Fixed the shared
+  `DateParser.formatRelativeOrAbsolute` near-now path without changing iPhone
+  styling; iPad `DateParserTests` passed 15 tests with xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-36-31--0700.xcresult`.
 
 ## Verification Plan
 
@@ -182,6 +196,7 @@ UDID before continuing.
 - Checkpoint 4: In progress. PSG-5 has IPD-0 passed, Agent Control
   History/live-update/dirty-summary regressions fixed with evidence, and
   additional iPad sidebar/non-git/isolated-clean Source Control proof after
-  Simulator window recovery. Remaining IPD rows must still close or be
+  Simulator window recovery. IPD-3 text input and sidebar near-now date display
+  have focused proof/fixes. Remaining IPD rows must still close or be
   explicitly successor-owned before final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

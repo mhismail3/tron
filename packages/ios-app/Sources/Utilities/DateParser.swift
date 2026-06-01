@@ -199,6 +199,10 @@ enum DateParser: Sendable {
         let now = Date()
         let interval = now.timeIntervalSince(date)
 
+        if abs(interval) < 60 {
+            return "now"
+        }
+
         if interval < 86400 && interval >= 0 {
             return relativeFullFormatter.withLock { $0.localizedString(for: date, relativeTo: now) }
         }

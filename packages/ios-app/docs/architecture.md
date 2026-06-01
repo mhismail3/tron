@@ -494,7 +494,9 @@ bar or server-known Agent Control History count between live events, server list
 refreshes, and local cache reload. The sidebar preloads filtered session ids only
 after the engine is connected; row labels and title icons both read through
 `SessionTitleIcons`, so visual fork/branch/dirty affordances and accessibility
-descriptors stay aligned with the same `WorktreeInfo` snapshot.
+descriptors stay aligned with the same `WorktreeInfo` snapshot. Recent activity
+labels clamp near-now or slightly future timestamps to `now` before localized
+relative formatting so fresh sidebar rows do not briefly announce future time.
 
 Token, cache, cost, provider, and model metadata are also server-owned display
 data. iOS may render provisional live totals during a streaming turn, but

@@ -195,6 +195,26 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   Working tree clean, Commit/Merge/Sessions/Pull disabled with visible help
   text, and Rebase/Push present but not triggered because those actions require
   action-time confirmation.
+- Additional IPD-3 input proof: Computer Use focused the iPad input bar, typed
+  `IPD-3 iPad input check. Reply exactly: IPD-3 input ready.`, and clicked the
+  active send icon. During the run the row rendered the user prompt, the input
+  reset to placeholder, Stop Agent replaced Send, and voice recording was
+  disabled; screenshot
+  `/tmp/tron-psg-evidence/ipd3-input-inflight-stop-state.png`. The completed
+  assistant response matched exactly `IPD-3 input ready.`; screenshot
+  `/tmp/tron-psg-evidence/ipd3-input-completed-response.png`. DB evidence in
+  `/tmp/tron-psg-evidence/ipd3-input-completed-session-db.txt` shows
+  `message_count=6`, `event_count=20`, `turn_count=3`, input tokens `16456`,
+  output tokens `94`, cache totals `0`, and cost `0.0`.
+- Additional IPD-1/IPD-9 sidebar date-label failure found and fixed: after the
+  IPD-3 completion, the sidebar row accessibility label briefly reported
+  `in 0 seconds` for fresh activity. Root cause was the full relative date path
+  in `DateParser.formatRelativeOrAbsolute`, which let sub-minute timestamps go
+  through `RelativeDateTimeFormatter`. Fixed by clamping near-now or slightly
+  future timestamps to `now`; iPad
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/DateParserTests`
+  passed 15 tests, including current and near-future regression cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_14-36-31--0700.xcresult`.
 
 Open loops before awarding more iPad points: finish IPD-1 processing and
 archive context action evidence, IPD-2 approval/reconnect/deep-link paths,

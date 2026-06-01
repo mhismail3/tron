@@ -52,9 +52,14 @@ final class DateParserTests: XCTestCase {
         let date = Date().addingTimeInterval(-30)
         let isoString = ISO8601DateFormatter().string(from: date)
         let result = DateParser.formatRelativeOrAbsolute(isoString)
-        // Should contain "seconds" or be a very recent relative time
-        XCTAssertFalse(result.contains("Jan") || result.contains("Feb") || result.contains("Dec"),
-                        "Within seconds should use relative format, got: \(result)")
+        XCTAssertEqual(result, "now")
+    }
+
+    func testFormatRelative_nearFuture_returnsNow() {
+        let date = Date().addingTimeInterval(5)
+        let isoString = ISO8601DateFormatter().string(from: date)
+        let result = DateParser.formatRelativeOrAbsolute(isoString)
+        XCTAssertEqual(result, "now")
     }
 
     func testFormatRelative_minutesAgo() {
