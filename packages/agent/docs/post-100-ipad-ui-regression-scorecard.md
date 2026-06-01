@@ -36,7 +36,7 @@ post-100 scorecard.
 | IPD-1 | Dashboard/sidebar session cards | 12 | running | Plain, forked, dirty, isolated, fork+dirty, processing, long-title/path, empty state, tap-open, archive context action, icon contrast, and sidebar preload after relaunch. |
 | IPD-2 | Chat and engine parity | 12 | running | Prompt send, streaming response, capability cards, approval pending/resolved sheets, reconnect/relaunch/deep-link parity, and DB event ordering. |
 | IPD-3 | Input, attachments, voice notes | 8 | running | Text send, queued prompt, stop, attachment add/remove, skills popup, voice-note available/unavailable/record/cancel/submit states on iPad. |
-| IPD-4 | Notifications | 8 | pending | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
+| IPD-4 | Notifications | 8 | running | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
 | IPD-5 | Capability, approval, generated UI | 10 | pending | Detail sheets/popovers, approve/deny/double-tap, read-only terminal approvals, generated UI render/refresh/submit/stale action rejection. |
 | IPD-6 | Source control and worktree | 10 | running | Agent Control source-control card, dirty/diff rendering, commit/push/rebase/merge/pull/conflict resolver, disabled destructive actions, and DB policy truth. |
 | IPD-7 | Settings, providers, pairing | 8 | pending | Settings grid/sidebar behavior, server unavailable/retry, pairing/onboarding from Settings, providers/OAuth status, model picker, protected branches, and profile/auth truth. |
@@ -291,10 +291,35 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   session sidebar, chat transcript, model pill, and input controls remained
   stable without overlapping text. Content size was restored to `large` and
   appearance to dark after the pass.
+- Additional IPD-4 notification proof used the open iPad Pro 13-inch (M5)
+  Simulator `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle
+  `com.tron.mobile.beta`, against rebuilt dev server PID `50456`. Two seeded
+  server notification resources were visible in the sidebar notification inbox:
+  `notification:019e8546-aa68-7230-8bf3-313ff3ddbf54` for isolated session
+  `sess_019e84f6-3d34-70a3-b083-812988035042` and
+  `notification:019e8547-2b34-76d3-8fd4-baff7588277d` for direct-branch session
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087`. Screenshots prove the unread
+  sidebar badge, inbox list, detail content, local read-all clearing, and final
+  cleared badge:
+  `/tmp/tron-psg-evidence/ipd4-notification-bell-badge-sidebar.png`,
+  `/tmp/tron-psg-evidence/ipd4-notification-list-sheet.png`,
+  `/tmp/tron-psg-evidence/ipd4-notification-detail-sheet.png`,
+  `/tmp/tron-psg-evidence/ipd4-notification-read-all-cleared.png`, and
+  `/tmp/tron-psg-evidence/ipd4-notification-sidebar-badge-cleared.png`.
+  DB/resource evidence in
+  `/tmp/tron-psg-evidence/ipd4-notification-mark-all-read-after-read-all.json`
+  shows opening detail invoked `notifications::mark_read` scoped to
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` with `unreadCount=1`; pressing
+  `Read All` invoked `notifications::mark_all_read` with `marked=1` and
+  `unreadCount=0`. The notification resources also captured `delivery_failed`
+  APNs evidence for invalid local simulator device tokens while still creating
+  inbox-visible resources, which covers the local offline/delivery-failure
+  state without treating provider delivery as a UI failure.
 
 Open loops before awarding more iPad points: finish IPD-1 processing and
 archive execution confirmation, IPD-2 approval/reconnect/deep-link paths,
-IPD-3 document-file picker and voice-note states, IPD-4 notifications, IPD-5
+IPD-3 document-file picker and voice-note states, IPD-4 notification deep-link
+and remaining routed notification states, IPD-5
 approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 provider/pairing details, IPD-8 deeper
 navigation/deep links, IPD-9 keyboard/pointer QA, and IPD-10 closeout.

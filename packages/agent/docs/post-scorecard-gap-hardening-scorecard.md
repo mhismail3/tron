@@ -215,6 +215,22 @@ Owner taxonomy: `server_contract`, `client_projection`,
   the visible split layout under light appearance request and large Dynamic
   Type, with no new overlap or clipped controls. The Simulator appearance and
   content size were restored after the pass.
+- IPD-4 notification evidence now covers the iPad sidebar unread badge, inbox
+  list, notification detail, scoped mark-read, global mark-all-read, APNs
+  delivery-failure display state, and badge clearing. Screenshots:
+  `/tmp/tron-psg-evidence/ipd4-notification-bell-badge-sidebar.png`,
+  `/tmp/tron-psg-evidence/ipd4-notification-list-sheet.png`,
+  `/tmp/tron-psg-evidence/ipd4-notification-detail-sheet.png`,
+  `/tmp/tron-psg-evidence/ipd4-notification-read-all-cleared.png`, and
+  `/tmp/tron-psg-evidence/ipd4-notification-sidebar-badge-cleared.png`. DB
+  evidence:
+  `/tmp/tron-psg-evidence/ipd4-notification-mark-all-read-after-read-all.json`
+  shows `notifications::mark_read` scoped to
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` left `unreadCount=1`, then
+  `notifications::mark_all_read` marked the remaining notification and returned
+  `unreadCount=0`. The seeded notification resources remained visible even
+  though APNs delivery recorded `delivery_failed` for invalid simulator-profile
+  device tokens.
 
 ## Verification Plan
 
@@ -264,6 +280,8 @@ UDID before continuing.
   have focused proof/fixes; queued prompts, resumed-session token-record turn
   ordinals, and photo attachment add/remove now have live iPad proof.
   Settings grid, archive-action discoverability, and light/Dynamic-Type visual
-  QA now have partial evidence too. Remaining IPD rows must still close or be
-  explicitly successor-owned before final PSG-5 points.
+  QA now have partial evidence too. IPD-4 notification list/detail/read/read-all
+  and delivery-failure/badge-clearing paths now have live iPad proof. Remaining
+  IPD rows must still close or be explicitly successor-owned before final PSG-5
+  points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
