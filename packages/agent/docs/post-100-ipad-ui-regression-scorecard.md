@@ -1,6 +1,6 @@
 # Post-100 iPad UI Regression Scorecard
 
-Status: future scorecard
+Status: active under `post-scorecard-gap-hardening-scorecard.md`
 
 Created: 2026-05-31
 
@@ -10,9 +10,10 @@ Current score: **0/100**
 
 This scorecard owns iPad-specific follow-up coverage that was explicitly moved
 out of `post-100-operating-conditions-scorecard.md` when that plan closed with
-iPhone-only simulator scope. It must run in a separate session/plan with real
-iPad Simulator evidence and the same server/DB truth discipline used by the
-closed post-100 scorecard.
+iPhone-only simulator scope. It is now active inside
+`post-scorecard-gap-hardening-scorecard.md` and must close with real iPad
+Simulator evidence plus the same server/DB truth discipline used by the closed
+post-100 scorecard.
 
 ## Scope
 
@@ -46,6 +47,8 @@ closed post-100 scorecard.
 ## Linked Source
 
 The closed iPhone/mac operating scorecard is
-`packages/agent/docs/post-100-operating-conditions-scorecard.md`. Its iPad
-deferrals are no longer open loops there; they are tracked by the IPD rows
-above.
+`packages/agent/docs/post-100-operating-conditions-scorecard.md`. The active
+campaign scorecard is
+`packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`. The original
+iPad deferrals are no longer open loops in the closed operating scorecard; they
+are tracked by the IPD rows above and PSG-5 in the active campaign.

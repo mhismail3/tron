@@ -94,9 +94,12 @@ Current living entry points:
   registry, recipes, and provider export.
 - `packages/agent/docs/post-100-operating-conditions-scorecard.md`: completed
   post-100 operating conditions and UI/UX regression scorecard at 100/100.
-- `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md`: future
-  iPad-specific post-100 UI regression scorecard moved out of the closed
-  iPhone/mac operating plan.
+- `packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`: active
+  recent-gap hardening campaign for token accounting, Agent Control fast-load,
+  Source Control workflows, scorecard drift, and iPad UI closeout.
+- `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md`: active
+  iPad-specific post-100 UI regression scorecard folded into the recent-gap
+  hardening campaign.
 - `packages/agent/docs/collapsed-engine-hardening-scorecard.md`: completed
   collapsed-engine hardening scorecard and scenario ledger at 100/100.
 - `packages/agent/docs/codebase-cleanup-scorecard.md`: completed repo-local

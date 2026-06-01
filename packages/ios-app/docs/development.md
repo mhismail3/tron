@@ -115,8 +115,9 @@ The completed post-100 UI/UX scorecard lives at
 `packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
 scenario ledger as the archived iPhone/mac evidence model for owner
 classification and Computer Use confirmation.
-The follow-up iPad-only regression ledger lives at
-`packages/agent/docs/post-100-ipad-ui-regression-scorecard.md`; use it for
+The active recent-gap campaign lives at
+`packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`. Its iPad rows
+use `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md` for
 split-view/sidebar, popover, pointer/keyboard, and wider-viewport coverage
 instead of reopening the closed iPhone/mac scorecard.
 The app registers `tron` and `tron-mobile` URL schemes, and

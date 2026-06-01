@@ -693,9 +693,10 @@ fn post_100_operating_scorecard_stays_formalized() {
         panic!("failed to read {}: {error}", ipad_scorecard_path.display())
     });
     for required in [
-        "Status: future scorecard",
+        "Status: active under `post-scorecard-gap-hardening-scorecard.md`",
         "Current score: **0/100**",
         "post-100-operating-conditions-scorecard.md",
+        "post-scorecard-gap-hardening-scorecard.md",
         "Use Computer Use against the iPad Simulator",
     ] {
         assert!(
@@ -717,11 +718,13 @@ fn post_100_operating_scorecard_stays_formalized() {
             && readme.contains(
                 "completed\n  post-100 operating conditions and UI/UX regression scorecard at 100/100"
             )
+            && readme.contains("packages/agent/docs/post-scorecard-gap-hardening-scorecard.md")
+            && readme.contains("active\n  recent-gap hardening campaign")
             && readme.contains("packages/agent/docs/post-100-ipad-ui-regression-scorecard.md")
-            && readme.contains("future\n  iPad-specific post-100 UI regression scorecard")
+            && readme.contains("active\n  iPad-specific post-100 UI regression scorecard")
             && readme.contains("completed\n  collapsed-engine hardening scorecard")
             && readme.contains("completed repo-local\n  cleanup scorecard"),
-        "README living-doc map must name the completed post-100 scorecard, iPad successor, and completed 100/100 scorecards"
+        "README living-doc map must name the completed post-100 scorecard, active recent-gap/iPad scorecards, and completed 100/100 scorecards"
     );
 
     let ios_development =
@@ -732,6 +735,7 @@ fn post_100_operating_scorecard_stays_formalized() {
             .expect("read Mac architecture docs");
     assert!(
         ios_development.contains("post-100-operating-conditions-scorecard.md")
+            && ios_development.contains("post-scorecard-gap-hardening-scorecard.md")
             && ios_development.contains("post-100-ipad-ui-regression-scorecard.md")
             && ios_development.contains("Computer Use confirmation")
             && mac_architecture.contains("post-100-operating-conditions-scorecard.md")
@@ -755,6 +759,88 @@ fn post_100_operating_scorecard_stays_formalized() {
             && cleanup.contains("Status: **CLC-10 complete; cleanup scorecard at 100/100**")
             && cleanup.contains("post-100-operating-conditions-scorecard.md"),
         "completed scorecards must stay at 100/100 and point future regression work to the post-100 scorecard"
+    );
+}
+
+#[test]
+fn post_scorecard_gap_hardening_scorecard_stays_formalized() {
+    let repo_root = repo_root();
+    let read = |relative: &str| {
+        let path = repo_root.join(relative);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+    };
+
+    let scorecard = read("packages/agent/docs/post-scorecard-gap-hardening-scorecard.md");
+    for required in [
+        "Initial score: **0/100**",
+        "Current score: **",
+        "Status: **active",
+        "not a whole-repo restart",
+        "Token accounting remains server-authoritative",
+        "Agent Control compact cards must use local-first summaries",
+        "Direct-branch git checkouts must keep Source Control available",
+        "## Scenario Ledger",
+        "| PSG-0 | Prior-scorecard/session audit and campaign formalization | 10 |",
+        "| PSG-1 | Token accounting regression audit | 15 |",
+        "| PSG-2 | Configured provider canaries | 10 |",
+        "| PSG-3 | Agent Control fast-load audit | 15 |",
+        "| PSG-4 | Source Control direct-branch/worktree workflows | 15 |",
+        "| PSG-5 | iPad UI regression execution | 20 |",
+        "| PSG-6 | Overlooked cleanup scan | 5 |",
+        "| PSG-7 | Closeout | 10 |",
+        "iPhone 17 Pro `267F6468-09AE-471D-9157-29144173EB82`",
+        "iPad Pro 13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`",
+        "configured-provider\n  canaries",
+        "force quit Simulator and reopen the same target\nUDID",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "post-scorecard gap scorecard missing required text: {required}"
+        );
+    }
+
+    for id in 0..=7 {
+        let needle = format!("| PSG-{id} |");
+        assert!(
+            scorecard.contains(&needle),
+            "post-scorecard gap scorecard missing {needle}"
+        );
+    }
+
+    let ipad = read("packages/agent/docs/post-100-ipad-ui-regression-scorecard.md");
+    assert!(
+        ipad.contains("Status: active under `post-scorecard-gap-hardening-scorecard.md`")
+            && ipad.contains("PSG-5")
+            && !ipad.contains("Status: future scorecard"),
+        "iPad scorecard must be active inside the post-scorecard gap campaign"
+    );
+
+    let collapsed = read("packages/agent/docs/collapsed-engine-hardening-scorecard.md");
+    assert!(
+        collapsed.contains("Status: completed hardening scorecard")
+            && collapsed.contains("Current score: **100/100**")
+            && collapsed.contains(
+                "No scored collapsed-engine hardening scenario remains open after RWO-N17"
+            ),
+        "collapsed-engine scorecard must not keep stale active-handoff status"
+    );
+
+    let readme = read("README.md");
+    assert!(
+        readme.contains("packages/agent/docs/post-scorecard-gap-hardening-scorecard.md")
+            && readme.contains("active\n  recent-gap hardening campaign")
+            && readme.contains("active\n  iPad-specific post-100 UI regression scorecard"),
+        "README must link the active post-scorecard gap campaign and active iPad scorecard"
+    );
+
+    let agent_control =
+        read("packages/ios-app/Sources/Views/AgentControl/SourceControlCardState.swift");
+    assert!(
+        agent_control.contains("Direct branch")
+            && agent_control.contains("hasSourceControlCheckout")
+            && !agent_control.contains("isolated == true"),
+        "direct-branch git checkouts must remain visible in Agent Control Source Control"
     );
 }
 
