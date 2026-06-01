@@ -309,6 +309,16 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `forkControlClicked=false`. Code inspection confirmed
   `HistorySheet.performFork` immediately forks a session, so actual fork
   execution remains action-time confirmation-gated.
+- IPD-9 keyboard-focus proof used the recovered iPad Simulator window with the
+  split dashboard visible and direct-branch session
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` selected. Screenshot
+  `/tmp/tron-psg-evidence/ipd9-keyboard-focus-input-ipad.png` shows the
+  message input focused with the caret visible; accessibility evidence
+  `/tmp/tron-psg-evidence/ipd9-keyboard-focus-accessibility.txt` records the
+  focused `Message input` element. A follow-up `Tab` while editing the
+  multiline input inserted a tab character into the draft instead of advancing
+  focus. The draft was cleared, no message was sent, and this remains partial
+  IPD-9 evidence pending full hardware-keyboard traversal and pointer QA.
 
 ## Verification Plan
 
@@ -366,7 +376,8 @@ UDID before continuing.
   processing and IPD-3 Stop Agent/interruption paths have live proof; IPD-7
   model-picker, provider-settings, and provider list rendering have live iPad
   proof; IPD-8 History and fork controls have live iPad proof without invoking
-  fork execution.
+  fork execution; IPD-9 input focus has partial live proof, with pointer and
+  full hardware-keyboard traversal still open.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

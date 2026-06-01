@@ -406,6 +406,18 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `forkControlClicked=false`. Code inspection confirmed `HistorySheet.performFork`
   immediately forks a session, so actual fork execution remains action-time
   confirmation-gated.
+- Additional IPD-9 keyboard-focus proof used the same iPad Simulator window
+  after it was moved and recovered by Computer Use. The split dashboard stayed
+  visible with direct-branch session
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` selected. Screenshot
+  `/tmp/tron-psg-evidence/ipd9-keyboard-focus-input-ipad.png` shows the
+  message input focused with the caret visible. Accessibility evidence in
+  `/tmp/tron-psg-evidence/ipd9-keyboard-focus-accessibility.txt` records the
+  focused `Message input` element. A follow-up `Tab` while the multiline input
+  was active inserted a tab character into the draft instead of advancing focus;
+  the draft was cleared and no message was sent. This is recorded as partial
+  keyboard evidence only, because changing multiline prompt editing semantics
+  needs a separate product decision.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation and any remaining sidebar preload/relaunch assertions, IPD-2
@@ -415,4 +427,5 @@ approval/generated UI details, full IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-7 pairing/onboarding, protected branches,
 profile/auth, and unavailable-server retry details, IPD-8
 load-earlier pagination, back/session-tree behavior, and action-time-confirmed
-fork execution, IPD-9 keyboard/pointer QA, and IPD-10 closeout.
+fork execution, IPD-9 pointer QA and full hardware-keyboard traversal, and
+IPD-10 closeout.
