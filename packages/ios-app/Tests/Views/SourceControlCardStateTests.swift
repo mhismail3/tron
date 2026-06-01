@@ -60,8 +60,8 @@ struct SourceControlCardStateTests {
         #expect(state.totalDeletions == 1)
     }
 
-    @Test("Known dirty worktree renders branch before summary arrives")
-    func knownDirtyWorktreeRendersBranchBeforeSummaryArrives() {
+    @Test("Known dirty worktree renders branch and changes before summary arrives")
+    func knownDirtyWorktreeRendersBranchAndChangesBeforeSummaryArrives() {
         let status = WorktreeGetStatusResult.fixture(
             worktree: .fixture(
                 branch: "session/feature-card",
@@ -78,7 +78,8 @@ struct SourceControlCardStateTests {
 
         #expect(state.isVisible == true)
         #expect(state.branchLabel == "feature-card")
-        #expect(state.detailLabel == "Loading...")
+        #expect(state.detailLabel == "Changes")
+        #expect(state.isGitRepo == true)
         #expect(state.totalFiles == 0)
     }
 

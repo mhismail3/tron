@@ -47,7 +47,7 @@ struct SourceControlCardState: Equatable {
         }
 
         isVisible = true
-        isGitRepo = diffSummaryResult?.isGitRepo
+        isGitRepo = diffSummaryResult?.isGitRepo ?? true
         let isPassthrough = worktreeStatus.worktree?.isolated == false
 
         if diffSummaryResult?.isGitRepo == false {
@@ -59,7 +59,7 @@ struct SourceControlCardState: Equatable {
             return
         }
 
-        branchLabel = worktreeStatus.worktree?.shortBranch ?? diffSummaryResult?.branch ?? "Loading..."
+        branchLabel = worktreeStatus.worktree?.shortBranch ?? diffSummaryResult?.branch ?? "Repository"
 
         let summary = diffSummaryResult?.summary
         if let summary {
@@ -75,7 +75,7 @@ struct SourceControlCardState: Equatable {
         if totalFiles > 0 {
             detailLabel = "\(totalFiles) \(totalFiles == 1 ? "file" : "files")"
         } else if worktreeStatus.worktree?.hasUncommittedChanges == true && diffSummaryResult == nil {
-            detailLabel = isLoading ? "Loading..." : "Changes unavailable"
+            detailLabel = isLoading ? "Changes" : "Changes unavailable"
         } else if isPassthrough {
             detailLabel = "Direct branch"
         } else {
