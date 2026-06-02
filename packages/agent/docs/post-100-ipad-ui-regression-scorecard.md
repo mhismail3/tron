@@ -572,6 +572,21 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   child `process::run` invocation
   `019e84dd-43c9-7141-90f3-a6770547f239` with `exitCode=0` and stdout
   `IPD-2 ready.`.
+- Additional IPD-5 resolved-approval read-only proof opened historical approval
+  session `sess_019e7d1d-c3a5-7a50-a947-e005d584ddfa` by deep link on the same
+  iPad UDID. Screenshot
+  `/tmp/tron-psg-evidence/ipd5-existing-approved-chip-landscape.png` shows the
+  executed `Approved` chip in the timeline. Tapping it opened a read-only detail
+  sheet with status `Approved`, `High Risk`, Action, and Reason text, and no
+  Approve/Deny controls exposed in the accessibility tree; screenshot
+  `/tmp/tron-psg-evidence/ipd5-approved-readonly-detail-landscape.png`.
+  DB evidence
+  `/tmp/tron-psg-evidence/ipd5-approved-readonly-detail-db.json` records
+  approval `019e7d1e-f523-7fc0-b99c-23966cf64207` with `status=executed`,
+  function `process::run`, parent invocation
+  `019e7d1e-f44b-79d0-bf8f-d842c44ac3c5`, and session
+  `sess_019e7d1d-c3a5-7a50-a947-e005d584ddfa`; combined UI/DB evidence is in
+  `/tmp/tron-psg-evidence/ipd5-approved-readonly-detail-landscape.json`.
 - Additional IPD-8 deep-link proof used real route targets from direct-branch
   session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087`. DB target evidence in
   `/tmp/tron-psg-evidence/ipd8-deeplink-db-targets.json` records
@@ -811,7 +826,7 @@ Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2
 approval/reconnect/deep-link paths,
 IPD-3 manual voice-note sheet record/cancel/submit states, IPD-5
-approval flows, read-only terminal approvals, and generated UI details, full
+approval decision flows and generated UI details, full
 IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-8
 action-time-confirmed fork execution, IPD-9

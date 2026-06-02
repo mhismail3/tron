@@ -475,6 +475,19 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd5-capability-detail-invocations.json` records the
   child `process::run` invocation
   `019e84dd-43c9-7141-90f3-a6770547f239` with `exitCode=0`.
+- IPD-5 resolved-approval read-only proof opened historical approval session
+  `sess_019e7d1d-c3a5-7a50-a947-e005d584ddfa` by deep link. Timeline proof
+  `/tmp/tron-psg-evidence/ipd5-existing-approved-chip-landscape.png` shows the
+  executed `Approved` chip; detail proof
+  `/tmp/tron-psg-evidence/ipd5-approved-readonly-detail-landscape.png` shows
+  the read-only approval sheet with `Approved`, `High Risk`, Action, and Reason
+  text and no Approve/Deny controls in the accessibility tree. DB evidence
+  `/tmp/tron-psg-evidence/ipd5-approved-readonly-detail-db.json` records
+  approval `019e7d1e-f523-7fc0-b99c-23966cf64207`, `status=executed`,
+  `function_id=process::run`, parent invocation
+  `019e7d1e-f44b-79d0-bf8f-d842c44ac3c5`, and the session id; combined UI/DB
+  evidence is
+  `/tmp/tron-psg-evidence/ipd5-approved-readonly-detail-landscape.json`.
 - IPD-8 deep-link proof then covered real session, capability, event, and
   cold-start routes on iPad. DB target evidence
   `/tmp/tron-psg-evidence/ipd8-deeplink-db-targets.json` records direct-branch
@@ -727,10 +740,11 @@ UDID before continuing.
   have live iPad proof and focused regression coverage; IPD-8 session,
   capability, event, and cold-start deep-link paths have live iPad proof; IPD-1
   processing and IPD-3 Stop Agent/interruption paths have live proof; IPD-5
-  completed-capability detail popover and metadata expansion have live iPad
-  proof; IPD-7 model-picker, provider-settings, and provider list rendering
-  have live iPad proof; IPD-8 History and fork controls have live iPad proof
-  without invoking fork execution; IPD-8 load-earlier pagination, sidebar
+  completed-capability detail popover, metadata expansion, and resolved
+  approval read-only details have live iPad proof; IPD-7 model-picker,
+  provider-settings, and provider list rendering have live iPad proof; IPD-8
+  History and fork controls have live iPad proof without invoking fork
+  execution; IPD-8 load-earlier pagination, sidebar
   selection, back/sidebar toggle, and existing fork lineage now have live iPad
   proof; IPD-9 input focus and prompt Tab no-draft behavior have live
   portrait/landscape proof, with pointer and full hardware-keyboard traversal
