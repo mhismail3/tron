@@ -246,32 +246,42 @@ struct SessionBranchInfoTests {
 @Suite("CommittedFileEntry Tests")
 struct CommittedFileEntryTests {
 
-    private func makeEntry(path: String = "/src/main.rs", status: String = "M") -> CommittedFileEntry {
+    private func makeEntry(path: String = "/src/main.rs", status: CommittedFileStatus = .modified) -> CommittedFileEntry {
         CommittedFileEntry(path: path, status: status, diff: nil, additions: 10, deletions: 5)
     }
 
     // MARK: - fileChangeStatus
 
     @Test("status A maps to added")
-    func statusAdded() { #expect(makeEntry(status: "A").fileChangeStatus == .added) }
+    func statusAdded() { #expect(makeEntry(status: .added).fileChangeStatus == .added) }
 
     @Test("status M maps to modified")
-    func statusModified() { #expect(makeEntry(status: "M").fileChangeStatus == .modified) }
+    func statusModified() { #expect(makeEntry(status: .modified).fileChangeStatus == .modified) }
 
     @Test("status D maps to deleted")
-    func statusDeleted() { #expect(makeEntry(status: "D").fileChangeStatus == .deleted) }
+    func statusDeleted() { #expect(makeEntry(status: .deleted).fileChangeStatus == .deleted) }
 
     @Test("status R maps to renamed")
-    func statusRenamed() { #expect(makeEntry(status: "R").fileChangeStatus == .renamed) }
+    func statusRenamed() { #expect(makeEntry(status: .renamed).fileChangeStatus == .renamed) }
 
     @Test("status C maps to copied")
-    func statusCopied() { #expect(makeEntry(status: "C").fileChangeStatus == .copied) }
+    func statusCopied() { #expect(makeEntry(status: .copied).fileChangeStatus == .copied) }
 
-    @Test("unknown status defaults to modified")
-    func statusUnknown() { #expect(makeEntry(status: "X").fileChangeStatus == .modified) }
+    @Test("unknown status fails decoding")
+    func statusUnknownFailsDecoding() {
+        let data = Data(#"{"path":"file.txt","status":"X","diff":null,"additions":0,"deletions":0}"#.utf8)
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(CommittedFileEntry.self, from: data)
+        }
+    }
 
-    @Test("empty status defaults to modified")
-    func statusEmpty() { #expect(makeEntry(status: "").fileChangeStatus == .modified) }
+    @Test("empty status fails decoding")
+    func statusEmptyFailsDecoding() {
+        let data = Data(#"{"path":"file.txt","status":"","diff":null,"additions":0,"deletions":0}"#.utf8)
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(CommittedFileEntry.self, from: data)
+        }
+    }
 
     // MARK: - fileName / fileExtension
 

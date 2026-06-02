@@ -9,8 +9,8 @@ struct DiffFileEntryTests {
     func fileNameExtractsLastComponent() {
         let entry = DiffFileEntry(
             path: "src/views/Main.swift",
-            status: "modified",
-            stagingArea: nil,
+            status: .modified,
+            stagingArea: .unstaged,
             diff: nil,
             additions: 0,
             deletions: 0
@@ -22,8 +22,8 @@ struct DiffFileEntryTests {
     func fileExtensionIsLowercase() {
         let entry = DiffFileEntry(
             path: "README.MD",
-            status: "modified",
-            stagingArea: nil,
+            status: .modified,
+            stagingArea: .unstaged,
             diff: nil,
             additions: 0,
             deletions: 0
@@ -31,32 +31,26 @@ struct DiffFileEntryTests {
         #expect(entry.fileExtension == "md")
     }
 
-    @Test("fileChangeStatus maps known statuses")
-    func fileChangeStatusMapsKnown() {
-        let cases: [(String, FileChangeStatus)] = [
-            ("modified", .modified),
-            ("added", .added),
-            ("deleted", .deleted),
-            ("renamed", .renamed),
-            ("untracked", .untracked),
-            ("unmerged", .unmerged),
-            ("copied", .copied),
+    @Test("fileChangeStatus returns decoded status")
+    func fileChangeStatusReturnsDecodedStatus() {
+        let cases: [FileChangeStatus] = [
+            .modified,
+            .added,
+            .deleted,
+            .renamed,
+            .untracked,
+            .unmerged,
+            .copied,
         ]
-        for (raw, expected) in cases {
-            let entry = DiffFileEntry(path: "f", status: raw, stagingArea: nil, diff: nil, additions: 0, deletions: 0)
-            #expect(entry.fileChangeStatus == expected)
+        for status in cases {
+            let entry = DiffFileEntry(path: "f", status: status, stagingArea: .unstaged, diff: nil, additions: 0, deletions: 0)
+            #expect(entry.fileChangeStatus == status)
         }
-    }
-
-    @Test("fileChangeStatus defaults to modified for unknown")
-    func fileChangeStatusDefaultsToModified() {
-        let entry = DiffFileEntry(path: "f", status: "unknown_status", stagingArea: nil, diff: nil, additions: 0, deletions: 0)
-        #expect(entry.fileChangeStatus == .modified)
     }
 
     @Test("id is the path")
     func idIsPath() {
-        let entry = DiffFileEntry(path: "src/main.rs", status: "modified", stagingArea: nil, diff: nil, additions: 0, deletions: 0)
+        let entry = DiffFileEntry(path: "src/main.rs", status: .modified, stagingArea: .unstaged, diff: nil, additions: 0, deletions: 0)
         #expect(entry.id == "src/main.rs")
     }
 }
@@ -74,6 +68,7 @@ struct WorktreeGetDiffResultDecodingTests {
                 {
                     "path": "src/main.rs",
                     "status": "modified",
+                    "stagingArea": "unstaged",
                     "diff": "@@ -1,3 +1,4 @@\\n-old\\n+new",
                     "additions": 1,
                     "deletions": 1
@@ -145,6 +140,7 @@ struct WorktreeGetDiffResultDecodingTests {
                 {
                     "path": "new.txt",
                     "status": "untracked",
+                    "stagingArea": "unstaged",
                     "diff": null,
                     "additions": 0,
                     "deletions": 0
@@ -155,7 +151,7 @@ struct WorktreeGetDiffResultDecodingTests {
         """.data(using: .utf8)!
         let result = try JSONDecoder().decode(WorktreeGetDiffResult.self, from: json)
         let file = try #require(result.files?.first)
-        #expect(file.status == "untracked")
+        #expect(file.status == .untracked)
         #expect(file.diff == nil)
     }
 
@@ -180,7 +176,7 @@ struct WorktreeGetDiffResultDecodingTests {
         """.data(using: .utf8)!
         let result = try JSONDecoder().decode(WorktreeGetDiffResult.self, from: json)
         let file = try #require(result.files?.first)
-        #expect(file.stagingArea == "staged")
+        #expect(file.stagingArea == .staged)
         #expect(file.fileStagingArea == .staged)
     }
 
@@ -232,8 +228,8 @@ struct WorktreeGetDiffResultDecodingTests {
         #expect(file.fileStagingArea == .both)
     }
 
-    @Test("Missing stagingArea defaults to unstaged (backward compat)")
-    func decodesMissingStagingAreaDefaultsUnstaged() throws {
+    @Test("Missing stagingArea fails decoding")
+    func missingStagingAreaFailsDecoding() throws {
         let json = """
         {
             "isGitRepo": true,
@@ -250,10 +246,33 @@ struct WorktreeGetDiffResultDecodingTests {
             "summary": { "totalFiles": 1, "totalAdditions": 0, "totalDeletions": 0 }
         }
         """.data(using: .utf8)!
-        let result = try JSONDecoder().decode(WorktreeGetDiffResult.self, from: json)
-        let file = try #require(result.files?.first)
-        #expect(file.stagingArea == nil)
-        #expect(file.fileStagingArea == .unstaged)
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(WorktreeGetDiffResult.self, from: json)
+        }
+    }
+
+    @Test("Unknown status fails decoding")
+    func unknownStatusFailsDecoding() throws {
+        let json = """
+        {
+            "isGitRepo": true,
+            "branch": "main",
+            "files": [
+                {
+                    "path": "old.rs",
+                    "status": "mystery",
+                    "stagingArea": "unstaged",
+                    "diff": null,
+                    "additions": 0,
+                    "deletions": 0
+                }
+            ],
+            "summary": { "totalFiles": 1, "totalAdditions": 0, "totalDeletions": 0 }
+        }
+        """.data(using: .utf8)!
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(WorktreeGetDiffResult.self, from: json)
+        }
     }
 
     @Test("Mixed staging areas in single response")

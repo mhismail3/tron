@@ -141,7 +141,7 @@ struct DiagnosticsBundleBuilderTests {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("DiagnosticsBundleBuilderTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let database = EventDatabase(fallbackPath: directory.appendingPathComponent("events.db").path)
+        let database = EventDatabase(temporaryCachePath: directory.appendingPathComponent("events.db").path)
         try await database.initialize()
         let engineClient = EngineClient(serverURL: URL(string: "ws://paired-server-required.invalid:1/engine")!)
         let eventStoreManager = EventStoreManager(eventDB: database, engineClient: engineClient)

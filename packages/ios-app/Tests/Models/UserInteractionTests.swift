@@ -57,8 +57,8 @@ final class UserInteractionTests: XCTestCase {
         XCTAssertEqual(option.id, "actual_value")
     }
 
-    /// Test option ID uses label as fallback
-    func testUserInteractionOptionIdUsesLabelAsFallback() throws {
+    /// Test option ID uses label when value is omitted
+    func testUserInteractionOptionIdUsesLabelWhenValueOmitted() throws {
         let option = UserInteractionOption(
             label: "Display Label",
             value: nil,

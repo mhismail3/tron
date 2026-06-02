@@ -32,7 +32,7 @@ enum GitActionVerb: String {
 /// - Parameters:
 ///   - error: The error caught from an `engineClient.*` call.
 ///   - action: Typed verb naming the attempted action. Used in the
-///     "{Action} failed: …" fallback for codes without specific copy
+///     "{Action} failed: …" generic copy for codes without specific copy
 ///     and in the "Cannot {action} ..." protected-branch arm.
 /// - Returns: A single-line message suitable for display in
 ///   `tronErrorAlert`. Never an empty string.
@@ -85,7 +85,7 @@ func friendlyGitError(_ error: Error, action: GitActionVerb) -> String {
     // Cron / auth / import codes pass through to the standard
     // "{verb} failed: {message}" — these engine protocols aren't called from git
     // sub-sheets, but the case-iterable contract requires every code to
-    // produce a message so we route them to the same fallback.
+    // produce a message so we route them to the same generic copy.
     case .cronNotFound, .cronDuplicateName, .cronInvalidExpression,
          .cronInvalidTimezone, .cronTimedOut, .cronCancelled,
          .authNotConfigured, .authTokenExpired, .authOauthError,

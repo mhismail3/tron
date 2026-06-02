@@ -40,7 +40,7 @@ final class ContextTrackingState {
     /// Accumulated cost across all turns
     var accumulatedCost: Double = 0
 
-    /// Last turn's input tokens (alias for contextWindowTokens for API compatibility)
+    /// Last turn's input tokens (retained property name; value is the server context-window size)
     var lastTurnInputTokens: Int {
         get { contextWindowTokens }
         set { contextWindowTokens = newValue }

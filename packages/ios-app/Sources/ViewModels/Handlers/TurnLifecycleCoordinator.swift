@@ -117,7 +117,7 @@ final class TurnLifecycleCoordinator {
         // Strategy:
         //   1. Active streaming message (text-only turns ending mid-stream)
         //   2. Last assistant message in turn range (text+capabilities, capability-only, or text-only)
-        //   3. Tracked first text ID fallback (rare: turnStartMessageIndex lost)
+        //   3. Tracked first text ID if the turn boundary was cleared early
         var targetIndex: Int?
 
         if let id = context.streamingMessageId,
@@ -145,7 +145,7 @@ final class TurnLifecycleCoordinator {
         } else if let firstTextId = context.firstTextMessageIdForTurn,
                   let index = MessageFinder.indexById(firstTextId, in: context.messages) {
             targetIndex = index
-            context.logDebug("Using tracked text message as fallback for turn metadata at index \(index)")
+            context.logDebug("Using tracked text message for turn metadata at index \(index)")
         }
 
         // Update the target message with metadata

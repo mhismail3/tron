@@ -127,7 +127,7 @@ struct SourceGuardTests {
         }
     }
 
-    @Test("Fallback event cache remains projection-only")
+    @Test("Temporary event cache remains projection-only")
     func testFallbackEventCacheRemainsProjectionOnly() throws {
         let forbidden: [(String, String)] = [
             ("target" + "Function" + "Id", "generated UI target construction"),
@@ -152,15 +152,15 @@ struct SourceGuardTests {
         for url in checkedFiles {
             let content = try String(contentsOf: url, encoding: .utf8)
             #expect(
-                content.contains("temporary" + "Fallback")
+                content.contains("temporary" + "Cache")
                     || content.contains("Event" + "Database" + "Storage" + "Mode")
                     || content.contains("eventDatabase.storageMode"),
-                "\(url.path) should keep fallback cache mode explicit"
+                "\(url.path) should keep temporary cache mode explicit"
             )
             for (needle, reason) in forbidden {
                 #expect(
                     !content.contains(needle),
-                    "\(url.path) couples fallback event cache mode to \(reason): `\(needle)`"
+                    "\(url.path) couples temporary event cache mode to \(reason): `\(needle)`"
                 )
             }
         }
@@ -526,16 +526,21 @@ struct SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleView.swift"),
             encoding: .utf8
         )
+        let engineConsoleComponents = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleComponents.swift"),
+            encoding: .utf8
+        )
+        let engineConsoleSurface = engineConsole + "\n" + engineConsoleComponents
 
         #expect(!engineConsole.contains(#".navigationTitle("Engine")"#))
         #expect(engineConsole.contains("DashboardToolbarContent("))
         #expect(engineConsole.contains(#"title: "Engine","#))
         #expect(engineConsole.contains(".presentationDragIndicator(.hidden)"))
-        #expect(engineConsole.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
-        #expect(engineConsole.contains("SheetDismissButton(color: tint)"))
-        #expect(engineConsole.contains("EngineConsoleCard(tint: tint)"))
-        #expect(engineConsole.contains("private var secondaryTitle: String?"))
-        #expect(engineConsole.contains("candidate != primaryTitle"))
+        #expect(engineConsoleSurface.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
+        #expect(engineConsoleSurface.contains("SheetDismissButton(color: tint)"))
+        #expect(engineConsoleSurface.contains("EngineConsoleCard(tint: tint)"))
+        #expect(engineConsoleSurface.contains("private var secondaryTitle: String?"))
+        #expect(engineConsoleSurface.contains("candidate != primaryTitle"))
 
         let readinessStart = try #require(engineConsole.range(of: "private var readinessIssues"))
         let readinessEnd = try #require(engineConsole.range(of: "private var mutationIssue"))

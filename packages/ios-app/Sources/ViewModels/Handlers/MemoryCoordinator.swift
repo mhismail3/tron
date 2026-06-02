@@ -81,7 +81,7 @@ final class MemoryCoordinator {
             context.messageIndex.rebuild(from: context.messages)
             // Don't clear the in-progress marker — the paired `memory_updated`
             // still arrives, and `handleMemoryUpdated` will either replace
-            // this message with the fallback summary or leave it as-is.
+            // this message with the server summary or leave it as-is.
         } else {
             // Defensive: `triggered` should always arrive before `failed`,
             // so no pill to update. Append a standalone failure notice.

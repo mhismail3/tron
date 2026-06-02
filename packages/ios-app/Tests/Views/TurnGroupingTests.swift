@@ -528,8 +528,8 @@ struct TurnGroupingTests {
         #expect(groups[1].userMessagePreview == "Pending")
     }
 
-    @Test("Reset detected via explicit turn fallback without user message")
-    func resetWithExplicitTurnFallback() {
+    @Test("Reset detected via explicit turn number without user message")
+    func resetWithExplicitTurnNumber() {
         // Two assistant messages where turn resets without an intervening user message
         // (e.g., auto-continuation or cron-triggered cycle)
         let events = [

@@ -455,9 +455,31 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   with zero windows; `Rotate Left` and `Rotate Right` remained disabled; and a
   direct launch of the Spotlight-resolved bundle
   `/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app` did
-  not restore an AX-visible device window. This is recorded as an environment
-  blocker for current-retune landscape proof and action-time manual flows, not
-  as an app UI failure.
+  not restore an AX-visible device window. That checkpoint recorded an
+  environment blocker for current-retune landscape proof and action-time manual
+  flows, not an app UI failure.
+- Latest sheet-shape review after the user found the current forms still a
+  little too wide and not tall enough retuned only the iPad presentation
+  metrics again. Large iPad forms now target
+  `min(referenceWidth * 0.50, 580)` by
+  `min(referenceHeight * 0.92, 980)`, compact iPad forms target
+  `min(referenceWidth * 0.44, 500)` by
+  `min(referenceHeight * 0.88, 920)`, and the iPhone/non-iPad branch still keeps
+  its existing detents and background behavior. Focused verification passed
+  after `xcodegen generate`:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests`
+  with 4 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_19-31-09--0700.xcresult`.
+  Computer Use recovered on the same iPad Pro 13-inch (M5) Simulator window,
+  bundle `com.tron.mobile.beta` was launched as pid `49779`, and the same
+  direct-branch session plus seeded notification deep link were verified in
+  portrait and landscape. Evidence:
+  `/tmp/tron-psg-evidence/ipd-sheet-retune-agent-control-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-retune-agent-control-landscape.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-retune-notification-portrait.png`, and
+  `/tmp/tron-psg-evidence/ipd-sheet-retune-notification-landscape.png`.
+  This closes the previous current-retune landscape proof blocker; action-time
+  voice-note/source-control/approval/fork/pointer rows remain open.
 - IPD-7 final Settings/unavailable/onboarding pass found and fixed one Server
   page projection gap: when the active paired server was offline, the page
   warned in the summary but hid the `Server Controls` unavailable card because
@@ -707,5 +729,4 @@ approval flows, read-only terminal approvals, and generated UI details, full
 IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-8
 back/session-tree behavior and action-time-confirmed fork execution, IPD-9
-current-retune landscape visual proof after Simulator AX/window recovery,
 pointer QA and full hardware-keyboard traversal, and IPD-10 closeout.

@@ -134,7 +134,7 @@ struct EngineConsoleView: View {
 
             readinessCard
 
-            if eventDatabaseStorageMode.isTemporaryFallback {
+            if eventDatabaseStorageMode.isTemporaryCache {
                 EngineConsoleBanner(
                     symbol: "externaldrive.badge.exclamationmark",
                     title: "Temporary local event cache",

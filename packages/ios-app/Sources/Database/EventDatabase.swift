@@ -5,10 +5,10 @@ import SQLite3
 
 enum EventDatabaseStorageMode: String, Equatable, Sendable {
     case primaryDocuments
-    case temporaryFallback
+    case temporaryCache
 
-    var isTemporaryFallback: Bool {
-        self == .temporaryFallback
+    var isTemporaryCache: Bool {
+        self == .temporaryCache
     }
 }
 
@@ -61,14 +61,14 @@ final class EventDatabase: DatabaseTransport {
         self.dbActor = DatabaseActor(dbPath: self.dbPath)
     }
 
-    /// Fallback initializer for when Documents directory is unavailable (e.g., device restore).
-    /// Data in the fallback path may be lost when the temp directory is cleaned.
-    init(fallbackPath: String) {
-        let dir = (fallbackPath as NSString).deletingLastPathComponent
+    /// Temporary-cache initializer for when Documents is unavailable (e.g., device restore).
+    /// Data in this path may be lost when the temp directory is cleaned.
+    init(temporaryCachePath: String) {
+        let dir = (temporaryCachePath as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        self.dbPath = fallbackPath
-        self.storageMode = .temporaryFallback
-        self.dbActor = DatabaseActor(dbPath: fallbackPath)
+        self.dbPath = temporaryCachePath
+        self.storageMode = .temporaryCache
+        self.dbActor = DatabaseActor(dbPath: temporaryCachePath)
     }
 
     func initialize() async throws {
@@ -80,9 +80,9 @@ final class EventDatabase: DatabaseTransport {
         switch storageMode {
         case .primaryDocuments:
             logger.info("Event database initialized at \(self.dbPath)", category: .session)
-        case .temporaryFallback:
+        case .temporaryCache:
             logger.warning(
-                "Event database initialized in temporary fallback cache mode at \(self.dbPath); local projections may be lost and server substrate remains authoritative",
+                "Event database initialized in temporary cache mode at \(self.dbPath); local projections may be lost and server substrate remains authoritative",
                 category: .session
             )
         }

@@ -54,7 +54,7 @@ enum SystemEvent: Equatable, Hashable {
     case memoryAutoRetainInProgress(intervalFired: Int)
     /// Automatic memory retain failed mid-pipeline (H3). Paired with a
     /// prior `memoryAutoRetainInProgress` — a `memoryUpdated` still
-    /// lands afterward when the server writes the fallback summary.
+    /// lands afterward when the server writes the summary.
     case memoryAutoRetainFailed(intervalFired: Int, reason: String)
     /// Memory was retained to long-term log
     case memoryRetained(title: String, summary: String?)

@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, lightweight source-control diff summary loading, balanced iPad liquid-glass sheet sizing, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, lightweight source-control diff summary loading, balanced iPad liquid-glass sheet sizing, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -198,9 +198,9 @@ helpers stay beside the message models and invocation views. Those splits must
 not introduce capability policy, routing, approval truth, generated-UI
 semantics, or server-owned product state into Swift.
 The local `EventDatabase` is a projection/cache. If Documents storage is
-unavailable at launch, the app uses `temporaryFallback` cache mode rather than
+unavailable at launch, the app uses `temporaryCache` mode rather than
 crashing, logs that mode, includes it in diagnostics bundles, and shows it in
-Engine Console. The fallback cache is never server truth: it cannot construct
+Engine Console. The temporary cache is never server truth: it cannot construct
 grants, generated UI action targets/templates, resource lineage, or capability
 policy.
 Each visible `ChatView` starts and stops only its own `ChatViewModel` live-event
@@ -543,8 +543,8 @@ main `SettingsView` grid. The root sheet supports medium and large detents and
 starts at medium on iPhone. On iPad, adaptive sheets use balanced liquid-glass
 floating forms so the underlying app context remains visible without the sheet
 reading as a full-width panel. Large iPad forms target a narrower/taller
-`0.54w`/`0.90h` shape capped at `620x980`, while compact iPad forms target
-`0.48w`/`0.82h` capped at `540x880`; the iPhone/non-iPad branch keeps its
+`0.50w`/`0.92h` shape capped at `580x980`, while compact iPad forms target
+`0.44w`/`0.88h` capped at `500x920`; the iPhone/non-iPad branch keeps its
 existing detent and background behavior. The iPad branch does not attach phone
 detents, so forms remain centered floating containers instead of falling back to
 bottom-detent sheets. The iPad branch also prioritizes scrolling sheet content

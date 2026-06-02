@@ -87,20 +87,20 @@ final class EventDatabaseTests: XCTestCase {
 
     // MARK: - Event Operations
 
-    func testStorageModeDistinguishesPrimaryAndTemporaryFallback() async throws {
+    func testStorageModeDistinguishesPrimaryAndTemporaryCache() async throws {
         XCTAssertEqual(database.storageMode, .primaryDocuments)
-        XCTAssertFalse(database.storageMode.isTemporaryFallback)
+        XCTAssertFalse(database.storageMode.isTemporaryCache)
 
-        let fallbackURL = FileManager.default.temporaryDirectory
+        let temporaryCacheURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-            .appendingPathComponent("fallback.db")
-        let fallback = EventDatabase(fallbackPath: fallbackURL.path)
-        XCTAssertEqual(fallback.storageMode, .temporaryFallback)
-        XCTAssertTrue(fallback.storageMode.isTemporaryFallback)
+            .appendingPathComponent("events.db")
+        let temporaryCache = EventDatabase(temporaryCachePath: temporaryCacheURL.path)
+        XCTAssertEqual(temporaryCache.storageMode, .temporaryCache)
+        XCTAssertTrue(temporaryCache.storageMode.isTemporaryCache)
 
-        try await fallback.initialize()
-        await fallback.close()
-        try? FileManager.default.removeItem(at: fallbackURL.deletingLastPathComponent())
+        try await temporaryCache.initialize()
+        await temporaryCache.close()
+        try? FileManager.default.removeItem(at: temporaryCacheURL.deletingLastPathComponent())
     }
 
     func testInsertAndGetEvent() async throws {

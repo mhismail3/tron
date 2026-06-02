@@ -91,7 +91,7 @@ struct UserMemorySnapshotTests {
         #expect(a != c)
     }
 
-    // MARK: - Wire compat with DetailedContextSnapshotResult
+    // MARK: - DetailedContextSnapshotResult wiring
 
     @Test("DetailedContextSnapshotResult decodes with memory populated")
     func testDecode_detailedSnapshot_memoryPopulated() throws {

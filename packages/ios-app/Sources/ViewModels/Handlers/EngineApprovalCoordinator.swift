@@ -142,7 +142,7 @@ final class EngineApprovalCoordinator {
                 )
                 updateMessageFromServerApproval(
                     result.approval,
-                    fallbackNote: submission.note,
+                    submittedNote: submission.note,
                     context: context
                 )
                 context.logInfo(
@@ -184,7 +184,7 @@ final class EngineApprovalCoordinator {
 
     private func updateMessageFromServerApproval(
         _ approval: EngineApprovalRecordDTO,
-        fallbackNote: String?,
+        submittedNote: String?,
         context: EngineApprovalContext
     ) {
         let invocationId = "engine-approval:\(approval.approvalId)"
@@ -207,7 +207,7 @@ final class EngineApprovalCoordinator {
         let result = decision.map {
             EngineApprovalResult(
                 decision: $0,
-                note: fallbackNote,
+                note: submittedNote,
                 submittedAt: approval.decidedAt ?? approval.updatedAt ?? DateParser.now
             )
         }
@@ -215,7 +215,7 @@ final class EngineApprovalCoordinator {
             invocationId: invocationId,
             status: status,
             decision: decision,
-            note: fallbackNote,
+            note: submittedNote,
             result: result,
             context: context
         )

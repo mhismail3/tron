@@ -153,7 +153,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     init() {
         // Initialize core services that persist across server changes.
-        // Falls back to temp directory if Documents is unavailable (e.g., device migration).
+        // Uses the temp directory if Documents is unavailable (e.g., device migration).
         let documentsURL: URL
         if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             documentsURL = url
@@ -166,7 +166,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         if let primaryDB = EventDatabase() {
             db = primaryDB
         } else {
-            db = EventDatabase(fallbackPath: NSTemporaryDirectory() + ".tron/database/fallback.db")
+            db = EventDatabase(temporaryCachePath: NSTemporaryDirectory() + ".tron/database/events.db")
         }
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)

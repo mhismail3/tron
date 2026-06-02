@@ -193,7 +193,7 @@ struct CommitEntry: Decodable, Identifiable, Hashable {
 /// Per-file entry in a committed diff
 struct CommittedFileEntry: Decodable, Identifiable, Hashable {
     let path: String
-    let status: String
+    let status: CommittedFileStatus
     let diff: String?
     let additions: Int
     let deletions: Int
@@ -210,14 +210,21 @@ struct CommittedFileEntry: Decodable, Identifiable, Hashable {
 
     var fileChangeStatus: FileChangeStatus {
         switch status {
-        case "A": return .added
-        case "M": return .modified
-        case "D": return .deleted
-        case "R": return .renamed
-        case "C": return .copied
-        default: return .modified
+        case .added: return .added
+        case .modified: return .modified
+        case .deleted: return .deleted
+        case .renamed: return .renamed
+        case .copied: return .copied
         }
     }
+}
+
+enum CommittedFileStatus: String, Decodable, Hashable {
+    case added = "A"
+    case modified = "M"
+    case deleted = "D"
+    case renamed = "R"
+    case copied = "C"
 }
 
 /// Aggregate diff summary for committed changes
