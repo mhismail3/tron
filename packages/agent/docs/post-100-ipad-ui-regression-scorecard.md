@@ -1069,6 +1069,18 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-55-02--0700.xcresult`,
   and suite-level `SourceGuardTests` passed 14 Swift Testing checks in
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-54-23--0700.xcresult`.
+- Follow-up container-routed detail-sheet audit found one remaining duplicate
+  adaptive sizing wrapper: `SourceControlSheet` wrapped `FileDetailSheet` even
+  though the sheet body already uses `CapabilityDetailSheetContainer`, which
+  owns canonical iPad sizing for capability detail presentations. The focused
+  guard first failed in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-00-44--0700.xcresult`,
+  then passed 9 `IPadSheetPresentationTests` cases after the presenter-side
+  duplicate was removed:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-01-14--0700.xcresult`.
+  Final combined coverage passed 13 XCTest cases across
+  `IPadSheetPresentationTests` and `NotificationSheetPresentationTests`:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-02-24--0700.xcresult`.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2

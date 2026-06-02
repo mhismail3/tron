@@ -209,7 +209,6 @@ struct SourceControlSheet: View {
                     activeGitAction = .conflictResolver
                 }
             )
-            .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         }
         .sheet(item: $activeGitAction, onDismiss: {
             Task { await reloadDataAndNotifyParent() }

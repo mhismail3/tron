@@ -967,6 +967,17 @@ UDID before continuing.
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-55-02--0700.xcresult`,
   and the updated Engine Console source guard passed 14 Swift Testing checks in
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-54-23--0700.xcresult`.
+  A further container-routed detail-sheet audit then caught `SourceControlSheet`
+  wrapping `FileDetailSheet` with duplicate presenter-side adaptive sizing even
+  though `FileDetailSheet` already routes through
+  `CapabilityDetailSheetContainer`. The focused guard first failed in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-00-44--0700.xcresult`,
+  then passed 9 `IPadSheetPresentationTests` cases after the duplicate wrapper
+  was removed while the reusable container retained ownership:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-01-14--0700.xcresult`.
+  Final combined sheet regression coverage passed 13 XCTest cases across
+  `IPadSheetPresentationTests` and `NotificationSheetPresentationTests`:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-02-24--0700.xcresult`.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

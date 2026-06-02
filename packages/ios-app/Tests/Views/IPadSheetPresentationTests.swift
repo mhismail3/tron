@@ -146,6 +146,11 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ["Sources", "Views", "Settings", "Pages", "PluginSourcesPage.swift"],
                 "private struct AddPluginSourceSheet: View",
                 ".adaptivePresentationDetents([.medium], ipadSizing: .largeForm)"
+            ),
+            (
+                ["Sources", "Views", "SourceChanges", "FileDetailSheet.swift"],
+                "struct FileDetailSheet: View",
+                "CapabilityDetailSheetContainer("
             )
         ]
 
@@ -161,6 +166,24 @@ final class IPadSheetPresentationTests: XCTestCase {
                 "\(entry.anchor) should own canonical adaptive iPad sheet sizing"
             )
         }
+    }
+
+    func testSourceControlDoesNotWrapFileDetailWithDuplicateSizing() throws {
+        let content = try source(pathComponents: ["Sources", "Views", "AgentControl", "SourceControlSheet.swift"])
+        let sheetRange = try XCTUnwrap(
+            content.range(of: ".sheet(item: $selectedFileDetail)"),
+            "SourceControlSheet should still present file detail through its selected-file sheet"
+        )
+        let nextSheetRange = try XCTUnwrap(
+            content.range(of: ".sheet(item: $activeGitAction", range: sheetRange.upperBound..<content.endIndex),
+            "SourceControlSheet should still present git action sheets after file detail"
+        )
+        let fileDetailSheetBlock = String(content[sheetRange.lowerBound..<nextSheetRange.lowerBound])
+
+        XCTAssertFalse(
+            fileDetailSheetBlock.contains(".adaptivePresentationDetents("),
+            "FileDetailSheet should inherit canonical sizing from CapabilityDetailSheetContainer instead of a presenter-side duplicate"
+        )
     }
 
     func testEveryAdaptivePresentationCallSiteDeclaresIPadSizingPreset() throws {
