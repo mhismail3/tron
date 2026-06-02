@@ -93,6 +93,7 @@ pub(super) fn upgrade_schema() -> Value {
     let mut schema = activate_schema();
     if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
         required.push(json!("activationResourceId"));
+        required.push(json!("expectedCurrentVersionId"));
     }
     schema["properties"]["activationResourceId"] = json!({"type": "string"});
     schema
@@ -101,7 +102,12 @@ pub(super) fn upgrade_schema() -> Value {
 pub(super) fn rollback_schema() -> Value {
     json!({
         "type": "object",
-        "required": ["activationResourceId", "targetVersionId", "childGrantRequest"],
+        "required": [
+            "activationResourceId",
+            "targetVersionId",
+            "childGrantRequest",
+            "expectedCurrentVersionId"
+        ],
         "additionalProperties": false,
         "properties": {
             "activationResourceId": {"type": "string"},

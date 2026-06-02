@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **53.25/100**
+Current score: **55.5/100**
 
 Status: **running**
 
@@ -695,8 +695,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D1 through HMH-D4 are also closed; continue with HMH-D5 to
-  prove upgrade, rollback, disable, and quarantine behavior.
+  proven. HMH-D1 through HMH-D5 are also closed; continue with HMH-D6 to
+  prove the local marketplace/install package shape.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -710,7 +710,7 @@ Out of scope: remote marketplace trust without explicit local policy.
 | HMH-D2 | Source trust is explicit and revocable | 15 | passed | Register/verify/approve/revoke/expire/rotate/reconcile trust flows create decision/evidence resources and enforce trust ceilings before activation. | Stop if activation can bypass source trust. |
 | HMH-D3 | Activation composes worker spawn | 15 | passed | `module::activate` invokes child `worker::spawn` outside host locks with narrowed grant, file roots, expected ids, scoped token, and activation lineage. | Stop if module runtime owns a parallel process launcher. |
 | HMH-D4 | Health, integrity, and conformance are inspectable | 15 | passed | `check_health`, `verify_integrity`, and `run_conformance` produce linked evidence, child invocation ids, and recovery recommendations. | Block promotion if evidence is missing/stale. |
-| HMH-D5 | Upgrade, rollback, disable, quarantine work | 15 | pending | Upgrade and rollback require expected versions and idempotency; disable/quarantine stop workers or fail closed; stale invocations cannot use quarantined functions. | Stop if rollback is doc-only. |
+| HMH-D5 | Upgrade, rollback, disable, quarantine work | 15 | passed | Upgrade and rollback require expected versions and idempotency; disable/quarantine stop workers or fail closed; stale invocations cannot use quarantined functions. | Stop if rollback is doc-only. |
 | HMH-D6 | Local marketplace shape exists | 10 | pending | Installing a first-party/local package is a capability operation over local package resources; remote source approval is explicit and policy-bound. | Reject implicit network trust. |
 | HMH-D7 | iOS/operator projection is complete | 10 | pending | Engine Console shows package/config/activation/trust/conformance actions and evidence without hardcoded package policy. | Fix iOS projection only after server truth is proven. |
 | HMH-D8 | No generic action escape hatch | 10 | pending | Static scan rejects `module::act`, generic package mutation multiplexers, and client-side module policy. | Remove escape hatches before closeout. |
@@ -824,11 +824,60 @@ HMH-D4 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml module_activation::health_integrity -- --nocapture`.
 
-Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4:
+HMH-D5 evidence, 2026-06-02:
 
-- HMH-D remains open. Continue with HMH-D5 to prove upgrade, rollback, disable,
-  and quarantine require expected versions/idempotency, stop or revoke workers,
-  and fail closed for stale or quarantined invocations.
+- Production ownership remains in
+  `packages/agent/src/engine/primitives/module/activation_lifecycle.rs`,
+  with request shape in
+  `packages/agent/src/engine/primitives/module/schemas.rs`.
+- `module::upgrade` and `module::rollback` schemas now require
+  `expectedCurrentVersionId`, and the lifecycle handler checks the activation
+  record's current version before deriving grants, spawning local-process
+  workers, revoking old grants, or stopping workers.
+- `module::rollback` now uses the same replacement-source cleanup path as
+  `module::upgrade`: it supersedes the current activation version, revokes the
+  replaced activation grant, records `supersedes`, and disconnects/stops the
+  replaced worker when the worker id changes.
+- Replacement local-process upgrades and rollbacks now stop the superseded
+  spawned worker through `sandbox::stop_spawned_worker` before the replacement
+  worker registers the same package function ids, avoiding function-owner
+  conflicts while preserving the canonical sandbox lifecycle.
+- The recording `worker::spawn` test fixture now scopes its child
+  `grant::derive` idempotency key by spawn invocation id, matching the
+  production activation grant shape and allowing a rollback to re-spawn the
+  original worker id without idempotency collision.
+- The new
+  `module_upgrade_and_rollback_require_current_version_before_spawn_and_replay`
+  proof covers missing/stale expected-version rejection before extra spawn/stop
+  effects, successful local-process upgrade, idempotent replay, successful
+  rollback to the prior activation version, revoked replaced grants, stopped
+  replaced workers, and no duplicate child effects on replay.
+- The new
+  `module_quarantine_stale_activation_fails_before_stop_and_blocks_stale_grant`
+  proof covers stale quarantine rejection before worker stop or grant revoke,
+  successful quarantine of a local-process activation, sandbox worker stop,
+  revoked activation grant, unregistered worker, and a closed error for a stale
+  invocation after quarantine.
+- The new
+  `module_local_process_replacement_spawn_failure_marks_activation_failed_closed`
+  proof covers replacement spawn failure after the superseded worker has been
+  stopped, verifies the old grant is revoked, both old and replacement workers
+  are absent, and inspects the activation resource lifecycle/payload to prove
+  `activationStatus=failed`, `compensationState.status=failed_closed`,
+  `runtimeDiagnostics.recoveryStatus=failed_closed`, and linked evidence refs.
+- Existing proofs still cover configure secret boundaries, upgrade activation
+  resource matching, grant replacement, disable grant revocation, explicit
+  revocation enforcement through quarantine, and the real local-process disable
+  path.
+- Passing focused proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml module_activation::lifecycle_controls -- --nocapture`.
+
+Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5:
+
+- HMH-D remains open. Continue with HMH-D6 to prove local marketplace/package
+  install shape: first-party/local package installation must be a canonical
+  capability operation over `worker_package` resources, and remote source
+  approval must stay explicit and policy-bound.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -984,9 +1033,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, and HMH-D1 through HMH-D4 are closed. Continue with
-HMH-D5: prove upgrade, rollback, disable, and quarantine behavior.
+HMH-A, HMH-B, HMH-C, and HMH-D1 through HMH-D5 are closed. Continue with
+HMH-D6: prove the local marketplace/install package shape.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml module_configure_and_activate_enforce_secret_and_grant_boundaries -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml module_register_package_validates_local_process_runtime_manifest -- --nocapture
 ```

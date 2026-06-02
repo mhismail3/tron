@@ -9,11 +9,12 @@ enum ActivationMode {
     Rollback,
 }
 
-struct UpgradeSource {
+struct ReplacementSource {
     resource_id: String,
     version_id: String,
     grant_id: String,
     worker_id: String,
+    payload: Value,
 }
 
 pub(super) struct SpawnedLocalProcess {
@@ -38,7 +39,10 @@ impl ModulePrimitiveHandler {
         let activation_resource_id =
             required_string_owned(&invocation.payload, "activationResourceId")?;
         let target_version_id = required_string_owned(&invocation.payload, "targetVersionId")?;
+        let expected_current_version_id =
+            required_string_owned(&invocation.payload, "expectedCurrentVersionId")?;
         let activation = require_inspection(self, &activation_resource_id, ACTIVATION_RECORD_KIND)?;
+        ensure_expected_current_version(&activation, &expected_current_version_id)?;
         let target = version_payload(&activation, &target_version_id)?;
         for (field, kind) in [
             ("packageResourceId", WORKER_PACKAGE_KIND),
@@ -76,6 +80,10 @@ impl ModulePrimitiveHandler {
         let current = current_version(&inspection).ok_or_else(|| {
             EngineError::PolicyViolation(format!("activation {resource_id} has no current version"))
         })?;
+        if let Some(expected) = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+        {
+            ensure_expected_current_version(&inspection, &expected)?;
+        }
         let mut payload = current.payload.clone();
         let grant_id = required_value_str(&payload, "derivedGrantId")?;
         let revoked_grant = self.revoke_grant(
@@ -122,6 +130,10 @@ impl ModulePrimitiveHandler {
                     kind: "resource",
                     id: resource_id.clone(),
                 })?;
+        if let Some(expected) = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+        {
+            ensure_expected_current_version(&inspection, &expected)?;
+        }
         if !matches!(
             inspection.resource.kind.as_str(),
             WORKER_PACKAGE_KIND | ACTIVATION_RECORD_KIND
@@ -221,11 +233,11 @@ impl ModulePrimitiveHandler {
         let declared = declared_capabilities(&manifest)?;
         let (scope, scope_token) = resource_scope_and_token(invocation)?;
         let resource_id = activation_resource_id(&scope_token, package_id);
-        let upgrade_source =
-            upgrade_source(self, invocation, mode, &resource_id, &package_resource_id)?;
+        let replacement_source =
+            replacement_source(self, invocation, mode, &resource_id, &package_resource_id)?;
         if mode == ActivationMode::Upgrade
             && matches!(&runtime_entrypoint, RuntimeEntryPoint::LocalProcess(_))
-            && upgrade_source
+            && replacement_source
                 .as_ref()
                 .is_some_and(|source| source.worker_id == worker_id)
         {
@@ -251,6 +263,8 @@ impl ModulePrimitiveHandler {
             &child_request,
         )?;
         let mut spawned_local_process = false;
+        let mut pre_replaced_grant = None;
+        let mut pre_disconnected_worker = None;
         let (worker, grant, spawn_invocation_id, spawn_result, worker_lifecycle) =
             match runtime_entrypoint {
                 RuntimeEntryPoint::ExistingOrBuiltin => {
@@ -277,6 +291,21 @@ impl ModulePrimitiveHandler {
                 }
                 RuntimeEntryPoint::LocalProcess(local_process) => {
                     spawned_local_process = true;
+                    if let Some(source) = &replacement_source
+                        && source.worker_id != local_process.worker_id.as_str()
+                    {
+                        pre_disconnected_worker = self
+                            .disconnect_activation_worker(
+                                invocation,
+                                &source.payload,
+                                "module activation superseded worker",
+                            )
+                            .await?;
+                        pre_replaced_grant = Some(self.revoke_grant(
+                            &AuthorityGrantId::new(source.grant_id.clone())?,
+                            invocation.causal_context.trace_id.clone(),
+                        )?);
+                    }
                     let spawn = match self
                         .spawn_local_process_worker(
                             invocation,
@@ -288,16 +317,19 @@ impl ModulePrimitiveHandler {
                     {
                         Ok(spawn) => spawn,
                         Err(error) => {
-                            self.record_activation_runtime_failure(
+                            record_activation_runtime_failure_and_mark_replacement(
+                                self,
                                 invocation,
                                 &package_resource_id,
                                 "worker_spawn",
                                 None,
                                 Some(local_process.worker_id.as_str()),
                                 true,
+                                replacement_source.as_ref(),
+                                pre_disconnected_worker.as_ref(),
                                 &error,
                             )
-                            .await;
+                            .await?;
                             return Err(error);
                         }
                     };
@@ -318,31 +350,37 @@ impl ModulePrimitiveHandler {
             let error = EngineError::PolicyViolation(format!(
                 "worker {worker_id} does not claim package namespace {namespace}"
             ));
-            self.record_activation_runtime_failure(
+            record_activation_runtime_failure_and_mark_replacement(
+                self,
                 invocation,
                 &package_resource_id,
                 "post_spawn_validation",
                 Some(&grant.grant_id),
                 Some(worker.id.as_str()),
                 spawned_local_process,
+                replacement_source.as_ref(),
+                pre_disconnected_worker.as_ref(),
                 &error,
             )
-            .await;
+            .await?;
             return Err(error);
         }
         let registered =
             registered_capabilities_for_worker(self, invocation, &worker.id, namespace).await?;
         if let Err(error) = validate_registered_capabilities(&declared, &registered) {
-            self.record_activation_runtime_failure(
+            record_activation_runtime_failure_and_mark_replacement(
+                self,
                 invocation,
                 &package_resource_id,
                 "post_spawn_validation",
                 Some(&grant.grant_id),
                 Some(worker.id.as_str()),
                 spawned_local_process,
+                replacement_source.as_ref(),
+                pre_disconnected_worker.as_ref(),
                 &error,
             )
-            .await;
+            .await?;
             return Err(error);
         }
         let grant_hash = hash_json(&json!(grant))?;
@@ -357,7 +395,7 @@ impl ModulePrimitiveHandler {
             .cloned()
             .or_else(|| manifest.get("healthPolicy").cloned())
             .unwrap_or_else(|| json!({"mode": "catalog_registered"}));
-        let supersedes = upgrade_source
+        let supersedes = replacement_source
             .as_ref()
             .map(|source| {
                 json!({
@@ -432,33 +470,37 @@ impl ModulePrimitiveHandler {
         let (resource, version, role) = match upserted {
             Ok(value) => value,
             Err(error) => {
-                self.record_activation_runtime_failure(
+                record_activation_runtime_failure_and_mark_replacement(
+                    self,
                     invocation,
                     &package_resource_id,
                     "activation_record_persist",
                     Some(&cleanup_grant_id),
                     Some(worker.id.as_str()),
                     spawned_local_process,
+                    replacement_source.as_ref(),
+                    pre_disconnected_worker.as_ref(),
                     &error,
                 )
-                .await;
+                .await?;
                 return Err(error);
             }
         };
-        let mut replaced_grant = None;
-        let mut disconnected_worker = None;
-        if let Some(source) = &upgrade_source {
-            if source.grant_id != grant.grant_id.as_str() {
+        let mut replaced_grant = pre_replaced_grant;
+        let mut disconnected_worker = pre_disconnected_worker;
+        if let Some(source) = &replacement_source {
+            if replaced_grant.is_none() && source.grant_id != grant.grant_id.as_str() {
                 replaced_grant = Some(self.revoke_grant(
                     &AuthorityGrantId::new(source.grant_id.clone())?,
                     invocation.causal_context.trace_id.clone(),
                 )?);
             }
-            if source.worker_id != worker.id.as_str() {
+            if disconnected_worker.is_none() && source.worker_id != worker.id.as_str() {
                 disconnected_worker = self
-                    .disconnect_volatile_worker(
-                        &source.worker_id,
-                        "module upgrade superseded worker",
+                    .disconnect_activation_worker(
+                        invocation,
+                        &source.payload,
+                        "module activation superseded worker",
                     )
                     .await?;
             }
@@ -490,29 +532,37 @@ impl ModulePrimitiveHandler {
     }
 }
 
-fn upgrade_source(
+fn replacement_source(
     host: &ModulePrimitiveHandler,
     invocation: &Invocation,
     mode: ActivationMode,
     expected_resource_id: &str,
     package_resource_id: &str,
-) -> Result<Option<UpgradeSource>> {
-    if mode != ActivationMode::Upgrade {
+) -> Result<Option<ReplacementSource>> {
+    if !matches!(mode, ActivationMode::Upgrade | ActivationMode::Rollback) {
         return Ok(None);
     }
+    let operation = match mode {
+        ActivationMode::Upgrade => "module::upgrade",
+        ActivationMode::Rollback => "module::rollback",
+        ActivationMode::Activate => unreachable!(),
+    };
     let resource_id = required_string_owned(&invocation.payload, "activationResourceId")?;
     if resource_id != expected_resource_id {
         return Err(EngineError::PolicyViolation(format!(
-            "module::upgrade activationResourceId {resource_id} does not match package activation {expected_resource_id}"
+            "{operation} activationResourceId {resource_id} does not match package activation {expected_resource_id}"
         )));
     }
+    let expected_current_version_id =
+        required_string_owned(&invocation.payload, "expectedCurrentVersionId")?;
     let inspection = require_inspection(host, &resource_id, ACTIVATION_RECORD_KIND)?;
+    ensure_expected_current_version(&inspection, &expected_current_version_id)?;
     if matches!(
         inspection.resource.lifecycle.as_str(),
         "disabled" | "failed" | "quarantined" | "damaged"
     ) {
         return Err(EngineError::PolicyViolation(format!(
-            "module::upgrade requires an active activation, got {}",
+            "{operation} requires an active activation, got {}",
             inspection.resource.lifecycle
         )));
     }
@@ -521,30 +571,126 @@ fn upgrade_source(
     })?;
     let payload = &current.payload;
     if payload.get("packageResourceId").and_then(Value::as_str) != Some(package_resource_id) {
-        return Err(EngineError::PolicyViolation(
-            "module::upgrade package does not match activation being replaced".to_owned(),
-        ));
+        return Err(EngineError::PolicyViolation(format!(
+            "{operation} package does not match activation being replaced"
+        )));
     }
     let grant_id = required_value_str(payload, "derivedGrantId")?.to_owned();
     let grant = host
         .inspect_grant(&AuthorityGrantId::new(grant_id.clone())?)?
         .ok_or_else(|| {
             EngineError::PolicyViolation(format!(
-                "module::upgrade source grant {grant_id} is not inspectable"
+                "{operation} source grant {grant_id} is not inspectable"
             ))
         })?;
     if grant.lifecycle != EngineGrantLifecycle::Active {
         return Err(EngineError::PolicyViolation(format!(
-            "module::upgrade source grant {grant_id} is not active"
+            "{operation} source grant {grant_id} is not active"
         )));
     }
     let worker_id = required_value_str(payload, "workerId")?.to_owned();
-    Ok(Some(UpgradeSource {
+    Ok(Some(ReplacementSource {
         resource_id,
         version_id: current.version_id.clone(),
         grant_id,
         worker_id,
+        payload: payload.clone(),
     }))
+}
+
+async fn record_activation_runtime_failure_and_mark_replacement(
+    host: &ModulePrimitiveHandler,
+    invocation: &Invocation,
+    target_resource_id: &str,
+    stage: &str,
+    grant_id: Option<&AuthorityGrantId>,
+    worker_id: Option<&str>,
+    spawned_local_process: bool,
+    replacement_source: Option<&ReplacementSource>,
+    disconnected_worker: Option<&Value>,
+    error: &EngineError,
+) -> Result<()> {
+    let diagnostics = host
+        .record_activation_runtime_failure(
+            invocation,
+            target_resource_id,
+            stage,
+            grant_id,
+            worker_id,
+            spawned_local_process,
+            error,
+        )
+        .await;
+    if let Some(source) = replacement_source
+        && disconnected_worker.is_some()
+    {
+        mark_replacement_source_failed(
+            host,
+            invocation,
+            source,
+            stage,
+            &diagnostics,
+            disconnected_worker,
+            error,
+        )?;
+    }
+    Ok(())
+}
+
+fn mark_replacement_source_failed(
+    host: &ModulePrimitiveHandler,
+    invocation: &Invocation,
+    source: &ReplacementSource,
+    stage: &str,
+    diagnostics: &Value,
+    disconnected_worker: Option<&Value>,
+    error: &EngineError,
+) -> Result<()> {
+    let evidence_ref = diagnostics
+        .get("evidenceRef")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let latest_recovery_evidence_refs = if evidence_ref.is_null() {
+        json!([])
+    } else {
+        json!([evidence_ref.clone()])
+    };
+    let worker_lifecycle = disconnected_worker.cloned().unwrap_or(Value::Null);
+    let mut payload = source.payload.clone();
+    payload["activationStatus"] = json!("failed");
+    payload["failedAt"] = json!(Utc::now().to_rfc3339());
+    payload["workerLifecycle"] = worker_lifecycle.clone();
+    payload["compensationState"] = json!({
+        "status": "failed_closed",
+        "stage": stage,
+        "error": error.to_string(),
+        "supersededGrantId": source.grant_id,
+        "workerLifecycle": worker_lifecycle.clone(),
+    });
+    payload["runtimeDiagnostics"] = json!({
+        "lastFailureStage": stage,
+        "cleanupStatus": "failed_closed",
+        "recoveryStatus": "failed_closed",
+        "latestRecoveryEvidenceRefs": latest_recovery_evidence_refs,
+        "replacementFailure": {
+            "stage": stage,
+            "error": error.to_string(),
+            "evidenceRef": evidence_ref,
+            "supersededGrantId": source.grant_id,
+            "workerLifecycle": worker_lifecycle,
+        },
+    });
+    host.update_resource(UpdateResource {
+        resource_id: source.resource_id.clone(),
+        expected_current_version_id: Some(source.version_id.clone()),
+        lifecycle: Some("failed".to_owned()),
+        payload,
+        state: None,
+        locations: Vec::new(),
+        trace_id: invocation.causal_context.trace_id.clone(),
+        invocation_id: Some(invocation.id.clone()),
+    })?;
+    Ok(())
 }
 
 fn ensure_config_matches_package(

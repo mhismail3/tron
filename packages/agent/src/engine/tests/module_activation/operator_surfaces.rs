@@ -171,6 +171,7 @@ async fn module_configure_and_activate_enforce_secret_and_grant_boundaries() {
                 "scope": "workspace",
                 "workspaceId": "workspace-a",
                 "workerId": "demo-worker",
+                "expectedCurrentVersionId": original_activation_version_id,
                 "childGrantRequest": {
                     "allowedCapabilities": ["demo::inspect", "demo::write_artifact"],
                     "allowedNamespaces": ["demo"],

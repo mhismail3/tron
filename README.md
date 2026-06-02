@@ -738,10 +738,15 @@ workers directly and launches `local_process` packages only by creating a child
 grant bounds, file roots, network policy, visibility, timeout, and idempotency.
 The activation record stores spawn lineage, spawn result, integrity diagnostics,
 worker lifecycle, health status, registered capability evidence, source-policy
-state, and the derived grant hash. Upgrade requires the activation being
-replaced, creates a replacement activation first, then revokes the superseded
-grant and disconnects superseded volatile workers only after the replacement
-succeeds.
+state, and the derived grant hash. Upgrade and rollback require the activation
+version being replaced. Existing/built-in replacements create the replacement
+activation before revoking superseded authority; local-process replacements
+stop the superseded sandbox worker first so the replacement can register the
+same package function ids, then persist the replacement activation and record
+the superseded grant/worker lineage. If replacement spawn or persistence fails
+after the superseded local-process worker has been stopped, the superseded
+activation is CAS-updated to `failed` with `failed_closed` runtime diagnostics
+and linked recovery evidence.
 
 Runtime package integrity is also capability-driven. `module::run_conformance`
 writes bounded evidence for static manifest rules, grant simulation,

@@ -1,8 +1,8 @@
 //! Module package activation engine tests.
 //!
 //! This parent module owns shared fixtures. Concern modules below own package
-//! registration, local-process activation, source trust, health/integrity,
-//! trust-review, and generated operator-surface behavior.
+//! registration, local-process activation, lifecycle controls, source trust,
+//! health/integrity, trust-review, and generated operator-surface behavior.
 
 use super::*;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
@@ -10,6 +10,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
 mod health_integrity;
+mod lifecycle_controls;
 mod local_process_activation;
 mod operator_surfaces;
 mod package_registration;
@@ -152,7 +153,7 @@ impl InProcessFunctionHandler for RecordingWorkerSpawnHandler {
                     invocation.causal_context.authority_grant_id.clone(),
                     invocation.causal_context.trace_id.clone(),
                 )
-                .with_idempotency_key(format!("derive-{worker_id}"))
+                .with_idempotency_key(format!("derive-{worker_id}-{}", invocation.id.as_str()))
                 .with_scope("grant.write"),
             ))
             .await;
