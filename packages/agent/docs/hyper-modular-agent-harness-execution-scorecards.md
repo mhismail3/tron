@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **17/100**
+Current score: **19/100**
 
 Status: **running**
 
@@ -278,7 +278,7 @@ Out of scope: remote worker hosting or unscoped global package installation.
 | HMH-B1 | Model is taught the lifecycle | 10 | passed_after_fix | Provider-visible transcript or deterministic runner fixture shows the model names discovery, `worker::protocol_guide`, worker authoring, `worker::spawn`, catalog watch/inspect, conformance/test, `execute`, promotion/disconnect, and evidence. | Stop if lifecycle appears only in hidden docs or test code. |
 | HMH-B2 | Worker guide is sufficient | 10 | passed_after_fix | `execute` can call `worker::protocol_guide`; returned template/protocol/env/rules let the agent write a worker without source-searching or probing HTTP paths. | Fix guide/primer before testing spawn. |
 | HMH-B3 | Session worker creation is scoped | 15 | passed | Live temp worker registers one harmless function under a session namespace through `worker::spawn`; result includes derived grant, expected ids, process id, visibility, and catalog revision. | Stop if default visibility is not session or grant exceeds parent. |
-| HMH-B4 | Live catalog update and inspection work | 10 | pending | Catalog watch or revision delta shows the new function; `execute` discovery/inspect returns schema, health, provenance, trust tier, conformance state, authority, and visibility. | Fix registry/inspection before invocation. |
+| HMH-B4 | Live catalog update and inspection work | 10 | passed | Catalog watch or revision delta shows the new function; `execute` discovery/inspect returns schema, health, provenance, trust tier, conformance state, authority, and visibility. | Fix registry/inspection before invocation. |
 | HMH-B5 | Conformance/test evidence is resource-backed | 10 | pending | `module::run_conformance` or capability conformance records pass/fail evidence resources linked to worker/function ids. | Do not promote without evidence resource refs. |
 | HMH-B6 | Invocation uses the tiny harness | 15 | pending | Provider-visible `execute` invokes the new function; child invocation id, trace id, idempotency key, grant id, target revision, result, and ledger row are inspectable. | Stop if the provider receives a direct worker tool or hidden transport path. |
 | HMH-B7 | Promotion is governed | 10 | pending | Workspace/system promotion requires expected revision, explicit idempotency, authority, approval if needed, and catalog-change evidence. | Stop if promotion is implicit, global by default, or client-owned. |
@@ -364,12 +364,33 @@ HMH-B3 evidence, 2026-06-02:
   delegation=false, and approval=false. Cleanup stops the spawned process
   through `sandbox::stop_spawned_worker`.
 
-Open loops after HMH-B1/HMH-B2/HMH-B3:
+HMH-B4 evidence, 2026-06-02:
+
+- Passing live proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_inspects_session_worker_catalog -- --nocapture`.
+- The proof reuses the public `/engine` `capability::execute` guide/spawn flow,
+  records the catalog revision before spawn, and proves `worker::spawn`
+  advances the live catalog revision for a session-visible worker.
+- A public `execute` call targeting `catalog::watch_snapshot` with the same
+  session context, owner-worker filter, availability class, and
+  `function_registered` kind returns the new function registration change with
+  subject id, owner worker, session visibility, session id, and revision.
+- The same watch response's snapshot contains the new function definition with
+  request and response schemas, `Healthy` health, `Session` visibility,
+  session provenance, `session_generated` trust tier, and healthy conformance
+  metadata.
+- A public `execute` call targeting `capability::inspect` for the new function
+  returns the capability inspection record with input/output schemas,
+  effect/risk, implementation health, session visibility, provenance, trust
+  tier, healthy conformance state, engine-issued signature status, empty
+  authority scope requirements, binding decision, and execution requirements.
+
+Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4:
 
 - HMH-B1 through HMH-B3 prove model-visible instruction, guide sufficiency, and
-  scoped session worker creation only. HMH-B remains running until catalog
-  inspection, conformance evidence, invocation, promotion, cleanup, and
-  explanation rows pass.
+  scoped session worker creation only. HMH-B4 adds live catalog and inspection
+  proof. HMH-B remains running until conformance evidence, invocation,
+  promotion, cleanup, and explanation rows pass.
 - Process note: Cargo accepts one test-name filter per invocation; run multiple
   focused filters sequentially.
 
@@ -573,9 +594,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B1, HMH-B2, and HMH-B3 are closed. Continue with HMH-B4:
-prove live catalog watch/inspection for the spawned session worker.
+HMH-A, HMH-B1, HMH-B2, HMH-B3, and HMH-B4 are closed. Continue with
+HMH-B5: prove conformance/test evidence is resource-backed for the spawned
+session worker.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_inspects_session_worker_catalog -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_records_session_worker_conformance_evidence -- --nocapture
 ```

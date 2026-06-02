@@ -516,25 +516,41 @@ async fn capability_self_modifying_lifecycle_execute_returns_worker_protocol_gui
 }
 
 #[cfg(unix)]
-#[tokio::test]
-async fn capability_self_modifying_lifecycle_spawns_session_worker() {
-    let port = reserve_loopback_port();
-    let config = ServerConfig {
-        host: "127.0.0.1".to_owned(),
-        port,
-        ..ServerConfig::default()
-    };
-    let (url, server) =
-        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
-    let mut ws = connect(&url).await;
-    let session_id = "hmh-b-spawn-session";
-    let worker_id = "hmh-b-spawn-worker";
-    let function_id = "hmh_b_spawn::echo";
-    let namespace = "hmh_b_spawn";
+struct HmhSessionWorkerFixture {
+    session_id: String,
+    worker_id: String,
+    function_id: String,
+    namespace: String,
+    spawn_result: Value,
+    expected_function_ids: Value,
+    expected_authority_scopes: Value,
+    expected_resource_kinds: Value,
+    expected_resource_selectors: Value,
+    expected_file_roots: Value,
+}
+
+#[cfg(unix)]
+impl HmhSessionWorkerFixture {
+    fn output(&self) -> &Value {
+        &self.spawn_result["details"]["output"]
+    }
+}
+
+#[cfg(unix)]
+async fn spawn_hmh_session_worker_through_execute(
+    ws: &mut WsStream,
+    port: u16,
+    label: &str,
+    base_rpc_id: u64,
+) -> HmhSessionWorkerFixture {
+    let namespace = format!("hmh_b_{label}");
+    let session_id = format!("hmh-b-{label}-session");
+    let worker_id = format!("hmh-b-{label}-worker");
+    let function_id = format!("{namespace}::echo");
 
     let guide_response = rpc_call(
-        &mut ws,
-        3211,
+        ws,
+        base_rpc_id,
         "capability::execute",
         Some(json!({
             "sessionId": session_id,
@@ -544,7 +560,7 @@ async fn capability_self_modifying_lifecycle_spawns_session_worker() {
                 "workerId": worker_id,
                 "functionId": function_id
             },
-            "reason": "HMH-B3 session worker spawn proof guide step"
+            "reason": "HMH-B session worker spawn proof guide step"
         })),
     )
     .await;
@@ -560,7 +576,8 @@ async fn capability_self_modifying_lifecycle_spawns_session_worker() {
     let script = guide_output["pythonTemplate"]
         .as_str()
         .expect("worker guide returns python template");
-    let script_log = unique_runtime_path("hmh-b-spawn-worker", "log");
+    let path_prefix = format!("hmh-b-{label}-worker");
+    let script_log = unique_runtime_path(&path_prefix, "log");
     let script = script.replace(
         "if __name__ == \"__main__\":\n    main()\n",
         &format!(
@@ -568,7 +585,7 @@ async fn capability_self_modifying_lifecycle_spawns_session_worker() {
             script_log.to_string_lossy()
         ),
     );
-    let script_path = unique_runtime_path("hmh-b-spawn-worker", "py");
+    let script_path = unique_runtime_path(&path_prefix, "py");
     std::fs::write(&script_path, script).unwrap();
     let working_directory = script_path
         .parent()
@@ -584,8 +601,8 @@ async fn capability_self_modifying_lifecycle_spawns_session_worker() {
     let expected_file_roots = json!([working_directory.clone()]);
 
     let spawn_response = rpc_call(
-        &mut ws,
-        3212,
+        ws,
+        base_rpc_id + 1,
         "capability::execute",
         Some(json!({
             "sessionId": session_id,
@@ -607,8 +624,8 @@ async fn capability_self_modifying_lifecycle_spawns_session_worker() {
                 "sessionId": session_id,
                 "timeoutMs": 10000
             },
-            "idempotencyKey": "hmh-b3-spawn-session-worker",
-            "reason": "HMH-B3 scoped session worker spawn proof"
+            "idempotencyKey": format!("hmh-b-{label}-spawn-session-worker"),
+            "reason": "HMH-B scoped session worker spawn proof"
         })),
     )
     .await;
@@ -652,6 +669,54 @@ async fn capability_self_modifying_lifecycle_spawns_session_worker() {
         "worker::spawn must inject the complete loopback worker endpoint: {output}"
     );
 
+    HmhSessionWorkerFixture {
+        session_id,
+        worker_id,
+        function_id,
+        namespace,
+        spawn_result: spawn_result.clone(),
+        expected_function_ids,
+        expected_authority_scopes,
+        expected_resource_kinds,
+        expected_resource_selectors,
+        expected_file_roots,
+    }
+}
+
+#[cfg(unix)]
+async fn stop_hmh_session_worker(
+    server: &Arc<TronServer>,
+    fixture: &HmhSessionWorkerFixture,
+    idempotency_key: &str,
+) -> Value {
+    direct_engine_invoke(
+        server,
+        "sandbox::stop_spawned_worker",
+        json!({
+            "workerId": fixture.worker_id,
+            "reason": "HMH integration cleanup",
+            "sessionId": fixture.session_id
+        }),
+        idempotency_key,
+        &["sandbox.write"],
+    )
+    .await
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn capability_self_modifying_lifecycle_spawns_session_worker() {
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let mut ws = connect(&url).await;
+    let fixture = spawn_hmh_session_worker_through_execute(&mut ws, port, "spawn", 3211).await;
+    let output = fixture.output();
     let grant_id = output["authorityGrantId"].as_str().unwrap();
     let grant = direct_engine_invoke(
         &server,
@@ -674,39 +739,231 @@ async fn capability_self_modifying_lifecycle_spawns_session_worker() {
     .await;
     assert_eq!(parent_grant["grant"]["lifecycle"], "active");
     assert_eq!(parent_grant["grant"]["canDelegate"], true);
-    assert_eq!(grant["grant"]["subjectWorkerId"], worker_id);
-    assert_eq!(grant["grant"]["allowedCapabilities"], expected_function_ids);
-    assert_eq!(grant["grant"]["allowedNamespaces"], json!([namespace]));
+    assert_eq!(grant["grant"]["subjectWorkerId"], fixture.worker_id);
+    assert_eq!(
+        grant["grant"]["allowedCapabilities"],
+        fixture.expected_function_ids
+    );
+    assert_eq!(
+        grant["grant"]["allowedNamespaces"],
+        json!([fixture.namespace])
+    );
     assert_eq!(
         grant["grant"]["allowedAuthorityScopes"],
-        expected_authority_scopes
+        fixture.expected_authority_scopes
     );
     assert_eq!(
         grant["grant"]["allowedResourceKinds"],
-        expected_resource_kinds
+        fixture.expected_resource_kinds
     );
     assert_eq!(
         grant["grant"]["resourceSelectors"],
-        expected_resource_selectors
+        fixture.expected_resource_selectors
     );
-    assert_eq!(grant["grant"]["fileRoots"], expected_file_roots);
+    assert_eq!(grant["grant"]["fileRoots"], fixture.expected_file_roots);
     assert_eq!(grant["grant"]["networkPolicy"], "loopback");
     assert_eq!(grant["grant"]["maxRisk"], "Low");
     assert_eq!(grant["grant"]["canDelegate"], false);
     assert_eq!(grant["grant"]["approvalRequired"], false);
 
-    let stopped = direct_engine_invoke(
-        &server,
-        "sandbox::stop_spawned_worker",
-        json!({
-            "workerId": worker_id,
-            "reason": "HMH-B3 integration cleanup",
-            "sessionId": session_id
-        }),
-        "hmh-b3-stop-session-worker",
-        &["sandbox.write"],
+    let stopped = stop_hmh_session_worker(&server, &fixture, "hmh-b3-stop-session-worker").await;
+    assert_eq!(stopped["stopped"], true);
+
+    server.shutdown().shutdown();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn capability_self_modifying_lifecycle_inspects_session_worker_catalog() {
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let before_revision = server
+        .runtime_context()
+        .engine_host
+        .catalog_revision()
+        .await
+        .0;
+    let mut ws = connect(&url).await;
+    let fixture = spawn_hmh_session_worker_through_execute(&mut ws, port, "catalog", 3221).await;
+    let spawn_revision = fixture.output()["catalogRevision"]
+        .as_u64()
+        .expect("spawn result records catalog revision");
+    assert!(
+        spawn_revision > before_revision,
+        "worker::spawn should advance the live catalog revision"
+    );
+
+    let watch_response = rpc_call(
+        &mut ws,
+        3223,
+        "capability::execute",
+        Some(json!({
+            "sessionId": fixture.session_id,
+            "target": "catalog::watch_snapshot",
+            "arguments": {
+                "afterRevision": before_revision,
+                "limit": 10,
+                "classes": ["availability"],
+                "kinds": ["function_registered"],
+                "ownerWorker": fixture.worker_id
+            },
+            "reason": "HMH-B4 live catalog revision proof"
+        })),
     )
     .await;
+    assert_eq!(
+        watch_response["success"], true,
+        "catalog watch execute failed: {watch_response}"
+    );
+    let watch_result = &watch_response["result"];
+    assert!(
+        watch_result.get("isError").is_none(),
+        "catalog watch execute should not be an error: {watch_result}"
+    );
+    assert_eq!(watch_result["details"]["status"], "ok");
+    assert_eq!(
+        watch_result["details"]["functionId"],
+        "catalog::watch_snapshot"
+    );
+    let watch_output = &watch_result["details"]["output"];
+    assert!(
+        watch_output["currentRevision"].as_u64().unwrap_or_default() >= spawn_revision,
+        "watch current revision should include the spawned worker registration: {watch_output}"
+    );
+    let changes = watch_output["changes"]
+        .as_array()
+        .expect("catalog watch returns changes");
+    let function_change = changes
+        .iter()
+        .find(|change| change["subjectId"] == fixture.function_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "catalog watch changes should include {}: {watch_output}",
+                fixture.function_id
+            )
+        });
+    assert_eq!(function_change["kind"], "function_registered");
+    assert_eq!(function_change["subjectKind"], "function");
+    assert_eq!(function_change["class"], "availability");
+    assert_eq!(function_change["visibility"], "session");
+    assert_eq!(function_change["sessionId"], fixture.session_id);
+    assert_eq!(function_change["ownerWorker"], fixture.worker_id);
+    assert!(
+        function_change["afterRevision"]
+            .as_u64()
+            .unwrap_or_default()
+            <= spawn_revision,
+        "function registration change should be covered by spawn catalog revision"
+    );
+
+    let snapshot_functions = watch_output["snapshot"]["functions"]
+        .as_array()
+        .expect("catalog watch returns snapshot functions");
+    let snapshot_function = snapshot_functions
+        .iter()
+        .find(|function| function["id"] == fixture.function_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "catalog snapshot should include {}: {watch_output}",
+                fixture.function_id
+            )
+        });
+    assert_eq!(snapshot_function["owner_worker"], fixture.worker_id);
+    assert_eq!(snapshot_function["visibility"], "Session");
+    assert_eq!(snapshot_function["health"], "Healthy");
+    assert_eq!(
+        snapshot_function["provenance"]["session_id"],
+        fixture.session_id
+    );
+    assert_eq!(
+        snapshot_function["metadata"]["trustTier"],
+        "session_generated"
+    );
+    assert_eq!(snapshot_function["metadata"]["conformanceState"], "healthy");
+    assert!(snapshot_function["request_schema"].is_object());
+    assert!(snapshot_function["response_schema"].is_object());
+
+    let inspect_response = rpc_call(
+        &mut ws,
+        3224,
+        "capability::execute",
+        Some(json!({
+            "sessionId": fixture.session_id,
+            "target": "capability::inspect",
+            "arguments": {"functionId": fixture.function_id},
+            "reason": "HMH-B4 execute inspection proof"
+        })),
+    )
+    .await;
+    assert_eq!(
+        inspect_response["success"], true,
+        "capability inspect execute failed: {inspect_response}"
+    );
+    let inspect_result = &inspect_response["result"];
+    assert!(
+        inspect_result.get("isError").is_none(),
+        "capability inspect execute should not be an error: {inspect_result}"
+    );
+    let inspection = &inspect_result["details"];
+    assert_eq!(
+        inspection["orchestration"]["phaseDetails"]["selectedTarget"]["functionId"],
+        "capability::inspect"
+    );
+    assert!(
+        inspection["capabilityExecution"]["childInvocations"]
+            .as_array()
+            .is_some_and(|ids| ids.len() == 1),
+        "execute should expose the capability::inspect child invocation id: {inspect_result}"
+    );
+    assert_eq!(inspection["contract"]["contractId"], fixture.function_id);
+    assert!(inspection["contract"]["inputSchema"].is_object());
+    assert!(inspection["contract"]["outputSchema"].is_object());
+    assert_eq!(inspection["contract"]["effectClass"], "pure_read");
+    assert_eq!(inspection["contract"]["riskLevel"], "low");
+    assert_eq!(
+        inspection["implementation"]["functionId"],
+        fixture.function_id
+    );
+    assert_eq!(inspection["implementation"]["workerId"], fixture.worker_id);
+    assert_eq!(inspection["implementation"]["health"], "Healthy");
+    assert_eq!(inspection["implementation"]["visibility"], "session");
+    assert_eq!(
+        inspection["implementation"]["trustTier"],
+        "session_generated"
+    );
+    assert_eq!(inspection["implementation"]["conformanceState"], "healthy");
+    assert_eq!(
+        inspection["implementation"]["signatureStatus"],
+        "engine_issued"
+    );
+    assert_eq!(
+        inspection["implementation"]["authorityRequirements"]["scopes"],
+        json!([])
+    );
+    assert_eq!(
+        inspection["implementation"]["authorityRequirements"]["approval_required"],
+        false
+    );
+    assert_eq!(
+        inspection["implementation"]["provenance"]["session_id"],
+        fixture.session_id
+    );
+    assert_eq!(
+        inspection["bindingDecision"]["selectedFunctionId"],
+        fixture.function_id
+    );
+    assert_eq!(
+        inspection["executionRequirements"]["freshInspectionRequired"],
+        false
+    );
+
+    let stopped = stop_hmh_session_worker(&server, &fixture, "hmh-b4-stop-session-worker").await;
     assert_eq!(stopped["stopped"], true);
 
     server.shutdown().shutdown();
