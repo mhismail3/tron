@@ -978,6 +978,17 @@ UDID before continuing.
   Final combined sheet regression coverage passed 13 XCTest cases across
   `IPadSheetPresentationTests` and `NotificationSheetPresentationTests`:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-02-24--0700.xcresult`.
+  The broader duplicate-wrapper audit then found `SettingsView` wrapping
+  reusable `LogViewer` with a second adaptive helper even though `LogViewer`
+  owns its own medium/large large-form sizing. The focused guard first failed
+  in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-05-08--0700.xcresult`,
+  then passed 10 `IPadSheetPresentationTests` cases after the presenter-side
+  wrapper was removed:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-05-43--0700.xcresult`.
+  Final combined sheet regression coverage passed 14 XCTest cases across
+  `IPadSheetPresentationTests` and `NotificationSheetPresentationTests`:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-07-11--0700.xcresult`.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

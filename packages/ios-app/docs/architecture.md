@@ -557,7 +557,8 @@ call rather than relying on each presenter to patch sizing around them.
 Detail-sheet containers such as `CapabilityDetailSheetContainer` and
 `GitSubSheetContainer` are reusable sheet owners too, so presenters that route
 content through those containers do not add a second adaptive sizing helper
-around the same content. Raw
+around the same content. Reusable system sheets such as `LogViewer` follow the
+same rule. Raw
 `.presentationBackground(...)` calls are centralized too: detented sheets use
 the adaptive helper and glass popovers use `glassPopoverPresentationBackground`.
 The same helper owns the app sheet drag-indicator policy, so app sources do not

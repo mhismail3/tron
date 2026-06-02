@@ -112,7 +112,6 @@ struct SettingsView: View {
         settingsBaseView
             .sheet(isPresented: $showLogViewer) {
                 LogViewer()
-                    .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
             }
             .sheet(item: $activePage) { page in
                 settingsPageSheet(for: page)

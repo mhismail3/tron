@@ -151,6 +151,11 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ["Sources", "Views", "SourceChanges", "FileDetailSheet.swift"],
                 "struct FileDetailSheet: View",
                 "CapabilityDetailSheetContainer("
+            ),
+            (
+                ["Sources", "Views", "System", "LogViewer.swift"],
+                "struct LogViewer: View",
+                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             )
         ]
 
@@ -183,6 +188,24 @@ final class IPadSheetPresentationTests: XCTestCase {
         XCTAssertFalse(
             fileDetailSheetBlock.contains(".adaptivePresentationDetents("),
             "FileDetailSheet should inherit canonical sizing from CapabilityDetailSheetContainer instead of a presenter-side duplicate"
+        )
+    }
+
+    func testSettingsDoesNotWrapLogViewerWithDuplicateSizing() throws {
+        let content = try source(pathComponents: ["Sources", "Views", "Settings", "SettingsView.swift"])
+        let sheetRange = try XCTUnwrap(
+            content.range(of: ".sheet(isPresented: $showLogViewer)"),
+            "SettingsView should still present LogViewer through its logs sheet"
+        )
+        let nextSheetRange = try XCTUnwrap(
+            content.range(of: ".sheet(item: $activePage", range: sheetRange.upperBound..<content.endIndex),
+            "SettingsView should still present settings pages after LogViewer"
+        )
+        let logViewerSheetBlock = String(content[sheetRange.lowerBound..<nextSheetRange.lowerBound])
+
+        XCTAssertFalse(
+            logViewerSheetBlock.contains(".adaptivePresentationDetents("),
+            "LogViewer should own canonical sizing instead of being wrapped by SettingsView"
         )
     }
 

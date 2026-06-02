@@ -1081,6 +1081,16 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   Final combined coverage passed 13 XCTest cases across
   `IPadSheetPresentationTests` and `NotificationSheetPresentationTests`:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-02-24--0700.xcresult`.
+- Broader duplicate-wrapper audit then found `SettingsView` wrapping reusable
+  `LogViewer` with a second adaptive sizing helper even though `LogViewer`
+  already owns its app sheet chrome. The focused guard first failed in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-05-08--0700.xcresult`,
+  then passed 10 `IPadSheetPresentationTests` cases after the presenter-side
+  duplicate was removed:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-05-43--0700.xcresult`.
+  Final combined coverage passed 14 XCTest cases across
+  `IPadSheetPresentationTests` and `NotificationSheetPresentationTests`:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-07-11--0700.xcresult`.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2
