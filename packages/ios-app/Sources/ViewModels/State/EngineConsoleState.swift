@@ -83,6 +83,136 @@ protocol EngineConsoleCapabilityClient: AnyObject {
 
 extension CapabilityClient: EngineConsoleCapabilityClient {}
 
+struct EngineConsoleSearchSuggestion: Equatable, Identifiable {
+    var title: String
+    var query: String
+    var symbol: String
+
+    var id: String { query }
+
+    static func make(
+        status: CapabilityStatusDTO?,
+        registry: CapabilityRegistrySnapshotDTO?,
+        controlSnapshot: ControlSnapshotDTO?,
+        audit: CapabilityAuditQueryResultDTO?,
+        programRuns: CapabilityProgramRunQueryResultDTO?
+    ) -> [EngineConsoleSearchSuggestion] {
+        var suggestions: [EngineConsoleSearchSuggestion] = []
+        var seen: Set<String> = []
+
+        func add(_ title: String, query: String, symbol: String) {
+            let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedQuery.isEmpty, seen.insert(trimmedQuery).inserted else { return }
+            suggestions.append(
+                EngineConsoleSearchSuggestion(
+                    title: shortened(title, limit: 34),
+                    query: trimmedQuery,
+                    symbol: symbol
+                )
+            )
+        }
+
+        if status?.indexStatus != nil || status?.serverProfile != nil {
+            add("Primer Policy", query: "capabilities.primer", symbol: "text.book.closed")
+        }
+
+        for implementation in registry?.implementations ?? [] {
+            let query = implementation.functionId ?? implementation.contractId ?? implementation.implementationId
+            add(query, query: query, symbol: symbol(for: query))
+            if let conformance = implementation.conformanceState, !conformance.isEmpty {
+                add(
+                    "Conformance \(implementation.implementationId)",
+                    query: "conformance \(implementation.implementationId)",
+                    symbol: "checkmark.shield"
+                )
+            }
+        }
+
+        for document in registry?.documents ?? [] {
+            let query = document.functionId
+                ?? document.contractId
+                ?? document.implementationId
+                ?? document.workerId
+                ?? document.capabilityId
+            guard let query else { continue }
+            add(query, query: query, symbol: symbol(for: query, kind: document.kind))
+        }
+
+        for action in controlSnapshot?.availableActions ?? [] {
+            guard let functionId = action.dictionaryValue?["functionId"] as? String else { continue }
+            add(functionId, query: functionId, symbol: symbol(for: functionId))
+        }
+
+        for package in controlSnapshot?.modulePackages ?? [] {
+            guard let resourceId = substrateString(package, keys: ["resourceId", "id"]) else { continue }
+            add("Module \(resourceId)", query: resourceId, symbol: "shippingbox")
+        }
+
+        for surface in controlSnapshot?.uiSurfaceRefs ?? [] {
+            let query = surface.surfaceId ?? surface.resourceId
+            add(surface.title ?? query, query: query, symbol: "rectangle.3.group")
+        }
+
+        for event in audit?.events ?? [] {
+            if let traceId = event.traceId, !traceId.isEmpty {
+                add("Trace \(traceId)", query: traceId, symbol: "waterfall")
+            }
+            if let eventType = event.eventType, !eventType.isEmpty {
+                add("Audit \(eventType)", query: eventType, symbol: "list.bullet.rectangle")
+            }
+        }
+
+        for run in programRuns?.programRuns ?? [] {
+            if let programRunId = run.programRunId, !programRunId.isEmpty {
+                add("Program \(programRunId)", query: programRunId, symbol: "curlybraces.square")
+            }
+            if let traceId = run.traceId, !traceId.isEmpty {
+                add("Trace \(traceId)", query: traceId, symbol: "waterfall")
+            }
+        }
+
+        return Array(suggestions.prefix(18))
+    }
+
+    private static func symbol(for query: String, kind: String? = nil) -> String {
+        if kind == "worker" || query.hasPrefix("worker::") {
+            return "server.rack"
+        }
+        if query.hasPrefix("module::") {
+            return "shippingbox"
+        }
+        if query.hasPrefix("ui::") {
+            return "rectangle.3.group"
+        }
+        if query.hasPrefix("approval::") {
+            return "checkmark.seal"
+        }
+        if query.hasPrefix("capability::") {
+            return "sparkle.magnifyingglass"
+        }
+        if query.contains("conformance") {
+            return "checkmark.shield"
+        }
+        return "function"
+    }
+
+    private static func shortened(_ value: String, limit: Int) -> String {
+        guard value.count > limit else { return value }
+        let end = value.index(value.startIndex, offsetBy: limit)
+        return "\(value[..<end])..."
+    }
+
+    private static func substrateString(_ value: AnyCodable, keys: [String]) -> String? {
+        guard let dictionary = value.dictionaryValue else { return nil }
+        for key in keys {
+            if let string = dictionary[key] as? String, !string.isEmpty {
+                return string
+            }
+        }
+        return nil
+    }
+}
+
 @MainActor
 @Observable
 final class EngineConsoleState {
@@ -148,6 +278,16 @@ final class EngineConsoleState {
 
     var moduleOperatorProjection: EngineConsoleModuleOperatorProjection {
         EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)
+    }
+
+    var substrateSearchSuggestions: [EngineConsoleSearchSuggestion] {
+        EngineConsoleSearchSuggestion.make(
+            status: status,
+            registry: registry,
+            controlSnapshot: controlSnapshot,
+            audit: audit,
+            programRuns: programRuns
+        )
     }
 
     func controlAdvertisesAction(functionId: String, targetType: String? = nil) -> Bool {

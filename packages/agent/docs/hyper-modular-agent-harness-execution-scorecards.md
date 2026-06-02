@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **60/100**
+Current score: **62.25/100**
 
 Status: **running**
 
@@ -696,8 +696,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D is also closed; continue with HMH-E1 to prove the Engine
-  Console remains substrate-first.
+  proven. HMH-D and HMH-E1 are also closed; continue with HMH-E2 to prove
+  generated UI for a new capability.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -956,9 +956,8 @@ HMH-D8 evidence, 2026-06-02:
 
 Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7/HMH-D8:
 
-- HMH-D is closed. Continue with HMH-E1 to prove the Engine Console remains
-  substrate-first over workers, capabilities, modules, generated UI, traces,
-  primer, conformance, and audit without a hardcoded tool catalog.
+- HMH-D and HMH-E1 are closed. Continue with HMH-E2 to prove generated UI for a
+  new capability uses stored surface/version/action ids.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -968,7 +967,7 @@ Out of scope: client-side target reconstruction or native-only feature forks.
 
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
-| HMH-E1 | Engine Console is substrate-first | 15 | pending | Console search/inspect covers workers, capabilities, modules, generated UI, traces, primer, conformance, and audit without a hardcoded tool catalog. | Stop if UI reads fixed capability descriptors. |
+| HMH-E1 | Engine Console is substrate-first | 15 | passed_after_fix | Console search/inspect covers workers, capabilities, modules, generated UI, traces, primer, conformance, and audit without a hardcoded tool catalog. | Stop if UI reads fixed capability descriptors. |
 | HMH-E2 | Generated surface for new capability | 20 | pending | Engine creates a `ui_surface` for a session-created function; iOS renders it natively; submit references stored surface/version/action ids only. | Stop if iOS constructs target payloads. |
 | HMH-E3 | Approval and consequence clarity | 15 | pending | iOS approval UI shows server risk/effect/authority/idempotency/lease/compensation metadata and resolves only through `approval::resolve`. | Stop if local approval state becomes final truth. |
 | HMH-E4 | Module controls are native projections | 15 | pending | iOS can inspect/configure/activate/disable/upgrade/rollback/quarantine module packages through canonical server functions with evidence drill-down. | Stop if module policy appears in Swift. |
@@ -980,9 +979,50 @@ Closeout commands:
 
 ```bash
 cd packages/ios-app && xcodegen generate
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronTests/GeneratedUIRendererTests
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronTests/EngineConsoleStateTests
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests
 ```
+
+HMH-E1 evidence, 2026-06-02:
+
+- The red audit found the Engine Console's capability-search chips were still a
+  fixed Swift mini catalog (`Read files`, `Run command`, `Search web`,
+  `Ask user`, `Spawn worker`) even though the rest of the Console already
+  loaded live status, registry documents/bindings, control snapshots, audit,
+  policies, generated UI refs, and program runs.
+- The fix replaces fixed search chips with
+  `EngineConsoleState.substrateSearchSuggestions`, a projection over live
+  server substrate state: status/index primer context, registry
+  implementations/documents, control-advertised actions, module packages,
+  generated `ui_surface` refs, redacted audit event/trace ids, and program-run
+  ids/traces. The suggestions are search queries only; inspect and mutation
+  paths still go through `CapabilityClient`, `control::snapshot`,
+  `ui::inspect_surface`, generated `ui_surface` actions, and server-owned
+  capability/admin primitives.
+- The new
+  `searchSuggestionsProjectLiveSubstrate` proof seeds a fake live substrate
+  with a dynamic implementation, worker document, module action, module package
+  resource, generated surface, trace/audit event, primer status, conformance
+  state, and program run. It verifies the suggestion queries are all derived
+  from those server-owned inputs and that the former fixed catalog queries are
+  absent.
+- `SourceGuardTests` now asserts the Engine Console wires
+  `EngineConsoleSuggestionChips(suggestions: state.substrateSearchSuggestions)`,
+  that the projection reads registry/control/audit/program/primer inputs, and
+  that `EngineConsoleComponents.swift` does not keep the removed fixed
+  suggestion strings.
+- Passing state proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests`.
+- Passing source-boundary proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`.
+- Passing accessibility proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleAccessibilityTests`.
+
+Open loops after HMH-E1:
+
+- Continue with HMH-E2: prove the engine creates a `ui_surface` for a
+  session-created function, iOS renders it natively, and submit references
+  stored surface/version/action ids only.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1114,9 +1154,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, and HMH-D are closed. Continue with HMH-E1: prove the
-Engine Console remains substrate-first without a hardcoded tool catalog.
+HMH-A, HMH-B, HMH-C, HMH-D, and HMH-E1 are closed. Continue with HMH-E2:
+prove generated UI for a new capability uses stored surface/version/action ids.
 
 ```bash
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests
 ```

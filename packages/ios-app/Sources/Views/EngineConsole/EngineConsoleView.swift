@@ -332,7 +332,7 @@ struct EngineConsoleView: View {
                         action: { Task { await state.search() } }
                     )
 
-                    EngineConsoleSuggestionChips { suggestion in
+                    EngineConsoleSuggestionChips(suggestions: state.substrateSearchSuggestions) { suggestion in
                         state.searchText = suggestion.query
                         Task { await state.search() }
                     }

@@ -547,6 +547,31 @@ struct SourceGuardTests {
         #expect(!engineConsole.contains(#".navigationTitle("Engine")"#))
         #expect(engineConsole.contains("DashboardToolbarContent("))
         #expect(engineConsole.contains(#"title: "Engine","#))
+        #expect(engineConsole.contains("EngineConsoleSuggestionChips(suggestions: state.substrateSearchSuggestions)"))
+        #expect(engineConsoleState.contains("var substrateSearchSuggestions: [EngineConsoleSearchSuggestion]"))
+        #expect(engineConsoleState.contains("registry?.implementations"))
+        #expect(engineConsoleState.contains("registry?.documents"))
+        #expect(engineConsoleState.contains("controlSnapshot?.availableActions"))
+        #expect(engineConsoleState.contains("controlSnapshot?.modulePackages"))
+        #expect(engineConsoleState.contains("controlSnapshot?.uiSurfaceRefs"))
+        #expect(engineConsoleState.contains("audit?.events"))
+        #expect(engineConsoleState.contains("programRuns?.programRuns"))
+        #expect(engineConsoleState.contains(#""capabilities.primer""#))
+        #expect(engineConsoleState.contains(#""conformance \(implementation.implementationId)""#))
+        #expect(!engineConsoleComponents.contains("private let suggestions"))
+        for fixedCatalogSuggestion in [
+            "Read files",
+            "Run command",
+            "Search web",
+            "Ask user",
+            "Spawn worker",
+            "read a file",
+            "run a shell command",
+            "search the web",
+            "ask the user a question"
+        ] {
+            #expect(!engineConsoleComponents.contains(fixedCatalogSuggestion))
+        }
         #expect(engineConsole.contains("EngineConsoleModuleProjectionCard(projection: state.moduleOperatorProjection)"))
         #expect(engineConsoleState.contains("EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)"))
         #expect(moduleProjection.contains("snapshot.moduleHealth"))

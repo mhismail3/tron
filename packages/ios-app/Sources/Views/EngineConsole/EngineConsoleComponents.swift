@@ -84,41 +84,30 @@ struct EngineConsoleReadinessItem: Identifiable {
     let tint: Color
 }
 
-struct EngineConsoleSearchSuggestion: Identifiable {
-    let id = UUID()
-    let title: String
-    let query: String
-    let symbol: String
-}
-
 @available(iOS 26.0, *)
 struct EngineConsoleSuggestionChips: View {
-    private let suggestions = [
-        EngineConsoleSearchSuggestion(title: "Read files", query: "read a file", symbol: "doc.text.magnifyingglass"),
-        EngineConsoleSearchSuggestion(title: "Run command", query: "run a shell command", symbol: "terminal"),
-        EngineConsoleSearchSuggestion(title: "Search web", query: "search the web", symbol: "globe"),
-        EngineConsoleSearchSuggestion(title: "Ask user", query: "ask the user a question", symbol: "person.crop.circle.badge.questionmark"),
-        EngineConsoleSearchSuggestion(title: "Spawn worker", query: "worker::spawn", symbol: "shippingbox")
-    ]
+    let suggestions: [EngineConsoleSearchSuggestion]
     let select: (EngineConsoleSearchSuggestion) -> Void
 
     var body: some View {
-        WrappingBadgeLayout(spacing: 8, rowSpacing: 8) {
-            ForEach(suggestions) { suggestion in
-                Button {
-                    select(suggestion)
-                } label: {
-                    Label(suggestion.title, systemImage: suggestion.symbol)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(Color.tronEmerald.opacity(0.1), in: Capsule())
+        if !suggestions.isEmpty {
+            WrappingBadgeLayout(spacing: 8, rowSpacing: 8) {
+                ForEach(suggestions) { suggestion in
+                    Button {
+                        select(suggestion)
+                    } label: {
+                        Label(suggestion.title, systemImage: suggestion.symbol)
+                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                            .foregroundStyle(.tronEmerald)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 6)
+                            .background(Color.tronEmerald.opacity(0.1), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape([.interaction, .hoverEffect], Capsule())
+                    .hoverEffect(.highlight)
+                    .accessibilityElement(children: .combine)
                 }
-                .buttonStyle(.plain)
-                .contentShape([.interaction, .hoverEffect], Capsule())
-                .hoverEffect(.highlight)
-                .accessibilityElement(children: .combine)
             }
         }
     }

@@ -224,6 +224,179 @@ struct EngineConsoleStateTests {
         #expect(state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: "grant"))
     }
 
+    @Test("search suggestions project live substrate instead of fixed tool catalog")
+    func searchSuggestionsProjectLiveSubstrate() async throws {
+        let client = FakeEngineConsoleCapabilityClient()
+        client.statusDTO = CapabilityStatusDTO(
+            catalogRevision: 22,
+            registryRevision: 7,
+            serverProfile: CapabilityServerProfileDTO(profileName: "default", profileHash: "hash"),
+            indexStatus: CapabilityIndexStatusDTO(
+                lexical: true,
+                localVector: true,
+                cloudEmbeddings: false,
+                vectorStore: "sqlite-vec",
+                embeddingModel: "fastembed:test",
+                state: "healthy",
+                degradedReason: nil,
+                dimension: 384,
+                updatedAt: nil
+            )
+        )
+        client.registrySnapshotDTO = CapabilityRegistrySnapshotDTO(
+            plugins: [],
+            implementations: [
+                CapabilityImplementationDTO(
+                    implementationId: "impl.dynamic",
+                    contractId: "dynamic::operate",
+                    pluginId: "plugin.dynamic",
+                    workerId: "worker-dynamic",
+                    functionId: "dynamic::operate",
+                    version: 1,
+                    health: "healthy",
+                    visibility: "session",
+                    latencyClass: nil,
+                    costClass: nil,
+                    trustTier: "session_generated",
+                    authorityRequirements: nil,
+                    runtimeRequirements: nil,
+                    schemaDigest: "sha256:dynamic",
+                    catalogRevision: 22,
+                    provenance: nil,
+                    conformanceState: "healthy",
+                    signatureStatus: "engine_issued",
+                    updatedAt: nil
+                )
+            ],
+            bindings: [],
+            documents: [
+                CapabilityIndexDocumentDTO(
+                    kind: "worker",
+                    capabilityId: nil,
+                    contractId: nil,
+                    implementationId: nil,
+                    pluginId: "plugin.dynamic",
+                    workerId: "worker-dynamic",
+                    functionId: "dynamic::operate",
+                    catalogRevision: 22,
+                    schemaDigest: "sha256:dynamic",
+                    trustTier: "session_generated",
+                    health: "healthy",
+                    visibility: "session",
+                    effectClass: "pure_read",
+                    riskLevel: "low",
+                    text: "Dynamic worker"
+                )
+            ],
+            programRuns: []
+        )
+        client.controlSnapshot = ControlSnapshotDTO(
+            catalogRevision: 22,
+            workers: [AnyCodable(["workerId": "worker-dynamic"])],
+            capabilities: [AnyCodable(["functionId": "dynamic::operate"])],
+            resourceTypes: [],
+            activeGoals: [],
+            modulePackages: [AnyCodable(["resourceId": "worker-package:dynamic"])],
+            moduleConfigs: [],
+            activationRecords: [],
+            invocations: [],
+            grants: [],
+            queues: [],
+            leases: [],
+            approvals: [],
+            storage: nil,
+            integrityWarnings: [],
+            availableActions: [
+                AnyCodable(["functionId": "module::custom_future_operation", "targetType": "package"])
+            ],
+            uiSurfaceRefs: [
+                UiSurfaceRefDTO(
+                    resourceId: "res-ui-dynamic",
+                    versionId: "ver-ui-dynamic",
+                    kind: "ui_surface",
+                    lifecycle: "active",
+                    surfaceId: "surface-dynamic",
+                    title: "Dynamic Surface",
+                    purpose: "Inspect dynamic worker",
+                    catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+                    expiresAt: nil,
+                    targets: [],
+                    actions: []
+                )
+            ]
+        )
+        client.auditResult = CapabilityAuditQueryResultDTO(
+            events: [
+                CapabilityAuditEventDTO(
+                    id: "audit-dynamic",
+                    eventType: "capability.execute",
+                    traceId: "trace-dynamic",
+                    payload: nil,
+                    payloadSummary: nil,
+                    createdAt: nil,
+                    redacted: true
+                )
+            ],
+            redacted: true
+        )
+        client.programRunResult = CapabilityProgramRunQueryResultDTO(
+            programRuns: [
+                CapabilityProgramRunDTO(
+                    programRunId: "program-run-dynamic",
+                    parentInvocationId: nil,
+                    rootInvocationId: "root-dynamic",
+                    bindingDecisionId: nil,
+                    status: "ok",
+                    traceId: "trace-dynamic",
+                    codeHash: "sha256:code",
+                    argsHash: "sha256:args",
+                    limits: nil,
+                    allowedContracts: ["dynamic::operate"],
+                    allowedImplementations: ["impl.dynamic"],
+                    childInvocations: ["child-dynamic"],
+                    selectedImplementations: ["impl.dynamic"],
+                    approvalState: nil,
+                    artifacts: nil,
+                    logs: nil,
+                    error: nil,
+                    compensationAttempts: nil,
+                    payloadSummary: nil,
+                    createdAt: nil,
+                    updatedAt: nil,
+                    redacted: true
+                )
+            ],
+            redacted: true
+        )
+        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+
+        await state.refresh()
+
+        let queries = Set(state.substrateSearchSuggestions.map(\.query))
+        for expected in [
+            "capabilities.primer",
+            "dynamic::operate",
+            "conformance impl.dynamic",
+            "module::custom_future_operation",
+            "worker-package:dynamic",
+            "surface-dynamic",
+            "trace-dynamic",
+            "capability.execute",
+            "program-run-dynamic"
+        ] {
+            #expect(queries.contains(expected))
+        }
+        for fixedCatalogQuery in [
+            "read a file",
+            "run a shell command",
+            "search the web",
+            "ask the user a question",
+            "worker::spawn"
+        ] {
+            #expect(!queries.contains(fixedCatalogQuery))
+        }
+    }
+
     @Test("module operator projection keeps server actions and evidence")
     func moduleOperatorProjectionKeepsServerActionsAndEvidence() async throws {
         let client = FakeEngineConsoleCapabilityClient()
@@ -421,6 +594,16 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
     )
     var searchError: Error?
     var statusError: Error?
+    var statusDTO = CapabilityStatusDTO(catalogRevision: 1, registryRevision: 1)
+    var registrySnapshotDTO = CapabilityRegistrySnapshotDTO(
+        plugins: [],
+        implementations: [],
+        bindings: [],
+        documents: [],
+        programRuns: []
+    )
+    var auditResult = CapabilityAuditQueryResultDTO(events: [], redacted: true)
+    var programRunResult = CapabilityProgramRunQueryResultDTO(programRuns: [], redacted: true)
     var lastSearchQuery: String?
     var lastRefreshRequest: UiSurfaceRefreshRequestDTO?
     var lastSubmission: UiActionSubmissionDTO?
@@ -442,14 +625,14 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
 
     func status(includeSnapshot: Bool) async throws -> CapabilityStatusDTO {
         if let statusError { throw statusError }
-        return CapabilityStatusDTO(catalogRevision: 1, registryRevision: 1)
+        return statusDTO
     }
 
     func registrySnapshot(
         includeDocuments: Bool,
         includeBindings: Bool
     ) async throws -> CapabilityRegistrySnapshotDTO {
-        CapabilityRegistrySnapshotDTO(plugins: [], implementations: [], bindings: [], documents: [], programRuns: [])
+        registrySnapshotDTO
     }
 
     func controlSnapshot(limit: Int) async throws -> ControlSnapshotDTO {
@@ -556,11 +739,11 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
     }
 
     func auditQuery(_ query: CapabilityAuditQueryDTO) async throws -> CapabilityAuditQueryResultDTO {
-        CapabilityAuditQueryResultDTO(events: [], redacted: true)
+        auditResult
     }
 
     func programRunList(_ query: CapabilityProgramRunQueryDTO) async throws -> CapabilityProgramRunQueryResultDTO {
-        CapabilityProgramRunQueryResultDTO(programRuns: [], redacted: true)
+        programRunResult
     }
 
     func getPolicy(policyId: String?) async throws -> CapabilityPolicyGetDTO {
