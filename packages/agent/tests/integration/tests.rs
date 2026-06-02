@@ -1094,6 +1094,195 @@ async fn capability_self_modifying_lifecycle_records_session_worker_conformance_
     server.shutdown().shutdown();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn capability_self_modifying_lifecycle_invokes_session_worker_through_execute() {
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let mut ws = connect(&url).await;
+    let fixture = spawn_hmh_session_worker_through_execute(&mut ws, port, "invoke", 3241).await;
+    let spawn_grant_id = fixture.output()["authorityGrantId"]
+        .as_str()
+        .expect("spawn result records derived grant")
+        .to_owned();
+    let invoke_key = "hmh-b6-invoke-session-worker-through-execute";
+    let invoke_payload = json!({
+        "message": "HMH-B6 invoke proof",
+        "nonce": 6
+    });
+
+    let invoke_response = rpc_call(
+        &mut ws,
+        3243,
+        "capability::execute",
+        Some(json!({
+            "sessionId": fixture.session_id,
+            "target": fixture.function_id,
+            "arguments": invoke_payload,
+            "idempotencyKey": invoke_key,
+            "reason": "HMH-B6 tiny harness invocation proof"
+        })),
+    )
+    .await;
+    assert_eq!(
+        invoke_response["success"], true,
+        "session worker execute failed: {invoke_response}"
+    );
+    let invoke_result = &invoke_response["result"];
+    assert!(
+        invoke_result.get("isError").is_none(),
+        "session worker execute should not be an error: {invoke_result}"
+    );
+    let details = &invoke_result["details"];
+    assert_eq!(details["status"], "ok");
+    assert_eq!(details["functionId"], fixture.function_id);
+    assert_eq!(
+        details["orchestration"]["phaseDetails"]["selectedTarget"]["functionId"],
+        fixture.function_id
+    );
+    assert_eq!(
+        details["orchestration"]["correctedRequest"]["target"],
+        json!({"capabilityId": fixture.function_id})
+    );
+    assert_eq!(
+        details["orchestration"]["correctedRequest"]["idempotencyKey"],
+        invoke_key
+    );
+    assert_eq!(details["output"]["echo"], json!(invoke_payload));
+    assert_eq!(details["output"]["workerId"], fixture.worker_id);
+    assert_eq!(
+        details["catalogRevision"],
+        fixture.output()["catalogRevision"]
+    );
+    assert!(
+        details["functionRevision"].as_u64().unwrap_or_default() > 0,
+        "execute details should expose the target function revision: {details}"
+    );
+    assert_eq!(
+        details["bindingDecision"]["selectedFunctionId"],
+        fixture.function_id
+    );
+    assert_eq!(
+        details["selectedImplementation"],
+        details["bindingDecision"]["selectedImplementation"]
+    );
+    let trace_id = details["traceId"]
+        .as_str()
+        .expect("execute details record trace id")
+        .to_owned();
+    let execute_invocation_id = details["executeInvocationId"]
+        .as_str()
+        .expect("execute details record primitive invocation id")
+        .to_owned();
+    assert_eq!(details["rootInvocationId"], execute_invocation_id);
+    let child_invocations = details["childInvocations"]
+        .as_array()
+        .expect("execute details record child invocations");
+    assert_eq!(
+        child_invocations.len(),
+        1,
+        "execute should create exactly one target child invocation: {details}"
+    );
+    assert_eq!(details["childInvocationIds"], json!(child_invocations));
+    let child_invocation_id = child_invocations[0]
+        .as_str()
+        .expect("child invocation id")
+        .to_owned();
+
+    let trace = direct_engine_invoke_with_session(
+        &server,
+        "observability::trace_get",
+        json!({
+            "traceId": trace_id,
+            "includeFullPayloads": true
+        }),
+        "hmh-b6-observe-session-worker-execute-trace",
+        &["observability.read"],
+        &fixture.session_id,
+    )
+    .await;
+    let invocations = trace["invocations"]
+        .as_array()
+        .expect("trace_get returns invocation rows");
+    let trace_functions = invocations
+        .iter()
+        .map(|record| record["functionId"].as_str().unwrap_or_default())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        trace_functions,
+        std::collections::BTreeSet::from([
+            "engine::invoke",
+            "capability::execute",
+            fixture.function_id.as_str()
+        ]),
+        "B6 trace should contain only the transport envelope, execute parent, and generated worker child: {trace}"
+    );
+    let engine_record = invocations
+        .iter()
+        .find(|record| record["functionId"] == "engine::invoke")
+        .unwrap_or_else(|| panic!("trace should include transport envelope record: {trace}"));
+    assert_eq!(engine_record["parentInvocationId"], Value::Null);
+    assert_eq!(engine_record["triggerId"], "engine_ws:invoke");
+    assert_eq!(engine_record["sessionId"], fixture.session_id);
+    assert_eq!(engine_record["succeeded"], true);
+    let execute_record = invocations
+        .iter()
+        .find(|record| record["invocationId"] == execute_invocation_id)
+        .unwrap_or_else(|| panic!("trace should include execute record: {trace}"));
+    assert_eq!(execute_record["functionId"], "capability::execute");
+    assert_eq!(execute_record["traceId"], trace_id);
+    assert_eq!(
+        execute_record["parentInvocationId"],
+        engine_record["invocationId"]
+    );
+    assert_eq!(execute_record["triggerId"], "engine_ws:invoke");
+    assert_eq!(execute_record["sessionId"], fixture.session_id);
+    assert_eq!(execute_record["idempotencyScope"]["kind"], "session");
+    assert_eq!(
+        execute_record["idempotencyScope"]["value"],
+        fixture.session_id
+    );
+    assert_eq!(execute_record["succeeded"], true);
+
+    let child_record = invocations
+        .iter()
+        .find(|record| record["invocationId"] == child_invocation_id)
+        .unwrap_or_else(|| panic!("trace should include child invocation record: {trace}"));
+    assert_eq!(child_record["functionId"], fixture.function_id);
+    assert_eq!(child_record["workerId"], fixture.worker_id);
+    assert_eq!(child_record["traceId"], trace_id);
+    assert_eq!(child_record["parentInvocationId"], execute_invocation_id);
+    assert_eq!(child_record["sessionId"], fixture.session_id);
+    assert_eq!(child_record["idempotencyKey"], invoke_key);
+    assert!(child_record["authorityGrantId"].is_string());
+    assert_ne!(
+        child_record["authorityGrantId"], spawn_grant_id,
+        "target call should not borrow the spawned worker's own runtime grant"
+    );
+    assert_eq!(
+        child_record["catalogRevision"],
+        fixture.output()["catalogRevision"]
+    );
+    assert_eq!(
+        child_record["functionRevision"],
+        details["functionRevision"]
+    );
+    assert_eq!(child_record["succeeded"], true);
+    assert_eq!(child_record["result"]["echo"], json!(invoke_payload));
+    assert_eq!(child_record["result"]["workerId"], fixture.worker_id);
+
+    let stopped = stop_hmh_session_worker(&server, &fixture, "hmh-b6-stop-session-worker").await;
+    assert_eq!(stopped["stopped"], true);
+
+    server.shutdown().shutdown();
+}
+
 #[tokio::test]
 async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     let (url, server) = boot_server_without_deps().await;
