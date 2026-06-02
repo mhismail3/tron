@@ -20,6 +20,9 @@
 //! `TronAgent` receives the persisted session turn count when resumed. Runtime
 //! events and token records use `persisted_turn_count + run_turn`, while
 //! `RunResult.turns_executed` stays scoped to the current prompt run.
+//! Hosted and local providers both receive the live `execute` primitive plus
+//! the bounded capability primer; local policy strips heavier context blocks
+//! without removing the harness-customization recipe or `harness_doc` pointer.
 
 pub mod capability_invocation_executor;
 pub mod compaction_handler;

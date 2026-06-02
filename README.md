@@ -367,7 +367,9 @@ Filesystem, code search, shell/process, web, plugin source, iOS/app interaction,
 notifications, subagents, and sandbox workers are not provider-facing built-ins.
 They are worker-owned capabilities discovered and invoked through the single
 `execute` orchestrator. Provider integrations do not expose their implementation
-names directly.
+names directly. Hosted and local model profiles receive the same provider-facing
+contract: one `execute` primitive plus the compact live primer/resource pointer;
+local profiles strip heavier context blocks without dropping the harness recipe.
 
 The default `coreFirstParty` primer is generated from registry metadata and
 includes the high-use first-party capabilities the agent should know without a

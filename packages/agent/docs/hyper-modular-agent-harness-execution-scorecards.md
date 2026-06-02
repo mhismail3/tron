@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **40.5/100**
+Current score: **43.5/100**
 
 Status: **running**
 
@@ -526,7 +526,7 @@ Out of scope: dumping the full catalog into prompts.
 | HMH-C2 | Context budget remains bounded | 15 | passed_after_fix | Snapshot fixture records primer token estimate under profile budget while preserving core worker/module/generated-UI recipes. | Split recipe docs into resources if budget exceeds policy. |
 | HMH-C3 | Execute correction covers lifecycle errors | 20 | passed_after_fix | Missing `expectedFunctionIds`, missing `sessionId`, stale revision, target trigger id, missing idempotency, ambiguous target, and approval-required states return actionable repair guidance. | Fix result presentation before model-run proof. |
 | HMH-C4 | Harness docs are resources | 15 | passed_after_fix | Agent-readable harness guide/recipes are versioned resources or capability-backed docs tied to catalog revision, not only repo prose. | Add resource/doc projection before closeout. |
-| HMH-C5 | Model-run proof across providers | 20 | pending | At least one high-capability hosted model and one alternate provider/local path answer "how can you customize your harness?" with current live capabilities and safety gates. | Classify provider-quality failures only after substrate proof. |
+| HMH-C5 | Model-run proof across providers | 20 | passed_after_fix | At least one high-capability hosted model and one alternate provider/local path answer "how can you customize your harness?" with current live capabilities and safety gates. | Classify provider-quality failures only after substrate proof. |
 | HMH-C6 | Prompt surface stays tiny | 10 | pending | Provider schemas expose only `execute`; `search`/`inspect`/admin functions stay operator/internal unless intentionally invoked through execute discovery. | Static gate or provider test must fail if prompt-expanded tools return. |
 
 Closeout commands:
@@ -535,6 +535,7 @@ Closeout commands:
 cargo test --manifest-path packages/agent/Cargo.toml capability_primer -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml execute_guidance -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml harness_docs_are_versioned_resources -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml model_run_proves_harness_customization_across_providers -- --nocapture
 ```
 
 HMH-C1 evidence, 2026-06-02:
@@ -640,12 +641,41 @@ HMH-C4 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml harness_docs_are_versioned_resources -- --nocapture`.
 
-Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4:
+HMH-C5 evidence, 2026-06-02:
 
-- HMH-C1 through HMH-C4 prove compact lifecycle knowledge, bounded context,
-  repair guidance, and versioned resource-backed harness docs. Continue with HMH-C5
-  to run provider-visible proof across at least one hosted
-  high-capability model and one alternate/local provider path.
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml model_run_proves_harness_customization_across_providers -- --nocapture`
+  initially returned a false green with zero matching tests. After adding a
+  provider-run proof, the first run failed because the isolated in-memory
+  harness did not seed the capability-domain `execute` contract, so provider
+  doubles saw no model-facing capability primitive.
+- The proof now drives `TronAgent::run` through two provider doubles:
+  `Provider::OpenAi` as the hosted high-capability path and `Provider::Ollama`
+  as the alternate/local path. Each double asserts against its actual
+  provider-visible `Context`, not renderer internals.
+- Both provider paths must see exactly one model-facing primitive,
+  `execute`; a bounded `capabilities.primer` containing the harness
+  customization recipe; a compact `harness_doc` resource id/version pointer
+  with `inspectTarget=resource::inspect`; and no prompt-expanded
+  `search`/`inspect`/admin capability surface. The local path additionally
+  proves memory, skill index, and job result blocks are stripped by profile
+  policy while the primer and `execute` remain visible.
+- The generated answer must explain the live harness sequence: inspect the
+  versioned `harness_doc`, run `worker::protocol_guide`, author and
+  `worker::spawn` the worker, inspect the catalog, collect conformance/test
+  evidence, expose generated `ui_surface` controls, use `engine::promote` only
+  after evidence passes, and clean up with `worker::disconnect` or
+  `sandbox::stop_spawned_worker`.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml model_run_proves_harness_customization_across_providers -- --nocapture`.
+
+Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5:
+
+- HMH-C1 through HMH-C5 prove compact lifecycle knowledge, bounded context,
+  repair guidance, versioned resource-backed harness docs, and provider-visible
+  hosted/local model-run answers. Continue with HMH-C6 to prove the provider
+  prompt surface stays tiny through static/negative gates and cannot re-expose
+  separate `search`, `inspect`, or admin tools.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -825,11 +855,11 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C1, HMH-C2, HMH-C3, and HMH-C4 are closed. Continue with
-HMH-C5: prove at least one high-capability hosted model and one alternate or
-local provider path can answer "how can you customize your harness?" using
-current live capabilities, versioned harness docs, and safety gates.
+HMH-A, HMH-B, HMH-C1, HMH-C2, HMH-C3, HMH-C4, and HMH-C5 are closed. Continue
+with HMH-C6: prove provider schemas expose only `execute`; `search`,
+`inspect`, and admin functions stay operator/internal unless intentionally
+invoked through execute discovery.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml model_run_proves_harness_customization_across_providers -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml provider_prompt_surface_stays_tiny -- --nocapture
 ```
