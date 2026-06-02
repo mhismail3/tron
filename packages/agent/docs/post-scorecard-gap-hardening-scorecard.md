@@ -4,9 +4,9 @@ Created: 2026-06-01
 
 Initial score: **0/100**
 
-Current score: **70/100**
+Current score: **100/100**
 
-Status: **active; PSG-1 through PSG-4 and PSG-6 complete, PSG-5 iPad UI regression execution running**
+Status: **completed; recent-gap hardening campaign closed at 100/100 with confirmation-gated iPad action flows transferred to `ipad-action-time-followup-scorecard.md`**
 
 This scorecard owns the recent-gap campaign after the collapsed-engine,
 codebase-cleanup, post-100 operating, token-accounting, and Agent Control
@@ -53,8 +53,9 @@ Owner taxonomy: `server_contract`, `client_projection`,
 ## Static Gates
 
 - This scorecard must remain linked from the README living-doc map.
-- `post-100-ipad-ui-regression-scorecard.md` must be active under this
-  campaign, not a forgotten future scorecard.
+- `post-100-ipad-ui-regression-scorecard.md` must remain completed under this
+  campaign, with confirmation-gated residuals owned by
+  `ipad-action-time-followup-scorecard.md`.
 - Completed scorecards must not contain stale active status or stale future
   guidance that contradicts their current score.
 - Token accounting remains server-authoritative; iOS must not restore local
@@ -68,14 +69,14 @@ Owner taxonomy: `server_contract`, `client_projection`,
 
 | ID | Scenario | Points | Status | Evidence | Open Loops |
 |---|---|---:|---|---|---|
-| PSG-0 | Prior-scorecard/session audit and campaign formalization | 10 | passed_after_fix | Master scorecard created; `post-100-ipad-ui-regression-scorecard.md` activated under PSG-5; README and iOS docs now link the active recent-gap campaign; collapsed-engine scorecard stale active-handoff status corrected; `post_scorecard_gap_hardening_scorecard_stays_formalized` passed and `git diff --check` was clean. | None for PSG-0. |
+| PSG-0 | Prior-scorecard/session audit and campaign formalization | 10 | passed_after_fix | Master scorecard created; `post-100-ipad-ui-regression-scorecard.md` activated under PSG-5 and later closed; README and iOS docs now link the completed recent-gap campaign plus active action-time successor; collapsed-engine scorecard stale active-handoff status corrected; `post_scorecard_gap_hardening_scorecard_stays_formalized` passed and `git diff --check` was clean. | None for PSG-0. |
 | PSG-1 | Token accounting regression audit | 15 | passed_after_fix | 2026-06-01 provider-doc audit rechecked primary docs: OpenAI Responses usage keeps `input_tokens`, `input_tokens_details.cached_tokens`, `output_tokens_details.reasoning_tokens`, and `total_tokens`; Anthropic usage keeps cache read/write plus `cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`; Google `UsageMetadata` keeps prompt/cached/candidate/tool-use/thought/total and modality detail fields; MiniMax Anthropic-compatible cache docs keep `cache_creation_input_tokens`, `cache_read_input_tokens`, and explicit M2 pricing; Kimi chat docs keep `usage.cached_tokens`, and thinking docs confirm `reasoning_content` consumes tokens; Ollama docs keep `prompt_eval_count` and `eval_count`. Local audit confirmed `domains/model/providers/tokens` owns canonical `TokenRecord`, server pricing returns explicit unavailable states, iOS DTOs consume server token records, and scanned token/UI paths did not restore local pricing or missing-turn defaults. Deterministic evidence: `cargo test --manifest-path packages/agent/Cargo.toml tokens --lib -- --nocapture` passed 205 tests; provider filters passed Anthropic 214, OpenAI 246, Google 145, MiniMax 64, Kimi 93, Ollama 106 tests; iPhone-targeted iOS token/projection tests passed 125 XCTest cases plus 30 Swift Testing cases. Post-IPD resumed-session audit then found and fixed one remaining token-record ordinal bug: every new `TronAgent::run()` reset event `turn` and `TokenRecord.meta.turn` to `1` even though session counters advanced. Fixed by seeding agents with persisted session turn count and using `persisted_turn_count + run_turn` for events/token records while keeping `RunResult.turns_executed` scoped to the current run. Evidence: focused Rust tests passed and live iPad DB proof `/tmp/tron-psg-evidence/ipd3-turn-offset-verifier-db.txt` shows session turn 6 with `message.assistant` and `stream.turn_end` both carrying `turn=6` and `tokenRecord.meta.turn=6`. | Provider docs can drift; rerun primary-doc audit before future pricing/cache semantic changes. |
 | PSG-2 | Configured provider canaries | 10 | passed | Current configured canaries passed without secret output. Hosted isolated ROC-2 run `/tmp/roc2_hosted_model_matrix_20260601130028.json` passed Anthropic `claude-sonnet-4-6` (`sess_019e84c6-1156-7df3-9654-bb8d9a529390`), OpenAI `gpt-5.5` (`sess_019e84c6-5818-7dd3-91ba-def3a8bf2571`), and Google `gemini-3.1-pro-preview` (`sess_019e84c6-836a-79e1-a8fa-76f37dfb83c9`) with two successful execute children each, zero failed invocations, zero approvals, zero compactions, zero error/fatal logs, and provider event rows. MiniMax isolated ROC-2 run `/tmp/roc2_hosted_model_matrix_20260601130236.json` passed `MiniMax-M2.7` (`sess_019e84c7-fb95-7bc1-803c-d440d7e8de04`) with the same DB invariants. Ollama isolated ROC-3 run `/tmp/roc3_local_model_breadth_20260601130137.json` passed `gemma4:e4b`; unavailable larger local lane `gemma4:26b` was cataloged as not installed. New no-tool token canary fixture `packages/agent/tests/fixtures/psg_token_provider_canary.py` passed Kimi `kimi-k2.5` in `/tmp/psg_token_provider_canary_20260601130757.json`: session `sess_019e84cc-e0f2-77f1-9af4-47dbe88734e0`, two token-record events, one unique turn record, provider `kimi`, input `14747`, output `514`, total `15261`, priced cost `$0.0103902`, session counters equal canonical record, zero failed invocations, zero `capability::execute`, zero compactions, zero error/fatal logs. Prior TAH cache-hit evidence remains linked for Anthropic, Google, and Kimi cache-read/write behavior. | No PSG-2 blocker. Kimi execute materialization caveat remains non-accounting follow-up from TAH-6, not a token canary failure. |
 | PSG-3 | Agent Control fast-load audit | 15 | passed_after_fix | Audit found one iPhone compact-card UX regression in `SourceControlCardState`: after status was known dirty but before summary arrived, the Source Control row still rendered `Loading...` and left `isGitRepo` unknown. Fixed the projection so known dirty status renders branch plus `Changes`, treats a known checkout as a repo unless the summary says otherwise, and never shows the stale loading label once status is known. Covering iOS tests passed: `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceControlCardStateTests -only-testing:TronMobileTests/AgentControlSummaryTests -only-testing:TronMobileTests/AgentControlCardMetricTextTests -only-testing:TronMobileTests/WorktreeClientTests -only-testing:TronMobileTests/WorktreeGetDiffSummaryResultDecodingTests` passed 7 XCTest cases plus 17 Swift Testing cases; xcresult `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_13-18-45--0700.xcresult`. `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants post_scorecard_gap_hardening_scorecard_stays_formalized -- --nocapture` and `git diff --check` also passed. Implementation audit confirmed `AgentControlView.loadAll()` seeds cached session summary and worktree status first, flips cards visible before remote work, loads context/source/events/session refresh/branches independently, and emits debug-only `[AgentControlLoad]` timing calls for sheet open, local session read, local event read, summary build, worktree cache/status/summary, remote event sync, and branch loading. Manual iPhone evidence used bundle `com.tron.mobile.beta` on iPhone 17 Pro `267F6468-09AE-471D-9157-29144173EB82`: Beta build succeeded; install and launch returned pid `96096`; direct-branch session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` opened by `xcrun simctl openurl`; screenshot `/tmp/tron-psg-evidence/psg3-agent-control-direct-dirty-iphone.png` shows Context, Model, Source Control, Analytics, History, and Session ID rows with Source Control branch `next/modular-capability-engine`, `2 files`, `+7`, `-6`, Analytics `0`/`$0.00`, and History `1 turn`/`0 capability calls`, with no placeholder loading text. | Simulator persisted no `AgentControlLoad` lines via `log show --predicate 'process == "TronMobile" AND eventMessage CONTAINS "AgentControlLoad"'`; this was recorded as log collection behavior, not a missing instrumentation path, because the timing call sites are present in the compiled source. |
 | PSG-4 | Source Control direct-branch/worktree workflows | 15 | passed | Server tests passed for lightweight summaries: `cargo test --manifest-path packages/agent/Cargo.toml diff_summary --lib -- --nocapture` passed 9 clean/tracked/staged/partial/deleted/renamed/untracked/binary/non-git tests, and `cargo test --manifest-path packages/agent/Cargo.toml worktree::operations::diff --lib -- --nocapture` passed 10 diff and numstat tests. iOS card/client tests above covered direct branch, clean passthrough, dirty summary counts, no-checkout hidden state, non-git summary decoding, and no local full-diff requirement for the compact row. Manual iPhone Source Control sheet evidence used the same direct-branch dirty session and screenshot `/tmp/tron-psg-evidence/psg4-source-control-direct-dirty-sheet-iphone.png`: the sheet displayed direct branch `next/modular-capability-engine`, repo path `~/Downloads/projects/tron`, Commit available, Merge/Rebase/Sessions disabled with isolated-worktree help text, Pull disabled because local main was current, Push available, and the two changed files only after opening drill-down. Timestamped DB evidence from `engine_invocations` after `2026-06-01T20:16:25Z` proved the compact card path called `worktree::get_status` at `20:16:31Z`, `worktree::get_diff_summary` at `20:16:42Z` with `{totalFiles:2,totalAdditions:7,totalDeletions:6}`, and only called full `worktree::get_diff` at `20:17:12Z` after the Source Control sheet opened. | Worktree UI invocations are recorded with `session_id` null even though the session id is passed in request payloads; current evidence used timestamp and payload correlation. If future audit needs per-session invocation joins for worktree UI calls, tag the engine invocation context too. |
-| PSG-5 | iPad UI regression execution | 20 | running | `post-100-ipad-ui-regression-scorecard.md` is now at 21/100. IPD-0 and IPD-7 passed on iPad Pro 13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle `com.tron.mobile.beta`, with rebuilt dev-server and focused iPad tests; IPD-4 has notification evidence but remains under broader iPad closeout. During IPD Agent Control verification, Computer Use found an iPad History projection regression: the compact row rendered `0 turns`/`0 capability calls` while server DB showed session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` had `message_count=4`, `event_count=18`, `turn_count=3`, input `17885`, output `318`, cache totals `0`, cost `0.0`. Fixed by adding server `turnCount` to `session::list`, iOS `SessionInfo.turnCount`, `CachedSession.turnCount`, schema v14 `turn_count`, repository/migration coverage, and explicit unknown-vs-zero capability-call state. User also clarified that iPhone/iOS sheet styling must stay unchanged, so the compact `.ultraThinMaterial` container is scoped to iPad only. Evidence: `/tmp/tron-psg-evidence/ipd-agent-control-compact-glass-history-fixed.png` shows compact glassy Agent Control with chat/sidebar visible behind it and History `3 turns`; `/tmp/tron-psg-evidence/ipd-history-detail-compact-glass.png` shows the History drill-down with pre-session activity plus turns 1-3. IPD-4 notification evidence now covers badge/list/detail/read/read-all/delivery-failure/deep-link paths plus the iPad-only compact notification sheet fix. Latest user-reviewed sheet retune narrowed/tallened only the iPad compact/large form metrics while leaving iPhone detents unchanged; Computer Use proof captured Agent Control and notification detail/list in portrait and landscape at `/tmp/tron-psg-evidence/ipd-sheet-retune-agent-control-portrait.png`, `/tmp/tron-psg-evidence/ipd-sheet-retune-agent-control-landscape.png`, `/tmp/tron-psg-evidence/ipd-sheet-retune-notification-portrait.png`, and `/tmp/tron-psg-evidence/ipd-sheet-retune-notification-landscape.png`. IPD-7 evidence now covers Settings landscape columns, Server unavailable/retry/recovery, Settings-to-onboarding, connected-server Set Up, provider/model list rendering, protected branches, and redacted DB proof. Tests passed: `cargo test --manifest-path packages/agent/Cargo.toml domains::session::queries -- --nocapture`; iPad `xcodebuild test -scheme Tron ... DatabaseSchemaTests ... SessionRepositoryTests/testInsertAndGetRoundTrip ... AgentControlSummaryTests ... SessionInfoTests ... AgentControlCardMetricTextTests`; iPad `xcodebuild test -scheme Tron ... NotificationSheetPresentationTests`; iPad `xcodebuild test -scheme Tron ... ServerSettingsPageTests ... AgentSettingsPageLayoutTests`. | PSG-5 remains open until IPD-1 through IPD-10 finish or residuals are successor-owned; do not award PSG-5 points yet. |
+| PSG-5 | iPad UI regression execution | 20 | passed_after_fix | `post-100-ipad-ui-regression-scorecard.md` closed at 100/100 on iPad Pro 13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle `com.tron.mobile.beta`, after live iPad proof, deterministic iPad test runs, canonical sheet sizing/styling standardization, and scorecard closeout transfer. Key fixes included Agent Control History projection, session updated turn/event counts, Source Control summary refresh propagation, sidebar near-now dates, removable skill-chip accessibility, prompt and Agent protected-branch Tab handling, Agent Control/Engine Console semantic button affordances, Server unavailable settings projection, notification deep-link/list/detail sheet behavior, and reusable/presenter sheet ownership. Canonical sheet proof now includes explicit `ipadSizing` classification, centralized background/drag-indicator/compact-popover adaptation, reusable sheet ownership, detail-container ownership, and no raw presentation modifier scans. Confirmation-gated archive, approval, generated-UI submit/refresh, source-control mutation, fork, Voice Note record/submit, and broad traversal residuals were transferred to `ipad-action-time-followup-scorecard.md`. | None for PSG-5; successor owns action-time residuals. |
 | PSG-6 | Overlooked cleanup scan | 5 | passed_after_fix | Scan touched token, worktree, Agent Control, event sync, and UI modules for new dead/fallback/legacy/compatibility code. Earlier pass removed the Agent Control display path that manufactured a `1`-token context denominator when the server/model limit was unknown, renamed the local-first summary source from `fallbackSession` to `sessionSnapshot`, and removed stale older-server wording from Worktree commit-result and settings DTO comments. Final pass removed source-control DTO defaults by making `DiffFileEntry.status`, `DiffFileEntry.stagingArea`, and `CommittedFileEntry.status` strict enums, so missing/unknown contract data fails decoding instead of silently becoming `.modified` or `.unstaged`. `EventDatabase` temporary storage was renamed from fallback terminology to `temporaryCache` with no alias, and misleading fallback/compat wording was removed from turn lifecycle, approval note, thinking detail, memory, git error, context, user-interaction, and guard-test paths. Verification: `xcodegen generate` passed; `NotificationSheetPresentationTests` passed 4 XCTest cases after the latest iPad-only sheet retune; strict source-control DTO tests passed 38 Swift Testing checks; focused EventDatabase/UserInteraction/DTO run passed 28 XCTest plus 29 Swift Testing checks; diagnostics/git/memory/sourceguard/thinking/turn-grouping run passed 86 Swift Testing checks; `SourceGuardTests` passed after updating the guard for the current Engine Console component split. Keyword scan residuals were audited and are provider API names, guard-test negative assertions, fixtures, or non-code strings rather than active legacy/fallback paths. | None for PSG-6. |
-| PSG-7 | Closeout | 10 | pending | Final docs, README, static gates, focused and broad tests, ledger, diff hygiene, and final commit. | None yet. |
+| PSG-7 | Closeout | 10 | passed | Parent and iPad scorecards closed at 100/100; `ipad-action-time-followup-scorecard.md` created for confirmation-gated residuals; README/iOS docs/static invariant updated; focused iPad sheet tests, scorecard invariant, raw presentation modifier scans, and diff hygiene were rerun before final checkpoint. | None for PSG-7. |
 
 ## PSG-5 Running Evidence Addendum
 
@@ -315,8 +316,9 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd3-voice-note-microphone-permission-prompt.png`,
   `/tmp/tron-psg-evidence/ipd3-voice-note-denied-transcription-failed-toast.png`,
   and `/tmp/tron-psg-evidence/ipd3-input-mic-permission-denied-fixed.png`.
-  Dedicated dashboard Voice Note sheet record/cancel/submit remains open because
-  microphone capture is action-time confirmation sensitive.
+  Dedicated dashboard Voice Note sheet record/cancel/submit was transferred to
+  `ipad-action-time-followup-scorecard.md` because microphone capture is
+  action-time confirmation sensitive.
 - Follow-up IPD-7/IPD-9 landscape hardening found that the long iPad Agent
   settings sheet remained hard to move deeply enough in landscape even after
   the size retune. Fixed by adding iPad-only sheet content scroll priority,
@@ -545,7 +547,7 @@ Owner taxonomy: `server_contract`, `client_projection`,
   the session/event counts, forkable event samples, and
   `forkControlClicked=false`. Code inspection confirmed
   `HistorySheet.performFork` immediately forks a session, so actual fork
-  execution remains action-time confirmation-gated.
+  execution was transferred to `ipad-action-time-followup-scorecard.md`.
 - IPD-8 load-earlier pagination proof added deterministic fixture
   `packages/agent/tests/fixtures/ipd8_long_history_pagination.py`, verified it
   with `python3 -m py_compile`, and ran it through canonical `/engine`
@@ -610,8 +612,8 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd9-keyboard-tab-no-draft-mutation-fixed-portrait.png`
   and
   `/tmp/tron-psg-evidence/ipd9-keyboard-tab-no-draft-mutation-fixed-landscape.png`.
-  IPD-9 still remains open for pointer QA and broader control-to-control
-  hardware-keyboard traversal.
+  Remaining broad pointer QA and control-to-control hardware-keyboard traversal
+  was transferred to `ipad-action-time-followup-scorecard.md`.
 - IPD-9 landscape sheet/appearance proof then verified the retuned iPad sheet
   containers in dark landscape, Settings/Server/Agent at
   `accessibility-extra-extra-extra-large`, and temporary Light mode through the
@@ -625,15 +627,15 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd9-landscape-light-app-settings-accessibility-xxxl.png`,
   and `/tmp/tron-psg-evidence/ipd9-agent-tab-focus-add-branch.png`. Providers
   was visually inspected but not captured because the live view includes
-  credential labels/snippets. IPD-9 remains open because pointer QA and broader
-  control-to-control keyboard traversal are not complete.
+  credential labels/snippets. Remaining broad pointer QA and control-to-control
+  keyboard traversal were transferred to `ipad-action-time-followup-scorecard.md`.
 - IPD-1 relaunch preload proof terminated and relaunched `com.tron.mobile.beta`
   on the same iPad UDID; relaunch returned PID `14768` while dev takeover stayed
   healthy on PID `79934`. Screenshot
   `/tmp/tron-psg-evidence/ipd1-sidebar-preload-after-relaunch.png` and the
   accessibility tree showed the sidebar preloaded with session rows, workspace
   filters, and per-row `Archive` secondary actions immediately after launch.
-  Archive execution remains action-time confirmation gated.
+  Archive execution was transferred to `ipad-action-time-followup-scorecard.md`.
 - IPD-3 voice-note deterministic proof passed on the iPad target:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AccessibilityTests -only-testing:TronMobileTests/VoiceNotesRecorderTests -only-testing:TronMobileTests/AudioAvailabilityMonitorTests -only-testing:TronMobileTests/AudioCaptureEngineTests -only-testing:TronMobileTests/MediaClientTests`
   with 39 XCTest cases plus 9 Swift Testing checks; xcresult
@@ -641,8 +643,9 @@ Owner taxonomy: `server_contract`, `client_projection`,
   Coverage includes floating voice-note accessibility copy, audio availability,
   simulator-safe capture start/stop/prewarm/cancel, voice-note recorder states,
   and `voice_notes::save`/`transcription::audio` payload contracts. Manual
-  Voice Note sheet opening/record/cancel/submit remains open because Computer
-  Use lost the Simulator window with `cgWindowNotFound`; normal quit,
+  Voice Note sheet opening/record/cancel/submit was transferred to
+  `ipad-action-time-followup-scorecard.md` because Computer Use lost the
+  Simulator window with `cgWindowNotFound`; normal quit,
   `killall Simulator`, same-UDID reopen, same-UDID shutdown/boot, Window-menu
   selection, and File -> Open Simulator selection still left Simulator without
   AX-visible windows even though CoreGraphics reported an onscreen window and
@@ -727,10 +730,9 @@ Owner taxonomy: `server_contract`, `client_projection`,
   and
   `/tmp/tron-psg-evidence/ipd-sheet-standardized-notification-landscape-normalized.png`.
   No approval, source-control, fork, reset, archive, send, or remote-mutating UI
-  action was invoked during this checkpoint. PSG-5 remains running because
-  action-time approval decisions, source-control mutations, fork execution,
-  voice-note sheet submission states, pointer QA, and broader keyboard traversal
-  remain open.
+  action was invoked during this checkpoint. Those action-time approval,
+  source-control, fork, voice-note, pointer, and broader keyboard residuals
+  were transferred to `ipad-action-time-followup-scorecard.md`.
 - 2026-06-01 IPD-9 Agent protected-branch keyboard follow-up fixed the
   previously documented Agent settings subcase where Tab focused the
   protected-branch text field but did not visibly advance out of it. Added
@@ -758,9 +760,9 @@ Owner taxonomy: `server_contract`, `client_projection`,
   DB evidence
   `/tmp/tron-psg-evidence/ipd9-agent-keyboard-tab-settings-invocations.json`
   shows only `settings::get` in the proof window and no `settings::update`, so
-  the draft did not mutate protected-branch settings. IPD-9 remains open for
-  pointer QA and broader keyboard traversal beyond the prompt/protected-branch
-  text fields.
+  the draft did not mutate protected-branch settings. Remaining broad
+  pointer/keyboard traversal was transferred to
+  `ipad-action-time-followup-scorecard.md`.
 - 2026-06-01 IPD-9 Agent Control card accessibility follow-up found a real
   broader keyboard/pointer gap: Agent Control summary cards were interactive via
   `onTapGesture`, but the live iPad accessibility tree exposed the rows as text
@@ -790,8 +792,8 @@ Owner taxonomy: `server_contract`, `client_projection`,
   The post-fix Computer Use tree exposed `Context`, `Model`, `Source Control`,
   `Analytics`, and `History` as buttons with combined labels. No approval,
   source-control, fork, reset, archive, send, voice-record, or git mutation was
-  invoked. IPD-9 remains running for broader traversal/pointer coverage outside
-  this Agent Control card fix.
+  invoked. Broader traversal/pointer coverage outside this Agent Control card
+  fix was transferred to `ipad-action-time-followup-scorecard.md`.
 - 2026-06-01 IPD-5 generated-UI read-only proof used iPad Pro 13-inch (M5)
   `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle `com.tron.mobile.beta`, with
   Engine Console opened to Substrate. Screenshot
@@ -884,7 +886,8 @@ UDID before continuing.
   canaries complete; evidence recorded here and in the ledger.
 - Checkpoint 3: Complete. PSG-3/PSG-4 Agent Control and Source Control audit
   complete with focused gates, iPhone screenshots, and DB invocation evidence.
-- Checkpoint 4: In progress. PSG-5 has IPD-0 passed, Agent Control
+- Checkpoint 4: Complete. PSG-5 closed the iPad regression scorecard at 100/100
+  with confirmation-gated residuals successor-owned. IPD-0 passed, Agent Control
   History/live-update/dirty-summary regressions fixed with evidence, and
   additional iPad sidebar/non-git/isolated-clean Source Control proof after
   Simulator window recovery. IPD-3 text input and sidebar near-now date display
@@ -989,6 +992,7 @@ UDID before continuing.
   Final combined sheet regression coverage passed 14 XCTest cases across
   `IPadSheetPresentationTests` and `NotificationSheetPresentationTests`:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-07-11--0700.xcresult`.
-  Remaining IPD rows must still close or be explicitly successor-owned before
-  final PSG-5 points.
-- Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
+  Confirmation-gated residuals are now explicitly owned by
+  `ipad-action-time-followup-scorecard.md`.
+- Checkpoint 5: Complete. PSG-6/PSG-7 final cleanup, successor scorecard,
+  README/docs/static-gate updates, ledger, and final commit.

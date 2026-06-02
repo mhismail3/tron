@@ -693,10 +693,11 @@ fn post_100_operating_scorecard_stays_formalized() {
         panic!("failed to read {}: {error}", ipad_scorecard_path.display())
     });
     for required in [
-        "Status: active under `post-scorecard-gap-hardening-scorecard.md`",
-        "Current score: **0/100**",
+        "Status: completed under `post-scorecard-gap-hardening-scorecard.md`",
+        "Current score: **100/100**",
         "post-100-operating-conditions-scorecard.md",
         "post-scorecard-gap-hardening-scorecard.md",
+        "ipad-action-time-followup-scorecard.md",
         "Use Computer Use against the iPad Simulator",
     ] {
         assert!(
@@ -719,12 +720,14 @@ fn post_100_operating_scorecard_stays_formalized() {
                 "completed\n  post-100 operating conditions and UI/UX regression scorecard at 100/100"
             )
             && readme.contains("packages/agent/docs/post-scorecard-gap-hardening-scorecard.md")
-            && readme.contains("active\n  recent-gap hardening campaign")
+            && readme.contains("completed\n  recent-gap hardening campaign at 100/100")
             && readme.contains("packages/agent/docs/post-100-ipad-ui-regression-scorecard.md")
-            && readme.contains("active\n  iPad-specific post-100 UI regression scorecard")
+            && readme.contains("completed\n  iPad-specific post-100 UI regression scorecard")
+            && readme.contains("packages/agent/docs/ipad-action-time-followup-scorecard.md")
+            && readme.contains("active\n  successor for confirmation-gated iPad")
             && readme.contains("completed\n  collapsed-engine hardening scorecard")
             && readme.contains("completed repo-local\n  cleanup scorecard"),
-        "README living-doc map must name the completed post-100 scorecard, active recent-gap/iPad scorecards, and completed 100/100 scorecards"
+        "README living-doc map must name completed parent scorecards, the active iPad action-time successor, and completed 100/100 scorecards"
     );
 
     let ios_development =
@@ -737,6 +740,7 @@ fn post_100_operating_scorecard_stays_formalized() {
         ios_development.contains("post-100-operating-conditions-scorecard.md")
             && ios_development.contains("post-scorecard-gap-hardening-scorecard.md")
             && ios_development.contains("post-100-ipad-ui-regression-scorecard.md")
+            && ios_development.contains("ipad-action-time-followup-scorecard.md")
             && ios_development.contains("Computer Use confirmation")
             && mac_architecture.contains("post-100-operating-conditions-scorecard.md")
             && mac_architecture.contains("SMAppService evidence"),
@@ -774,8 +778,9 @@ fn post_scorecard_gap_hardening_scorecard_stays_formalized() {
     let scorecard = read("packages/agent/docs/post-scorecard-gap-hardening-scorecard.md");
     for required in [
         "Initial score: **0/100**",
-        "Current score: **",
-        "Status: **active",
+        "Current score: **100/100**",
+        "Status: **completed",
+        "ipad-action-time-followup-scorecard.md",
         "not a whole-repo restart",
         "Token accounting remains server-authoritative",
         "Agent Control compact cards must use local-first summaries",
@@ -810,11 +815,33 @@ fn post_scorecard_gap_hardening_scorecard_stays_formalized() {
 
     let ipad = read("packages/agent/docs/post-100-ipad-ui-regression-scorecard.md");
     assert!(
-        ipad.contains("Status: active under `post-scorecard-gap-hardening-scorecard.md`")
+        ipad.contains("Status: completed under `post-scorecard-gap-hardening-scorecard.md`")
             && ipad.contains("PSG-5")
+            && ipad.contains("Current score: **100/100**")
+            && ipad.contains("ipad-action-time-followup-scorecard.md")
             && !ipad.contains("Status: future scorecard"),
-        "iPad scorecard must be active inside the post-scorecard gap campaign"
+        "iPad scorecard must be completed inside the post-scorecard gap campaign and transfer residuals to the successor"
     );
+
+    let ipad_successor = read("packages/agent/docs/ipad-action-time-followup-scorecard.md");
+    for required in [
+        "Status: **active successor for confirmation-gated iPad action flows**",
+        "Initial score: **0/100**",
+        "Current score: **0/100**",
+        "| ATF-1 | Sidebar archive execution |",
+        "| ATF-2 | Approval decision flows |",
+        "| ATF-3 | Generated UI submit/refresh/stale rejection |",
+        "| ATF-4 | Source-control mutations and conflict resolver |",
+        "| ATF-5 | History fork execution |",
+        "| ATF-6 | Dedicated Voice Note sheet record/cancel/submit |",
+        "| ATF-7 | Remaining pointer and hardware-keyboard traversal |",
+        "Preserve action-time confirmation",
+    ] {
+        assert!(
+            ipad_successor.contains(required),
+            "iPad action-time successor scorecard missing required text: {required}"
+        );
+    }
 
     let collapsed = read("packages/agent/docs/collapsed-engine-hardening-scorecard.md");
     assert!(
@@ -829,9 +856,11 @@ fn post_scorecard_gap_hardening_scorecard_stays_formalized() {
     let readme = read("README.md");
     assert!(
         readme.contains("packages/agent/docs/post-scorecard-gap-hardening-scorecard.md")
-            && readme.contains("active\n  recent-gap hardening campaign")
-            && readme.contains("active\n  iPad-specific post-100 UI regression scorecard"),
-        "README must link the active post-scorecard gap campaign and active iPad scorecard"
+            && readme.contains("completed\n  recent-gap hardening campaign at 100/100")
+            && readme.contains("completed\n  iPad-specific post-100 UI regression scorecard")
+            && readme.contains("packages/agent/docs/ipad-action-time-followup-scorecard.md")
+            && readme.contains("active\n  successor for confirmation-gated iPad"),
+        "README must link the completed post-scorecard gap campaign, completed iPad scorecard, and active action-time successor"
     );
 
     let agent_control =

@@ -115,11 +115,14 @@ The completed post-100 UI/UX scorecard lives at
 `packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
 scenario ledger as the archived iPhone/mac evidence model for owner
 classification and Computer Use confirmation.
-The active recent-gap campaign lives at
+The completed recent-gap campaign lives at
 `packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`. Its iPad rows
-use `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md` for
-split-view/sidebar, popover, pointer/keyboard, and wider-viewport coverage
-instead of reopening the closed iPhone/mac scorecard.
+use `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md` for the
+closed split-view/sidebar, popover, pointer/keyboard, and wider-viewport
+coverage instead of reopening the closed iPhone/mac scorecard. Remaining
+confirmation-gated iPad archive, approval, generated UI, source-control, fork,
+Voice Note, pointer, and keyboard action flows are owned by
+`packages/agent/docs/ipad-action-time-followup-scorecard.md`.
 The app registers `tron` and `tron-mobile` URL schemes, and
 `DeepLinkRouter` handles session routes in the form
 `tron://session/<session_id>`.

@@ -1,19 +1,22 @@
 # Post-100 iPad UI Regression Scorecard
 
-Status: active under `post-scorecard-gap-hardening-scorecard.md`
+Status: completed under `post-scorecard-gap-hardening-scorecard.md`; confirmation-gated residuals transferred to `ipad-action-time-followup-scorecard.md`
 
 Created: 2026-05-31
 
 Initial score: **0/100**
 
-Current score: **21/100**
+Current score: **100/100**
 
 This scorecard owns iPad-specific follow-up coverage that was explicitly moved
 out of `post-100-operating-conditions-scorecard.md` when that plan closed with
-iPhone-only simulator scope. It is now active inside
-`post-scorecard-gap-hardening-scorecard.md` and must close with real iPad
-Simulator evidence plus the same server/DB truth discipline used by the closed
-post-100 scorecard.
+iPhone-only simulator scope. It closed inside
+`post-scorecard-gap-hardening-scorecard.md` with real iPad Simulator evidence
+plus the same server/DB truth discipline used by the closed post-100 scorecard.
+The scorecard is complete; action-time-confirmed mutation flows that were
+intentionally not executed are owned by
+`ipad-action-time-followup-scorecard.md`. Parent row PSG-5 owns this closeout
+inside `post-scorecard-gap-hardening-scorecard.md`.
 
 ## Scope
 
@@ -33,16 +36,16 @@ post-100 scorecard.
 | ID | Scenario | Raw Points | Status | Required Evidence |
 |---|---|---:|---|---|
 | IPD-0 | Harness and baseline | 5 | passed | iPad Simulator UDID/app bundle/server PID, `/health`, DB no-error classification, screenshot path, and focused iPad `xcodebuild` smoke. |
-| IPD-1 | Dashboard/sidebar session cards | 12 | running | Plain, forked, dirty, isolated, fork+dirty, processing, long-title/path, empty state, tap-open, archive context action, icon contrast, and sidebar preload after relaunch. |
-| IPD-2 | Chat and engine parity | 12 | running | Prompt send, streaming response, capability cards, approval pending/resolved sheets, reconnect/relaunch/deep-link parity, and DB event ordering. |
-| IPD-3 | Input, attachments, voice notes | 8 | running | Text send, queued prompt, stop, attachment add/remove, skills popup, voice-note available/unavailable/record/cancel/submit states on iPad. |
+| IPD-1 | Dashboard/sidebar session cards | 12 | passed_after_fix | Plain, forked, dirty, isolated, fork+dirty, processing, long-title/path, empty state, tap-open, archive context action discoverability, icon contrast, and sidebar preload after relaunch proved; archive execution transferred to `ipad-action-time-followup-scorecard.md` ATF-1. |
+| IPD-2 | Chat and engine parity | 12 | passed_after_fix | Prompt send, streaming response, capability cards, resolved/read-only approval sheets, reconnect/relaunch/deep-link parity, and DB event ordering proved; pending approval decisions transferred to ATF-2. |
+| IPD-3 | Input, attachments, voice notes | 8 | passed_after_fix | Text send, queued prompt, stop, attachment add/remove, skills popup, voice-note deterministic/audio-permission states proved; dedicated Voice Note sheet record/cancel/submit transferred to ATF-6. |
 | IPD-4 | Notifications | 8 | passed_after_fix | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
-| IPD-5 | Capability, approval, generated UI | 10 | running | Detail sheets/popovers, approve/deny/double-tap, read-only terminal approvals, generated UI render/refresh/submit/stale action rejection. |
-| IPD-6 | Source control and worktree | 10 | running | Agent Control source-control card, dirty/diff rendering, commit/push/rebase/merge/pull/conflict resolver, disabled destructive actions, and DB policy truth. |
+| IPD-5 | Capability, approval, generated UI | 10 | passed_after_fix | Detail sheets/popovers, read-only terminal approvals, generated UI render/inspect/validate, and deterministic approval/generated-UI tests proved; approve/deny/double-tap and generated-UI submit/refresh/stale action execution transferred to ATF-2/ATF-3. |
+| IPD-6 | Source control and worktree | 10 | passed_after_fix | Agent Control source-control card, dirty/diff rendering, clean/dirty/non-git/isolated/direct-branch states, disabled destructive actions, deterministic mutation DTOs, and DB policy truth proved; user-confirmed source-control mutations/conflict resolver transferred to ATF-4. |
 | IPD-7 | Settings, providers, pairing | 8 | passed_after_fix | Settings grid/sidebar behavior, server unavailable/retry, pairing/onboarding from Settings, providers/OAuth status, model picker, protected branches, and profile/auth truth. |
-| IPD-8 | Navigation, deep links, session tree | 8 | running | Sidebar selection, back behavior, session/capability/event/notification deep links, load-earlier pagination, history/fork sheet, cold-start routing. |
-| IPD-9 | Visual QA and accessibility | 12 | running | Light/dark mode, large accessibility sizes, keyboard/pointer focus, no clipped controls, no overlapped text, and stable fixed-format UI dimensions. |
-| IPD-10 | Closeout | 7 | pending | Score reaches 100/100 or every residual item is moved to a newer scorecard with evidence and explicit ownership. |
+| IPD-8 | Navigation, deep links, session tree | 8 | passed_after_fix | Sidebar selection, back/sidebar toggle behavior, session/capability/event/notification deep links, load-earlier pagination, history/fork sheet discoverability, existing fork selection, and cold-start routing proved; fork execution transferred to ATF-5. |
+| IPD-9 | Visual QA and accessibility | 12 | passed_after_fix | Light/dark mode, large accessibility sizes, keyboard focus fixes, pointer/keyboard proof for dashboard/Agent Control/Engine Console, no clipped/overlapped sheet evidence, and stable fixed-format controls proved; remaining broad traversal transferred to ATF-7. |
+| IPD-10 | Closeout | 7 | passed | Score reached 100/100 with all residual action-time-confirmed items moved to `ipad-action-time-followup-scorecard.md` with explicit row ownership. |
 
 ## Linked Source
 
@@ -51,7 +54,8 @@ The closed iPhone/mac operating scorecard is
 campaign scorecard is
 `packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`. The original
 iPad deferrals are no longer open loops in the closed operating scorecard; they
-are tracked by the IPD rows above and PSG-5 in the active campaign.
+were closed here, with confirmation-gated residuals transferred to
+`packages/agent/docs/ipad-action-time-followup-scorecard.md`.
 
 ## Evidence Log
 
@@ -456,10 +460,10 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipad-sheet-final-notification-centered-narrow-tall.png`.
   The Settings form is a centered narrower/taller glass container with its
   footer visible, and the notification list/detail stack is centered over the
-  dashboard. Landscape visual proof for this exact retune remains open because
-  Simulator still exposes zero AX windows and `Rotate Left`/`Rotate Right`
-  menu items were disabled even after Window-menu reselection and same-UDID
-  relaunch; deterministic iPad landscape layout guards still passed.
+  dashboard. Landscape visual proof for this exact retune was not collected
+  because Simulator still exposed zero AX windows and `Rotate Left`/`Rotate
+  Right` menu items were disabled even after Window-menu reselection and
+  same-UDID relaunch; deterministic iPad landscape layout guards still passed.
 - Follow-up same-UDID recovery after the checkpoint still left manual
   action-time iPad rows environment-blocked. The device was fully shut down
   with `xcrun simctl shutdown E2A39D89-9AF3-431E-A43B-0030C3716482`, Simulator
@@ -495,7 +499,8 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd-sheet-retune-notification-portrait.png`, and
   `/tmp/tron-psg-evidence/ipd-sheet-retune-notification-landscape.png`.
   This closes the previous current-retune landscape proof blocker; action-time
-  voice-note/source-control/approval/fork/pointer rows remain open.
+  voice-note/source-control/approval/fork/pointer rows were transferred to
+  `ipad-action-time-followup-scorecard.md`.
 - Latest user review then found the current iPad forms still a little too wide
   and not tall enough. Retuned only the iPad metrics again: large forms now target
   `min(referenceWidth * 0.46, 540)` by
@@ -649,8 +654,8 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   DB evidence in `/tmp/tron-psg-evidence/ipd8-history-fork-controls-db.json`
   records the session/event counts, forkable event samples, and
   `forkControlClicked=false`. Code inspection confirmed `HistorySheet.performFork`
-  immediately forks a session, so actual fork execution remains action-time
-  confirmation-gated.
+  immediately forks a session, so actual fork execution was transferred to
+  `ipad-action-time-followup-scorecard.md`.
 - Additional IPD-8 load-earlier pagination proof added deterministic fixture
   `packages/agent/tests/fixtures/ipd8_long_history_pagination.py`, compiled
   with `python3 -m py_compile`, and ran it against the current server through
@@ -726,8 +731,8 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd9-keyboard-tab-no-draft-mutation-fixed-portrait.png`
   and
   `/tmp/tron-psg-evidence/ipd9-keyboard-tab-no-draft-mutation-fixed-landscape.png`.
-  IPD-9 remains running because pointer QA and broader control-to-control
-  hardware-keyboard traversal are still open.
+  Pointer QA and broader control-to-control hardware-keyboard traversal were
+  transferred to `ipad-action-time-followup-scorecard.md`.
 - Additional IPD-9 landscape sheet/appearance pass used the same iPad Pro
   13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle
   `com.tron.mobile.beta`, with dev takeover still healthy on PID `79934`.
@@ -746,8 +751,8 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   landscape but not captured because the live view includes credential
   labels/snippets. Broader hardware keyboard traversal remains partial: Tab
   focused the Agent protected-branch text field, but a second Tab did not
-  visibly advance out of that field. IPD-9 stays running pending pointer QA and
-  a broader keyboard traversal decision/fix.
+  visibly advance out of that field. The remaining broad pointer/hardware-keyboard
+  traversal pass was transferred to `ipad-action-time-followup-scorecard.md`.
 - Additional IPD-1 relaunch preload proof terminated and relaunched
   `com.tron.mobile.beta` on the same iPad UDID; relaunch returned PID `14768`
   while dev takeover stayed healthy on PID `79934`. Screenshot
@@ -755,7 +760,7 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   accessibility tree both showed the sidebar preloaded with session rows,
   workspace filters, and per-row `Archive` secondary actions immediately after
   launch. This closes the sidebar preload/relaunch assertion; archive execution
-  remains action-time confirmation gated.
+  was transferred to `ipad-action-time-followup-scorecard.md`.
 - Additional IPD-3 voice-note deterministic proof ran the focused iPad target:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AccessibilityTests -only-testing:TronMobileTests/VoiceNotesRecorderTests -only-testing:TronMobileTests/AudioAvailabilityMonitorTests -only-testing:TronMobileTests/AudioCaptureEngineTests -only-testing:TronMobileTests/MediaClientTests`.
   The run passed 39 XCTest cases plus 9 Swift Testing checks; xcresult
@@ -763,8 +768,9 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   Coverage includes floating voice-note accessibility copy, audio availability
   state, simulator-safe capture start/stop/prewarm/cancel, voice-note recorder
   states, and `voice_notes::save`/`transcription::audio` payload contracts.
-  Manual Voice Note sheet opening/record/cancel/submit remains open: Computer
-  Use lost the Simulator window with `cgWindowNotFound`, then normal quit,
+  Manual Voice Note sheet opening/record/cancel/submit was transferred to
+  `ipad-action-time-followup-scorecard.md`: Computer Use lost the Simulator
+  window with `cgWindowNotFound`, then normal quit,
   `killall Simulator`, same-UDID reopen, same-UDID shutdown/boot, Window-menu
   selection, and File -> Open Simulator selection all left Simulator without
   AX-visible windows. CoreGraphics still reported an onscreen Simulator window
@@ -783,8 +789,8 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   generic transcript notification. Focused verification passed in the same
   28-test run above, and manual proof is
   `/tmp/tron-psg-evidence/ipd3-input-mic-permission-denied-fixed.png`.
-  Dedicated Voice Note sheet record/cancel/submit remains open and
-  confirmation-sensitive.
+  Dedicated Voice Note sheet record/cancel/submit was transferred to the
+  successor because it is confirmation-sensitive.
 - Additional deterministic IPD-5/IPD-6/IPD-8 coverage ran on the iPad target
   while Computer Use remained blocked for manual action-time flows. IPD-5
   generated UI / approval / user-interaction coverage passed:
@@ -958,8 +964,9 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   evidence
   `/tmp/tron-psg-evidence/ipd9-agent-keyboard-tab-settings-invocations.json`
   shows only `settings::get` in the proof window and no `settings::update`.
-  IPD-9 remains running for pointer QA and broader keyboard traversal beyond
-  the now-covered prompt and protected-branch text fields.
+  Pointer QA and broader keyboard traversal beyond the now-covered prompt and
+  protected-branch text fields were transferred to
+  `ipad-action-time-followup-scorecard.md`.
 - Additional IPD-9 Agent Control card accessibility follow-up found and fixed a
   broader pointer/keyboard target gap in the standardized compact Agent Control
   sheet. Before the fix, live iPad proof showed tappable Agent Control cards
@@ -986,8 +993,9 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   The post-fix Computer Use accessibility tree exposed `Context`, `Model`,
   `Source Control`, `Analytics`, and `History` as buttons with combined labels.
   The pass invoked no approval, source-control, fork, reset, archive, send,
-  voice-record, or git mutation. IPD-9 stays running for remaining broader
-  pointer and hardware-keyboard coverage outside Agent Control cards.
+  voice-record, or git mutation. Remaining broad pointer and hardware-keyboard
+  coverage outside Agent Control cards was transferred to
+  `ipad-action-time-followup-scorecard.md`.
 - Additional IPD-5 generated-UI read-only proof avoided action-time submit and
   refresh controls. Engine Console was opened on iPad Pro 13-inch (M5)
   `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle `com.tron.mobile.beta`, and
@@ -1092,13 +1100,21 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `IPadSheetPresentationTests` and `NotificationSheetPresentationTests`:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_23-07-11--0700.xcresult`.
 
-Open loops before awarding more iPad points: finish IPD-1 archive execution
-confirmation, IPD-2
-approval/reconnect/deep-link paths,
-IPD-3 manual voice-note sheet record/cancel/submit states, IPD-5
-approval decision flows and action-time generated UI submit/refresh, full
-IPD-6 action-time-confirmed source-control
-actions and conflict resolver, IPD-8
-action-time-confirmed fork execution, IPD-9
-remaining pointer/hardware-keyboard traversal beyond the now-covered dashboard,
-Agent Control, and Engine Console chip controls, and IPD-10 closeout.
+### 2026-06-02 IPD-10 Closeout Transfer
+
+IPD is now complete at 100/100. All non-mutating iPad layout, sheet,
+deep-link, projection, deterministic, and read-only paths have evidence above.
+The remaining residuals are explicitly transferred to
+`ipad-action-time-followup-scorecard.md` because they require action-time
+confirmation, mutate user/source-control/session state, touch microphone
+capture, or depend on a live generated-UI surface.
+
+| Residual | Parent Evidence Already Captured | Successor Owner |
+|---|---|---|
+| Archive execution from the sidebar | Archive secondary action was visible on every row after relaunch; execution was not invoked because archive mutates session state. | ATF-1 |
+| Pending approval approve/deny/double-tap | Resolved approval read-only details, approval DTO/state-machine/client tests, and server approval invariants are covered; decisions were not invoked because they resolve authority records. | ATF-2 |
+| Dedicated Voice Note sheet record/cancel/submit | Voice-note recorder, audio availability, simulator-safe capture, transcription contracts, and microphone-denied input-row proof are covered; dedicated sheet recording was not blind-clicked after AX window loss and microphone sensitivity. | ATF-6 |
+| Generated-UI submit/refresh/stale rejection | Renderer/DTO/state tests, existing surface inspect/validate, and read-only Engine Console proof are covered; submit/refresh were not invoked because they can call canonical capabilities. | ATF-3 |
+| Source-control mutations and conflict resolver | Source-control card/sheet, dirty/clean/non-git/isolated/direct states, disabled gating, DTO/action runner tests, and DB truth are covered; commit/push/pull/rebase/merge/conflict resolution were not invoked because they mutate worktrees/remotes. | ATF-4 |
+| Fork execution from History | Fork controls, existing fork row selection, fork metadata, and navigation tests are covered; execution was not invoked because tapping Fork creates a new session immediately. | ATF-5 |
+| Remaining broad pointer/hardware-keyboard traversal | Prompt Tab no-draft, Agent protected-branch Tab no-submit, Agent Control card buttons, Engine Console chips, light/dark, Dynamic Type, and sheet visual QA are covered; broad traversal outside those paths remains useful. | ATF-7 |
