@@ -215,7 +215,16 @@ struct EngineConsoleView: View {
                 }
             }
 
-            EngineConsoleModuleProjectionCard(projection: state.moduleOperatorProjection)
+            EngineConsoleModuleProjectionCard(
+                projection: state.moduleOperatorProjection,
+                mutatingDisabled: state.isMutatingDisabled,
+                canOpenSurface: { target in
+                    state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: target.targetType)
+                },
+                openSurface: { target in
+                    Task { await state.authorSurface(targetType: target.targetType, targetId: target.targetId) }
+                }
+            )
 
             EngineConsoleCard {
                 EngineConsoleCardHeader(

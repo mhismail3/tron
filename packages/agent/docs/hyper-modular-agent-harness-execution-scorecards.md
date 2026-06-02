@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **67.5/100**
+Current score: **82.5/100**
 
 Status: **running**
 
@@ -696,8 +696,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D, HMH-E1, HMH-E2, and HMH-E3 are also closed; continue with
-  HMH-E4 to prove module controls are native server projections.
+  proven. HMH-D, HMH-E1, HMH-E2, HMH-E3, and HMH-E4 are also closed; continue
+  with HMH-E5 to prove humans can understand agent-created harness changes.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -956,8 +956,8 @@ HMH-D8 evidence, 2026-06-02:
 
 Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7/HMH-D8:
 
-- HMH-D, HMH-E1, HMH-E2, and HMH-E3 are closed. Continue with HMH-E4 to prove
-  module controls are native server projections.
+- HMH-D, HMH-E1, HMH-E2, HMH-E3, and HMH-E4 are closed. Continue with HMH-E5
+  to prove humans can understand agent-created harness changes.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -970,7 +970,7 @@ Out of scope: client-side target reconstruction or native-only feature forks.
 | HMH-E1 | Engine Console is substrate-first | 15 | passed_after_fix | Console search/inspect covers workers, capabilities, modules, generated UI, traces, primer, conformance, and audit without a hardcoded tool catalog. | Stop if UI reads fixed capability descriptors. |
 | HMH-E2 | Generated surface for new capability | 20 | passed_after_fix | Engine creates a `ui_surface` for a session-created function; iOS renders it natively; submit references stored surface/version/action ids only. | Stop if iOS constructs target payloads. |
 | HMH-E3 | Approval and consequence clarity | 15 | passed_after_fix | iOS approval UI shows server risk/effect/authority/idempotency/lease/compensation metadata and resolves only through `approval::resolve`. | Stop if local approval state becomes final truth. |
-| HMH-E4 | Module controls are native projections | 15 | pending | iOS can inspect/configure/activate/disable/upgrade/rollback/quarantine module packages through canonical server functions with evidence drill-down. | Stop if module policy appears in Swift. |
+| HMH-E4 | Module controls are native projections | 15 | passed_after_fix | iOS can inspect/configure/activate/disable/upgrade/rollback/quarantine module packages through canonical server functions with evidence drill-down. | Stop if module policy appears in Swift. |
 | HMH-E5 | Human can understand agent-created harness changes | 15 | pending | Session-created capability, provenance, tests, generated UI, promotion status, cleanup, and trace are visible in an ergonomic iPhone/iPad flow. | Fix UX before declaring north-star proof. |
 | HMH-E6 | Visual proof covers iPhone and iPad | 10 | pending | Browser/Simulator/Computer Use proof includes device, UDID, bundle id, screenshots, action sequence, server rows, and return codes. | No screenshot-only proof without DB/event evidence. |
 | HMH-E7 | Disconnected cache is read-only | 10 | pending | Offline Engine Console cache cannot submit generated actions, approvals, module changes, or policy edits. | Fix before live UI closeout. |
@@ -1082,11 +1082,49 @@ HMH-E3 evidence, 2026-06-02:
 - Passing source-boundary proof:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`.
 
-Open loops after HMH-E1/HMH-E2/HMH-E3:
+HMH-E4 evidence, 2026-06-02:
 
-- Continue with HMH-E4: prove module controls are native projections over
-  canonical server functions with evidence drill-down and no Swift-owned module
-  policy.
+- The red audit found module projections displayed packages/configs/
+  activations/trust/health/evidence/action summaries from `control::snapshot`,
+  but package/activation generated surfaces did not expose the full module
+  lifecycle control set as stored actions. Package surfaces carried
+  inspect/source/trust/conformance actions but missed `module::configure` and
+  `module::activate`; activation surfaces carried health/integrity/recovery but
+  missed `module::disable`, `module::upgrade`, `module::rollback`, and
+  `module::quarantine`. The default generated layout also rendered only a
+  refresh button, so stored module actions were not native controls.
+- The fix keeps module policy server-owned. `ui::surface_for_target` now
+  derives package configure/activate actions from the current worker-package
+  manifest, config schema, matching scoped module config, and manifest grant
+  ceiling. Activation surfaces derive disable/upgrade/rollback/quarantine
+  payload templates from current/prior activation versions, current package/
+  config versions, resource scope, expected-current-version guards, and
+  manifest grant ceilings. Generated module layouts render stored action inputs
+  and buttons from the action array; clients still submit only surface resource
+  id, surface version id, action id, user input, and idempotency key through
+  `ui::submit_action`. The server-authored action ids are `configure-package`,
+  `activate-package`, `disable-activation`, `upgrade-activation`,
+  `rollback-activation`, and `quarantine-activation`.
+- iOS now projects package and activation surface targets from server resource
+  rows as `EngineConsoleModuleSurfaceTarget` values and opens them through the
+  generic `ui::surface_for_target` path. The module projection card has no
+  module action allowlist, no module payload templates, and no Swift-owned
+  package policy; source guards assert those literals stay out of production
+  Swift.
+- Passing server proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib generated_ui_can_author_package_and_activation_operator_surfaces -- --nocapture`.
+- Passing iOS projection proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests`.
+- Passing generated UI renderer proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests`.
+- Passing source-boundary proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`.
+
+Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4:
+
+- Continue with HMH-E5: prove session-created capability provenance, tests,
+  generated UI, promotion status, cleanup, and trace are visible in an
+  ergonomic iPhone/iPad flow.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1218,9 +1256,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, HMH-E2, and HMH-E3 are closed. Continue
-with HMH-E4: prove module controls are native server projections.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, HMH-E2, HMH-E3, and HMH-E4 are closed.
+Continue with HMH-E5: prove humans can understand agent-created harness
+changes.
 
 ```bash
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleAccessibilityTests
 ```

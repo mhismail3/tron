@@ -1,6 +1,7 @@
 //! Generated UI action authoring.
 
 use super::*;
+use serde_json::Map;
 
 pub(in crate::engine::primitives::ui::authoring) fn generated_actions(
     host: &dyn PrimitiveRuntimeHost,
@@ -112,6 +113,73 @@ pub(in crate::engine::primitives::ui::authoring) fn generated_actions(
             && let Some(version_id) = inspection.resource.current_version_id.clone()
         {
             let manifest = current_payload(&inspection).unwrap_or_else(|| json!({}));
+            let package_id = manifest
+                .get("packageId")
+                .and_then(Value::as_str)
+                .unwrap_or_else(|| {
+                    resource_id
+                        .strip_prefix("worker-package:")
+                        .unwrap_or(&resource_id)
+                });
+            if let Some((input_schema, config_template)) =
+                config_input_schema_and_template(&manifest)
+                && let Some(configure) = functions
+                    .iter()
+                    .find(|function| function.id.as_str() == "module::configure")
+            {
+                let mut payload_template = action_scope_payload(invocation);
+                payload_template.insert("packageResourceId".to_owned(), json!(resource_id.clone()));
+                payload_template.insert("packageVersionId".to_owned(), json!(version_id.clone()));
+                payload_template.insert("config".to_owned(), config_template);
+                actions.push(json!({
+                    "actionId": "configure-package",
+                    "label": "Configure",
+                    "targetFunctionId": "module::configure",
+                    "inputSchema": input_schema,
+                    "payloadTemplate": Value::Object(payload_template),
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&configure.risk_level),
+                    "approvalPolicy": {"required": configure.required_authority.approval_required},
+                    "targetRevision": configure.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if let Some((config_resource_id, config_version_id)) =
+                matching_module_config(host, invocation, package_id, &resource_id, &version_id)?
+                && let Some(activate) = functions
+                    .iter()
+                    .find(|function| function.id.as_str() == "module::activate")
+            {
+                let mut payload_template = action_scope_payload(invocation);
+                payload_template.insert("packageResourceId".to_owned(), json!(resource_id.clone()));
+                payload_template.insert("packageVersionId".to_owned(), json!(version_id.clone()));
+                payload_template.insert(
+                    "moduleConfigResourceId".to_owned(),
+                    json!(config_resource_id),
+                );
+                payload_template.insert("configVersionId".to_owned(), json!(config_version_id));
+                payload_template.insert(
+                    "childGrantRequest".to_owned(),
+                    manifest
+                        .get("requiredGrants")
+                        .cloned()
+                        .unwrap_or_else(|| json!({})),
+                );
+                actions.push(json!({
+                    "actionId": "activate-package",
+                    "label": "Activate",
+                    "targetFunctionId": "module::activate",
+                    "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                    "payloadTemplate": Value::Object(payload_template),
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&activate.risk_level),
+                    "approvalPolicy": {"required": activate.required_authority.approval_required},
+                    "targetRevision": activate.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
             if let Some(verify_source) = functions
                 .iter()
                 .find(|function| function.id.as_str() == "module::verify_source")
@@ -749,13 +817,112 @@ pub(in crate::engine::primitives::ui::authoring) fn generated_actions(
         } else {
             format!("activation:{}", request.target_id)
         };
-        let version_id = host
-            .inspect_resource(&resource_id)?
-            .and_then(|inspection| inspection.resource.current_version_id)
+        let inspection =
+            host.inspect_resource(&resource_id)?
+                .ok_or_else(|| EngineError::NotFound {
+                    kind: "resource",
+                    id: resource_id.clone(),
+                })?;
+        let version_id = inspection
+            .resource
+            .current_version_id
+            .clone()
             .ok_or_else(|| EngineError::NotFound {
                 kind: "resource_version",
                 id: resource_id.clone(),
             })?;
+        let activation_payload = current_payload(&inspection).unwrap_or_else(|| json!({}));
+        let activation_scope = resource_scope_payload(&inspection.resource.scope);
+        if let Some(disable) = functions
+            .iter()
+            .find(|function| function.id.as_str() == "module::disable")
+        {
+            actions.push(json!({
+                "actionId": "disable-activation",
+                "label": "Disable",
+                "targetFunctionId": "module::disable",
+                "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                "payloadTemplate": {
+                    "activationResourceId": resource_id.clone(),
+                    "expectedCurrentVersionId": version_id.clone()
+                },
+                "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                "requiredRisk": risk_label(&disable.risk_level),
+                "approvalPolicy": {"required": disable.required_authority.approval_required},
+                "targetRevision": disable.revision.0,
+                "expiresAt": default_expires_at()
+            }));
+        }
+        if let Some(quarantine) = functions
+            .iter()
+            .find(|function| function.id.as_str() == "module::quarantine")
+        {
+            actions.push(json!({
+                "actionId": "quarantine-activation",
+                "label": "Quarantine",
+                "targetFunctionId": "module::quarantine",
+                "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                "payloadTemplate": {
+                    "resourceId": resource_id.clone(),
+                    "expectedCurrentVersionId": version_id.clone()
+                },
+                "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                "requiredRisk": risk_label(&quarantine.risk_level),
+                "approvalPolicy": {"required": quarantine.required_authority.approval_required},
+                "targetRevision": quarantine.revision.0,
+                "expiresAt": default_expires_at()
+            }));
+        }
+        if let Some(upgrade_payload) = upgrade_activation_payload(
+            host,
+            &activation_payload,
+            &activation_scope,
+            &resource_id,
+            &version_id,
+        )? && let Some(upgrade) = functions
+            .iter()
+            .find(|function| function.id.as_str() == "module::upgrade")
+        {
+            actions.push(json!({
+                "actionId": "upgrade-activation",
+                "label": "Upgrade",
+                "targetFunctionId": "module::upgrade",
+                "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                "payloadTemplate": upgrade_payload,
+                "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                "requiredRisk": risk_label(&upgrade.risk_level),
+                "approvalPolicy": {"required": upgrade.required_authority.approval_required},
+                "targetRevision": upgrade.revision.0,
+                "expiresAt": default_expires_at()
+            }));
+        }
+        if let Some(rollback_payload) = rollback_activation_payload(
+            host,
+            &inspection,
+            &activation_scope,
+            &resource_id,
+            &version_id,
+        )? && let Some(rollback) = functions
+            .iter()
+            .find(|function| function.id.as_str() == "module::rollback")
+        {
+            actions.push(json!({
+                "actionId": "rollback-activation",
+                "label": "Rollback",
+                "targetFunctionId": "module::rollback",
+                "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
+                "payloadTemplate": rollback_payload,
+                "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                "requiredRisk": risk_label(&rollback.risk_level),
+                "approvalPolicy": {"required": rollback.required_authority.approval_required},
+                "targetRevision": rollback.revision.0,
+                "expiresAt": default_expires_at()
+            }));
+        }
         for (action_id, label, target_function, payload) in [
             (
                 "check-activation-health",
@@ -814,6 +981,269 @@ pub(in crate::engine::primitives::ui::authoring) fn generated_actions(
         .into_iter()
         .map(with_stored_action_consequence)
         .collect())
+}
+
+fn config_input_schema_and_template(manifest: &Value) -> Option<(Value, Value)> {
+    let schema = manifest.get("configSchema")?;
+    if !schema
+        .get("type")
+        .is_none_or(|schema_type| schema_type == "object")
+    {
+        return None;
+    }
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|fields| {
+            fields
+                .iter()
+                .map(|field| field.as_str().map(ToOwned::to_owned))
+                .collect::<Option<Vec<_>>>()
+        })
+        .unwrap_or_else(|| Some(Vec::new()))?;
+    let mut input_properties = Map::new();
+    let mut config_template = Map::new();
+    for field in &required {
+        let property = properties.get(field)?;
+        if !capability_schema_field_is_renderable(property) {
+            return None;
+        }
+        input_properties.insert(field.clone(), property.clone());
+        config_template.insert(field.clone(), json!(format!("${{input.{field}}}")));
+    }
+    Some((
+        json!({
+            "type": "object",
+            "required": required,
+            "additionalProperties": false,
+            "properties": input_properties
+        }),
+        Value::Object(config_template),
+    ))
+}
+
+fn action_scope_payload(invocation: &crate::engine::Invocation) -> Map<String, Value> {
+    let mut payload = Map::new();
+    if let Some(workspace_id) = &invocation.causal_context.workspace_id {
+        payload.insert("scope".to_owned(), json!("workspace"));
+        payload.insert("workspaceId".to_owned(), json!(workspace_id));
+    } else if let Some(session_id) = &invocation.causal_context.session_id {
+        payload.insert("scope".to_owned(), json!("session"));
+        payload.insert("sessionId".to_owned(), json!(session_id));
+    } else {
+        payload.insert("scope".to_owned(), json!("system"));
+    }
+    payload
+}
+
+fn resource_scope_payload(
+    scope: &crate::engine::resources::EngineResourceScope,
+) -> Map<String, Value> {
+    let mut payload = Map::new();
+    payload.insert("scope".to_owned(), json!(scope.kind()));
+    match scope {
+        crate::engine::resources::EngineResourceScope::System => {}
+        crate::engine::resources::EngineResourceScope::Workspace(value) => {
+            payload.insert("workspaceId".to_owned(), json!(value));
+        }
+        crate::engine::resources::EngineResourceScope::Session(value) => {
+            payload.insert("sessionId".to_owned(), json!(value));
+        }
+    }
+    payload
+}
+
+fn scope_token(payload: &Map<String, Value>) -> String {
+    payload
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("sessionId").and_then(Value::as_str))
+        .unwrap_or("system")
+        .to_owned()
+}
+
+fn matching_module_config(
+    host: &dyn PrimitiveRuntimeHost,
+    invocation: &crate::engine::Invocation,
+    package_id: &str,
+    package_resource_id: &str,
+    package_version_id: &str,
+) -> Result<Option<(String, String)>> {
+    let scope = action_scope_payload(invocation);
+    matching_module_config_for_scope(
+        host,
+        package_id,
+        package_resource_id,
+        package_version_id,
+        &scope_token(&scope),
+    )
+}
+
+fn matching_module_config_for_scope(
+    host: &dyn PrimitiveRuntimeHost,
+    package_id: &str,
+    package_resource_id: &str,
+    package_version_id: &str,
+    scope_token: &str,
+) -> Result<Option<(String, String)>> {
+    let config_resource_id = format!("module-config:{scope_token}:{package_id}");
+    let Some(inspection) = host.inspect_resource(&config_resource_id)? else {
+        return Ok(None);
+    };
+    let Some(version_id) = inspection.resource.current_version_id.clone() else {
+        return Ok(None);
+    };
+    let Some(payload) = current_payload(&inspection) else {
+        return Ok(None);
+    };
+    if payload.get("packageResourceId").and_then(Value::as_str) == Some(package_resource_id)
+        && payload.get("packageVersionId").and_then(Value::as_str) == Some(package_version_id)
+    {
+        Ok(Some((config_resource_id, version_id)))
+    } else {
+        Ok(None)
+    }
+}
+
+fn upgrade_activation_payload(
+    host: &dyn PrimitiveRuntimeHost,
+    activation_payload: &Value,
+    activation_scope: &Map<String, Value>,
+    activation_resource_id: &str,
+    current_activation_version_id: &str,
+) -> Result<Option<Value>> {
+    let Some(package_resource_id) = activation_payload
+        .get("packageResourceId")
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let Some(package) = host.inspect_resource(package_resource_id)? else {
+        return Ok(None);
+    };
+    let Some(package_version_id) = package.resource.current_version_id.clone() else {
+        return Ok(None);
+    };
+    let Some(manifest) = resource_version_payload(&package, &package_version_id) else {
+        return Ok(None);
+    };
+    if manifest
+        .get("runtimeEntryPoint")
+        .and_then(|entry| entry.get("kind"))
+        .and_then(Value::as_str)
+        == Some("local_process")
+    {
+        return Ok(None);
+    }
+    let Some(package_id) = manifest.get("packageId").and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    let Some((config_resource_id, config_version_id)) = matching_module_config_for_scope(
+        host,
+        package_id,
+        package_resource_id,
+        &package_version_id,
+        &scope_token(activation_scope),
+    )?
+    else {
+        return Ok(None);
+    };
+    let mut payload = activation_scope.clone();
+    payload.insert(
+        "activationResourceId".to_owned(),
+        json!(activation_resource_id),
+    );
+    payload.insert("packageResourceId".to_owned(), json!(package_resource_id));
+    payload.insert("packageVersionId".to_owned(), json!(package_version_id));
+    payload.insert(
+        "moduleConfigResourceId".to_owned(),
+        json!(config_resource_id),
+    );
+    payload.insert("configVersionId".to_owned(), json!(config_version_id));
+    payload.insert(
+        "childGrantRequest".to_owned(),
+        manifest
+            .get("requiredGrants")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    );
+    payload.insert(
+        "expectedCurrentVersionId".to_owned(),
+        json!(current_activation_version_id),
+    );
+    Ok(Some(Value::Object(payload)))
+}
+
+fn rollback_activation_payload(
+    host: &dyn PrimitiveRuntimeHost,
+    activation: &EngineResourceInspection,
+    activation_scope: &Map<String, Value>,
+    activation_resource_id: &str,
+    current_activation_version_id: &str,
+) -> Result<Option<Value>> {
+    let Some(target_version) = activation.versions.iter().rev().find(|version| {
+        version.version_id != current_activation_version_id
+            && version.state == EngineResourceVersionState::Available
+    }) else {
+        return Ok(None);
+    };
+    let Some(package_resource_id) = target_version
+        .payload
+        .get("packageResourceId")
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let Some(package_version_id) = target_version
+        .payload
+        .get("packageVersionId")
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    let Some(package) = host.inspect_resource(package_resource_id)? else {
+        return Ok(None);
+    };
+    let Some(manifest) = resource_version_payload(&package, package_version_id) else {
+        return Ok(None);
+    };
+    let mut payload = activation_scope.clone();
+    payload.insert(
+        "activationResourceId".to_owned(),
+        json!(activation_resource_id),
+    );
+    payload.insert(
+        "targetVersionId".to_owned(),
+        json!(target_version.version_id.clone()),
+    );
+    payload.insert(
+        "childGrantRequest".to_owned(),
+        manifest
+            .get("requiredGrants")
+            .cloned()
+            .unwrap_or_else(|| json!({})),
+    );
+    payload.insert(
+        "expectedCurrentVersionId".to_owned(),
+        json!(current_activation_version_id),
+    );
+    Ok(Some(Value::Object(payload)))
+}
+
+fn resource_version_payload(
+    inspection: &EngineResourceInspection,
+    version_id: &str,
+) -> Option<Value> {
+    inspection
+        .versions
+        .iter()
+        .find(|version| version.version_id == version_id)
+        .map(|version| version.payload.clone())
 }
 
 fn resource_collection_actions(

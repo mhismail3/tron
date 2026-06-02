@@ -33,6 +33,26 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
         return Array(Set(refs)).count
     }
 
+    var surfaceTargets: [EngineConsoleModuleSurfaceTarget] {
+        packages.map {
+            EngineConsoleModuleSurfaceTarget(
+                targetType: "package",
+                targetId: $0.resourceId,
+                title: "Package Surface",
+                subtitle: $0.resourceId,
+                symbol: "shippingbox"
+            )
+        } + activations.map {
+            EngineConsoleModuleSurfaceTarget(
+                targetType: "activation",
+                targetId: $0.resourceId,
+                title: "Activation Surface",
+                subtitle: $0.resourceId,
+                symbol: "bolt.badge.clock"
+            )
+        }
+    }
+
     static func make(from snapshot: ControlSnapshotDTO?) -> EngineConsoleModuleOperatorProjection {
         guard let snapshot else { return .empty }
         return EngineConsoleModuleOperatorProjection(
@@ -52,6 +72,16 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
                 .filter { $0.functionId.hasPrefix("module::") }
         )
     }
+}
+
+struct EngineConsoleModuleSurfaceTarget: Equatable, Identifiable {
+    var targetType: String
+    var targetId: String
+    var title: String
+    var subtitle: String
+    var symbol: String
+
+    var id: String { "\(targetType):\(targetId)" }
 }
 
 struct EngineConsoleModuleResourceSummary: Equatable, Identifiable {

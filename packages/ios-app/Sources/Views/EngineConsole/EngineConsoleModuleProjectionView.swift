@@ -2,6 +2,9 @@ import SwiftUI
 
 struct EngineConsoleModuleProjectionCard: View {
     let projection: EngineConsoleModuleOperatorProjection
+    let mutatingDisabled: Bool
+    var canOpenSurface: (EngineConsoleModuleSurfaceTarget) -> Bool
+    var openSurface: (EngineConsoleModuleSurfaceTarget) -> Void
 
     var body: some View {
         EngineConsoleCard {
@@ -29,11 +32,33 @@ struct EngineConsoleModuleProjectionCard: View {
                         "\(projection.evidenceRefCount) evidence refs"
                     ])
 
+                    surfaceSection
                     resourceSection
                     trustSection
                     healthSection
                     actionSection
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var surfaceSection: some View {
+        if !projection.surfaceTargets.isEmpty {
+            moduleSectionTitle("Operator Surfaces")
+            ForEach(Array(projection.surfaceTargets.prefix(6)), id: \.id) { target in
+                Button {
+                    openSurface(target)
+                } label: {
+                    EngineConsoleActionRow(
+                        symbol: target.symbol,
+                        title: target.title,
+                        subtitle: target.subtitle,
+                        tint: .tronEmerald
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(mutatingDisabled || !canOpenSurface(target))
             }
         }
     }

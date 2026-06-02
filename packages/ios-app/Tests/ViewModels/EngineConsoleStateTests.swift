@@ -514,6 +514,17 @@ struct EngineConsoleStateTests {
         }
         #expect(!actionIds.contains("worker::disconnect"))
         #expect(projection.actions.first { $0.functionId == "module::activate" }?.approvalRequired == true)
+        #expect(projection.surfaceTargets.map(\.targetType) == ["package", "activation"])
+        #expect(projection.surfaceTargets.map(\.targetId) == [
+            "worker-package:demo",
+            "activation:workspace:demo"
+        ])
+
+        let packageSurface = try #require(projection.surfaceTargets.first)
+        await state.authorSurface(targetType: packageSurface.targetType, targetId: packageSurface.targetId)
+        #expect(client.lastSurfaceRequest?.targetType == "package")
+        #expect(client.lastSurfaceRequest?.targetId == "worker-package:demo")
+        #expect(client.lastSurfaceRequest?.purpose == "Inspect package worker-package:demo")
     }
 
     @Test("engine console loads validates and refreshes generated surfaces through ui primitives")
@@ -606,6 +617,7 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
     var programRunResult = CapabilityProgramRunQueryResultDTO(programRuns: [], redacted: true)
     var lastSearchQuery: String?
     var lastRefreshRequest: UiSurfaceRefreshRequestDTO?
+    var lastSurfaceRequest: UiSurfaceForTargetRequestDTO?
     var lastSubmission: UiActionSubmissionDTO?
     var controlSnapshot = ControlSnapshotDTO(
         catalogRevision: 1,
@@ -690,7 +702,8 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         _ request: UiSurfaceForTargetRequestDTO,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> UiSurfaceMutationResultDTO {
-        UiSurfaceMutationResultDTO(
+        lastSurfaceRequest = request
+        return UiSurfaceMutationResultDTO(
             surface: nil,
             resource: nil,
             version: nil,

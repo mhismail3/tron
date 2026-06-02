@@ -606,12 +606,18 @@ struct SourceGuardTests {
         ] {
             #expect(!engineConsoleComponents.contains(fixedCatalogSuggestion))
         }
-        #expect(engineConsole.contains("EngineConsoleModuleProjectionCard(projection: state.moduleOperatorProjection)"))
+        #expect(engineConsole.contains("EngineConsoleModuleProjectionCard("))
+        #expect(engineConsole.contains("projection: state.moduleOperatorProjection"))
+        #expect(engineConsole.contains(#"state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: target.targetType)"#))
+        #expect(engineConsole.contains("state.authorSurface(targetType: target.targetType, targetId: target.targetId)"))
         #expect(engineConsoleState.contains("EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)"))
         #expect(moduleProjection.contains("snapshot.moduleHealth"))
         #expect(moduleProjection.contains("snapshot.moduleSourceTrust"))
         #expect(moduleProjection.contains(#".filter { $0.functionId.hasPrefix("module::") }"#))
+        #expect(moduleProjection.contains("var surfaceTargets: [EngineConsoleModuleSurfaceTarget]"))
         #expect(moduleProjectionView.contains("projection.evidenceRefCount"))
+        #expect(moduleProjectionView.contains("projection.surfaceTargets"))
+        #expect(moduleProjectionView.contains("openSurface(target)"))
         #expect(moduleProjectionView.contains("projection.actions"))
         for forbiddenModulePolicy in [
             "module::configure",

@@ -282,10 +282,101 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
             .as_str()
             .unwrap()
             .to_owned();
+    let configured = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": "worker-package:demo-tools",
+                "packageVersionId": registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"].as_str().unwrap(),
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true}
+            }),
+            mutating_causal("module-ui-configure").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured.error, None);
+    let config_version_id = configured.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            json!({
+                "packageResourceId": "worker-package:demo-tools",
+                "packageVersionId": registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"].as_str().unwrap(),
+                "moduleConfigResourceId": "module-config:workspace-a:demo-tools",
+                "configVersionId": config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": grant_ceiling_for_namespace("demo")
+            }),
+            mutating_causal("module-ui-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(activated.error, None);
+    let original_activation_version_id =
+        activated.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let mut upgraded_manifest = package_manifest("demo-tools", "demo", "demo-worker");
+    upgraded_manifest["version"] = json!("1.1.0");
+    let upgraded_package = register_package(
+        &handle,
+        manifest_with_digest(upgraded_manifest),
+        "module-ui-upgrade-register",
+    )
+    .await;
+    assert_eq!(upgraded_package.error, None);
+    let upgraded_package_version_id =
+        upgraded_package.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let upgraded_config = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": "worker-package:demo-tools",
+                "packageVersionId": upgraded_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true}
+            }),
+            mutating_causal("module-ui-upgrade-configure").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(upgraded_config.error, None);
+    let upgraded_config_version_id =
+        upgraded_config.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+    let upgraded = handle
+        .invoke(host_invocation(
+            "module::upgrade",
+            json!({
+                "activationResourceId": "activation:workspace-a:demo-tools",
+                "packageResourceId": "worker-package:demo-tools",
+                "packageVersionId": upgraded_package_version_id,
+                "moduleConfigResourceId": "module-config:workspace-a:demo-tools",
+                "configVersionId": upgraded_config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "expectedCurrentVersionId": original_activation_version_id,
+                "childGrantRequest": grant_ceiling_for_namespace("demo")
+            }),
+            mutating_causal("module-ui-upgrade").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(upgraded.error, None);
 
     for (target_type, target_id) in [
         ("package", "demo-tools"),
         ("resource", "worker-package:demo-tools"),
+        ("activation", "activation:workspace-a:demo-tools"),
         ("decision", trust_root_decision_id.as_str()),
     ] {
         let surface = handle
@@ -311,6 +402,9 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
         );
         if target_type == "package" {
             for function_id in [
+                "module::inspect_package",
+                "module::configure",
+                "module::activate",
                 "module::verify_source",
                 "module::run_conformance",
                 "module::simulate_trust_change",
@@ -327,6 +421,41 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                     "package surface must expose {function_id}"
                 );
             }
+            assert!(
+                surface.value.as_ref().unwrap()["surface"]["layout"]
+                    .to_string()
+                    .contains("configure-package"),
+                "package layout must render stored module action controls"
+            );
+        }
+        if target_type == "activation" {
+            for (function_id, action_id) in [
+                ("module::disable", "disable-activation"),
+                ("module::upgrade", "upgrade-activation"),
+                ("module::rollback", "rollback-activation"),
+                ("module::quarantine", "quarantine-activation"),
+            ] {
+                assert!(
+                    surface.value.as_ref().unwrap()["surface"]["actions"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|action| action["targetFunctionId"] == function_id
+                            && action["actionId"] == action_id
+                            && action["consequence"]["recommendedCanonicalAction"] == function_id),
+                    "activation surface must expose {function_id}"
+                );
+            }
+            assert!(
+                surface.value.as_ref().unwrap()["surface"]["actions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|action| action["actionId"] == "rollback-activation"
+                        && action["payloadTemplate"]["targetVersionId"]
+                            == original_activation_version_id),
+                "rollback action must target the prior activation version"
+            );
         }
         if target_type == "decision" {
             for function_id in [

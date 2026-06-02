@@ -1,4 +1,5 @@
-//! Server-owned generated UI authoring for resource and lineage surfaces.
+//! Server-owned generated UI authoring for resource, lineage, and module
+//! operator surfaces.
 
 use super::*;
 
@@ -736,6 +737,12 @@ fn layout_for_projection(
     if request.target_type == "capability" {
         return capability_layout(projection, actions);
     }
+    if matches!(
+        request.target_type.as_str(),
+        "package" | "activation" | "decision" | "module_config"
+    ) {
+        return operator_action_layout(projection, actions);
+    }
     json!({
         "type": "Section",
         "props": {"title": projection.title},
@@ -746,6 +753,63 @@ fn layout_for_projection(
             {"type": "Button", "props": {"label": "Refresh", "actionId": "refresh-surface"}}
         ]
     })
+}
+
+fn operator_action_layout(projection: &TargetProjection, actions: &[Value]) -> Value {
+    let mut children = vec![
+        json!({"type": "Heading", "props": {"text": projection.title}}),
+        json!({"type": "Text", "props": {"text": projection.summary}}),
+        json!({"type": "Monospace", "props": {"text": projection.graph.to_string()}}),
+    ];
+    children.extend(operator_input_components(actions));
+    let action_ids = actions
+        .iter()
+        .filter_map(|action| {
+            action
+                .get("actionId")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .collect::<Vec<_>>();
+    if !action_ids.is_empty() {
+        children.push(json!({
+            "type": "ButtonGroup",
+            "props": {"actions": action_ids}
+        }));
+    }
+    json!({
+        "type": "Section",
+        "props": {"title": projection.title},
+        "children": children
+    })
+}
+
+fn operator_input_components(actions: &[Value]) -> Vec<Value> {
+    let mut components = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for action in actions {
+        let schema = action.get("inputSchema").unwrap_or(&Value::Null);
+        let properties = schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let required = schema
+            .get("required")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str);
+        for name in required {
+            if !seen.insert(name.to_owned()) {
+                continue;
+            }
+            if let Some(property) = properties.get(name) {
+                components.push(component_for_capability_field(name, property));
+            }
+        }
+    }
+    components
 }
 
 fn capability_layout(projection: &TargetProjection, actions: &[Value]) -> Value {
@@ -811,10 +875,10 @@ fn component_for_capability_field(name: &str, schema: &Value) -> Value {
     }
     match schema.get("type").and_then(Value::as_str) {
         Some("boolean") => {
-            json!({"type": "Toggle", "props": {"name": name, "label": label, "required": true}})
+            json!({"type": "Toggle", "props": {"name": name, "label": label}})
         }
         Some("integer") => {
-            json!({"type": "Stepper", "props": {"name": name, "label": label, "required": true}})
+            json!({"type": "Stepper", "props": {"name": name, "label": label}})
         }
         _ if name.contains("text") || name.contains("body") || name.contains("message") => {
             json!({"type": "TextArea", "props": {"name": name, "label": label, "required": true}})

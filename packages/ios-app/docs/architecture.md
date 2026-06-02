@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-02 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-02 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -158,11 +158,11 @@ final class SubagentState {
 | `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state |
-| `ViewModels/State/EngineConsoleModuleProjection.swift` | Typed read-only projection over server-authored module package/config/activation/trust/health/action rows |
+| `ViewModels/State/EngineConsoleModuleProjection.swift` | Typed read-only projection over server-authored module package/config/activation/trust/health/action rows and package/activation generated-surface targets |
 | `Views/EngineConsole/EngineConsoleView.swift` | Top-level capability operator console |
 | `Views/EngineConsole/EngineConsoleSection.swift` | Engine Console section identity |
 | `Views/EngineConsole/EngineConsoleComponents.swift` | Console-specific section chips, metrics, cards, rows, and inspection sheet components |
-| `Views/EngineConsole/EngineConsoleModuleProjectionView.swift` | Native module projection card for package/config/activation/trust/health/evidence/action rows |
+| `Views/EngineConsole/EngineConsoleModuleProjectionView.swift` | Native module projection card for package/config/activation/trust/health/evidence/action rows and server-authored surface-open controls |
 | `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources, including session-generated capability surfaces; uses Tron typography/color tokens, restrained native row expansion, and submits only stored action coordinates |
 | `Models/Messages/CapabilityInvocationTypes.swift` | Capability invocation lifecycle DTOs, artifacts, results, and errors |
 | `Models/Messages/CapabilityInvocationDisplayModel.swift` | Server-authored capability invocation display projection |
@@ -268,9 +268,13 @@ search does not replace the overview or cached registry state. Capability
 search suggestions are projected from live status, registry documents,
 control-advertised actions, module package resources, generated UI refs,
 audit traces, program runs, and primer state instead of a hardcoded tool list.
-Generated capability surfaces render server-authored native controls from the
-stored `ui_surface`; submit sends only surface/version/action coordinates, user
-input, and idempotency key through `CapabilityClient.submitUiAction`.
+Generated capability and module operator surfaces render server-authored native
+controls from the stored `ui_surface`; submit sends only surface/version/action
+coordinates, user input, and idempotency key through
+`CapabilityClient.submitUiAction`. Package and activation module rows can open
+generated `ui_surface` resources through the generic server-advertised surface
+authoring action, so configure, activate, disable, upgrade, rollback, and
+quarantine remain stored server actions rather than Swift-owned payload policy.
 Capability cards avoid duplicate titles when a contract id and function id are
 identical, and inspection sheets reuse the same capability color, sheet title,
 and hidden drag-handle conventions as the rest of the app. Capability mutations
