@@ -29,7 +29,7 @@ private struct CardTitle: View {
     }
 }
 
-/// Shared card chrome: padding, glass tint, tap target.
+/// Shared card chrome: padding, glass tint, and semantic button target when tappable.
 @available(iOS 26.0, *)
 private struct CardChrome: ViewModifier {
     let tintColor: Color
@@ -42,15 +42,20 @@ private struct CardChrome: ViewModifier {
         let base = content
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
 
         if let onTap {
-            base
-                .glassEffect(
-                    .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
-                    in: shape
-                )
-                .contentShape(shape)
-                .onTapGesture(perform: onTap)
+            Button(action: onTap) {
+                base
+                    .glassEffect(
+                        .regular.tint(tintColor.opacity(tintOpacity)).interactive(),
+                        in: shape
+                    )
+                    .contentShape([.interaction, .hoverEffect], shape)
+                    .accessibilityElement(children: .combine)
+            }
+            .buttonStyle(.plain)
+            .hoverEffect(.highlight)
         } else {
             base
                 .glassEffect(

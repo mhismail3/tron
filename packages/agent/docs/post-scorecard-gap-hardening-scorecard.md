@@ -761,6 +761,37 @@ Owner taxonomy: `server_contract`, `client_projection`,
   the draft did not mutate protected-branch settings. IPD-9 remains open for
   pointer QA and broader keyboard traversal beyond the prompt/protected-branch
   text fields.
+- 2026-06-01 IPD-9 Agent Control card accessibility follow-up found a real
+  broader keyboard/pointer gap: Agent Control summary cards were interactive via
+  `onTapGesture`, but the live iPad accessibility tree exposed the rows as text
+  instead of buttons, so hardware-keyboard traversal had no semantic row targets.
+  Added source-level TDD guard
+  `packages/ios-app/Tests/Views/AgentControlCardAccessibilityTests.swift`; the
+  initial focused run failed with 5 issues in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_21-08-25--0700.xcresult`.
+  `AgentControlCards.CardChrome` now wraps tappable cards in plain semantic
+  `Button` controls, combines their accessibility children, keeps the
+  interactive glass shape, and adds hover highlighting. The focused guard passed
+  after the fix in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_21-09-16--0700.xcresult`.
+  Manual non-mutating proof rebuilt and launched `com.tron.mobile.beta` as pid
+  `51618` on iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482` with Simulator pointer and keyboard
+  capture enabled. Screenshots captured dashboard pointer/keyboard baseline,
+  session selection, composer focus/no-draft Tab behavior, sidebar/floating
+  pointer hovers, and post-fix Agent Control card button rendering:
+  `/tmp/tron-psg-evidence/ipd9-pointer-keyboard-capture-dashboard-baseline.png`,
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-dashboard-selected-session.png`,
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-message-input-focused-capture.png`,
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-message-input-resigned-no-draft.png`,
+  `/tmp/tron-psg-evidence/ipd9-pointer-hover-sidebar-row.png`,
+  `/tmp/tron-psg-evidence/ipd9-pointer-hover-floating-new-session.png`, and
+  `/tmp/tron-psg-evidence/ipd9-agent-control-card-buttons-accessibility-fixed.png`.
+  The post-fix Computer Use tree exposed `Context`, `Model`, `Source Control`,
+  `Analytics`, and `History` as buttons with combined labels. No approval,
+  source-control, fork, reset, archive, send, voice-record, or git mutation was
+  invoked. IPD-9 remains running for broader traversal/pointer coverage outside
+  this Agent Control card fix.
 
 ## Verification Plan
 

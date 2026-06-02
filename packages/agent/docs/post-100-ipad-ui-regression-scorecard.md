@@ -902,6 +902,34 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   shows only `settings::get` in the proof window and no `settings::update`.
   IPD-9 remains running for pointer QA and broader keyboard traversal beyond
   the now-covered prompt and protected-branch text fields.
+- Additional IPD-9 Agent Control card accessibility follow-up found and fixed a
+  broader pointer/keyboard target gap in the standardized compact Agent Control
+  sheet. Before the fix, live iPad proof showed tappable Agent Control cards
+  rendered as text-only accessibility rows because shared `CardChrome` used
+  `onTapGesture`; a focused source guard
+  `packages/ios-app/Tests/Views/AgentControlCardAccessibilityTests.swift` first
+  failed with 5 issues in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_21-08-25--0700.xcresult`.
+  `CardChrome` now wraps tappable cards in plain semantic `Button` controls,
+  combines child labels, preserves the interactive glass content shape, and adds
+  hover highlighting; the focused guard passed in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_21-09-16--0700.xcresult`.
+  Manual non-mutating proof rebuilt and launched `com.tron.mobile.beta` as pid
+  `51618` on iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482` with Simulator pointer and keyboard
+  capture enabled. Screenshots:
+  `/tmp/tron-psg-evidence/ipd9-pointer-keyboard-capture-dashboard-baseline.png`,
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-dashboard-selected-session.png`,
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-message-input-focused-capture.png`,
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-message-input-resigned-no-draft.png`,
+  `/tmp/tron-psg-evidence/ipd9-pointer-hover-sidebar-row.png`,
+  `/tmp/tron-psg-evidence/ipd9-pointer-hover-floating-new-session.png`, and
+  `/tmp/tron-psg-evidence/ipd9-agent-control-card-buttons-accessibility-fixed.png`.
+  The post-fix Computer Use accessibility tree exposed `Context`, `Model`,
+  `Source Control`, `Analytics`, and `History` as buttons with combined labels.
+  The pass invoked no approval, source-control, fork, reset, archive, send,
+  voice-record, or git mutation. IPD-9 stays running for remaining broader
+  pointer and hardware-keyboard coverage outside Agent Control cards.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2
