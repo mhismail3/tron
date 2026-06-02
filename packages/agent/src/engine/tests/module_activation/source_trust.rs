@@ -143,6 +143,186 @@ async fn module_local_source_policy_requires_verification_and_approval_before_sp
 }
 
 #[tokio::test]
+async fn module_source_approval_ceiling_denies_overbroad_activation_before_spawn() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let spawn_calls = register_recording_worker_spawn(&handle);
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("approval-ceiling-worker.sh"),
+        "module-approval-ceiling-executable",
+    )
+    .await;
+    let manifest = manifest_with_digest(local_process_manifest(
+        "approval-ceiling-tools",
+        "ceiling_demo",
+        "approval-ceiling-worker",
+        executable,
+    ));
+    let package_digest = manifest["packageDigest"].as_str().unwrap().to_owned();
+    let registered = register_package(&handle, manifest, "module-approval-ceiling-register").await;
+    assert_eq!(registered.error, None);
+    let package_resource_id = "worker-package:approval-ceiling-tools";
+    let package_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let verified = verify_source(
+        &handle,
+        package_resource_id,
+        &package_version_id,
+        "module-approval-ceiling-verify",
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    let verified_package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let configured = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true, "apiKeyRef": "secret_ref:approval-ceiling-key"}
+            }),
+            mutating_causal("module-approval-ceiling-configure").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured.error, None);
+    let config_version_id = configured.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let approval_ceiling = json!({
+        "allowedCapabilities": ["ceiling_demo::inspect"],
+        "allowedNamespaces": ["ceiling_demo"],
+        "allowedAuthorityScopes": ["ceiling_demo.read"],
+        "allowedResourceKinds": ["artifact"],
+        "resourceSelectors": ["*"],
+        "fileRoots": ["*"],
+        "networkPolicy": "none",
+        "maxRisk": "low",
+        "canDelegate": false,
+        "approvalRequired": false
+    });
+    let approved = handle
+        .invoke(host_invocation(
+            "module::approve_source",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "packageDigest": package_digest,
+                "packageId": "approval-ceiling-tools",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "trustTierCeiling": "local_digest_pinned",
+                "grantCeiling": approval_ceiling,
+                "expiresAt": "2100-01-01T00:00:00Z",
+                "reason": "test approves only the read capability"
+            }),
+            mutating_causal("module-approval-ceiling-approve").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(approved.error, None);
+    let decision_resource_id = approved.value.as_ref().unwrap()["resourceRefs"][0]["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let decision = inspect_resource(&handle, &decision_resource_id).await;
+    let decision_payload =
+        decision["versions"].as_array().unwrap().last().unwrap()["payload"].clone();
+    assert_eq!(
+        decision_payload["metadata"]["decisionType"],
+        "module_source_approval"
+    );
+    assert_eq!(
+        decision_payload["metadata"]["grantCeiling"]["allowedCapabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|function_id| function_id.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["ceiling_demo::inspect"]
+    );
+
+    let narrow_policy = handle
+        .invoke(host_invocation(
+            "module::policy_decide",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": {
+                    "allowedCapabilities": ["ceiling_demo::inspect"],
+                    "allowedNamespaces": ["ceiling_demo"],
+                    "allowedAuthorityScopes": ["ceiling_demo.read"],
+                    "allowedResourceKinds": ["artifact"],
+                    "resourceSelectors": ["*"],
+                    "fileRoots": ["*"],
+                    "networkPolicy": "none",
+                    "maxRisk": "low"
+                }
+            }),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(narrow_policy.error, None);
+    assert_eq!(narrow_policy.value.as_ref().unwrap()["decision"], "allow");
+
+    let overbroad_activation = handle
+        .invoke(host_invocation(
+            "module::activate",
+            json!({
+                "packageResourceId": package_resource_id,
+                "packageVersionId": verified_package_version_id,
+                "moduleConfigResourceId": "module-config:workspace-a:approval-ceiling-tools",
+                "configVersionId": config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "childGrantRequest": {
+                    "allowedCapabilities": [
+                        "ceiling_demo::inspect",
+                        "ceiling_demo::write_artifact"
+                    ],
+                    "allowedNamespaces": ["ceiling_demo"],
+                    "allowedAuthorityScopes": ["ceiling_demo.read", "ceiling_demo.write"],
+                    "allowedResourceKinds": ["artifact"],
+                    "resourceSelectors": ["*"],
+                    "fileRoots": ["*"],
+                    "networkPolicy": "none",
+                    "maxRisk": "medium"
+                }
+            }),
+            mutating_causal("module-approval-ceiling-activate-overbroad")
+                .with_scope("module.write"),
+        ))
+        .await;
+    assert!(matches!(
+        overbroad_activation.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("approval grant capabilities")
+                || message.contains("approval grant authority scopes")
+                || message.contains("requested maxRisk exceeds source approval")
+    ));
+    assert_eq!(
+        spawn_calls.lock().expect("spawn calls").len(),
+        0,
+        "source approval ceiling must be enforced before worker::spawn"
+    );
+}
+
+#[tokio::test]
 async fn module_source_approval_revocation_and_conformance_are_resource_backed() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let tmp = tempfile::tempdir().unwrap();

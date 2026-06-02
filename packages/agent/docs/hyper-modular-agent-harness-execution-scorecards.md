@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **46.5/100**
+Current score: **48.75/100**
 
 Status: **running**
 
@@ -695,8 +695,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D1 is also closed; continue with HMH-D2 to prove source trust is
-  explicit and revocable before activation can trust a package.
+  proven. HMH-D1 and HMH-D2 are also closed; continue with HMH-D3 to prove
+  module activation composes canonical `worker::spawn`.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -707,7 +707,7 @@ Out of scope: remote marketplace trust without explicit local policy.
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
 | HMH-D1 | Package registration is resource-backed | 10 | passed | `module::register_package` writes worker-package resources with declared capabilities, expected ids, digest, provenance, runtime entry point, and no raw secrets. | Stop if package truth lands in an unowned side table. |
-| HMH-D2 | Source trust is explicit and revocable | 15 | pending | Register/verify/approve/revoke/expire/rotate/reconcile trust flows create decision/evidence resources and enforce trust ceilings before activation. | Stop if activation can bypass source trust. |
+| HMH-D2 | Source trust is explicit and revocable | 15 | passed | Register/verify/approve/revoke/expire/rotate/reconcile trust flows create decision/evidence resources and enforce trust ceilings before activation. | Stop if activation can bypass source trust. |
 | HMH-D3 | Activation composes worker spawn | 15 | pending | `module::activate` invokes child `worker::spawn` outside host locks with narrowed grant, file roots, expected ids, scoped token, and activation lineage. | Stop if module runtime owns a parallel process launcher. |
 | HMH-D4 | Health, integrity, and conformance are inspectable | 15 | pending | `check_health`, `verify_integrity`, and `run_conformance` produce linked evidence, child invocation ids, and recovery recommendations. | Block promotion if evidence is missing/stale. |
 | HMH-D5 | Upgrade, rollback, disable, quarantine work | 15 | pending | Upgrade and rollback require expected versions and idempotency; disable/quarantine stop workers or fail closed; stale invocations cannot use quarantined functions. | Stop if rollback is doc-only. |
@@ -745,11 +745,38 @@ HMH-D1 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml module_register_package_validates_digest_namespace_and_contracts -- --nocapture`.
 
-Open loops after HMH-D1:
+HMH-D2 evidence, 2026-06-02:
 
-- HMH-D remains open. Continue with HMH-D2 to prove source trust is explicit
-  and revocable across register, verify, approve, revoke, expire, rotate, and
-  reconcile flows before activation can trust a package.
+- Production ownership is in
+  `packages/agent/src/engine/primitives/module/source_trust.rs` and its
+  focused `approval`, `verification`, `registration`, `policy`, and
+  `lifecycle` submodules. `module::activate` calls
+  `ensure_activation_source_policy` in
+  `packages/agent/src/engine/primitives/module/activation_lifecycle.rs` before
+  spawning, so activation cannot bypass source trust.
+- The strengthened proof adds
+  `module_source_approval_ceiling_denies_overbroad_activation_before_spawn`.
+  It verifies a local package, creates a `module_source_approval` decision with
+  a narrow grant ceiling, proves a matching narrow policy decision is allowed,
+  then asks `module::activate` for broader capability/authority/risk. The call
+  fails with a source-approval ceiling violation and records zero
+  `worker::spawn` calls.
+- The full source-trust suite covers activation denial before verification and
+  approval, local source verification evidence, source approval decisions,
+  approval revocation evidence and warnings, signed trust-root registration and
+  signature verification, trust-root revocation, policy audit evidence, trust
+  reconciliation with affected package/activation refs, trust-root renewal,
+  trust decision expiry, signature-key rotation links, explicit revocation
+  enforcement, bad signatures/unknown keys, and adversarial manifests without
+  persistence.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml module_activation::source_trust -- --nocapture`.
+
+Open loops after HMH-D1/HMH-D2:
+
+- HMH-D remains open. Continue with HMH-D3 to prove module activation composes
+  canonical `worker::spawn` outside host locks with narrowed grants, file
+  roots, expected ids, scoped token lineage, and activation resource evidence.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -905,10 +932,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, and HMH-D1 are closed. Continue with HMH-D2:
-prove source trust is explicit and revocable before activation can trust a
-package.
+HMH-A, HMH-B, HMH-C, HMH-D1, and HMH-D2 are closed. Continue with
+HMH-D3: prove `module::activate` composes canonical `worker::spawn` with
+narrowed grants, expected ids, scoped token lineage, and activation evidence.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml module_source_approval_revocation_and_conformance_are_resource_backed -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml module_activate_local_process_invokes_worker_spawn_and_records_integrity -- --nocapture
 ```
