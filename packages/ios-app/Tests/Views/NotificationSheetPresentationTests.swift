@@ -3,10 +3,43 @@ import XCTest
 /// Source-level presentation guards for notification sheets.
 ///
 /// The presentation helper keeps iPhone detents/backgrounds unchanged while
-/// switching iPad floating sheets to compact glass form sizing. These tests
-/// prevent the notification inbox/detail sheets from drifting back to the
-/// oversized default iPad form.
+/// switching iPad floating sheets to balanced glass form sizing. These tests
+/// prevent the notification inbox/detail sheets and shared presentation helper
+/// from drifting back to narrow, oversized iPad forms.
 final class NotificationSheetPresentationTests: XCTestCase {
+
+    func testAdaptivePresentationUsesBalancedIPadSizingWithoutChangingPhoneBranch() throws {
+        let content = try extensionSource(named: "View+Extensions.swift")
+
+        XCTAssertTrue(
+            content.contains("struct BalancedLargeFormSizing"),
+            "Detail-heavy iPad sheets need a dedicated balanced sizing primitive"
+        )
+        XCTAssertTrue(
+            content.contains("let width = min(referenceWidth * 0.74, 780)"),
+            "Large iPad sheets should be balanced instead of over-wide"
+        )
+        XCTAssertTrue(
+            content.contains("let height = min(referenceHeight * 0.60, 720)"),
+            "Large iPad sheets should have enough vertical room for settings content"
+        )
+        XCTAssertTrue(
+            content.contains("let width = min(referenceWidth * 0.70, 720)"),
+            "Compact iPad sheets should avoid becoming over-wide"
+        )
+        XCTAssertTrue(
+            content.contains("let height = min(referenceHeight * 0.50, 620)"),
+            "Compact iPad sheets should have enough vertical room for card rows"
+        )
+        XCTAssertTrue(
+            content.contains(".presentationSizing(.balancedLargeForm)"),
+            "The iPad large-form branch must use the balanced iPad sizing primitive"
+        )
+        XCTAssertTrue(
+            content.contains("needsOpaquePhoneBackground ? Color.tronBackground : .clear"),
+            "The non-iPad branch should keep its existing background behavior"
+        )
+    }
 
     func testNotificationListSheetUsesIPadCompactGlassPresentation() throws {
         let content = try source(named: "NotificationListSheet.swift")
@@ -52,6 +85,10 @@ final class NotificationSheetPresentationTests: XCTestCase {
 
     private func chatSource(named fileName: String) throws -> String {
         try source(pathComponents: ["Sources", "Views", "Chat", fileName])
+    }
+
+    private func extensionSource(named fileName: String) throws -> String {
+        try source(pathComponents: ["Sources", "Extensions", fileName])
     }
 
     private func source(pathComponents: [String]) throws -> String {

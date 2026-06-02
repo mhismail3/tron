@@ -88,7 +88,7 @@ extension ButtonStyle where Self == NoFeedbackButtonStyle {
 // MARK: - Adaptive Presentation Detents
 
 /// Custom presentation sizing that's smaller than `.page` but larger than `.form`
-/// Provides a wide, tall floating sheet for detail-heavy iPad flows.
+/// Preserves the existing non-iPad sheet path used by adaptive presentations.
 @MainActor
 struct LargeFormSizing: PresentationSizing {
     nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
@@ -110,8 +110,29 @@ struct LargeFormSizing: PresentationSizing {
     }
 }
 
-/// Compact iPad form sizing for summary sheets that should not consume most
-/// of the tablet viewport.
+/// Balanced iPad form sizing for detail-heavy sheets that should feel like a
+/// horizontal floating surface instead of a tall narrow card.
+@MainActor
+struct BalancedLargeFormSizing: PresentationSizing {
+    nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
+        let screenBounds = MainActor.assumeIsolated {
+            UIApplication.shared.connectedScenes
+                .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
+                .first ?? .zero
+        }
+        let fallbackSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
+        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
+        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
+
+        let width = min(referenceWidth * 0.74, 780)
+        let height = min(referenceHeight * 0.60, 720)
+
+        return ProposedViewSize(width: width, height: height)
+    }
+}
+
+/// Balanced iPad form sizing for summary sheets that should keep dashboard
+/// context visible without becoming a narrow vertical card.
 @MainActor
 struct CompactFormSizing: PresentationSizing {
     nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
@@ -124,20 +145,25 @@ struct CompactFormSizing: PresentationSizing {
         let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
         let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
 
-        let width = referenceWidth * 0.58
-        let height = min(referenceHeight * 0.58, 620)
+        let width = min(referenceWidth * 0.70, 720)
+        let height = min(referenceHeight * 0.50, 620)
 
         return ProposedViewSize(width: width, height: height)
     }
 }
 
 extension PresentationSizing where Self == LargeFormSizing {
-    /// A presentation size larger than `.form` but smaller than `.page`
+    /// The existing adaptive sheet size used outside the iPad-specific branch.
     static var largeForm: LargeFormSizing { LargeFormSizing() }
 }
 
+extension PresentationSizing where Self == BalancedLargeFormSizing {
+    /// A balanced floating iPad form for detail-heavy sheets.
+    static var balancedLargeForm: BalancedLargeFormSizing { BalancedLargeFormSizing() }
+}
+
 extension PresentationSizing where Self == CompactFormSizing {
-    /// A shorter floating iPad form for summary sheets.
+    /// A balanced floating iPad form for summary sheets.
     static var compactForm: CompactFormSizing { CompactFormSizing() }
 }
 
@@ -148,7 +174,7 @@ enum AdaptivePresentationSizing {
 
 extension View {
     /// Presentation detents with adaptive sizing for iPad/iPhone:
-    /// - iPad: Uses custom `.largeForm` sizing (60% width, 80% height) - smaller than page, larger than form
+    /// - iPad: Uses balanced `.balancedLargeForm` or `.compactForm` sizing
     /// - iPad material background keeps floating sheets glassy so dashboard context remains visible
     /// - iPhone keeps the existing detent sizing and background behavior
     ///
@@ -193,7 +219,7 @@ private struct AdaptivePresentationModifier: ViewModifier {
             switch ipadSizing {
             case .largeForm:
                 base
-                    .presentationSizing(.largeForm)
+                    .presentationSizing(.balancedLargeForm)
                     .presentationBackground(.ultraThinMaterial)
             case .compactForm:
                 base

@@ -90,7 +90,7 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   Fixes added server `turnCount`, iOS `SessionInfo.turnCount`,
   `CachedSession.turnCount`, schema v14 `turn_count`, repository round-trip and
   migration coverage, and explicit unknown-vs-zero capability-call state.
-- Visual/sheet fix: Agent Control now uses the shorter `.compactForm` sizing
+- Visual/sheet fix: Agent Control now uses balanced `.compactForm` sizing
   only on iPad and applies `.ultraThinMaterial` only for iPad floating
   presentations; iPhone keeps the previous sizing/background behavior. Manual
   evidence screenshot:
@@ -342,6 +342,32 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `019e8556-5c0c-7ba2-8267-6cd17d4675db` at
   `2026-06-01T22:38:09.943498+00:00` returning the target notification with
   `isRead=true` and `deliveryStatus=delivery_failed`.
+- Follow-up IPD-7/IPD-9 sheet-shape fix after user review found the iPad glass
+  forms had become too wide and not tall enough. The shared adaptive
+  presentation helper now keeps the existing non-iPad `.largeForm` branch,
+  routes only iPad large presentations through a balanced large form, and
+  retunes compact iPad sheets to a narrower/taller form. Source guards passed
+  after `xcodegen generate`:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests`
+  passed 4 XCTest cases. Manual Computer Use proof on bundle
+  `com.tron.mobile.beta`, iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`, verified portrait and landscape for
+  Settings, Agent settings, Agent Control, notification list, and notification
+  detail. Portrait screenshots:
+  `/tmp/tron-psg-evidence/ipad-balanced-settings-sheet-retuned-portrait.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-agent-settings-retuned-portrait.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-agent-control-retuned-portrait.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-notifications-list-retuned-portrait.png`,
+  and `/tmp/tron-psg-evidence/ipad-balanced-notification-detail-retuned-portrait.png`.
+  Landscape screenshots:
+  `/tmp/tron-psg-evidence/ipad-balanced-settings-retuned-landscape.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-agent-settings-retuned-landscape.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-agent-control-retuned-landscape.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-notifications-list-retuned-landscape.png`,
+  and `/tmp/tron-psg-evidence/ipad-balanced-notification-detail-retuned-landscape.png`.
+  Open loops remain for IPD-7 pairing/unavailable-server/protected-branch
+  details and IPD-9 pointer/full keyboard traversal, so no new points were
+  awarded at this checkpoint.
 - Additional IPD-5 capability-detail proof opened direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` on the iPad Simulator and
   tapped completed capability invocation `call_eiaqjnjn` for the read-only

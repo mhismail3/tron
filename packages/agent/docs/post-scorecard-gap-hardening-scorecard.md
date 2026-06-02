@@ -251,6 +251,30 @@ Owner taxonomy: `server_contract`, `client_projection`,
   shows the compact glass notification detail sheet over the dashboard, and DB
   invocation `019e8556-5c0c-7ba2-8267-6cd17d4675db` returned the target row
   with `isRead=true` and `deliveryStatus=delivery_failed`.
+- Follow-up sheet-shape review then found the iPad glass forms had overcorrected
+  too wide and not tall enough. Retuned only the iPad presentation sizing path:
+  iPad `.largeForm` now maps to a balanced large form while the non-iPad branch
+  keeps the existing `.largeForm`, and compact iPad sheets use a narrower,
+  taller balanced form. Focused verification passed
+  `xcodegen generate` and
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests`
+  with 4 XCTest cases. Manual iPad proof used rebuilt bundle
+  `com.tron.mobile.beta` on iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`; portrait screenshots:
+  `/tmp/tron-psg-evidence/ipad-balanced-settings-sheet-retuned-portrait.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-agent-settings-retuned-portrait.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-agent-control-retuned-portrait.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-notifications-list-retuned-portrait.png`,
+  and `/tmp/tron-psg-evidence/ipad-balanced-notification-detail-retuned-portrait.png`.
+  Landscape screenshots:
+  `/tmp/tron-psg-evidence/ipad-balanced-settings-retuned-landscape.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-agent-settings-retuned-landscape.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-agent-control-retuned-landscape.png`,
+  `/tmp/tron-psg-evidence/ipad-balanced-notifications-list-retuned-landscape.png`,
+  and `/tmp/tron-psg-evidence/ipad-balanced-notification-detail-retuned-landscape.png`.
+  Computer Use verified row contents, filter controls, footer/actions, and
+  detail text remained visible without the sheets reading as tall cards or
+  short over-wide strips.
 - IPD-5 capability-detail proof opened direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` and tapped completed
   `capability::execute` invocation `call_eiaqjnjn` for the read-only

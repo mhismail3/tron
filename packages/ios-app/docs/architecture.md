@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, lightweight source-control diff summary loading, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, lightweight source-control diff summary loading, balanced iPad liquid-glass sheet sizing, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase fallback-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -536,10 +536,13 @@ state.
 
 Settings pages live under `Views/Settings/Pages/` and are launched from the
 main `SettingsView` grid. The root sheet supports medium and large detents and
-starts at medium on iPhone. Its first grid row launches the surface-oriented
-settings: App, Server, and Providers. Its second row launches agent-behavior
-settings: Agent, Context, and Plugin Sources. The third row holds the destructive actions
-without a separate Danger Zone header, while keeping those tiles error-red. All
+starts at medium on iPhone. On iPad, adaptive sheets use balanced liquid-glass
+floating forms so the underlying app context remains visible without the sheet
+reading as a tall narrow card or a short strip. Its first grid row launches
+the surface-oriented settings: App, Server, and Providers. Its second row
+launches agent-behavior settings: Agent, Context, and Plugin Sources. The third
+row holds the destructive actions without a separate Danger Zone header, while
+keeping those tiles error-red. All
 main-grid icons use the shared settings tile size. A thin muted divider separates
 the green destination rows from the destructive actions. The surface and behavior
 tiles use taller containers with left-aligned emerald titles, top-right icons,
