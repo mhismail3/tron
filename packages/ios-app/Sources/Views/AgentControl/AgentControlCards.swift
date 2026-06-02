@@ -92,12 +92,16 @@ struct ContextUsageGaugeView: View {
         }
     }
 
-    private var formattedTokens: String {
-        TokenFormatter.format(currentTokens)
+    private var gaugePercent: Double {
+        contextLimit > 0 ? usagePercent : 0
     }
 
-    private var formattedLimit: String {
-        TokenFormatter.format(contextLimit)
+    private var percentageText: String {
+        AgentControlCardMetricText.contextPercent(usagePercent, contextLimit: contextLimit)
+    }
+
+    private var tokenSummaryText: String {
+        AgentControlCardMetricText.contextSummary(currentTokens: currentTokens, contextLimit: contextLimit)
     }
 
     var body: some View {
@@ -115,14 +119,14 @@ struct ContextUsageGaugeView: View {
                         .overlay(alignment: .leading) {
                             Rectangle()
                                 .fill(usageColor.opacity(0.8))
-                                .frame(width: geometry.size.width * min(usagePercent, 1.0))
+                                .frame(width: geometry.size.width * min(gaugePercent, 1.0))
                         }
                         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
                 .frame(height: 6)
                 .padding(.horizontal, 4)
 
-                Text("\(Int((usagePercent * 100).rounded()))%")
+                Text(percentageText)
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(usageColor)
                     .layoutPriority(1)
@@ -131,7 +135,7 @@ struct ContextUsageGaugeView: View {
             // Row 2: token summary
             HStack {
                 Spacer()
-                Text("\(TokenFormatter.format(contextLimit - currentTokens)) left (\(formattedTokens) / \(formattedLimit))")
+                Text(tokenSummaryText)
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
             }
@@ -269,6 +273,20 @@ enum AgentControlCardMetricText {
     static func capabilityCalls(_ totalCapabilityInvocations: Int, isLoading: Bool) -> String {
         if isLoading { return loadingPlaceholder }
         return "\(totalCapabilityInvocations) capability \(totalCapabilityInvocations == 1 ? "call" : "calls")"
+    }
+
+    static func contextPercent(_ usagePercent: Double, contextLimit: Int) -> String {
+        guard contextLimit > 0 else { return "--" }
+        return "\(Int((usagePercent * 100).rounded()))%"
+    }
+
+    static func contextSummary(currentTokens: Int, contextLimit: Int) -> String {
+        let formattedTokens = TokenFormatter.format(currentTokens)
+        guard contextLimit > 0 else {
+            return currentTokens > 0 ? "\(formattedTokens) used (limit unknown)" : "Limit unknown"
+        }
+        let remaining = max(0, contextLimit - currentTokens)
+        return "\(TokenFormatter.format(remaining)) left (\(formattedTokens) / \(TokenFormatter.format(contextLimit)))"
     }
 }
 

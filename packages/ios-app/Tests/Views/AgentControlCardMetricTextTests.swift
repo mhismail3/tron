@@ -22,4 +22,28 @@ final class AgentControlCardMetricTextTests: XCTestCase {
         XCTAssertEqual(AgentControlCardMetricText.historyTurns(0, isLoading: false), "0 turns")
         XCTAssertEqual(AgentControlCardMetricText.capabilityCalls(0, isLoading: false), "0 capability calls")
     }
+
+    func testUnknownContextLimitDoesNotRenderFakeDenominator() {
+        XCTAssertEqual(AgentControlCardMetricText.contextPercent(0, contextLimit: 0), "--")
+        XCTAssertEqual(
+            AgentControlCardMetricText.contextSummary(currentTokens: 0, contextLimit: 0),
+            "Limit unknown"
+        )
+        XCTAssertEqual(
+            AgentControlCardMetricText.contextSummary(currentTokens: 12_300, contextLimit: 0),
+            "12.3k used (limit unknown)"
+        )
+    }
+
+    func testKnownContextLimitRendersRemainingAndClampsAtZero() {
+        XCTAssertEqual(AgentControlCardMetricText.contextPercent(0.247, contextLimit: 100_000), "25%")
+        XCTAssertEqual(
+            AgentControlCardMetricText.contextSummary(currentTokens: 12_300, contextLimit: 100_000),
+            "87.7k left (12.3k / 100.0k)"
+        )
+        XCTAssertEqual(
+            AgentControlCardMetricText.contextSummary(currentTokens: 120_000, contextLimit: 100_000),
+            "0 left (120.0k / 100.0k)"
+        )
+    }
 }

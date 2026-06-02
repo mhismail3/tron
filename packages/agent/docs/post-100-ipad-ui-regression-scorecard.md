@@ -415,31 +415,35 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   and `/tmp/tron-psg-evidence/ipad-agent-control-compact-narrow-tall-balanced-final.png`.
   Provider credential values were not copied into this scorecard.
 - Additional sheet-shape retune after further user review found the current
-  iPad forms still a little too wide and not tall enough. Retuned only the
-  iPad presentation helper again: large iPad forms now target
-  `min(referenceWidth * 0.58, 660)` by
-  `min(referenceHeight * 0.86, 940)`, compact iPad forms now target
-  `min(referenceWidth * 0.52, 580)` by
-  `min(referenceHeight * 0.76, 820)`, and the non-iPad `.largeForm` branch and
-  iPhone detent/background behavior remain unchanged. Focused iPad verification
-  passed:
+  iPad forms still a little too wide, not tall enough, and able to behave like
+  bottom-detent sheets. Root cause was not only the ratio: the iPad branch still
+  inherited `.presentationDetents(...)` from the phone path. Fixed by moving
+  detents onto the non-iPad branch only, keeping iPad on centered custom
+  presentation sizing, and retuning only the iPad metrics again. Large iPad
+  forms now target `min(referenceWidth * 0.54, 620)` by
+  `min(referenceHeight * 0.90, 980)`, compact iPad forms now target
+  `min(referenceWidth * 0.48, 540)` by
+  `min(referenceHeight * 0.82, 880)`, and the iPhone/non-iPad detent/background
+  behavior remains unchanged. Focused iPad verification passed:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/SettingsPageContainerTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
   with 9 XCTest cases; xcresult
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-39-01--0700.xcresult`.
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-58-29--0700.xcresult`.
   Manual same-UDID recovery followed the plan after Computer Use returned
   `cgWindowNotFound`: Simulator was quit, killed if still present, the same iPad
   UDID was booted/reopened, and bundle `com.tron.mobile.beta` relaunched as pid
-  `38771`. Computer Use still reported no AX-visible Simulator window, but
-  `simctl` screenshots confirmed the visible app and opened sheets through
-  non-click deep links. Current portrait evidence:
-  `/tmp/tron-psg-evidence/ipad-sheet-retune-settings-portrait-narrower-taller.png`
+  `81287` for notification proof after the latest build was installed. Computer
+  Use still reported no AX-visible Simulator window, but `simctl` screenshots
+  confirmed the visible app and opened sheets through non-click deep links.
+  Current portrait evidence:
+  `/tmp/tron-psg-evidence/ipad-sheet-final-settings-centered-narrow-tall.png`
   and
-  `/tmp/tron-psg-evidence/ipad-sheet-retune-notifications-compact-narrower-taller.png`.
-  The notification compact form shows the dashboard visible around the glassy
-  sheet; the Settings form is narrower/taller with the footer still pinned.
-  Landscape visual proof for this exact retune remains open because Simulator's
-  Orientation submenu was disabled/ineffective while the device window had no
-  AX-visible window, even after Window-menu reselection and same-UDID relaunch.
+  `/tmp/tron-psg-evidence/ipad-sheet-final-notification-centered-narrow-tall.png`.
+  The Settings form is a centered narrower/taller glass container with its
+  footer visible, and the notification list/detail stack is centered over the
+  dashboard. Landscape visual proof for this exact retune remains open because
+  Simulator still exposes zero AX windows and `Rotate Left`/`Rotate Right`
+  menu items were disabled even after Window-menu reselection and same-UDID
+  relaunch; deterministic iPad landscape layout guards still passed.
 - IPD-7 final Settings/unavailable/onboarding pass found and fixed one Server
   page projection gap: when the active paired server was offline, the page
   warned in the summary but hid the `Server Controls` unavailable card because
@@ -644,6 +648,42 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd-computer-use-window-recovery-simctl-visible.png`.
   Because voice-note recording can involve microphone capture, the flow was not
   driven by blind coordinate clicks.
+- Additional deterministic IPD-5/IPD-6/IPD-8 coverage ran on the iPad target
+  while Computer Use remained blocked for manual action-time flows. IPD-5
+  generated UI / approval / user-interaction coverage passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/GeneratedUIRendererTests -only-testing:TronMobileTests/GeneratedUIDTOTests -only-testing:TronMobileTests/UserInteractionTests -only-testing:TronMobileTests/UserInteractionStateTests -only-testing:TronMobileTests/UserInteractionCoordinatorTests -only-testing:TronMobileTests/EngineApprovalStateTests -only-testing:TronMobileTests/EngineApprovalTimelineTests -only-testing:TronMobileTests/ApprovalClientTests`
+  with 62 XCTest cases plus 9 Swift Testing checks; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-35-03--0700.xcresult`.
+  Source/navigation coverage passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/SourceChangesSheetTests -only-testing:TronMobileTests/GitActionRunnerTests -only-testing:TronMobileTests/SourceControlCardStateTests -only-testing:TronMobileTests/WorktreeClientTests -only-testing:TronMobileTests/WorktreeStatusCacheTests -only-testing:TronMobileTests/DeepLinkRouterTests -only-testing:TronMobileTests/EngineNavigationTests -only-testing:TronMobileTests/ForkNavigationTests -only-testing:TronMobileTests/EngineProtocolTypesWorktreeTests`
+  with 57 XCTest cases plus 22 Swift Testing checks; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-35-21--0700.xcresult`.
+  A follow-up source metadata/worktree DTO rerun passed 71 Swift Testing checks
+  across `FileDetailData`, `SourceControlMetadata`, `DiffContentExtraction`,
+  `WorktreeInfo`, `RepoDivergence`, `SessionBranchInfo`,
+  `CommittedFileEntry`, `WorktreeCommitParams`, `WorktreeCommitResult`, and
+  `GitActionResult` suites; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-52-01--0700.xcresult`.
+  This narrows IPD-5/IPD-6/IPD-8 to manual action-time approval decisions,
+  source-control mutations, conflict resolution, back/session-tree checks, and
+  fork execution rather than DTO/state-machine coverage.
+- PSG-6 cleanup scan found and fixed one Agent Control display fallback: when
+  no detailed context snapshot or model context window was known, the Context
+  card used a fake `1`-token denominator. `AgentControlView` now preserves
+  unknown as `0`, and `ContextUsageGaugeView` renders `--`, `Limit unknown`, or
+  `{tokens} used (limit unknown)` instead of a misleading percentage/ratio.
+  The same cleanup pass renamed `AgentControlSummary.fromEvents` from
+  `fallbackSession` to `sessionSnapshot`, because the value is the cached
+  server session projection used for local-first reconciliation rather than a
+  legacy fallback path.
+  Focused iPad verification passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AgentControlSummaryTests -only-testing:TronMobileTests/AgentControlCardMetricTextTests -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/SettingsPageContainerTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  with 24 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_19-05-55--0700.xcresult`.
+  The same cleanup pass removed stale "older server" wording from
+  `WorktreeCommitResultTests` and the optional `tailscaleIp` DTO comment;
+  current semantics are unknown current-server stats and environment-dependent
+  server metadata, not compatibility shims.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2

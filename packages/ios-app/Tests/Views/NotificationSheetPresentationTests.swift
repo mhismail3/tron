@@ -16,19 +16,19 @@ final class NotificationSheetPresentationTests: XCTestCase {
             "Detail-heavy iPad sheets need a dedicated balanced sizing primitive"
         )
         XCTAssertTrue(
-            content.contains("width: min(referenceWidth * 0.58, 660)"),
+            content.contains("width: min(referenceWidth * 0.54, 620)"),
             "Large iPad sheets should be narrower than the wide landscape sheet style"
         )
         XCTAssertTrue(
-            content.contains("height: min(referenceHeight * 0.86, 940)"),
+            content.contains("height: min(referenceHeight * 0.90, 980)"),
             "Large iPad sheets should have enough vertical room for settings content"
         )
         XCTAssertTrue(
-            content.contains("width: min(referenceWidth * 0.52, 580)"),
+            content.contains("width: min(referenceWidth * 0.48, 540)"),
             "Compact iPad sheets should avoid becoming over-wide"
         )
         XCTAssertTrue(
-            content.contains("height: min(referenceHeight * 0.76, 820)"),
+            content.contains("height: min(referenceHeight * 0.82, 880)"),
             "Compact iPad sheets should have enough vertical room for card rows"
         )
         XCTAssertTrue(
@@ -44,6 +44,10 @@ final class NotificationSheetPresentationTests: XCTestCase {
             "iPad floating sheets should prioritize scrolling long settings content in landscape"
         )
         XCTAssertTrue(
+            content.contains("content\n                .presentationContentInteraction(.scrolls)"),
+            "The iPad branch should size a true floating form instead of inheriting phone detents"
+        )
+        XCTAssertTrue(
             content.contains(".frame(width: targetSize.width, height: targetSize.height)"),
             "iPad floating sheets should constrain presented content to the same visible form size"
         )
@@ -54,6 +58,10 @@ final class NotificationSheetPresentationTests: XCTestCase {
         XCTAssertTrue(
             content.contains("needsOpaquePhoneBackground ? Color.tronBackground : .clear"),
             "The non-iPad branch should keep its existing background behavior"
+        )
+        XCTAssertTrue(
+            content.contains("content\n                .presentationDetents(detents, selection: $selectedDetent)"),
+            "Phone presentation detents must remain on the non-iPad branch"
         )
     }
 

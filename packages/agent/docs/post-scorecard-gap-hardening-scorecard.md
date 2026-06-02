@@ -74,7 +74,7 @@ Owner taxonomy: `server_contract`, `client_projection`,
 | PSG-3 | Agent Control fast-load audit | 15 | passed_after_fix | Audit found one iPhone compact-card UX regression in `SourceControlCardState`: after status was known dirty but before summary arrived, the Source Control row still rendered `Loading...` and left `isGitRepo` unknown. Fixed the projection so known dirty status renders branch plus `Changes`, treats a known checkout as a repo unless the summary says otherwise, and never shows the stale loading label once status is known. Covering iOS tests passed: `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceControlCardStateTests -only-testing:TronMobileTests/AgentControlSummaryTests -only-testing:TronMobileTests/AgentControlCardMetricTextTests -only-testing:TronMobileTests/WorktreeClientTests -only-testing:TronMobileTests/WorktreeGetDiffSummaryResultDecodingTests` passed 7 XCTest cases plus 17 Swift Testing cases; xcresult `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_13-18-45--0700.xcresult`. `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants post_scorecard_gap_hardening_scorecard_stays_formalized -- --nocapture` and `git diff --check` also passed. Implementation audit confirmed `AgentControlView.loadAll()` seeds cached session summary and worktree status first, flips cards visible before remote work, loads context/source/events/session refresh/branches independently, and emits debug-only `[AgentControlLoad]` timing calls for sheet open, local session read, local event read, summary build, worktree cache/status/summary, remote event sync, and branch loading. Manual iPhone evidence used bundle `com.tron.mobile.beta` on iPhone 17 Pro `267F6468-09AE-471D-9157-29144173EB82`: Beta build succeeded; install and launch returned pid `96096`; direct-branch session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` opened by `xcrun simctl openurl`; screenshot `/tmp/tron-psg-evidence/psg3-agent-control-direct-dirty-iphone.png` shows Context, Model, Source Control, Analytics, History, and Session ID rows with Source Control branch `next/modular-capability-engine`, `2 files`, `+7`, `-6`, Analytics `0`/`$0.00`, and History `1 turn`/`0 capability calls`, with no placeholder loading text. | Simulator persisted no `AgentControlLoad` lines via `log show --predicate 'process == "TronMobile" AND eventMessage CONTAINS "AgentControlLoad"'`; this was recorded as log collection behavior, not a missing instrumentation path, because the timing call sites are present in the compiled source. |
 | PSG-4 | Source Control direct-branch/worktree workflows | 15 | passed | Server tests passed for lightweight summaries: `cargo test --manifest-path packages/agent/Cargo.toml diff_summary --lib -- --nocapture` passed 9 clean/tracked/staged/partial/deleted/renamed/untracked/binary/non-git tests, and `cargo test --manifest-path packages/agent/Cargo.toml worktree::operations::diff --lib -- --nocapture` passed 10 diff and numstat tests. iOS card/client tests above covered direct branch, clean passthrough, dirty summary counts, no-checkout hidden state, non-git summary decoding, and no local full-diff requirement for the compact row. Manual iPhone Source Control sheet evidence used the same direct-branch dirty session and screenshot `/tmp/tron-psg-evidence/psg4-source-control-direct-dirty-sheet-iphone.png`: the sheet displayed direct branch `next/modular-capability-engine`, repo path `~/Downloads/projects/tron`, Commit available, Merge/Rebase/Sessions disabled with isolated-worktree help text, Pull disabled because local main was current, Push available, and the two changed files only after opening drill-down. Timestamped DB evidence from `engine_invocations` after `2026-06-01T20:16:25Z` proved the compact card path called `worktree::get_status` at `20:16:31Z`, `worktree::get_diff_summary` at `20:16:42Z` with `{totalFiles:2,totalAdditions:7,totalDeletions:6}`, and only called full `worktree::get_diff` at `20:17:12Z` after the Source Control sheet opened. | Worktree UI invocations are recorded with `session_id` null even though the session id is passed in request payloads; current evidence used timestamp and payload correlation. If future audit needs per-session invocation joins for worktree UI calls, tag the engine invocation context too. |
 | PSG-5 | iPad UI regression execution | 20 | running | `post-100-ipad-ui-regression-scorecard.md` is now at 21/100. IPD-0 and IPD-7 passed on iPad Pro 13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle `com.tron.mobile.beta`, with rebuilt dev-server and focused iPad tests; IPD-4 has notification evidence but remains under broader iPad closeout. During IPD Agent Control verification, Computer Use found an iPad History projection regression: the compact row rendered `0 turns`/`0 capability calls` while server DB showed session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` had `message_count=4`, `event_count=18`, `turn_count=3`, input `17885`, output `318`, cache totals `0`, cost `0.0`. Fixed by adding server `turnCount` to `session::list`, iOS `SessionInfo.turnCount`, `CachedSession.turnCount`, schema v14 `turn_count`, repository/migration coverage, and explicit unknown-vs-zero capability-call state. User also clarified that iPhone/iOS sheet styling must stay unchanged, so the compact `.ultraThinMaterial` container is scoped to iPad only. Evidence: `/tmp/tron-psg-evidence/ipd-agent-control-compact-glass-history-fixed.png` shows compact glassy Agent Control with chat/sidebar visible behind it and History `3 turns`; `/tmp/tron-psg-evidence/ipd-history-detail-compact-glass.png` shows the History drill-down with pre-session activity plus turns 1-3. IPD-4 notification evidence now covers badge/list/detail/read/read-all/delivery-failure/deep-link paths plus the iPad-only compact notification sheet fix. IPD-7 evidence now covers Settings landscape columns, Server unavailable/retry/recovery, Settings-to-onboarding, connected-server Set Up, provider/model list rendering, protected branches, and redacted DB proof. Tests passed: `cargo test --manifest-path packages/agent/Cargo.toml domains::session::queries -- --nocapture`; iPad `xcodebuild test -scheme Tron ... DatabaseSchemaTests ... SessionRepositoryTests/testInsertAndGetRoundTrip ... AgentControlSummaryTests ... SessionInfoTests ... AgentControlCardMetricTextTests`; iPad `xcodebuild test -scheme Tron ... NotificationSheetPresentationTests`; iPad `xcodebuild test -scheme Tron ... ServerSettingsPageTests ... AgentSettingsPageLayoutTests`. | PSG-5 remains open until IPD-1 through IPD-10 finish or residuals are successor-owned; do not award PSG-5 points yet. |
-| PSG-6 | Overlooked cleanup scan | 5 | running | Scan touched token, worktree, Agent Control, event sync, and UI modules for new dead/fallback/legacy/compatibility code. Latest touched iPad sheet/settings pass scanned the changed Swift/docs files for `legacy`, `fallback`, `compat`, `dead`, `TODO`, `FIXME`, and `HACK`; changed Swift files are clean after renaming a noisy presentation measurement variable, and remaining matches are existing scorecard policy text plus the documented EventDatabase fallback-cache mode. | Broader campaign cleanup scan still needs final closeout across all touched token/worktree/event/UI modules. |
+| PSG-6 | Overlooked cleanup scan | 5 | running | Scan touched token, worktree, Agent Control, event sync, and UI modules for new dead/fallback/legacy/compatibility code. Latest pass removed one Agent Control display fallback that manufactured a `1`-token context denominator when the server/model limit was unknown, renamed the local-first summary source from `fallbackSession` to `sessionSnapshot`, and removed stale older-server wording from Worktree commit-result and settings DTO comments. Focused iPad Agent Control / sheet presentation tests passed 24 XCTest cases, and the worktree DTO rerun passed 71 Swift Testing checks. | Broader campaign cleanup scan still needs final closeout across all touched token/worktree/event/UI modules. |
 | PSG-7 | Closeout | 10 | pending | Final docs, README, static gates, focused and broad tests, ledger, diff hygiene, and final commit. | None yet. |
 
 ## PSG-5 Running Evidence Addendum
@@ -361,29 +361,33 @@ Owner taxonomy: `server_contract`, `client_projection`,
   and `/tmp/tron-psg-evidence/ipad-agent-control-compact-narrow-tall-balanced-final.png`.
   Provider credential values were not copied into this scorecard.
 - Additional sheet-shape retune after further user review found the current
-  iPad forms still a little too wide and not tall enough. Retuned only the
-  iPad presentation helper again: large iPad forms now target
-  `min(referenceWidth * 0.58, 660)` by
-  `min(referenceHeight * 0.86, 940)`, compact iPad forms now target
-  `min(referenceWidth * 0.52, 580)` by
-  `min(referenceHeight * 0.76, 820)`, and the non-iPad `.largeForm` branch and
-  iPhone detent/background behavior remain unchanged. Focused iPad verification
-  passed:
+  iPad forms still a little too wide, not tall enough, and able to behave like
+  bottom-detent sheets. Root cause was not only the ratio: the iPad branch still
+  inherited `.presentationDetents(...)` from the phone path. Fixed by moving
+  detents onto the non-iPad branch only, keeping iPad on centered custom
+  presentation sizing, and retuning only the iPad metrics again. Large iPad
+  forms now target `min(referenceWidth * 0.54, 620)` by
+  `min(referenceHeight * 0.90, 980)`, compact iPad forms now target
+  `min(referenceWidth * 0.48, 540)` by
+  `min(referenceHeight * 0.82, 880)`, and the iPhone/non-iPad detent/background
+  behavior remains unchanged. Focused iPad verification passed:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/SettingsPageContainerTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
   with 9 XCTest cases; xcresult
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-39-01--0700.xcresult`.
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-58-29--0700.xcresult`.
   Manual same-UDID recovery followed the plan after Computer Use returned
   `cgWindowNotFound`: Simulator was quit, killed if still present, the same iPad
   UDID was booted/reopened, and bundle `com.tron.mobile.beta` relaunched as pid
-  `38771`. Computer Use still reported no AX-visible Simulator window, but
-  `simctl` screenshots confirmed the visible app and opened sheets through
-  non-click deep links. Current portrait evidence:
-  `/tmp/tron-psg-evidence/ipad-sheet-retune-settings-portrait-narrower-taller.png`
+  `81287` for notification proof after the latest build was installed. Computer
+  Use still reported no AX-visible Simulator window, but `simctl` screenshots
+  confirmed the visible app and opened sheets through non-click deep links.
+  Current portrait evidence:
+  `/tmp/tron-psg-evidence/ipad-sheet-final-settings-centered-narrow-tall.png`
   and
-  `/tmp/tron-psg-evidence/ipad-sheet-retune-notifications-compact-narrower-taller.png`.
-  Landscape visual proof for this exact retune remains open because Simulator's
-  Orientation submenu was disabled/ineffective while the device window had no
-  AX-visible window, even after Window-menu reselection and same-UDID relaunch.
+  `/tmp/tron-psg-evidence/ipad-sheet-final-notification-centered-narrow-tall.png`.
+  Landscape visual proof for this exact retune remains open because Simulator
+  still exposes zero AX windows and `Rotate Left`/`Rotate Right` menu items were
+  disabled even after Window-menu reselection and same-UDID relaunch;
+  deterministic iPad landscape layout guards still passed.
 - IPD-5 capability-detail proof opened direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` and tapped completed
   `capability::execute` invocation `call_eiaqjnjn` for the read-only
@@ -525,6 +529,42 @@ Owner taxonomy: `server_contract`, `client_projection`,
   simctl screenshots worked. Evidence:
   `/tmp/tron-psg-evidence/ipd-computer-use-window-recovery-simctl-visible.png`.
   The microphone path was not driven by blind coordinate clicks.
+- Additional deterministic IPD-5/IPD-6/IPD-8 coverage ran on the iPad target
+  while Computer Use remained blocked for manual action-time flows. IPD-5
+  generated UI / approval / user-interaction coverage passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/GeneratedUIRendererTests -only-testing:TronMobileTests/GeneratedUIDTOTests -only-testing:TronMobileTests/UserInteractionTests -only-testing:TronMobileTests/UserInteractionStateTests -only-testing:TronMobileTests/UserInteractionCoordinatorTests -only-testing:TronMobileTests/EngineApprovalStateTests -only-testing:TronMobileTests/EngineApprovalTimelineTests -only-testing:TronMobileTests/ApprovalClientTests`
+  with 62 XCTest cases plus 9 Swift Testing checks; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-35-03--0700.xcresult`.
+  Source/navigation coverage passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/SourceChangesSheetTests -only-testing:TronMobileTests/GitActionRunnerTests -only-testing:TronMobileTests/SourceControlCardStateTests -only-testing:TronMobileTests/WorktreeClientTests -only-testing:TronMobileTests/WorktreeStatusCacheTests -only-testing:TronMobileTests/DeepLinkRouterTests -only-testing:TronMobileTests/EngineNavigationTests -only-testing:TronMobileTests/ForkNavigationTests -only-testing:TronMobileTests/EngineProtocolTypesWorktreeTests`
+  with 57 XCTest cases plus 22 Swift Testing checks; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-35-21--0700.xcresult`.
+  A follow-up source metadata/worktree DTO rerun passed 71 Swift Testing checks
+  across `FileDetailData`, `SourceControlMetadata`, `DiffContentExtraction`,
+  `WorktreeInfo`, `RepoDivergence`, `SessionBranchInfo`,
+  `CommittedFileEntry`, `WorktreeCommitParams`, `WorktreeCommitResult`, and
+  `GitActionResult` suites; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-52-01--0700.xcresult`.
+  This narrows IPD-5/IPD-6/IPD-8 to manual action-time approval decisions,
+  source-control mutations, conflict resolution, back/session-tree checks, and
+  fork execution rather than DTO/state-machine coverage.
+- PSG-6 cleanup scan found and fixed one Agent Control display fallback: when
+  no detailed context snapshot or model context window was known, the Context
+  card used a fake `1`-token denominator. `AgentControlView` now preserves
+  unknown as `0`, and `ContextUsageGaugeView` renders `--`, `Limit unknown`, or
+  `{tokens} used (limit unknown)` instead of a misleading percentage/ratio.
+  The same cleanup pass renamed `AgentControlSummary.fromEvents` from
+  `fallbackSession` to `sessionSnapshot`, because the value is the cached
+  server session projection used for local-first reconciliation rather than a
+  legacy fallback path.
+  Focused iPad verification passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AgentControlSummaryTests -only-testing:TronMobileTests/AgentControlCardMetricTextTests -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/SettingsPageContainerTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  with 24 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_19-05-55--0700.xcresult`.
+  The same cleanup pass removed stale "older server" wording from
+  `WorktreeCommitResultTests` and the optional `tailscaleIp` DTO comment;
+  current semantics are unknown current-server stats and environment-dependent
+  server metadata, not compatibility shims.
 
 ## Verification Plan
 

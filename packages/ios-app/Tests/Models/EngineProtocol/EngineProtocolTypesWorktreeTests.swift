@@ -400,7 +400,7 @@ struct WorktreeCommitResultTests {
         #expect(result.deletions == 2)
     }
 
-    @Test("decodes response without stats (older servers without stats)")
+    @Test("decodes response without stats when current server cannot compute them")
     func decodesWithoutStats() {
         // Some server paths (e.g. amending a root commit) cannot compute
         // line stats and omit insertions/deletions entirely. The client

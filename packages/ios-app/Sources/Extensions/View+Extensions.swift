@@ -113,15 +113,15 @@ struct LargeFormSizing: PresentationSizing {
 private enum AdaptiveSheetMetrics {
     static func balancedLargeFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
         CGSize(
-            width: min(referenceWidth * 0.58, 660),
-            height: min(referenceHeight * 0.86, 940)
+            width: min(referenceWidth * 0.54, 620),
+            height: min(referenceHeight * 0.90, 980)
         )
     }
 
     static func compactFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
         CGSize(
-            width: min(referenceWidth * 0.52, 580),
-            height: min(referenceHeight * 0.76, 820)
+            width: min(referenceWidth * 0.48, 540),
+            height: min(referenceHeight * 0.82, 880)
         )
     }
 }
@@ -251,12 +251,9 @@ private struct AdaptivePresentationModifier: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        let base = content
-            .presentationDetents(detents, selection: $selectedDetent)
-
         if isPad {
             let targetSize = iPadTargetSize
-            let ipadBase = base
+            let ipadBase = content
                 .presentationContentInteraction(.scrolls)
                 .frame(width: targetSize.width, height: targetSize.height)
             switch ipadSizing {
@@ -270,7 +267,8 @@ private struct AdaptivePresentationModifier: ViewModifier {
                     .presentationBackground(.ultraThinMaterial)
             }
         } else {
-            base
+            content
+                .presentationDetents(detents, selection: $selectedDetent)
                 .presentationSizing(.largeForm)
                 .presentationBackground(needsOpaquePhoneBackground ? Color.tronBackground : .clear)
         }

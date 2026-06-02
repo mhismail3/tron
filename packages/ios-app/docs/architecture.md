@@ -375,6 +375,10 @@ card cannot keep a stale clean/direct-branch label. Analytics and History cards
 seed from local `CachedSession` counters and local EventDatabase rows before
 background session/event refreshes reconcile them, so valid zero values render
 as values rather than loading placeholders.
+The Context card is also server-first: detailed context snapshots or the
+server-provided model context window supply the denominator. Until one is known,
+the card renders the limit as unknown rather than manufacturing a `1`-token
+window.
 Live `session.updated` events carry server-owned event and turn counts; the app
 persists those updates and Agent Control merges the in-memory row with the local
 DB snapshot so a same-run sheet open cannot regress to stale dashboard counts.
@@ -539,10 +543,12 @@ main `SettingsView` grid. The root sheet supports medium and large detents and
 starts at medium on iPhone. On iPad, adaptive sheets use balanced liquid-glass
 floating forms so the underlying app context remains visible without the sheet
 reading as a full-width panel. Large iPad forms target a narrower/taller
-`0.58w`/`0.86h` shape capped at `660x940`, while compact iPad forms target
-`0.52w`/`0.76h` capped at `580x820`; the iPhone/non-iPad branch keeps its
-existing detent and background behavior. The iPad branch also prioritizes
-scrolling sheet content so long settings pages remain reachable in landscape.
+`0.54w`/`0.90h` shape capped at `620x980`, while compact iPad forms target
+`0.48w`/`0.82h` capped at `540x880`; the iPhone/non-iPad branch keeps its
+existing detent and background behavior. The iPad branch does not attach phone
+detents, so forms remain centered floating containers instead of falling back to
+bottom-detent sheets. The iPad branch also prioritizes scrolling sheet content
+so long settings pages remain reachable in landscape.
 Its first grid row launches the surface-oriented settings: App, Server, and
 Providers. Its second row launches agent-behavior settings: Agent, Context, and
 Plugin Sources. The Agent page switches to an iPad-only two-column landscape

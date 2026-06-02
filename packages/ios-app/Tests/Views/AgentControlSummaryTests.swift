@@ -137,7 +137,7 @@ final class AgentControlSummaryTests: XCTestCase {
             events,
             analytics: analytics,
             turnGroups: turnGroups,
-            fallbackSession: makeSession(input: 0, output: 0, cacheRead: 0, cacheCreation: 0, cost: 0),
+            sessionSnapshot: makeSession(input: 0, output: 0, cacheRead: 0, cacheCreation: 0, cost: 0),
             freshness: .cached
         )
 
@@ -159,7 +159,7 @@ final class AgentControlSummaryTests: XCTestCase {
             events,
             analytics: analytics,
             turnGroups: turnGroups,
-            fallbackSession: makeSession(
+            sessionSnapshot: makeSession(
                 input: 17_885,
                 output: 318,
                 cacheRead: 0,
@@ -204,7 +204,7 @@ final class AgentControlSummaryTests: XCTestCase {
             events,
             analytics: analytics,
             turnGroups: turnGroups,
-            fallbackSession: makeSession(
+            sessionSnapshot: makeSession(
                 input: 0,
                 output: 0,
                 cacheRead: 0,
@@ -239,7 +239,7 @@ final class AgentControlSummaryTests: XCTestCase {
             events,
             analytics: analytics,
             turnGroups: [],
-            fallbackSession: makeSession(input: 999, output: 999, cacheRead: 0, cacheCreation: 0, cost: 0),
+            sessionSnapshot: makeSession(input: 999, output: 999, cacheRead: 0, cacheCreation: 0, cost: 0),
             freshness: .fresh
         )
 

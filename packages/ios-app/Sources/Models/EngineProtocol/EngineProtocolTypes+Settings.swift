@@ -16,7 +16,7 @@ struct ServerSettings: Decodable {
     /// seeding the sidecar files and restarting the helper.
     let transcriptionEnabled: Bool
     /// Cached Tailscale IP (e.g. `100.x.y.z`) the server reported. Populated by
-    /// the Mac wrapper / install scripts. Optional — older servers don't set it.
+    /// the Mac wrapper / install scripts when that environment can report it.
     let tailscaleIp: String?
 
     // MARK: - Update Checks

@@ -94,7 +94,7 @@ struct AgentControlSummary: Equatable {
         _ events: [SessionEvent],
         analytics: ConsolidatedAnalytics,
         turnGroups: [TurnGroup],
-        fallbackSession session: CachedSession?,
+        sessionSnapshot session: CachedSession?,
         freshness: Freshness
     ) -> AgentControlSummary {
         let sessionSummary = fromSession(session, freshness: freshness)

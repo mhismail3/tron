@@ -87,8 +87,7 @@ struct AgentControlView: View {
     }
 
     private var contextLimit: Int {
-        let fallback = contextState?.currentContextWindow ?? 0
-        return detailedSnapshot?.contextLimit ?? (fallback > 0 ? fallback : 1)
+        detailedSnapshot?.contextLimit ?? contextState?.currentContextWindow ?? 0
     }
 
     private var contextUsagePercent: Double {
@@ -466,7 +465,7 @@ struct AgentControlView: View {
                 sessionEvents,
                 analytics: cachedAnalytics,
                 turnGroups: cachedTurnGroups,
-                fallbackSession: session,
+                sessionSnapshot: session,
                 freshness: freshness
             )
         }
@@ -501,7 +500,7 @@ struct AgentControlView: View {
             events,
             analytics: analytics,
             turnGroups: cachedTurnGroups,
-            fallbackSession: await cachedSession(),
+            sessionSnapshot: await cachedSession(),
             freshness: freshness
         )
         logTiming("agent summary build", startedAt: startedAt)
