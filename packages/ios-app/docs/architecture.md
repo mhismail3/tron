@@ -538,11 +538,11 @@ Settings pages live under `Views/Settings/Pages/` and are launched from the
 main `SettingsView` grid. The root sheet supports medium and large detents and
 starts at medium on iPhone. On iPad, adaptive sheets use balanced liquid-glass
 floating forms so the underlying app context remains visible without the sheet
-reading as a tall narrow card or a short strip. Large iPad forms use a
-narrower/taller target than the old landscape-heavy shape, while compact iPad
-forms share the same glass treatment at a smaller width. The iPad branch also
-prioritizes scrolling sheet content so long settings pages remain reachable in
-landscape.
+reading as a full-width panel. Large iPad forms target a narrower/taller
+`0.58w`/`0.86h` shape capped at `660x940`, while compact iPad forms target
+`0.52w`/`0.76h` capped at `580x820`; the iPhone/non-iPad branch keeps its
+existing detent and background behavior. The iPad branch also prioritizes
+scrolling sheet content so long settings pages remain reachable in landscape.
 Its first grid row launches the surface-oriented settings: App, Server, and
 Providers. Its second row launches agent-behavior settings: Agent, Context, and
 Plugin Sources. The Agent page switches to an iPad-only two-column landscape

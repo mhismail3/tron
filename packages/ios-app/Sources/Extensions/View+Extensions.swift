@@ -113,21 +113,21 @@ struct LargeFormSizing: PresentationSizing {
 private enum AdaptiveSheetMetrics {
     static func balancedLargeFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
         CGSize(
-            width: min(referenceWidth * 0.62, 700),
-            height: min(referenceHeight * 0.82, 900)
+            width: min(referenceWidth * 0.58, 660),
+            height: min(referenceHeight * 0.86, 940)
         )
     }
 
     static func compactFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
         CGSize(
-            width: min(referenceWidth * 0.56, 620),
-            height: min(referenceHeight * 0.70, 780)
+            width: min(referenceWidth * 0.52, 580),
+            height: min(referenceHeight * 0.76, 820)
         )
     }
 }
 
 /// Balanced iPad form sizing for detail-heavy sheets that should feel like a
-/// horizontal floating surface instead of a tall narrow card.
+/// floating form instead of an edge-to-edge sheet.
 @MainActor
 struct BalancedLargeFormSizing: PresentationSizing {
     nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {
@@ -149,7 +149,7 @@ struct BalancedLargeFormSizing: PresentationSizing {
 }
 
 /// Balanced iPad form sizing for summary sheets that should keep dashboard
-/// context visible without becoming a narrow vertical card.
+/// context visible without becoming an oversized panel.
 @MainActor
 struct CompactFormSizing: PresentationSizing {
     nonisolated func proposedSize(for root: PresentationSizingRoot, context: PresentationSizingContext) -> ProposedViewSize {

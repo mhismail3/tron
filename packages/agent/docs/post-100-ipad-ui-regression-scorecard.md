@@ -392,10 +392,11 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   unavailable-server retry evidence; no new points were awarded yet.
 - Follow-up sheet-shape review after the user found the latest iPad sheets still
   a little too wide and not tall enough retuned only the iPad presentation
-  helpers: large forms now target `min(referenceWidth * 0.62, 700)` by
-  `min(referenceHeight * 0.82, 900)`, compact forms target
+  helpers at that checkpoint: large forms targeted
+  `min(referenceWidth * 0.62, 700)` by
+  `min(referenceHeight * 0.82, 900)`, compact forms targeted
   `min(referenceWidth * 0.56, 620)` by `min(referenceHeight * 0.70, 780)`, and
-  the iPhone/non-iPad branch remains unchanged. The same live pass found that
+  the iPhone/non-iPad branch remained unchanged. The same live pass found that
   Server and Providers needed the landscape split too, not only Agent: fixed by
   adding a shared `SettingsAdaptiveLayout`, splitting Providers into model
   provider/service columns, and balancing Server so Diagnostics sits with
@@ -413,6 +414,32 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd7-providers-settings-landscape-balanced-final.png`,
   and `/tmp/tron-psg-evidence/ipad-agent-control-compact-narrow-tall-balanced-final.png`.
   Provider credential values were not copied into this scorecard.
+- Additional sheet-shape retune after further user review found the current
+  iPad forms still a little too wide and not tall enough. Retuned only the
+  iPad presentation helper again: large iPad forms now target
+  `min(referenceWidth * 0.58, 660)` by
+  `min(referenceHeight * 0.86, 940)`, compact iPad forms now target
+  `min(referenceWidth * 0.52, 580)` by
+  `min(referenceHeight * 0.76, 820)`, and the non-iPad `.largeForm` branch and
+  iPhone detent/background behavior remain unchanged. Focused iPad verification
+  passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/SettingsPageContainerTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  with 9 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-39-01--0700.xcresult`.
+  Manual same-UDID recovery followed the plan after Computer Use returned
+  `cgWindowNotFound`: Simulator was quit, killed if still present, the same iPad
+  UDID was booted/reopened, and bundle `com.tron.mobile.beta` relaunched as pid
+  `38771`. Computer Use still reported no AX-visible Simulator window, but
+  `simctl` screenshots confirmed the visible app and opened sheets through
+  non-click deep links. Current portrait evidence:
+  `/tmp/tron-psg-evidence/ipad-sheet-retune-settings-portrait-narrower-taller.png`
+  and
+  `/tmp/tron-psg-evidence/ipad-sheet-retune-notifications-compact-narrower-taller.png`.
+  The notification compact form shows the dashboard visible around the glassy
+  sheet; the Settings form is narrower/taller with the footer still pinned.
+  Landscape visual proof for this exact retune remains open because Simulator's
+  Orientation submenu was disabled/ineffective while the device window had no
+  AX-visible window, even after Window-menu reselection and same-UDID relaunch.
 - IPD-7 final Settings/unavailable/onboarding pass found and fixed one Server
   page projection gap: when the active paired server was offline, the page
   warned in the summary but hid the `Server Controls` unavailable card because
@@ -626,4 +653,5 @@ approval flows, read-only terminal approvals, and generated UI details, full
 IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-8
 back/session-tree behavior and action-time-confirmed fork execution, IPD-9
+current-retune landscape visual proof after Simulator AX/window recovery,
 pointer QA and full hardware-keyboard traversal, and IPD-10 closeout.
