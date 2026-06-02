@@ -144,6 +144,148 @@ async fn module_register_package_validates_digest_namespace_and_contracts() {
         "worker-package:demo-tools"
     );
 
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("demo-local-resource-worker.sh"),
+        "module-register-local-executable",
+    )
+    .await;
+    let local_manifest = manifest_with_digest(local_process_manifest(
+        "demo-local-resource-backed",
+        "demo_local_resource",
+        "demo-local-resource-worker",
+        executable.clone(),
+    ));
+    let local_digest = local_manifest["packageDigest"].as_str().unwrap().to_owned();
+    let registered_local = register_package(
+        &handle,
+        local_manifest,
+        "module-register-local-resource-backed",
+    )
+    .await;
+    assert_eq!(registered_local.error, None);
+    let local_ref = &registered_local.value.as_ref().unwrap()["resourceRefs"][0];
+    assert_eq!(local_ref["kind"], "worker_package");
+    assert_eq!(
+        local_ref["resourceId"],
+        "worker-package:demo-local-resource-backed"
+    );
+    let inspected = inspect_resource(&handle, "worker-package:demo-local-resource-backed").await;
+    assert_eq!(inspected["resource"]["kind"], "worker_package");
+    assert_eq!(inspected["resource"]["ownerWorkerId"], "module");
+    assert_eq!(inspected["resource"]["lifecycle"], "available");
+    assert_eq!(
+        inspected["resource"]["currentVersionId"], local_ref["versionId"],
+        "registration must persist the current worker_package version"
+    );
+    let payload = current_version_payload(&inspected);
+    assert_eq!(payload["packageId"], "demo-local-resource-backed");
+    assert_eq!(payload["packageDigest"], local_digest);
+    assert_eq!(payload["sourceDigest"], local_digest);
+    assert_eq!(payload["sourceProvenance"]["kind"], "local_digest_pinned");
+    assert_eq!(
+        payload["sourceRef"]["provenance"]["kind"],
+        "local_digest_pinned"
+    );
+    assert_eq!(payload["sourceTrustStatus"], "unverified");
+    assert_eq!(payload["effectiveTrustTier"], "untrusted");
+    assert_eq!(payload["signatureVerification"]["status"], "not_verified");
+    assert_eq!(payload["sourceEvidenceRefs"].as_array().unwrap().len(), 0);
+    assert_eq!(payload["sourceApprovalRefs"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        payload["conformanceEvidenceRefs"].as_array().unwrap().len(),
+        0
+    );
+    assert_eq!(
+        payload["declaredCapabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|capability| capability["functionId"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "demo_local_resource::inspect",
+            "demo_local_resource::write_artifact"
+        ]
+    );
+    assert_eq!(
+        payload["requiredGrants"]["allowedCapabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|function_id| function_id.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "demo_local_resource::inspect",
+            "demo_local_resource::write_artifact"
+        ]
+    );
+    assert_eq!(payload["runtimeEntryPoint"]["kind"], "local_process");
+    assert_eq!(
+        payload["runtimeEntryPoint"]["workerId"],
+        "demo-local-resource-worker"
+    );
+    assert_eq!(
+        payload["runtimeEntryPoint"]["expectedFunctionIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|function_id| function_id.as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec![
+            "demo_local_resource::inspect",
+            "demo_local_resource::write_artifact"
+        ]
+    );
+    assert_eq!(
+        payload["runtimeEntryPoint"]["commandTemplate"]["resourceId"],
+        executable["resourceId"]
+    );
+    assert_eq!(
+        payload["runtimeEntryPoint"]["commandTemplate"]["versionId"],
+        executable["versionId"]
+    );
+    assert_eq!(
+        payload["runtimeEntryPoint"]["executableRefs"][0]["resourceId"],
+        executable["resourceId"]
+    );
+    assert_eq!(
+        payload["runtimeEntryPoint"]["executableRefs"][0]["versionId"],
+        executable["versionId"]
+    );
+    assert_eq!(
+        payload["runtimeEntryPoint"]["environmentPolicy"]["mode"],
+        "empty"
+    );
+    let stored_manifest = serde_json::to_string(payload).unwrap();
+    assert!(
+        !stored_manifest.contains("sk-") && !stored_manifest.contains("secret="),
+        "worker_package payload must not persist raw secret-like material"
+    );
+
+    let mut raw_secret_runtime = manifest_with_digest(local_process_manifest(
+        "raw-secret-runtime",
+        "raw_secret_runtime",
+        "raw-secret-runtime-worker",
+        executable,
+    ));
+    raw_secret_runtime["runtimeEntryPoint"]["environmentPolicy"] = json!({
+        "mode": "empty",
+        "apiKey": "sk-test-secret"
+    });
+    raw_secret_runtime["packageDigest"] = json!(manifest_digest(&raw_secret_runtime));
+    let rejected_secret = register_package(
+        &handle,
+        raw_secret_runtime,
+        "module-register-raw-secret-runtime",
+    )
+    .await;
+    assert!(matches!(
+        rejected_secret.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("secret-like value")
+    ));
+
     let mut bad_digest =
         manifest_with_digest(package_manifest("bad-digest", "demo", "demo-worker"));
     bad_digest["packageDigest"] = json!("sha256:not-the-digest");
@@ -178,6 +320,18 @@ async fn module_register_package_validates_digest_namespace_and_contracts() {
         rejected_contract.error,
         Some(EngineError::PolicyViolation(message)) if message.contains("idempotency")
     ));
+}
+
+fn current_version_payload(inspection: &Value) -> &Value {
+    let current_version_id = inspection["resource"]["currentVersionId"]
+        .as_str()
+        .expect("resource inspection has a current version");
+    &inspection["versions"]
+        .as_array()
+        .expect("resource inspection has versions")
+        .iter()
+        .find(|version| version["versionId"].as_str() == Some(current_version_id))
+        .expect("current resource version is inspectable")["payload"]
 }
 
 #[tokio::test]

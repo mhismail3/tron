@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **45/100**
+Current score: **46.5/100**
 
 Status: **running**
 
@@ -695,9 +695,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. Continue with HMH-D1 to prove module package registration writes
-  resource-backed `worker_package` truth with declared capabilities, expected
-  ids, digest, provenance, and runtime entry point.
+  proven. HMH-D1 is also closed; continue with HMH-D2 to prove source trust is
+  explicit and revocable before activation can trust a package.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -707,7 +706,7 @@ Out of scope: remote marketplace trust without explicit local policy.
 
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
-| HMH-D1 | Package registration is resource-backed | 10 | pending | `module::register_package` writes worker-package resources with declared capabilities, expected ids, digest, provenance, runtime entry point, and no raw secrets. | Stop if package truth lands in an unowned side table. |
+| HMH-D1 | Package registration is resource-backed | 10 | passed | `module::register_package` writes worker-package resources with declared capabilities, expected ids, digest, provenance, runtime entry point, and no raw secrets. | Stop if package truth lands in an unowned side table. |
 | HMH-D2 | Source trust is explicit and revocable | 15 | pending | Register/verify/approve/revoke/expire/rotate/reconcile trust flows create decision/evidence resources and enforce trust ceilings before activation. | Stop if activation can bypass source trust. |
 | HMH-D3 | Activation composes worker spawn | 15 | pending | `module::activate` invokes child `worker::spawn` outside host locks with narrowed grant, file roots, expected ids, scoped token, and activation lineage. | Stop if module runtime owns a parallel process launcher. |
 | HMH-D4 | Health, integrity, and conformance are inspectable | 15 | pending | `check_health`, `verify_integrity`, and `run_conformance` produce linked evidence, child invocation ids, and recovery recommendations. | Block promotion if evidence is missing/stale. |
@@ -722,6 +721,35 @@ Closeout commands:
 cargo test --manifest-path packages/agent/Cargo.toml --test integration e2e_local_process_module_activation_health_and_disable_use_real_worker_spawn -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml module_activation module_trust module_conformance -- --nocapture
 ```
+
+HMH-D1 evidence, 2026-06-02:
+
+- The existing D1 command was real but too narrow before this checkpoint: it
+  validated digest, namespace, and idempotent declared contracts, but did not
+  inspect the persisted `worker_package` resource payload.
+- The strengthened proof registers an existing-worker package and a
+  local-process package, then inspects
+  `worker-package:demo-local-resource-backed` through `resource::inspect`.
+  The current resource version must be kind `worker_package`, owned by the
+  `module` worker, lifecycle `available`, and must carry the normalized
+  manifest payload rather than an invocation echo.
+- The inspected payload proves declared capabilities, `requiredGrants`
+  expected function ids, `packageDigest`, `sourceDigest`,
+  `sourceProvenance`, normalized `sourceRef`, `sourceTrustStatus`,
+  `effectiveTrustTier`, `signatureVerification`, empty source approval,
+  source evidence, and conformance refs, plus the local-process
+  `runtimeEntryPoint` worker id, command/executable resource refs,
+  `expectedFunctionIds`, and empty environment policy.
+- The same test rejects a digest-correct adversarial local-process manifest
+  containing raw `apiKey: sk-test-secret` runtime material before persistence.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml module_register_package_validates_digest_namespace_and_contracts -- --nocapture`.
+
+Open loops after HMH-D1:
+
+- HMH-D remains open. Continue with HMH-D2 to prove source trust is explicit
+  and revocable across register, verify, approve, revoke, expire, rotate, and
+  reconcile flows before activation can trust a package.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -877,11 +905,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, and HMH-C are closed. Continue with HMH-D1: prove
-`module::register_package` writes resource-backed `worker_package` truth with
-declared capabilities, expected ids, digest, provenance, and runtime entry
-point.
+HMH-A, HMH-B, HMH-C, and HMH-D1 are closed. Continue with HMH-D2:
+prove source trust is explicit and revocable before activation can trust a
+package.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml module_register_package_validates_digest_namespace_and_contracts -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml module_source_approval_revocation_and_conformance_are_resource_backed -- --nocapture
 ```
