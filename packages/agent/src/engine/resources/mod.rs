@@ -2,9 +2,10 @@
 //!
 //! Resources are the collapsed durable object model for the modular engine.
 //! Artifacts, goals, claims, evidence, decisions, UI surfaces, worker packages,
-//! and materialized files all become typed resources with versioned payloads,
-//! links, lifecycle state, policy, provenance, and auditable events. Streams,
-//! indexes, and control-plane summaries are projections over this store.
+//! harness docs, and materialized files all become typed resources with
+//! versioned payloads, links, lifecycle state, policy, provenance, and
+//! auditable events. Streams, indexes, and control-plane summaries are
+//! projections over this store.
 //!
 //! Ownership is split by concern: `types` holds public substrate structs,
 //! `definitions` registers built-in resource kinds, `validation` enforces the

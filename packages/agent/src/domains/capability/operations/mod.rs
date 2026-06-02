@@ -7,7 +7,8 @@
 //! single `execute` surface. Target-specific argument affordances are isolated in
 //! `target_arguments`, deterministic route and argument-fit heuristics live in
 //! `target_resolution`, target payload guidance lives in `schema_validation`,
-//! model-visible summaries live in `presentation`, and profile policy
+//! model-visible summaries live in `presentation`, harness-primer resource
+//! materialization stays in this operations boundary, and profile policy
 //! persistence plus admin primitives live in `policy_profile` and `admin`, so
 //! the shared execute flow does not grow new per-capability branches unnoticed.
 
@@ -30,8 +31,8 @@ use crate::domains::capability_support::implementations::primitive_surface::{
     IMPLEMENTATION_DENY_SCOPE_PREFIX, PLUGIN_ALLOW_SCOPE_PREFIX, PLUGIN_DENY_SCOPE_PREFIX,
 };
 use crate::engine::{
-    ActorContext, ActorKind, AuthorityGrantId, EffectClass, FunctionDefinition, FunctionHealth,
-    FunctionQuery, Invocation, RiskLevel,
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, EffectClass, FunctionDefinition,
+    FunctionHealth, FunctionId, FunctionQuery, HARNESS_DOC_KIND, Invocation, RiskLevel, TraceId,
 };
 #[cfg(test)]
 use crate::engine::{
@@ -43,9 +44,11 @@ use crate::shared::model_capabilities::CapabilityResult;
 #[cfg(test)]
 use crate::shared::model_capabilities::CapabilityResultBody;
 use crate::shared::server::context::run_blocking_task;
+use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
 
 static IN_FLIGHT_VECTOR_WARMUP_SIGNATURE: AtomicU64 = AtomicU64::new(0);
+const HARNESS_DOC_POINTER_TOKEN_RESERVE: usize = 96;
 
 mod admin;
 mod audit;
@@ -143,7 +146,134 @@ pub(crate) async fn render_capability_primer(
     let revision = engine_host.catalog_revision().await;
     let triggers = engine_host.visible_triggers(&actor).await;
     let snapshot = CapabilityRegistrySnapshot::with_triggers(functions, triggers, revision.0);
-    Ok(render_primer_from_snapshot(&snapshot, policy))
+    let mut render_policy = policy.clone();
+    if render_policy.max_tokens > HARNESS_DOC_POINTER_TOKEN_RESERVE {
+        render_policy.max_tokens -= HARNESS_DOC_POINTER_TOKEN_RESERVE;
+    }
+    let Some(primer) = render_primer_from_snapshot(&snapshot, &render_policy) else {
+        return Ok(None);
+    };
+    let doc_ref = materialize_harness_doc_resource(
+        engine_host,
+        session_id,
+        workspace_id,
+        &snapshot,
+        policy,
+        &primer,
+    )
+    .await?;
+    Ok(Some(format!(
+        "{primer}\nHarness docs resource: resourceId={} versionId={} kind={} catalogRevision={} inspectTarget=resource::inspect.\n",
+        doc_ref.resource_id, doc_ref.version_id, HARNESS_DOC_KIND, snapshot.catalog_revision
+    )))
+}
+
+struct HarnessDocResourceRef {
+    resource_id: String,
+    version_id: String,
+}
+
+async fn materialize_harness_doc_resource(
+    engine_host: &crate::engine::EngineHostHandle,
+    session_id: &str,
+    workspace_id: Option<&str>,
+    snapshot: &CapabilityRegistrySnapshot,
+    policy: &CapabilityContextPrimerPolicy,
+    body: &str,
+) -> Result<HarnessDocResourceRef, CapabilityError> {
+    let policy_value = serde_json::to_value(policy).map_err(|error| CapabilityError::Internal {
+        message: error.to_string(),
+    })?;
+    let policy_bytes =
+        serde_json::to_vec(&policy_value).map_err(|error| CapabilityError::Internal {
+            message: error.to_string(),
+        })?;
+    let policy_digest = sha256_hex_128(&policy_bytes);
+    let content_hash = sha256_hex_128(body.as_bytes());
+    let resource_id = format!(
+        "harness_doc:capability-primer:{policy_digest}:catalog-{}:{content_hash}",
+        snapshot.catalog_revision
+    );
+    let payload = json!({
+        "resourceId": resource_id,
+        "kind": HARNESS_DOC_KIND,
+        "scope": "session",
+        "sessionId": session_id,
+        "lifecycle": "active",
+        "policy": {
+            "managedBy": "capability",
+            "retention": "catalog_revision"
+        },
+        "payload": {
+            "docId": "capability-primer",
+            "title": "Capability primer",
+            "format": "text/markdown",
+            "body": body,
+            "catalogRevision": snapshot.catalog_revision,
+            "policy": policy_value,
+            "contentHash": content_hash,
+            "source": "capability.primer",
+            "metadata": {
+                "sessionId": session_id,
+                "workspaceId": workspace_id,
+                "entryCount": snapshot.entries.len(),
+                "resourceKind": HARNESS_DOC_KIND
+            }
+        }
+    });
+    let mut causal_context = crate::engine::CausalContext::new(
+        ActorId::new("system:capability").map_err(capability_engine_error)?,
+        ActorKind::System,
+        AuthorityGrantId::new("engine-system").map_err(capability_engine_error)?,
+        TraceId::new(format!(
+            "trace:harness-doc:{}:{}",
+            snapshot.catalog_revision, content_hash
+        ))
+        .map_err(capability_engine_error)?,
+    )
+    .with_scope("resource.write")
+    .with_session_id(session_id.to_owned())
+    .with_idempotency_key(format!("harness-doc:v1:{resource_id}"));
+    if let Some(workspace_id) = workspace_id {
+        causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
+    }
+    let invocation = Invocation::new_sync(
+        FunctionId::new("resource::create").map_err(capability_engine_error)?,
+        payload,
+        causal_context,
+    );
+    let result = engine_host.invoke(invocation).await;
+    if let Some(error) = result.error {
+        return Err(engine_error_to_capability_error(error));
+    }
+    let value = result.value.ok_or_else(|| CapabilityError::Internal {
+        message: "resource::create returned no value for harness doc".to_owned(),
+    })?;
+    let reference = value
+        .get("resourceRefs")
+        .and_then(Value::as_array)
+        .and_then(|refs| refs.first())
+        .ok_or_else(|| CapabilityError::Internal {
+            message: "resource::create returned no harness doc resource ref".to_owned(),
+        })?;
+    let resource_id = reference
+        .get("resourceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CapabilityError::Internal {
+            message: "harness doc resource ref omitted resourceId".to_owned(),
+        })?
+        .to_owned();
+    let version_id = reference
+        .get("versionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| CapabilityError::Internal {
+            message: "harness doc resource ref omitted versionId".to_owned(),
+        })?
+        .to_owned();
+    Ok(HarnessDocResourceRef {
+        resource_id,
+        version_id,
+    })
 }
 
 pub(super) async fn registry_snapshot_for_functions(
@@ -525,6 +655,12 @@ fn registry_store_error(error: String) -> CapabilityError {
         };
     }
     CapabilityError::Internal { message: error }
+}
+
+fn capability_engine_error(error: impl std::fmt::Display) -> CapabilityError {
+    CapabilityError::Internal {
+        message: error.to_string(),
+    }
 }
 
 async fn sync_registry_for_admin(

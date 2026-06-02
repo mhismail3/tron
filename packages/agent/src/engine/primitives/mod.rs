@@ -711,6 +711,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         .with_namespace_claim("worker_package")
         .with_namespace_claim("module_config")
         .with_namespace_claim("activation_record")
+        .with_namespace_claim("harness_doc")
         .with_namespace_claim("materialized_file")
         .with_namespace_claim("patch");
     Ok(vec![

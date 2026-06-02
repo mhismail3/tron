@@ -5,9 +5,9 @@ use serde_json::{Value, json};
 
 use super::types::{
     ACTIVATION_RECORD_KIND, ACTIVATION_RECORD_SCHEMA_ID, EngineResourceTypeDefinition,
-    EngineResourceVersioningMode, MODULE_CONFIG_KIND, MODULE_CONFIG_SCHEMA_ID,
-    RegisterResourceType, UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID, WORKER_PACKAGE_KIND,
-    WORKER_PACKAGE_SCHEMA_ID,
+    EngineResourceVersioningMode, HARNESS_DOC_KIND, HARNESS_DOC_SCHEMA_ID, MODULE_CONFIG_KIND,
+    MODULE_CONFIG_SCHEMA_ID, RegisterResourceType, UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID,
+    WORKER_PACKAGE_KIND, WORKER_PACKAGE_SCHEMA_ID,
 };
 use super::ui_surface::ui_surface_schema;
 use crate::engine::ids::WorkerId;
@@ -481,6 +481,48 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "write": ["module.write", "resource.write"],
                 "disable": ["module.write"],
                 "quarantine": ["module.write"]
+            }),
+        ),
+        builtin_type(
+            HARNESS_DOC_KIND,
+            HARNESS_DOC_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "docId",
+                    "title",
+                    "format",
+                    "body",
+                    "catalogRevision",
+                    "policy",
+                    "contentHash",
+                    "source",
+                    "metadata"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "docId": {"type": "string"},
+                    "title": {"type": "string"},
+                    "format": {"type": "string"},
+                    "body": {"type": "string"},
+                    "catalogRevision": {"type": "integer"},
+                    "policy": {"type": "object"},
+                    "contentHash": {"type": "string"},
+                    "source": {"type": "string"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["active", "superseded", "archived", "discarded"],
+            vec![
+                "documents",
+                "documents_capability",
+                "documents_catalog",
+                "supersedes",
+                "derived_from",
+            ],
+            json!({
+                "read": ["capability.read", "resource.read"],
+                "write": ["capability.write", "resource.write"]
             }),
         ),
         builtin_type(

@@ -27,6 +27,10 @@ pub const MODULE_CONFIG_SCHEMA_ID: &str = "tron.resource.module_config.v1";
 pub const ACTIVATION_RECORD_KIND: &str = "activation_record";
 /// Built-in module activation record schema id.
 pub const ACTIVATION_RECORD_SCHEMA_ID: &str = "tron.resource.activation_record.v1";
+/// Built-in harness documentation resource kind.
+pub const HARNESS_DOC_KIND: &str = "harness_doc";
+/// Built-in harness documentation schema id.
+pub const HARNESS_DOC_SCHEMA_ID: &str = "tron.resource.harness_doc.v1";
 
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

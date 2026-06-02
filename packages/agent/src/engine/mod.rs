@@ -167,8 +167,9 @@ pub use registry::LiveCatalog;
 pub use resources::{
     CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
     EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
-    EngineResourceVersion, EngineResourceVersioningMode, InMemoryEngineResourceStore,
-    LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+    EngineResourceVersion, EngineResourceVersioningMode, HARNESS_DOC_KIND, HARNESS_DOC_SCHEMA_ID,
+    InMemoryEngineResourceStore, LinkResources, ListResources, RegisterResourceType,
+    SqliteEngineResourceStore, UpdateResource,
 };
 pub use state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,

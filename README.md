@@ -375,7 +375,11 @@ separate discovery turn. The same registry projection also generates
 `AgentCapabilityRecipe` records for operator search/inspect and execute
 resolution, so capability discovery returns copyable `execute` templates,
 required argument fields, approval behavior, lifecycle notes, and result
-expectations instead of bare ids.
+expectations instead of bare ids. Each rendered primer is also materialized as a
+versioned `harness_doc` resource keyed by primer policy, catalog revision, and
+content hash; the primer includes the resource id/version and `resource::inspect`
+target so the agent can retrieve the full guide through the live substrate
+instead of depending on repo prose.
 The model-facing contract is intent-first: use `intent` alone for unfamiliar
 tasks or capability matching, add `target` only when the user supplied an exact
 id, a prior `execute` result selected it, or a primed recipe makes it
@@ -1242,7 +1246,9 @@ The default `coreFirstParty` policy includes compact recipe-style schemas and
 examples for trusted first-party core capabilities, using `contractId` execute
 templates. `allVisibleCompact` is available as an opt-in profile policy for
 every visible worker/plugin/plugin source/OpenAPI/session capability under a
-strict budget.
+strict budget. The renderer reserves space for a compact `harness_doc` resource
+pointer; the full primer body is stored as a session-scoped versioned resource
+tied to the live catalog revision.
 
 ### Skills
 

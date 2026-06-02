@@ -2,8 +2,8 @@
 //!
 //! `resource::*` is the canonical capability surface for durable engine
 //! resources. Higher-level modules such as artifacts, goals, claims, evidence,
-//! decisions, and generated UI should compose these functions instead of
-//! creating separate persistence planes.
+//! decisions, generated UI, harness docs, and module package records should
+//! compose these functions instead of creating separate persistence planes.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
