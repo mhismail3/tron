@@ -36,6 +36,7 @@ struct ProcessListSheet: View {
                 }
             }
         }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)
     }
 
     // MARK: - Subviews

@@ -1047,6 +1047,16 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   Engine section selection, and screenshots; no capability search submit,
   approval, generated UI submit/refresh, source-control action, fork, archive,
   delete, reset, send, voice-record, or git mutation was invoked.
+- Additional iPad sheet-standardization follow-up audited reusable `.sheet`
+  content for presenter-owned adaptive sizing. `IPadSheetPresentationTests`
+  first failed because `ProcessListSheet` and `SubagentResultsListSheet`
+  depended on their presenting call sites for canonical iPad sizing; red
+  xcresult:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-47-13--0700.xcresult`.
+  Both reusable sheet bodies now own `adaptivePresentationDetents` directly,
+  the duplicate presenter-side modifiers were removed, and the focused iPad
+  guard passed 7 XCTest cases in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-48-59--0700.xcresult`.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2

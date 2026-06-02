@@ -199,6 +199,5 @@ struct ChatSheetContent: View {
                 sheetCoordinator?.dismiss()
             }
         )
-        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
     }
 }

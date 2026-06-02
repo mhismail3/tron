@@ -551,7 +551,9 @@ floating forms so the underlying app context remains visible without the sheet
 reading as a full-width panel. Detented app sheets route through
 `adaptivePresentationDetents`; source-level tests forbid raw
 `.presentationDetents(...)` in app sources outside that helper and require every
-adaptive sheet call site to declare its `ipadSizing` preset explicitly. Raw
+adaptive sheet call site to declare its `ipadSizing` preset explicitly.
+Reusable app sheet views with app-owned modal chrome own their adaptive helper
+call rather than relying on each presenter to patch sizing around them. Raw
 `.presentationBackground(...)` calls are centralized too: detented sheets use
 the adaptive helper and glass popovers use `glassPopoverPresentationBackground`.
 The same helper owns the app sheet drag-indicator policy, so app sources do not

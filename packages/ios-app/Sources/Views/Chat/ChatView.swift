@@ -93,7 +93,6 @@ struct ChatView: View {
                 onCancel: { processId in viewModel.cancelProcess(processId) },
                 onClose: { viewModel.showProcessSheet = false }
             )
-            .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)
         }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },

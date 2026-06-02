@@ -62,6 +62,7 @@ struct SubagentResultsListSheet: View {
                 )
             }
         }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
     }
 
     @ViewBuilder

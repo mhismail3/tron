@@ -950,6 +950,14 @@ UDID before continuing.
   `NotificationSheetPresentationTests` after `popoverCompactAdaptation()`
   replaced those six raw call sites:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-41-13--0700.xcresult`.
+  Follow-up reusable-sheet ownership audit then found `ProcessListSheet` and
+  `SubagentResultsListSheet` depended on their presenters to apply adaptive
+  iPad sizing. The expanded `IPadSheetPresentationTests` guard first failed on
+  those two sheet views in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-47-13--0700.xcresult`,
+  then passed after both reusable sheet bodies owned the helper directly and
+  the duplicate presenter-side modifiers were removed:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-48-59--0700.xcresult`.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
