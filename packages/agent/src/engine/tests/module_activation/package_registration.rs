@@ -322,6 +322,163 @@ async fn module_register_package_validates_digest_namespace_and_contracts() {
     ));
 }
 
+#[tokio::test]
+async fn module_local_package_install_shape_is_resource_backed_and_rejects_implicit_remote_trust() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("marketplace-local-worker.sh"),
+        "module-marketplace-local-executable",
+    )
+    .await;
+    let manifest = manifest_with_digest(local_process_manifest(
+        "marketplace-local-tools",
+        "marketplace_local",
+        "marketplace-local-worker",
+        executable,
+    ));
+    let package_digest = manifest["packageDigest"].as_str().unwrap().to_owned();
+    let installed = register_package(&handle, manifest, "module-marketplace-local-install").await;
+    assert_eq!(installed.error, None);
+    let installed_ref = &installed.value.as_ref().unwrap()["resourceRefs"][0];
+    assert_eq!(installed_ref["kind"], "worker_package");
+    assert_eq!(installed_ref["role"], "created");
+    assert_eq!(
+        installed_ref["resourceId"],
+        "worker-package:marketplace-local-tools"
+    );
+
+    let inspected = inspect_resource(&handle, "worker-package:marketplace-local-tools").await;
+    assert_eq!(inspected["resource"]["kind"], "worker_package");
+    assert_eq!(inspected["resource"]["ownerWorkerId"], "module");
+    let payload = current_version_payload(&inspected);
+    assert_eq!(payload["sourceProvenance"]["kind"], "local_digest_pinned");
+    assert_eq!(
+        payload["sourceRef"]["provenance"]["kind"],
+        "local_digest_pinned"
+    );
+    assert_eq!(payload["sourceDigest"], package_digest);
+    assert_eq!(payload["sourceTrustStatus"], "unverified");
+    assert_eq!(payload["effectiveTrustTier"], "untrusted");
+    assert_eq!(payload["sourceEvidenceRefs"], json!([]));
+    assert_eq!(payload["sourceApprovalRefs"], json!([]));
+
+    let package_view = handle
+        .invoke(host_invocation(
+            "module::inspect_package",
+            json!({"packageId": "marketplace-local-tools"}),
+            causal().with_scope("module.read"),
+        ))
+        .await;
+    assert_eq!(package_view.error, None);
+    for function_id in [
+        "module::verify_source",
+        "module::approve_source",
+        "module::run_conformance",
+        "module::configure",
+        "module::activate",
+    ] {
+        assert!(
+            package_view.value.as_ref().unwrap()["availableActions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action["functionId"] == function_id
+                    && action["consequence"]["targetFunctionId"] == function_id),
+            "package install surface must expose canonical {function_id}"
+        );
+    }
+
+    let source_registration = handle
+        .invoke(host_invocation(
+            "module::register_source",
+            json!({
+                "sourceKind": "local_digest_source",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "sourceDigest": package_digest,
+                "sourceRef": {"provenance": {"kind": "local_digest_pinned"}},
+                "allowedPackageSelectors": ["marketplace-local-tools"],
+                "trustTierCeiling": "local_digest_pinned",
+                "grantCeiling": grant_ceiling_for_namespace("marketplace_local"),
+                "expiresAt": "2100-01-01T00:00:00Z",
+                "reason": "test registers explicit local install source policy"
+            }),
+            mutating_causal("module-marketplace-register-source").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(source_registration.error, None);
+    let source_value = source_registration.value.as_ref().unwrap();
+    assert!(
+        source_value["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "decision")
+    );
+    assert!(
+        source_value["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["kind"] == "evidence")
+    );
+    assert_eq!(
+        source_value["decision"]["metadata"]["allowedPackageSelectors"],
+        json!(["marketplace-local-tools"])
+    );
+    assert_eq!(
+        source_value["decision"]["metadata"]["grantCeiling"]["allowedCapabilities"],
+        json!([
+            "marketplace_local::inspect",
+            "marketplace_local::write_artifact"
+        ])
+    );
+
+    let package_count_before_remote = resource_count(&handle, "worker_package").await;
+    let mut remote_manifest =
+        manifest_with_digest(package_manifest("remote-tools", "remote", "remote-worker"));
+    remote_manifest["sourceProvenance"] = json!({
+        "kind": "remote_url",
+        "url": "https://example.invalid/remote-tools.json"
+    });
+    remote_manifest["packageDigest"] = json!(manifest_digest(&remote_manifest));
+    let rejected_remote_package = register_package(
+        &handle,
+        remote_manifest,
+        "module-marketplace-remote-package",
+    )
+    .await;
+    assert!(matches!(
+        rejected_remote_package.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("unsupported package provenance")
+    ));
+    assert_eq!(
+        resource_count(&handle, "worker_package").await,
+        package_count_before_remote
+    );
+
+    let rejected_remote_source = handle
+        .invoke(host_invocation(
+            "module::register_source",
+            json!({
+                "sourceKind": "remote_url",
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "reason": "implicit remote marketplace trust must not be accepted"
+            }),
+            mutating_causal("module-marketplace-remote-source").with_scope("module.write"),
+        ))
+        .await;
+    assert!(
+        rejected_remote_source
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("sourceKind"))
+    );
+}
+
 fn current_version_payload(inspection: &Value) -> &Value {
     let current_version_id = inspection["resource"]["currentVersionId"]
         .as_str()

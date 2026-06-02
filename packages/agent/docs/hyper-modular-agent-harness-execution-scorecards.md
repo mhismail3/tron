@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **55.5/100**
+Current score: **57/100**
 
 Status: **running**
 
@@ -695,8 +695,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D1 through HMH-D5 are also closed; continue with HMH-D6 to
-  prove the local marketplace/install package shape.
+  proven. HMH-D1 through HMH-D6 are also closed; continue with HMH-D7 to
+  prove the iOS/operator projection.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -711,7 +711,7 @@ Out of scope: remote marketplace trust without explicit local policy.
 | HMH-D3 | Activation composes worker spawn | 15 | passed | `module::activate` invokes child `worker::spawn` outside host locks with narrowed grant, file roots, expected ids, scoped token, and activation lineage. | Stop if module runtime owns a parallel process launcher. |
 | HMH-D4 | Health, integrity, and conformance are inspectable | 15 | passed | `check_health`, `verify_integrity`, and `run_conformance` produce linked evidence, child invocation ids, and recovery recommendations. | Block promotion if evidence is missing/stale. |
 | HMH-D5 | Upgrade, rollback, disable, quarantine work | 15 | passed | Upgrade and rollback require expected versions and idempotency; disable/quarantine stop workers or fail closed; stale invocations cannot use quarantined functions. | Stop if rollback is doc-only. |
-| HMH-D6 | Local marketplace shape exists | 10 | pending | Installing a first-party/local package is a capability operation over local package resources; remote source approval is explicit and policy-bound. | Reject implicit network trust. |
+| HMH-D6 | Local marketplace shape exists | 10 | passed | Installing a first-party/local package is a capability operation over local package resources; remote source approval is explicit and policy-bound. | Reject implicit network trust. |
 | HMH-D7 | iOS/operator projection is complete | 10 | pending | Engine Console shows package/config/activation/trust/conformance actions and evidence without hardcoded package policy. | Fix iOS projection only after server truth is proven. |
 | HMH-D8 | No generic action escape hatch | 10 | pending | Static scan rejects `module::act`, generic package mutation multiplexers, and client-side module policy. | Remove escape hatches before closeout. |
 
@@ -872,12 +872,38 @@ HMH-D5 evidence, 2026-06-02:
 - Passing focused proof:
   `cargo test --manifest-path packages/agent/Cargo.toml module_activation::lifecycle_controls -- --nocapture`.
 
-Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5:
+HMH-D6 evidence, 2026-06-02:
 
-- HMH-D remains open. Continue with HMH-D6 to prove local marketplace/package
-  install shape: first-party/local package installation must be a canonical
-  capability operation over `worker_package` resources, and remote source
-  approval must stay explicit and policy-bound.
+- No production-code change was required for D6. The existing install primitive
+  is `module::register_package`: it is an idempotent, resource-backed
+  capability operation that writes normalized `worker_package` resources.
+- The model-facing primer already teaches agents to "install packaged modules
+  with `module::register_package` over `worker_package` resources", then verify
+  source trust, activate through `module::activate`, and record conformance or
+  health evidence before lifecycle operations.
+- The new
+  `module_local_package_install_shape_is_resource_backed_and_rejects_implicit_remote_trust`
+  proof registers a local digest-pinned `local_process` package, inspects the
+  resulting `worker_package` resource and current payload, and verifies
+  `sourceRef`, `sourceDigest`, `sourceTrustStatus=unverified`,
+  `effectiveTrustTier=untrusted`, empty source evidence/approval refs, and
+  server-authored package actions for verify, approve, conformance, configure,
+  and activate.
+- The same proof registers explicit local source policy through
+  `module::register_source` as decision/evidence resources with
+  `allowedPackageSelectors` and a bounded grant ceiling. It then rejects an
+  unsupported `remote_url` package provenance without creating another
+  `worker_package`, and rejects unsupported remote `sourceKind` registration
+  through schema/policy validation.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml module_local_package_install_shape_is_resource_backed_and_rejects_implicit_remote_trust -- --nocapture`.
+
+Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6:
+
+- HMH-D remains open. Continue with HMH-D7 to prove the iOS/operator projection:
+  Engine Console and generated operator surfaces must expose
+  package/config/activation/trust/conformance actions and evidence without
+  hardcoded client-side package policy.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -1033,9 +1059,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, and HMH-D1 through HMH-D5 are closed. Continue with
-HMH-D6: prove the local marketplace/install package shape.
+HMH-A, HMH-B, HMH-C, and HMH-D1 through HMH-D6 are closed. Continue with
+HMH-D7: prove the iOS/operator projection.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml module_register_package_validates_local_process_runtime_manifest -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml generated_ui_can_author_package_and_activation_operator_surfaces -- --nocapture
 ```
