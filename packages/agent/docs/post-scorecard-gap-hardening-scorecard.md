@@ -388,6 +388,20 @@ Owner taxonomy: `server_contract`, `client_projection`,
   still exposes zero AX windows and `Rotate Left`/`Rotate Right` menu items were
   disabled even after Window-menu reselection and same-UDID relaunch;
   deterministic iPad landscape layout guards still passed.
+- Follow-up same-UDID recovery after the checkpoint still left manual
+  action-time iPad rows environment-blocked. The device was fully shut down
+  with `xcrun simctl shutdown E2A39D89-9AF3-431E-A43B-0030C3716482`, Simulator
+  was quit and killed, the same iPad UDID was booted/reopened, the current beta
+  app was reinstalled and relaunched as pid `1615`, and screenshot
+  `/tmp/tron-psg-evidence/ipad-recovery-fresh-boot-visible.png` proved the
+  framebuffer remained available. Computer Use still returned
+  `cgWindowNotFound`; System Events reported process `Simulator` as visible but
+  with zero windows; `Rotate Left` and `Rotate Right` remained disabled; and a
+  direct launch of the Spotlight-resolved bundle
+  `/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app` did
+  not restore an AX-visible device window. This is recorded as an environment
+  blocker for current-retune landscape proof and action-time manual flows, not
+  as an app UI failure.
 - IPD-5 capability-detail proof opened direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` and tapped completed
   `capability::execute` invocation `call_eiaqjnjn` for the read-only

@@ -444,6 +444,20 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   Simulator still exposes zero AX windows and `Rotate Left`/`Rotate Right`
   menu items were disabled even after Window-menu reselection and same-UDID
   relaunch; deterministic iPad landscape layout guards still passed.
+- Follow-up same-UDID recovery after the checkpoint still left manual
+  action-time iPad rows environment-blocked. The device was fully shut down
+  with `xcrun simctl shutdown E2A39D89-9AF3-431E-A43B-0030C3716482`, Simulator
+  was quit and killed, the same iPad UDID was booted/reopened, the current beta
+  app was reinstalled and relaunched as pid `1615`, and screenshot
+  `/tmp/tron-psg-evidence/ipad-recovery-fresh-boot-visible.png` proved the
+  framebuffer remained available. Computer Use still returned
+  `cgWindowNotFound`; System Events reported process `Simulator` as visible but
+  with zero windows; `Rotate Left` and `Rotate Right` remained disabled; and a
+  direct launch of the Spotlight-resolved bundle
+  `/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app` did
+  not restore an AX-visible device window. This is recorded as an environment
+  blocker for current-retune landscape proof and action-time manual flows, not
+  as an app UI failure.
 - IPD-7 final Settings/unavailable/onboarding pass found and fixed one Server
   page projection gap: when the active paired server was offline, the page
   warned in the summary but hid the `Server Controls` unavailable card because
