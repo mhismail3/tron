@@ -646,6 +646,26 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd8-long-history-sidebar-selected.png` shows the
   selected long-history session at the top of the iPad sidebar with
   `240 messages`, while the paginated chat stays visible.
+- Additional IPD-8 back/sidebar/session-tree proof used the same iPad
+  Simulator, bundle `com.tron.mobile.beta`, and only existing sessions. Sidebar
+  visibility before toggle is captured in
+  `/tmp/tron-psg-evidence/ipd8-back-sidebar-visible-before-toggle.png`; hiding
+  the sidebar left the selected detail stable in
+  `/tmp/tron-psg-evidence/ipd8-back-sidebar-hidden-detail-stable.png`; restoring
+  the sidebar preserved selection in
+  `/tmp/tron-psg-evidence/ipd8-back-sidebar-restored-selected.png`. Existing
+  fork-session selection proof
+  `/tmp/tron-psg-evidence/ipd8-existing-fork-row-selected.png` shows the
+  `IPD-1 visible fork card 20260601205310` row selected with its fork indicator
+  and the chat detail still stable. DB evidence
+  `/tmp/tron-psg-evidence/ipd8-existing-fork-session-db.json` records forked
+  session `sess_019e84f6-3d48-75c3-8df2-aca65b38a123`, parent session
+  `sess_019e84f6-3d29-7071-9874-714a0b34e102`, root fork event
+  `evt_019e84f6-3d48-75c3-8df2-acbf25c331ba`, parent event
+  `evt_019e84f6-3d31-7760-a400-a611c658bb43`, and payload
+  `sourceSessionId`/`sourceEventId`. Actual fork execution remains
+  action-time confirmation-gated because the History sheet's `Fork` control
+  immediately creates a new session.
 - Additional IPD-9 keyboard-focus proof used the same iPad Simulator window
   after it was moved and recovered by Computer Use. The split dashboard stayed
   visible with direct-branch session
@@ -751,8 +771,8 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `GitActionResult` suites; xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-52-01--0700.xcresult`.
   This narrows IPD-5/IPD-6/IPD-8 to manual action-time approval decisions,
-  source-control mutations, conflict resolution, back/session-tree checks, and
-  fork execution rather than DTO/state-machine coverage.
+  source-control mutations, conflict resolution, and fork execution rather than
+  DTO/state-machine/back/session-tree coverage.
 - PSG-6 cleanup scan found and fixed one Agent Control display fallback: when
   no detailed context snapshot or model context window was known, the Context
   card used a fake `1`-token denominator. `AgentControlView` now preserves
@@ -778,5 +798,5 @@ IPD-3 manual voice-note sheet record/cancel/submit states, IPD-5
 approval flows, read-only terminal approvals, and generated UI details, full
 IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-8
-back/session-tree behavior and action-time-confirmed fork execution, IPD-9
+action-time-confirmed fork execution, IPD-9
 pointer QA and full hardware-keyboard traversal, and IPD-10 closeout.

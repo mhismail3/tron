@@ -543,6 +543,21 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd8-long-history-sidebar-selected.png` shows the
   selected long-history session at the top of the iPad sidebar with
   `240 messages` while the paginated chat remains visible.
+- IPD-8 back/sidebar/session-tree proof then used the same iPad Simulator,
+  bundle `com.tron.mobile.beta`, and only existing sessions. Screenshots
+  `/tmp/tron-psg-evidence/ipd8-back-sidebar-visible-before-toggle.png`,
+  `/tmp/tron-psg-evidence/ipd8-back-sidebar-hidden-detail-stable.png`, and
+  `/tmp/tron-psg-evidence/ipd8-back-sidebar-restored-selected.png` show sidebar
+  hide/restore preserving the selected chat detail. Existing fork-session proof
+  `/tmp/tron-psg-evidence/ipd8-existing-fork-row-selected.png` shows the
+  selected `IPD-1 visible fork card 20260601205310` row and stable detail view.
+  DB evidence `/tmp/tron-psg-evidence/ipd8-existing-fork-session-db.json`
+  records forked session `sess_019e84f6-3d48-75c3-8df2-aca65b38a123`, parent
+  session `sess_019e84f6-3d29-7071-9874-714a0b34e102`, root fork event
+  `evt_019e84f6-3d48-75c3-8df2-acbf25c331ba`, parent event
+  `evt_019e84f6-3d31-7760-a400-a611c658bb43`, and the
+  `sourceSessionId`/`sourceEventId` payload. Actual fork execution remains
+  action-time confirmation-gated because invoking `Fork` creates a session.
 - IPD-9 keyboard-focus proof used the recovered iPad Simulator window with the
   split dashboard visible and direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` selected. Screenshot
@@ -627,8 +642,8 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `GitActionResult` suites; xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-52-01--0700.xcresult`.
   This narrows IPD-5/IPD-6/IPD-8 to manual action-time approval decisions,
-  source-control mutations, conflict resolution, back/session-tree checks, and
-  fork execution rather than DTO/state-machine coverage.
+  source-control mutations, conflict resolution, and fork execution rather than
+  DTO/state-machine/back/session-tree coverage.
 - PSG-6 cleanup scan found and fixed one Agent Control display fallback: when
   no detailed context snapshot or model context window was known, the Context
   card used a fake `1`-token denominator. `AgentControlView` now preserves
@@ -704,10 +719,11 @@ UDID before continuing.
   completed-capability detail popover and metadata expansion have live iPad
   proof; IPD-7 model-picker, provider-settings, and provider list rendering
   have live iPad proof; IPD-8 History and fork controls have live iPad proof
-  without invoking fork execution; IPD-8 load-earlier pagination and sidebar
-  selection now have live iPad proof; IPD-9 input focus and prompt Tab
-  no-draft behavior have live portrait/landscape proof, with pointer and full
-  hardware-keyboard traversal still open.
+  without invoking fork execution; IPD-8 load-earlier pagination, sidebar
+  selection, back/sidebar toggle, and existing fork lineage now have live iPad
+  proof; IPD-9 input focus and prompt Tab no-draft behavior have live
+  portrait/landscape proof, with pointer and full hardware-keyboard traversal
+  still open.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
