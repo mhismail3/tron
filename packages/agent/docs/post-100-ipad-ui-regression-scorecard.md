@@ -593,11 +593,35 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   Agent protected-branch text field, but a second Tab did not visibly advance
   out of that field. IPD-9 stays running pending pointer QA and a broader
   keyboard traversal decision/fix.
+- Additional IPD-1 relaunch preload proof terminated and relaunched
+  `com.tron.mobile.beta` on the same iPad UDID; relaunch returned PID `14768`
+  while dev takeover stayed healthy on PID `79934`. Screenshot
+  `/tmp/tron-psg-evidence/ipd1-sidebar-preload-after-relaunch.png` and the
+  accessibility tree both showed the sidebar preloaded with session rows,
+  workspace filters, and per-row `Archive` secondary actions immediately after
+  launch. This closes the sidebar preload/relaunch assertion; archive execution
+  remains action-time confirmation gated.
+- Additional IPD-3 voice-note deterministic proof ran the focused iPad target:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AccessibilityTests -only-testing:TronMobileTests/VoiceNotesRecorderTests -only-testing:TronMobileTests/AudioAvailabilityMonitorTests -only-testing:TronMobileTests/AudioCaptureEngineTests -only-testing:TronMobileTests/MediaClientTests`.
+  The run passed 39 XCTest cases plus 9 Swift Testing checks; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-32-53--0700.xcresult`.
+  Coverage includes floating voice-note accessibility copy, audio availability
+  state, simulator-safe capture start/stop/prewarm/cancel, voice-note recorder
+  states, and `voice_notes::save`/`transcription::audio` payload contracts.
+  Manual Voice Note sheet opening/record/cancel/submit remains open: Computer
+  Use lost the Simulator window with `cgWindowNotFound`, then normal quit,
+  `killall Simulator`, same-UDID reopen, same-UDID shutdown/boot, Window-menu
+  selection, and File -> Open Simulator selection all left Simulator without
+  AX-visible windows. CoreGraphics still reported an onscreen Simulator window
+  and simctl screenshots worked; evidence
+  `/tmp/tron-psg-evidence/ipd-computer-use-window-recovery-simctl-visible.png`.
+  Because voice-note recording can involve microphone capture, the flow was not
+  driven by blind coordinate clicks.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
-confirmation and any remaining sidebar preload/relaunch assertions, IPD-2
+confirmation, IPD-2
 approval/reconnect/deep-link paths,
-IPD-3 voice-note states, IPD-5
+IPD-3 manual voice-note sheet record/cancel/submit states, IPD-5
 approval flows, read-only terminal approvals, and generated UI details, full
 IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-8

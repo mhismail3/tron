@@ -478,6 +478,28 @@ Owner taxonomy: `server_contract`, `client_projection`,
   was visually inspected but not captured because the live view includes
   credential labels/snippets. IPD-9 remains open because pointer QA and full
   keyboard traversal are not complete.
+- IPD-1 relaunch preload proof terminated and relaunched `com.tron.mobile.beta`
+  on the same iPad UDID; relaunch returned PID `14768` while dev takeover stayed
+  healthy on PID `79934`. Screenshot
+  `/tmp/tron-psg-evidence/ipd1-sidebar-preload-after-relaunch.png` and the
+  accessibility tree showed the sidebar preloaded with session rows, workspace
+  filters, and per-row `Archive` secondary actions immediately after launch.
+  Archive execution remains action-time confirmation gated.
+- IPD-3 voice-note deterministic proof passed on the iPad target:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/AccessibilityTests -only-testing:TronMobileTests/VoiceNotesRecorderTests -only-testing:TronMobileTests/AudioAvailabilityMonitorTests -only-testing:TronMobileTests/AudioCaptureEngineTests -only-testing:TronMobileTests/MediaClientTests`
+  with 39 XCTest cases plus 9 Swift Testing checks; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-32-53--0700.xcresult`.
+  Coverage includes floating voice-note accessibility copy, audio availability,
+  simulator-safe capture start/stop/prewarm/cancel, voice-note recorder states,
+  and `voice_notes::save`/`transcription::audio` payload contracts. Manual
+  Voice Note sheet opening/record/cancel/submit remains open because Computer
+  Use lost the Simulator window with `cgWindowNotFound`; normal quit,
+  `killall Simulator`, same-UDID reopen, same-UDID shutdown/boot, Window-menu
+  selection, and File -> Open Simulator selection still left Simulator without
+  AX-visible windows even though CoreGraphics reported an onscreen window and
+  simctl screenshots worked. Evidence:
+  `/tmp/tron-psg-evidence/ipd-computer-use-window-recovery-simctl-visible.png`.
+  The microphone path was not driven by blind coordinate clicks.
 
 ## Verification Plan
 
