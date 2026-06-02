@@ -1,7 +1,9 @@
 //! Context-primer rendering for capability discovery.
 //!
 //! Primer policy and rendering live here so catalog persistence and search
-//! indexing do not own model-facing documentation text.
+//! indexing do not own model-facing documentation text. The fixed header carries
+//! the compact harness-customization recipe because it must survive aggressive
+//! entry truncation and should not depend on README-only prose.
 
 use serde::{Deserialize, Serialize};
 
@@ -107,7 +109,7 @@ pub(crate) fn render_capability_primer(
         snapshot.catalog_revision
     ));
     out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with executionMode=sandbox_materialized and expectedOutputs, not filesystem::write_file; the command must write the same relative sandbox path declared in expectedOutputs. Nested declared output paths are allowed, but do not write absolute, home-relative, shell-expanded, parent-escaping, or undeclared command output paths. Freshness and approval happen inside execute. Approved execute results include idempotencyKey; reuse that exact top-level key to replay the approved command without creating another child.\n\n");
-    out.push_str("To customize the harness, stay on the same `execute` primitive: call `worker::protocol_guide`, author the worker from the returned template/protocol, call `worker::spawn` with session visibility, expected function ids, and idempotency, then prove the live catalog with `catalog::watch_snapshot` or `capability::inspect`. Run conformance or test evidence before relying on the new function, invoke it through `execute`, use `engine::promote` only for governed workspace/system promotion, and clean up volatile entries with `worker::disconnect` or `sandbox::stop_spawned_worker`. Report trace id, resource refs, catalog revision, child invocation ids, and cleanup state.\n\n");
+    out.push_str("To customize the harness, stay on the same `execute` primitive: call `worker::protocol_guide`, author the worker from the returned template/protocol, call `worker::spawn` with session visibility, expected function ids, and idempotency, then prove the live catalog with `catalog::watch_snapshot` or `capability::inspect`. Run conformance or test evidence before relying on the new function, invoke it through `execute`, expose human/operator controls only as generated `ui_surface` resources through `ui::surface_for_target` and `ui::inspect_surface`, and submit generated actions with `ui::submit_action` using stored surface/version/action ids instead of reconstructed client targets. Use `engine::promote` only for governed workspace/system promotion, and clean up volatile entries with `worker::disconnect` or `sandbox::stop_spawned_worker`. Report trace id, resource refs, catalog revision, child invocation ids, and cleanup state.\n\n");
     let mut rendered_entries = 0usize;
     for entry in entries.drain(..) {
         let recipe = entry.agent_recipe();

@@ -99,7 +99,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
 
     for required in [
         "# Hyper Modular Agent Harness Execution Scorecard Portfolio",
-        "Current score: **30/100**",
+        "Current score: **33/100**",
         "Status: **running**",
         "## Source-Derived Requirements",
         "The agent and the human use the same operation to extend the same system.",
@@ -118,7 +118,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "## Operating Loop",
         "| HMH-A | Source, baseline, and primitive audit | 10 | passed |",
         "| HMH-B | Agent self-modifying capability lifecycle | 20 | passed |",
-        "| HMH-C | Harness knowledge and context compiler | 15 | pending |",
+        "| HMH-C | Harness knowledge and context compiler | 15 | running |",
         "| HMH-D | Plug-and-play module/package lifecycle | 15 | pending |",
         "| HMH-E | Human harness and generated UI | 15 | pending |",
         "| HMH-F | Causality, safety, loops, and rollback | 15 | pending |",
@@ -179,7 +179,17 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7/HMH-B8/HMH-B9:",
         "HMH-B is closed.",
         "## HMH-C Scorecard: Harness Knowledge And Context Compiler",
-        "| HMH-C1 | Primer contains the north-star recipe |",
+        "| HMH-C1 | Primer contains the north-star recipe | 20 | passed_after_fix |",
+        "HMH-C1 evidence, 2026-06-02:",
+        "initially failed after the C1 test was strengthened to require generated",
+        "`ui::surface_for_target`",
+        "`ui::inspect_surface`",
+        "`ui::submit_action`",
+        "stored surface/version/action ids",
+        "The fix keeps the recipe in the fixed `capabilities.primer` header",
+        "README's worker-protocol section now matches the primer",
+        "Open loops after HMH-C1:",
+        "Continue with HMH-C2",
         "| HMH-C6 | Prompt surface stays tiny |",
         "## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle",
         "| HMH-D3 | Activation composes worker spawn |",
@@ -203,6 +213,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_cleans_up_session_worker_and_stale_calls_fail_closed -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_explains_session_worker_evidence -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml primer_teaches_self_modifying_worker_lifecycle -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml capability_primer_context_stays_within_budget -- --nocapture",
     ] {
         assert!(
             portfolio.contains(required),
@@ -225,15 +236,19 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "| HMH-B7 | Promotion is governed | 10 | pending |",
         "| HMH-B8 | Cleanup and stale calls fail closed | 10 | pending |",
         "| HMH-B9 | Agent explains the evidence | 10 | pending |",
+        "| HMH-C | Harness knowledge and context compiler | 15 | pending |",
+        "| HMH-C1 | Primer contains the north-star recipe | 20 | pending |",
         "Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7:",
         "Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7/HMH-B8:",
         "Continue with HMH-B8: prove cleanup unregisters or marks stale session-worker",
         "Continue with HMH-B9: prove the agent can explain live",
+        "Continue with HMH-C1: prove the compact",
         "Current score: **19/100**",
         "Current score: **21/100**",
         "Current score: **24/100**",
         "Current score: **26/100**",
         "Current score: **28/100**",
+        "Current score: **30/100**",
         "Current score: **100/100**",
         "Status: **completed**",
     ] {
@@ -270,8 +285,12 @@ fn hyper_modular_architecture_plan_stays_formalized() {
     assert!(
         readme_harness_section.contains("Session visibility is the default")
             && readme_harness_section.contains("workspace/system")
-            && readme_harness_section.contains("`engine::promote`"),
-        "README must document session-worker default visibility and governed promotion"
+            && readme_harness_section.contains("`engine::promote`")
+            && readme_harness_section.contains("`ui::surface_for_target`")
+            && readme_harness_section.contains("`ui::inspect_surface`")
+            && readme_harness_section.contains("`ui::submit_action`")
+            && readme_harness_section.contains("surface/version/action ids"),
+        "README must document session-worker default visibility, generated UI handoff, and governed promotion"
     );
 }
 

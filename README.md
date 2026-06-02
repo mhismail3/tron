@@ -843,11 +843,16 @@ derive socket paths from client URLs. The intended loop is: use `execute` with
 intent or target `worker::protocol_guide`, write the worker script from that
 template, use `execute` with target `worker::spawn` plus expected function ids
 and a stable idempotency key, then invoke the new `namespace::function` through
-`execute` and disconnect it with `worker::disconnect` when finished. Operator
-catalog search/inspect views remain available for debugging, but they are not
-separate model tools. The model-facing `execute` schema and generated
-`capabilities.primer` both name this loop so ordinary provider turns do not need
-README-only knowledge to modify the harness.
+`execute`. Human/operator controls for the new capability remain server-owned:
+author or inspect generated `ui_surface` resources through
+`ui::surface_for_target` and `ui::inspect_surface`, and submit stored actions
+through `ui::submit_action` using surface/version/action ids rather than
+reconstructing targets in the client. Disconnect volatile worker entries with
+`worker::disconnect` when finished. Operator catalog search/inspect views
+remain available for debugging, but they are not separate model tools. The
+model-facing `execute` schema and generated `capabilities.primer` both name
+this loop so ordinary provider turns do not need README-only knowledge to
+modify the harness.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, `trigger::*`, `resource::*`, `grant::*`, and `approval::*` preserve

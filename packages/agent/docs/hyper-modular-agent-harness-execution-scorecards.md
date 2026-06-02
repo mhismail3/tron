@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **30/100**
+Current score: **33/100**
 
 Status: **running**
 
@@ -197,7 +197,7 @@ Planes to delete or prevent:
 |----|-----------|--------|--------|-------|-------------------|
 | HMH-A | Source, baseline, and primitive audit | 10 | passed | docs_or_scorecard | Attachment synthesis, official iii source check, current-code audit, README link, static gate. |
 | HMH-B | Agent self-modifying capability lifecycle | 20 | passed | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
-| HMH-C | Harness knowledge and context compiler | 15 | pending | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
+| HMH-C | Harness knowledge and context compiler | 15 | running | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
 | HMH-D | Plug-and-play module/package lifecycle | 15 | pending | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
 | HMH-E | Human harness and generated UI | 15 | pending | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy. |
 | HMH-F | Causality, safety, loops, and rollback | 15 | pending | engine_policy_ledger | Idempotency, approval resume, leases, trigger budgets, queues/DLQ, compensation, and trace/ledger proof fail closed. |
@@ -522,7 +522,7 @@ Out of scope: dumping the full catalog into prompts.
 
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
-| HMH-C1 | Primer contains the north-star recipe | 20 | pending | `capabilities.primer` includes a compact "customize the harness" sequence with `worker::protocol_guide`, `worker::spawn`, inspection, conformance/test, generated UI, promotion, and cleanup. | Stop if the model must infer the loop from unrelated recipes. |
+| HMH-C1 | Primer contains the north-star recipe | 20 | passed_after_fix | `capabilities.primer` includes a compact "customize the harness" sequence with `worker::protocol_guide`, `worker::spawn`, inspection, conformance/test, generated UI, promotion, and cleanup. | Stop if the model must infer the loop from unrelated recipes. |
 | HMH-C2 | Context budget remains bounded | 15 | pending | Snapshot fixture records primer token estimate under profile budget while preserving core worker/module/generated-UI recipes. | Split recipe docs into resources if budget exceeds policy. |
 | HMH-C3 | Execute correction covers lifecycle errors | 20 | pending | Missing `expectedFunctionIds`, missing `sessionId`, stale revision, target trigger id, missing idempotency, ambiguous target, and approval-required states return actionable repair guidance. | Fix result presentation before model-run proof. |
 | HMH-C4 | Harness docs are resources | 15 | pending | Agent-readable harness guide/recipes are versioned resources or capability-backed docs tied to catalog revision, not only repo prose. | Add resource/doc projection before closeout. |
@@ -535,6 +535,35 @@ Closeout commands:
 cargo test --manifest-path packages/agent/Cargo.toml capability_primer -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml execute_guidance -- --nocapture
 ```
+
+HMH-C1 evidence, 2026-06-02:
+
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml primer_teaches_self_modifying_worker_lifecycle -- --nocapture`
+  initially failed after the C1 test was strengthened to require generated
+  `ui_surface` guidance, `ui::surface_for_target`, `ui::inspect_surface`,
+  `ui::submit_action`, and stored surface/version/action ids.
+- The fix keeps the recipe in the fixed `capabilities.primer` header under
+  `packages/agent/src/domains/capability/registry/primer.rs`, so it survives
+  compact entry truncation and does not depend on README-only prose.
+- The compact recipe now teaches the same `execute` primitive for
+  `worker::protocol_guide`, worker authoring, `worker::spawn`, live catalog
+  proof, `capability::inspect`, conformance/test evidence, invocation,
+  generated `ui_surface` handoff, governed `engine::promote`, cleanup through
+  `worker::disconnect` or `sandbox::stop_spawned_worker`, and evidence markers
+  including trace id, resource refs, catalog revision, child invocation ids,
+  and cleanup state.
+- README's worker-protocol section now matches the primer by documenting that
+  human/operator controls are server-owned generated UI surfaces and that iOS
+  submits stored surface/version/action ids instead of reconstructing targets.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml primer_teaches_self_modifying_worker_lifecycle -- --nocapture`.
+
+Open loops after HMH-C1:
+
+- HMH-C1 proves the compact recipe content only. Continue with HMH-C2 to prove
+  the context compiler keeps that recipe inside budget while preserving core
+  worker, module, and generated-UI guidance in a provider-visible snapshot.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -714,10 +743,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A and HMH-B are closed. Continue with HMH-C1: prove the compact
-`capabilities.primer` still contains the north-star self-modifying worker
-lifecycle recipe before broadening the context compiler lane.
+HMH-A, HMH-B, and HMH-C1 are closed. Continue with HMH-C2: prove the context
+compiler keeps the primer bounded while preserving core worker/module/generated
+UI recipes.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml primer_teaches_self_modifying_worker_lifecycle -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_primer_context_stays_within_budget -- --nocapture
 ```
