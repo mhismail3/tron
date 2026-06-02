@@ -172,6 +172,56 @@ struct ServerSettingsPageTests {
         #expect(ServerSettingsSummary.description(for: context) == SettingsLabels.connectedServerUnavailableDescription)
     }
 
+    @Test("server controls status hides when no active server exists")
+    func serverControlsStatusHidesWhenNoActiveServerExists() {
+        let status = ConnectionSettingsServerControlsStatus.resolve(
+            hasActiveServer: false,
+            activeServerUnavailable: false,
+            loadError: nil
+        )
+
+        #expect(status == nil)
+    }
+
+    @Test("server controls status shows unavailable copy for disconnected active server")
+    func serverControlsStatusShowsUnavailableCopyForDisconnectedActiveServer() throws {
+        let status = try #require(ConnectionSettingsServerControlsStatus.resolve(
+            hasActiveServer: true,
+            activeServerUnavailable: true,
+            loadError: nil
+        ))
+
+        #expect(status.title == "Server settings unavailable")
+        #expect(status.description == SettingsLabels.connectedServerUnavailableDescription)
+        #expect(status.icon == "wifi.exclamationmark")
+    }
+
+    @Test("server controls status keeps explicit load error")
+    func serverControlsStatusKeepsExplicitLoadError() throws {
+        let status = try #require(ConnectionSettingsServerControlsStatus.resolve(
+            hasActiveServer: true,
+            activeServerUnavailable: false,
+            loadError: "Connection timed out"
+        ))
+
+        #expect(status.title == "Server settings unavailable")
+        #expect(status.description == "Connection timed out")
+        #expect(status.icon == "wifi.exclamationmark")
+    }
+
+    @Test("server controls status shows loading for connected active server before settings load")
+    func serverControlsStatusShowsLoadingForConnectedActiveServerBeforeSettingsLoad() throws {
+        let status = try #require(ConnectionSettingsServerControlsStatus.resolve(
+            hasActiveServer: true,
+            activeServerUnavailable: false,
+            loadError: nil
+        ))
+
+        #expect(status.title == "Loading server settings")
+        #expect(status.description == SettingsLabels.loadingServerSettingsDescription)
+        #expect(status.icon == "hourglass")
+    }
+
     @Test("server summary reflects loaded security transcription and update settings")
     func serverSummaryReflectsLoadedSettings() {
         let context = ServerSettingsSummary.Context(

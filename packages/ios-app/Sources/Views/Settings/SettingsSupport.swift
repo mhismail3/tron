@@ -665,6 +665,46 @@ enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
     }
 }
 
+struct ConnectionSettingsServerControlsStatus: Equatable, Sendable {
+    let title: String
+    let description: String
+    let icon: String
+
+    static func resolve(
+        hasActiveServer: Bool,
+        activeServerUnavailable: Bool,
+        loadError: String?
+    ) -> Self? {
+        guard hasActiveServer else { return nil }
+
+        if activeServerUnavailable {
+            return Self(
+                title: "Server settings unavailable",
+                description: SettingsLabels.connectedServerUnavailableDescription,
+                icon: "wifi.exclamationmark"
+            )
+        }
+
+        if let error = cleaned(loadError), !error.isEmpty {
+            return Self(
+                title: "Server settings unavailable",
+                description: error,
+                icon: "wifi.exclamationmark"
+            )
+        }
+
+        return Self(
+            title: "Loading server settings",
+            description: SettingsLabels.loadingServerSettingsDescription,
+            icon: "hourglass"
+        )
+    }
+
+    private static func cleaned(_ value: String?) -> String? {
+        value?.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 enum ServerUpdateSettingsItem: CaseIterable, Hashable, Sendable {
     case automaticChecks
     case releaseChannel

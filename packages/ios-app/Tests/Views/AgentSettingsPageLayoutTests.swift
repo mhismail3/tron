@@ -77,6 +77,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
 
         XCTAssertLessThan(pairedIndex, transcriptionIndex)
         XCTAssertLessThan(transcriptionIndex, diagnosticsIndex)
+        XCTAssertLessThan(diagnosticsIndex, updatesIndex)
         XCTAssertTrue(
             landscapeContent.contains("if settingsState.isLoaded && !activeServerUnavailable {\n                        updatesSection\n                    }"),
             "Updates should stay in the right landscape column without also stacking diagnostics below it"
@@ -86,8 +87,8 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             "Server landscape should not stack Updates and Diagnostics in the same long column"
         )
         XCTAssertTrue(
-            landscapeContent.contains("serverBackedSettingsLoadingOrUnavailableSection"),
-            "Server landscape layout should still expose unavailable/loading states"
+            landscapeContent.contains("serverBackedSettingsStatusSection(status)"),
+            "Server landscape layout should still expose the explicit unavailable/loading status card"
         )
         XCTAssertTrue(
             landscapeContent.contains(".fixedSize(horizontal: false, vertical: true)"),

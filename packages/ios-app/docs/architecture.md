@@ -550,7 +550,10 @@ layout so protected-branch controls stay visible near the top of the floating
 form. Server and Providers use the same shared iPad-landscape detector:
 Servers balances paired-server/transcription/diagnostics controls against the
 updates column, and Providers splits model providers and services into two
-columns so configured rows stay visible without deep scrolling. The third row
+columns so configured rows stay visible without deep scrolling. Server controls
+use an explicit status projection so no active server hides server-backed
+controls, an offline active server shows unavailable copy, and connected
+not-yet-loaded settings still show a loading state. The third row
 holds the destructive actions without a separate Danger Zone header, while
 keeping those tiles error-red. All
 main-grid icons use the shared settings tile size. A thin muted divider separates

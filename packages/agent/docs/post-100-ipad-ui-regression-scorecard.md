@@ -6,7 +6,7 @@ Created: 2026-05-31
 
 Initial score: **0/100**
 
-Current score: **13/100**
+Current score: **21/100**
 
 This scorecard owns iPad-specific follow-up coverage that was explicitly moved
 out of `post-100-operating-conditions-scorecard.md` when that plan closed with
@@ -39,7 +39,7 @@ post-100 scorecard.
 | IPD-4 | Notifications | 8 | passed_after_fix | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
 | IPD-5 | Capability, approval, generated UI | 10 | running | Detail sheets/popovers, approve/deny/double-tap, read-only terminal approvals, generated UI render/refresh/submit/stale action rejection. |
 | IPD-6 | Source control and worktree | 10 | running | Agent Control source-control card, dirty/diff rendering, commit/push/rebase/merge/pull/conflict resolver, disabled destructive actions, and DB policy truth. |
-| IPD-7 | Settings, providers, pairing | 8 | running | Settings grid/sidebar behavior, server unavailable/retry, pairing/onboarding from Settings, providers/OAuth status, model picker, protected branches, and profile/auth truth. |
+| IPD-7 | Settings, providers, pairing | 8 | passed_after_fix | Settings grid/sidebar behavior, server unavailable/retry, pairing/onboarding from Settings, providers/OAuth status, model picker, protected branches, and profile/auth truth. |
 | IPD-8 | Navigation, deep links, session tree | 8 | running | Sidebar selection, back behavior, session/capability/event/notification deep links, load-earlier pagination, history/fork sheet, cold-start routing. |
 | IPD-9 | Visual QA and accessibility | 12 | running | Light/dark mode, large accessibility sizes, keyboard/pointer focus, no clipped controls, no overlapped text, and stable fixed-format UI dimensions. |
 | IPD-10 | Closeout | 7 | pending | Score reaches 100/100 or every residual item is moved to a newer scorecard with evidence and explicit ownership. |
@@ -413,6 +413,46 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd7-providers-settings-landscape-balanced-final.png`,
   and `/tmp/tron-psg-evidence/ipad-agent-control-compact-narrow-tall-balanced-final.png`.
   Provider credential values were not copied into this scorecard.
+- IPD-7 final Settings/unavailable/onboarding pass found and fixed one Server
+  page projection gap: when the active paired server was offline, the page
+  warned in the summary but hid the `Server Controls` unavailable card because
+  both status branches required `!activeServerUnavailable`. The page now uses
+  `ConnectionSettingsServerControlsStatus`: no active server renders no fake
+  loading card, an offline active server renders explicit unavailable copy, and
+  a connected not-yet-loaded active server still renders loading copy. Focused
+  TDD coverage first failed because the primitive was missing, then passed after
+  the fix:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/ServerSettingsPageTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  with 4 XCTest cases plus 23 Swift Testing checks; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-19-29--0700.xcresult`.
+  Manual landscape proof used bundle `com.tron.mobile.beta` on iPad Pro
+  13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`: dev server PID `50456`
+  was temporarily stopped by booting out the dev LaunchAgent, port `9847`
+  returned closed, Settings showed the main unavailable card and the Server page
+  unavailable card, and the active server menu exposed `Retry`/`Forget` without
+  invoking destructive Forget. Screenshots:
+  `/tmp/tron-psg-evidence/ipd7-settings-unavailable-main-card-fixed.png`,
+  `/tmp/tron-psg-evidence/ipd7-server-page-unavailable-status-card-fixed.png`,
+  and `/tmp/tron-psg-evidence/ipd7-server-unavailable-retry-menu.png`.
+  Restarting dev takeover produced healthy PID `79934`, after which the same
+  Server sheet recovered to connected server settings; screenshot
+  `/tmp/tron-psg-evidence/ipd7-server-page-recovered-after-dev-restart.png`.
+  Settings-to-onboarding proof showed `Connect to a new server` opening the
+  `Connect your Mac` sheet, manual entry exposing host/port/token/name fields
+  with Connect disabled until valid input, connected-server `Set Up` opening
+  the same sheet with Connect enabled by stored-token reuse, prefilled
+  host/port/name with the token field blank, and Connect advancing to the
+  workspace step without exposing a token. Screenshots:
+  `/tmp/tron-psg-evidence/ipd7-settings-onboarding-connect-step.png`,
+  `/tmp/tron-psg-evidence/ipd7-settings-onboarding-manual-entry.png`,
+  `/tmp/tron-psg-evidence/ipd7-server-connected-setup-menu.png`,
+  `/tmp/tron-psg-evidence/ipd7-server-setup-stored-token-connect-enabled.png`,
+  `/tmp/tron-psg-evidence/ipd7-server-setup-prefilled-manual-entry.png`, and
+  `/tmp/tron-psg-evidence/ipd7-server-setup-advanced-workspace-step.png`.
+  Redacted DB evidence is
+  `/tmp/tron-psg-evidence/ipd7-settings-onboarding-redacted-invocations.json`;
+  raw provider auth payloads were not copied because they include credential
+  labels/metadata.
 - Additional IPD-5 capability-detail proof opened direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` on the iPad Simulator and
   tapped completed capability invocation `call_eiaqjnjn` for the read-only
@@ -540,7 +580,6 @@ approval/reconnect/deep-link paths,
 IPD-3 voice-note states, IPD-5
 approval flows, read-only terminal approvals, and generated UI details, full
 IPD-6 action-time-confirmed source-control
-actions and conflict resolver, IPD-7 pairing/onboarding, provider/profile/auth,
-and unavailable-server retry details, IPD-8
+actions and conflict resolver, IPD-8
 back/session-tree behavior and action-time-confirmed fork execution, IPD-9
 pointer QA and full hardware-keyboard traversal, and IPD-10 closeout.

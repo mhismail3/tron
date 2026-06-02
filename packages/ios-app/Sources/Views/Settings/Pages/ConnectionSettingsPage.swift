@@ -71,8 +71,8 @@ struct ConnectionSettingsPage: View {
                 VStack(spacing: 16) {
                     if settingsState.isLoaded && !activeServerUnavailable {
                         updatesSection
-                    } else if !activeServerUnavailable {
-                        serverBackedSettingsLoadingOrUnavailableSection
+                    } else if let status = serverControlsStatus {
+                        serverBackedSettingsStatusSection(status)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -84,8 +84,8 @@ struct ConnectionSettingsPage: View {
     private var serverBackedContent: some View {
         if settingsState.isLoaded && !activeServerUnavailable {
             loadedServerBackedSettingsSections
-        } else if !activeServerUnavailable {
-            serverBackedSettingsLoadingOrUnavailableSection
+        } else if let status = serverControlsStatus {
+            serverBackedSettingsStatusSection(status)
         }
     }
 
@@ -113,8 +113,19 @@ struct ConnectionSettingsPage: View {
     }
 
     private var activeServerUnavailable: Bool {
+        hasActiveServer && !dependencies.engineClient.connectionState.isConnected
+    }
+
+    private var hasActiveServer: Bool {
         dependencies.pairedServerStore.activeServer != nil
-            && !dependencies.engineClient.connectionState.isConnected
+    }
+
+    private var serverControlsStatus: ConnectionSettingsServerControlsStatus? {
+        ConnectionSettingsServerControlsStatus.resolve(
+            hasActiveServer: hasActiveServer,
+            activeServerUnavailable: activeServerUnavailable,
+            loadError: settingsState.loadError
+        )
     }
 
     private var pairedServersSection: some View {
@@ -301,22 +312,22 @@ struct ConnectionSettingsPage: View {
         }
     }
 
-    private var serverBackedSettingsLoadingOrUnavailableSection: some View {
+    private func serverBackedSettingsStatusSection(_ status: ConnectionSettingsServerControlsStatus) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Server Controls")
 
             SettingsCard(accent: .tronWarning) {
                 HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: settingsState.loadError == nil ? "hourglass" : "wifi.exclamationmark")
+                    Image(systemName: status.icon)
                         .font(TronTypography.sans(size: TronTypography.sizeBody))
                         .foregroundStyle(.tronWarning)
                         .frame(width: 18)
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(settingsState.loadError == nil ? "Loading server settings" : "Server settings unavailable")
+                        Text(status.title)
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                             .foregroundStyle(.tronTextPrimary)
-                        Text(settingsState.loadError ?? SettingsLabels.loadingServerSettingsDescription)
+                        Text(status.description)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronTextSecondary)
                             .fixedSize(horizontal: false, vertical: true)
