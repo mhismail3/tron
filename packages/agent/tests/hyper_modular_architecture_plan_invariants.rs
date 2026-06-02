@@ -18,6 +18,21 @@ fn hyper_modular_architecture_plan_stays_formalized() {
     let portfolio = std::fs::read_to_string(&portfolio_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", portfolio_path.display()));
     let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README.md");
+    let primitive_surface = std::fs::read_to_string(repo_root.join(
+        "packages/agent/src/domains/capability_support/implementations/primitive_surface.rs",
+    ))
+    .expect("read primitive_surface.rs");
+    let capability_contract = std::fs::read_to_string(
+        repo_root.join("packages/agent/src/domains/capability/contract.rs"),
+    )
+    .expect("read capability contract");
+    let sandbox_contract =
+        std::fs::read_to_string(repo_root.join("packages/agent/src/domains/sandbox/contract.rs"))
+            .expect("read sandbox contract");
+    let readme_harness_section = readme
+        .split("Agents do not need to inspect Tron source to create a local worker.")
+        .nth(1)
+        .expect("README must document worker protocol guide loop");
 
     assert!(
         readme.contains("packages/agent/docs/hyper-modular-agent-architecture-scorecard.md")
@@ -84,21 +99,37 @@ fn hyper_modular_architecture_plan_stays_formalized() {
 
     for required in [
         "# Hyper Modular Agent Harness Execution Scorecard Portfolio",
-        "Current score: **0/100**",
-        "Status: **ready_for_execution**",
+        "Current score: **10/100**",
+        "Status: **running**",
         "## Source-Derived Requirements",
         "The agent and the human use the same operation to extend the same system.",
         "The harness is a composition slider, not a thin-vs-thick fork.",
+        "https://iii.dev/docs/0-10-0/primitives-and-concepts/functions-triggers-workers",
+        "https://iii.dev/docs/0-10-0/primitives-and-concepts/discovery",
+        "https://iii.dev/docs/0-10-0/how-to/use-functions-and-triggers",
+        "https://iii.dev/docs/0-10-0/how-to/trigger-actions",
+        "https://iii.dev/docs/0-10-0/how-to/use-queues",
+        "https://iii.dev/docs/0-10-0/advanced/protocol",
+        "https://iii.dev/docs/quickstart",
+        "https://iii.dev/docs/workers/managed-worker-lockfile",
+        "https://github.com/iii-hq/iii",
         "## Current Tron Baseline",
         "## Primitive And Plane Budget",
         "## Operating Loop",
-        "| HMH-A | Source, baseline, and primitive audit | 10 | pending |",
+        "| HMH-A | Source, baseline, and primitive audit | 10 | passed |",
         "| HMH-B | Agent self-modifying capability lifecycle | 20 | pending |",
         "| HMH-C | Harness knowledge and context compiler | 15 | pending |",
         "| HMH-D | Plug-and-play module/package lifecycle | 15 | pending |",
         "| HMH-E | Human harness and generated UI | 15 | pending |",
         "| HMH-F | Causality, safety, loops, and rollback | 15 | pending |",
         "| HMH-G | Final adversarial closeout and absence gates | 10 | pending |",
+        "| HMH-A1 | Attachment synthesis is first-class source | 20 | passed |",
+        "| HMH-A2 | Public iii facts verified | 15 | passed |",
+        "| HMH-A3 | Current Tron substrate map is evidence-backed | 25 | passed |",
+        "| HMH-A4 | Primitive/plane budget accepted | 20 | passed |",
+        "| HMH-A5 | Prior scorecards treated as prerequisites only | 10 | passed |",
+        "| HMH-A6 | Fresh execution portfolio linked and guarded | 10 | passed |",
+        "HMH-A closeout evidence, 2026-06-02:",
         "## HMH-B Scorecard: Agent Self-Modifying Capability Lifecycle",
         "| HMH-B3 | Session worker creation is scoped |",
         "| HMH-B6 | Invocation uses the tiny harness |",
@@ -125,6 +156,8 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "## Static Gates",
         "## Final Closeout Criteria",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml worker_protocol_guide -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle -- --nocapture",
     ] {
         assert!(
             portfolio.contains(required),
@@ -134,6 +167,10 @@ fn hyper_modular_architecture_plan_stays_formalized() {
 
     for forbidden in [
         "The attached pasted files available in this thread were not the iii articles.",
+        "Current score: **0/100**",
+        "Status: **ready_for_execution**",
+        "| HMH-A | Source, baseline, and primitive audit | 10 | pending |",
+        "| HMH-A1 | Attachment synthesis is first-class source | 20 | pending |",
         "Current score: **100/100**",
         "Status: **completed**",
     ] {
@@ -142,6 +179,34 @@ fn hyper_modular_architecture_plan_stays_formalized() {
             "execution portfolio must not claim completion or preserve forbidden plane text: {forbidden}"
         );
     }
+
+    assert!(
+        primitive_surface.contains("provider_surface_contains_only_capability_primitives")
+            && primitive_surface
+                .contains("assert_eq!(surface.all_model_capability_ids, [\"execute\"]);")
+            && primitive_surface
+                .contains("only the `capability` worker's `execute` orchestrator is exposed"),
+        "provider surface must keep a concrete guard against prompt-expanded tool catalogs"
+    );
+    assert!(
+        capability_contract.contains("fn only_execute_has_model_metadata()")
+            && capability_contract
+                .contains("assert!(model_metadata(SEARCH_FUNCTION_ID).is_null());")
+            && capability_contract
+                .contains("assert!(!model_metadata(EXECUTE_FUNCTION_ID).is_null());"),
+        "capability contract must guard execute as the only model metadata owner"
+    );
+    assert!(
+        sandbox_contract.contains("worker::spawn")
+            && !sandbox_contract.contains("sandbox::spawn_worker"),
+        "worker creation must remain canonical worker::spawn, not an alternate sandbox public API"
+    );
+    assert!(
+        readme_harness_section.contains("Session visibility is the default")
+            && readme_harness_section.contains("workspace/system")
+            && readme_harness_section.contains("`engine::promote`"),
+        "README must document session-worker default visibility and governed promotion"
+    );
 }
 
 fn repo_root() -> PathBuf {

@@ -4,9 +4,9 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **0/100**
+Current score: **10/100**
 
-Status: **ready_for_execution**
+Status: **running**
 
 Scope:
 - Fresh, source-backed implementation scorecard portfolio for reaching the
@@ -75,7 +75,21 @@ Public iii docs and repository pages checked on 2026-06-02 support the same
 facts: functions/triggers/workers are the core primitives; discovery is a live
 engine registry pushed to workers; trigger modes include sync, Void, and
 Enqueue; queues provide retries/concurrency/FIFO/DLQ; the worker protocol is
-WebSocket JSON; and the iii engine license boundary differs from SDK/docs.
+WebSocket JSON; `iii worker add` incrementally adds local or registry workers;
+and the iii engine license boundary differs from SDK/docs.
+
+Official source URLs checked for this portfolio:
+
+- https://iii.dev/docs/0-10-0/primitives-and-concepts/functions-triggers-workers
+- https://iii.dev/docs/0-10-0/primitives-and-concepts/discovery
+- https://iii.dev/docs/0-10-0/how-to/use-functions-and-triggers
+- https://iii.dev/docs/0-10-0/how-to/trigger-actions
+- https://iii.dev/docs/0-10-0/how-to/use-queues
+- https://iii.dev/docs/0-10-0/advanced/protocol
+- https://iii.dev/docs
+- https://iii.dev/docs/quickstart
+- https://iii.dev/docs/workers/managed-worker-lockfile
+- https://github.com/iii-hq/iii
 
 ## Current Tron Baseline
 
@@ -181,7 +195,7 @@ Planes to delete or prevent:
 
 | ID | Scorecard | Weight | Status | Owner | Evidence contract |
 |----|-----------|--------|--------|-------|-------------------|
-| HMH-A | Source, baseline, and primitive audit | 10 | pending | docs_or_scorecard | Attachment synthesis, official iii source check, current-code audit, README link, static gate. |
+| HMH-A | Source, baseline, and primitive audit | 10 | passed | docs_or_scorecard | Attachment synthesis, official iii source check, current-code audit, README link, static gate. |
 | HMH-B | Agent self-modifying capability lifecycle | 20 | pending | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
 | HMH-C | Harness knowledge and context compiler | 15 | pending | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
 | HMH-D | Plug-and-play module/package lifecycle | 15 | pending | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
@@ -198,12 +212,12 @@ baseline.
 
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
-| HMH-A1 | Attachment synthesis is first-class source | 20 | pending | Scorecard cites both pasted text paths or attachment hashes, names the agent/human same-operation thesis, harness-as-worker-stack thesis, live discovery thesis, and slider thesis. | Stop if the plan cites only public docs or stale prior summaries. |
-| HMH-A2 | Public iii facts verified | 15 | pending | Official iii docs/GitHub links and retrieval date prove primitive, discovery, trigger action, queue, protocol, worker-add, and license facts used by the plan. | Remove or weaken any unverified external claim. |
-| HMH-A3 | Current Tron substrate map is evidence-backed | 25 | pending | Current file references cover engine, capability execute, worker guide/spawn, module lifecycle, iOS Engine Console/generated UI, and absence gates. | Stop if a claimed primitive is doc-only or unreachable. |
-| HMH-A4 | Primitive/plane budget accepted | 20 | pending | Explicit keep/delete budget in this file plus static gate against client policy, public dotted methods, prompt-expanded catalog, global session-worker visibility, and alternate spawn paths. | Add or tighten static gates before coding. |
-| HMH-A5 | Prior scorecards treated as prerequisites only | 10 | pending | README and this file reference completed scorecards as baseline evidence, not as proof that the new recursive loop is done. | Correct status language before continuing. |
-| HMH-A6 | Fresh execution portfolio linked and guarded | 10 | pending | README links this file, and `hyper_modular_architecture_plan_invariants` asserts required portfolio rows and no stale attachment-source error. | Add test before marking HMH-A passed. |
+| HMH-A1 | Attachment synthesis is first-class source | 20 | passed | Scorecard cites both pasted text paths or attachment hashes, names the agent/human same-operation thesis, harness-as-worker-stack thesis, live discovery thesis, and slider thesis. | Stop if the plan cites only public docs or stale prior summaries. |
+| HMH-A2 | Public iii facts verified | 15 | passed | Official iii docs/GitHub links and retrieval date prove primitive, discovery, trigger action, queue, protocol, worker-add, and license facts used by the plan. | Remove or weaken any unverified external claim. |
+| HMH-A3 | Current Tron substrate map is evidence-backed | 25 | passed | Current file references cover engine, capability execute, worker guide/spawn, module lifecycle, iOS Engine Console/generated UI, and absence gates. | Stop if a claimed primitive is doc-only or unreachable. |
+| HMH-A4 | Primitive/plane budget accepted | 20 | passed | Explicit keep/delete budget in this file plus static gate against client policy, public dotted methods, prompt-expanded catalog, global session-worker visibility, and alternate spawn paths. | Add or tighten static gates before coding. |
+| HMH-A5 | Prior scorecards treated as prerequisites only | 10 | passed | README and this file reference completed scorecards as baseline evidence, not as proof that the new recursive loop is done. | Correct status language before continuing. |
+| HMH-A6 | Fresh execution portfolio linked and guarded | 10 | passed | README links this file, and `hyper_modular_architecture_plan_invariants` asserts required portfolio rows and no stale attachment-source error. | Add test before marking HMH-A passed. |
 
 Closeout commands:
 
@@ -211,6 +225,47 @@ Closeout commands:
 cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture
 git diff --check
 ```
+
+HMH-A closeout evidence, 2026-06-02:
+
+- HMH-A1 passed because this file treats the two pasted text attachments as the
+  primary source and captures the same-operation, harness-as-worker-stack, live
+  discovery, and composition-slider theses in `Source-Derived Requirements`.
+- HMH-A2 passed after rechecking official iii docs/repo pages on 2026-06-02 and
+  recording the URLs above for primitives, discovery, function/trigger use,
+  trigger modes, queues/DLQ, WebSocket protocol, `iii worker add`, and license
+  boundary.
+- HMH-A3 passed because `Current Tron Baseline` maps each claimed substrate
+  feature to current files under `packages/agent/src/engine`,
+  `packages/agent/src/domains/capability`, `packages/agent/src/domains/sandbox`,
+  `packages/agent/src/engine/primitives/module.rs`, and
+  `packages/ios-app/docs/architecture.md`.
+- HMH-A4 passed because `Primitive And Plane Budget`, README,
+  `packages/agent/src/domains/capability_support/implementations/primitive_surface.rs`,
+  `packages/agent/src/domains/capability/contract.rs`, and
+  `packages/agent/tests/threat_model_invariants.rs` jointly guard the server
+  ownership boundary, canonical `worker::spawn`, generated UI action-target
+  reconstruction, module escape hatches, public dotted methods,
+  prompt-expanded tools, and session-worker visibility defaults.
+- HMH-A5 passed because README links older completed scorecards only as living
+  baseline evidence while this file says the recursive harness loop is still
+  unproven until HMH-B through HMH-G pass.
+- HMH-A6 passed because README links this execution portfolio and
+  `packages/agent/tests/hyper_modular_architecture_plan_invariants.rs` guards
+  the portfolio shape, HMH-A pass state, source links, score, and stale
+  attachment-source regression.
+
+Open loops after HMH-A:
+
+- HMH-A only proves the baseline and gates. It does not prove the recursive live
+  agent turn; HMH-B remains the next active implementation lane.
+- HMH-B should start with the smallest live-loop prerequisite:
+  `execute -> worker::protocol_guide`, then advance to scoped `worker::spawn`
+  only after the guide result is proven sufficient.
+- Process note: avoid parallel Cargo test invocations in this repo during
+  scorecard closeout; the run hit package-cache/artifact locks and the
+  sequential rerun was cleaner. Run `cargo fmt` before `--check` after editing
+  Rust tests to save one failed check.
 
 ## HMH-B Scorecard: Agent Self-Modifying Capability Lifecycle
 
@@ -437,9 +492,11 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-Start implementation with HMH-A. It is the smallest gate that makes the new
-baseline durable:
+HMH-A is closed. Continue with HMH-B, starting from the smallest live-loop
+prerequisite: prove `execute` can call `worker::protocol_guide` and that the
+returned guide is sufficient for a model-visible worker authoring lifecycle:
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_protocol_guide -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle -- --nocapture
 ```
