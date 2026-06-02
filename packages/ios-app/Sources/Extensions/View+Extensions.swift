@@ -97,9 +97,9 @@ struct LargeFormSizing: PresentationSizing {
                 .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
                 .first ?? .zero
         }
-        let fallbackSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
-        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
-        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
+        let intrinsicSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
+        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : intrinsicSize.width
+        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : intrinsicSize.height
 
         // Use 60% of screen width and 80% of height for a "large form" look
         // This is smaller than .page but larger than .form
@@ -113,15 +113,15 @@ struct LargeFormSizing: PresentationSizing {
 private enum AdaptiveSheetMetrics {
     static func balancedLargeFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
         CGSize(
-            width: min(referenceWidth * 0.70, 760),
-            height: min(referenceHeight * 0.68, 760)
+            width: min(referenceWidth * 0.62, 700),
+            height: min(referenceHeight * 0.82, 900)
         )
     }
 
     static func compactFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
         CGSize(
-            width: min(referenceWidth * 0.66, 680),
-            height: min(referenceHeight * 0.56, 660)
+            width: min(referenceWidth * 0.56, 620),
+            height: min(referenceHeight * 0.70, 780)
         )
     }
 }
@@ -136,9 +136,9 @@ struct BalancedLargeFormSizing: PresentationSizing {
                 .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
                 .first ?? .zero
         }
-        let fallbackSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
-        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
-        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
+        let intrinsicSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
+        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : intrinsicSize.width
+        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : intrinsicSize.height
         let size = AdaptiveSheetMetrics.balancedLargeFormSize(
             referenceWidth: referenceWidth,
             referenceHeight: referenceHeight
@@ -158,9 +158,9 @@ struct CompactFormSizing: PresentationSizing {
                 .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
                 .first ?? .zero
         }
-        let fallbackSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
-        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
-        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
+        let intrinsicSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
+        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : intrinsicSize.width
+        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : intrinsicSize.height
         let size = AdaptiveSheetMetrics.compactFormSize(
             referenceWidth: referenceWidth,
             referenceHeight: referenceHeight

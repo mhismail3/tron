@@ -538,14 +538,20 @@ Settings pages live under `Views/Settings/Pages/` and are launched from the
 main `SettingsView` grid. The root sheet supports medium and large detents and
 starts at medium on iPhone. On iPad, adaptive sheets use balanced liquid-glass
 floating forms so the underlying app context remains visible without the sheet
-reading as a tall narrow card or a short strip. The iPad branch also prioritizes
-scrolling sheet content so long settings pages remain reachable in landscape.
+reading as a tall narrow card or a short strip. Large iPad forms use a
+narrower/taller target than the old landscape-heavy shape, while compact iPad
+forms share the same glass treatment at a smaller width. The iPad branch also
+prioritizes scrolling sheet content so long settings pages remain reachable in
+landscape.
 Its first grid row launches the surface-oriented settings: App, Server, and
 Providers. Its second row launches agent-behavior settings: Agent, Context, and
 Plugin Sources. The Agent page switches to an iPad-only two-column landscape
 layout so protected-branch controls stay visible near the top of the floating
-form. The third
-row holds the destructive actions without a separate Danger Zone header, while
+form. Server and Providers use the same shared iPad-landscape detector:
+Servers balances paired-server/transcription/diagnostics controls against the
+updates column, and Providers splits model providers and services into two
+columns so configured rows stay visible without deep scrolling. The third row
+holds the destructive actions without a separate Danger Zone header, while
 keeping those tiles error-red. All
 main-grid icons use the shared settings tile size. A thin muted divider separates
 the green destination rows from the destructive actions. The surface and behavior

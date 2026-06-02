@@ -16,7 +16,7 @@ struct AgentSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(title: "Agent") {
-            if usesIPadLandscapeLayout {
+            if SettingsAdaptiveLayout.usesIPadLandscapeLayout {
                 landscapeContent
             } else {
                 stackedContent
@@ -61,14 +61,6 @@ struct AgentSettingsPage: View {
                 }
             )
         }
-    }
-
-    private var usesIPadLandscapeLayout: Bool {
-        guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
-        let screenBounds = UIApplication.shared.connectedScenes
-            .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
-            .first ?? .zero
-        return screenBounds.width > screenBounds.height
     }
 
     @ViewBuilder

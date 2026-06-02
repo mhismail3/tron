@@ -39,7 +39,7 @@ post-100 scorecard.
 | IPD-4 | Notifications | 8 | passed_after_fix | Bell count, list/detail, mark read, mark all read, session-scoped read, offline failure, badge clearing, and notification deep link in split view. |
 | IPD-5 | Capability, approval, generated UI | 10 | running | Detail sheets/popovers, approve/deny/double-tap, read-only terminal approvals, generated UI render/refresh/submit/stale action rejection. |
 | IPD-6 | Source control and worktree | 10 | running | Agent Control source-control card, dirty/diff rendering, commit/push/rebase/merge/pull/conflict resolver, disabled destructive actions, and DB policy truth. |
-| IPD-7 | Settings, providers, pairing | 8 | pending | Settings grid/sidebar behavior, server unavailable/retry, pairing/onboarding from Settings, providers/OAuth status, model picker, protected branches, and profile/auth truth. |
+| IPD-7 | Settings, providers, pairing | 8 | running | Settings grid/sidebar behavior, server unavailable/retry, pairing/onboarding from Settings, providers/OAuth status, model picker, protected branches, and profile/auth truth. |
 | IPD-8 | Navigation, deep links, session tree | 8 | running | Sidebar selection, back behavior, session/capability/event/notification deep links, load-earlier pagination, history/fork sheet, cold-start routing. |
 | IPD-9 | Visual QA and accessibility | 12 | running | Light/dark mode, large accessibility sizes, keyboard/pointer focus, no clipped controls, no overlapped text, and stable fixed-format UI dimensions. |
 | IPD-10 | Closeout | 7 | pending | Score reaches 100/100 or every residual item is moved to a newer scorecard with evidence and explicit ownership. |
@@ -390,6 +390,29 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/Users/moose/.tron/profiles/default/profile.toml:229 protectedBranches = ["main", "master", "develop"]`.
   Remaining IPD-7 loops are provider/profile/auth, pairing/onboarding, and
   unavailable-server retry evidence; no new points were awarded yet.
+- Follow-up sheet-shape review after the user found the latest iPad sheets still
+  a little too wide and not tall enough retuned only the iPad presentation
+  helpers: large forms now target `min(referenceWidth * 0.62, 700)` by
+  `min(referenceHeight * 0.82, 900)`, compact forms target
+  `min(referenceWidth * 0.56, 620)` by `min(referenceHeight * 0.70, 780)`, and
+  the iPhone/non-iPad branch remains unchanged. The same live pass found that
+  Server and Providers needed the landscape split too, not only Agent: fixed by
+  adding a shared `SettingsAdaptiveLayout`, splitting Providers into model
+  provider/service columns, and balancing Server so Diagnostics sits with
+  paired-server/transcription controls while Updates owns the second column.
+  Focused verification passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/SettingsPageContainerTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  with 9 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_18-01-42--0700.xcresult`.
+  Manual Computer Use proof used iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`; when Simulator accessibility became
+  inaccessible, Simulator was force-quit and the same UDID was booted/reopened
+  before continuing. Final landscape screenshots:
+  `/tmp/tron-psg-evidence/ipad-settings-grid-narrow-tall-balanced-final.png`,
+  `/tmp/tron-psg-evidence/ipd7-server-settings-landscape-balanced-final.png`,
+  `/tmp/tron-psg-evidence/ipd7-providers-settings-landscape-balanced-final.png`,
+  and `/tmp/tron-psg-evidence/ipad-agent-control-compact-narrow-tall-balanced-final.png`.
+  Provider credential values were not copied into this scorecard.
 - Additional IPD-5 capability-detail proof opened direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` on the iPad Simulator and
   tapped completed capability invocation `call_eiaqjnjn` for the read-only

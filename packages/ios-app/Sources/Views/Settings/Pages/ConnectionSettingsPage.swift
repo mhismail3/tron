@@ -22,12 +22,10 @@ struct ConnectionSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(title: "Servers") {
-            serverInfoCard
-            pairedServersSection
-            if settingsState.isLoaded && !activeServerUnavailable {
-                loadedServerBackedSettingsSections
-            } else if !activeServerUnavailable {
-                serverBackedSettingsLoadingOrUnavailableSection
+            if SettingsAdaptiveLayout.usesIPadLandscapeLayout {
+                landscapeContent
+            } else {
+                stackedContent
             }
         }
         .alert("Forget this server?", isPresented: removalAlertBinding, presenting: serverPendingRemoval) { server in
@@ -44,6 +42,50 @@ struct ConnectionSettingsPage: View {
             )
         ) {
             Button("OK", role: .cancel) { checkResultMessage = nil }
+        }
+    }
+
+    @ViewBuilder
+    private var stackedContent: some View {
+        serverInfoCard
+        pairedServersSection
+        serverBackedContent
+    }
+
+    private var landscapeContent: some View {
+        VStack(spacing: 16) {
+            serverInfoCard
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(spacing: 16) {
+                    pairedServersSection
+                        .fixedSize(horizontal: false, vertical: true)
+                    if settingsState.isLoaded && !activeServerUnavailable {
+                        transcriptionSection
+                            .fixedSize(horizontal: false, vertical: true)
+                        diagnosticsSection
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+
+                VStack(spacing: 16) {
+                    if settingsState.isLoaded && !activeServerUnavailable {
+                        updatesSection
+                    } else if !activeServerUnavailable {
+                        serverBackedSettingsLoadingOrUnavailableSection
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var serverBackedContent: some View {
+        if settingsState.isLoaded && !activeServerUnavailable {
+            loadedServerBackedSettingsSections
+        } else if !activeServerUnavailable {
+            serverBackedSettingsLoadingOrUnavailableSection
         }
     }
 

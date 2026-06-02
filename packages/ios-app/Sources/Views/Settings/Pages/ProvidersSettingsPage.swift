@@ -17,31 +17,10 @@ struct ProvidersSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(title: Self.title) {
-            providersInfoCard
-
-            ForEach(ProviderInfo.modelProviders) { provider in
-                ModelProviderSection(
-                    provider: provider,
-                    providerAuth: authState?.providers[provider.id],
-                    onSetActive: { credential in await setActive(provider: provider.id, credential: credential) },
-                    onRemoveAccount: { label in await removeAccount(provider: provider.id, label: label) },
-                    onRemoveApiKey: { label in await removeApiKey(provider: provider.id, label: label) },
-                    onAddApiKey: { label, key in await addApiKey(provider: provider.id, label: label, key: key) },
-                    onOAuthLogin: { oauthProvider = OAuthProvider.from(provider.id) },
-                    onSaveProvider: { params in await saveProvider(params) },
-                    onClear: { await clearProvider(provider.id) }
-                )
-            }
-
-            ProvidersServicesSectionHeader()
-
-            ForEach(ProviderInfo.services) { service in
-                ProviderServiceCard(
-                    service: service,
-                    serviceAuth: authState?.services[service.id],
-                    onSave: { params in await saveProvider(params) },
-                    onClear: { await clearService(service.id) }
-                )
+            if SettingsAdaptiveLayout.usesIPadLandscapeLayout {
+                landscapeContent
+            } else {
+                stackedContent
             }
         }
         .sheet(item: $oauthProvider) { provider in
@@ -51,6 +30,72 @@ struct ProvidersSettingsPage: View {
         }
         .task(id: dependencies.authVersion) { await loadAuthState() }
         .tronErrorAlert(message: $error)
+    }
+
+    @ViewBuilder
+    private var stackedContent: some View {
+        providersInfoCard
+
+        ForEach(ProviderInfo.modelProviders) { provider in
+            modelProviderSection(provider)
+        }
+
+        ProvidersServicesSectionHeader()
+
+        ForEach(ProviderInfo.services) { service in
+            providerServiceCard(service)
+        }
+    }
+
+    private var landscapeContent: some View {
+        VStack(spacing: 16) {
+            providersInfoCard
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(ProviderInfo.modelProviders.prefix(3))) { provider in
+                        modelProviderSection(provider)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(ProviderInfo.modelProviders.dropFirst(3))) { provider in
+                        modelProviderSection(provider)
+                    }
+
+                    ProvidersServicesSectionHeader()
+
+                    ForEach(ProviderInfo.services) { service in
+                        providerServiceCard(service)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+        }
+    }
+
+    private func modelProviderSection(_ provider: ProviderInfo) -> some View {
+        ModelProviderSection(
+            provider: provider,
+            providerAuth: authState?.providers[provider.id],
+            onSetActive: { credential in await setActive(provider: provider.id, credential: credential) },
+            onRemoveAccount: { label in await removeAccount(provider: provider.id, label: label) },
+            onRemoveApiKey: { label in await removeApiKey(provider: provider.id, label: label) },
+            onAddApiKey: { label, key in await addApiKey(provider: provider.id, label: label, key: key) },
+            onOAuthLogin: { oauthProvider = OAuthProvider.from(provider.id) },
+            onSaveProvider: { params in await saveProvider(params) },
+            onClear: { await clearProvider(provider.id) }
+        )
+    }
+
+    private func providerServiceCard(_ service: ProviderInfo) -> some View {
+        ProviderServiceCard(
+            service: service,
+            serviceAuth: authState?.services[service.id],
+            onSave: { params in await saveProvider(params) },
+            onClear: { await clearService(service.id) }
+        )
     }
 
     private var providersInfoCard: some View {

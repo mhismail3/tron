@@ -14,6 +14,17 @@ enum SettingsLabels {
     static let updates = "Updates"
 }
 
+enum SettingsAdaptiveLayout {
+    @MainActor
+    static var usesIPadLandscapeLayout: Bool {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+        let screenBounds = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
+            .first ?? .zero
+        return screenBounds.width > screenBounds.height
+    }
+}
+
 enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
     case server
     case providers
