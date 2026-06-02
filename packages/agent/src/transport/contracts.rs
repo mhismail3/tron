@@ -57,7 +57,7 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
         )
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .request_schema(json!({"additionalProperties":false,"properties":{"expectedFunctionRevision":{"type":"integer"},"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"targetVisibility":{"type":"string"},"workspaceId":{"type":"string"}},"required":["functionId","targetVisibility","expectedFunctionRevision","idempotencyKey"],"type":"object"}))
-        .response_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"newVisibility":{"type":"string"},"promoted":{"type":"boolean"}},"required":["promoted","functionId","newVisibility"],"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"catalogRevision":{"type":"integer"},"functionId":{"type":"string"},"revision":{"type":"integer"},"visibility":{"enum":["workspace","system"],"type":"string"}},"required":["functionId","revision","visibility","catalogRevision"],"type":"object"}))
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .compensation(crate::engine::CompensationContract::new(
             crate::engine::CompensationKind::InverseCommandAvailable,
@@ -208,5 +208,22 @@ mod tests {
             trigger_type.allowed_delivery_modes,
             vec![DeliveryMode::Sync, DeliveryMode::Enqueue]
         );
+    }
+
+    #[test]
+    fn promote_transport_response_schema_matches_engine_promote_result() {
+        let promote = public_engine_transport_specs()
+            .expect("public specs")
+            .into_iter()
+            .find(|spec| spec.operation_key.as_str() == "promote")
+            .expect("promote spec");
+        let schema = promote.response_schema.expect("promote response schema");
+
+        assert_eq!(
+            schema["required"],
+            json!(["functionId", "revision", "visibility", "catalogRevision"])
+        );
+        assert!(schema["properties"]["newVisibility"].is_null());
+        assert!(schema["properties"]["promoted"].is_null());
     }
 }

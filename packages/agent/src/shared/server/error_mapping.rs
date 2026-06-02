@@ -56,6 +56,51 @@ pub(crate) fn engine_error_to_capability_error(error: EngineError) -> Capability
                 "reason": reason,
             })),
         },
+        EngineError::StaleFunctionRevision {
+            function_id,
+            expected,
+            actual,
+        } => CapabilityError::Custom {
+            code: codes::STALE_FUNCTION_REVISION.to_owned(),
+            message: format!(
+                "stale function revision for {function_id}: expected {expected}, actual {actual}"
+            ),
+            details: Some(serde_json::json!({
+                "functionId": function_id,
+                "expected": expected,
+                "actual": actual,
+            })),
+        },
+        EngineError::OwnerMismatch {
+            kind,
+            id,
+            owner,
+            attempted_owner,
+        } => CapabilityError::Custom {
+            code: codes::ENGINE_OWNER_MISMATCH.to_owned(),
+            message: format!("{kind} {id} is owned by {owner}, not {attempted_owner}"),
+            details: Some(serde_json::json!({
+                "kind": kind,
+                "id": id,
+                "owner": owner,
+                "attemptedOwner": attempted_owner,
+            })),
+        },
+        EngineError::InvalidVisibilityPromotion {
+            function_id,
+            target,
+            reason,
+        } => CapabilityError::Custom {
+            code: codes::INVALID_VISIBILITY_PROMOTION.to_owned(),
+            message: format!(
+                "invalid visibility promotion for {function_id} to {target}: {reason}"
+            ),
+            details: Some(serde_json::json!({
+                "functionId": function_id,
+                "target": target,
+                "reason": reason,
+            })),
+        },
         EngineError::NotFound { id, .. } => CapabilityError::NotFound {
             code: codes::NOT_FOUND.to_owned(),
             message: format!("Engine function '{id}' not found"),
@@ -392,13 +437,70 @@ mod tests {
     //! compile-error the exhaustive match raises.
 
     use super::{
-        map_auth_error, map_cron_error, map_event_store_error, map_import_error, map_worktree_error,
+        engine_error_to_capability_error, map_auth_error, map_cron_error, map_event_store_error,
+        map_import_error, map_worktree_error,
     };
     use crate::domains::auth::provider_credentials::errors::AuthError as A;
     use crate::domains::cron::errors::CronError as C;
     use crate::domains::import::errors::ImportError as I;
     use crate::domains::session::event_store::errors::EventStoreError as E;
     use crate::domains::worktree::WorktreeError as W;
+    use crate::engine::EngineError;
+
+    #[test]
+    fn engine_stale_function_revision_is_typed() {
+        let mapped = engine_error_to_capability_error(EngineError::StaleFunctionRevision {
+            function_id: "demo::run".to_owned(),
+            expected: 4,
+            actual: 5,
+        });
+        assert_eq!(mapped.code(), "STALE_FUNCTION_REVISION");
+        assert!(
+            mapped.to_string().contains("stale function revision"),
+            "message should be actionable; got {mapped}"
+        );
+        let details = mapped.details().expect("stale revision details");
+        assert_eq!(details["functionId"], "demo::run");
+        assert_eq!(details["expected"], 4);
+        assert_eq!(details["actual"], 5);
+    }
+
+    #[test]
+    fn engine_owner_mismatch_is_typed() {
+        let mapped = engine_error_to_capability_error(EngineError::OwnerMismatch {
+            kind: "function",
+            id: "demo::run".to_owned(),
+            owner: "worker-a".to_owned(),
+            attempted_owner: "worker-b".to_owned(),
+        });
+        assert_eq!(mapped.code(), "ENGINE_OWNER_MISMATCH");
+        let details = mapped.details().expect("owner mismatch details");
+        assert_eq!(details["kind"], "function");
+        assert_eq!(details["id"], "demo::run");
+        assert_eq!(details["owner"], "worker-a");
+        assert_eq!(details["attemptedOwner"], "worker-b");
+    }
+
+    #[test]
+    fn engine_invalid_visibility_promotion_is_typed() {
+        let mapped = engine_error_to_capability_error(EngineError::InvalidVisibilityPromotion {
+            function_id: "demo::run".to_owned(),
+            target: "session".to_owned(),
+            reason: "only workspace and system promotion are supported".to_owned(),
+        });
+        assert_eq!(mapped.code(), "INVALID_VISIBILITY_PROMOTION");
+        assert!(
+            mapped.to_string().contains("invalid visibility promotion"),
+            "message should be actionable; got {mapped}"
+        );
+        let details = mapped.details().expect("visibility promotion details");
+        assert_eq!(details["functionId"], "demo::run");
+        assert_eq!(details["target"], "session");
+        assert_eq!(
+            details["reason"],
+            "only workspace and system promotion are supported"
+        );
+    }
 
     #[test]
     fn not_found_carries_inner_session_id() {

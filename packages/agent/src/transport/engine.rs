@@ -11,6 +11,9 @@
 //! agent actor and still use server-owned execution policy. The transport
 //! derives policy scopes and metadata from the active profile and rejects
 //! client-authored capability policy context.
+//! Public transport authority scopes are assembled into a deduped causal scope
+//! list so trace/ledger evidence reflects the authority set, not construction
+//! order artifacts.
 
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -107,18 +110,17 @@ pub fn build_engine_transport_request(
         &input.context,
     )?;
     if spec.operation_key.as_str() == "promote" {
-        causal_context = causal_context
-            .with_scope("engine.promote.workspace")
-            .with_scope("engine.promote.system");
+        push_scope_once(&mut causal_context, "engine.promote.workspace".to_owned());
+        push_scope_once(&mut causal_context, "engine.promote.system".to_owned());
     }
     if spec.operation_key.as_str() == "invoke" {
         for scope in target_authority_scopes_for_engine_invoke(&input.params_payload) {
-            causal_context = causal_context.with_scope(scope);
+            push_scope_once(&mut causal_context, scope);
         }
     }
     for scope in &input.context.authority_scopes {
         if !scope.trim().is_empty() {
-            causal_context = causal_context.with_scope(scope.clone());
+            push_scope_once(&mut causal_context, scope.clone());
         }
     }
     for (key, value) in &input.context.runtime_metadata {

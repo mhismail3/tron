@@ -99,7 +99,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
 
     for required in [
         "# Hyper Modular Agent Harness Execution Scorecard Portfolio",
-        "Current score: **24/100**",
+        "Current score: **26/100**",
         "Status: **running**",
         "## Source-Derived Requirements",
         "The agent and the human use the same operation to extend the same system.",
@@ -151,8 +151,13 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "`observability::trace_get` with full payloads shows exactly three functions",
         "`engine::invoke`, `capability::execute`, and the generated",
         "capability_self_modifying_lifecycle_invokes_session_worker_through_execute",
-        "Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6:",
-        "| HMH-B7 | Promotion is governed |",
+        "| HMH-B7 | Promotion is governed | 10 | passed_after_fix |",
+        "HMH-B7 evidence, 2026-06-02:",
+        "`expectedFunctionRevision` returns `STALE_FUNCTION_REVISION`",
+        "clean authority scopes",
+        "capability_self_modifying_lifecycle_governs_session_worker_promotion",
+        "Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7:",
+        "| HMH-B8 | Cleanup and stale calls fail closed |",
         "| HMH-B9 | Agent explains the evidence |",
         "## HMH-C Scorecard: Harness Knowledge And Context Compiler",
         "| HMH-C1 | Primer contains the north-star recipe |",
@@ -176,7 +181,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "## Static Gates",
         "## Final Closeout Criteria",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_governs_session_worker_promotion -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_cleans_up_session_worker_and_stale_calls_fail_closed -- --nocapture",
     ] {
         assert!(
             portfolio.contains(required),
@@ -196,8 +201,10 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "| HMH-B4 | Live catalog update and inspection work | 10 | pending |",
         "| HMH-B5 | Conformance/test evidence is resource-backed | 10 | pending |",
         "| HMH-B6 | Invocation uses the tiny harness | 15 | pending |",
+        "| HMH-B7 | Promotion is governed | 10 | pending |",
         "Current score: **19/100**",
         "Current score: **21/100**",
+        "Current score: **24/100**",
         "Current score: **100/100**",
         "Status: **completed**",
     ] {

@@ -1283,6 +1283,248 @@ async fn capability_self_modifying_lifecycle_invokes_session_worker_through_exec
     server.shutdown().shutdown();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn capability_self_modifying_lifecycle_governs_session_worker_promotion() {
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let mut ws = connect(&url).await;
+    let fixture = spawn_hmh_session_worker_through_execute(&mut ws, port, "promote", 3251).await;
+    let session_id = fixture.session_id.clone();
+    let workspace_id = "hmh-b-promote-workspace";
+    let promotion_key = "hmh-b7-promote-session-worker";
+    let initial_catalog_revision = fixture.output()["catalogRevision"]
+        .as_u64()
+        .expect("spawn output records catalog revision");
+
+    let missing_key = raw_rpc_call_with_interleaved_events(
+        &mut ws,
+        3253,
+        "promote",
+        Some(json!({
+            "functionId": fixture.function_id,
+            "targetVisibility": "workspace",
+            "expectedFunctionRevision": 1,
+            "workspaceId": workspace_id,
+            "context": {
+                "sessionId": session_id,
+                "workspaceId": workspace_id
+            }
+        })),
+    )
+    .await
+    .0;
+    assert_eq!(missing_key["ok"], false);
+    assert!(
+        missing_key["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("idempotencyKey")),
+        "public promote must require explicit idempotency: {missing_key}"
+    );
+
+    let stale = raw_rpc_call_with_interleaved_events(
+        &mut ws,
+        3254,
+        "promote",
+        Some(json!({
+            "functionId": fixture.function_id,
+            "targetVisibility": "workspace",
+            "expectedFunctionRevision": 2,
+            "workspaceId": workspace_id,
+            "idempotencyKey": "hmh-b7-stale-promote-session-worker",
+            "context": {
+                "sessionId": session_id,
+                "workspaceId": workspace_id
+            }
+        })),
+    )
+    .await
+    .0;
+    let stale_response = unwrap_engine_invoke_response(stale);
+    assert_eq!(stale_response["success"], false);
+    assert!(
+        stale_response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("stale function revision")),
+        "promotion must reject stale expectedFunctionRevision: {stale_response}"
+    );
+
+    let promoted_raw = raw_rpc_call_with_interleaved_events(
+        &mut ws,
+        3255,
+        "promote",
+        Some(json!({
+            "functionId": fixture.function_id,
+            "targetVisibility": "workspace",
+            "expectedFunctionRevision": 1,
+            "workspaceId": workspace_id,
+            "idempotencyKey": promotion_key,
+            "context": {
+                "sessionId": session_id,
+                "workspaceId": workspace_id
+            }
+        })),
+    )
+    .await
+    .0;
+    let trace_id = promoted_raw["traceId"]
+        .as_str()
+        .expect("public promote response records trace id")
+        .to_owned();
+    let promoted = unwrap_engine_invoke_response(promoted_raw);
+    assert_eq!(
+        promoted["success"], true,
+        "public session worker promotion failed: {promoted}"
+    );
+    let promotion_result = &promoted["result"];
+    assert_eq!(promotion_result["functionId"], fixture.function_id);
+    assert_eq!(promotion_result["visibility"], "workspace");
+    assert_eq!(promotion_result["revision"], 2);
+    let promoted_catalog_revision = promotion_result["catalogRevision"]
+        .as_u64()
+        .expect("promotion returns catalog revision");
+    assert!(
+        promoted_catalog_revision > initial_catalog_revision,
+        "promotion should advance catalog revision: {promotion_result}"
+    );
+
+    let replay_raw = raw_rpc_call_with_interleaved_events(
+        &mut ws,
+        3256,
+        "promote",
+        Some(json!({
+            "functionId": fixture.function_id,
+            "targetVisibility": "workspace",
+            "expectedFunctionRevision": 1,
+            "workspaceId": workspace_id,
+            "idempotencyKey": promotion_key,
+            "context": {
+                "sessionId": session_id,
+                "workspaceId": workspace_id
+            }
+        })),
+    )
+    .await
+    .0;
+    let replay = unwrap_engine_invoke_response(replay_raw);
+    assert_eq!(replay["success"], true);
+    assert_eq!(
+        replay["result"], *promotion_result,
+        "duplicate promotion key should replay the original result"
+    );
+
+    let watch_response = rpc_call(
+        &mut ws,
+        3257,
+        "capability::execute",
+        Some(json!({
+            "sessionId": session_id,
+            "workspaceId": workspace_id,
+            "target": "catalog::watch_snapshot",
+            "arguments": {
+                "afterRevision": initial_catalog_revision,
+                "limit": 10,
+                "classes": ["visibility"],
+                "kinds": ["visibility_changed"],
+                "ownerWorker": fixture.worker_id
+            },
+            "reason": "HMH-B7 catalog promotion evidence"
+        })),
+    )
+    .await;
+    assert_eq!(
+        watch_response["success"], true,
+        "catalog watch after promotion failed: {watch_response}"
+    );
+    let watch_output = &watch_response["result"]["details"]["output"];
+    let changes = watch_output["changes"]
+        .as_array()
+        .expect("catalog watch returns changes");
+    let promotion_change = changes
+        .iter()
+        .find(|change| change["subjectId"] == fixture.function_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "catalog watch changes should include promotion for {}: {watch_output}",
+                fixture.function_id
+            )
+        });
+    assert_eq!(promotion_change["kind"], "visibility_changed");
+    assert_eq!(promotion_change["subjectKind"], "function");
+    assert_eq!(promotion_change["class"], "visibility");
+    assert_eq!(promotion_change["visibility"], "workspace");
+    assert_eq!(promotion_change["workspaceId"], workspace_id);
+    assert_eq!(promotion_change["sessionId"], Value::Null);
+    assert_eq!(promotion_change["ownerWorker"], fixture.worker_id);
+    assert_eq!(
+        promotion_change["afterRevision"], promoted_catalog_revision,
+        "catalog change should name the promotion revision"
+    );
+    let snapshot_functions = watch_output["snapshot"]["functions"]
+        .as_array()
+        .expect("catalog snapshot returns functions");
+    let promoted_function = snapshot_functions
+        .iter()
+        .find(|function| function["id"] == fixture.function_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "catalog snapshot should include promoted function {}: {watch_output}",
+                fixture.function_id
+            )
+        });
+    assert_eq!(promoted_function["visibility"], "Workspace");
+    assert_eq!(promoted_function["revision"], 2);
+    assert_eq!(
+        promoted_function["provenance"]["workspace_id"],
+        workspace_id
+    );
+    assert_eq!(promoted_function["provenance"]["session_id"], Value::Null);
+
+    let trace = direct_engine_invoke_with_session(
+        &server,
+        "observability::trace_get",
+        json!({
+            "traceId": trace_id,
+            "includeFullPayloads": true
+        }),
+        "hmh-b7-observe-promotion-trace",
+        &["observability.read"],
+        &session_id,
+    )
+    .await;
+    let invocations = trace["invocations"]
+        .as_array()
+        .expect("trace_get returns invocation rows");
+    let promote_record = invocations
+        .iter()
+        .find(|record| record["functionId"] == "engine::promote")
+        .unwrap_or_else(|| panic!("trace should include engine::promote record: {trace}"));
+    assert_eq!(promote_record["actorKind"], "User");
+    assert_eq!(promote_record["triggerId"], "engine_ws:promote");
+    assert_eq!(promote_record["sessionId"], session_id);
+    assert_eq!(promote_record["workspaceId"], workspace_id);
+    assert_eq!(promote_record["idempotencyKey"], promotion_key);
+    assert_eq!(promote_record["idempotencyScope"]["kind"], "session");
+    assert_eq!(promote_record["idempotencyScope"]["value"], session_id);
+    assert_eq!(
+        promote_record["authorityScopes"],
+        json!(["engine.promote.workspace", "engine.promote.system"])
+    );
+    assert_eq!(promote_record["succeeded"], true);
+    assert_eq!(promote_record["result"], *promotion_result);
+
+    let stopped = stop_hmh_session_worker(&server, &fixture, "hmh-b7-stop-session-worker").await;
+    assert_eq!(stopped["stopped"], true);
+
+    server.shutdown().shutdown();
+}
+
 #[tokio::test]
 async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     let (url, server) = boot_server_without_deps().await;

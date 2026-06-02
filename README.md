@@ -810,6 +810,11 @@ Correlation ids are never command ids or idempotency keys. Stream clients should
 persist delivered cursors locally and ACK the latest delivered cursor per
 subscription, not every event in a burst; ACK responses use normal engine
 backpressure so catch-up traffic does not become a socket-fatal overload.
+Public `promote` is a user-owned `engine::promote` path, not a client-side
+catalog edit: it requires `expectedFunctionRevision`, a non-empty
+`idempotencyKey`, workspace/system authority, and workspace context for
+workspace promotion. Stale revision, owner mismatch, and invalid visibility
+promotion failures return typed public error codes with structured details.
 
 `/engine/workers` is the local-first worker protocol. A worker performs a
 versioned hello with `WorkerIdentity`, auth policy, registration mode, visibility
@@ -887,7 +892,8 @@ with scoped `/engine/workers` environment plus a worker token carrying
 expected registration, and returns the worker id, derived grant id, registered
 functions, catalog revision, visibility, and process metadata without a
 separate approval prompt. Session visibility is the default; workspace/system
-promotion is still only `engine::promote`. `sandbox::list_spawned_workers`,
+promotion is still only governed `engine::promote`, with revision/idempotency
+guards and catalog-watch evidence. `sandbox::list_spawned_workers`,
 `sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the
 local process lifecycle; stop kills the process, unregisters volatile catalog
 entries through `worker::disconnect`, and publishes `sandbox.lifecycle`.

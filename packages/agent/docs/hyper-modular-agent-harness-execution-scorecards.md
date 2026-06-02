@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **24/100**
+Current score: **26/100**
 
 Status: **running**
 
@@ -281,7 +281,7 @@ Out of scope: remote worker hosting or unscoped global package installation.
 | HMH-B4 | Live catalog update and inspection work | 10 | passed | Catalog watch or revision delta shows the new function; `execute` discovery/inspect returns schema, health, provenance, trust tier, conformance state, authority, and visibility. | Fix registry/inspection before invocation. |
 | HMH-B5 | Conformance/test evidence is resource-backed | 10 | passed_after_fix | `module::run_conformance` or capability conformance records pass/fail evidence resources linked to worker/function ids. | Do not promote without evidence resource refs. |
 | HMH-B6 | Invocation uses the tiny harness | 15 | passed | Provider-visible `execute` invokes the new function; child invocation id, trace id, idempotency key, grant id, target revision, result, and ledger row are inspectable. | Stop if the provider receives a direct worker tool or hidden transport path. |
-| HMH-B7 | Promotion is governed | 10 | pending | Workspace/system promotion requires expected revision, explicit idempotency, authority, approval if needed, and catalog-change evidence. | Stop if promotion is implicit, global by default, or client-owned. |
+| HMH-B7 | Promotion is governed | 10 | passed_after_fix | Workspace/system promotion requires expected revision, explicit idempotency, authority, approval if needed, and catalog-change evidence. | Stop if promotion is implicit, global by default, or client-owned. |
 | HMH-B8 | Cleanup and stale calls fail closed | 10 | pending | Disconnect/stop unregisters volatile functions or marks durable workers unhealthy; stale invocation fails closed; no UI cache can keep it callable. | Fix cleanup before broader module work. |
 | HMH-B9 | Agent explains the evidence | 10 | pending | Agent answer cites live capability ids, resource refs, trace/ledger ids, and next maintenance actions; no stale README-only explanation. | Fix context/evidence projection if explanation is vague. |
 
@@ -422,13 +422,41 @@ HMH-B6 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_invokes_session_worker_through_execute -- --nocapture`.
 
-Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6:
+HMH-B7 evidence, 2026-06-02:
+
+- Initial live proof in
+  `capability_self_modifying_lifecycle_governs_session_worker_promotion`
+  found two promotion evidence gaps. First, stale
+  `expectedFunctionRevision` rejection was correct in the engine but collapsed
+  to `INTERNAL_ERROR` at the public transport boundary. Second, public promote
+  recorded duplicate `engine.promote.workspace` authority scopes.
+- The fixes keep ownership in the existing engine substrate:
+  `engine_error_to_capability_error` now maps stale function revision, engine
+  owner mismatch, and invalid visibility promotion to typed public errors with
+  structured details, and `transport::engine` dedupes authority scopes while
+  building public transport causal context.
+- The passing live proof spawns a session-generated worker, proves missing
+  public `promote.idempotencyKey` is rejected, proves stale
+  `expectedFunctionRevision` returns `STALE_FUNCTION_REVISION`, promotes the
+  function to workspace visibility with explicit idempotency and workspace
+  context, and verifies duplicate promote calls replay the original result.
+- `catalog::watch_snapshot` then exposes the ledger-backed
+  `visibility_changed` catalog change and the promoted workspace-visible
+  function revision/provenance. `observability::trace_get` shows
+  `engine::promote` ran through `engine_ws:promote` as a user action with the
+  explicit idempotency key, session/workspace scope, clean authority scopes,
+  successful result, and the promotion trace id.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_governs_session_worker_promotion -- --nocapture`.
+
+Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7:
 
 - HMH-B1 through HMH-B3 prove model-visible instruction, guide sufficiency, and
   scoped session worker creation only. HMH-B4 adds live catalog and inspection
   proof. HMH-B5 adds resource-backed conformance evidence. HMH-B6 adds live
-  invocation proof through the tiny harness. HMH-B remains running until
-  promotion, cleanup, and explanation rows pass.
+  invocation proof through the tiny harness. HMH-B7 adds governed promotion
+  proof through public `engine::promote`. HMH-B remains running until cleanup
+  and explanation rows pass.
 - Process note: Cargo accepts one test-name filter per invocation; run multiple
   focused filters sequentially.
 
@@ -632,11 +660,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B1, HMH-B2, HMH-B3, HMH-B4, HMH-B5, and HMH-B6 are closed. Continue
-with HMH-B7: prove governed session worker promotion preserves expected
-revision, explicit idempotency, authority, approval, and catalog-change
-evidence.
+HMH-A, HMH-B1, HMH-B2, HMH-B3, HMH-B4, HMH-B5, HMH-B6, and HMH-B7 are closed.
+Continue with HMH-B8: prove cleanup unregisters or marks stale session-worker
+functions unhealthy and stale calls fail closed.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_governs_session_worker_promotion -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_cleans_up_session_worker_and_stale_calls_fail_closed -- --nocapture
 ```

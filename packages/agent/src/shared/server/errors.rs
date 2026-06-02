@@ -30,6 +30,12 @@ pub const GIT_ERROR: &str = "GIT_ERROR";
 pub const SESSION_BUSY: &str = "SESSION_BUSY";
 /// Engine idempotency key replay/conflict could not be accepted.
 pub const IDEMPOTENCY_CONFLICT: &str = "IDEMPOTENCY_CONFLICT";
+/// Engine function revision CAS guard failed.
+pub const STALE_FUNCTION_REVISION: &str = "STALE_FUNCTION_REVISION";
+/// Engine catalog mutation targeted an item owned by a different worker.
+pub const ENGINE_OWNER_MISMATCH: &str = "ENGINE_OWNER_MISMATCH";
+/// Engine visibility promotion request is not allowed.
+pub const INVALID_VISIBILITY_PROMOTION: &str = "INVALID_VISIBILITY_PROMOTION";
 
 // ── Typed git workflow errors ───────────────────────────────────────
 //
