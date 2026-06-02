@@ -792,6 +792,27 @@ Owner taxonomy: `server_contract`, `client_projection`,
   source-control, fork, reset, archive, send, voice-record, or git mutation was
   invoked. IPD-9 remains running for broader traversal/pointer coverage outside
   this Agent Control card fix.
+- 2026-06-01 IPD-5 generated-UI read-only proof used iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle `com.tron.mobile.beta`, with
+  Engine Console opened to Substrate. Screenshot
+  `/tmp/tron-psg-evidence/ipd5-engine-console-generated-surfaces-empty-ipad.png`
+  shows the read-only `Generated Surfaces` card with no actionable live rows in
+  the current control projection. Direct DB/API evidence
+  `/tmp/tron-psg-evidence/ipd5-generated-ui-readonly-existing-surfaces.json`
+  inspected four active fixed-catalog `ui_surface` resources and validated them
+  through successful read-only `ui::inspect_surface`/`ui::validate_surface`
+  invocations
+  `019e86aa-c6c1-7182-800e-3b913f082acd`,
+  `019e86aa-c6c4-7210-84e6-15d31d7b0f3c`,
+  `019e86aa-c6c5-7180-9cc6-aed1e9d957bf`,
+  `019e86aa-c6c8-7dc3-bdf2-5e923065abff`,
+  `019e86aa-c6c9-7891-9376-570e2bd929b3`,
+  `019e86aa-c6cb-7960-9d14-88a3abc36f59`,
+  `019e86aa-c6cd-7ec3-8f6b-6c8147884b27`, and
+  `019e86aa-c6cf-7a51-843e-06d4f372e580`. The stored actions target
+  `resource::create`; validation returned `unauthorized` with `grant_mismatch`,
+  so the proof covers read-only inspect/validate behavior without invoking
+  `ui::submit_action`, `ui::refresh_surface`, or any approval decision.
 
 ## Verification Plan
 
@@ -853,7 +874,9 @@ UDID before continuing.
   History and fork controls have live iPad proof without invoking fork
   execution; IPD-8 load-earlier pagination, sidebar
   selection, back/sidebar toggle, and existing fork lineage now have live iPad
-  proof; IPD-9 input focus, prompt Tab no-draft behavior, and Agent
+  proof; IPD-5 generated-UI read-only inspect/validate has live DB/API and iPad
+  Engine Console proof without invoking submit/refresh; IPD-9 input focus,
+  prompt Tab no-draft behavior, and Agent
   protected-branch Tab no-submit behavior have live proof, with pointer and
   broader keyboard traversal still open.
   Remaining IPD rows must still close or be explicitly successor-owned before

@@ -930,12 +930,36 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   The pass invoked no approval, source-control, fork, reset, archive, send,
   voice-record, or git mutation. IPD-9 stays running for remaining broader
   pointer and hardware-keyboard coverage outside Agent Control cards.
+- Additional IPD-5 generated-UI read-only proof avoided action-time submit and
+  refresh controls. Engine Console was opened on iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle `com.tron.mobile.beta`, and
+  switched to Substrate; screenshot
+  `/tmp/tron-psg-evidence/ipd5-engine-console-generated-surfaces-empty-ipad.png`
+  shows the live read-only `Generated Surfaces` card reporting no actionable
+  surface rows in the current control projection. Direct DB/API evidence then
+  inspected the four existing active `ui_surface` resources without creating,
+  refreshing, or submitting any surface:
+  `/tmp/tron-psg-evidence/ipd5-generated-ui-readonly-existing-surfaces.json`.
+  The evidence records fixed catalog `tron.ui.catalog.core.v1` revision `1`,
+  stored `submit-test` actions targeting `resource::create`, successful
+  read-only `ui::inspect_surface` and `ui::validate_surface` invocations
+  `019e86aa-c6c1-7182-800e-3b913f082acd`,
+  `019e86aa-c6c4-7210-84e6-15d31d7b0f3c`,
+  `019e86aa-c6c5-7180-9cc6-aed1e9d957bf`,
+  `019e86aa-c6c8-7dc3-bdf2-5e923065abff`,
+  `019e86aa-c6c9-7891-9376-570e2bd929b3`,
+  `019e86aa-c6cb-7960-9d14-88a3abc36f59`,
+  `019e86aa-c6cd-7ec3-8f6b-6c8147884b27`, and
+  `019e86aa-c6cf-7a51-843e-06d4f372e580`, all succeeded with no session id
+  and validation state `unauthorized`/diagnostic `grant_mismatch`. The proof
+  invoked no `ui::submit_action`, no `ui::refresh_surface`, and no approval
+  decision.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2
 approval/reconnect/deep-link paths,
 IPD-3 manual voice-note sheet record/cancel/submit states, IPD-5
-approval decision flows and generated UI details, full
+approval decision flows and action-time generated UI submit/refresh, full
 IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-8
 action-time-confirmed fork execution, IPD-9
