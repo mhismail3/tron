@@ -106,7 +106,6 @@ struct PluginSourcesPage: View {
             AddPluginSourceSheet(onAdd: { params in
                 await addServer(params)
             })
-            .adaptivePresentationDetents([.medium], ipadSizing: .largeForm)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mcpStatusChanged)) { _ in
             Task { await loadStatus() }
@@ -631,6 +630,7 @@ private struct AddPluginSourceSheet: View {
                 }
             }
         }
+        .adaptivePresentationDetents([.medium], ipadSizing: .largeForm)
     }
 
     private func addServer() {

@@ -958,6 +958,15 @@ UDID before continuing.
   then passed after both reusable sheet bodies owned the helper directly and
   the duplicate presenter-side modifiers were removed:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-48-59--0700.xcresult`.
+  A scoped reusable-sheet guard then caught the same presenter-owned sizing
+  pattern in `CapabilityInspectionSheet` and private `AddPluginSourceSheet`:
+  red xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-53-06--0700.xcresult`.
+  Moving those helpers into the sheet bodies passed 8 focused
+  `IPadSheetPresentationTests` cases in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-55-02--0700.xcresult`,
+  and the updated Engine Console source guard passed 14 Swift Testing checks in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-54-23--0700.xcresult`.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

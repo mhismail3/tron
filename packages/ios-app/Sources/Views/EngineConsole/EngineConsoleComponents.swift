@@ -837,6 +837,7 @@ struct CapabilityInspectionSheet: View {
                 }
             }
         }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .tint(tint)
     }
 

@@ -1057,6 +1057,18 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   the duplicate presenter-side modifiers were removed, and the focused iPad
   guard passed 7 XCTest cases in xcresult
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-48-59--0700.xcresult`.
+- The same reusable-sheet audit added a scoped guard that scans from each sheet
+  struct anchor rather than accepting presenter-side helper calls elsewhere in
+  the file. It first failed on `CapabilityInspectionSheet` and private
+  `AddPluginSourceSheet` in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-53-06--0700.xcresult`.
+  Both sheet bodies now own their adaptive helpers directly, and
+  `EngineConsoleView`/`PluginSourcesPage` no longer wrap those reusable views
+  at presentation sites. Green evidence: `IPadSheetPresentationTests` passed 8
+  XCTest cases in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-55-02--0700.xcresult`,
+  and suite-level `SourceGuardTests` passed 14 Swift Testing checks in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-54-23--0700.xcresult`.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2

@@ -125,6 +125,44 @@ final class IPadSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testReusableSheetViewsOwnCanonicalIPadSizing() throws {
+        let expected: [(path: [String], anchor: String, fragment: String)] = [
+            (
+                ["Sources", "Views", "Process", "ProcessListSheet.swift"],
+                "struct ProcessListSheet: View",
+                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
+            ),
+            (
+                ["Sources", "Views", "Subagents", "SubagentResultsListSheet.swift"],
+                "struct SubagentResultsListSheet: View",
+                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
+            ),
+            (
+                ["Sources", "Views", "EngineConsole", "EngineConsoleComponents.swift"],
+                "struct CapabilityInspectionSheet: View",
+                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
+            ),
+            (
+                ["Sources", "Views", "Settings", "Pages", "PluginSourcesPage.swift"],
+                "private struct AddPluginSourceSheet: View",
+                ".adaptivePresentationDetents([.medium], ipadSizing: .largeForm)"
+            )
+        ]
+
+        for entry in expected {
+            let content = try source(pathComponents: entry.path)
+            let anchorRange = try XCTUnwrap(
+                content.range(of: entry.anchor),
+                "\(entry.path.joined(separator: "/")) is missing \(entry.anchor)"
+            )
+            let scopedContent = String(content[anchorRange.lowerBound...])
+            XCTAssertTrue(
+                scopedContent.contains(entry.fragment),
+                "\(entry.anchor) should own canonical adaptive iPad sheet sizing"
+            )
+        }
+    }
+
     func testEveryAdaptivePresentationCallSiteDeclaresIPadSizingPreset() throws {
         let sourceRoot = try projectRoot()
             .appendingPathComponent("Sources")

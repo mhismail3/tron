@@ -58,7 +58,6 @@ struct EngineConsoleView: View {
         .sheet(isPresented: inspectionPresented) {
             if let inspection = state.selectedInspection {
                 CapabilityInspectionSheet(inspection: inspection)
-                    .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
             }
         }
     }
