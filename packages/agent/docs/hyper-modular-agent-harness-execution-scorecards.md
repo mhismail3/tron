@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **62.25/100**
+Current score: **65.25/100**
 
 Status: **running**
 
@@ -696,8 +696,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D and HMH-E1 are also closed; continue with HMH-E2 to prove
-  generated UI for a new capability.
+  proven. HMH-D, HMH-E1, and HMH-E2 are also closed; continue with HMH-E3 to
+  prove approval and consequence clarity.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -956,8 +956,8 @@ HMH-D8 evidence, 2026-06-02:
 
 Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7/HMH-D8:
 
-- HMH-D and HMH-E1 are closed. Continue with HMH-E2 to prove generated UI for a
-  new capability uses stored surface/version/action ids.
+- HMH-D, HMH-E1, and HMH-E2 are closed. Continue with HMH-E3 to prove approval
+  and consequence clarity.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -968,7 +968,7 @@ Out of scope: client-side target reconstruction or native-only feature forks.
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
 | HMH-E1 | Engine Console is substrate-first | 15 | passed_after_fix | Console search/inspect covers workers, capabilities, modules, generated UI, traces, primer, conformance, and audit without a hardcoded tool catalog. | Stop if UI reads fixed capability descriptors. |
-| HMH-E2 | Generated surface for new capability | 20 | pending | Engine creates a `ui_surface` for a session-created function; iOS renders it natively; submit references stored surface/version/action ids only. | Stop if iOS constructs target payloads. |
+| HMH-E2 | Generated surface for new capability | 20 | passed_after_fix | Engine creates a `ui_surface` for a session-created function; iOS renders it natively; submit references stored surface/version/action ids only. | Stop if iOS constructs target payloads. |
 | HMH-E3 | Approval and consequence clarity | 15 | pending | iOS approval UI shows server risk/effect/authority/idempotency/lease/compensation metadata and resolves only through `approval::resolve`. | Stop if local approval state becomes final truth. |
 | HMH-E4 | Module controls are native projections | 15 | pending | iOS can inspect/configure/activate/disable/upgrade/rollback/quarantine module packages through canonical server functions with evidence drill-down. | Stop if module policy appears in Swift. |
 | HMH-E5 | Human can understand agent-created harness changes | 15 | pending | Session-created capability, provenance, tests, generated UI, promotion status, cleanup, and trace are visible in an ergonomic iPhone/iPad flow. | Fix UX before declaring north-star proof. |
@@ -1018,11 +1018,40 @@ HMH-E1 evidence, 2026-06-02:
 - Passing accessibility proof:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleAccessibilityTests`.
 
-Open loops after HMH-E1:
+HMH-E2 evidence, 2026-06-02:
 
-- Continue with HMH-E2: prove the engine creates a `ui_surface` for a
-  session-created function, iOS renders it natively, and submit references
-  stored surface/version/action ids only.
+- The red audit found generated `capability` surfaces were inspect/refresh-only:
+  `ui::surface_for_target` could describe a session-created function, but it
+  did not author a stored invoke action for renderable target request schemas.
+- The fix adds server-owned capability action authoring for target request
+  schemas whose required top-level fields map to the fixed native catalog
+  (`TextField`, `TextArea`, `Select`, `Toggle`, `Stepper`). Unsupported
+  required schema shapes do not get a guessed client interpreter.
+- `ui_surface_for_session_generated_capability_submits_stored_action_coordinates`
+  registers a session-scoped external worker function through
+  `EngineExternalWorkerRuntime`, proves the surface carries
+  `authoring.targetType=capability`, `authoring.contextSessionId`, native
+  `TextArea` + `invoke-capability` layout with no inlined
+  `targetFunctionId`/`payloadTemplate`, then submits only
+  `surfaceResourceId`, `surfaceVersionId`, `actionId`, user input, and
+  idempotency key through `ui::submit_action`. The resulting child invocation
+  is the session-generated `session_ui::summarize` function with the submitted
+  idempotency key, session id, and resource-backed output.
+- `GeneratedUIRendererTests.sessionGeneratedCapabilitySurfaceRendersAndSubmitsCoordinates`
+  proves the iOS renderer accepts the same generated capability surface shape,
+  scopes user input from the stored action schema, and encodes only stored
+  coordinates in `UiActionSubmissionDTO`; no target function, payload template,
+  or grant is constructed by Swift.
+- Passing server proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib ui_surface_for_session_generated_capability_submits_stored_action_coordinates -- --nocapture`.
+- Passing iOS renderer proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests`.
+
+Open loops after HMH-E1/HMH-E2:
+
+- Continue with HMH-E3: prove iOS approval UI shows server risk/effect/
+  authority/idempotency/lease/compensation metadata and resolves only through
+  `approval::resolve`.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1154,9 +1183,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, and HMH-E1 are closed. Continue with HMH-E2:
-prove generated UI for a new capability uses stored surface/version/action ids.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, and HMH-E2 are closed. Continue with
+HMH-E3: prove approval and consequence clarity stays server-owned.
 
 ```bash
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineApprovalStateTests
 ```

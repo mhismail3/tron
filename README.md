@@ -660,10 +660,12 @@ Generated UI is persisted as
 submits only the stored
 surface/version/action coordinates, user input, and idempotency key; the server
 reconstructs and authorizes the canonical target invocation.
-Generated authoring currently covers substrate targets, prompt-library,
+Generated authoring currently covers substrate targets, session-created
+capability invoke surfaces with renderable request schemas, prompt-library,
 notification, subagent-lineage, source-control, and AgentControl review
-surfaces; source-control mutations remain stored canonical `git::*` or
-`worktree::*` actions.
+surfaces. Capability, source-control, and review mutations remain stored
+canonical actions; clients render fixed-catalog native controls and never
+construct target function ids or payload templates.
 
 The module package lifecycle is also resource-native. `module::register_package`
 validates manifest digest, provenance, namespace ownership, declared capability
@@ -867,12 +869,14 @@ and a stable idempotency key, then invoke the new `namespace::function` through
 author or inspect generated `ui_surface` resources through
 `ui::surface_for_target` and `ui::inspect_surface`, and submit stored actions
 through `ui::submit_action` using surface/version/action ids rather than
-reconstructing targets in the client. Disconnect volatile worker entries with
-`worker::disconnect` when finished. Operator catalog search/inspect views
-remain available for debugging, but they are not separate model tools. The
-model-facing `execute` schema and generated `capabilities.primer` both name
-this loop so ordinary provider turns do not need README-only knowledge to
-modify the harness.
+reconstructing targets in the client. For session-created functions with
+renderable required request fields, `ui::surface_for_target` authors the native
+input controls and stored invoke action from the server-side schema. Disconnect
+volatile worker entries with `worker::disconnect` when finished. Operator
+catalog search/inspect views remain available for debugging, but they are not
+separate model tools. The model-facing `execute` schema and generated
+`capabilities.primer` both name this loop so ordinary provider turns do not
+need README-only knowledge to modify the harness.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, `trigger::*`, `resource::*`, `grant::*`, and `approval::*` preserve

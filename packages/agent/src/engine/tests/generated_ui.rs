@@ -70,6 +70,12 @@ fn sessionless_prompt_ui_context(key: &str) -> CausalContext {
         .with_scope("prompt_library.write")
 }
 
+fn session_generated_ui_context(key: &str) -> CausalContext {
+    mutating_causal(key)
+        .with_scope("ui.write")
+        .with_scope("session_ui.write")
+}
+
 fn prompt_write_context(key: &str) -> CausalContext {
     mutating_causal(key).with_scope("prompt_library.write")
 }
@@ -115,6 +121,31 @@ fn register_source_control_capabilities(handle: &EngineHostHandle) {
                 false,
             )
             .unwrap();
+    }
+}
+
+struct SessionGeneratedUiInvoker;
+
+#[async_trait]
+impl external::ExternalWorkerInvoker for SessionGeneratedUiInvoker {
+    async fn invoke(&self, invoke: WorkerInvoke) -> Result<WorkerInvocationResult> {
+        Ok(WorkerInvocationResult {
+            invocation_id: invoke.invocation_id,
+            result: Some(json!({
+                "accepted": true,
+                "functionId": invoke.function_id.as_str(),
+                "payload": invoke.payload,
+                "sessionId": invoke.session_id,
+                "resourceRefs": [{
+                    "resourceId": "artifact-session-ui",
+                    "kind": "artifact",
+                    "versionId": "ver-session-ui",
+                    "role": "created",
+                    "contentHash": "hash-session-ui"
+                }]
+            })),
+            error: None,
+        })
     }
 }
 
@@ -444,6 +475,144 @@ async fn ui_surface_for_target_supports_core_substrate_targets() {
             target_type
         );
     }
+}
+
+#[tokio::test]
+async fn ui_surface_for_session_generated_capability_submits_stored_action_coordinates() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let session_id = "session-a";
+    let worker_id = wid("session-ui-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("session_ui");
+    let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
+    let mut hello = WorkerHello::loopback(worker);
+    hello.session_id = Some(session_id.to_owned());
+    hello.worker_token.session_id = Some(session_id.to_owned());
+    runtime.hello(hello).await.unwrap();
+    runtime
+        .attach_invoker(worker_id.clone(), Arc::new(SessionGeneratedUiInvoker))
+        .unwrap();
+    let mut function = external_visible_function(
+        FunctionDefinition::new(
+            fid("session_ui::summarize"),
+            worker_id,
+            "session-created generated UI function",
+            VisibilityScope::Session,
+            EffectClass::IdempotentWrite,
+        )
+        .with_required_authority(AuthorityRequirement::scope("session_ui.write"))
+        .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .with_output_contract(DurableOutputContract::resource_backed(["artifact"])),
+    );
+    function.request_schema = Some(json!({
+        "type": "object",
+        "required": ["message"],
+        "additionalProperties": false,
+        "properties": {
+            "message": {"type": "string", "title": "Message"}
+        }
+    }));
+    runtime
+        .register_function(RegisterFunction {
+            definition: function,
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+
+    let created = handle
+        .invoke(host_invocation(
+            "ui::surface_for_target",
+            generated_surface_request("capability", "session_ui::summarize"),
+            session_generated_ui_context("session-generated-surface"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let value = created.value.as_ref().unwrap();
+    let resource_ref = &value["resourceRefs"][0];
+    assert_eq!(resource_ref["kind"], "ui_surface");
+    assert_eq!(value["surface"]["authoring"]["targetType"], "capability");
+    assert_eq!(
+        value["surface"]["authoring"]["targetId"],
+        "session_ui::summarize"
+    );
+    assert_eq!(
+        value["surface"]["authoring"]["contextSessionId"],
+        session_id
+    );
+    let layout_text = value["surface"]["layout"].to_string();
+    assert!(layout_text.contains("TextArea"));
+    assert!(layout_text.contains("invoke-capability"));
+    assert!(
+        !layout_text.contains("targetFunctionId") && !layout_text.contains("payloadTemplate"),
+        "native layout must not inline stored action target templates"
+    );
+    let invoke_action = value["surface"]["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|action| action["actionId"] == "invoke-capability")
+        .expect("session-created capability surface must include a stored invoke action");
+    assert_eq!(invoke_action["targetFunctionId"], "session_ui::summarize");
+    assert_eq!(
+        invoke_action["payloadTemplate"]["message"],
+        "${input.message}"
+    );
+    assert_eq!(invoke_action["inputSchema"]["required"], json!(["message"]));
+
+    let resource_id = resource_ref["resourceId"].as_str().unwrap();
+    let surface_version_id = resource_ref["versionId"].as_str().unwrap();
+    let submitted = handle
+        .invoke(host_invocation(
+            "ui::submit_action",
+            json!({
+                "surfaceResourceId": resource_id,
+                "surfaceVersionId": surface_version_id,
+                "actionId": "invoke-capability",
+                "userInput": {"message": "summarize this session-created capability"},
+                "idempotencyKey": "session-generated-ui-submit"
+            }),
+            session_generated_ui_context("session-generated-ui-submit"),
+        ))
+        .await;
+    assert_eq!(submitted.error, None);
+    let submitted_value = submitted.value.as_ref().unwrap();
+    assert_eq!(submitted_value["targetFunctionId"], "session_ui::summarize");
+    assert_eq!(
+        submitted_value["result"]["payload"]["message"],
+        "summarize this session-created capability"
+    );
+    assert_eq!(submitted_value["result"]["sessionId"], session_id);
+    assert!(
+        submitted_value["result"]["resourceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["resourceId"] == "artifact-session-ui")
+    );
+
+    let records = handle.lock().await.catalog().invocations().to_vec();
+    let child = records
+        .iter()
+        .find(|record| {
+            record.function_id.as_str() == "session_ui::summarize"
+                && record
+                    .parent_invocation_id
+                    .as_ref()
+                    .is_some_and(|parent| parent == &submitted.invocation_id)
+        })
+        .expect("stored ui action must create a trace-linked session function child");
+    assert_eq!(child.session_id.as_deref(), Some(session_id));
+    assert_eq!(
+        child.idempotency_key.as_deref(),
+        Some("session-generated-ui-submit")
+    );
+    assert_eq!(child.authority_scopes, vec!["ui.write", "session_ui.write"]);
 }
 
 #[tokio::test]

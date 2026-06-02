@@ -7,8 +7,10 @@
 //! without constructing target functions, payload templates, grants, or
 //! stale-state policy locally. The authoring folder is split by target family:
 //! prompt-library collections, notifications, subagent lineage, source-control,
-//! and AgentControl. Resource-collection authoring uses bounded projections
-//! over `PrimitiveRuntimeHost::list_resources` and `inspect_resource`.
+//! and AgentControl. Capability authoring can expose a stored invoke action for
+//! session-created functions when the required request fields map to the fixed
+//! native catalog. Resource-collection authoring uses bounded projections over
+//! `PrimitiveRuntimeHost::list_resources` and `inspect_resource`.
 
 mod authoring;
 mod schemas;

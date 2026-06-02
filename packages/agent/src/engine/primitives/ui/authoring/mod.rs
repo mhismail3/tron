@@ -211,14 +211,15 @@ pub(super) fn author_surface_for_target(
         request.target_type,
         slug(&request.target_id)
     );
+    let actions = generated_actions(host, invocation, request)?;
     let mut surface = json!({
         "surfaceId": surface_id,
         "title": projection.title,
         "purpose": request.purpose,
         "catalog": {"id": "tron.ui.catalog.core.v1", "revision": UI_CATALOG_REVISION},
-        "layout": layout_for_projection(request, &projection),
+        "layout": layout_for_projection(request, &projection, &actions),
         "bindings": bindings,
-        "actions": generated_actions(host, invocation, request)?,
+        "actions": actions,
         "redactionPolicy": {"mode": "redacted"},
         "expiresAt": request.expires_at,
         "refreshPolicy": request.refresh_policy,
@@ -721,6 +722,7 @@ pub(super) fn unsafe_prompt_preview_text(text: &str) -> bool {
 fn layout_for_projection(
     request: &SurfaceAuthoringRequest,
     projection: &TargetProjection,
+    actions: &[Value],
 ) -> Value {
     if request.target_type == RESOURCE_COLLECTION_TARGET {
         return resource_collection_layout(request, projection);
@@ -730,6 +732,9 @@ fn layout_for_projection(
     }
     if request.target_type == AGENT_CONTROL_TARGET {
         return agent_control_session_layout(projection);
+    }
+    if request.target_type == "capability" {
+        return capability_layout(projection, actions);
     }
     json!({
         "type": "Section",
@@ -741,6 +746,83 @@ fn layout_for_projection(
             {"type": "Button", "props": {"label": "Refresh", "actionId": "refresh-surface"}}
         ]
     })
+}
+
+fn capability_layout(projection: &TargetProjection, actions: &[Value]) -> Value {
+    let mut children = vec![
+        json!({"type": "Heading", "props": {"text": projection.title}}),
+        json!({"type": "Text", "props": {"text": projection.summary}}),
+        json!({"type": "Monospace", "props": {"text": projection.graph.to_string()}}),
+    ];
+    if let Some(invoke) = actions
+        .iter()
+        .find(|action| action.get("actionId").and_then(Value::as_str) == Some("invoke-capability"))
+    {
+        children.extend(capability_input_components(invoke));
+        children.push(json!({
+            "type": "Button",
+            "props": {"label": "Invoke", "actionId": "invoke-capability"}
+        }));
+    }
+    children.push(
+        json!({"type": "Button", "props": {"label": "Refresh", "actionId": "refresh-surface"}}),
+    );
+    json!({
+        "type": "Section",
+        "props": {"title": projection.title},
+        "children": children
+    })
+}
+
+fn capability_input_components(action: &Value) -> Vec<Value> {
+    let schema = action.get("inputSchema").unwrap_or(&Value::Null);
+    let properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str);
+    required
+        .filter_map(|name| {
+            let property = properties.get(name)?;
+            Some(component_for_capability_field(name, property))
+        })
+        .collect()
+}
+
+fn component_for_capability_field(name: &str, schema: &Value) -> Value {
+    let label = schema
+        .get("title")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| display_identifier(name));
+    if let Some(options) = schema.get("enum").and_then(Value::as_array) {
+        let options = options
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        return json!({"type": "Select", "props": {"name": name, "label": label, "required": true, "options": options}});
+    }
+    match schema.get("type").and_then(Value::as_str) {
+        Some("boolean") => {
+            json!({"type": "Toggle", "props": {"name": name, "label": label, "required": true}})
+        }
+        Some("integer") => {
+            json!({"type": "Stepper", "props": {"name": name, "label": label, "required": true}})
+        }
+        _ if name.contains("text") || name.contains("body") || name.contains("message") => {
+            json!({"type": "TextArea", "props": {"name": name, "label": label, "required": true}})
+        }
+        _ => {
+            json!({"type": "TextField", "props": {"name": name, "label": label, "required": true}})
+        }
+    }
 }
 
 fn resource_collection_layout(

@@ -146,6 +146,108 @@ struct GeneratedUIRendererTests {
         ], for: action))
     }
 
+    @Test("session-generated capability surface renders and submits stored coordinates")
+    func sessionGeneratedCapabilitySurfaceRendersAndSubmitsCoordinates() throws {
+        let action = UiActionDTO(
+            actionId: "invoke-capability",
+            label: "Invoke",
+            targetFunctionId: "session_ui::summarize",
+            inputSchema: AnyCodable([
+                "type": "object",
+                "required": ["message"],
+                "additionalProperties": false,
+                "properties": [
+                    "message": ["type": "string", "title": "Message"]
+                ]
+            ]),
+            payloadTemplate: AnyCodable(["message": "${input.message}"]),
+            idempotencyKeyTemplate: "${submission.idempotencyKey}",
+            requiredGrant: "grant",
+            requiredRisk: "medium",
+            approvalPolicy: AnyCodable(["required": false]),
+            targetRevision: 7,
+            expiresAt: "2100-01-01T00:00:00Z",
+            presentation: UiActionPresentationDTO(
+                tone: "primary",
+                icon: "play.fill",
+                buttonRole: "primary"
+            )
+        )
+        let surface = UiSurfaceDTO(
+            surfaceId: "generated.capability.session-ui-summarize",
+            title: "Capability session_ui::summarize",
+            purpose: "Operate a session-created capability",
+            catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: GeneratedUIRenderer.catalogRevision),
+            layout: UiComponentDTO(
+                id: "root",
+                type: "Section",
+                props: ["title": AnyCodable("Capability session_ui::summarize")],
+                children: [
+                    UiComponentDTO(id: "message", type: "TextArea", props: [
+                        "name": AnyCodable("message"),
+                        "label": AnyCodable("Message"),
+                        "required": AnyCodable(true)
+                    ], children: nil),
+                    UiComponentDTO(id: "invoke", type: "Button", props: [
+                        "actionId": AnyCodable("invoke-capability"),
+                        "label": AnyCodable("Invoke")
+                    ], children: nil)
+                ]
+            ),
+            bindings: [UiBindingDTO(targetType: "capability", targetId: "session_ui::summarize", role: "target", label: "Session capability")],
+            actions: [action],
+            redactionPolicy: ["mode": AnyCodable("redacted")],
+            expiresAt: "2100-01-01T00:00:00Z",
+            refreshPolicy: ["mode": AnyCodable("manual")],
+            authoring: UiSurfaceAuthoringDTO(
+                mode: "generated",
+                targetType: "capability",
+                targetId: "session_ui::summarize",
+                purpose: "Operate a session-created capability",
+                layoutProfile: "compact",
+                targetRevision: 7,
+                catalogRevision: GeneratedUIRenderer.catalogRevision,
+                projectionHash: "hash-session-ui",
+                maxPreviewBytes: 512,
+                createdByInvocationId: "inv-session-ui",
+                refreshedFromVersionId: nil
+            )
+        )
+        let ref = UiSurfaceRefDTO(
+            resourceId: "ui-surface-session-ui",
+            versionId: "ver-session-ui",
+            kind: "ui_surface",
+            lifecycle: "active",
+            surfaceId: surface.surfaceId,
+            title: surface.title,
+            purpose: surface.purpose,
+            catalog: surface.catalog,
+            expiresAt: surface.expiresAt,
+            targets: surface.bindings,
+            actions: []
+        )
+        let values = ["message": AnyCodable("summarize this session-created capability")]
+
+        let state = GeneratedUIRenderer.validate(surface: surface, resourceRef: ref, observedVersionId: "ver-session-ui")
+        #expect(state.status == .renderable)
+        #expect(state.actionsEnabled)
+        #expect(GeneratedUIRenderer.inputIsSatisfied(values, for: action))
+        #expect(GeneratedUIRenderer.userInput(from: values, for: action) == values)
+
+        let submission = UiActionSubmissionDTO(
+            surfaceResourceId: ref.resourceId,
+            surfaceVersionId: try #require(ref.versionId),
+            actionId: action.actionId,
+            userInput: GeneratedUIRenderer.userInput(from: values, for: action),
+            idempotencyKey: "session-generated-ui-submit"
+        )
+        let object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(submission)) as? [String: Any])
+        #expect(Set(object.keys) == ["surfaceResourceId", "surfaceVersionId", "actionId", "userInput", "idempotencyKey"])
+        #expect(object["targetFunctionId"] == nil)
+        #expect(object["payloadTemplate"] == nil)
+        #expect(object["requiredGrant"] == nil)
+    }
+
     private func baseSurface(componentType: String) -> UiSurfaceDTO {
         UiSurfaceDTO(
             surfaceId: "surface",
