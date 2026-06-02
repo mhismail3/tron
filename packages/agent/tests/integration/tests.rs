@@ -1525,6 +1525,274 @@ async fn capability_self_modifying_lifecycle_governs_session_worker_promotion() 
     server.shutdown().shutdown();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn capability_self_modifying_lifecycle_cleans_up_session_worker_and_stale_calls_fail_closed()
+{
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let mut ws = connect(&url).await;
+    let fixture = spawn_hmh_session_worker_through_execute(&mut ws, port, "cleanup", 3261).await;
+    let spawn_revision = fixture.output()["catalogRevision"]
+        .as_u64()
+        .expect("spawn output records catalog revision");
+
+    let before_cleanup_payload = json!({
+        "message": "HMH-B8 before cleanup",
+        "nonce": 8
+    });
+    let before_cleanup = rpc_call(
+        &mut ws,
+        3263,
+        "capability::execute",
+        Some(json!({
+            "sessionId": fixture.session_id,
+            "target": fixture.function_id,
+            "arguments": before_cleanup_payload,
+            "idempotencyKey": "hmh-b8-before-cleanup-invoke",
+            "reason": "HMH-B8 pre-cleanup invocation proof"
+        })),
+    )
+    .await;
+    assert_eq!(
+        before_cleanup["success"], true,
+        "session worker should be callable before cleanup: {before_cleanup}"
+    );
+    let before_cleanup_details = &before_cleanup["result"]["details"];
+    assert_eq!(before_cleanup_details["status"], "ok");
+    assert_eq!(before_cleanup_details["functionId"], fixture.function_id);
+    assert_eq!(
+        before_cleanup_details["output"]["echo"],
+        json!(before_cleanup_payload)
+    );
+    assert_eq!(
+        before_cleanup_details["output"]["workerId"],
+        fixture.worker_id
+    );
+
+    let stopped = stop_hmh_session_worker(&server, &fixture, "hmh-b8-stop-session-worker").await;
+    assert_eq!(stopped["stopped"], true);
+    assert_eq!(stopped["worker"]["workerId"], fixture.worker_id);
+    assert_eq!(stopped["worker"]["status"], "stopped");
+    assert_eq!(
+        stopped["worker"]["registeredFunctionIds"],
+        json!([fixture.function_id])
+    );
+    assert_eq!(stopped["streamTopic"], "sandbox.lifecycle");
+    let stop_revision = stopped["catalogRevision"]
+        .as_u64()
+        .expect("stop returns catalog revision after cleanup");
+    assert!(
+        stop_revision > spawn_revision,
+        "sandbox stop should advance the catalog revision: {stopped}"
+    );
+
+    let stopped_record = direct_engine_invoke_with_session(
+        &server,
+        "sandbox::get_spawned_worker",
+        json!({"workerId": fixture.worker_id}),
+        "hmh-b8-get-stopped-session-worker",
+        &["sandbox.read"],
+        &fixture.session_id,
+    )
+    .await;
+    assert_eq!(stopped_record["worker"]["workerId"], fixture.worker_id);
+    assert_eq!(stopped_record["worker"]["status"], "stopped");
+
+    let watch_response = rpc_call(
+        &mut ws,
+        3265,
+        "capability::execute",
+        Some(json!({
+            "sessionId": fixture.session_id,
+            "target": "catalog::watch_snapshot",
+            "arguments": {
+                "afterRevision": spawn_revision,
+                "limit": 20,
+                "classes": ["availability"],
+                "kinds": ["function_unregistered", "worker_unregistered"]
+            },
+            "reason": "HMH-B8 cleanup catalog evidence"
+        })),
+    )
+    .await;
+    assert_eq!(
+        watch_response["success"], true,
+        "catalog watch after cleanup failed: {watch_response}"
+    );
+    let watch_result = &watch_response["result"];
+    assert!(
+        watch_result.get("isError").is_none(),
+        "catalog cleanup watch should not be an error: {watch_result}"
+    );
+    assert_eq!(watch_result["details"]["status"], "ok");
+    assert_eq!(
+        watch_result["details"]["functionId"],
+        "catalog::watch_snapshot"
+    );
+    let watch_output = &watch_result["details"]["output"];
+    assert!(
+        watch_output["currentRevision"].as_u64().unwrap_or_default() >= stop_revision,
+        "watch current revision should include cleanup: {watch_output}"
+    );
+    let changes = watch_output["changes"]
+        .as_array()
+        .expect("catalog watch returns cleanup changes");
+    let function_removed = changes
+        .iter()
+        .find(|change| change["subjectId"] == fixture.function_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "catalog cleanup changes should include {}: {watch_output}",
+                fixture.function_id
+            )
+        });
+    assert_eq!(function_removed["kind"], "function_unregistered");
+    assert_eq!(function_removed["subjectKind"], "function");
+    assert_eq!(function_removed["class"], "availability");
+    assert_eq!(function_removed["visibility"], "session");
+    assert_eq!(function_removed["sessionId"], fixture.session_id);
+    assert_eq!(function_removed["ownerWorker"], fixture.worker_id);
+    let worker_removed = changes
+        .iter()
+        .find(|change| change["subjectId"] == fixture.worker_id)
+        .unwrap_or_else(|| {
+            panic!(
+                "catalog cleanup changes should include {}: {watch_output}",
+                fixture.worker_id
+            )
+        });
+    assert_eq!(worker_removed["kind"], "worker_unregistered");
+    assert_eq!(worker_removed["subjectKind"], "worker");
+    assert_eq!(worker_removed["class"], "availability");
+    assert_eq!(worker_removed["visibility"], "session");
+    assert_eq!(worker_removed["sessionId"], fixture.session_id);
+    assert_eq!(worker_removed["ownerWorker"], Value::Null);
+    assert!(
+        worker_removed["afterRevision"].as_u64().unwrap_or_default()
+            > function_removed["afterRevision"]
+                .as_u64()
+                .unwrap_or_default(),
+        "volatile worker removal should be recorded after owned function cleanup: {watch_output}"
+    );
+
+    let snapshot_functions = watch_output["snapshot"]["functions"]
+        .as_array()
+        .expect("catalog watch returns snapshot functions");
+    assert!(
+        snapshot_functions
+            .iter()
+            .all(|function| function["id"] != fixture.function_id),
+        "stopped worker function must not remain discoverable: {watch_output}"
+    );
+    let snapshot_workers = watch_output["snapshot"]["workers"]
+        .as_array()
+        .expect("catalog watch returns snapshot workers");
+    assert!(
+        snapshot_workers
+            .iter()
+            .all(|worker| worker["id"] != fixture.worker_id),
+        "stopped volatile worker must not remain discoverable: {watch_output}"
+    );
+
+    let (stale_raw, _) = raw_rpc_call_with_interleaved_events(
+        &mut ws,
+        3267,
+        "invoke",
+        Some(json!({
+            "functionId": "capability::execute",
+            "payload": {
+                "sessionId": fixture.session_id,
+                "target": fixture.function_id,
+                "arguments": {
+                    "message": "HMH-B8 stale invoke",
+                    "nonce": 80
+                },
+                "idempotencyKey": "hmh-b8-stale-invoke-after-cleanup",
+                "reason": "HMH-B8 stale invocation fail-closed proof"
+            },
+            "idempotencyKey": "hmh-b8-stale-execute-root",
+            "context": {"sessionId": fixture.session_id}
+        })),
+    )
+    .await;
+    let stale_trace_id = stale_raw["traceId"]
+        .as_str()
+        .expect("stale public invoke response records trace id")
+        .to_owned();
+    let stale_response = unwrap_engine_invoke_response(stale_raw);
+    assert_eq!(
+        stale_response["success"], true,
+        "capability::execute should return structured fail-closed guidance: {stale_response}"
+    );
+    let stale_result = &stale_response["result"];
+    assert!(
+        stale_result.get("isError").is_none(),
+        "missing stale capability is a guided same-turn failure, not a target child error: {stale_result}"
+    );
+    let stale_details = &stale_result["details"];
+    assert_eq!(stale_details["status"], "needs_capability");
+    assert_eq!(stale_details["childInvocationCreated"], false);
+    assert_eq!(stale_details["approvalCreated"], false);
+    assert_eq!(stale_details["resourceRefs"], json!([]));
+    assert_eq!(
+        stale_details["orchestration"]["phaseDetails"]["selectedTarget"]["capabilityId"],
+        fixture.function_id
+    );
+    assert!(
+        stale_details.get("output").is_none(),
+        "stale execute must not return worker output: {stale_details}"
+    );
+
+    let stale_trace = direct_engine_invoke_with_session(
+        &server,
+        "observability::trace_get",
+        json!({
+            "traceId": stale_trace_id,
+            "includeFullPayloads": true
+        }),
+        "hmh-b8-observe-stale-execute-trace",
+        &["observability.read"],
+        &fixture.session_id,
+    )
+    .await;
+    let stale_invocations = stale_trace["invocations"]
+        .as_array()
+        .expect("trace_get returns stale invocation rows");
+    let stale_functions = stale_invocations
+        .iter()
+        .map(|record| record["functionId"].as_str().unwrap_or_default())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        stale_functions,
+        std::collections::BTreeSet::from(["engine::invoke", "capability::execute"]),
+        "stale execute trace should not invoke the stopped session worker: {stale_trace}"
+    );
+    let execute_record = stale_invocations
+        .iter()
+        .find(|record| record["functionId"] == "capability::execute")
+        .unwrap_or_else(|| panic!("stale trace should include execute record: {stale_trace}"));
+    assert_eq!(execute_record["succeeded"], true);
+    assert_eq!(
+        execute_record["result"]["details"]["status"],
+        "needs_capability"
+    );
+    assert!(
+        stale_invocations
+            .iter()
+            .all(|record| record["workerId"] != fixture.worker_id),
+        "stale execute must not route to the stopped worker: {stale_trace}"
+    );
+
+    server.shutdown().shutdown();
+}
+
 #[tokio::test]
 async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     let (url, server) = boot_server_without_deps().await;

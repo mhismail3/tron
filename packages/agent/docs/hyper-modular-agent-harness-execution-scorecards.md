@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **26/100**
+Current score: **28/100**
 
 Status: **running**
 
@@ -282,7 +282,7 @@ Out of scope: remote worker hosting or unscoped global package installation.
 | HMH-B5 | Conformance/test evidence is resource-backed | 10 | passed_after_fix | `module::run_conformance` or capability conformance records pass/fail evidence resources linked to worker/function ids. | Do not promote without evidence resource refs. |
 | HMH-B6 | Invocation uses the tiny harness | 15 | passed | Provider-visible `execute` invokes the new function; child invocation id, trace id, idempotency key, grant id, target revision, result, and ledger row are inspectable. | Stop if the provider receives a direct worker tool or hidden transport path. |
 | HMH-B7 | Promotion is governed | 10 | passed_after_fix | Workspace/system promotion requires expected revision, explicit idempotency, authority, approval if needed, and catalog-change evidence. | Stop if promotion is implicit, global by default, or client-owned. |
-| HMH-B8 | Cleanup and stale calls fail closed | 10 | pending | Disconnect/stop unregisters volatile functions or marks durable workers unhealthy; stale invocation fails closed; no UI cache can keep it callable. | Fix cleanup before broader module work. |
+| HMH-B8 | Cleanup and stale calls fail closed | 10 | passed | Disconnect/stop unregisters volatile functions or marks durable workers unhealthy; stale invocation fails closed; no UI cache can keep it callable. | Fix cleanup before broader module work. |
 | HMH-B9 | Agent explains the evidence | 10 | pending | Agent answer cites live capability ids, resource refs, trace/ledger ids, and next maintenance actions; no stale README-only explanation. | Fix context/evidence projection if explanation is vague. |
 
 Closeout commands:
@@ -449,14 +449,44 @@ HMH-B7 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_governs_session_worker_promotion -- --nocapture`.
 
-Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7:
+HMH-B8 evidence, 2026-06-02:
+
+- Passing live proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_cleans_up_session_worker_and_stale_calls_fail_closed -- --nocapture`.
+- The proof reuses the public `/engine` `capability::execute`
+  guide/spawn flow, invokes the generated session worker once before cleanup,
+  and confirms the worker output, selected function id, and worker id are live
+  before any stop path runs.
+- `sandbox::stop_spawned_worker` then stops the spawned process, returns the
+  stopped worker record, preserves the registered function ids, publishes
+  `streamTopic=sandbox.lifecycle`, and advances the catalog revision past the
+  spawn revision. `sandbox::get_spawned_worker` confirms the local lifecycle
+  store keeps the process record as `status=stopped`.
+- A public `execute` call targeting `catalog::watch_snapshot` after the spawn
+  revision returns both the `function_unregistered` change for the session
+  generated function and the `worker_unregistered` change for the volatile
+  worker. The same snapshot no longer contains the stopped function or worker.
+- A stale public `invoke -> capability::execute` against the stopped function
+  returns structured `needs_capability` guidance with
+  `childInvocationCreated=false`, `approvalCreated=false`, empty
+  `resourceRefs`, and no worker output. `observability::trace_get` for that
+  stale trace shows only `engine::invoke` and `capability::execute`; no child
+  invocation routes to the stopped worker id or function.
+- Durable disconnect behavior remains covered by the existing engine-unit
+  policy for external workers: durable disconnected workers stay in the catalog
+  as unhealthy and invocation is not routable, while the live B8 proof covers
+  volatile session workers unregistering and stale calls failing closed. The
+  supporting durable policy proof is:
+  `cargo test --manifest-path packages/agent/Cargo.toml local_external_worker_durable_disconnect_marks_functions_unhealthy -- --nocapture`.
+
+Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7/HMH-B8:
 
 - HMH-B1 through HMH-B3 prove model-visible instruction, guide sufficiency, and
   scoped session worker creation only. HMH-B4 adds live catalog and inspection
   proof. HMH-B5 adds resource-backed conformance evidence. HMH-B6 adds live
   invocation proof through the tiny harness. HMH-B7 adds governed promotion
-  proof through public `engine::promote`. HMH-B remains running until cleanup
-  and explanation rows pass.
+  proof through public `engine::promote`. HMH-B8 adds cleanup and stale-call
+  fail-closed proof. HMH-B remains running until the explanation row passes.
 - Process note: Cargo accepts one test-name filter per invocation; run multiple
   focused filters sequentially.
 
@@ -660,10 +690,11 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B1, HMH-B2, HMH-B3, HMH-B4, HMH-B5, HMH-B6, and HMH-B7 are closed.
-Continue with HMH-B8: prove cleanup unregisters or marks stale session-worker
-functions unhealthy and stale calls fail closed.
+HMH-A, HMH-B1, HMH-B2, HMH-B3, HMH-B4, HMH-B5, HMH-B6, HMH-B7, and HMH-B8
+are closed. Continue with HMH-B9: prove the agent can explain live
+self-modifying harness evidence from ids, resource refs, traces, catalog
+revisions, and cleanup state rather than stale README-only claims.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_cleans_up_session_worker_and_stale_calls_fail_closed -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_explains_session_worker_evidence -- --nocapture
 ```
