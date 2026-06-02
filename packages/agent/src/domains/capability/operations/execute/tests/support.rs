@@ -1,4 +1,5 @@
 pub(super) use super::super::super::capability_result_value;
+pub(super) use super::super::super::preflight_rejection_result;
 pub(super) use super::super::super::target_arguments::IntentFileReadRequest;
 pub(super) use super::super::*;
 pub(super) use crate::domains::capability::registry::{

@@ -394,9 +394,13 @@ unique, so harmless casing/separator mistakes such as `functionid` versus
 closed in schema validation.
 If an intent is too broad but clearly names a known capability namespace, such
 as “do something useful with files,” `execute` returns `needs_selection` with
-bounded top-level candidate summaries. It does not fabricate a target, create a
-child invocation, request approval, or produce durable refs until the agent
-re-runs `execute` with the intended target.
+bounded top-level candidate summaries and structured `select_target` guidance.
+It does not fabricate a target, create a child invocation, request approval, or
+produce durable refs until the agent re-runs `execute` with the intended
+target. The same result surface carries repair guidance for stale revision or
+schema guards, trigger ids used as targets, missing target fields, missing
+idempotency keys, and approval-required states, including the approval id when
+one exists.
 Important parity anchors are:
 
 | Previous surface | Capability contract |
@@ -499,7 +503,9 @@ the network, so `riskMax=low` intentionally rejects them. Target schema, policy,
 and idempotency preflight
 rejections return structured `isError=true` capability results with no child
 invocation, approval, or resource refs, so expected contract failures stay
-inspectable without becoming engine-level execution failures.
+inspectable without becoming engine-level execution failures. Missing
+idempotency returns a stable `provide_idempotency_key` guidance object so the
+agent can retry the same intended mutation without guessing wrapper shape.
 Session-scoped capabilities do not require the model to invent the active
 session id: `execute` binds trusted causal-context fields such as the current
 `sessionId` into selected target arguments when the target schema requires

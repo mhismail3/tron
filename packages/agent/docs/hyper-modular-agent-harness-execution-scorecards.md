@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **35.25/100**
+Current score: **38.25/100**
 
 Status: **running**
 
@@ -524,7 +524,7 @@ Out of scope: dumping the full catalog into prompts.
 |----|----------|--------|--------|----------|---------------|
 | HMH-C1 | Primer contains the north-star recipe | 20 | passed_after_fix | `capabilities.primer` includes a compact "customize the harness" sequence with `worker::protocol_guide`, `worker::spawn`, inspection, conformance/test, generated UI, promotion, and cleanup. | Stop if the model must infer the loop from unrelated recipes. |
 | HMH-C2 | Context budget remains bounded | 15 | passed_after_fix | Snapshot fixture records primer token estimate under profile budget while preserving core worker/module/generated-UI recipes. | Split recipe docs into resources if budget exceeds policy. |
-| HMH-C3 | Execute correction covers lifecycle errors | 20 | pending | Missing `expectedFunctionIds`, missing `sessionId`, stale revision, target trigger id, missing idempotency, ambiguous target, and approval-required states return actionable repair guidance. | Fix result presentation before model-run proof. |
+| HMH-C3 | Execute correction covers lifecycle errors | 20 | passed_after_fix | Missing `expectedFunctionIds`, missing `sessionId`, stale revision, target trigger id, missing idempotency, ambiguous target, and approval-required states return actionable repair guidance. | Fix result presentation before model-run proof. |
 | HMH-C4 | Harness docs are resources | 15 | pending | Agent-readable harness guide/recipes are versioned resources or capability-backed docs tied to catalog revision, not only repo prose. | Add resource/doc projection before closeout. |
 | HMH-C5 | Model-run proof across providers | 20 | pending | At least one high-capability hosted model and one alternate provider/local path answer "how can you customize your harness?" with current live capabilities and safety gates. | Classify provider-quality failures only after substrate proof. |
 | HMH-C6 | Prompt surface stays tiny | 10 | pending | Provider schemas expose only `execute`; `search`/`inspect`/admin functions stay operator/internal unless intentionally invoked through execute discovery. | Static gate or provider test must fail if prompt-expanded tools return. |
@@ -591,11 +591,37 @@ HMH-C2 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml capability_primer_context_stays_within_budget -- --nocapture`.
 
-Open loops after HMH-C1/HMH-C2:
+HMH-C3 evidence, 2026-06-02:
 
-- HMH-C1 and HMH-C2 prove recipe content and default-profile budget behavior.
-  Continue with HMH-C3 to prove execute correction/guidance covers the common
-  lifecycle error cases instead of leaving the model to guess repair steps.
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml execute_guidance_covers_self_modifying_lifecycle_errors -- --nocapture`
+  initially failed with the stale-revision case exposing `guidance.kind=null`
+  instead of `refresh_capability_revision` in the model-visible terminal
+  execute details.
+- The strengthened proof covers the lifecycle repair set needed for
+  self-modifying harness work: missing `worker::spawn.expectedFunctionIds`,
+  missing `sessionId`, stale capability revision, trigger id used as a target,
+  missing top-level `idempotencyKey`, ambiguous target selection, and
+  approval-required state with an approval id.
+- The fix keeps ownership split by phase: `operations/run.rs` now returns a
+  stable `provide_idempotency_key` guidance object for idempotency preflight;
+  `operations/execute/result.rs` synthesizes structured `select_target`,
+  `refresh_capability_revision`, `refresh_capability_schema`, and
+  `refresh_inspection_handle` guidance for terminal orchestration details; and
+  bare approval-required results carry their `approvalId` through normalized
+  `approvalDecision`.
+- README and `domains/capability/mod.rs` now document that execute repair
+  guidance covers stale guards, trigger target repairs, missing fields,
+  idempotency, ambiguity, and approval ids.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml execute_guidance_covers_self_modifying_lifecycle_errors -- --nocapture`.
+
+Open loops after HMH-C1/HMH-C2/HMH-C3:
+
+- HMH-C1 through HMH-C3 prove compact lifecycle knowledge, bounded context, and
+  repair guidance. Continue with HMH-C4 to make harness docs versioned
+  resources or capability-backed docs tied to catalog revision, not only repo
+  prose.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -775,11 +801,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C1, and HMH-C2 are closed. Continue with HMH-C3: prove
-execute correction covers lifecycle errors such as missing expected function
-ids, missing session context, stale revisions, trigger targets, missing
-idempotency, ambiguity, and approval-required states.
+HMH-A, HMH-B, HMH-C1, HMH-C2, and HMH-C3 are closed. Continue with HMH-C4:
+prove harness docs are versioned resources or capability-backed docs tied to
+catalog revision, not only repo prose.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml execute_guidance_covers_self_modifying_lifecycle_errors -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml harness_docs_are_versioned_resources -- --nocapture
 ```

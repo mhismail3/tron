@@ -251,17 +251,36 @@ fn execution_approval_decision(details: &Value) -> Option<Value> {
             .get("approvalReplayed")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        json!({
-            "approvalRequired": approval_required,
-            "approvalCreated": approval_created,
-            "approvalExecuted": approval_executed,
-            "approvalReplayed": approval_replayed,
-            "status": if approval_required || approval_created || approval_executed || approval_replayed {
-                "approval_flow"
-            } else {
-                "not_required"
-            },
-        })
+        let mut decision = Map::new();
+        decision.insert("approvalRequired".to_owned(), json!(approval_required));
+        decision.insert("approvalCreated".to_owned(), json!(approval_created));
+        decision.insert("approvalExecuted".to_owned(), json!(approval_executed));
+        decision.insert("approvalReplayed".to_owned(), json!(approval_replayed));
+        decision.insert(
+            "status".to_owned(),
+            json!(
+                if approval_required || approval_created || approval_executed || approval_replayed {
+                    "approval_flow"
+                } else {
+                    "not_required"
+                }
+            ),
+        );
+        for key in [
+            "approvalId",
+            "approvalRequestId",
+            "approvalResourceId",
+            "idempotencyKey",
+            "traceId",
+            "functionId",
+            "childInvocationId",
+            "childInvocationIds",
+        ] {
+            if let Some(value) = details.get(key) {
+                decision.insert(key.to_owned(), value.clone());
+            }
+        }
+        Value::Object(decision)
     })
 }
 
@@ -459,6 +478,11 @@ fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Va
                 details.insert(key.to_owned(), value.clone());
             }
         }
+        if !details.contains_key("guidance")
+            && let Some(guidance) = terminal_repair_guidance(status, phase_details)
+        {
+            details.insert("guidance".to_owned(), guidance);
+        }
     }
     for key in [
         "correctedRequest",
@@ -471,6 +495,51 @@ fn terminal_orchestration_result_details(status: &str, diagnostics: Value) -> Va
         }
     }
     Value::Object(details)
+}
+
+fn terminal_repair_guidance(status: &str, phase_details: &Value) -> Option<Value> {
+    if status == "needs_selection"
+        && let Some(candidates) = phase_details.get("candidates").and_then(Value::as_array)
+    {
+        let candidate_function_ids = candidates
+            .iter()
+            .filter_map(|candidate| candidate.get("functionId").and_then(Value::as_str))
+            .take(6)
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        if !candidate_function_ids.is_empty() {
+            return Some(json!({
+                "kind": "select_target",
+                "message": needs_selection_message(candidates),
+                "candidateFunctionIds": candidate_function_ids,
+            }));
+        }
+    }
+
+    let error = phase_details.get("error")?;
+    let code = error.get("code").and_then(Value::as_str)?;
+    let error_details = error.get("details").cloned().unwrap_or(Value::Null);
+    match code {
+        "STALE_CAPABILITY_REVISION" => Some(json!({
+            "kind": "refresh_capability_revision",
+            "message": "Re-run execute after a fresh capability inspection and retry with the current revision guard; do not reuse stale expectedRevision values.",
+            "errorCode": code,
+            "details": error_details,
+        })),
+        "STALE_CAPABILITY_SCHEMA" => Some(json!({
+            "kind": "refresh_capability_schema",
+            "message": "Re-run execute after a fresh capability inspection and retry with the current schema digest; do not reuse stale expectedSchemaDigest values.",
+            "errorCode": code,
+            "details": error_details,
+        })),
+        "INSPECTION_HANDLE_INVALID" => Some(json!({
+            "kind": "refresh_inspection_handle",
+            "message": "Re-run capability inspection or execute discovery to acquire a fresh inspection handle before retrying this mutating or elevated-risk target.",
+            "errorCode": code,
+            "details": error_details,
+        })),
+        _ => None,
+    }
 }
 
 pub(super) fn default_no_approval_decision() -> Value {

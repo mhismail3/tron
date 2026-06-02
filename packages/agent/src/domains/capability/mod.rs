@@ -62,8 +62,11 @@
 //! bounded execute observation metadata into the model-visible tool result
 //! text, because provider APIs only feed the LLM result content, not the
 //! engine-only `details` object used by UI and audit surfaces. That projection
-//! includes correction guidance such as missing argument paths so the model can
-//! repair a call without guessing at wrapper-vs-target payload shape.
+//! includes correction guidance such as missing argument paths, stale
+//! revision/schema refresh steps, trigger-id target repairs, ambiguous target
+//! candidates, required idempotency keys, and approval ids so the model can
+//! repair a call without guessing at wrapper-vs-target payload shape or hidden
+//! approval state.
 //! Target idempotency is owned by the selected capability, not by the
 //! model-provider wrapper. The runner gives each provider tool call its own
 //! wrapper idempotency key, while `execute.idempotencyKey` is forwarded into the

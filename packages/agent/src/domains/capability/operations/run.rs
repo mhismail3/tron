@@ -408,6 +408,16 @@ fn preflight_message(function: &FunctionDefinition, status: &str, message: &str)
 }
 
 fn preflight_guidance(status: &str, details: Option<&Value>) -> Value {
+    if status == "idempotency_required" {
+        return json!({
+            "kind": "provide_idempotency_key",
+            "message": "Re-run execute with a stable top-level idempotencyKey for this intended mutation.",
+            "missingFields": ["idempotencyKey"],
+            "missingArgumentPaths": ["idempotencyKey"],
+            "invalidFields": [],
+            "invalidArgumentPaths": [],
+        });
+    }
     if status != "needs_input" {
         return Value::Null;
     }
