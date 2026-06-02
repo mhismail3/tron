@@ -552,6 +552,133 @@ struct EngineConsoleStateTests {
         #expect(change.evidenceValues.contains("Trace trace-session-summary"))
     }
 
+    @Test("harness change projection includes live catalog session functions")
+    func harnessChangeProjectionIncludesLiveCatalogSessionFunctions() async throws {
+        let client = FakeEngineConsoleCapabilityClient()
+        client.registrySnapshotDTO = CapabilityRegistrySnapshotDTO(
+            plugins: [],
+            implementations: [],
+            bindings: [],
+            documents: [],
+            programRuns: []
+        )
+        client.catalogSnapshotResult = CatalogWatchSnapshotDTO(
+            changes: [
+                CatalogChangeDTO(
+                    id: "catalog-change-session-visual",
+                    beforeRevision: 40,
+                    afterRevision: 41,
+                    kind: "function_registered",
+                    subjectId: "hmh_e6::visual_echo",
+                    subjectKind: "function",
+                    changeClass: "availability",
+                    visibility: "session",
+                    sessionId: "session-visual",
+                    workspaceId: "workspace-visual",
+                    ownerWorker: "worker-visual",
+                    timestamp: nil
+                )
+            ],
+            snapshot: CatalogSnapshotDTO(
+                functions: [
+                    AnyCodable([
+                        "id": "hmh_e6::visual_echo",
+                        "revision": 1,
+                        "owner_worker": "worker-visual",
+                        "visibility": "Session",
+                        "health": "Healthy",
+                        "provenance": [
+                            "session_id": "session-visual",
+                            "workspace_id": "workspace-visual"
+                        ],
+                        "metadata": [
+                            "contractId": "hmh_e6::visual_echo",
+                            "implementationId": "session_generated.hmh_e6.visual_echo",
+                            "pluginId": "session_generated.worker-visual",
+                            "trustTier": "session_generated",
+                            "conformanceState": "healthy"
+                        ]
+                    ])
+                ],
+                workers: [
+                    AnyCodable([
+                        "id": "worker-visual",
+                        "lifecycle": "Ready",
+                        "visibility": "Session"
+                    ])
+                ],
+                triggers: [],
+                triggerTypes: []
+            ),
+            currentRevision: 41,
+            nextRevision: 42,
+            hasMore: false
+        )
+        client.controlSnapshot = ControlSnapshotDTO(
+            catalogRevision: 41,
+            workers: [],
+            capabilities: [],
+            resourceTypes: [],
+            activeGoals: [],
+            invocations: [],
+            grants: [],
+            queues: [],
+            leases: [],
+            approvals: [],
+            storage: nil,
+            integrityWarnings: [],
+            availableActions: [],
+            uiSurfaceRefs: [
+                UiSurfaceRefDTO(
+                    resourceId: "ui-surface:hmh-e6-visual",
+                    versionId: "ui-surface-version:hmh-e6-visual",
+                    kind: "ui_surface",
+                    lifecycle: "active",
+                    surfaceId: "surface-hmh-e6-visual",
+                    title: "HMH-E6 Visual Surface",
+                    purpose: "Inspect hmh_e6::visual_echo",
+                    catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+                    expiresAt: nil,
+                    targets: [
+                        UiBindingDTO(
+                            targetType: "capability",
+                            targetId: "hmh_e6::visual_echo",
+                            role: "primary",
+                            label: "HMH-E6 visual"
+                        )
+                    ],
+                    actions: []
+                )
+            ]
+        )
+        client.auditResult = CapabilityAuditQueryResultDTO(
+            events: [
+                CapabilityAuditEventDTO(
+                    id: "audit-visual",
+                    eventType: "capability.execute",
+                    traceId: "trace-hmh-e6-visual",
+                    payload: nil,
+                    payloadSummary: AnyCodable(["functionId": "hmh_e6::visual_echo"]),
+                    createdAt: nil,
+                    redacted: true
+                )
+            ],
+            redacted: true
+        )
+        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+
+        await state.refresh()
+
+        let change = try #require(state.harnessChangeProjection.changes.first)
+        #expect(change.functionId == "hmh_e6::visual_echo")
+        #expect(change.implementationId == "session_generated.hmh_e6.visual_echo")
+        #expect(change.workerId == "worker-visual")
+        #expect(change.provenanceText == "session session-visual")
+        #expect(change.testText == "healthy")
+        #expect(change.generatedSurfaceIds == ["surface-hmh-e6-visual"])
+        #expect(change.traceIds == ["trace-hmh-e6-visual"])
+    }
+
     @Test("module operator projection keeps server actions and evidence")
     func moduleOperatorProjectionKeepsServerActionsAndEvidence() async throws {
         let client = FakeEngineConsoleCapabilityClient()

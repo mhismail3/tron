@@ -4,6 +4,7 @@ import Foundation
 protocol EngineConsoleCapabilityClient: AnyObject {
     func status(includeSnapshot: Bool) async throws -> CapabilityStatusDTO
     func registrySnapshot(includeDocuments: Bool, includeBindings: Bool) async throws -> CapabilityRegistrySnapshotDTO
+    func catalogWatchSnapshot(_ request: CatalogWatchSnapshotRequestDTO) async throws -> CatalogWatchSnapshotDTO
     func controlSnapshot(limit: Int) async throws -> ControlSnapshotDTO
     func controlInspect(targetType: String, targetId: String, includeFullPayloads: Bool) async throws -> ControlInspectDTO
     func inspectUiSurface(surfaceResourceId: String) async throws -> UiSurfaceInspectResultDTO
@@ -93,6 +94,7 @@ struct EngineConsoleSearchSuggestion: Equatable, Identifiable {
     static func make(
         status: CapabilityStatusDTO?,
         registry: CapabilityRegistrySnapshotDTO?,
+        catalogSnapshot: CatalogWatchSnapshotDTO?,
         controlSnapshot: ControlSnapshotDTO?,
         audit: CapabilityAuditQueryResultDTO?,
         programRuns: CapabilityProgramRunQueryResultDTO?
@@ -136,6 +138,14 @@ struct EngineConsoleSearchSuggestion: Equatable, Identifiable {
                 ?? document.capabilityId
             guard let query else { continue }
             add(query, query: query, symbol: symbol(for: query, kind: document.kind))
+        }
+
+        for function in catalogSnapshot?.snapshot?.functions ?? [] {
+            guard let dictionary = function.dictionaryValue,
+                  let query = substrateString(dictionary, keys: ["id", "functionId"]) else {
+                continue
+            }
+            add(query, query: query, symbol: symbol(for: query))
         }
 
         for action in controlSnapshot?.availableActions ?? [] {
@@ -204,6 +214,10 @@ struct EngineConsoleSearchSuggestion: Equatable, Identifiable {
 
     private static func substrateString(_ value: AnyCodable, keys: [String]) -> String? {
         guard let dictionary = value.dictionaryValue else { return nil }
+        return substrateString(dictionary, keys: keys)
+    }
+
+    private static func substrateString(_ dictionary: [String: Any], keys: [String]) -> String? {
         for key in keys {
             if let string = dictionary[key] as? String, !string.isEmpty {
                 return string
@@ -246,6 +260,7 @@ final class EngineConsoleState {
     private(set) var loadState: LoadState = .idle
     private(set) var status: CapabilityStatusDTO?
     private(set) var registry: CapabilityRegistrySnapshotDTO?
+    private(set) var catalogSnapshot: CatalogWatchSnapshotDTO?
     private(set) var controlSnapshot: ControlSnapshotDTO?
     private(set) var audit: CapabilityAuditQueryResultDTO?
     private(set) var programRuns: CapabilityProgramRunQueryResultDTO?
@@ -283,6 +298,7 @@ final class EngineConsoleState {
     var harnessChangeProjection: EngineConsoleHarnessChangeProjection {
         EngineConsoleHarnessChangeProjection.make(
             registry: registry,
+            catalogSnapshot: catalogSnapshot,
             controlSnapshot: controlSnapshot,
             audit: audit,
             programRuns: programRuns
@@ -293,6 +309,7 @@ final class EngineConsoleState {
         EngineConsoleSearchSuggestion.make(
             status: status,
             registry: registry,
+            catalogSnapshot: catalogSnapshot,
             controlSnapshot: controlSnapshot,
             audit: audit,
             programRuns: programRuns
@@ -338,6 +355,16 @@ final class EngineConsoleState {
                 includeDocuments: true,
                 includeBindings: true
             )
+            let catalogSnapshot = try await capabilityClient.catalogWatchSnapshot(
+                CatalogWatchSnapshotRequestDTO(
+                    afterRevision: nil,
+                    limit: 100,
+                    classes: nil,
+                    kinds: nil,
+                    subjectPrefix: nil,
+                    ownerWorker: nil
+                )
+            )
             let controlSnapshot = try await capabilityClient.controlSnapshot(limit: 100)
             let audit = try await capabilityClient.auditQuery(
                 CapabilityAuditQueryDTO(eventType: nil, traceId: nil, limit: 50, revealPayloads: false)
@@ -348,6 +375,7 @@ final class EngineConsoleState {
             let policies = try await capabilityClient.getPolicy(policyId: nil)
             self.status = status
             self.registry = registry
+            self.catalogSnapshot = catalogSnapshot
             self.controlSnapshot = controlSnapshot
             self.audit = audit
             self.programRuns = programRuns

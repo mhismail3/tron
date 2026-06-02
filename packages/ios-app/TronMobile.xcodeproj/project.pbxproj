@@ -763,6 +763,7 @@
 		E513F51AE620340CE9425DE2 /* NetworkDiagnosticsFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA80D575DED5BF6374D6E730 /* NetworkDiagnosticsFormatterTests.swift */; };
 		E567E5DEB088C4762E74C17B /* CapabilityCodeBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFC2A9896F3F7070ED8CAE94 /* CapabilityCodeBlock.swift */; };
 		E61181D73E4D021CDCD099B2 /* ConnectionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E1E2A2B22732B153F35C836 /* ConnectionCoordinator.swift */; };
+		E696FF9E7F6D9B10650691C4 /* EngineProtocolTypes+Catalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84AB1A24C43A50B6A5E7C757 /* EngineProtocolTypes+Catalog.swift */; };
 		E6CDD8634619BE68EB307E81 /* CloneRepoSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C1612AACC366E0C97BAEB4B /* CloneRepoSheet.swift */; };
 		E6E703162239F4A161B3F5C4 /* CapabilitySectionViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 927BA42223D5D4AE65C11841 /* CapabilitySectionViews.swift */; };
 		E75E9DA5CD898F5C1C8352E2 /* TaskFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C573788A03A877BDF7DDFF /* TaskFormatting.swift */; };
@@ -1323,6 +1324,7 @@
 		82FBD1C62F81A20D5003A4E5 /* StreamingContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingContentView.swift; sourceTree = "<group>"; };
 		8347F0B7D54B1F1EAA6C762C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		848E4571A3D59B2CC16DB76A /* CapabilityInvocationPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationPayloads.swift; sourceTree = "<group>"; };
+		84AB1A24C43A50B6A5E7C757 /* EngineProtocolTypes+Catalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+Catalog.swift"; sourceTree = "<group>"; };
 		84D2024D9DEF870900164930 /* InputBarContentAreaChipTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputBarContentAreaChipTests.swift; sourceTree = "<group>"; };
 		84DB0B2DB800488B66C6E22E /* MemoryCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryCoordinatorTests.swift; sourceTree = "<group>"; };
 		84E5AE7C913863A2C97EEB32 /* AnyCodableExtensionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyCodableExtensionsTests.swift; sourceTree = "<group>"; };
@@ -3533,6 +3535,7 @@
 				6A5112DD4DAB00598B5C1A90 /* EngineProtocolTypes+Approval.swift */,
 				DF46CE496FBCA25A60539153 /* EngineProtocolTypes+Auth.swift */,
 				C7B1087DB83B69DB9A91F336 /* EngineProtocolTypes+Capability.swift */,
+				84AB1A24C43A50B6A5E7C757 /* EngineProtocolTypes+Catalog.swift */,
 				91D5AE1ABD647D8B61B8048B /* EngineProtocolTypes+Control.swift */,
 				98193BFDDD1A468FA43D6F8E /* EngineProtocolTypes+Cron.swift */,
 				630DD90FF9C9332CCF2F4F33 /* EngineProtocolTypes+Diff.swift */,
@@ -4014,6 +4017,7 @@
 				9C9386AE0B8B7C0ABCFA71D1 /* EngineProtocolTypes+Approval.swift in Sources */,
 				5289DF7D55B0976F0CC93C17 /* EngineProtocolTypes+Auth.swift in Sources */,
 				C55C635F1306963EFD55F947 /* EngineProtocolTypes+Capability.swift in Sources */,
+				E696FF9E7F6D9B10650691C4 /* EngineProtocolTypes+Catalog.swift in Sources */,
 				B4CE6599B439130867C25BE8 /* EngineProtocolTypes+Control.swift in Sources */,
 				FEC068077EAFFCAF19971720 /* EngineProtocolTypes+Cron.swift in Sources */,
 				1D664AC2865E3FC76868AEA6 /* EngineProtocolTypes+Diff.swift in Sources */,
