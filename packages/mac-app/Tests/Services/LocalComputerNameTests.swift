@@ -3,7 +3,7 @@ import Testing
 
 @Suite("LocalComputerName")
 struct LocalComputerNameTests {
-    @Test("Computer Name wins over host fallbacks")
+    @Test("Computer Name wins over host candidates")
     func computerNameWins() {
         let name = LocalComputerName.preferredName(
             computerName: "Studio Mac",
@@ -13,8 +13,8 @@ struct LocalComputerNameTests {
         #expect(name == "Studio Mac")
     }
 
-    @Test("Falls back through localized host, host, then default")
-    func fallbackOrder() {
+    @Test("Uses localized host, host, then default")
+    func candidateOrder() {
         #expect(LocalComputerName.preferredName(
             computerName: " ",
             localizedHostName: "Living Room Mac",
@@ -31,7 +31,7 @@ struct LocalComputerNameTests {
             computerName: nil,
             localizedHostName: nil,
             hostName: nil,
-            fallback: "Fallback Mac"
-        ) == "Fallback Mac")
+            defaultName: "Default Mac"
+        ) == "Default Mac")
     }
 }

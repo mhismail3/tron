@@ -41,7 +41,7 @@ struct MessageBubble: View {
                     latency: message.formattedLatency
                 )
             } else if let record = message.tokenRecord {
-                // Fallback to simple token badge for user messages
+                // User messages use the compact token badge.
                 TokenBadge(record: record)
             }
         }

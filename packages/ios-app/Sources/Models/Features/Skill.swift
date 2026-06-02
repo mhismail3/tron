@@ -19,8 +19,8 @@ enum SkillSource: String, Codable, Sendable {
 enum SkillService: String, Sendable {
     case tron
     case claude
-    /// Forward-compatibility bucket: a service the server knows about but
-    /// this client build doesn't. Rendered without a per-service badge.
+    /// Service value the server knows about but this client build does not.
+    /// Rendered without a per-service badge.
     case unknown
 }
 

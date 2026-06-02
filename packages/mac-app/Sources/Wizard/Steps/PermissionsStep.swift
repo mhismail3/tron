@@ -302,7 +302,7 @@ struct PermissionsStep: View {
 
     /// Applies a probe snapshot while preserving the last concrete
     /// answer across transient engine protocol failures. If launchd is briefly
-    /// cycling for some unrelated reason, an all-unknown fallback should
+    /// cycling for some unrelated reason, an all-unknown probe snapshot should
     /// not wipe green/red badges into confusing gray icons.
     @MainActor
     private static func applyPermissionSnapshot(

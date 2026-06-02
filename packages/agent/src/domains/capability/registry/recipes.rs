@@ -307,7 +307,7 @@ fn recipe_example_value(name: &str, field: &Value, function: &FunctionDefinition
     match name {
         "command" => Value::String("date".to_owned()),
         "path" | "filePath" | "file_path" => Value::String("README.md".to_owned()),
-        "pattern" => Value::String("TODO".to_owned()),
+        "pattern" => Value::String("search-term".to_owned()),
         "query" => Value::String("project documentation".to_owned()),
         "url" => Value::String("https://example.com".to_owned()),
         "title" => Value::String("Tron update".to_owned()),

@@ -212,7 +212,7 @@ enum SystemEventHandlers {
     /// Transform memory.auto_retain_failed event into a ChatMessage.
     ///
     /// Reconstructed history shows the failure as a diagnostic breadcrumb
-    /// in addition to the subsequent fallback-summary `memoryRetained`
+    /// in addition to the subsequent summary `memoryRetained`
     /// pill, so users can tell which session summaries came from a
     /// failing summarizer.
     static func transformMemoryAutoRetainFailed(

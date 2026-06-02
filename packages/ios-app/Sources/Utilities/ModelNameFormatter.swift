@@ -4,7 +4,7 @@ import os
 // MARK: - Model Name Formatter
 
 /// Unified model name formatting for Claude models.
-/// Uses server-provided metadata when available, falls back to ID heuristic parsing.
+/// Uses server-provided metadata when available, then deterministic ID heuristics.
 enum ModelNameFormatter {
 
     /// Lock-protected server model cache. Written by ModelClient, read from any context.
@@ -41,9 +41,9 @@ enum ModelNameFormatter {
     /// - Parameters:
     ///   - modelId: The raw model ID (e.g., "claude-sonnet-4-20250514")
     ///   - style: The desired output format
-    ///   - fallback: Optional fallback string if model can't be parsed
+    ///   - displayOverride: Optional label to use when the ID has no known family markers.
     /// - Returns: Formatted model name
-    static func format(_ rawModelId: String, style: Style, fallback: String? = nil) -> String {
+    static func format(_ rawModelId: String, style: Style, displayOverride: String? = nil) -> String {
         // Strip explicit provider prefix (e.g. "openai/gpt-5.4" → "gpt-5.4")
         let modelId = rawModelId.contains("/")
             ? String(rawModelId.split(separator: "/", maxSplits: 1).last ?? Substring(rawModelId))
@@ -63,7 +63,7 @@ enum ModelNameFormatter {
             }
         }
 
-        // Fallback: heuristic ID parsing for models not in cache
+        // Deterministic ID parsing for models not present in the server cache.
         let lowered = modelId.lowercased()
 
         // Check for OpenAI models
@@ -131,12 +131,11 @@ enum ModelNameFormatter {
             version = nil
         }
 
-        // If we couldn't detect tier, use fallback logic
+        // If no known family marker is present, keep the display deterministic.
         guard let tier = tier else {
-            if let fallback = fallback {
-                return fallback
+            if let displayOverride {
+                return displayOverride
             }
-            // Fallback: first two components title-cased
             let parts = modelId.split(separator: "-")
             if parts.count >= 2 {
                 return String(parts[0]).capitalized + " " + String(parts[1]).capitalized
@@ -224,7 +223,7 @@ enum ModelNameFormatter {
         }
     }
 
-    /// Format ChatGPT-latest compatibility model IDs.
+    /// Format ChatGPT-latest alias model IDs.
     private static func formatChatGptModel(_ modelId: String, style: Style) -> String {
         let lowered = modelId.lowercased()
         let name = lowered.contains("4o") ? "ChatGPT-4o" : "ChatGPT"

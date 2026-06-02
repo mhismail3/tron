@@ -53,15 +53,15 @@ final class ModelNameFormatterTests: XCTestCase {
         XCTAssertEqual(ModelNameFormatter.format("claude-opus-4-6", style: .compact), "opus-4.6")
     }
 
-    // MARK: - Fallback Tests (no server cache)
+    // MARK: - Heuristic Tests (no server cache)
 
-    func testFallback_claudeModel() {
-        // No server cache → falls back to heuristic parsing
+    func testHeuristic_claudeModel() {
+        // No server cache -> deterministic ID parsing.
         XCTAssertEqual(ModelNameFormatter.format("claude-opus-4-6", style: .short), "Opus 4.6")
         XCTAssertEqual(ModelNameFormatter.format("claude-opus-4-6", style: .full), "Claude Opus 4.6")
     }
 
-    func testFallback_gptModels() {
+    func testHeuristic_gptModels() {
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.5", style: .short), "GPT-5.5")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.5-2026-04-23", style: .short), "GPT-5.5")
         XCTAssertEqual(ModelNameFormatter.format("gpt-5.4", style: .short), "GPT-5.4")
@@ -88,7 +88,7 @@ final class ModelNameFormatterTests: XCTestCase {
         XCTAssertEqual(ModelNameFormatter.format("o1-preview", style: .short), "o1 Preview")
     }
 
-    func testFallback_geminiModel() {
+    func testHeuristic_geminiModel() {
         XCTAssertEqual(ModelNameFormatter.format("gemini-3-pro-preview", style: .short), "Gemini 3 Pro")
         XCTAssertEqual(ModelNameFormatter.format("gemini-3.1-pro-preview", style: .short), "Gemini 3.1 Pro")
         XCTAssertEqual(ModelNameFormatter.format("gemini-3-flash-preview", style: .short), "Gemini 3 Flash")
@@ -98,14 +98,14 @@ final class ModelNameFormatterTests: XCTestCase {
         XCTAssertEqual(ModelNameFormatter.format("gemini-2.5-flash-lite", style: .short), "Gemini 2.5 Flash Lite")
     }
 
-    func testFallback_minimaxModel() {
+    func testHeuristic_minimaxModel() {
         XCTAssertEqual(ModelNameFormatter.format("MiniMax-M2.7", style: .short), "MiniMax M2.7")
         XCTAssertEqual(ModelNameFormatter.format("MiniMax-M2.7-highspeed", style: .short), "MiniMax M2.7 HS")
         XCTAssertEqual(ModelNameFormatter.format("MiniMax-M2.5", style: .short), "MiniMax M2.5")
         XCTAssertEqual(ModelNameFormatter.format("MiniMax-M2", style: .short), "MiniMax M2")
     }
 
-    func testFallback_kimiModel() {
+    func testHeuristic_kimiModel() {
         XCTAssertEqual(ModelNameFormatter.format("kimi-k2.5", style: .short), "Kimi K2.5")
         XCTAssertEqual(ModelNameFormatter.format("kimi-k2-turbo-preview", style: .short), "Kimi K2 Turbo")
         XCTAssertEqual(ModelNameFormatter.format("kimi-k2-thinking", style: .short), "Kimi K2 Think")
@@ -113,7 +113,7 @@ final class ModelNameFormatterTests: XCTestCase {
         XCTAssertEqual(ModelNameFormatter.format("moonshot-v1-128k", style: .short), "Moonshot V1 128K")
     }
 
-    func testFallback_ollamaModel() {
+    func testHeuristic_ollamaModel() {
         XCTAssertEqual(ModelNameFormatter.format("gemma4:e4b", style: .short), "Gemma 4 E4B")
         XCTAssertEqual(ModelNameFormatter.format("gemma4:26b", style: .short), "Gemma 4 26B")
     }
@@ -158,8 +158,8 @@ final class ModelNameFormatterTests: XCTestCase {
         XCTAssertEqual(formatModelDisplayName("claude-opus-4-6"), "Opus 4.6")
     }
 
-    func testFormatModelDisplayName_fallback() {
-        // No cache → falls back to shortModelName heuristic
+    func testFormatModelDisplayName_usesHeuristicWithoutCache() {
+        // No cache -> shortModelName deterministic heuristic.
         let result = formatModelDisplayName("claude-sonnet-4-5-20250929")
         XCTAssertEqual(result, "Sonnet 4.5")
     }

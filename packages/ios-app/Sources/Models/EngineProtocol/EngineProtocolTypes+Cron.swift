@@ -184,7 +184,7 @@ enum CronScheduleDTO: Codable, Hashable {
             }
         }
 
-        // Fallback
+        // Preserve the exact expression when it does not match a recognized pattern.
         return "\(expression) (\(tz))"
     }
 

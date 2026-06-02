@@ -78,7 +78,7 @@ struct ThinkingContentView: View {
             if let onTap = onTap {
                 onTap()
             } else if hasMoreContent {
-                // Fallback to inline expansion
+                // Inline expansion is used when no parent sheet action is supplied.
                 withAnimation(.tronStandard) {
                     expanded.toggle()
                 }

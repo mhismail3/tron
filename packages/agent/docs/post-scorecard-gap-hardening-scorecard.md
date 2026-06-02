@@ -996,3 +996,44 @@ UDID before continuing.
   `ipad-action-time-followup-scorecard.md`.
 - Checkpoint 5: Complete. PSG-6/PSG-7 final cleanup, successor scorecard,
   README/docs/static-gate updates, ledger, and final commit.
+
+## 2026-06-02 Post-Closeout Cleanup Confidence Pass
+
+Scope: quick `scorecard-goal-runner` pass over production source, recent tests,
+and high-signal docs after the PSG/IPD closeout. This pass did not reopen PSG
+scoring; it records extra cleanup evidence against the already completed
+campaign.
+
+Evidence:
+
+- Production source scans for `legacy`, `fallback`, backward compatibility,
+  deprecated/dead-code markers, `todo!`, `unimplemented!`, `TODO`, `FIXME`,
+  `HACK`, and workaround wording found no remaining active legacy/fallback code
+  after cleanup. Residual terms are domain nouns: temporary storage/sandbox/profile
+  paths, retryable temporary provider errors, and `todo.write` event payloads.
+- Removed the silent clone-destination `/Users` substitution in
+  `CloneRepoSheet`; the sheet now requires server home-directory truth or an
+  explicit locked destination path before cloning.
+- Removed retired `FontSettings.casualAxis` compatibility storage and its
+  isolated compatibility test.
+- Renamed product defaults and deterministic display heuristics away from
+  fallback terminology in Mac pairing, model-name formatting, fork worktree
+  display bridging, image compression, menu routing, thinking expansion, token
+  badges, cron expression display, and font creation.
+- Added `CleanupGuardTests` as a separate infrastructure test file instead of
+  adding more assertions to the large `SourceGuardTests` file. It guards clone
+  destination truth, retired font-axis storage, model display heuristics, and
+  Mac pairing default naming.
+- Regenerated `packages/ios-app/TronMobile.xcodeproj` with `xcodegen generate`
+  so the split-out cleanup guard is in the Xcode test target.
+- Verification passed: `cargo fmt --manifest-path packages/agent/Cargo.toml
+  --all -- --check`; `cargo test --manifest-path packages/agent/Cargo.toml
+  recipes --lib -- --nocapture`; `cargo test --manifest-path
+  packages/agent/Cargo.toml no_triggers_exist -- --nocapture`; iOS
+  `xcodebuild test -scheme Tron -destination
+  'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482'
+  -only-testing:TronMobileTests/CleanupGuardTests
+  -only-testing:TronMobileTests/FontFamilyTests
+  -only-testing:TronMobileTests/ModelNameFormatterTests`; Mac
+  `xcodebuild test -scheme TronMac -only-testing:TronMacTests/LocalComputerNameTests`;
+  production source terminology scan; and `git diff --check`.

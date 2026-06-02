@@ -486,7 +486,7 @@ struct InputBar: View {
 
 }
 
-// MARK: - iOS 26 Menu Workaround Notifications
+// MARK: - iOS 26 Menu Action Notifications
 
 extension Notification.Name {
     /// iOS 26 Menu bug: State mutations in button actions break gesture handling

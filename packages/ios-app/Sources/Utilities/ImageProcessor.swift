@@ -91,7 +91,7 @@ struct ImageProcessor {
             }
         }
 
-        // Fallback: convert to JPEG
+        // Convert to JPEG when the source format cannot meet the byte budget.
         return await compressToJpeg(image: image, maxDimension: limits.maxDimension, maxBytes: effectiveMaxBytes, note: "format conversion")
     }
 
@@ -191,7 +191,7 @@ struct ImageProcessor {
             }
         }
 
-        // Step 3: Dimension reduction fallback
+        // Step 3: Reduce dimensions if quality compression is still too large.
         if let d = data, d.count > maxBytes {
             var scale: CGFloat = 0.9
             while scale >= 0.3 {

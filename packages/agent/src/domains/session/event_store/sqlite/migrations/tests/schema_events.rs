@@ -74,9 +74,9 @@ fn indexes_are_created() {
 
 #[test]
 fn no_triggers_exist() {
-    // Fresh schema uses inline CHECK constraints instead of BEFORE
-    // triggers (which v005 used as a workaround for "SQLite cannot ALTER
-    // ADD CHECK"). Guard against triggers creeping back.
+    // Fresh schema uses inline CHECK constraints instead of BEFORE triggers;
+    // SQLite cannot add CHECK constraints to an existing table with ALTER.
+    // Guard against triggers creeping back.
     let conn = open_memory();
     run_migrations(&conn).unwrap();
 

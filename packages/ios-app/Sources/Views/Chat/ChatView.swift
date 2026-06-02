@@ -29,7 +29,7 @@ struct ChatView: View {
     // MARK: - Interaction policy (read-only gate for input bar, shared app-wide debounce)
     @Environment(\.interactionPolicy) private var interactionPolicy
 
-    // MARK: - Navigation Lifecycle (SDF crash workaround)
+    // MARK: - Navigation Lifecycle (SDF crash guard)
     // Disables .textSelection(.enabled) before navigation pop animation starts,
     // preventing EXC_BREAKPOINT in SwiftUI.SDFStyle.distanceRange.getter
     @State private var isDisappearing = false
@@ -118,7 +118,7 @@ struct ChatView: View {
             let count = viewModel.messageQueueState.queue.count
             Text("You have \(count) queued message\(count == 1 ? "" : "s").")
         }
-        // iOS 26 Menu workaround: Handle menu actions via NotificationCenter
+        // iOS 26 menu actions route through NotificationCenter before state mutation.
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
             guard let raw = notification.object as? String,
                   let action = ChatMenuAction(rawValue: raw) else { return }
@@ -131,7 +131,7 @@ struct ChatView: View {
             guard let model = notification.object as? ModelInfo else { return }
             switchModel(to: model)
         }
-        // iOS 26 Menu workaround: Handle reasoning level actions via NotificationCenter
+        // Reasoning level uses the same iOS 26 menu action routing.
         .onReceive(NotificationCenter.default.publisher(for: .reasoningLevelAction)) { notification in
             guard let level = notification.object as? String else { return }
             let previousLevel = viewModel.inputBarState.reasoningLevel
@@ -820,9 +820,9 @@ struct ChatView: View {
     }
 }
 
-// MARK: - iOS 26 Menu Workaround
-// Menu button actions that mutate @State break gesture handling in iOS 26
-// Workaround: Post notification, handle via onReceive
+// MARK: - iOS 26 Menu Action Routing
+// Menu button actions that mutate @State break gesture handling in iOS 26.
+// Posting a notification lets the parent view mutate state from onReceive.
 
 enum ChatMenuAction: String {
     case settings, processes

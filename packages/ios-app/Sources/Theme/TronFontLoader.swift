@@ -100,7 +100,7 @@ enum TronFontLoader {
             return font
         }
 
-        logger.warning("Font creation failed for \(resolvedFamily.displayName), using system fallback", category: .ui)
+        logger.warning("Font creation failed for \(resolvedFamily.displayName), using matching system font", category: .ui)
         return (mono || resolvedFamily.category == .mono)
             ? UIFont.monospacedSystemFont(ofSize: size, weight: uiFontWeight(from: weight))
             : UIFont.systemFont(ofSize: size, weight: uiFontWeight(from: weight))

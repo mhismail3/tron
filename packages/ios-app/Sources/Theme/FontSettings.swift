@@ -20,12 +20,6 @@ final class FontSettings {
         }
     }
 
-    /// CASL axis value (0 = Linear, 1 = Casual) — backward-compatible convenience for Recursive
-    var casualAxis: Double {
-        get { axisValue(for: .recursive, axis: .casual) }
-        set { setAxisValue(for: .recursive, axis: .casual, value: newValue) }
-    }
-
     /// Per-font axis values: [familyRawValue: [axisRawValue: Double]]
     private var axisValues: [String: [String: Double]] {
         didSet { persistAxisValues() }
@@ -73,15 +67,6 @@ final class FontSettings {
             self.axisValues = decoded
         } else {
             self.axisValues = [:]
-            // Migrate old casualAxis value if present
-            if UserDefaults.standard.bool(forKey: "fontCasualAxisSet") {
-                let oldValue = UserDefaults.standard.double(forKey: "fontCasualAxis")
-                let migrated = oldValue == 0 && !UserDefaults.standard.bool(forKey: "fontCasualAxisSet")
-                    ? 0.5
-                    : oldValue
-                axisValues[FontFamily.recursive.rawValue] = [FontAxis.casual.rawValue: migrated]
-                persistAxisValues()
-            }
         }
     }
 

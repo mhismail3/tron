@@ -1,6 +1,6 @@
 import Foundation
 
-/// Coordinator for handling iOS 26 Menu workaround notifications.
+/// Coordinator for handling iOS 26 menu action notifications.
 /// Menu button actions that mutate @State break gesture handling in iOS 26,
 /// so we use NotificationCenter to decouple the action from state mutation.
 enum ChatNotificationCoordinator {

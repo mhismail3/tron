@@ -337,19 +337,6 @@ struct FontSettingsTests {
         settings.selectedFamily = origFamily
     }
 
-    @Test func casualAxisBackwardCompatibility() {
-        let settings = FontSettings.shared
-        let original = settings.casualAxis
-
-        settings.casualAxis = 0.7
-        #expect(settings.axisValue(for: .recursive, axis: .casual) == 0.7)
-
-        settings.setAxisValue(for: .recursive, axis: .casual, value: 0.3)
-        #expect(settings.casualAxis == 0.3)
-
-        settings.casualAxis = original
-    }
-
     @Test func currentAxisValueFollowsSelectedFamily() {
         let settings = FontSettings.shared
         let origFamily = settings.selectedFamily

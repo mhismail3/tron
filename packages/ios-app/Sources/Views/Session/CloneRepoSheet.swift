@@ -19,7 +19,6 @@ struct CloneRepoSheet: View {
     @State private var isCloning = false
     @State private var cloneError: String?
     @State private var showDestinationPicker = false
-    @State private var isLoadingHome = true
 
     /// Parsed repo info from the URL (nil if invalid)
     private var parsedRepo: GitHubURLParser.ParseResult? {
@@ -40,13 +39,14 @@ struct CloneRepoSheet: View {
 
     /// Full destination path including repo name
     private var fullDestinationPath: String {
-        guard let repo = parsedRepo else { return destinationPath }
+        guard let repo = parsedRepo, !destinationPath.isEmpty else { return destinationPath }
         return (destinationPath as NSString).appendingPathComponent(repo.repoName)
     }
 
     /// Display-friendly destination path (truncates home dir)
     private var displayDestinationPath: String {
-        fullDestinationPath.abbreviatingHomeDirectory
+        guard !fullDestinationPath.isEmpty else { return "Select destination" }
+        return fullDestinationPath.abbreviatingHomeDirectory
     }
 
     private var lockedDestinationPath: String? {
@@ -153,7 +153,7 @@ struct CloneRepoSheet: View {
                     .onChange(of: repoURL) { _, newValue in
                         // Auto-update destination when URL changes.
                         if GitHubURLParser.parse(newValue) != nil, destinationPath.isEmpty {
-                            destinationPath = lockedDestinationPath ?? defaultProjectsPath
+                            destinationPath = lockedDestinationPath ?? defaultProjectsPath ?? ""
                         }
                         cloneError = nil
                     }
@@ -285,14 +285,14 @@ struct CloneRepoSheet: View {
 
     // MARK: - Computed Properties
 
-    private var defaultProjectsPath: String {
-        (homePath as NSString).appendingPathComponent("Downloads/projects")
+    private var defaultProjectsPath: String? {
+        guard !homePath.isEmpty else { return nil }
+        return (homePath as NSString).appendingPathComponent("Downloads/projects")
     }
 
     // MARK: - Actions
 
     private func loadHome() async {
-        isLoadingHome = true
         do {
             await engineClient.connect()
             if !engineClient.isConnected {
@@ -302,15 +302,14 @@ struct CloneRepoSheet: View {
             let home = try await engineClient.filesystem.getHome()
             await MainActor.run {
                 homePath = home.homePath
-                destinationPath = lockedDestinationPath ?? defaultProjectsPath
-                isLoadingHome = false
+                destinationPath = lockedDestinationPath ?? defaultProjectsPath ?? ""
             }
         } catch {
+            let message = (error as? EngineProtocolError)?.message ?? error.localizedDescription
             await MainActor.run {
-                let fallback = "/Users"
-                homePath = fallback
-                destinationPath = lockedDestinationPath ?? fallback
-                isLoadingHome = false
+                homePath = ""
+                destinationPath = lockedDestinationPath ?? ""
+                cloneError = "Could not load home directory: \(message)"
             }
         }
     }

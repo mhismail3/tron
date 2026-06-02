@@ -7,7 +7,7 @@ import SystemConfiguration
 /// localized host name, and lower-level host name. Pairing wants the
 /// friendly Sharing name first because that is what users recognize.
 enum LocalComputerName {
-    static let fallback = "My Mac"
+    static let defaultName = "My Mac"
 
     static func current() -> String {
         preferredName(
@@ -21,14 +21,14 @@ enum LocalComputerName {
         computerName: String?,
         localizedHostName: String?,
         hostName: String?,
-        fallback: String = fallback
+        defaultName: String = defaultName
     ) -> String {
-        for candidate in [computerName, localizedHostName, hostName, fallback] {
+        for candidate in [computerName, localizedHostName, hostName] {
             if let normalized = normalize(candidate) {
                 return normalized
             }
         }
-        return fallback
+        return normalize(defaultName) ?? Self.defaultName
     }
 
     private static func systemComputerName() -> String? {

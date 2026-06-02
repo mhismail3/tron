@@ -536,7 +536,7 @@ enum TronAnimationTiming {
     static let inputBarFinalSpring: Animation = .spring(response: 0.35, dampingFraction: 0.85)
 }
 
-// MARK: - ShapeStyle Extension for foregroundStyle compatibility
+// MARK: - ShapeStyle Tokens for foregroundStyle
 
 extension ShapeStyle where Self == Color {
     // Accent Greens
