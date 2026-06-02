@@ -223,7 +223,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     agent.set_persister(Some(persister.clone()));
     agent.set_invocation_abort_registry(orchestrator.invocation_abort_registry().clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
-
     let skills_payload = {
         let registry = skill_registry.read();
         collect_pending_skill_payloads(&event_store, &session_id, Some(&*registry))
@@ -275,7 +274,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         let mut registry = skill_registry.write();
         let _ = registry.refresh_if_stale(&working_dir);
     }
-
     let skill_result = match prepare_skill_context_from_session(
         skill_registry.clone(),
         event_store.clone(),

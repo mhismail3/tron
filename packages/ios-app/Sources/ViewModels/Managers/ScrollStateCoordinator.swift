@@ -19,7 +19,7 @@ import SwiftUI
 /// has scrolled away.** This prevents programmatic `scrollTo` calls from fighting the
 /// user's gesture during streaming.
 ///
-/// A `hadUserInteraction` flag bridges the callback ordering race — `onScrollPhaseChange`
+/// A `hadUserInteraction` flag covers the callback ordering race — `onScrollPhaseChange`
 /// can fire before `onScrollGeometryChange` in the same frame, so the flag ensures a
 /// geometry update arriving after phase → idle still correctly attributes the scroll to
 /// the user.

@@ -626,7 +626,7 @@ struct EngineConsoleView: View {
                 EngineConsoleCardHeader(
                     symbol: "curlybraces.square",
                     title: "Program Executor",
-                    subtitle: "Inspect the runtime, then run JavaScript through the capability bridge."
+                    subtitle: "Inspect the runtime, then run JavaScript through the capability runtime."
                 )
 
                 Button {

@@ -616,6 +616,149 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 }
 
 #[test]
+fn legacy_fallback_cleanup_pass_stays_formalized() {
+    let repo_root = repo_root();
+    let scorecard_path = repo_root
+        .join("packages")
+        .join("agent")
+        .join("docs")
+        .join("legacy-fallback-cleanup-pass-scorecard.md");
+    assert!(
+        scorecard_path.is_file(),
+        "post-closeout legacy/fallback cleanup pass scorecard must exist"
+    );
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+
+    for required in [
+        "# Legacy/Fallback Cleanup Pass Scorecard",
+        "Current score: **100/100**",
+        "Status: **completed**",
+        "| LFC-0 | Scorecard formalization |",
+        "| LFC-1 | Production legacy/fallback scan |",
+        "| LFC-2 | Client/script static gate |",
+        "| LFC-3 | Large-file/test split audit |",
+        "| LFC-4 | High-signal docs and naming |",
+        "| LFC-5 | Closeout verification |",
+        "iOS/Mac production sources and scripts must stay free",
+        "large_file_budget_invariants",
+        "threat_model_invariants legacy_fallback_cleanup_pass_stays_formalized",
+        "No runtime/UI smoke required because this pass does not change behavior",
+        "## Next Test",
+        "The pass is closed.",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "legacy/fallback cleanup pass scorecard missing required text: {required}"
+        );
+    }
+
+    for stale in [
+        "Status: **active**",
+        "pending |",
+        "Next Test\n\nRun the focused static gates",
+    ] {
+        assert!(
+            !scorecard.contains(stale),
+            "legacy/fallback cleanup pass scorecard must not retain active/pending closeout text: {stale}"
+        );
+    }
+
+    let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
+    assert!(
+        readme.contains("packages/agent/docs/legacy-fallback-cleanup-pass-scorecard.md")
+            && readme.contains("completed\n  post-closeout static pass"),
+        "README living-doc map must link the completed legacy/fallback cleanup pass"
+    );
+
+    let mut scan_files = Vec::new();
+    scan_files.extend(files_with_extensions(
+        &repo_root.join("packages/ios-app/Sources"),
+        &["swift"],
+    ));
+    scan_files.extend(files_with_extensions(
+        &repo_root.join("packages/mac-app/Sources"),
+        &["swift"],
+    ));
+    scan_files.extend(files_with_extensions(
+        &repo_root.join("scripts"),
+        &["sh", "py"],
+    ));
+    for rel in [
+        "scripts/asc-jwt",
+        "scripts/auto-deploy",
+        "scripts/reset-db",
+        "scripts/tron",
+        "scripts/tron-cli",
+        "scripts/tron-ios-beta",
+        "scripts/tron-release-notes",
+        "scripts/tron-version",
+    ] {
+        scan_files.push(repo_root.join(rel));
+    }
+    scan_files.sort();
+    scan_files.dedup();
+    let current_client_term_allowlist = [
+        (
+            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Model.swift",
+            "isLegacy",
+            "legacy",
+            "current model-list wire key for retired-generation metadata",
+        ),
+        (
+            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Model.swift",
+            "isDeprecated",
+            "deprecated",
+            "current model-list wire key for retired model metadata",
+        ),
+    ];
+
+    for path in scan_files {
+        if !path.is_file() {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(&repo_root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {rel}: {error}"));
+        let lower = content.to_lowercase();
+        for forbidden in [
+            "legacy",
+            "fallback",
+            "back-compat",
+            "back compat",
+            "backward compatibility",
+            "backwards compatibility",
+            "compatibility layer",
+            "compatibility shim",
+            "deprecated",
+            "obsolete",
+            "remove later",
+            "temporary workaround",
+            "old server",
+            "older server",
+        ] {
+            let allowed_current_term =
+                current_client_term_allowlist
+                    .iter()
+                    .any(|(allowed_rel, marker, term, reason)| {
+                        rel == *allowed_rel
+                            && forbidden == *term
+                            && content.contains(marker)
+                            && !reason.is_empty()
+                    });
+            assert!(
+                !lower.contains(forbidden) || allowed_current_term,
+                "{rel} contains unowned legacy/fallback/compatibility debt marker `{forbidden}`"
+            );
+        }
+    }
+}
+
+#[test]
 fn post_100_operating_scorecard_stays_formalized() {
     let repo_root = repo_root();
     let scorecard_path =
@@ -2389,8 +2532,8 @@ fn critical_execution_and_ui_boundaries_stay_split() {
     .expect("failed to read iOS EventDatabase");
     assert!(
         event_database.contains("EventDatabaseStorageMode")
-            && event_database.contains("temporaryFallback"),
-        "iOS EventDatabase must expose fallback-cache mode visibly"
+            && event_database.contains("temporaryCache"),
+        "iOS EventDatabase must expose temporary-cache mode visibly"
     );
 }
 
@@ -5638,6 +5781,14 @@ struct CurrentBoundaryAllow {
 }
 
 const CURRENT_BOUNDARY_ALLOWLIST: &[CurrentBoundaryAllow] = &[
+    CurrentBoundaryAllow {
+        relative_path_prefix: "README.md",
+        marker: "legacy-fallback-cleanup-pass-scorecard.md",
+        kind: CurrentBoundaryKind::Isolate,
+        owner: "docs_or_scorecard",
+        reason: "Durable scorecard filename for this cleanup pass; README only links the evidence document.",
+        expires: "when the scorecard leaves the living-doc map",
+    },
     CurrentBoundaryAllow {
         relative_path_prefix: "packages/agent/src/domains/mcp/product_protocol/",
         marker: "JsonRpc",

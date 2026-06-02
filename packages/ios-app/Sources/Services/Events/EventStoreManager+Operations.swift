@@ -279,8 +279,8 @@ extension EventStoreManager {
             sourceSession = nil
         }
         let now = DateParser.now
-        // New fork worktree truth comes from the server result; source-session
-        // path is only a display bridge when the fork shares its parent checkout.
+        // New fork worktree truth comes from the server result; the source-session
+        // path is display context only when the fork shares its parent checkout.
         let workingDir = result.worktree?.path ?? sourceSession?.workingDirectory ?? ""
         let workspaceName = URL(fileURLWithPath: workingDir).lastPathComponent
         // CRITICAL: Tag with current server origin for filtering

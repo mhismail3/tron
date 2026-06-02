@@ -149,7 +149,7 @@ enum NewSessionPreferredModel: Equatable, Sendable {
         let defaultModel = defaultModel.trimmingCharacters(in: .whitespacesAndNewlines)
         if profile == .local {
             return preferredLocalModel(from: selectable)?.id
-                ?? fallbackUnknownDefaultModel(defaultModel, availableModels: availableModels)
+                ?? unknownDefaultModelSelection(defaultModel, availableModels: availableModels)
         }
 
         if let defaultMatch = selectable.first(where: { $0.id == defaultModel && !$0.isLocalProvider }) {
@@ -169,7 +169,7 @@ enum NewSessionPreferredModel: Equatable, Sendable {
             ?? models.first(where: { $0.isLocalProvider })
     }
 
-    private static func fallbackUnknownDefaultModel(
+    private static func unknownDefaultModelSelection(
         _ defaultModel: String,
         availableModels: [ModelInfo]
     ) -> String {

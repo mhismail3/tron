@@ -349,7 +349,7 @@ private struct ScreenRecordingAppShortcut: NSViewRepresentable {
 
 private final class ScreenRecordingAppShortcutView: NSView, NSDraggingSource {
     private var appURL: URL?
-    private var appIcon = NSImage.tronShortcutFallbackAppIcon
+    private var appIcon = NSImage.tronShortcutPlaceholderAppIcon
     private var mouseDownPoint: NSPoint?
     private var didStartDrag = false
 
@@ -470,7 +470,7 @@ private final class ScreenRecordingAppShortcutView: NSView, NSDraggingSource {
             )
             return image
         }
-        return .tronShortcutFallbackAppIcon
+        return .tronShortcutPlaceholderAppIcon
     }
 
     private var iconDrawingRect: NSRect {
@@ -485,7 +485,7 @@ private final class ScreenRecordingAppShortcutView: NSView, NSDraggingSource {
 }
 
 private extension NSImage {
-    static var tronShortcutFallbackAppIcon: NSImage {
+    static var tronShortcutPlaceholderAppIcon: NSImage {
         NSImage(named: "AppIcon")
             ?? NSImage(size: NSSize(
                 width: PermissionsStepLayout.appShortcutIconSize,

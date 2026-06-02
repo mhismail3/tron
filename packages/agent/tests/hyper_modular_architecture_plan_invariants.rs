@@ -1,0 +1,154 @@
+//! Static gates for the hyper modular agent architecture planning scorecard.
+//!
+//! This test stays separate from `threat_model_invariants.rs` so the broad
+//! north-star planning guard does not grow the already-budgeted cross-cutting
+//! invariant file.
+
+use std::path::PathBuf;
+
+#[test]
+fn hyper_modular_architecture_plan_stays_formalized() {
+    let repo_root = repo_root();
+    let scorecard_path =
+        repo_root.join("packages/agent/docs/hyper-modular-agent-architecture-scorecard.md");
+    let portfolio_path =
+        repo_root.join("packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md");
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+    let portfolio = std::fs::read_to_string(&portfolio_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", portfolio_path.display()));
+    let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README.md");
+
+    assert!(
+        readme.contains("packages/agent/docs/hyper-modular-agent-architecture-scorecard.md")
+            && readme.contains(
+                "completed planning scorecard for the iii-informed hyper modular agent harness"
+            )
+            && readme.contains(
+                "packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md"
+            )
+            && readme.contains("fresh execution scorecard portfolio"),
+        "README living-doc map must link the hyper modular planning and execution scorecards"
+    );
+
+    for required in [
+        "Current score: **100/100**",
+        "Status: **completed planning artifact**",
+        "Implementation execution status: **not started by this planning scorecard**",
+        "/Users/moose/.codex/attachments/0af3ea78-c386-4055-ba8d-6e04c8eb5c49/pasted-text.txt",
+        "/Users/moose/.codex/attachments/053a570d-434a-4879-bb93-1db134477b7c/pasted-text.txt",
+        "`iii worker add` is the important product operation",
+        "The agent and the human use the same operation to extend the same system",
+        "The harness is a stack of workers, not a framework block.",
+        "https://iii.dev/manifesto",
+        "https://iii.dev/docs/0-10-0/primitives-and-concepts/functions-triggers-workers",
+        "https://iii.dev/docs/0-10-0/primitives-and-concepts/discovery",
+        "https://iii.dev/docs/0-10-0/how-to/use-functions-and-triggers",
+        "https://iii.dev/docs/0-10-0/how-to/trigger-actions",
+        "https://github.com/iii-hq/iii",
+        "packages/agent/src/engine/mod.rs",
+        "packages/agent/src/domains/capability/mod.rs",
+        "packages/agent/src/domains/sandbox/mod.rs",
+        "packages/ios-app/docs/architecture.md",
+        "packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md",
+        "## North-Star Requirements",
+        "## Primitive And Plane Budget",
+        "## Execution Scorecard Portfolio",
+        "| HMA-B | Agent self-modifying capability lifecycle |",
+        "| HMA-C | Harness knowledge and context compiler |",
+        "| HMA-E | Human harness and generated UI north star |",
+        "| HMA-F | Causality, safety, loops, and rollback |",
+        "## Required Scenario Rows For HMA-B",
+        "## Required Scenario Rows For HMA-E",
+        "## Adversarial Audit",
+        "| HMA-6 | Closeout verification | 10 | passed |",
+        "The planning artifact is closed.",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "hyper modular planning scorecard missing required text: {required}"
+        );
+    }
+
+    for forbidden in [
+        "The attached pasted files available in this thread were not the iii articles.",
+        "Status: **active until closeout verification**",
+        "| HMA-6 | Closeout verification | 10 | pending |",
+        "Then update HMA-6",
+    ] {
+        assert!(
+            !scorecard.contains(forbidden),
+            "completed planning scorecard must not retain active closeout text: {forbidden}"
+        );
+    }
+
+    for required in [
+        "# Hyper Modular Agent Harness Execution Scorecard Portfolio",
+        "Current score: **0/100**",
+        "Status: **ready_for_execution**",
+        "## Source-Derived Requirements",
+        "The agent and the human use the same operation to extend the same system.",
+        "The harness is a composition slider, not a thin-vs-thick fork.",
+        "## Current Tron Baseline",
+        "## Primitive And Plane Budget",
+        "## Operating Loop",
+        "| HMH-A | Source, baseline, and primitive audit | 10 | pending |",
+        "| HMH-B | Agent self-modifying capability lifecycle | 20 | pending |",
+        "| HMH-C | Harness knowledge and context compiler | 15 | pending |",
+        "| HMH-D | Plug-and-play module/package lifecycle | 15 | pending |",
+        "| HMH-E | Human harness and generated UI | 15 | pending |",
+        "| HMH-F | Causality, safety, loops, and rollback | 15 | pending |",
+        "| HMH-G | Final adversarial closeout and absence gates | 10 | pending |",
+        "## HMH-B Scorecard: Agent Self-Modifying Capability Lifecycle",
+        "| HMH-B3 | Session worker creation is scoped |",
+        "| HMH-B6 | Invocation uses the tiny harness |",
+        "| HMH-B9 | Agent explains the evidence |",
+        "## HMH-C Scorecard: Harness Knowledge And Context Compiler",
+        "| HMH-C1 | Primer contains the north-star recipe |",
+        "| HMH-C6 | Prompt surface stays tiny |",
+        "## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle",
+        "| HMH-D3 | Activation composes worker spawn |",
+        "| HMH-D8 | No generic action escape hatch |",
+        "## HMH-E Scorecard: Human Harness And Generated UI",
+        "| HMH-E2 | Generated surface for new capability |",
+        "| HMH-E7 | Disconnected cache is read-only |",
+        "## HMH-F Scorecard: Causality, Safety, Loops, And Rollback",
+        "| HMH-F2 | Approval resume preserves original context |",
+        "| HMH-F7 | Restart/disconnect chaos fails closed |",
+        "## HMH-G Scorecard: Final Adversarial Closeout And Absence Gates",
+        "| HMH-G1 | Requirement-by-requirement completion audit |",
+        "| HMH-G7 | Ledger and final status are honest |",
+        "## Adversarial Audit Of This Portfolio",
+        "Modular in docs, not in the agent turn.",
+        "Human harness as a second engine.",
+        "Scorecard closure by rhetoric.",
+        "## Static Gates",
+        "## Final Closeout Criteria",
+        "cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture",
+    ] {
+        assert!(
+            portfolio.contains(required),
+            "hyper modular execution portfolio missing required text: {required}"
+        );
+    }
+
+    for forbidden in [
+        "The attached pasted files available in this thread were not the iii articles.",
+        "Current score: **100/100**",
+        "Status: **completed**",
+    ] {
+        assert!(
+            !portfolio.contains(forbidden),
+            "execution portfolio must not claim completion or preserve forbidden plane text: {forbidden}"
+        );
+    }
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("packages/agent parent")
+        .parent()
+        .expect("repo root")
+        .to_path_buf()
+}

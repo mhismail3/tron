@@ -108,6 +108,15 @@ Current living entry points:
 - `packages/agent/docs/codebase-cleanup-scorecard.md`: completed repo-local
   cleanup scorecard, large-file budget ledger, and module-by-module
   maintainability plan at 100/100.
+- `packages/agent/docs/legacy-fallback-cleanup-pass-scorecard.md`: completed
+  post-closeout static pass for cleanup debt, production naming cleanup, and
+  large-file budget drift.
+- `packages/agent/docs/hyper-modular-agent-architecture-scorecard.md`:
+  completed planning scorecard for the iii-informed hyper modular agent harness
+  north star and its successor execution scorecard portfolio.
+- `packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md`:
+  fresh execution scorecard portfolio for proving the recursive agent/human
+  plug-and-play harness loop from the current baseline.
 - `packages/agent/docs/token-accounting-hardening-scorecard.md`: completed
   server-authoritative token accounting, pricing, provider-cache, and
   iPhone-only UI hardening scorecard with final evidence caveats.

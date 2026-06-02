@@ -18,9 +18,9 @@ enum PairingProbeOutcome: Equatable, Sendable {
     /// best-effort prose for diagnostics.
     case unreachable(reason: String)
 
-    /// Bridge to the existing `PairingStepConnectError` taxonomy used by
+    /// Map into the `PairingStepConnectError` taxonomy used by
     /// `PairingStepValidator.classify(error:hostHint:)`. `.ok` returns
-    /// `nil` because there's no error to bridge.
+    /// `nil` because success has no error payload.
     func toConnectError() -> PairingStepConnectError? {
         switch self {
         case .ok:

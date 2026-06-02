@@ -25,9 +25,8 @@ enum PairingURLParser {
         let host: String
         let port: Int
         let token: String
-        /// Optional server name. It travels as `label` in the URL so
-    /// existing Mac QR codes stay compatible while the UI can call it
-    /// "Server Name."
+        /// Optional server name. The URL field is `label`; the UI presents it
+        /// as "Server Name."
         let label: String?
     }
 

@@ -414,7 +414,7 @@ struct GeneratedUISurfaceView: View {
         case "Button":
             return generatedActionButton(
                 actionId: component.props?.string("actionId"),
-                fallbackLabel: component.props?.string("label"),
+                componentLabel: component.props?.string("label"),
                 actionsEnabled: actionsEnabled
             )
         case "ButtonGroup":
@@ -422,7 +422,7 @@ struct GeneratedUISurfaceView: View {
                 ForEach(arrayStrings(component.props?["actions"]), id: \.self) { actionId in
                     generatedActionButton(
                         actionId: actionId,
-                        fallbackLabel: nil,
+                        componentLabel: nil,
                         actionsEnabled: actionsEnabled,
                         compact: true
                     )
@@ -603,12 +603,12 @@ struct GeneratedUISurfaceView: View {
 
     private func generatedActionButton(
         actionId: String?,
-        fallbackLabel: String?,
+        componentLabel: String?,
         actionsEnabled: Bool,
         compact: Bool = false
     ) -> AnyView {
         let action = action(for: actionId)
-        let label = action?.label ?? fallbackLabel ?? "Action"
+        let label = action?.label ?? componentLabel ?? "Action"
         let role = GeneratedUIActionButtonRole(presentation: action?.presentation)
         let enabled = actionsEnabled && canSubmit(actionId: actionId)
         let button = Button {

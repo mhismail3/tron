@@ -27,7 +27,7 @@ enum ActivityLineStatus: String, Codable, Equatable, CaseIterable, Sendable {
 
 // MARK: - Capability Risk Color
 
-/// Type-safe capability color that bridges between capability presentation hint names and SwiftUI colors.
+/// Type-safe capability color that maps capability presentation hint names to SwiftUI colors.
 /// Replaces the stringly-typed `presentationColorName` → `String.resolvedCapabilityColor` pattern.
 enum CapabilityColor: String, Codable, Equatable, CaseIterable, Sendable {
     case tronSlate

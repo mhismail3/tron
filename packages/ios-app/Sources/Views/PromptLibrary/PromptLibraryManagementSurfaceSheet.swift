@@ -147,7 +147,7 @@ struct PromptLibraryManagementSurfaceSheet: View {
                 idempotencyKey: .userAction("promptLibrary.manage.\(tab.rawValue).\(submission.actionId)")
             )
             ToastCenter.shared.push(
-                successMessage(for: result, fallbackActionId: submission.actionId),
+                successMessage(for: result, submittedActionId: submission.actionId),
                 severity: .success,
                 dedupKey: toastDedupKey(for: submission.actionId),
                 duplicatePolicy: .replace
@@ -158,8 +158,8 @@ struct PromptLibraryManagementSurfaceSheet: View {
         }
     }
 
-    private func successMessage(for result: UiActionResultDTO, fallbackActionId: String) -> String {
-        let actionId = (result.actionId ?? fallbackActionId).lowercased()
+    private func successMessage(for result: UiActionResultDTO, submittedActionId: String) -> String {
+        let actionId = (result.actionId ?? submittedActionId).lowercased()
         if actionId.contains("create-snippet") {
             return "Snippet created"
         }
