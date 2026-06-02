@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **48.75/100**
+Current score: **51/100**
 
 Status: **running**
 
@@ -695,8 +695,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D1 and HMH-D2 are also closed; continue with HMH-D3 to prove
-  module activation composes canonical `worker::spawn`.
+  proven. HMH-D1, HMH-D2, and HMH-D3 are also closed; continue with HMH-D4
+  to prove health, integrity, and conformance evidence.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -708,7 +708,7 @@ Out of scope: remote marketplace trust without explicit local policy.
 |----|----------|--------|--------|----------|---------------|
 | HMH-D1 | Package registration is resource-backed | 10 | passed | `module::register_package` writes worker-package resources with declared capabilities, expected ids, digest, provenance, runtime entry point, and no raw secrets. | Stop if package truth lands in an unowned side table. |
 | HMH-D2 | Source trust is explicit and revocable | 15 | passed | Register/verify/approve/revoke/expire/rotate/reconcile trust flows create decision/evidence resources and enforce trust ceilings before activation. | Stop if activation can bypass source trust. |
-| HMH-D3 | Activation composes worker spawn | 15 | pending | `module::activate` invokes child `worker::spawn` outside host locks with narrowed grant, file roots, expected ids, scoped token, and activation lineage. | Stop if module runtime owns a parallel process launcher. |
+| HMH-D3 | Activation composes worker spawn | 15 | passed | `module::activate` invokes child `worker::spawn` outside host locks with narrowed grant, file roots, expected ids, scoped token, and activation lineage. | Stop if module runtime owns a parallel process launcher. |
 | HMH-D4 | Health, integrity, and conformance are inspectable | 15 | pending | `check_health`, `verify_integrity`, and `run_conformance` produce linked evidence, child invocation ids, and recovery recommendations. | Block promotion if evidence is missing/stale. |
 | HMH-D5 | Upgrade, rollback, disable, quarantine work | 15 | pending | Upgrade and rollback require expected versions and idempotency; disable/quarantine stop workers or fail closed; stale invocations cannot use quarantined functions. | Stop if rollback is doc-only. |
 | HMH-D6 | Local marketplace shape exists | 10 | pending | Installing a first-party/local package is a capability operation over local package resources; remote source approval is explicit and policy-bound. | Reject implicit network trust. |
@@ -772,11 +772,39 @@ HMH-D2 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml module_activation::source_trust -- --nocapture`.
 
-Open loops after HMH-D1/HMH-D2:
+HMH-D3 evidence, 2026-06-02:
 
-- HMH-D remains open. Continue with HMH-D3 to prove module activation composes
-  canonical `worker::spawn` outside host locks with narrowed grants, file
-  roots, expected ids, scoped token lineage, and activation resource evidence.
+- The strengthened unit proof is
+  `module_activate_local_process_invokes_worker_spawn_and_records_integrity`.
+  It drives `module::activate` through the recording `worker::spawn` handler,
+  which calls back into the engine to register the worker/functions and derive
+  the grant while activation is awaiting the child invocation. That passing
+  callback path proves activation is not holding a host lock that deadlocks
+  child engine work.
+- The same proof now asserts the exact `worker::spawn` payload:
+  activation-derived grant id, expected function ids, narrowed authority
+  scopes, resource kinds, selectors, file roots, network policy, risk,
+  session visibility, session id, and workspace id.
+- It inspects the derived grant and verifies parent grant lineage, subject
+  worker, subject spawn invocation, allowed capabilities/namespaces/authority
+  scopes/resource kinds/selectors/file roots/network/risk, then inspects the
+  `activation_record` resource to verify current version, `spawnInvocationId`,
+  incoming `activates` package link, and outgoing `configured_by` config link.
+- The real integration proof
+  `e2e_local_process_module_activation_health_and_disable_use_real_worker_spawn`
+  passed through the actual local-process `worker::spawn` path, including the
+  scoped worker-token/protocol worker wiring needed for the spawned worker to
+  register and respond.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml module_activate_local_process_invokes_worker_spawn_and_records_integrity -- --nocapture`.
+- Passing integration proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test integration e2e_local_process_module_activation_health_and_disable_use_real_worker_spawn -- --nocapture`.
+
+Open loops after HMH-D1/HMH-D2/HMH-D3:
+
+- HMH-D remains open. Continue with HMH-D4 to prove `module::check_health`,
+  `module::verify_integrity`, and `module::run_conformance` produce linked
+  evidence, child invocation ids, and recovery recommendations.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -932,10 +960,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D1, and HMH-D2 are closed. Continue with
-HMH-D3: prove `module::activate` composes canonical `worker::spawn` with
-narrowed grants, expected ids, scoped token lineage, and activation evidence.
+HMH-A, HMH-B, HMH-C, HMH-D1, HMH-D2, and HMH-D3 are closed. Continue with
+HMH-D4: prove health, integrity, and conformance operations produce linked
+evidence, child invocation ids, and recovery recommendations.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml module_activate_local_process_invokes_worker_spawn_and_records_integrity -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml module_activation::health_integrity -- --nocapture
 ```

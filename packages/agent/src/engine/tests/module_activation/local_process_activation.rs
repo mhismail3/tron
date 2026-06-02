@@ -118,8 +118,88 @@ async fn module_activate_local_process_invokes_worker_spawn_and_records_integrit
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0]["workerId"], "demo-local-worker");
     assert_eq!(
+        calls[0]["grantId"],
+        format!(
+            "sandbox-worker:demo-local-worker:{}",
+            activated.invocation_id.as_str()
+        )
+    );
+    assert_eq!(
         calls[0]["expectedFunctionIds"],
         json!(["demo_local::inspect", "demo_local::write_artifact"])
+    );
+    assert_eq!(
+        calls[0]["allowedAuthorityScopes"],
+        json!(["demo_local.read", "demo_local.write"])
+    );
+    assert_eq!(calls[0]["allowedResourceKinds"], json!(["artifact"]));
+    assert_eq!(calls[0]["resourceSelectors"], json!(["*"]));
+    assert_eq!(calls[0]["fileRoots"], json!(["*"]));
+    assert_eq!(calls[0]["networkPolicy"], "none");
+    assert_eq!(calls[0]["maxRisk"], "medium");
+    assert_eq!(calls[0]["visibility"], "session");
+    assert_eq!(calls[0]["sessionId"], "session-a");
+    assert_eq!(calls[0]["workspaceId"], "workspace-a");
+    let spawn_invocation_id = value["activation"]["payload"]["spawnInvocationId"]
+        .as_str()
+        .unwrap();
+    let grant = handle
+        .invoke(host_invocation(
+            "grant::inspect",
+            json!({"grantId": value["activation"]["payload"]["derivedGrantId"]}),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("engine-system"),
+                trace("module-local-activate-grant-inspect"),
+            )
+            .with_scope("grant.read"),
+        ))
+        .await;
+    assert_eq!(grant.error, None);
+    let grant = &grant.value.as_ref().unwrap()["grant"];
+    assert_eq!(grant["parentGrantId"], "grant");
+    assert_eq!(grant["subjectWorkerId"], "demo-local-worker");
+    assert_eq!(grant["subjectInvocationId"], spawn_invocation_id);
+    assert_eq!(
+        grant["allowedCapabilities"],
+        json!(["demo_local::inspect", "demo_local::write_artifact"])
+    );
+    assert_eq!(grant["allowedNamespaces"], json!(["demo_local"]));
+    assert_eq!(
+        grant["allowedAuthorityScopes"],
+        json!(["demo_local.read", "demo_local.write"])
+    );
+    assert_eq!(grant["allowedResourceKinds"], json!(["artifact"]));
+    assert_eq!(grant["resourceSelectors"], json!(["*"]));
+    assert_eq!(grant["fileRoots"], json!(["*"]));
+    assert_eq!(grant["networkPolicy"], "none");
+    assert_eq!(grant["maxRisk"], "Medium");
+    let activation = inspect_resource(&handle, "activation:workspace-a:demo-local-tools").await;
+    assert_eq!(activation["resource"]["kind"], "activation_record");
+    assert_eq!(
+        activation["resource"]["currentVersionId"],
+        value["resourceRefs"][0]["versionId"]
+    );
+    assert_eq!(
+        activation["versions"].as_array().unwrap().last().unwrap()["payload"]["spawnInvocationId"],
+        spawn_invocation_id
+    );
+    assert!(
+        activation["incomingLinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["relation"] == "activates"
+                && link["sourceResourceId"] == "worker-package:demo-local-tools")
+    );
+    assert!(
+        activation["outgoingLinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["relation"] == "configured_by"
+                && link["targetResourceId"] == "module-config:workspace-a:demo-local-tools")
     );
     let inspection = handle
         .invoke(host_invocation(
