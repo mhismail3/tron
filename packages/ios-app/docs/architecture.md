@@ -551,11 +551,13 @@ floating forms so the underlying app context remains visible without the sheet
 reading as a full-width panel. Detented app sheets route through
 `adaptivePresentationDetents`; source-level tests forbid raw
 `.presentationDetents(...)` in app sources outside that helper and require every
-adaptive sheet call site to declare its `ipadSizing` preset explicitly. Large
-iPad forms target `0.46w` capped at `540` wide and `0.88h` capped at `900` high
-with a `540` floor, while compact iPad forms target `0.40w` capped at `470` wide
-and `0.78h` capped at `760` high with a `420` floor. Both variants can shrink
-short detail content within their floor/cap so resolved approval,
+adaptive sheet call site to declare its `ipadSizing` preset explicitly. Raw
+`.presentationBackground(...)` calls are centralized too: detented sheets use
+the adaptive helper and glass popovers use `glassPopoverPresentationBackground`.
+Large iPad forms target `0.46w` capped at `540` wide and `0.88h` capped at
+`900` high with a `540` floor, while compact iPad forms target `0.40w` capped
+at `470` wide and `0.78h` capped at `760` high with a `420` floor. Both variants
+can shrink short detail content within their floor/cap so resolved approval,
 provider-error, notification, and user-interaction sheets do not become empty
 tall columns. The iPhone/non-iPad branch keeps its existing detents,
 selected-detent bindings, and background behavior, including raw-detent callers

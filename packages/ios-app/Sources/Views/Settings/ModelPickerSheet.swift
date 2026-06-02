@@ -581,7 +581,7 @@ private struct ReasoningLevelPopover: View {
         .padding(12)
         .frame(minWidth: 200)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .presentationBackground(.clear)
+        .glassPopoverPresentationBackground()
     }
 
     private func reasoningLabel(_ level: String) -> String {

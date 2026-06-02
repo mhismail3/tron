@@ -917,6 +917,15 @@ UDID before continuing.
   `ipadSizing: .largeForm` classification was added without changing compact or
   phone-preserving call sites:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-20-41--0700.xcresult`.
+  The same guard now centralizes raw `.presentationBackground(...)` styling in
+  `View+Extensions.swift`: it first failed on `ModelPickerSheet` and
+  `GlassActionSheet` in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-24-30--0700.xcresult`,
+  then passed 9 focused sheet XCTest cases across `IPadSheetPresentationTests`
+  and `NotificationSheetPresentationTests` after
+  `glassPopoverPresentationBackground()` replaced those raw popover-background
+  call sites:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-26-53--0700.xcresult`.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

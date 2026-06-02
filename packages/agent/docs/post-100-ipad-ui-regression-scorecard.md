@@ -888,6 +888,18 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-20-41--0700.xcresult`.
   No action-time-confirmed UI control was invoked by this source-level
   guardrail checkpoint.
+- Additional iPad sheet/popover background standardization tightened the same
+  guard so raw `.presentationBackground(...)` styling is centralized in
+  `View+Extensions.swift`. The new guard first failed against
+  `ModelPickerSheet` and `GlassActionSheet` in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-24-30--0700.xcresult`.
+  Added `glassPopoverPresentationBackground()` for clear glass-popover
+  backgrounds, replaced both raw call sites, and reran the combined iPad sheet
+  guard. `IPadSheetPresentationTests` plus `NotificationSheetPresentationTests`
+  passed 9 XCTest cases in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-26-53--0700.xcresult`.
+  No action-time-confirmed UI control was invoked by this source-level
+  guardrail checkpoint.
 - Additional IPD-9 Agent protected-branch keyboard follow-up fixed the remaining
   Agent settings Tab subcase documented in the previous landscape pass. The
   protected-branch add field now has focus state and an iPad-only

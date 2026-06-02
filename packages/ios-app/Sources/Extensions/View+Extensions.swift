@@ -236,6 +236,12 @@ enum AdaptivePhonePresentationBackground {
 }
 
 extension View {
+    /// Clear presentation background for glass popovers. Detented sheets should
+    /// use `adaptivePresentationDetents` so iPad sizing/background stays centralized.
+    func glassPopoverPresentationBackground() -> some View {
+        presentationBackground(.clear)
+    }
+
     /// Presentation detents with adaptive sizing for iPad/iPhone:
     /// - iPad: Uses balanced `.balancedLargeForm` or `.compactForm` sizing
     /// - iPad material background keeps floating sheets glassy so dashboard context remains visible

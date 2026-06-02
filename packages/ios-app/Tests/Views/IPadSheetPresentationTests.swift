@@ -42,6 +42,10 @@ final class IPadSheetPresentationTests: XCTestCase {
             content.contains("case .unchanged"),
             "The helper needs an unchanged phone branch for app sheets converted from raw detents"
         )
+        XCTAssertTrue(
+            content.contains("func glassPopoverPresentationBackground() -> some View"),
+            "Glass popover background styling should live beside the canonical sheet presentation helpers"
+        )
     }
 
     func testRepresentativeAppSheetsUseCanonicalIPadSizing() throws {
@@ -136,6 +140,24 @@ final class IPadSheetPresentationTests: XCTestCase {
         XCTAssertTrue(
             offenders.isEmpty,
             "Raw presentationDetents bypass the iPad sizing helper: \(offenders.joined(separator: ", "))"
+        )
+    }
+
+    func testPresentationBackgroundStylingStaysCentralized() throws {
+        let sourceRoot = try projectRoot()
+            .appendingPathComponent("Sources")
+        let files = try swiftFiles(under: sourceRoot)
+        let offenders = try files.compactMap { file -> String? in
+            guard file.lastPathComponent != "View+Extensions.swift" else { return nil }
+            let content = try String(contentsOf: file, encoding: .utf8)
+            return content.contains(".presentationBackground(")
+                ? relativePath(file, under: sourceRoot)
+                : nil
+        }
+
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Raw presentationBackground styling bypasses canonical sheet/popover helpers: \(offenders.joined(separator: ", "))"
         )
     }
 
