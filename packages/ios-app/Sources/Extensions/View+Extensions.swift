@@ -110,6 +110,22 @@ struct LargeFormSizing: PresentationSizing {
     }
 }
 
+private enum AdaptiveSheetMetrics {
+    static func balancedLargeFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
+        CGSize(
+            width: min(referenceWidth * 0.70, 760),
+            height: min(referenceHeight * 0.68, 760)
+        )
+    }
+
+    static func compactFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
+        CGSize(
+            width: min(referenceWidth * 0.66, 680),
+            height: min(referenceHeight * 0.56, 660)
+        )
+    }
+}
+
 /// Balanced iPad form sizing for detail-heavy sheets that should feel like a
 /// horizontal floating surface instead of a tall narrow card.
 @MainActor
@@ -123,11 +139,12 @@ struct BalancedLargeFormSizing: PresentationSizing {
         let fallbackSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
         let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
         let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
+        let size = AdaptiveSheetMetrics.balancedLargeFormSize(
+            referenceWidth: referenceWidth,
+            referenceHeight: referenceHeight
+        )
 
-        let width = min(referenceWidth * 0.74, 780)
-        let height = min(referenceHeight * 0.60, 720)
-
-        return ProposedViewSize(width: width, height: height)
+        return ProposedViewSize(width: size.width, height: size.height)
     }
 }
 
@@ -144,11 +161,12 @@ struct CompactFormSizing: PresentationSizing {
         let fallbackSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
         let referenceWidth = screenBounds.width > 0 ? screenBounds.width : fallbackSize.width
         let referenceHeight = screenBounds.height > 0 ? screenBounds.height : fallbackSize.height
+        let size = AdaptiveSheetMetrics.compactFormSize(
+            referenceWidth: referenceWidth,
+            referenceHeight: referenceHeight
+        )
 
-        let width = min(referenceWidth * 0.70, 720)
-        let height = min(referenceHeight * 0.50, 620)
-
-        return ProposedViewSize(width: width, height: height)
+        return ProposedViewSize(width: size.width, height: size.height)
     }
 }
 
@@ -210,19 +228,44 @@ private struct AdaptivePresentationModifier: ViewModifier {
         selectedDetent == .large && colorScheme == .light
     }
 
+    private var iPadTargetSize: CGSize {
+        let screenBounds = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
+            .first ?? .zero
+        let referenceWidth = screenBounds.width > 0 ? screenBounds.width : 720
+        let referenceHeight = screenBounds.height > 0 ? screenBounds.height : 960
+
+        switch ipadSizing {
+        case .largeForm:
+            return AdaptiveSheetMetrics.balancedLargeFormSize(
+                referenceWidth: referenceWidth,
+                referenceHeight: referenceHeight
+            )
+        case .compactForm:
+            return AdaptiveSheetMetrics.compactFormSize(
+                referenceWidth: referenceWidth,
+                referenceHeight: referenceHeight
+            )
+        }
+    }
+
     @ViewBuilder
     func body(content: Content) -> some View {
         let base = content
             .presentationDetents(detents, selection: $selectedDetent)
 
         if isPad {
+            let targetSize = iPadTargetSize
+            let ipadBase = base
+                .presentationContentInteraction(.scrolls)
+                .frame(width: targetSize.width, height: targetSize.height)
             switch ipadSizing {
             case .largeForm:
-                base
+                ipadBase
                     .presentationSizing(.balancedLargeForm)
                     .presentationBackground(.ultraThinMaterial)
             case .compactForm:
-                base
+                ipadBase
                     .presentationSizing(.compactForm)
                     .presentationBackground(.ultraThinMaterial)
             }

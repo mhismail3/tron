@@ -16,12 +16,11 @@ struct AgentSettingsPage: View {
 
     var body: some View {
         SettingsPageContainer(title: "Agent") {
-            summaryCard
-            quickSessionCard
-            hooksSection
-            promptLibrarySection
-            messageQueueCard
-            protectedBranchesSection
+            if usesIPadLandscapeLayout {
+                landscapeContent
+            } else {
+                stackedContent
+            }
         }
         .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
             WorkspaceSelector(
@@ -61,6 +60,45 @@ struct AgentSettingsPage: View {
                     }
                 }
             )
+        }
+    }
+
+    private var usesIPadLandscapeLayout: Bool {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { return false }
+        let screenBounds = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.screen.bounds }
+            .first ?? .zero
+        return screenBounds.width > screenBounds.height
+    }
+
+    @ViewBuilder
+    private var stackedContent: some View {
+        summaryCard
+        quickSessionCard
+        hooksSection
+        promptLibrarySection
+        messageQueueCard
+        protectedBranchesSection
+    }
+
+    private var landscapeContent: some View {
+        VStack(spacing: 16) {
+            summaryCard
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(spacing: 16) {
+                    quickSessionCard
+                    hooksSection
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+
+                VStack(spacing: 16) {
+                    protectedBranchesSection
+                    messageQueueCard
+                    promptLibrarySection
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
         }
     }
 

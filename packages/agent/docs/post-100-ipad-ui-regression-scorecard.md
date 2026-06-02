@@ -365,9 +365,31 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipad-balanced-agent-control-retuned-landscape.png`,
   `/tmp/tron-psg-evidence/ipad-balanced-notifications-list-retuned-landscape.png`,
   and `/tmp/tron-psg-evidence/ipad-balanced-notification-detail-retuned-landscape.png`.
-  Open loops remain for IPD-7 pairing/unavailable-server/protected-branch
-  details and IPD-9 pointer/full keyboard traversal, so no new points were
-  awarded at this checkpoint.
+  At that checkpoint, open loops still included IPD-7
+  pairing/unavailable-server/protected-branch details and IPD-9 pointer/full
+  keyboard traversal, so no new points were awarded.
+- Follow-up landscape hardening after live Computer Use found the long Agent
+  settings sheet still could not be moved deeply enough in the iPad landscape
+  Simulator. The iPad-only sheet presentation path now keeps the narrower/taller
+  liquid-glass size, prioritizes sheet content scrolling, constrains presented
+  content to the same visible form frame, and the shared Settings container
+  bounds its `ScrollView` to the sheet viewport. Agent settings now has an
+  iPad-landscape two-column layout that keeps Protected Branches visible near
+  the top instead of relying on a deep scroll. iPhone/non-iPad presentation
+  styling remains on the existing branch. Focused iPad verification passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/SettingsPageContainerTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  with 6 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_17-30-58--0700.xcresult`.
+  Manual landscape proof used rebuilt bundle `com.tron.mobile.beta`, launch pid
+  `866`, and iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`: screenshot
+  `/tmp/tron-psg-evidence/ipd7-agent-settings-protected-branches-landscape-final.png`
+  shows the Agent two-column sheet with Protected Branches immediately visible,
+  including `main`, `master`, `develop`, and the add-field. Server profile truth
+  matched exactly:
+  `/Users/moose/.tron/profiles/default/profile.toml:229 protectedBranches = ["main", "master", "develop"]`.
+  Remaining IPD-7 loops are provider/profile/auth, pairing/onboarding, and
+  unavailable-server retry evidence; no new points were awarded yet.
 - Additional IPD-5 capability-detail proof opened direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` on the iPad Simulator and
   tapped completed capability invocation `call_eiaqjnjn` for the read-only
@@ -495,7 +517,7 @@ approval/reconnect/deep-link paths,
 IPD-3 voice-note states, IPD-5
 approval flows, read-only terminal approvals, and generated UI details, full
 IPD-6 action-time-confirmed source-control
-actions and conflict resolver, IPD-7 pairing/onboarding, protected branches,
-profile/auth, and unavailable-server retry details, IPD-8
+actions and conflict resolver, IPD-7 pairing/onboarding, provider/profile/auth,
+and unavailable-server retry details, IPD-8
 back/session-tree behavior and action-time-confirmed fork execution, IPD-9
 pointer QA and full hardware-keyboard traversal, and IPD-10 closeout.

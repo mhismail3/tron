@@ -272,9 +272,31 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipad-balanced-agent-control-retuned-landscape.png`,
   `/tmp/tron-psg-evidence/ipad-balanced-notifications-list-retuned-landscape.png`,
   and `/tmp/tron-psg-evidence/ipad-balanced-notification-detail-retuned-landscape.png`.
-  Computer Use verified row contents, filter controls, footer/actions, and
-  detail text remained visible without the sheets reading as tall cards or
-  short over-wide strips.
+  Computer Use verified row contents, filter controls, footer/actions,
+  landscape proportions, and detail text remained visible without the sheets
+  reading as tall cards or short over-wide strips, but protected-branch details
+  still needed a follow-up pass.
+- Follow-up IPD-7/IPD-9 landscape hardening found that the long iPad Agent
+  settings sheet remained hard to move deeply enough in landscape even after
+  the size retune. Fixed by adding iPad-only sheet content scroll priority,
+  constraining presented iPad sheet content to the same visible form frame,
+  bounding the shared Settings container `ScrollView` to the viewport, and
+  adding an iPad-landscape two-column Agent settings layout that keeps
+  Protected Branches visible near the top. Focused iPad verification passed
+  after `xcodegen generate`:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/SettingsPageContainerTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  with 6 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_17-30-58--0700.xcresult`.
+  Manual landscape proof used rebuilt bundle `com.tron.mobile.beta`, launch pid
+  `866`, and iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`: screenshot
+  `/tmp/tron-psg-evidence/ipd7-agent-settings-protected-branches-landscape-final.png`
+  shows Protected Branches immediately visible with `main`, `master`,
+  `develop`, and the add-field. Server profile truth matched:
+  `/Users/moose/.tron/profiles/default/profile.toml:229 protectedBranches = ["main", "master", "develop"]`.
+  No new PSG-5 points were awarded because IPD-7 still needs
+  provider/profile/auth, pairing/onboarding, and unavailable-server retry
+  evidence.
 - IPD-5 capability-detail proof opened direct-branch session
   `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` and tapped completed
   `capability::execute` invocation `call_eiaqjnjn` for the read-only

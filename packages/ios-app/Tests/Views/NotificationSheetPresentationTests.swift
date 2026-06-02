@@ -16,20 +16,36 @@ final class NotificationSheetPresentationTests: XCTestCase {
             "Detail-heavy iPad sheets need a dedicated balanced sizing primitive"
         )
         XCTAssertTrue(
-            content.contains("let width = min(referenceWidth * 0.74, 780)"),
+            content.contains("width: min(referenceWidth * 0.70, 760)"),
             "Large iPad sheets should be balanced instead of over-wide"
         )
         XCTAssertTrue(
-            content.contains("let height = min(referenceHeight * 0.60, 720)"),
+            content.contains("height: min(referenceHeight * 0.68, 760)"),
             "Large iPad sheets should have enough vertical room for settings content"
         )
         XCTAssertTrue(
-            content.contains("let width = min(referenceWidth * 0.70, 720)"),
+            content.contains("width: min(referenceWidth * 0.66, 680)"),
             "Compact iPad sheets should avoid becoming over-wide"
         )
         XCTAssertTrue(
-            content.contains("let height = min(referenceHeight * 0.50, 620)"),
+            content.contains("height: min(referenceHeight * 0.56, 660)"),
             "Compact iPad sheets should have enough vertical room for card rows"
+        )
+        XCTAssertTrue(
+            content.contains("AdaptiveSheetMetrics.balancedLargeFormSize"),
+            "The iPad content frame should reuse the same large-form sizing helper"
+        )
+        XCTAssertTrue(
+            content.contains("AdaptiveSheetMetrics.compactFormSize"),
+            "The iPad content frame should reuse the same compact sizing helper"
+        )
+        XCTAssertTrue(
+            content.contains(".presentationContentInteraction(.scrolls)"),
+            "iPad floating sheets should prioritize scrolling long settings content in landscape"
+        )
+        XCTAssertTrue(
+            content.contains(".frame(width: targetSize.width, height: targetSize.height)"),
+            "iPad floating sheets should constrain presented content to the same visible form size"
         )
         XCTAssertTrue(
             content.contains(".presentationSizing(.balancedLargeForm)"),

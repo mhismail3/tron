@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Shared container for settings pages providing NavigationStack,
-/// ScrollView, toolbar, and standard padding.
+/// viewport-constrained scrolling, toolbar, and standard padding.
 struct SettingsPageContainer<Leading: View, Content: View>: View {
     let title: String
     let leadingToolbar: Leading
@@ -29,13 +29,21 @@ struct SettingsPageContainer<Leading: View, Content: View>: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    content()
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(spacing: 16) {
+                        content()
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+                    .padding(.bottom, 40)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: geometry.size.height,
+                        alignment: .top
+                    )
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 40)
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
