@@ -917,6 +917,20 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-35-00--0700.xcresult`.
   No action-time-confirmed UI control was invoked by this source-level
   guardrail checkpoint.
+- Additional compact-popover adaptation standardization moved the repeated
+  `.presentationCompactAdaptation(.popover)` policy into
+  `popoverCompactAdaptation()` beside the other presentation helpers. The new
+  source guard first failed because the helper did not exist and raw compact
+  popover adaptation remained in `ModelPickerSheet`, `AgentControlView`,
+  `ContextDetailView`, `RepoSessionsSubSheet`, and `FileDetailSheet`; red
+  xcresult:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-38-55--0700.xcresult`.
+  The fix added the helper in `View+Extensions.swift` and replaced those six
+  raw call sites. `IPadSheetPresentationTests` plus
+  `NotificationSheetPresentationTests` then passed 11 XCTest cases in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-41-13--0700.xcresult`.
+  No action-time-confirmed UI control was invoked by this source-level
+  guardrail checkpoint.
 - Additional IPD-9 Agent protected-branch keyboard follow-up fixed the remaining
   Agent settings Tab subcase documented in the previous landscape pass. The
   protected-branch add field now has focus state and an iPad-only

@@ -162,7 +162,7 @@ struct ModelPickerSheet: View {
                     NotificationCenter.default.post(name: .reasoningLevelAction, object: level)
                 }
             )
-            .presentationCompactAdaptation(.popover)
+            .popoverCompactAdaptation()
         }
     }
 

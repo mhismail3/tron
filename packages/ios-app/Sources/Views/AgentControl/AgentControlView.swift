@@ -553,7 +553,7 @@ struct AgentControlView: View {
                     }
                 ]
             )
-            .presentationCompactAdaptation(.popover)
+            .popoverCompactAdaptation()
         }
     }
 

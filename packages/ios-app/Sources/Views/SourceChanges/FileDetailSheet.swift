@@ -342,7 +342,7 @@ struct FileDetailSheet: View {
                     }
                 ]
             )
-            .presentationCompactAdaptation(.popover)
+            .popoverCompactAdaptation()
         }
     }
 

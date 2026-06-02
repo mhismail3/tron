@@ -306,7 +306,7 @@ struct RepoSessionsSubSheet: View {
                     }
                 ]
             )
-            .presentationCompactAdaptation(.popover)
+            .popoverCompactAdaptation()
         }
     }
 

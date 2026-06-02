@@ -346,7 +346,7 @@ struct ContextDetailView: View {
                     }
                 ]
             )
-            .presentationCompactAdaptation(.popover)
+            .popoverCompactAdaptation()
         }
     }
 
@@ -382,7 +382,7 @@ struct ContextDetailView: View {
                     }
                 ]
             )
-            .presentationCompactAdaptation(.popover)
+            .popoverCompactAdaptation()
         }
     }
 

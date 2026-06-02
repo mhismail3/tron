@@ -556,6 +556,9 @@ adaptive sheet call site to declare its `ipadSizing` preset explicitly. Raw
 the adaptive helper and glass popovers use `glassPopoverPresentationBackground`.
 The same helper owns the app sheet drag-indicator policy, so app sources do not
 repeat raw `.presentationDragIndicator(...)` styling.
+Compact-width popover adaptation is centralized through
+`popoverCompactAdaptation` so action and option popovers do not fall back to
+raw sheet-style adaptation call sites.
 Large iPad forms target `0.46w` capped at `540` wide and `0.88h` capped at
 `900` high with a `540` floor, while compact iPad forms target `0.40w` capped
 at `470` wide and `0.78h` capped at `760` high with a `420` floor. Both variants

@@ -940,6 +940,16 @@ UDID before continuing.
   Suite-level `SourceGuardTests` also passed 14 Swift Testing checks after the
   stale Engine Console source guard was updated:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-35-00--0700.xcresult`.
+  The same presentation guard now centralizes compact-width popover adaptation:
+  it first failed because the helper did not exist and raw
+  `.presentationCompactAdaptation(.popover)` remained in `ModelPickerSheet`,
+  `AgentControlView`, `ContextDetailView`, `RepoSessionsSubSheet`, and
+  `FileDetailSheet` in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-38-55--0700.xcresult`,
+  then passed 11 focused XCTest cases across `IPadSheetPresentationTests` and
+  `NotificationSheetPresentationTests` after `popoverCompactAdaptation()`
+  replaced those six raw call sites:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-41-13--0700.xcresult`.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

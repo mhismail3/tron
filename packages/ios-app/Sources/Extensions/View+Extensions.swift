@@ -242,6 +242,12 @@ extension View {
         presentationBackground(.clear)
     }
 
+    /// Keep popover actions as popovers on compact-width presentations instead
+    /// of allowing them to fall back to sheet styling.
+    func popoverCompactAdaptation() -> some View {
+        presentationCompactAdaptation(.popover)
+    }
+
     /// Presentation detents with adaptive sizing for iPad/iPhone:
     /// - iPad: Uses balanced `.balancedLargeForm` or `.compactForm` sizing
     /// - iPad material background keeps floating sheets glassy so dashboard context remains visible
