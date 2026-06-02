@@ -81,6 +81,16 @@ final class TranscriptionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.transcriptionFailedNotificationShown)
     }
 
+    func testStartRecordingPermissionDeniedShowsPermissionError() async {
+        mockContext.isRecording = false
+        mockContext.startRecordingError = TranscriptionTestError.permissionDenied
+
+        await coordinator.toggleRecording(context: mockContext)
+
+        XCTAssertFalse(mockContext.transcriptionFailedNotificationShown)
+        XCTAssertEqual(mockContext.shownErrors, ["Microphone permission denied"])
+    }
+
     // MARK: - Recording Finished Tests
 
     func testHandleRecordingFinishedWithSuccessTranscribes() async {
@@ -269,12 +279,14 @@ enum TranscriptionTestError: Error, LocalizedError {
     case custom(String)
     case noSpeech
     case generic
+    case permissionDenied
 
     var errorDescription: String? {
         switch self {
         case .custom(let message): return message
         case .noSpeech: return "No speech detected"
         case .generic: return "Transcription failed"
+        case .permissionDenied: return "Microphone permission denied"
         }
     }
 }
@@ -304,9 +316,11 @@ final class MockTranscriptionContext: TranscriptionContext {
     var transcriptionFailedNotificationShown = false
     var noSpeechNotificationShown = false
     var isTranscribingWasSetTrue = false
+    var shownErrors: [String] = []
 
     // MARK: - Test Configuration
     var startRecordingShouldFail = false
+    var startRecordingError: Error?
     var transcriptionShouldFail = false
     var transcriptionShouldFailWithNoSpeech = false
     var transcriptionResult: String = ""
@@ -317,6 +331,9 @@ final class MockTranscriptionContext: TranscriptionContext {
 
     func startRecording() async throws {
         startRecordingCalled = true
+        if let startRecordingError {
+            throw startRecordingError
+        }
         if startRecordingShouldFail {
             throw TranscriptionTestError.generic
         }
@@ -361,5 +378,7 @@ final class MockTranscriptionContext: TranscriptionContext {
     func logInfo(_ message: String) {}
     func logWarning(_ message: String) {}
     func logError(_ message: String) {}
-    func showError(_ message: String) {}
+    func showError(_ message: String) {
+        shownErrors.append(message)
+    }
 }

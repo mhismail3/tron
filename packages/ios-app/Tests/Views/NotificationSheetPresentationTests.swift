@@ -16,19 +16,19 @@ final class NotificationSheetPresentationTests: XCTestCase {
             "Detail-heavy iPad sheets need a dedicated balanced sizing primitive"
         )
         XCTAssertTrue(
-            content.contains("width: min(referenceWidth * 0.50, 580)"),
+            content.contains("width: min(referenceWidth * 0.46, 540)"),
             "Large iPad sheets should avoid becoming too wide in landscape"
         )
         XCTAssertTrue(
-            content.contains("height: min(referenceHeight * 0.92, 980)"),
+            content.contains("height: min(referenceHeight * 0.94, 1020)"),
             "Large iPad sheets should have enough vertical room for settings content"
         )
         XCTAssertTrue(
-            content.contains("width: min(referenceWidth * 0.44, 500)"),
+            content.contains("width: min(referenceWidth * 0.40, 470)"),
             "Compact iPad sheets should avoid becoming over-wide"
         )
         XCTAssertTrue(
-            content.contains("height: min(referenceHeight * 0.88, 920)"),
+            content.contains("height: min(referenceHeight * 0.92, 960)"),
             "Compact iPad sheets should have enough vertical room for card rows"
         )
         XCTAssertTrue(

@@ -458,7 +458,7 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   not restore an AX-visible device window. That checkpoint recorded an
   environment blocker for current-retune landscape proof and action-time manual
   flows, not an app UI failure.
-- Latest sheet-shape review after the user found the current forms still a
+- Previous sheet-shape review after the user found the current forms still a
   little too wide and not tall enough retuned only the iPad presentation
   metrics again. Large iPad forms now target
   `min(referenceWidth * 0.50, 580)` by
@@ -480,6 +480,24 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd-sheet-retune-notification-landscape.png`.
   This closes the previous current-retune landscape proof blocker; action-time
   voice-note/source-control/approval/fork/pointer rows remain open.
+- Latest user review then found the current iPad forms still a little too wide
+  and not tall enough. Retuned only the iPad metrics again: large forms now target
+  `min(referenceWidth * 0.46, 540)` by
+  `min(referenceHeight * 0.94, 1020)`, compact forms target
+  `min(referenceWidth * 0.40, 470)` by
+  `min(referenceHeight * 0.92, 960)`, and iPhone/non-iPad detent/background
+  behavior remains unchanged. Focused verification passed after
+  `xcodegen generate`:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/TranscriptionCoordinatorTests`
+  with 28 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_19-45-51--0700.xcresult`.
+  Manual Computer Use proof used bundle `com.tron.mobile.beta`, launch pid
+  `77571`, and iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`; screenshots:
+  `/tmp/tron-psg-evidence/ipd-sheet-retune2-agent-control-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-retune2-agent-control-landscape.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-retune2-notification-portrait.png`, and
+  `/tmp/tron-psg-evidence/ipd-sheet-retune2-notification-landscape.png`.
 - IPD-7 final Settings/unavailable/onboarding pass found and fixed one Server
   page projection gap: when the active paired server was offline, the page
   warned in the summary but hid the `Server Controls` unavailable card because
@@ -684,6 +702,19 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd-computer-use-window-recovery-simctl-visible.png`.
   Because voice-note recording can involve microphone capture, the flow was not
   driven by blind coordinate clicks.
+- Additional IPD-3 input-row microphone permission proof covered the chat
+  transcription mic, which shares the audio capture path but is not the dashboard
+  Voice Note sheet. Before the fix, denying the simulator microphone permission
+  left a generic `Transcription failed` transcript pill; screenshots:
+  `/tmp/tron-psg-evidence/ipd3-voice-note-microphone-permission-prompt.png` and
+  `/tmp/tron-psg-evidence/ipd3-voice-note-denied-transcription-failed-toast.png`.
+  `TranscriptionCoordinator` now treats permission-denied start failures as an
+  explicit `Microphone permission denied` UI error and does not append the
+  generic transcript notification. Focused verification passed in the same
+  28-test run above, and manual proof is
+  `/tmp/tron-psg-evidence/ipd3-input-mic-permission-denied-fixed.png`.
+  Dedicated Voice Note sheet record/cancel/submit remains open and
+  confirmation-sensitive.
 - Additional deterministic IPD-5/IPD-6/IPD-8 coverage ran on the iPad target
   while Computer Use remained blocked for manual action-time flows. IPD-5
   generated UI / approval / user-interaction coverage passed:

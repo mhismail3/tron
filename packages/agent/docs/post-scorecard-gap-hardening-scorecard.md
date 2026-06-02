@@ -276,6 +276,36 @@ Owner taxonomy: `server_contract`, `client_projection`,
   landscape proportions, and detail text remained visible without the sheets
   reading as tall cards or short over-wide strips, but protected-branch details
   still needed a follow-up pass.
+- 2026-06-01 follow-up sheet-shape review after the user reported the current
+  iPad forms were still a little too wide and not tall enough retuned only the
+  iPad metrics again. Current large iPad forms target
+  `min(referenceWidth * 0.46, 540)` by
+  `min(referenceHeight * 0.94, 1020)`; compact iPad forms target
+  `min(referenceWidth * 0.40, 470)` by
+  `min(referenceHeight * 0.92, 960)`. The iPhone/non-iPad branch remains on its
+  existing detents and background behavior. Focused verification passed
+  `xcodegen generate` and
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/NotificationSheetPresentationTests -only-testing:TronMobileTests/TranscriptionCoordinatorTests`
+  with 28 XCTest cases; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_19-45-51--0700.xcresult`.
+  Manual Computer Use proof used bundle `com.tron.mobile.beta`, launch pid
+  `77571`, and iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`; screenshots:
+  `/tmp/tron-psg-evidence/ipd-sheet-retune2-agent-control-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-retune2-agent-control-landscape.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-retune2-notification-portrait.png`, and
+  `/tmp/tron-psg-evidence/ipd-sheet-retune2-notification-landscape.png`.
+- 2026-06-01 IPD-3 input-row microphone permission pass found that denying
+  microphone permission through the chat transcription mic could previously
+  leave a generic `Transcription failed` transcript pill. `TranscriptionCoordinator`
+  now maps microphone permission-denied start failures to explicit
+  `Microphone permission denied` UI and does not append the generic failure
+  notification. Evidence before/after:
+  `/tmp/tron-psg-evidence/ipd3-voice-note-microphone-permission-prompt.png`,
+  `/tmp/tron-psg-evidence/ipd3-voice-note-denied-transcription-failed-toast.png`,
+  and `/tmp/tron-psg-evidence/ipd3-input-mic-permission-denied-fixed.png`.
+  Dedicated dashboard Voice Note sheet record/cancel/submit remains open because
+  microphone capture is action-time confirmation sensitive.
 - Follow-up IPD-7/IPD-9 landscape hardening found that the long iPad Agent
   settings sheet remained hard to move deeply enough in landscape even after
   the size retune. Fixed by adding iPad-only sheet content scroll priority,
@@ -403,7 +433,7 @@ Owner taxonomy: `server_contract`, `client_projection`,
   not restore an AX-visible device window. That checkpoint recorded an
   environment blocker for current-retune landscape proof and action-time manual
   flows, not an app UI failure.
-- Latest user-reviewed sheet retune found the current iPad forms still too wide
+- Previous user-reviewed sheet retune found the current iPad forms still too wide
   and not tall enough. Fixed only the iPad metrics again: large forms now target
   `min(referenceWidth * 0.50, 580)` by
   `min(referenceHeight * 0.92, 980)`, compact forms target

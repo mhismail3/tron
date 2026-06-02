@@ -524,7 +524,9 @@ simulator UI tests on the real app workflow while avoiding simulator-only
 CoreAudio aborts. Transcription and voice-note persistence remain server-owned
 through `transcription::audio` and voice-note media capabilities; Swift only
 captures the local file and projects the returned result or no-speech/error
-state.
+state. Chat transcription start failures caused by microphone permission denial
+surface an explicit local error and do not append a generic transcription-failed
+message to the session transcript.
 
 ## File Placement Guidelines
 
@@ -543,8 +545,8 @@ main `SettingsView` grid. The root sheet supports medium and large detents and
 starts at medium on iPhone. On iPad, adaptive sheets use balanced liquid-glass
 floating forms so the underlying app context remains visible without the sheet
 reading as a full-width panel. Large iPad forms target a narrower/taller
-`0.50w`/`0.92h` shape capped at `580x980`, while compact iPad forms target
-`0.44w`/`0.88h` capped at `500x920`; the iPhone/non-iPad branch keeps its
+`0.46w`/`0.94h` shape capped at `540x1020`, while compact iPad forms target
+`0.40w`/`0.92h` capped at `470x960`; the iPhone/non-iPad branch keeps its
 existing detent and background behavior. The iPad branch does not attach phone
 detents, so forms remain centered floating containers instead of falling back to
 bottom-detent sheets. The iPad branch also prioritizes scrolling sheet content

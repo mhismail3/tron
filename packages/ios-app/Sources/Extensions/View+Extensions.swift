@@ -113,15 +113,15 @@ struct LargeFormSizing: PresentationSizing {
 private enum AdaptiveSheetMetrics {
     static func balancedLargeFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
         CGSize(
-            width: min(referenceWidth * 0.50, 580),
-            height: min(referenceHeight * 0.92, 980)
+            width: min(referenceWidth * 0.46, 540),
+            height: min(referenceHeight * 0.94, 1020)
         )
     }
 
     static func compactFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
         CGSize(
-            width: min(referenceWidth * 0.44, 500),
-            height: min(referenceHeight * 0.88, 920)
+            width: min(referenceWidth * 0.40, 470),
+            height: min(referenceHeight * 0.92, 960)
         )
     }
 }

@@ -102,6 +102,10 @@ final class TranscriptionCoordinator {
             log.info("[Transcription] recording started (max \(context.maxRecordingDuration)s)", category: .audio)
         } catch {
             log.error("[Transcription] startRecording failed: \(error.localizedDescription)", category: .audio)
+            if isMicrophonePermissionDenied(error) {
+                context.showError("Microphone permission denied")
+                return
+            }
             context.appendTranscriptionFailedNotification()
         }
     }
@@ -208,6 +212,16 @@ final class TranscriptionCoordinator {
         }
         let normalized = message.lowercased()
         return normalized.contains("no speech") || normalized.contains("no text")
+    }
+
+    func isMicrophonePermissionDenied(_ error: Error) -> Bool {
+        if case AudioRecorder.RecorderError.permissionDenied = error {
+            return true
+        }
+        let normalized = error.localizedDescription.lowercased()
+        return normalized.contains("microphone")
+            && normalized.contains("permission")
+            && normalized.contains("denied")
     }
 }
 
