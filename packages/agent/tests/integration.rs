@@ -38,7 +38,10 @@ use tron::engine::{
 };
 use tron::shared::content::AssistantContent;
 use tron::shared::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
-use tron::shared::messages::TokenUsage;
+use tron::shared::messages::{
+    CapabilityInvocationDraft, CapabilityResultMessageContent, Context as ModelContext,
+    Message as ModelMessage, TokenUsage,
+};
 use tron::shared::server::context::{AgentDeps, ServerRuntimeContext};
 use tron::transport::runtime::streams::EngineStreamEventPump;
 
@@ -234,6 +237,282 @@ impl Provider for TextOnlyProvider {
     }
 }
 
+#[derive(Clone, Debug)]
+struct HmhEvidenceExplanationScenario {
+    function_id: String,
+    worker_id: String,
+    plugin_id: String,
+    implementation_id: String,
+    evidence_resource_id: String,
+    evidence_version_id: String,
+    evidence_trace_id: String,
+    evidence_parent_invocation_id: String,
+    next_test: String,
+}
+
+struct EvidenceExplainingProvider {
+    scenario: Mutex<Option<HmhEvidenceExplanationScenario>>,
+    call_count: AtomicU64,
+    final_answer: Mutex<Option<String>>,
+}
+
+impl EvidenceExplainingProvider {
+    fn new() -> Self {
+        Self {
+            scenario: Mutex::new(None),
+            call_count: AtomicU64::new(0),
+            final_answer: Mutex::new(None),
+        }
+    }
+
+    fn set_scenario(&self, scenario: HmhEvidenceExplanationScenario) {
+        *self.scenario.lock().unwrap() = Some(scenario);
+    }
+
+    fn final_answer(&self) -> Option<String> {
+        self.final_answer.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl Provider for EvidenceExplainingProvider {
+    fn provider_type(&self) -> ProviderKind {
+        ProviderKind::Anthropic
+    }
+
+    fn model(&self) -> &'static str {
+        "mock"
+    }
+
+    async fn stream(
+        &self,
+        context: &ModelContext,
+        _o: &ProviderStreamOptions,
+    ) -> Result<StreamEventStream, ProviderError> {
+        let scenario = self
+            .scenario
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("HMH evidence explanation scenario must be configured before prompting");
+        match self.call_count.fetch_add(1, Ordering::SeqCst) {
+            0 => Ok(hmh_evidence_inspect_stream(&scenario)),
+            1 => {
+                let answer = hmh_evidence_answer_from_context(context, &scenario);
+                *self.final_answer.lock().unwrap() = Some(answer.clone());
+                let events = vec![
+                    Ok(StreamEvent::Start),
+                    Ok(StreamEvent::TextDelta {
+                        delta: answer.clone(),
+                    }),
+                    Ok(StreamEvent::Done {
+                        message: AssistantMessage {
+                            content: vec![AssistantContent::text(&answer)],
+                            token_usage: Some(TokenUsage {
+                                input_tokens: 30,
+                                output_tokens: 20,
+                                ..Default::default()
+                            }),
+                        },
+                        stop_reason: "end_turn".into(),
+                    }),
+                ];
+                Ok(Box::pin(stream::iter(events)))
+            }
+            call => panic!("HMH evidence explanation provider called too many times: {call}"),
+        }
+    }
+}
+
+fn hmh_evidence_inspect_stream(scenario: &HmhEvidenceExplanationScenario) -> StreamEventStream {
+    let mut arguments = serde_json::Map::new();
+    arguments.insert("target".to_owned(), json!("resource::inspect"));
+    arguments.insert(
+        "arguments".to_owned(),
+        json!({"resourceId": scenario.evidence_resource_id}),
+    );
+    arguments.insert(
+        "idempotencyKey".to_owned(),
+        json!("hmh-b9-agent-inspect-evidence-resource"),
+    );
+    arguments.insert(
+        "reason".to_owned(),
+        json!("HMH-B9 inspect live conformance evidence before explaining"),
+    );
+    let invocation =
+        CapabilityInvocationDraft::new("hmh-b9-inspect-evidence", "execute", arguments.clone());
+    let events = vec![
+        Ok(StreamEvent::Start),
+        Ok(StreamEvent::CapabilityInvocationDraftStart {
+            invocation_id: invocation.id.clone(),
+            name: invocation.name.clone(),
+        }),
+        Ok(StreamEvent::CapabilityInvocationDraftEnd {
+            capability_invocation: invocation.clone(),
+        }),
+        Ok(StreamEvent::Done {
+            message: AssistantMessage {
+                content: vec![AssistantContent::CapabilityInvocation {
+                    id: invocation.id,
+                    name: invocation.name,
+                    arguments,
+                    thought_signature: None,
+                }],
+                token_usage: Some(TokenUsage {
+                    input_tokens: 25,
+                    output_tokens: 10,
+                    ..Default::default()
+                }),
+            },
+            stop_reason: "capability_invocation".into(),
+        }),
+    ];
+    Box::pin(stream::iter(events))
+}
+
+fn hmh_evidence_answer_from_context(
+    context: &ModelContext,
+    scenario: &HmhEvidenceExplanationScenario,
+) -> String {
+    let inspection = hmh_single_execute_output(context, &scenario.evidence_resource_id);
+    assert_eq!(
+        inspection["inspection"]["resource"]["resourceId"],
+        scenario.evidence_resource_id
+    );
+    assert_eq!(
+        inspection["inspection"]["resource"]["currentVersionId"],
+        scenario.evidence_version_id
+    );
+    let payload = &inspection["inspection"]["versions"][0]["payload"];
+    assert_eq!(payload["source"], "capability::conformance_run");
+    assert_eq!(payload["target"]["pluginId"], scenario.plugin_id);
+    assert_eq!(
+        payload["target"]["implementationIds"],
+        json!([scenario.implementation_id.as_str()])
+    );
+    assert_eq!(
+        payload["target"]["functionIds"],
+        json!([scenario.function_id.as_str()])
+    );
+    assert_eq!(
+        payload["target"]["workerIds"],
+        json!([scenario.worker_id.as_str()])
+    );
+    assert_eq!(payload["metadata"]["traceId"], scenario.evidence_trace_id);
+    assert_eq!(
+        payload["metadata"]["parentInvocationId"],
+        scenario.evidence_parent_invocation_id
+    );
+
+    let context_text = hmh_context_text(context);
+    for required in [
+        scenario.function_id.as_str(),
+        scenario.worker_id.as_str(),
+        scenario.plugin_id.as_str(),
+        scenario.implementation_id.as_str(),
+        scenario.evidence_resource_id.as_str(),
+        scenario.evidence_version_id.as_str(),
+        scenario.evidence_trace_id.as_str(),
+        scenario.evidence_parent_invocation_id.as_str(),
+        "resource::inspect",
+        "executeInvocationId",
+        "childInvocationIds",
+    ] {
+        assert!(
+            context_text.contains(required),
+            "model context missing HMH-B9 evidence marker `{required}`: {context_text}"
+        );
+    }
+    let inspection_text = inspection.to_string();
+    assert!(
+        !inspection_text.contains("README-only"),
+        "HMH-B9 inspected evidence must not rely on stale README-only explanation"
+    );
+
+    format!(
+        "HMH-B9 evidence: capability {function_id} is implemented by {implementation_id} in plugin {plugin_id} on worker {worker_id}. Evidence resourceRefs include evidence:{resource_id}@{version_id}. Trace/ledger ids: traceId={trace_id}, parentInvocationId={parent_invocation_id}, and the execute observation exposes executeInvocationId plus childInvocationIds for the resource::inspect proof. Next maintenance actions: rerun capability::conformance_run before promotion, cite resourceRefs and trace ids in user-facing explanations, promote only with expectedFunctionRevision and explicit idempotency, clean up volatile workers with sandbox::stop_spawned_worker or worker::disconnect, and continue with `{next_test}`.",
+        function_id = scenario.function_id.as_str(),
+        implementation_id = scenario.implementation_id.as_str(),
+        plugin_id = scenario.plugin_id.as_str(),
+        worker_id = scenario.worker_id.as_str(),
+        resource_id = scenario.evidence_resource_id.as_str(),
+        version_id = scenario.evidence_version_id.as_str(),
+        trace_id = scenario.evidence_trace_id.as_str(),
+        parent_invocation_id = scenario.evidence_parent_invocation_id.as_str(),
+        next_test = scenario.next_test.as_str(),
+    )
+}
+
+fn hmh_single_execute_output(context: &ModelContext, expected_resource_id: &str) -> Value {
+    hmh_execute_outputs(context)
+        .into_iter()
+        .find(|output| {
+            output
+                .pointer("/inspection/resource/resourceId")
+                .and_then(Value::as_str)
+                == Some(expected_resource_id)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "provider context did not include inspected evidence resource {expected_resource_id}: {}",
+                hmh_context_text(context)
+            )
+        })
+}
+
+fn hmh_execute_outputs(context: &ModelContext) -> Vec<Value> {
+    context
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            ModelMessage::CapabilityResult { content, .. } => {
+                Some(hmh_capability_result_text(content))
+            }
+            _ => None,
+        })
+        .flat_map(|text| hmh_execute_outputs_from_text(&text))
+        .collect()
+}
+
+fn hmh_capability_result_text(content: &CapabilityResultMessageContent) -> String {
+    match content {
+        CapabilityResultMessageContent::Text(text) => text.clone(),
+        CapabilityResultMessageContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                tron::shared::content::CapabilityResultContent::Text { text } => {
+                    Some(text.as_str())
+                }
+                tron::shared::content::CapabilityResultContent::Image { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+fn hmh_execute_outputs_from_text(text: &str) -> Vec<Value> {
+    const START: &str = "[execute result - exact target output or status text]\n";
+    const END: &str = "\n[/execute result]";
+    let mut outputs = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(START) {
+        let after_start = &rest[start + START.len()..];
+        let Some(end) = after_start.find(END) else {
+            break;
+        };
+        let json_text = &after_start[..end];
+        if let Ok(value) = serde_json::from_str::<Value>(json_text) {
+            outputs.push(value);
+        }
+        rest = &after_start[end + END.len()..];
+    }
+    outputs
+}
+
+fn hmh_context_text(context: &ModelContext) -> String {
+    serde_json::to_string_pretty(context).unwrap_or_else(|_| "<unserializable context>".to_owned())
+}
+
 struct LaggyTextProvider {
     text: String,
 }
@@ -394,6 +673,19 @@ async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<
 async fn boot_server_with_provider_and_handles(
     provider: Arc<dyn Provider>,
 ) -> (String, Arc<TronServer>, Vec<JoinHandle<()>>) {
+    boot_server_with_provider_config_and_handles(
+        provider,
+        ServerConfig::default(),
+        "localhost:9847".to_string(),
+    )
+    .await
+}
+
+async fn boot_server_with_provider_config_and_handles(
+    provider: Arc<dyn Provider>,
+    config: ServerConfig,
+    origin: String,
+) -> (String, Arc<TronServer>, Vec<JoinHandle<()>>) {
     let event_store = unique_event_store();
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
@@ -424,7 +716,6 @@ async fn boot_server_with_provider_and_handles(
         subagent_manager: None,
         health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
-        origin: "localhost:9847".to_string(),
         cron_scheduler: None,
         worktree_coordinator: None,
         device_request_broker: None,
@@ -445,9 +736,9 @@ async fn boot_server_with_provider_and_handles(
         onboarded_marker_path: unique_runtime_path("onboarded", "marker"),
         release_fetcher: None,
         updater_state_path: unique_runtime_path("updater-state", "json"),
+        origin,
     };
 
-    let config = ServerConfig::default();
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();

@@ -543,8 +543,20 @@ async fn spawn_hmh_session_worker_through_execute(
     label: &str,
     base_rpc_id: u64,
 ) -> HmhSessionWorkerFixture {
-    let namespace = format!("hmh_b_{label}");
     let session_id = format!("hmh-b-{label}-session");
+    spawn_hmh_session_worker_through_execute_for_session(ws, port, label, base_rpc_id, session_id)
+        .await
+}
+
+#[cfg(unix)]
+async fn spawn_hmh_session_worker_through_execute_for_session(
+    ws: &mut WsStream,
+    port: u16,
+    label: &str,
+    base_rpc_id: u64,
+    session_id: String,
+) -> HmhSessionWorkerFixture {
+    let namespace = format!("hmh_b_{label}");
     let worker_id = format!("hmh-b-{label}-worker");
     let function_id = format!("{namespace}::echo");
 
@@ -1789,6 +1801,225 @@ async fn capability_self_modifying_lifecycle_cleans_up_session_worker_and_stale_
             .all(|record| record["workerId"] != fixture.worker_id),
         "stale execute must not route to the stopped worker: {stale_trace}"
     );
+
+    server.shutdown().shutdown();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn capability_self_modifying_lifecycle_explains_session_worker_evidence() {
+    let port = reserve_loopback_port();
+    let provider = Arc::new(EvidenceExplainingProvider::new());
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server, _handles) = boot_server_with_provider_config_and_handles(
+        provider.clone(),
+        config,
+        format!("127.0.0.1:{port}"),
+    )
+    .await;
+    let mut ws = connect(&url).await;
+
+    let session_id = create_and_bind_session(&mut ws, 3271).await;
+    let fixture = spawn_hmh_session_worker_through_execute_for_session(
+        &mut ws,
+        port,
+        "explain",
+        3273,
+        session_id.clone(),
+    )
+    .await;
+    assert_eq!(fixture.session_id, session_id);
+
+    let inspected = direct_engine_invoke_with_session(
+        &server,
+        "capability::inspect",
+        json!({"functionId": fixture.function_id}),
+        "hmh-b9-inspect-session-worker-function",
+        &["capability.inspect"],
+        &fixture.session_id,
+    )
+    .await;
+    let inspection = &inspected["details"];
+    let plugin_id = inspection["implementation"]["pluginId"]
+        .as_str()
+        .expect("inspection records plugin id")
+        .to_owned();
+    let implementation_id = inspection["implementation"]["implementationId"]
+        .as_str()
+        .expect("inspection records implementation id")
+        .to_owned();
+    assert_eq!(
+        inspection["implementation"]["functionId"],
+        fixture.function_id
+    );
+    assert_eq!(inspection["implementation"]["workerId"], fixture.worker_id);
+
+    let conformance = direct_engine_invoke_with_session(
+        &server,
+        "capability::conformance_run",
+        json!({
+            "pluginId": plugin_id,
+            "implementationId": implementation_id,
+            "reason": "HMH-B9 live evidence explanation resource"
+        }),
+        "hmh-b9-run-session-worker-conformance",
+        &["capability.plugin.write"],
+        &fixture.session_id,
+    )
+    .await;
+    assert_eq!(conformance["state"], "healthy");
+    let evidence_ref = conformance["resourceRefs"]
+        .as_array()
+        .expect("conformance returns resource refs")
+        .iter()
+        .find(|reference| reference["kind"] == "evidence")
+        .expect("conformance returns evidence ref")
+        .clone();
+    let evidence_resource_id = evidence_ref["resourceId"]
+        .as_str()
+        .expect("evidence ref has resource id")
+        .to_owned();
+    let evidence_version_id = evidence_ref["versionId"]
+        .as_str()
+        .expect("evidence ref has version id")
+        .to_owned();
+
+    let evidence = direct_engine_invoke_with_session(
+        &server,
+        "resource::inspect",
+        json!({"resourceId": evidence_resource_id}),
+        "hmh-b9-inspect-conformance-evidence",
+        &["resource.read"],
+        &fixture.session_id,
+    )
+    .await;
+    assert_eq!(evidence["inspection"]["resource"]["kind"], "evidence");
+    assert_eq!(
+        evidence["inspection"]["resource"]["currentVersionId"],
+        evidence_version_id
+    );
+    let evidence_payload = evidence["inspection"]["versions"][0]["payload"].clone();
+    assert_eq!(evidence_payload["source"], "capability::conformance_run");
+    assert_eq!(evidence_payload["status"], "healthy");
+    assert_eq!(
+        evidence_payload["target"]["functionIds"],
+        json!([fixture.function_id.as_str()])
+    );
+    assert_eq!(
+        evidence_payload["target"]["workerIds"],
+        json!([fixture.worker_id.as_str()])
+    );
+    let evidence_trace_id = evidence_payload["metadata"]["traceId"]
+        .as_str()
+        .expect("evidence metadata records trace id")
+        .to_owned();
+    let evidence_parent_invocation_id = evidence_payload["metadata"]["parentInvocationId"]
+        .as_str()
+        .expect("evidence metadata records parent invocation id")
+        .to_owned();
+    assert_eq!(
+        evidence_payload["metadata"]["sessionId"],
+        fixture.session_id
+    );
+
+    provider.set_scenario(HmhEvidenceExplanationScenario {
+        function_id: fixture.function_id.clone(),
+        worker_id: fixture.worker_id.clone(),
+        plugin_id: plugin_id.clone(),
+        implementation_id: implementation_id.clone(),
+        evidence_resource_id: evidence_resource_id.clone(),
+        evidence_version_id: evidence_version_id.clone(),
+        evidence_trace_id: evidence_trace_id.clone(),
+        evidence_parent_invocation_id: evidence_parent_invocation_id.clone(),
+        next_test: "cargo test --manifest-path packages/agent/Cargo.toml primer_teaches_self_modifying_worker_lifecycle -- --nocapture".to_owned(),
+    });
+
+    let (prompt_resp, mut events) = rpc_call_with_interleaved_events(
+        &mut ws,
+        3281,
+        "agent::prompt",
+        Some(json!({
+            "sessionId": session_id,
+            "prompt": "Explain the live HMH-B session-worker evidence you can inspect. Cite capability ids, resource refs, trace/ledger ids, and next maintenance actions. Do not use README-only claims."
+        })),
+    )
+    .await;
+    assert_eq!(
+        prompt_resp["success"], true,
+        "agent prompt should complete after provider inspects live evidence: {prompt_resp}"
+    );
+    events.extend(collect_events_until_type(&mut ws, "agent.ready", PROMPT_EVENT_TIMEOUT).await);
+    wait_until_run_cleared(&server, &session_id).await;
+
+    let answer = provider
+        .final_answer()
+        .expect("provider emitted final HMH-B9 evidence answer");
+    for required in [
+        fixture.function_id.as_str(),
+        fixture.worker_id.as_str(),
+        plugin_id.as_str(),
+        implementation_id.as_str(),
+        evidence_resource_id.as_str(),
+        evidence_version_id.as_str(),
+        evidence_trace_id.as_str(),
+        evidence_parent_invocation_id.as_str(),
+        "executeInvocationId",
+        "childInvocationIds",
+        "sandbox::stop_spawned_worker",
+        "worker::disconnect",
+        "expectedFunctionRevision",
+        "idempotency",
+    ] {
+        assert!(
+            answer.contains(required),
+            "final evidence answer missing `{required}`: {answer}"
+        );
+    }
+    assert!(
+        !answer.contains("README-only"),
+        "final answer must explain live evidence, not README-only claims: {answer}"
+    );
+    assert!(
+        events.iter().any(|event| {
+            event["type"] == "agent.text_delta"
+                && event["data"]["delta"].as_str().is_some_and(|delta| {
+                    delta.contains(&fixture.function_id)
+                        && delta.contains(&evidence_resource_id)
+                        && delta.contains(&evidence_trace_id)
+                })
+        }),
+        "agent text stream should expose the live evidence answer: {events:?}"
+    );
+
+    let history = rpc_call(
+        &mut ws,
+        3283,
+        "session::get_history",
+        Some(json!({"sessionId": session_id})),
+    )
+    .await;
+    assert_eq!(
+        history["success"], true,
+        "session history should be readable after HMH-B9 prompt: {history}"
+    );
+    let history_text = history["result"]["messages"].to_string();
+    for required in [
+        fixture.function_id.as_str(),
+        evidence_resource_id.as_str(),
+        evidence_trace_id.as_str(),
+    ] {
+        assert!(
+            history_text.contains(required),
+            "session history missing final evidence marker `{required}`: {history_text}"
+        );
+    }
+
+    let stopped = stop_hmh_session_worker(&server, &fixture, "hmh-b9-stop-session-worker").await;
+    assert_eq!(stopped["stopped"], true);
 
     server.shutdown().shutdown();
 }

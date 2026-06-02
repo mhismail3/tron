@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **28/100**
+Current score: **30/100**
 
 Status: **running**
 
@@ -196,7 +196,7 @@ Planes to delete or prevent:
 | ID | Scorecard | Weight | Status | Owner | Evidence contract |
 |----|-----------|--------|--------|-------|-------------------|
 | HMH-A | Source, baseline, and primitive audit | 10 | passed | docs_or_scorecard | Attachment synthesis, official iii source check, current-code audit, README link, static gate. |
-| HMH-B | Agent self-modifying capability lifecycle | 20 | running | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
+| HMH-B | Agent self-modifying capability lifecycle | 20 | passed | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
 | HMH-C | Harness knowledge and context compiler | 15 | pending | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
 | HMH-D | Plug-and-play module/package lifecycle | 15 | pending | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
 | HMH-E | Human harness and generated UI | 15 | pending | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy. |
@@ -283,7 +283,7 @@ Out of scope: remote worker hosting or unscoped global package installation.
 | HMH-B6 | Invocation uses the tiny harness | 15 | passed | Provider-visible `execute` invokes the new function; child invocation id, trace id, idempotency key, grant id, target revision, result, and ledger row are inspectable. | Stop if the provider receives a direct worker tool or hidden transport path. |
 | HMH-B7 | Promotion is governed | 10 | passed_after_fix | Workspace/system promotion requires expected revision, explicit idempotency, authority, approval if needed, and catalog-change evidence. | Stop if promotion is implicit, global by default, or client-owned. |
 | HMH-B8 | Cleanup and stale calls fail closed | 10 | passed | Disconnect/stop unregisters volatile functions or marks durable workers unhealthy; stale invocation fails closed; no UI cache can keep it callable. | Fix cleanup before broader module work. |
-| HMH-B9 | Agent explains the evidence | 10 | pending | Agent answer cites live capability ids, resource refs, trace/ledger ids, and next maintenance actions; no stale README-only explanation. | Fix context/evidence projection if explanation is vague. |
+| HMH-B9 | Agent explains the evidence | 10 | passed | Agent answer cites live capability ids, resource refs, trace/ledger ids, and next maintenance actions; no stale README-only explanation. | Fix context/evidence projection if explanation is vague. |
 
 Closeout commands:
 
@@ -479,14 +479,38 @@ HMH-B8 evidence, 2026-06-02:
   supporting durable policy proof is:
   `cargo test --manifest-path packages/agent/Cargo.toml local_external_worker_durable_disconnect_marks_functions_unhealthy -- --nocapture`.
 
-Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7/HMH-B8:
+HMH-B9 evidence, 2026-06-02:
 
-- HMH-B1 through HMH-B3 prove model-visible instruction, guide sufficiency, and
-  scoped session worker creation only. HMH-B4 adds live catalog and inspection
-  proof. HMH-B5 adds resource-backed conformance evidence. HMH-B6 adds live
-  invocation proof through the tiny harness. HMH-B7 adds governed promotion
-  proof through public `engine::promote`. HMH-B8 adds cleanup and stale-call
-  fail-closed proof. HMH-B remains running until the explanation row passes.
+- Passing live proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_explains_session_worker_evidence -- --nocapture`.
+- The proof creates a real agent session, spawns a session-generated worker
+  through public `capability::execute`, inspects the spawned function, runs
+  `capability::conformance_run`, and inspects the resulting `evidence`
+  resource before the agent answer is allowed to complete.
+- A deterministic provider first emits a model `execute` invocation targeting
+  `resource::inspect` for the live evidence resource. On the second provider
+  turn, it parses the model-visible execute result from context and asserts the
+  payload includes the current function id, worker id, plugin id,
+  implementation id, evidence resource id/version id, trace id, parent
+  invocation id, and session id.
+- The final answer cites the live function, worker, plugin, implementation,
+  `resourceRefs`, trace/parent invocation ids, `executeInvocationId`,
+  `childInvocationIds`, governed promotion with `expectedFunctionRevision`,
+  explicit idempotency, and cleanup through `sandbox::stop_spawned_worker` or
+  `worker::disconnect`. Streamed `agent.text_delta` and
+  `session::get_history` both preserve the live evidence markers, and the
+  final answer contains no README-only explanation.
+
+Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5/HMH-B6/HMH-B7/HMH-B8/HMH-B9:
+
+- HMH-B is closed. It proves model-visible instruction, guide sufficiency,
+  scoped session worker creation, live catalog/inspection, resource-backed
+  conformance evidence, invocation through the tiny harness, governed
+  promotion, cleanup/stale-call fail-closed behavior, and live evidence
+  explanation in one coherent lifecycle lane.
+- Continue with HMH-C to prove the context compiler keeps this knowledge
+  bounded, current, and provider-visible without expanding the public prompt
+  surface beyond `execute`.
 - Process note: Cargo accepts one test-name filter per invocation; run multiple
   focused filters sequentially.
 
@@ -690,11 +714,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B1, HMH-B2, HMH-B3, HMH-B4, HMH-B5, HMH-B6, HMH-B7, and HMH-B8
-are closed. Continue with HMH-B9: prove the agent can explain live
-self-modifying harness evidence from ids, resource refs, traces, catalog
-revisions, and cleanup state rather than stale README-only claims.
+HMH-A and HMH-B are closed. Continue with HMH-C1: prove the compact
+`capabilities.primer` still contains the north-star self-modifying worker
+lifecycle recipe before broadening the context compiler lane.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_explains_session_worker_evidence -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml primer_teaches_self_modifying_worker_lifecycle -- --nocapture
 ```
