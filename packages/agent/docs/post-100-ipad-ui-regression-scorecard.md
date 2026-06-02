@@ -954,6 +954,41 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   and validation state `unauthorized`/diagnostic `grant_mismatch`. The proof
   invoked no `ui::submit_action`, no `ui::refresh_surface`, and no approval
   decision.
+- Additional IPD-9 Engine Console accessibility follow-up found a remaining
+  pointer/keyboard affordance gap outside Agent Control: Engine Console section
+  and suggestion chips were semantic buttons but lacked the same explicit hover
+  content shape and combined accessibility treatment required for other compact
+  iPad controls, and toolbar icon controls did not have source-guarded explicit
+  labels/values. Added
+  `packages/ios-app/Tests/Views/EngineConsoleAccessibilityTests.swift`; the
+  initial focused guard failed before the fix in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_21-58-58--0700.xcresult`.
+  `EngineConsoleSectionChips` and `EngineConsoleSuggestionChips` now use plain
+  semantic buttons with interaction/hover content shapes, hover highlighting,
+  and combined accessibility labels. `DashboardToolbarContent` now uses
+  icon-only `Label` controls for sidebar/navigation/settings and source-guards
+  their labels/hover affordances; `NotificationBellButton` hides the visual
+  badge from duplicate reading and exposes a notification count value. The
+  corrected focused guard passed after the final fix and post-rename rerun in
+  xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-13-18--0700.xcresult`.
+  Manual proof installed the final Beta app product and launched
+  `com.tron.mobile.beta` as pid `20615` on iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482` with Simulator capture off. Evidence
+  file:
+  `/tmp/tron-psg-evidence/ipd9-engine-console-accessibility-fixed.txt`.
+  Screenshots:
+  `/tmp/tron-psg-evidence/ipd9-engine-console-overview-chip-buttons-fixed.png`
+  and
+  `/tmp/tron-psg-evidence/ipd9-engine-console-capability-suggestion-buttons-fixed.png`.
+  Computer Use exposed toolbar overflow controls `Navigation`/`Settings`,
+  navigation rows `Sessions`/`Engine`, Engine Console section chips
+  `Show Advanced`/`Overview`/`Substrate`/`Capabilities`/`Program Runs`, and
+  Capabilities suggestions `Read files`/`Run command`/`Search web`/`Ask user`/
+  `Spawn worker` as buttons. The pass invoked only toolbar/menu navigation,
+  Engine section selection, and screenshots; no capability search submit,
+  approval, generated UI submit/refresh, source-control action, fork, archive,
+  delete, reset, send, voice-record, or git mutation was invoked.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2
@@ -963,4 +998,5 @@ approval decision flows and action-time generated UI submit/refresh, full
 IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-8
 action-time-confirmed fork execution, IPD-9
-pointer QA and broader hardware-keyboard traversal, and IPD-10 closeout.
+remaining pointer/hardware-keyboard traversal beyond the now-covered dashboard,
+Agent Control, and Engine Console chip controls, and IPD-10 closeout.

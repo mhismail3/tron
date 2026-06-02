@@ -31,6 +31,9 @@ struct EngineConsoleSectionChips: View {
                         .foregroundStyle(.tronEmerald)
                 }
                 .buttonStyle(.plain)
+                .contentShape([.interaction, .hoverEffect], Capsule())
+                .hoverEffect(.highlight)
+                .accessibilityElement(children: .combine)
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -49,6 +52,9 @@ struct EngineConsoleSectionChips: View {
                                 .background(selection == section ? Color.tronEmerald : Color.tronEmerald.opacity(0.12), in: Capsule())
                         }
                         .buttonStyle(.plain)
+                        .contentShape([.interaction, .hoverEffect], Capsule())
+                        .hoverEffect(.highlight)
+                        .accessibilityElement(children: .combine)
                     }
                 }
                 .padding(.vertical, 2)
@@ -110,6 +116,9 @@ struct EngineConsoleSuggestionChips: View {
                         .background(Color.tronEmerald.opacity(0.1), in: Capsule())
                 }
                 .buttonStyle(.plain)
+                .contentShape([.interaction, .hoverEffect], Capsule())
+                .hoverEffect(.highlight)
+                .accessibilityElement(children: .combine)
             }
         }
     }

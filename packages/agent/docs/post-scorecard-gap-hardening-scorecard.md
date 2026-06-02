@@ -813,6 +813,35 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `resource::create`; validation returned `unauthorized` with `grant_mismatch`,
   so the proof covers read-only inspect/validate behavior without invoking
   `ui::submit_action`, `ui::refresh_surface`, or any approval decision.
+- 2026-06-01 IPD-9 Engine Console accessibility follow-up found and fixed a
+  remaining broader pointer/keyboard affordance gap outside Agent Control:
+  Engine Console section and suggestion chips were semantic buttons but lacked
+  explicit hover content shapes, hover highlighting, and combined accessibility
+  treatment, and toolbar icon controls needed source-guarded labels/values.
+  Added
+  `packages/ios-app/Tests/Views/EngineConsoleAccessibilityTests.swift`; the
+  initial guard failed before the fix in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_21-58-58--0700.xcresult`.
+  The corrected focused guard passed after the final fix and post-rename rerun
+  in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-13-18--0700.xcresult`.
+  `EngineConsoleSectionChips` and `EngineConsoleSuggestionChips` now use plain
+  buttons with interaction/hover content shapes, `.hoverEffect(.highlight)`,
+  and combined labels; `DashboardToolbarContent` uses icon-only `Label`
+  controls for sidebar/navigation/settings with explicit labels/hover effects;
+  `NotificationBellButton` hides the visual badge from duplicate reading and
+  exposes a notification count value. Manual final-build proof installed and
+  launched `com.tron.mobile.beta` pid `20615` on iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482`; evidence lives at
+  `/tmp/tron-psg-evidence/ipd9-engine-console-accessibility-fixed.txt`,
+  `/tmp/tron-psg-evidence/ipd9-engine-console-overview-chip-buttons-fixed.png`,
+  and
+  `/tmp/tron-psg-evidence/ipd9-engine-console-capability-suggestion-buttons-fixed.png`.
+  Computer Use exposed toolbar overflow `Navigation`/`Settings`, navigation
+  rows `Sessions`/`Engine`, Engine Console section chips, and Capabilities
+  suggestion chips as buttons. No capability submit, approval, generated UI
+  submit/refresh, source-control action, fork, archive, delete, reset, send,
+  voice-record, or git mutation was invoked.
 
 ## Verification Plan
 

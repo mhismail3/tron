@@ -11,10 +11,13 @@ struct DashboardToolbarContent: ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             if let onToggleSidebar {
                 Button(action: onToggleSidebar) {
-                    Image(systemName: "sidebar.leading")
+                    Label("Show sidebar", systemImage: "sidebar.leading")
+                        .labelStyle(.iconOnly)
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(accent)
                 }
+                .accessibilityLabel("Show sidebar")
+                .hoverEffect(.highlight)
             } else {
                 Menu {
                     ForEach(NavigationMode.allCases, id: \.self) { mode in
@@ -25,14 +28,21 @@ struct DashboardToolbarContent: ToolbarContent {
                         }
                     }
                 } label: {
-                    Image("TronLogoVector")
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
-                        .offset(y: 1)
-                        .foregroundStyle(accent)
+                    Label {
+                        Text("Navigation")
+                    } icon: {
+                        Image("TronLogoVector")
+                            .renderingMode(.template)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 28)
+                            .offset(y: 1)
+                            .foregroundStyle(accent)
+                    }
+                    .labelStyle(.iconOnly)
                 }
+                .accessibilityLabel("Navigation")
+                .hoverEffect(.highlight)
             }
         }
         ToolbarItem(placement: .principal) {
@@ -49,10 +59,13 @@ struct DashboardToolbarContent: ToolbarContent {
                 )
             }
             Button(action: actions.onSettings) {
-                Image(systemName: "gearshape")
+                Label("Settings", systemImage: "gearshape")
+                    .labelStyle(.iconOnly)
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(accent)
             }
+            .accessibilityLabel("Settings")
+            .hoverEffect(.highlight)
         }
     }
 }

@@ -22,7 +22,15 @@ struct NotificationBellButton: View {
                         .frame(minWidth: 16, minHeight: 16)
                         .background(Circle().fill(Color.red))
                         .offset(x: 6, y: -6)
+                        .accessibilityHidden(true)
                 }
         }
+        .accessibilityLabel("Notifications")
+        .accessibilityValue(notificationAccessibilityValue)
+        .hoverEffect(.highlight)
+    }
+
+    private var notificationAccessibilityValue: String {
+        unreadCount == 1 ? "1 unread notification" : "\(unreadCount) unread notifications"
     }
 }
