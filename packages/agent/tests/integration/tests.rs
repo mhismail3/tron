@@ -515,6 +515,203 @@ async fn capability_self_modifying_lifecycle_execute_returns_worker_protocol_gui
     server.shutdown().shutdown();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn capability_self_modifying_lifecycle_spawns_session_worker() {
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let mut ws = connect(&url).await;
+    let session_id = "hmh-b-spawn-session";
+    let worker_id = "hmh-b-spawn-worker";
+    let function_id = "hmh_b_spawn::echo";
+    let namespace = "hmh_b_spawn";
+
+    let guide_response = rpc_call(
+        &mut ws,
+        3211,
+        "capability::execute",
+        Some(json!({
+            "sessionId": session_id,
+            "target": "worker::protocol_guide",
+            "arguments": {
+                "language": "python",
+                "workerId": worker_id,
+                "functionId": function_id
+            },
+            "reason": "HMH-B3 session worker spawn proof guide step"
+        })),
+    )
+    .await;
+    assert_eq!(
+        guide_response["success"], true,
+        "guide execute failed: {guide_response}"
+    );
+    let guide_output = &guide_response["result"]["details"]["output"];
+    assert_eq!(
+        guide_output["spawnWorkerPayloadExample"]["visibility"], "session",
+        "guide must teach the session-scoped default spawn shape"
+    );
+    let script = guide_output["pythonTemplate"]
+        .as_str()
+        .expect("worker guide returns python template");
+    let script_log = unique_runtime_path("hmh-b-spawn-worker", "log");
+    let script = script.replace(
+        "if __name__ == \"__main__\":\n    main()\n",
+        &format!(
+            "if __name__ == \"__main__\":\n    try:\n        main()\n    except Exception as exc:\n        with open({:?}, \"a\") as log:\n            log.write(str(exc) + \"\\n\")\n        raise\n",
+            script_log.to_string_lossy()
+        ),
+    );
+    let script_path = unique_runtime_path("hmh-b-spawn-worker", "py");
+    std::fs::write(&script_path, script).unwrap();
+    let working_directory = script_path
+        .parent()
+        .expect("script has parent")
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let expected_function_ids = json!([function_id]);
+    let expected_authority_scopes = json!([format!("{namespace}.read")]);
+    let expected_resource_kinds = json!(["evidence"]);
+    let expected_resource_selectors = json!([format!("session:{session_id}")]);
+    let expected_file_roots = json!([working_directory.clone()]);
+
+    let spawn_response = rpc_call(
+        &mut ws,
+        3212,
+        "capability::execute",
+        Some(json!({
+            "sessionId": session_id,
+            "target": "worker::spawn",
+            "arguments": {
+                "workerId": worker_id,
+                "command": "python3",
+                "args": [script_path.to_string_lossy()],
+                "workingDirectory": working_directory,
+                "expectedFunctionIds": expected_function_ids.clone(),
+                "allowedAuthorityScopes": expected_authority_scopes.clone(),
+                "allowedResourceKinds": expected_resource_kinds.clone(),
+                "resourceSelectors": expected_resource_selectors.clone(),
+                "fileRoots": expected_file_roots.clone(),
+                "networkPolicy": "loopback",
+                "maxRisk": "low",
+                "approvalRequired": false,
+                "visibility": "session",
+                "sessionId": session_id,
+                "timeoutMs": 10000
+            },
+            "idempotencyKey": "hmh-b3-spawn-session-worker",
+            "reason": "HMH-B3 scoped session worker spawn proof"
+        })),
+    )
+    .await;
+    assert_eq!(
+        spawn_response["success"], true,
+        "worker::spawn execute failed: {spawn_response}"
+    );
+    let spawn_result = &spawn_response["result"];
+    assert!(
+        spawn_result.get("isError").is_none(),
+        "worker::spawn execute should not be an error: {spawn_result}"
+    );
+    assert_eq!(spawn_result["details"]["status"], "ok");
+    assert_eq!(spawn_result["details"]["functionId"], "worker::spawn");
+    assert!(
+        spawn_result["details"]["childInvocations"]
+            .as_array()
+            .is_some_and(|ids| ids.len() == 1),
+        "execute should expose the worker::spawn child invocation id: {spawn_result}"
+    );
+
+    let output = &spawn_result["details"]["output"];
+    assert_eq!(output["workerId"], worker_id);
+    assert_eq!(output["visibility"], "session");
+    assert_eq!(output["registeredFunctionIds"], json!([function_id]));
+    assert!(output["authorityGrantId"].is_string());
+    assert!(output["authorityGrantRevision"].is_number());
+    assert!(
+        output["processId"].is_number(),
+        "spawn should return the launched worker process id: {output}"
+    );
+    assert!(
+        output["catalogRevision"].as_u64().unwrap_or_default() > 0,
+        "spawn should return the catalog revision that contains the worker function: {output}"
+    );
+    assert_eq!(output["streamTopic"], "sandbox.lifecycle");
+    assert!(
+        output["workerEndpoint"]
+            .as_str()
+            .is_some_and(|endpoint| endpoint == format!("ws://127.0.0.1:{port}/engine/workers")),
+        "worker::spawn must inject the complete loopback worker endpoint: {output}"
+    );
+
+    let grant_id = output["authorityGrantId"].as_str().unwrap();
+    let grant = direct_engine_invoke(
+        &server,
+        "grant::inspect",
+        json!({"grantId": grant_id}),
+        "hmh-b3-inspect-derived-grant",
+        &["grant.read"],
+    )
+    .await;
+    let parent_grant_id = grant["grant"]["parentGrantId"]
+        .as_str()
+        .expect("spawned worker grant records its parent grant");
+    let parent_grant = direct_engine_invoke(
+        &server,
+        "grant::inspect",
+        json!({"grantId": parent_grant_id}),
+        "hmh-b3-inspect-parent-grant",
+        &["grant.read"],
+    )
+    .await;
+    assert_eq!(parent_grant["grant"]["lifecycle"], "active");
+    assert_eq!(parent_grant["grant"]["canDelegate"], true);
+    assert_eq!(grant["grant"]["subjectWorkerId"], worker_id);
+    assert_eq!(grant["grant"]["allowedCapabilities"], expected_function_ids);
+    assert_eq!(grant["grant"]["allowedNamespaces"], json!([namespace]));
+    assert_eq!(
+        grant["grant"]["allowedAuthorityScopes"],
+        expected_authority_scopes
+    );
+    assert_eq!(
+        grant["grant"]["allowedResourceKinds"],
+        expected_resource_kinds
+    );
+    assert_eq!(
+        grant["grant"]["resourceSelectors"],
+        expected_resource_selectors
+    );
+    assert_eq!(grant["grant"]["fileRoots"], expected_file_roots);
+    assert_eq!(grant["grant"]["networkPolicy"], "loopback");
+    assert_eq!(grant["grant"]["maxRisk"], "Low");
+    assert_eq!(grant["grant"]["canDelegate"], false);
+    assert_eq!(grant["grant"]["approvalRequired"], false);
+
+    let stopped = direct_engine_invoke(
+        &server,
+        "sandbox::stop_spawned_worker",
+        json!({
+            "workerId": worker_id,
+            "reason": "HMH-B3 integration cleanup",
+            "sessionId": session_id
+        }),
+        "hmh-b3-stop-session-worker",
+        &["sandbox.write"],
+    )
+    .await;
+    assert_eq!(stopped["stopped"], true);
+
+    server.shutdown().shutdown();
+}
+
 #[tokio::test]
 async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     let (url, server) = boot_server_without_deps().await;

@@ -99,7 +99,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
 
     for required in [
         "# Hyper Modular Agent Harness Execution Scorecard Portfolio",
-        "Current score: **14/100**",
+        "Current score: **17/100**",
         "Status: **running**",
         "## Source-Derived Requirements",
         "The agent and the human use the same operation to extend the same system.",
@@ -137,8 +137,9 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "| HMH-B2 | Worker guide is sufficient | 10 | passed_after_fix |",
         "HMH-B2 evidence, 2026-06-02:",
         "as the profile-backed agent actor while server-owned execution policy scopes",
-        "Open loops after HMH-B1/HMH-B2:",
-        "| HMH-B3 | Session worker creation is scoped |",
+        "| HMH-B3 | Session worker creation is scoped | 15 | passed |",
+        "HMH-B3 evidence, 2026-06-02:",
+        "Open loops after HMH-B1/HMH-B2/HMH-B3:",
         "| HMH-B6 | Invocation uses the tiny harness |",
         "| HMH-B9 | Agent explains the evidence |",
         "## HMH-C Scorecard: Harness Knowledge And Context Compiler",
@@ -163,7 +164,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "## Static Gates",
         "## Final Closeout Criteria",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_spawns_session_worker -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_inspects_session_worker_catalog -- --nocapture",
     ] {
         assert!(
             portfolio.contains(required),
@@ -179,6 +180,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "| HMH-B | Agent self-modifying capability lifecycle | 20 | pending |",
         "| HMH-A1 | Attachment synthesis is first-class source | 20 | pending |",
         "| HMH-B1 | Model is taught the lifecycle | 10 | pending |",
+        "| HMH-B3 | Session worker creation is scoped | 15 | pending |",
         "Current score: **100/100**",
         "Status: **completed**",
     ] {

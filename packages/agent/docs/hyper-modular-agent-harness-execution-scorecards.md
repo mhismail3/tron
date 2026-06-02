@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **14/100**
+Current score: **17/100**
 
 Status: **running**
 
@@ -277,7 +277,7 @@ Out of scope: remote worker hosting or unscoped global package installation.
 |----|----------|--------|--------|----------|---------------|
 | HMH-B1 | Model is taught the lifecycle | 10 | passed_after_fix | Provider-visible transcript or deterministic runner fixture shows the model names discovery, `worker::protocol_guide`, worker authoring, `worker::spawn`, catalog watch/inspect, conformance/test, `execute`, promotion/disconnect, and evidence. | Stop if lifecycle appears only in hidden docs or test code. |
 | HMH-B2 | Worker guide is sufficient | 10 | passed_after_fix | `execute` can call `worker::protocol_guide`; returned template/protocol/env/rules let the agent write a worker without source-searching or probing HTTP paths. | Fix guide/primer before testing spawn. |
-| HMH-B3 | Session worker creation is scoped | 15 | pending | Live temp worker registers one harmless function under a session namespace through `worker::spawn`; result includes derived grant, expected ids, process id, visibility, and catalog revision. | Stop if default visibility is not session or grant exceeds parent. |
+| HMH-B3 | Session worker creation is scoped | 15 | passed | Live temp worker registers one harmless function under a session namespace through `worker::spawn`; result includes derived grant, expected ids, process id, visibility, and catalog revision. | Stop if default visibility is not session or grant exceeds parent. |
 | HMH-B4 | Live catalog update and inspection work | 10 | pending | Catalog watch or revision delta shows the new function; `execute` discovery/inspect returns schema, health, provenance, trust tier, conformance state, authority, and visibility. | Fix registry/inspection before invocation. |
 | HMH-B5 | Conformance/test evidence is resource-backed | 10 | pending | `module::run_conformance` or capability conformance records pass/fail evidence resources linked to worker/function ids. | Do not promote without evidence resource refs. |
 | HMH-B6 | Invocation uses the tiny harness | 15 | pending | Provider-visible `execute` invokes the new function; child invocation id, trace id, idempotency key, grant id, target revision, result, and ledger row are inspectable. | Stop if the provider receives a direct worker tool or hidden transport path. |
@@ -340,12 +340,36 @@ HMH-B2 evidence, 2026-06-02:
   and
   `cargo test --manifest-path packages/agent/Cargo.toml worker_protocol_guide -- --nocapture`.
 
-Open loops after HMH-B1/HMH-B2:
+HMH-B3 evidence, 2026-06-02:
 
-- HMH-B1 and HMH-B2 prove model-visible instruction and guide sufficiency only.
-  HMH-B remains running until scoped `worker::spawn`, catalog inspection,
-  conformance evidence, invocation, promotion, cleanup, and explanation rows
-  pass.
+- Passing live proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_spawns_session_worker -- --nocapture`.
+- The proof uses public `/engine` WebSocket `capability::execute`, first
+  targeting `worker::protocol_guide` to obtain the generated Python worker
+  template and session-scoped spawn example, then materializing that template
+  into a temp worker script.
+- The same public `execute` path targets `worker::spawn` with
+  `visibility=session`, active `sessionId`, `expectedFunctionIds`, explicit
+  top-level `idempotencyKey`, and narrowed child-grant bounds:
+  one namespace read scope, one evidence resource kind, one session resource
+  selector, the temp file root, loopback network, low risk, delegation=false,
+  and approval=false.
+- The spawn result includes the worker id, `visibility=session`, expected
+  registered function id, derived `authorityGrantId`, grant revision, numeric
+  process id, positive catalog revision, complete loopback
+  `/engine/workers` endpoint, and `sandbox.lifecycle` stream topic.
+- `grant::inspect` confirms the derived grant has an active delegable parent
+  and exact child bounds for capability, namespace, authority scope, resource
+  kind, resource selector, file root, loopback network, low risk,
+  delegation=false, and approval=false. Cleanup stops the spawned process
+  through `sandbox::stop_spawned_worker`.
+
+Open loops after HMH-B1/HMH-B2/HMH-B3:
+
+- HMH-B1 through HMH-B3 prove model-visible instruction, guide sufficiency, and
+  scoped session worker creation only. HMH-B remains running until catalog
+  inspection, conformance evidence, invocation, promotion, cleanup, and
+  explanation rows pass.
 - Process note: Cargo accepts one test-name filter per invocation; run multiple
   focused filters sequentially.
 
@@ -549,9 +573,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B1, and HMH-B2 are closed. Continue with HMH-B3: prove the
-scoped session worker spawn path from the guide output.
+HMH-A, HMH-B1, HMH-B2, and HMH-B3 are closed. Continue with HMH-B4:
+prove live catalog watch/inspection for the spawned session worker.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_spawns_session_worker -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_inspects_session_worker_catalog -- --nocapture
 ```
