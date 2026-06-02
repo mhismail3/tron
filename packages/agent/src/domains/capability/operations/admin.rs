@@ -7,9 +7,10 @@ use super::policy_profile::{
     write_capability_execution_policy_to_profile_and_reload,
 };
 use super::{Deps, registry_store_error, sync_registry_for_admin};
-use crate::engine::Invocation;
+use crate::engine::{ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation};
 use crate::shared::profile::CapabilityExecutionPolicySpec;
 use crate::shared::server::context::run_blocking_task;
+use crate::shared::server::error_mapping::result_to_capability_value;
 use crate::shared::server::errors::CapabilityError;
 
 pub(crate) async fn registry_snapshot_value(
@@ -359,6 +360,11 @@ pub(crate) async fn conformance_run_value(
     } else {
         "degraded"
     };
+    let checked_implementations = conformance_implementation_targets(&implementations, &expected);
+    let checks = json!({
+        "manifestImplementationsPresent": missing.is_empty(),
+        "missingImplementations": missing,
+    });
     let store = deps.registry_store.clone();
     let plugin_for_update = plugin_id.clone();
     let expected_for_update = expected.clone();
@@ -376,14 +382,29 @@ pub(crate) async fn conformance_run_value(
         Ok(())
     })
     .await?;
+    let evidence = create_conformance_evidence_resource(
+        invocation,
+        deps,
+        &plugin_id,
+        requested_implementation.as_deref(),
+        &expected,
+        &checked_implementations,
+        next_state,
+        checks.clone(),
+    )
+    .await?;
+    let resource_refs = evidence
+        .get("resourceRefs")
+        .filter(|value| value.as_array().is_some())
+        .cloned()
+        .unwrap_or_else(|| json!([]));
     let result = json!({
         "pluginId": plugin_id,
         "implementationId": requested_implementation,
         "state": next_state,
-        "checks": {
-            "manifestImplementationsPresent": missing.is_empty(),
-            "missingImplementations": missing,
-        }
+        "checks": checks,
+        "evidence": evidence.get("resource").cloned().unwrap_or(Value::Null),
+        "resourceRefs": resource_refs,
     });
     record_admin_audit(
         deps,
@@ -393,6 +414,140 @@ pub(crate) async fn conformance_run_value(
     )
     .await?;
     Ok(result)
+}
+
+fn conformance_implementation_targets(
+    implementations: &[Value],
+    expected: &[String],
+) -> Vec<Value> {
+    let expected = expected
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    implementations
+        .iter()
+        .filter(|implementation| {
+            implementation
+                .get("implementationId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| expected.contains(id))
+        })
+        .map(|implementation| {
+            json!({
+                "implementationId": implementation.get("implementationId").cloned().unwrap_or(Value::Null),
+                "contractId": implementation.get("contractId").cloned().unwrap_or(Value::Null),
+                "functionId": implementation.get("functionId").cloned().unwrap_or(Value::Null),
+                "workerId": implementation.get("workerId").cloned().unwrap_or(Value::Null),
+                "conformanceState": implementation.get("conformanceState").cloned().unwrap_or(Value::Null),
+                "health": implementation.get("health").cloned().unwrap_or(Value::Null),
+                "visibility": implementation.get("visibility").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect()
+}
+
+async fn create_conformance_evidence_resource(
+    invocation: &Invocation,
+    deps: &Deps,
+    plugin_id: &str,
+    requested_implementation: Option<&str>,
+    expected_implementations: &[String],
+    checked_implementations: &[Value],
+    state: &str,
+    checks: Value,
+) -> Result<Value, CapabilityError> {
+    let mut payload = json!({
+        "kind": "evidence",
+        "lifecycle": "accepted",
+        "policy": {"managedBy": "capability"},
+        "payload": {
+            "summary": format!("capability conformance for {plugin_id} is {state}"),
+            "source": "capability::conformance_run",
+            "status": state,
+            "target": {
+                "pluginId": plugin_id,
+                "requestedImplementationId": requested_implementation,
+                "implementationIds": expected_implementations,
+                "functionIds": unique_string_field_values(checked_implementations, "functionId"),
+                "workerIds": unique_string_field_values(checked_implementations, "workerId"),
+            },
+            "checks": checks,
+            "checkedImplementations": checked_implementations,
+            "metadata": {
+                "parentInvocationId": invocation.id.as_str(),
+                "traceId": invocation.causal_context.trace_id.as_str(),
+                "sessionId": invocation.causal_context.session_id,
+                "workspaceId": invocation.causal_context.workspace_id,
+            }
+        }
+    });
+    if let Some(session_id) = &invocation.causal_context.session_id {
+        payload["scope"] = json!("session");
+        payload["sessionId"] = json!(session_id);
+    } else if let Some(workspace_id) = &invocation.causal_context.workspace_id {
+        payload["scope"] = json!("workspace");
+        payload["workspaceId"] = json!(workspace_id);
+    } else {
+        payload["scope"] = json!("system");
+    }
+    invoke_resource_capability(deps, invocation, "resource::create", payload).await
+}
+
+fn unique_string_field_values(values: &[Value], field: &str) -> Vec<String> {
+    values
+        .iter()
+        .filter_map(|value| value.get(field).and_then(Value::as_str))
+        .map(ToOwned::to_owned)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+async fn invoke_resource_capability(
+    deps: &Deps,
+    parent: &Invocation,
+    function_id: &str,
+    payload: Value,
+) -> Result<Value, CapabilityError> {
+    let mut causal = CausalContext::new(
+        ActorId::new("system:capability").map_err(capability_resource_error)?,
+        ActorKind::System,
+        AuthorityGrantId::new("engine-system").map_err(capability_resource_error)?,
+        parent.causal_context.trace_id.clone(),
+    )
+    .with_parent_invocation(parent.id.clone())
+    .with_scope("resource.write")
+    .with_idempotency_key(format!(
+        "{}:{}",
+        parent.id.as_str(),
+        function_id.replace("::", "-")
+    ));
+    if let Some(session_id) = &parent.causal_context.session_id {
+        causal = causal.with_session_id(session_id.clone());
+    }
+    if let Some(workspace_id) = &parent.causal_context.workspace_id {
+        causal = causal.with_workspace_id(workspace_id.clone());
+    }
+    for (key, value) in &parent.causal_context.runtime_metadata {
+        causal = causal.with_runtime_metadata(key.clone(), value.clone());
+    }
+    let result = deps
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new(function_id).map_err(capability_resource_error)?,
+            payload,
+            causal,
+        ))
+        .await;
+    result_to_capability_value(result).map_err(capability_resource_error)
+}
+
+fn capability_resource_error(error: impl std::fmt::Display) -> CapabilityError {
+    CapabilityError::Custom {
+        code: "CAPABILITY_CONFORMANCE_EVIDENCE_FAILED".to_owned(),
+        message: error.to_string(),
+        details: None,
+    }
 }
 
 pub(crate) async fn implementation_set_state_value(

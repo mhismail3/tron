@@ -9,8 +9,8 @@ use serde_json::json;
 use crate::domains::catalog::CapabilitySpec;
 use crate::domains::contract::CapabilityContract;
 use crate::engine::{
-    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
-    Result as EngineResult, RiskLevel, VisibilityScope,
+    CompensationContract, CompensationKind, DurableOutputContract, EffectClass,
+    IdempotencyContract, Result as EngineResult, RiskLevel, VisibilityScope,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["capability.runtime"];
@@ -143,11 +143,12 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             plugin_promote_request_schema(),
             admin_result_schema(),
         )?,
-        admin_write_contract(
+        admin_write_resource_backed_contract(
             CONFORMANCE_RUN_FUNCTION_ID,
             "capability.plugin.write",
             conformance_run_request_schema(),
-            admin_result_schema(),
+            conformance_run_response_schema(),
+            ["evidence"],
         )?,
         admin_write_contract(
             IMPLEMENTATION_SET_STATE_FUNCTION_ID,
@@ -226,6 +227,23 @@ fn admin_write_contract(
     ))
     .approval_required(true)
     .build()
+}
+
+fn admin_write_resource_backed_contract(
+    function_id: &'static str,
+    authority_scope: &'static str,
+    request_schema: serde_json::Value,
+    response_schema: serde_json::Value,
+    produced_resource_kinds: impl IntoIterator<Item = &'static str>,
+) -> EngineResult<CapabilitySpec> {
+    let mut spec = admin_write_contract(
+        function_id,
+        authority_scope,
+        request_schema,
+        response_schema,
+    )?;
+    spec.output_contract = DurableOutputContract::resource_backed(produced_resource_kinds);
+    Ok(spec)
 }
 
 pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
@@ -543,6 +561,22 @@ fn conformance_run_request_schema() -> serde_json::Value {
             "pluginId": {"type": "string"},
             "implementationId": {"type": "string"},
             "reason": {"type": "string"}
+        }
+    })
+}
+
+fn conformance_run_response_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["pluginId", "state", "checks", "evidence", "resourceRefs"],
+        "properties": {
+            "pluginId": {"type": "string"},
+            "implementationId": {"type": ["string", "null"]},
+            "state": {"type": "string"},
+            "checks": {"type": "object"},
+            "evidence": {"type": "object"},
+            "resourceRefs": {"type": "array"}
         }
     })
 }

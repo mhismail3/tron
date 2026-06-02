@@ -969,6 +969,131 @@ async fn capability_self_modifying_lifecycle_inspects_session_worker_catalog() {
     server.shutdown().shutdown();
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn capability_self_modifying_lifecycle_records_session_worker_conformance_evidence() {
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let mut ws = connect(&url).await;
+    let fixture =
+        spawn_hmh_session_worker_through_execute(&mut ws, port, "conformance", 3231).await;
+
+    let inspected = direct_engine_invoke_with_session(
+        &server,
+        "capability::inspect",
+        json!({"functionId": fixture.function_id}),
+        "hmh-b5-inspect-session-worker-function",
+        &["capability.inspect"],
+        &fixture.session_id,
+    )
+    .await;
+    let inspection = &inspected["details"];
+    let plugin_id = inspection["implementation"]["pluginId"]
+        .as_str()
+        .expect("inspection records plugin id")
+        .to_owned();
+    let implementation_id = inspection["implementation"]["implementationId"]
+        .as_str()
+        .expect("inspection records implementation id")
+        .to_owned();
+    assert_eq!(
+        inspection["implementation"]["functionId"],
+        fixture.function_id
+    );
+    assert_eq!(inspection["implementation"]["workerId"], fixture.worker_id);
+
+    let conformance = direct_engine_invoke_with_session(
+        &server,
+        "capability::conformance_run",
+        json!({
+            "pluginId": plugin_id,
+            "implementationId": implementation_id,
+            "reason": "HMH-B5 session worker conformance evidence proof"
+        }),
+        "hmh-b5-run-session-worker-conformance",
+        &["capability.plugin.write"],
+        &fixture.session_id,
+    )
+    .await;
+    assert_eq!(conformance["state"], "healthy");
+    assert_eq!(
+        conformance["checks"]["manifestImplementationsPresent"],
+        true
+    );
+    assert!(
+        conformance["resourceRefs"]
+            .as_array()
+            .is_some_and(|refs| refs.iter().any(|reference| reference["kind"] == "evidence")),
+        "conformance_run must return evidence resource refs: {conformance}"
+    );
+    let evidence_ref = conformance["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "evidence")
+        .expect("evidence ref")
+        .clone();
+    let evidence_resource_id = evidence_ref["resourceId"]
+        .as_str()
+        .expect("evidence ref has resource id")
+        .to_owned();
+
+    let evidence = direct_engine_invoke_with_session(
+        &server,
+        "resource::inspect",
+        json!({"resourceId": evidence_resource_id}),
+        "hmh-b5-inspect-conformance-evidence",
+        &["resource.read"],
+        &fixture.session_id,
+    )
+    .await;
+    let evidence_inspection = &evidence["inspection"];
+    assert_eq!(evidence_inspection["resource"]["kind"], "evidence");
+    assert_eq!(evidence_inspection["resource"]["lifecycle"], "accepted");
+    let evidence_payload = evidence_inspection["versions"][0]["payload"].clone();
+    assert_eq!(evidence_payload["source"], "capability::conformance_run");
+    assert_eq!(evidence_payload["status"], "healthy");
+    assert_eq!(
+        evidence_payload["target"]["pluginId"],
+        conformance["pluginId"]
+    );
+    assert_eq!(
+        evidence_payload["target"]["implementationIds"],
+        json!([conformance["implementationId"].as_str().unwrap()])
+    );
+    assert_eq!(
+        evidence_payload["target"]["functionIds"],
+        json!([fixture.function_id.as_str()])
+    );
+    assert_eq!(
+        evidence_payload["target"]["workerIds"],
+        json!([fixture.worker_id.as_str()])
+    );
+    assert_eq!(
+        evidence_payload["checks"]["manifestImplementationsPresent"],
+        true
+    );
+    assert!(
+        evidence_payload["metadata"]["parentInvocationId"].is_string(),
+        "evidence should preserve invocation lineage: {evidence_payload}"
+    );
+    assert_eq!(
+        evidence_payload["metadata"]["sessionId"], fixture.session_id,
+        "session worker conformance evidence should stay session-scoped"
+    );
+
+    let stopped = stop_hmh_session_worker(&server, &fixture, "hmh-b5-stop-session-worker").await;
+    assert_eq!(stopped["stopped"], true);
+
+    server.shutdown().shutdown();
+}
+
 #[tokio::test]
 async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     let (url, server) = boot_server_without_deps().await;

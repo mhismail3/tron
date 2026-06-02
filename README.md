@@ -569,6 +569,9 @@ Engine Console mutations such as plugin state changes, conformance runs,
 binding edits, and policy updates are system-idempotent operator actions. They
 do not require a chat session id, but they still go through normal capability
 schema validation, approval, audit, trace, and compensation records.
+`capability::conformance_run` also writes an `evidence` resource whose payload
+links the checked plugin implementations to the catalog function ids and worker
+ids, and its response is runtime-guarded to include `resourceRefs`.
 
 Provider models see one capability primitive: `execute`. The request is
 intent-shaped: `intent`, optional `target` or direct target alias, target-only
@@ -628,6 +631,7 @@ provider-facing primitives:
 Admin mutations carry high-risk capability metadata, approval requirements,
 idempotency, policy evaluation, tracing, and audit records. Read paths return
 redacted audit data by default; reveal behavior remains server-authoritative.
+Capability conformance runs are resource-backed and return evidence refs.
 
 Engine-owned primitive workers additionally expose the substrate control and
 generated UI surfaces. `control::snapshot` and `control::inspect` are read-only

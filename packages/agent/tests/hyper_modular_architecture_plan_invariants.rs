@@ -99,7 +99,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
 
     for required in [
         "# Hyper Modular Agent Harness Execution Scorecard Portfolio",
-        "Current score: **19/100**",
+        "Current score: **21/100**",
         "Status: **running**",
         "## Source-Derived Requirements",
         "The agent and the human use the same operation to extend the same system.",
@@ -141,7 +141,12 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "HMH-B3 evidence, 2026-06-02:",
         "| HMH-B4 | Live catalog update and inspection work | 10 | passed |",
         "HMH-B4 evidence, 2026-06-02:",
-        "Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4:",
+        "| HMH-B5 | Conformance/test evidence is resource-backed | 10 | passed_after_fix |",
+        "HMH-B5 evidence, 2026-06-02:",
+        "`capability::conformance_run` now creates an `evidence` resource",
+        "declares a resource-backed `evidence` output contract",
+        "capability_self_modifying_lifecycle_records_session_worker_conformance_evidence",
+        "Open loops after HMH-B1/HMH-B2/HMH-B3/HMH-B4/HMH-B5:",
         "| HMH-B6 | Invocation uses the tiny harness |",
         "| HMH-B9 | Agent explains the evidence |",
         "## HMH-C Scorecard: Harness Knowledge And Context Compiler",
@@ -166,7 +171,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "## Static Gates",
         "## Final Closeout Criteria",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_records_session_worker_conformance_evidence -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_invokes_session_worker_through_execute -- --nocapture",
     ] {
         assert!(
             portfolio.contains(required),
@@ -184,6 +189,8 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "| HMH-B1 | Model is taught the lifecycle | 10 | pending |",
         "| HMH-B3 | Session worker creation is scoped | 15 | pending |",
         "| HMH-B4 | Live catalog update and inspection work | 10 | pending |",
+        "| HMH-B5 | Conformance/test evidence is resource-backed | 10 | pending |",
+        "Current score: **19/100**",
         "Current score: **100/100**",
         "Status: **completed**",
     ] {
@@ -206,8 +213,11 @@ fn hyper_modular_architecture_plan_stays_formalized() {
             && capability_contract
                 .contains("assert!(model_metadata(SEARCH_FUNCTION_ID).is_null());")
             && capability_contract
-                .contains("assert!(!model_metadata(EXECUTE_FUNCTION_ID).is_null());"),
-        "capability contract must guard execute as the only model metadata owner"
+                .contains("assert!(!model_metadata(EXECUTE_FUNCTION_ID).is_null());")
+            && capability_contract.contains("admin_write_resource_backed_contract")
+            && capability_contract.contains("CONFORMANCE_RUN_FUNCTION_ID")
+            && capability_contract.contains("[\"evidence\"]"),
+        "capability contract must guard execute as the only model metadata owner and conformance evidence as resource-backed"
     );
     assert!(
         sandbox_contract.contains("worker::spawn")

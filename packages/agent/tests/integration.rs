@@ -775,6 +775,25 @@ async fn direct_engine_invoke(
     idempotency_key: &str,
     scopes: &[&str],
 ) -> Value {
+    direct_engine_invoke_with_session(
+        server,
+        function_id,
+        payload,
+        idempotency_key,
+        scopes,
+        "integration-session",
+    )
+    .await
+}
+
+async fn direct_engine_invoke_with_session(
+    server: &Arc<TronServer>,
+    function_id: &str,
+    payload: Value,
+    idempotency_key: &str,
+    scopes: &[&str],
+    session_id: &str,
+) -> Value {
     let mut context = CausalContext::new(
         ActorId::new("integration-system").unwrap(),
         ActorKind::System,
@@ -782,7 +801,7 @@ async fn direct_engine_invoke(
         TraceId::generate(),
     )
     .with_idempotency_key(idempotency_key.to_owned())
-    .with_session_id("integration-session");
+    .with_session_id(session_id);
     for scope in scopes {
         context = context.with_scope(*scope);
     }

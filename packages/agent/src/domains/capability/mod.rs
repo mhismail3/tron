@@ -117,6 +117,10 @@
 //! the engine persists that state, emits `capability.pause.*` or
 //! `capability.run.status`, and resumes/cancels only through authority-checked
 //! capability functions.
+//! Capability conformance is resource-backed: `capability::conformance_run`
+//! updates plugin/implementation state only after creating an `evidence`
+//! resource with plugin, implementation, function, worker, trace, and session
+//! lineage, and the catalog output contract requires returned `resourceRefs`.
 //!
 //! # INVARIANT: search is local and explicit about degradation
 //!
