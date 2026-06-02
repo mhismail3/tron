@@ -821,6 +821,58 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `WorktreeCommitResultTests` and the optional `tailscaleIp` DTO comment;
   current semantics are unknown current-server stats and environment-dependent
   server metadata, not compatibility shims.
+- Additional canonical iPad sheet standardization replaced the remaining
+  per-sheet detent/styling variants with one source-guarded helper. The
+  root-cause issue was structural: several app sheets still owned raw
+  `.presentationDetents(...)`, some detail sheets had duplicate wrappers, and
+  the iPad frame used fixed maximum height even for short resolved/read-only
+  content. `adaptivePresentationDetents` now owns the app-wide iPad shape,
+  supports selected-detent bindings, preserves existing iPhone sizing/background
+  for converted raw-detent callers, and gives iPad large/compact sheets
+  content-aware height caps. Current iPad metrics are large
+  `min(referenceWidth * 0.46, 540)` by
+  `min(referenceHeight * 0.88, 900)` with a `540` floor and compact
+  `min(referenceWidth * 0.40, 470)` by
+  `min(referenceHeight * 0.78, 760)` with a `420` floor; short content clamps
+  within those floor/cap bounds rather than forcing empty vertical space.
+  Converted representatives include onboarding, camera capture, QR scanner,
+  clone repo, process list, stream details, approval, user-interaction,
+  subagent, compaction, memory-retain, provider-error, and notification sheets.
+  Source-level TDD coverage in
+  `packages/ios-app/Tests/Views/IPadSheetPresentationTests.swift` initially
+  failed with raw-detent offenders and now guards both representative call sites
+  and the no-raw-detent rule for `packages/ios-app/Sources`. Focused
+  verification passed 12 XCTest cases on iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482` after `xcodegen generate`: targeted
+  classes were `IPadSheetPresentationTests`,
+  `NotificationSheetPresentationTests`, `SettingsPageContainerTests`, and
+  `AgentSettingsPageLayoutTests`; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-44-10--0700.xcresult`.
+  Manual non-mutating proof used rebuilt bundle `com.tron.mobile.beta`
+  launched as pid `92610` on the same iPad UDID. Baseline screenshot
+  `/tmp/tron-psg-evidence/ipd-current-open-approved-sheet-baseline.png`
+  captured the over-expanded approved read-only detail before the current
+  standardization. Post-fix proof captured approved read-only detail in
+  landscape and portrait:
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-approved-readonly-landscape.png`
+  and
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-approved-readonly-portrait.png`;
+  Settings main/server:
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-settings-main-portrait.png`
+  and
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-settings-server-portrait.png`;
+  Agent Control and drill-downs:
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-agent-control-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-context-detail-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-source-control-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-analytics-portrait.png`, and
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-history-portrait.png`; and
+  notification detail/list stack in portrait and landscape:
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-notification-portrait-normalized.png`
+  and
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-notification-landscape-normalized.png`.
+  The proof did not invoke approval/deny, commit, push, pull, rebase, merge,
+  fork, archive, reset, send, or other action-time-confirmed controls.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2

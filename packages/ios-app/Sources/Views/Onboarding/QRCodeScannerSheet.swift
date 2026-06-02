@@ -41,7 +41,7 @@ struct QRCodeScannerSheet: View {
             .frame(maxWidth: .infinity)
         }
         .padding(.horizontal, 24)
-        .presentationDetents([.medium])
+        .adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)
         .presentationDragIndicator(.hidden)
         .task {
             await scannerModel.requestPermissionAndSetup()

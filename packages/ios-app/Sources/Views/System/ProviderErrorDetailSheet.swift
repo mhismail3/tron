@@ -31,6 +31,7 @@ struct ProviderErrorDetailSheet: View {
                 }
             }
         }
+        .adaptivePresentationDetents([.medium], ipadSizing: .compactForm)
         .presentationDragIndicator(.hidden)
         .tint(.red)
     }

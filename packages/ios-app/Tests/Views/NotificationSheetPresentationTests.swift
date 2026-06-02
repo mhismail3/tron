@@ -20,16 +20,24 @@ final class NotificationSheetPresentationTests: XCTestCase {
             "Large iPad sheets should avoid becoming too wide in landscape"
         )
         XCTAssertTrue(
-            content.contains("height: min(referenceHeight * 0.94, 1020)"),
-            "Large iPad sheets should have enough vertical room for settings content"
+            content.contains("let maxHeight = min(referenceHeight * 0.88, 900)"),
+            "Large iPad sheets should cap height without becoming an empty full-height column"
+        )
+        XCTAssertTrue(
+            content.contains("minHeight: min(540, maxHeight)"),
+            "Large iPad sheets should keep a usable floor for settings content"
         )
         XCTAssertTrue(
             content.contains("width: min(referenceWidth * 0.40, 470)"),
             "Compact iPad sheets should avoid becoming over-wide"
         )
         XCTAssertTrue(
-            content.contains("height: min(referenceHeight * 0.92, 960)"),
-            "Compact iPad sheets should have enough vertical room for card rows"
+            content.contains("let maxHeight = min(referenceHeight * 0.78, 760)"),
+            "Compact iPad sheets should avoid becoming oddly tall for short detail content"
+        )
+        XCTAssertTrue(
+            content.contains("minHeight: min(420, maxHeight)"),
+            "Compact iPad sheets should keep a usable floor for card rows"
         )
         XCTAssertTrue(
             content.contains("AdaptiveSheetMetrics.balancedLargeFormSize"),
@@ -48,8 +56,8 @@ final class NotificationSheetPresentationTests: XCTestCase {
             "The iPad branch should size a true floating form instead of inheriting phone detents"
         )
         XCTAssertTrue(
-            content.contains(".frame(width: targetSize.width, height: targetSize.height)"),
-            "iPad floating sheets should constrain presented content to the same visible form size"
+            content.contains(".frame(width: targetSize.width)\n                .frame(maxHeight: targetSize.height)"),
+            "iPad floating sheets should cap height while allowing short content to shrink"
         )
         XCTAssertTrue(
             content.contains(".presentationSizing(.balancedLargeForm)"),
@@ -60,8 +68,12 @@ final class NotificationSheetPresentationTests: XCTestCase {
             "The non-iPad branch should keep its existing background behavior"
         )
         XCTAssertTrue(
-            content.contains("content\n                .presentationDetents(detents, selection: $selectedDetent)"),
+            content.contains("let detented = content.presentationDetents(detents, selection: phoneSelection)"),
             "Phone presentation detents must remain on the non-iPad branch"
+        )
+        XCTAssertTrue(
+            content.contains("case .unchanged:\n            phoneBackgroundBody(content: detented)"),
+            "Sheets converted from raw detents need to preserve their existing phone sizing"
         )
     }
 

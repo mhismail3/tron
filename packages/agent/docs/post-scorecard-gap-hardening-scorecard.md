@@ -685,6 +685,52 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `WorktreeCommitResultTests` and the optional `tailscaleIp` DTO comment;
   current semantics are unknown current-server stats and environment-dependent
   server metadata, not compatibility shims.
+- 2026-06-01 iPad sheet standardization checkpoint found the remaining sheet
+  inconsistency was structural rather than another one-off metric retune:
+  app-level and feature sheets still mixed raw `.presentationDetents(...)`,
+  duplicate outer wrappers, and fixed iPad heights that made short read-only
+  details look over-expanded. Fixed by making `adaptivePresentationDetents` the
+  canonical helper for app sources, adding content-aware large/compact iPad
+  target sizes, adding explicit phone-preserving sizing/background modes for
+  converted raw-detent callers, and moving approval, user-interaction,
+  subagent, compaction, memory-retain, provider-error, onboarding, camera, QR,
+  clone, process-list, and stream sheets onto the shared helper. Source-level
+  TDD guard `TronMobileTests/IPadSheetPresentationTests` first failed against
+  the mixed raw-detent source set, then passed after the conversions; `rg -n
+  "\\.presentationDetents\\(" packages/ios-app/Sources` now reports only the
+  shared helper in `Sources/Extensions/View+Extensions.swift`. Focused iPad
+  tests passed 12 XCTest cases on iPad Pro 13-inch (M5)
+  `E2A39D89-9AF3-431E-A43B-0030C3716482` after `xcodegen generate`: targeted
+  classes were `IPadSheetPresentationTests`,
+  `NotificationSheetPresentationTests`, `SettingsPageContainerTests`, and
+  `AgentSettingsPageLayoutTests`; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-44-10--0700.xcresult`.
+  Rebuilt beta app proof used bundle `com.tron.mobile.beta`; build/install
+  succeeded and launch returned pid `92610`. Non-mutating Computer Use proof
+  captured the previously over-expanded resolved approval sheet before the
+  change at `/tmp/tron-psg-evidence/ipd-current-open-approved-sheet-baseline.png`,
+  then the standardized read-only approval detail in landscape/portrait at
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-approved-readonly-landscape.png`
+  and
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-approved-readonly-portrait.png`.
+  Additional standardized sheet proof covers Settings main/server, Agent
+  Control, Context, Source Control, Analytics, History, and notification
+  portrait/landscape screenshots:
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-settings-main-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-settings-server-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-agent-control-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-context-detail-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-source-control-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-analytics-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-history-portrait.png`,
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-notification-portrait-normalized.png`,
+  and
+  `/tmp/tron-psg-evidence/ipd-sheet-standardized-notification-landscape-normalized.png`.
+  No approval, source-control, fork, reset, archive, send, or remote-mutating UI
+  action was invoked during this checkpoint. PSG-5 remains running because
+  action-time approval decisions, source-control mutations, fork execution,
+  voice-note sheet submission states, pointer QA, and full keyboard traversal
+  remain open.
 
 ## Verification Plan
 

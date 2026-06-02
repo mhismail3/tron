@@ -69,11 +69,9 @@ struct ChatSheetContent: View {
                 preservedTurns: data.preservedTurns,
                 summarizedTurns: data.summarizedTurns
             )
-            .adaptivePresentationDetents([.medium, .large])
 
         case .memoryRetainDetail(let data):
             MemoryRetainDetailSheet(title: data.title, summary: data.summary)
-                .adaptivePresentationDetents([.medium, .large])
 
         case .userInteraction:
             userInteractionSheet
@@ -103,7 +101,6 @@ struct ChatSheetContent: View {
 
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
-                .adaptivePresentationDetents([.medium])
 
         }
     }
@@ -180,7 +177,6 @@ struct ChatSheetContent: View {
                     sheetCoordinator?.dismiss()
                 }
             )
-            .adaptivePresentationDetents([.medium, .large])
         } else {
             EmptyView()
         }
@@ -203,6 +199,6 @@ struct ChatSheetContent: View {
                 sheetCoordinator?.dismiss()
             }
         )
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
     }
 }

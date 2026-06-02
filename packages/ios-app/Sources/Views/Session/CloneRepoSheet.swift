@@ -109,7 +109,7 @@ struct CloneRepoSheet: View {
                 await loadHome()
             }
         }
-        .presentationDetents([.medium])
+        .adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(isCloning)
     }

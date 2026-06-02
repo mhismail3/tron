@@ -41,6 +41,7 @@ struct CompactionDetailSheet: View {
                 }
             }
         }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .presentationDragIndicator(.hidden)
         .tint(.cyan)
     }

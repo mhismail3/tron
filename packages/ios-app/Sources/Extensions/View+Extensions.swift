@@ -111,18 +111,33 @@ struct LargeFormSizing: PresentationSizing {
 }
 
 private enum AdaptiveSheetMetrics {
-    static func balancedLargeFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
-        CGSize(
+    static func balancedLargeFormSize(
+        referenceWidth: CGFloat,
+        referenceHeight: CGFloat,
+        intrinsicSize: CGSize? = nil
+    ) -> CGSize {
+        let maxHeight = min(referenceHeight * 0.88, 900)
+        return CGSize(
             width: min(referenceWidth * 0.46, 540),
-            height: min(referenceHeight * 0.94, 1020)
+            height: clampedHeight(intrinsicSize?.height, minHeight: min(540, maxHeight), maxHeight: maxHeight)
         )
     }
 
-    static func compactFormSize(referenceWidth: CGFloat, referenceHeight: CGFloat) -> CGSize {
-        CGSize(
+    static func compactFormSize(
+        referenceWidth: CGFloat,
+        referenceHeight: CGFloat,
+        intrinsicSize: CGSize? = nil
+    ) -> CGSize {
+        let maxHeight = min(referenceHeight * 0.78, 760)
+        return CGSize(
             width: min(referenceWidth * 0.40, 470),
-            height: min(referenceHeight * 0.92, 960)
+            height: clampedHeight(intrinsicSize?.height, minHeight: min(420, maxHeight), maxHeight: maxHeight)
         )
+    }
+
+    private static func clampedHeight(_ intrinsicHeight: CGFloat?, minHeight: CGFloat, maxHeight: CGFloat) -> CGFloat {
+        guard let intrinsicHeight, intrinsicHeight > 0 else { return maxHeight }
+        return min(max(intrinsicHeight, minHeight), maxHeight)
     }
 }
 
@@ -139,9 +154,10 @@ struct BalancedLargeFormSizing: PresentationSizing {
         let intrinsicSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
         let referenceWidth = screenBounds.width > 0 ? screenBounds.width : intrinsicSize.width
         let referenceHeight = screenBounds.height > 0 ? screenBounds.height : intrinsicSize.height
-        let size = AdaptiveSheetMetrics.balancedLargeFormSize(
+        let size = AdaptivePresentationSizing.largeForm.targetSize(
             referenceWidth: referenceWidth,
-            referenceHeight: referenceHeight
+            referenceHeight: referenceHeight,
+            intrinsicSize: intrinsicSize
         )
 
         return ProposedViewSize(width: size.width, height: size.height)
@@ -161,9 +177,10 @@ struct CompactFormSizing: PresentationSizing {
         let intrinsicSize = root.sizeThatFits(ProposedViewSize(width: nil, height: nil))
         let referenceWidth = screenBounds.width > 0 ? screenBounds.width : intrinsicSize.width
         let referenceHeight = screenBounds.height > 0 ? screenBounds.height : intrinsicSize.height
-        let size = AdaptiveSheetMetrics.compactFormSize(
+        let size = AdaptivePresentationSizing.compactForm.targetSize(
             referenceWidth: referenceWidth,
-            referenceHeight: referenceHeight
+            referenceHeight: referenceHeight,
+            intrinsicSize: intrinsicSize
         )
 
         return ProposedViewSize(width: size.width, height: size.height)
@@ -188,6 +205,34 @@ extension PresentationSizing where Self == CompactFormSizing {
 enum AdaptivePresentationSizing {
     case largeForm
     case compactForm
+
+    func targetSize(referenceWidth: CGFloat, referenceHeight: CGFloat, intrinsicSize: CGSize? = nil) -> CGSize {
+        switch self {
+        case .largeForm:
+            return AdaptiveSheetMetrics.balancedLargeFormSize(
+                referenceWidth: referenceWidth,
+                referenceHeight: referenceHeight,
+                intrinsicSize: intrinsicSize
+            )
+        case .compactForm:
+            return AdaptiveSheetMetrics.compactFormSize(
+                referenceWidth: referenceWidth,
+                referenceHeight: referenceHeight,
+                intrinsicSize: intrinsicSize
+            )
+        }
+    }
+}
+
+enum AdaptivePhonePresentationSizing {
+    case largeForm
+    case unchanged
+}
+
+enum AdaptivePhonePresentationBackground {
+    case automaticLargeDetent
+    case clear
+    case unchanged
 }
 
 extension View {
@@ -199,21 +244,42 @@ extension View {
     /// On iPad, `presentationDetents` is ignored for floating modals.
     func adaptivePresentationDetents(
         _ detents: Set<PresentationDetent> = [.medium, .large],
-        ipadSizing: AdaptivePresentationSizing = .largeForm
+        selection: Binding<PresentationDetent>? = nil,
+        ipadSizing: AdaptivePresentationSizing = .largeForm,
+        phoneSizing: AdaptivePhonePresentationSizing = .largeForm,
+        phoneBackground: AdaptivePhonePresentationBackground = .automaticLargeDetent
     ) -> some View {
-        self.modifier(AdaptivePresentationModifier(detents: detents, ipadSizing: ipadSizing))
+        self.modifier(AdaptivePresentationModifier(
+            detents: detents,
+            selection: selection,
+            ipadSizing: ipadSizing,
+            phoneSizing: phoneSizing,
+            phoneBackground: phoneBackground
+        ))
     }
 }
 
 private struct AdaptivePresentationModifier: ViewModifier {
     let detents: Set<PresentationDetent>
+    let selection: Binding<PresentationDetent>?
     let ipadSizing: AdaptivePresentationSizing
+    let phoneSizing: AdaptivePhonePresentationSizing
+    let phoneBackground: AdaptivePhonePresentationBackground
     @State private var selectedDetent: PresentationDetent
     @Environment(\.colorScheme) private var colorScheme
 
-    init(detents: Set<PresentationDetent>, ipadSizing: AdaptivePresentationSizing) {
+    init(
+        detents: Set<PresentationDetent>,
+        selection: Binding<PresentationDetent>?,
+        ipadSizing: AdaptivePresentationSizing,
+        phoneSizing: AdaptivePhonePresentationSizing,
+        phoneBackground: AdaptivePhonePresentationBackground
+    ) {
         self.detents = detents
+        self.selection = selection
         self.ipadSizing = ipadSizing
+        self.phoneSizing = phoneSizing
+        self.phoneBackground = phoneBackground
         // Initialize to the smallest detent so the selection binding stays in sync.
         // When only [.large] is provided, this ensures the initial state matches
         // what SwiftUI will present, avoiding a stale .medium default.
@@ -225,7 +291,15 @@ private struct AdaptivePresentationModifier: ViewModifier {
     }
 
     private var needsOpaquePhoneBackground: Bool {
-        selectedDetent == .large && colorScheme == .light
+        phoneSelectedDetent == .large && colorScheme == .light
+    }
+
+    private var phoneSelectedDetent: PresentationDetent {
+        selection?.wrappedValue ?? selectedDetent
+    }
+
+    private var phoneSelection: Binding<PresentationDetent> {
+        selection ?? $selectedDetent
     }
 
     private var iPadTargetSize: CGSize {
@@ -235,18 +309,7 @@ private struct AdaptivePresentationModifier: ViewModifier {
         let referenceWidth = screenBounds.width > 0 ? screenBounds.width : 720
         let referenceHeight = screenBounds.height > 0 ? screenBounds.height : 960
 
-        switch ipadSizing {
-        case .largeForm:
-            return AdaptiveSheetMetrics.balancedLargeFormSize(
-                referenceWidth: referenceWidth,
-                referenceHeight: referenceHeight
-            )
-        case .compactForm:
-            return AdaptiveSheetMetrics.compactFormSize(
-                referenceWidth: referenceWidth,
-                referenceHeight: referenceHeight
-            )
-        }
+        return ipadSizing.targetSize(referenceWidth: referenceWidth, referenceHeight: referenceHeight)
     }
 
     @ViewBuilder
@@ -255,7 +318,8 @@ private struct AdaptivePresentationModifier: ViewModifier {
             let targetSize = iPadTargetSize
             let ipadBase = content
                 .presentationContentInteraction(.scrolls)
-                .frame(width: targetSize.width, height: targetSize.height)
+                .frame(width: targetSize.width)
+                .frame(maxHeight: targetSize.height)
             switch ipadSizing {
             case .largeForm:
                 ipadBase
@@ -267,10 +331,30 @@ private struct AdaptivePresentationModifier: ViewModifier {
                     .presentationBackground(.ultraThinMaterial)
             }
         } else {
+            phoneBody(content: content)
+        }
+    }
+
+    @ViewBuilder
+    private func phoneBody(content: Content) -> some View {
+        let detented = content.presentationDetents(detents, selection: phoneSelection)
+        switch phoneSizing {
+        case .largeForm:
+            phoneBackgroundBody(content: detented.presentationSizing(.largeForm))
+        case .unchanged:
+            phoneBackgroundBody(content: detented)
+        }
+    }
+
+    @ViewBuilder
+    private func phoneBackgroundBody<PhoneContent: View>(content: PhoneContent) -> some View {
+        switch phoneBackground {
+        case .automaticLargeDetent:
+            content.presentationBackground(needsOpaquePhoneBackground ? Color.tronBackground : .clear)
+        case .clear:
+            content.presentationBackground(.clear)
+        case .unchanged:
             content
-                .presentationDetents(detents, selection: $selectedDetent)
-                .presentationSizing(.largeForm)
-                .presentationBackground(needsOpaquePhoneBackground ? Color.tronBackground : .clear)
         }
     }
 }

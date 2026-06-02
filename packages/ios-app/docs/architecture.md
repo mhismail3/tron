@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, lightweight source-control diff summary loading, balanced iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -545,10 +545,17 @@ Settings pages live under `Views/Settings/Pages/` and are launched from the
 main `SettingsView` grid. The root sheet supports medium and large detents and
 starts at medium on iPhone. On iPad, adaptive sheets use balanced liquid-glass
 floating forms so the underlying app context remains visible without the sheet
-reading as a full-width panel. Large iPad forms target a narrower/taller
-`0.46w`/`0.94h` shape capped at `540x1020`, while compact iPad forms target
-`0.40w`/`0.92h` capped at `470x960`; the iPhone/non-iPad branch keeps its
-existing detent and background behavior. The iPad branch does not attach phone
+reading as a full-width panel. Detented app sheets route through
+`adaptivePresentationDetents`; source-level tests forbid raw
+`.presentationDetents(...)` in app sources outside that helper. Large iPad forms
+target `0.46w` capped at `540` wide and `0.88h` capped at `900` high with a
+`540` floor, while compact iPad forms target `0.40w` capped at `470` wide and
+`0.78h` capped at `760` high with a `420` floor. Both variants can shrink short
+detail content within their floor/cap so resolved approval, provider-error,
+notification, and user-interaction sheets do not become empty tall columns. The
+iPhone/non-iPad branch keeps its existing detents, selected-detent bindings, and
+background behavior, including raw-detent callers converted to the helper with
+phone sizing/background marked unchanged. The iPad branch does not attach phone
 detents, so forms remain centered floating containers instead of falling back to
 bottom-detent sheets. The iPad branch also prioritizes scrolling sheet content
 so long settings pages remain reachable in landscape.
