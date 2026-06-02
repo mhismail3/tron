@@ -280,6 +280,15 @@ final class EngineConsoleState {
         EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)
     }
 
+    var harnessChangeProjection: EngineConsoleHarnessChangeProjection {
+        EngineConsoleHarnessChangeProjection.make(
+            registry: registry,
+            controlSnapshot: controlSnapshot,
+            audit: audit,
+            programRuns: programRuns
+        )
+    }
+
     var substrateSearchSuggestions: [EngineConsoleSearchSuggestion] {
         EngineConsoleSearchSuggestion.make(
             status: status,

@@ -326,6 +326,7 @@
 		62E86AEACE77BC758DE18051 /* InteractionPolicyEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FDA303C74F309FCC7BD1AC3 /* InteractionPolicyEnvironment.swift */; };
 		635F100955D3A973E63C057A /* UnifiedEventTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8570EA3731FBC504D7AB252 /* UnifiedEventTransformer.swift */; };
 		63E44A124CD9497D7C74B260 /* SessionRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13E8FEDBD3439B810835D5E9 /* SessionRepositoryTests.swift */; };
+		6423AABE032CCA0C6E8D3C7F /* EngineConsoleHarnessChangeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBDA6A85342438C84A265DC0 /* EngineConsoleHarnessChangeView.swift */; };
 		64271F61CFB104365BA5BE18 /* EngineConsoleSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABA97D46FB399437EE5965C3 /* EngineConsoleSection.swift */; };
 		64578473F4E468C657CDCE51 /* SystemEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 876D3BCA467E57145E1062AC /* SystemEvent.swift */; };
 		64D67422193355B8130715F4 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0CDC9922B58D9AB366386EA /* ContentView.swift */; };
@@ -690,6 +691,7 @@
 		D07B171EBAA7F04C7246C6B0 /* InputBarContentAreaChipTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84D2024D9DEF870900164930 /* InputBarContentAreaChipTests.swift */; };
 		D0A2874F726A16D304F3D6B1 /* MessageFinderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67C59A0F3F425162A5CE890C /* MessageFinderTests.swift */; };
 		D1249E3E28B54AA91F083D44 /* ApprovalClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E7989DF80CCF11061394617 /* ApprovalClient.swift */; };
+		D139A85B85D02D1DB4AE6F83 /* EngineConsoleHarnessChangeProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = D35880BDF4FEA918022A4187 /* EngineConsoleHarnessChangeProjection.swift */; };
 		D157FECEFE408E0E25C02C98 /* ServerRestartingPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F58086E60ECF8827D8CDE511 /* ServerRestartingPluginTests.swift */; };
 		D1AE72E1813E730D9B9303F1 /* RepoLockReleasedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE71DDAADDAEDD4E356E6832 /* RepoLockReleasedPlugin.swift */; };
 		D1C6E5920426C15F11767849 /* EngineProtocolTypesAuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74239985866693A2818864B1 /* EngineProtocolTypesAuthTests.swift */; };
@@ -1571,6 +1573,7 @@
 		CB15F90F9F4060BF054E2D5C /* ModelPickerStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelPickerStateTests.swift; sourceTree = "<group>"; };
 		CB4FF5D2037260F6A7093CAD /* PluginSourcesPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginSourcesPage.swift; sourceTree = "<group>"; };
 		CB98000DFDD7BD8FA48B164A /* SubagentResultNotificationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentResultNotificationView.swift; sourceTree = "<group>"; };
+		CBDA6A85342438C84A265DC0 /* EngineConsoleHarnessChangeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineConsoleHarnessChangeView.swift; sourceTree = "<group>"; };
 		CC1C325D5E32EDF3D5B0CED0 /* ContextSettingsPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextSettingsPage.swift; sourceTree = "<group>"; };
 		CC475667BC6878E548D29BB1 /* LoggingContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoggingContext.swift; sourceTree = "<group>"; };
 		CC88990CCE440B6DAAFF0CD8 /* SessionAnalyticsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAnalyticsSection.swift; sourceTree = "<group>"; };
@@ -1595,6 +1598,7 @@
 		D2CB9D7FC4C805863C1FC744 /* SQLiteHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteHelpers.swift; sourceTree = "<group>"; };
 		D2D0308B0EF5BAE9B0E0C8F8 /* PairingPersistor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingPersistor.swift; sourceTree = "<group>"; };
 		D347104732A7594FED880D0D /* EngineProtocolTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineProtocolTypes.swift; sourceTree = "<group>"; };
+		D35880BDF4FEA918022A4187 /* EngineConsoleHarnessChangeProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineConsoleHarnessChangeProjection.swift; sourceTree = "<group>"; };
 		D3A7AAC4DAA5334A8FC4BDB7 /* ConnectionErrorClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionErrorClassifierTests.swift; sourceTree = "<group>"; };
 		D3E656D23A2352751AB4427E /* DisplayStreamState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayStreamState.swift; sourceTree = "<group>"; };
 		D3F508E497D32752BE06E126 /* SetupSteps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupSteps.swift; sourceTree = "<group>"; };
@@ -2163,6 +2167,7 @@
 			isa = PBXGroup;
 			children = (
 				EF91DE2A2872301B877E47E0 /* EngineConsoleComponents.swift */,
+				CBDA6A85342438C84A265DC0 /* EngineConsoleHarnessChangeView.swift */,
 				8BA61C9E59C5F1A55E067D95 /* EngineConsoleModuleProjectionView.swift */,
 				ABA97D46FB399437EE5965C3 /* EngineConsoleSection.swift */,
 				A4F6FCF6894DD031E725B24C /* EngineConsoleView.swift */,
@@ -3342,6 +3347,7 @@
 				EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */,
 				D3E656D23A2352751AB4427E /* DisplayStreamState.swift */,
 				7CE7E1AB7DD81261A07F4E2E /* EngineApprovalState.swift */,
+				D35880BDF4FEA918022A4187 /* EngineConsoleHarnessChangeProjection.swift */,
 				EC0E3474D2632EE49F8D4B16 /* EngineConsoleModuleProjection.swift */,
 				7580919E2D8CAA94FE15D330 /* EngineConsoleState.swift */,
 				6C1651B2823641DFC3DD68AC /* GitTileGating.swift */,
@@ -3996,6 +4002,8 @@
 				3C592D6B6E14E96FBB24FCBD /* EngineConnectionTypes.swift in Sources */,
 				93A7303FC87BD12FEAB792D2 /* EngineConsoleCache.swift in Sources */,
 				60536FA5B426FB8932BE34CA /* EngineConsoleComponents.swift in Sources */,
+				D139A85B85D02D1DB4AE6F83 /* EngineConsoleHarnessChangeProjection.swift in Sources */,
+				6423AABE032CCA0C6E8D3C7F /* EngineConsoleHarnessChangeView.swift in Sources */,
 				AE71497201790CB6E7B9FF98 /* EngineConsoleModuleProjection.swift in Sources */,
 				DD15AE953D22517E176054F2 /* EngineConsoleModuleProjectionView.swift in Sources */,
 				64271F61CFB104365BA5BE18 /* EngineConsoleSection.swift in Sources */,

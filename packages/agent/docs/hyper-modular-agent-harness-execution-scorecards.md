@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **82.5/100**
+Current score: **84.75/100**
 
 Status: **running**
 
@@ -696,8 +696,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D, HMH-E1, HMH-E2, HMH-E3, and HMH-E4 are also closed; continue
-  with HMH-E5 to prove humans can understand agent-created harness changes.
+  proven. HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, and HMH-E5 are also closed;
+  continue with HMH-E6 to capture device visual proof.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -956,8 +956,8 @@ HMH-D8 evidence, 2026-06-02:
 
 Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7/HMH-D8:
 
-- HMH-D, HMH-E1, HMH-E2, HMH-E3, and HMH-E4 are closed. Continue with HMH-E5
-  to prove humans can understand agent-created harness changes.
+- HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, and HMH-E5 are closed. Continue
+  with HMH-E6 to capture iPhone/iPad visual proof.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -971,7 +971,7 @@ Out of scope: client-side target reconstruction or native-only feature forks.
 | HMH-E2 | Generated surface for new capability | 20 | passed_after_fix | Engine creates a `ui_surface` for a session-created function; iOS renders it natively; submit references stored surface/version/action ids only. | Stop if iOS constructs target payloads. |
 | HMH-E3 | Approval and consequence clarity | 15 | passed_after_fix | iOS approval UI shows server risk/effect/authority/idempotency/lease/compensation metadata and resolves only through `approval::resolve`. | Stop if local approval state becomes final truth. |
 | HMH-E4 | Module controls are native projections | 15 | passed_after_fix | iOS can inspect/configure/activate/disable/upgrade/rollback/quarantine module packages through canonical server functions with evidence drill-down. | Stop if module policy appears in Swift. |
-| HMH-E5 | Human can understand agent-created harness changes | 15 | pending | Session-created capability, provenance, tests, generated UI, promotion status, cleanup, and trace are visible in an ergonomic iPhone/iPad flow. | Fix UX before declaring north-star proof. |
+| HMH-E5 | Human can understand agent-created harness changes | 15 | passed_after_fix | Session-created capability, provenance, tests, generated UI, promotion status, cleanup, and trace are visible in an ergonomic iPhone/iPad flow. | Fix UX before declaring north-star proof. |
 | HMH-E6 | Visual proof covers iPhone and iPad | 10 | pending | Browser/Simulator/Computer Use proof includes device, UDID, bundle id, screenshots, action sequence, server rows, and return codes. | No screenshot-only proof without DB/event evidence. |
 | HMH-E7 | Disconnected cache is read-only | 10 | pending | Offline Engine Console cache cannot submit generated actions, approvals, module changes, or policy edits. | Fix before live UI closeout. |
 
@@ -981,6 +981,7 @@ Closeout commands:
 cd packages/ios-app && xcodegen generate
 xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests
 xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleAccessibilityTests
 ```
 
 HMH-E1 evidence, 2026-06-02:
@@ -1120,11 +1121,38 @@ HMH-E4 evidence, 2026-06-02:
 - Passing source-boundary proof:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`.
 
-Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4:
+HMH-E5 evidence, 2026-06-02:
 
-- Continue with HMH-E5: prove session-created capability provenance, tests,
-  generated UI, promotion status, cleanup, and trace are visible in an
-  ergonomic iPhone/iPad flow.
+- The red audit found the listed Next Test only proved generic Engine Console
+  chip accessibility. It did not prove a human could see a session-created
+  capability's provenance, conformance/test result, generated UI surface,
+  promotion scope, cleanup signal, and trace linkage in one operator flow.
+- The fix adds `EngineConsoleHarnessChangeProjection`, a read-only projection
+  over existing server-owned registry implementations, control snapshot
+  `ui_surface` refs and worker rows, redacted audit events, and program-run
+  rows. It selects session-created implementations from session visibility,
+  session trust tier, or provenance session id; it does not introduce new
+  client-owned routing, lifecycle policy, or generated action payload logic.
+- The Substrate section now renders a `Harness Changes` card with named
+  evidence lanes: provenance, tests, generated UI, promotion, cleanup, and
+  trace. Each row has combined accessibility label/value text so VoiceOver can
+  read the whole harness-change story without requiring the user to infer it
+  from scattered registry, audit, program-run, and surface rows.
+- `harnessChangeProjectionExplainsSessionCreatedCapabilityEvidence` seeds a
+  session-generated capability with agent provenance, passed conformance,
+  generated UI target/action refs, session promotion scope, worker-disconnect
+  cleanup audit event, trace id, program run id, and child invocation id. The
+  projection must surface every named evidence lane from server DTOs.
+- `testHarnessChangeEvidenceCardStaysAccessible` guards the card's named
+  evidence lanes and combined accessibility label/value.
+- Passing iOS proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests -only-testing:TronMobileTests/EngineConsoleAccessibilityTests`.
+
+Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5:
+
+- Continue with HMH-E6: capture visual proof for iPhone and iPad with device
+  identifiers, bundle id, launch/open return codes, screenshots, visible
+  Engine Console Harness Changes state, and server-row evidence.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1256,10 +1284,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, HMH-E2, HMH-E3, and HMH-E4 are closed.
-Continue with HMH-E5: prove humans can understand agent-created harness
-changes.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, and HMH-E5 are
+closed. Continue with HMH-E6: capture iPhone/iPad visual proof for the Engine
+Console Harness Changes flow.
 
 ```bash
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleAccessibilityTests
+xcrun simctl list devices available
 ```

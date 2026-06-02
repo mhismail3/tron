@@ -35,6 +35,26 @@ struct EngineConsoleAccessibilityTests {
         #expect(notificationBell.contains(".hoverEffect(.highlight)"))
     }
 
+    @Test("harness change evidence card keeps named evidence lanes accessible")
+    func testHarnessChangeEvidenceCardStaysAccessible() throws {
+        let source = try Self.source("Sources/Views/EngineConsole/EngineConsoleHarnessChangeView.swift")
+
+        for required in [
+            "Harness Changes",
+            "Provenance",
+            "Tests",
+            "Generated UI",
+            "Promotion",
+            "Cleanup",
+            "Trace"
+        ] {
+            #expect(source.contains(required))
+        }
+        #expect(source.contains(".accessibilityElement(children: .combine)"))
+        #expect(source.contains(".accessibilityLabel(change.accessibilityLabel)"))
+        #expect(source.contains(".accessibilityValue(change.accessibilityValue)"))
+    }
+
     private static func source(_ relativePath: String) throws -> String {
         let fileURL = URL(fileURLWithPath: #filePath)
         let iosRoot = fileURL

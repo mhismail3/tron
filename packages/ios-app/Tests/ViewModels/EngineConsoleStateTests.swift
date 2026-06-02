@@ -397,6 +397,161 @@ struct EngineConsoleStateTests {
         }
     }
 
+    @Test("harness change projection explains session-created capability evidence")
+    func harnessChangeProjectionExplainsSessionCreatedCapabilityEvidence() async throws {
+        let client = FakeEngineConsoleCapabilityClient()
+        client.registrySnapshotDTO = CapabilityRegistrySnapshotDTO(
+            plugins: [],
+            implementations: [
+                CapabilityImplementationDTO(
+                    implementationId: "impl.session.summary",
+                    contractId: "session_summary::summarize",
+                    pluginId: "plugin.session.summary",
+                    workerId: "worker-session-summary",
+                    functionId: "session_summary::summarize",
+                    version: 1,
+                    health: "healthy",
+                    visibility: "session",
+                    latencyClass: nil,
+                    costClass: nil,
+                    trustTier: "session_generated",
+                    authorityRequirements: nil,
+                    runtimeRequirements: nil,
+                    schemaDigest: "sha256:summary",
+                    catalogRevision: 41,
+                    provenance: AnyCodable([
+                        "sessionId": "session-harness",
+                        "createdBy": "agent"
+                    ]),
+                    conformanceState: "passed",
+                    signatureStatus: "engine_issued",
+                    updatedAt: nil
+                )
+            ],
+            bindings: [],
+            documents: [],
+            programRuns: []
+        )
+        client.controlSnapshot = ControlSnapshotDTO(
+            catalogRevision: 41,
+            workers: [
+                AnyCodable([
+                    "workerId": "worker-session-summary",
+                    "health": "healthy",
+                    "lifecycle": "active"
+                ])
+            ],
+            capabilities: [],
+            resourceTypes: [],
+            activeGoals: [],
+            invocations: [],
+            grants: [],
+            queues: [],
+            leases: [],
+            approvals: [],
+            storage: nil,
+            integrityWarnings: [],
+            availableActions: [],
+            uiSurfaceRefs: [
+                UiSurfaceRefDTO(
+                    resourceId: "ui-surface:session-summary",
+                    versionId: "ui-surface-version:session-summary",
+                    kind: "ui_surface",
+                    lifecycle: "active",
+                    surfaceId: "surface-session-summary",
+                    title: "Session Summary Surface",
+                    purpose: "Inspect session_summary::summarize",
+                    catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+                    expiresAt: nil,
+                    targets: [
+                        UiBindingDTO(
+                            targetType: "capability",
+                            targetId: "session_summary::summarize",
+                            role: "primary",
+                            label: "Session summary"
+                        )
+                    ],
+                    actions: [
+                        UiActionSummaryDTO(
+                            actionId: "invoke-capability",
+                            label: "Invoke",
+                            targetFunctionId: "session_summary::summarize",
+                            requiredGrant: nil,
+                            requiredRisk: "low",
+                            targetRevision: 1,
+                            expiresAt: nil
+                        )
+                    ]
+                )
+            ]
+        )
+        client.auditResult = CapabilityAuditQueryResultDTO(
+            events: [
+                CapabilityAuditEventDTO(
+                    id: "audit-cleanup",
+                    eventType: "worker.disconnected",
+                    traceId: "trace-session-summary",
+                    payload: nil,
+                    payloadSummary: AnyCodable(["workerId": "worker-session-summary"]),
+                    createdAt: nil,
+                    redacted: true
+                )
+            ],
+            redacted: true
+        )
+        client.programRunResult = CapabilityProgramRunQueryResultDTO(
+            programRuns: [
+                CapabilityProgramRunDTO(
+                    programRunId: "program-run-session-summary",
+                    parentInvocationId: "parent-session-summary",
+                    rootInvocationId: "root-session-summary",
+                    bindingDecisionId: nil,
+                    status: "ok",
+                    traceId: "trace-session-summary",
+                    codeHash: "sha256:program",
+                    argsHash: "sha256:args",
+                    limits: nil,
+                    allowedContracts: nil,
+                    allowedImplementations: nil,
+                    childInvocations: ["child-session-summary"],
+                    selectedImplementations: nil,
+                    approvalState: nil,
+                    artifacts: nil,
+                    logs: nil,
+                    error: nil,
+                    compensationAttempts: nil,
+                    payloadSummary: AnyCodable([
+                        "operation": [
+                            "functionId": "session_summary::summarize",
+                            "implementationId": "impl.session.summary"
+                        ]
+                    ]),
+                    createdAt: nil,
+                    updatedAt: nil,
+                    redacted: true
+                )
+            ],
+            redacted: true
+        )
+        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+
+        await state.refresh()
+
+        let projection = state.harnessChangeProjection
+        let change = try #require(projection.changes.first)
+        #expect(change.functionId == "session_summary::summarize")
+        #expect(change.provenanceText == "session session-harness")
+        #expect(change.testText == "passed")
+        #expect(change.generatedSurfaceIds == ["surface-session-summary"])
+        #expect(change.promotionText == "session")
+        #expect(change.cleanupText == "worker.disconnected")
+        #expect(change.traceIds == ["trace-session-summary"])
+        #expect(change.programRunIds == ["program-run-session-summary"])
+        #expect(change.childInvocationIds == ["child-session-summary"])
+        #expect(change.evidenceValues.contains("Generated UI surface-session-summary"))
+        #expect(change.evidenceValues.contains("Trace trace-session-summary"))
+    }
+
     @Test("module operator projection keeps server actions and evidence")
     func moduleOperatorProjectionKeepsServerActionsAndEvidence() async throws {
         let client = FakeEngineConsoleCapabilityClient()

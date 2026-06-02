@@ -568,6 +568,14 @@ struct SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleState.swift"),
             encoding: .utf8
         )
+        let harnessChangeProjection = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleHarnessChangeProjection.swift"),
+            encoding: .utf8
+        )
+        let harnessChangeView = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleHarnessChangeView.swift"),
+            encoding: .utf8
+        )
         let moduleProjection = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleModuleProjection.swift"),
             encoding: .utf8
@@ -592,6 +600,15 @@ struct SourceGuardTests {
         #expect(engineConsoleState.contains("programRuns?.programRuns"))
         #expect(engineConsoleState.contains(#""capabilities.primer""#))
         #expect(engineConsoleState.contains(#""conformance \(implementation.implementationId)""#))
+        #expect(engineConsole.contains("EngineConsoleHarnessChangeCard(projection: state.harnessChangeProjection)"))
+        #expect(engineConsoleState.contains("EngineConsoleHarnessChangeProjection.make("))
+        #expect(harnessChangeProjection.contains("registry?.implementations"))
+        #expect(harnessChangeProjection.contains("controlSnapshot?.uiSurfaceRefs"))
+        #expect(harnessChangeProjection.contains("audit?.events"))
+        #expect(harnessChangeProjection.contains("programRuns?.programRuns"))
+        #expect(harnessChangeProjection.contains(#"implementation.visibility == "session""#))
+        #expect(harnessChangeView.contains(#"title: "Harness Changes""#))
+        #expect(harnessChangeView.contains(".accessibilityValue(change.accessibilityValue)"))
         #expect(!engineConsoleComponents.contains("private let suggestions"))
         for fixedCatalogSuggestion in [
             "Read files",

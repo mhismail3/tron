@@ -182,6 +182,8 @@ struct EngineConsoleView: View {
                 )
             }
 
+            EngineConsoleHarnessChangeCard(projection: state.harnessChangeProjection)
+
             EngineConsoleCard {
                 EngineConsoleCardHeader(
                     symbol: "target",
