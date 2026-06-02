@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **51/100**
+Current score: **53.25/100**
 
 Status: **running**
 
@@ -695,8 +695,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D1, HMH-D2, and HMH-D3 are also closed; continue with HMH-D4
-  to prove health, integrity, and conformance evidence.
+  proven. HMH-D1 through HMH-D4 are also closed; continue with HMH-D5 to
+  prove upgrade, rollback, disable, and quarantine behavior.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -709,7 +709,7 @@ Out of scope: remote marketplace trust without explicit local policy.
 | HMH-D1 | Package registration is resource-backed | 10 | passed | `module::register_package` writes worker-package resources with declared capabilities, expected ids, digest, provenance, runtime entry point, and no raw secrets. | Stop if package truth lands in an unowned side table. |
 | HMH-D2 | Source trust is explicit and revocable | 15 | passed | Register/verify/approve/revoke/expire/rotate/reconcile trust flows create decision/evidence resources and enforce trust ceilings before activation. | Stop if activation can bypass source trust. |
 | HMH-D3 | Activation composes worker spawn | 15 | passed | `module::activate` invokes child `worker::spawn` outside host locks with narrowed grant, file roots, expected ids, scoped token, and activation lineage. | Stop if module runtime owns a parallel process launcher. |
-| HMH-D4 | Health, integrity, and conformance are inspectable | 15 | pending | `check_health`, `verify_integrity`, and `run_conformance` produce linked evidence, child invocation ids, and recovery recommendations. | Block promotion if evidence is missing/stale. |
+| HMH-D4 | Health, integrity, and conformance are inspectable | 15 | passed | `check_health`, `verify_integrity`, and `run_conformance` produce linked evidence, child invocation ids, and recovery recommendations. | Block promotion if evidence is missing/stale. |
 | HMH-D5 | Upgrade, rollback, disable, quarantine work | 15 | pending | Upgrade and rollback require expected versions and idempotency; disable/quarantine stop workers or fail closed; stale invocations cannot use quarantined functions. | Stop if rollback is doc-only. |
 | HMH-D6 | Local marketplace shape exists | 10 | pending | Installing a first-party/local package is a capability operation over local package resources; remote source approval is explicit and policy-bound. | Reject implicit network trust. |
 | HMH-D7 | iOS/operator projection is complete | 10 | pending | Engine Console shows package/config/activation/trust/conformance actions and evidence without hardcoded package policy. | Fix iOS projection only after server truth is proven. |
@@ -800,11 +800,35 @@ HMH-D3 evidence, 2026-06-02:
 - Passing integration proof:
   `cargo test --manifest-path packages/agent/Cargo.toml --test integration e2e_local_process_module_activation_health_and_disable_use_real_worker_spawn -- --nocapture`.
 
-Open loops after HMH-D1/HMH-D2/HMH-D3:
+HMH-D4 evidence, 2026-06-02:
 
-- HMH-D remains open. Continue with HMH-D4 to prove `module::check_health`,
-  `module::verify_integrity`, and `module::run_conformance` produce linked
-  evidence, child invocation ids, and recovery recommendations.
+- Production ownership is in
+  `packages/agent/src/engine/primitives/module/health_integrity.rs`, which owns
+  `module::check_health`, `module::verify_integrity`,
+  `module::run_conformance`, health scheduling, and activation recovery.
+- The strengthened health proof asserts an `invoke_function` health policy
+  records the child invocation id in `healthResult`, the activation payload,
+  and the linked evidence resource payload.
+- The new
+  `module_run_conformance_links_evidence_and_updates_package_policy` proof
+  runs `module::run_conformance` in activation mode with a child grant
+  simulation request, inspects the linked evidence resource, and verifies the
+  updated `worker_package` payload records `conformanceEvidenceRefs` and
+  `policyDiagnostics.conformance.evidenceRef`.
+- The existing integrity and recovery tests prove `module::verify_integrity`
+  writes evidence, rejects stale activation versions, updates activation
+  diagnostics, and that `module::recover_activation` records cleanup evidence,
+  quarantines unsafe activations, surfaces manual recovery when spawned-worker
+  stop fails, and exposes `module::recover_activation` as the recommended
+  canonical action through package diagnostics.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml module_activation::health_integrity -- --nocapture`.
+
+Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4:
+
+- HMH-D remains open. Continue with HMH-D5 to prove upgrade, rollback, disable,
+  and quarantine require expected versions/idempotency, stop or revoke workers,
+  and fail closed for stale or quarantined invocations.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -960,10 +984,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D1, HMH-D2, and HMH-D3 are closed. Continue with
-HMH-D4: prove health, integrity, and conformance operations produce linked
-evidence, child invocation ids, and recovery recommendations.
+HMH-A, HMH-B, HMH-C, and HMH-D1 through HMH-D4 are closed. Continue with
+HMH-D5: prove upgrade, rollback, disable, and quarantine behavior.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml module_activation::health_integrity -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml module_configure_and_activate_enforce_secret_and_grant_boundaries -- --nocapture
 ```

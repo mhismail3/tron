@@ -175,27 +175,55 @@ async fn module_check_health_invoke_function_records_child_lineage() {
         ))
         .await;
     assert_eq!(checked.error, None);
-    let child_ids =
-        checked.value.as_ref().unwrap()["healthResult"]["diagnostics"]["childInvocationIds"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+    let value = checked.value.as_ref().unwrap();
+    let child_ids = value["healthResult"]["childInvocationIds"]
+        .as_array()
+        .expect("health result records child invocation ids");
+    assert_eq!(child_ids.len(), 1);
+    let child_id = child_ids[0].as_str().unwrap();
     assert!(
-        checked.value.as_ref().unwrap()["activation"]["payload"]["healthInvocationIds"]
+        value["activation"]["payload"]["healthInvocationIds"]
             .as_array()
             .unwrap()
-            .len()
-            >= 2
+            .iter()
+            .any(|id| id == checked.invocation_id.as_str())
     );
     assert_eq!(
-        checked.value.as_ref().unwrap()["healthResult"]["status"],
-        "healthy"
+        value["activation"]["payload"]["healthInvocationIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == child_id),
+        true
+    );
+    assert_eq!(value["healthResult"]["status"], "healthy");
+    assert_eq!(
+        value["healthResult"]["diagnostics"]["functionId"],
+        "invoke_health::health"
+    );
+    let evidence_id = value["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "evidence")
+        .unwrap()["resourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let evidence = inspect_resource(&handle, &evidence_id).await;
+    let evidence_payload = &evidence["versions"].as_array().unwrap().last().unwrap()["payload"];
+    assert_eq!(evidence_payload["metadata"]["status"], "healthy");
+    assert_eq!(
+        evidence_payload["metadata"]["childInvocationIds"][0],
+        child_id
     );
     assert!(
-        checked.value.as_ref().unwrap()["healthResult"]["diagnostics"]
-            .to_string()
-            .contains("invoke_health::health")
-            || !child_ids.is_empty()
+        evidence["outgoingLinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["relation"] == "evidence_for"
+                && link["targetResourceId"] == "activation:workspace-a:invoke-health-tools")
     );
 }
 
@@ -269,6 +297,145 @@ async fn module_verify_integrity_records_evidence_and_rejects_stale_activation_v
         ))
         .await;
     assert_eq!(reverified.error, None);
+}
+
+#[tokio::test]
+async fn module_run_conformance_links_evidence_and_updates_package_policy() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let executable = materialized_executable_ref(
+        &handle,
+        &tmp.path().join("conformance-policy-worker.sh"),
+        "module-conformance-policy-executable",
+    )
+    .await;
+    let manifest = manifest_with_digest(local_process_manifest(
+        "conformance-policy-tools",
+        "conformance_policy",
+        "conformance-policy-worker",
+        executable,
+    ));
+    let registered =
+        register_package(&handle, manifest, "module-conformance-policy-register").await;
+    assert_eq!(registered.error, None);
+    let package_resource_id = "worker-package:conformance-policy-tools";
+    let package_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let verified = verify_source(
+        &handle,
+        package_resource_id,
+        &package_version_id,
+        "module-conformance-policy-verify",
+    )
+    .await;
+    assert_eq!(verified.error, None);
+    let verified_package_version_id = verified.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let conformance = handle
+        .invoke(host_invocation(
+            "module::run_conformance",
+            json!({
+                "targetType": "worker_package",
+                "resourceId": package_resource_id,
+                "resourceVersionId": verified_package_version_id,
+                "expectedCurrentVersionId": verified_package_version_id,
+                "mode": "activation",
+                "childGrantRequest": {
+                    "allowedCapabilities": [
+                        "conformance_policy::inspect",
+                        "conformance_policy::write_artifact"
+                    ],
+                    "allowedNamespaces": ["conformance_policy"],
+                    "allowedAuthorityScopes": [
+                        "conformance_policy.read",
+                        "conformance_policy.write"
+                    ],
+                    "allowedResourceKinds": ["artifact"],
+                    "resourceSelectors": ["*"],
+                    "fileRoots": ["*"],
+                    "networkPolicy": "none",
+                    "maxRisk": "medium"
+                }
+            }),
+            mutating_causal("module-conformance-policy-run").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(conformance.error, None);
+    let value = conformance.value.as_ref().unwrap();
+    assert_eq!(value["conformance"]["status"], "valid");
+    assert_eq!(
+        value["conformance"]["findings"].as_array().unwrap().len(),
+        0
+    );
+    let evidence_ref = value["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "evidence")
+        .unwrap()
+        .clone();
+    let package_ref = value["resourceRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|reference| reference["kind"] == "worker_package")
+        .unwrap()
+        .clone();
+    assert_eq!(package_ref["role"], "conformance_checked");
+
+    let evidence = inspect_resource(&handle, evidence_ref["resourceId"].as_str().unwrap()).await;
+    let evidence_payload = &evidence["versions"].as_array().unwrap().last().unwrap()["payload"];
+    assert_eq!(evidence_payload["metadata"]["targetType"], "worker_package");
+    assert_eq!(evidence_payload["metadata"]["mode"], "activation");
+    assert_eq!(evidence_payload["metadata"]["status"], "valid");
+    assert_eq!(
+        evidence_payload["metadata"]["findings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    assert!(
+        evidence["outgoingLinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|link| link["relation"] == "evidence_for"
+                && link["targetResourceId"] == package_resource_id)
+    );
+
+    let package = inspect_resource(&handle, package_resource_id).await;
+    let package_payload = &package["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|version| version["versionId"] == package_ref["versionId"])
+        .unwrap()["payload"];
+    assert!(
+        package_payload["conformanceEvidenceRefs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reference| reference["resourceId"] == evidence_ref["resourceId"])
+    );
+    assert_eq!(
+        package_payload["policyDiagnostics"]["conformance"]["evidenceRef"]["resourceId"],
+        evidence_ref["resourceId"]
+    );
+    assert_eq!(
+        package_payload["policyDiagnostics"]["conformance"]["status"],
+        "valid"
+    );
 }
 
 #[tokio::test]
