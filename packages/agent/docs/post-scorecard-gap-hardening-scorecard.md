@@ -463,6 +463,21 @@ Owner taxonomy: `server_contract`, `client_projection`,
   multiline input inserted a tab character into the draft instead of advancing
   focus. The draft was cleared, no message was sent, and this remains partial
   IPD-9 evidence pending full hardware-keyboard traversal and pointer QA.
+- IPD-9 landscape sheet/appearance proof then verified the retuned iPad sheet
+  containers in dark landscape, Settings/Server/Agent at
+  `accessibility-extra-extra-extra-large`, and temporary Light mode through the
+  app's own Color Mode setting before restoring Dark plus Simulator
+  `content_size large`/`appearance dark`. Screenshots:
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-sidebar-baseline.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-settings-sheet.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-settings-sheet-accessibility-xxxl.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-server-accessibility-xxxl.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-agent-accessibility-xxxl.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-light-app-settings-accessibility-xxxl.png`,
+  and `/tmp/tron-psg-evidence/ipd9-agent-tab-focus-add-branch.png`. Providers
+  was visually inspected but not captured because the live view includes
+  credential labels/snippets. IPD-9 remains open because pointer QA and full
+  keyboard traversal are not complete.
 
 ## Verification Plan
 

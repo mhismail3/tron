@@ -573,6 +573,26 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   the draft was cleared and no message was sent. This is recorded as partial
   keyboard evidence only, because changing multiline prompt editing semantics
   needs a separate product decision.
+- Additional IPD-9 landscape sheet/appearance pass used the same iPad Pro
+  13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle
+  `com.tron.mobile.beta`, with dev takeover still healthy on PID `79934`.
+  Evidence screenshots:
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-sidebar-baseline.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-settings-sheet.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-settings-sheet-accessibility-xxxl.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-server-accessibility-xxxl.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-dark-agent-accessibility-xxxl.png`,
+  `/tmp/tron-psg-evidence/ipd9-landscape-light-app-settings-accessibility-xxxl.png`,
+  and `/tmp/tron-psg-evidence/ipd9-agent-tab-focus-add-branch.png`. The pass
+  verified the retuned iPad sheet containers in landscape, Settings/Server/Agent
+  with `accessibility-extra-extra-extra-large`, and temporary Light mode via the
+  app's own Color Mode setting before restoring Dark plus Simulator
+  `content_size large`/`appearance dark`. Providers was visually inspected in
+  landscape but not captured because the live view includes credential
+  labels/snippets. Hardware keyboard traversal remains partial: Tab focused the
+  Agent protected-branch text field, but a second Tab did not visibly advance
+  out of that field. IPD-9 stays running pending pointer QA and a broader
+  keyboard traversal decision/fix.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation and any remaining sidebar preload/relaunch assertions, IPD-2
