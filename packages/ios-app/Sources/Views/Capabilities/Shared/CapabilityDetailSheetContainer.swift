@@ -65,7 +65,7 @@ struct CapabilityDetailSheetContainer<Content: View, LeadingToolbar: View>: View
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .presentationDragIndicator(.hidden)
         .tint(accent)
     }

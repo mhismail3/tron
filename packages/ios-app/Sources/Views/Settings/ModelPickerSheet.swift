@@ -113,7 +113,7 @@ struct ModelPickerSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .presentationDragIndicator(.hidden)
         .onDisappear {
             commitSelection()

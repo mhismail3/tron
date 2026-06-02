@@ -43,7 +43,7 @@ struct SkillDetailSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .presentationDragIndicator(.hidden)
         .tint(accentColor)
         .task {

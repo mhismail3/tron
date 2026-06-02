@@ -907,7 +907,16 @@ UDID before continuing.
   Engine Console proof without invoking submit/refresh; IPD-9 input focus,
   prompt Tab no-draft behavior, and Agent
   protected-branch Tab no-submit behavior have live proof, with pointer and
-  broader keyboard traversal still open.
+  broader keyboard traversal still open. The canonical iPad sheet
+  standardization guard now also requires every adaptive sheet call site in app
+  sources to declare its `ipadSizing` preset explicitly; it first failed on 25
+  implicit-preset offenders in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-18-19--0700.xcresult`,
+  then passed 8 focused sheet XCTest cases across `IPadSheetPresentationTests`
+  and `NotificationSheetPresentationTests` after explicit
+  `ipadSizing: .largeForm` classification was added without changing compact or
+  phone-preserving call sites:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-20-41--0700.xcresult`.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

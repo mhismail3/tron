@@ -75,7 +75,7 @@ struct PromptLibraryManagementSurfaceSheet: View {
             .tronErrorAlert(message: $errorMessage)
             .withToastBanner()
         }
-        .adaptivePresentationDetents([.large])
+        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .task { await load(selectedTab) }

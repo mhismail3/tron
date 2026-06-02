@@ -120,7 +120,7 @@ struct OAuthLoginSheet: View {
                 }
             }
         }
-        .adaptivePresentationDetents([.large])
+        .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
         .presentationDragIndicator(.hidden)
     }
 

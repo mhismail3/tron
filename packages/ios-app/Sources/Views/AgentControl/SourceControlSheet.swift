@@ -193,7 +193,7 @@ struct SourceControlSheet: View {
                 Task { await reloadDataAndNotifyParent() }
             }
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .presentationDragIndicator(.hidden)
         .tint(.tronTeal)
         .sheet(item: $selectedFileDetail) { fileData in
@@ -211,7 +211,7 @@ struct SourceControlSheet: View {
                 }
             )
             .presentationDragIndicator(.hidden)
-            .adaptivePresentationDetents([.medium, .large])
+            .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         }
         .sheet(item: $activeGitAction, onDismiss: {
             Task { await reloadDataAndNotifyParent() }

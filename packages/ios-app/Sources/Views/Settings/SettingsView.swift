@@ -88,7 +88,7 @@ struct SettingsView: View {
 
     private var settingsView: some View {
         settingsWithAlerts
-            .adaptivePresentationDetents([.medium, .large])
+            .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
             .presentationDragIndicator(.hidden)
             .tint(.tronEmerald)
     }
@@ -113,12 +113,12 @@ struct SettingsView: View {
         settingsBaseView
             .sheet(isPresented: $showLogViewer) {
                 LogViewer()
-                    .adaptivePresentationDetents([.large])
+                    .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
                     .presentationDragIndicator(.hidden)
             }
             .sheet(item: $activePage) { page in
                 settingsPageSheet(for: page)
-                    .adaptivePresentationDetents([.medium, .large])
+                    .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
                     .presentationDragIndicator(.hidden)
             }
             .sheet(item: $feedbackMailDraft) { draft in

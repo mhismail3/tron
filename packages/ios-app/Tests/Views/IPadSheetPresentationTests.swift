@@ -101,6 +101,26 @@ final class IPadSheetPresentationTests: XCTestCase {
         }
     }
 
+    func testEveryAdaptivePresentationCallSiteDeclaresIPadSizingPreset() throws {
+        let sourceRoot = try projectRoot()
+            .appendingPathComponent("Sources")
+        let files = try swiftFiles(under: sourceRoot)
+        let offenders = try files.flatMap { file -> [String] in
+            guard file.lastPathComponent != "View+Extensions.swift" else { return [] }
+            let content = try String(contentsOf: file, encoding: .utf8)
+            return adaptivePresentationCalls(in: content).compactMap { call in
+                call.text.contains("ipadSizing:")
+                    ? nil
+                    : "\(relativePath(file, under: sourceRoot)):\(call.line)"
+            }
+        }
+
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Every adaptive iPad sheet should declare its size preset explicitly: \(offenders.joined(separator: ", "))"
+        )
+    }
+
     func testNoRawPresentationDetentsOutsideAdaptiveHelper() throws {
         let sourceRoot = try projectRoot()
             .appendingPathComponent("Sources")
@@ -128,6 +148,37 @@ final class IPadSheetPresentationTests: XCTestCase {
         return enumerator?
             .compactMap { $0 as? URL }
             .filter { $0.pathExtension == "swift" } ?? []
+    }
+
+    private func adaptivePresentationCalls(in content: String) -> [(line: Int, text: String)] {
+        var calls: [(line: Int, text: String)] = []
+        var searchRange = content.startIndex..<content.endIndex
+        while let callStart = content.range(of: ".adaptivePresentationDetents(", range: searchRange) {
+            var depth = 0
+            var cursor = callStart.lowerBound
+            var callEnd = callStart.upperBound
+            while cursor < content.endIndex {
+                let character = content[cursor]
+                if character == "(" {
+                    depth += 1
+                } else if character == ")" {
+                    depth -= 1
+                    if depth == 0 {
+                        callEnd = content.index(after: cursor)
+                        break
+                    }
+                }
+                cursor = content.index(after: cursor)
+            }
+            let line = content[..<callStart.lowerBound].filter { $0 == "\n" }.count + 1
+            calls.append((line: line, text: String(content[callStart.lowerBound..<callEnd])))
+            searchRange = callEnd..<content.endIndex
+        }
+        return calls
+    }
+
+    private func relativePath(_ file: URL, under root: URL) -> String {
+        file.path.replacingOccurrences(of: root.path + "/", with: "")
     }
 
     private func source(pathComponents: [String]) throws -> String {

@@ -873,6 +873,21 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd-sheet-standardized-notification-landscape-normalized.png`.
   The proof did not invoke approval/deny, commit, push, pull, rebase, merge,
   fork, archive, reset, send, or other action-time-confirmed controls.
+- Additional canonical iPad sheet classification follow-up tightened the
+  source guard so every `adaptivePresentationDetents` call site in app sources
+  must declare its iPad size preset explicitly instead of inheriting the helper
+  default. The new TDD guard in
+  `packages/ios-app/Tests/Views/IPadSheetPresentationTests.swift` first failed
+  with 25 implicit-preset offenders in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-18-19--0700.xcresult`.
+  The fix preserved the existing large-form behavior by making those call
+  sites explicitly pass `ipadSizing: .largeForm`, while previously compact and
+  phone-preserving call sites remained unchanged. The focused iPad sheet run
+  then passed 8 XCTest cases across `IPadSheetPresentationTests` and
+  `NotificationSheetPresentationTests` in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-20-41--0700.xcresult`.
+  No action-time-confirmed UI control was invoked by this source-level
+  guardrail checkpoint.
 - Additional IPD-9 Agent protected-branch keyboard follow-up fixed the remaining
   Agent settings Tab subcase documented in the previous landscape pass. The
   protected-branch add field now has focus state and an iPad-only

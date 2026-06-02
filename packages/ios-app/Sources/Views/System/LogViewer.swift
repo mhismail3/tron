@@ -48,7 +48,7 @@ struct LogViewer: View {
             .sensoryFeedback(.success, trigger: copySuccess)
             .onAppear { refreshLogs() }
         }
-        .adaptivePresentationDetents([.medium, .large])
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
     }

@@ -106,7 +106,7 @@ struct PluginSourcesPage: View {
             AddPluginSourceSheet(onAdd: { params in
                 await addServer(params)
             })
-            .adaptivePresentationDetents([.medium])
+            .adaptivePresentationDetents([.medium], ipadSizing: .largeForm)
             .presentationDragIndicator(.hidden)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mcpStatusChanged)) { _ in
