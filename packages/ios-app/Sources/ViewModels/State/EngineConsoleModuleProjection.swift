@@ -37,13 +37,13 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
         guard let snapshot else { return .empty }
         return EngineConsoleModuleOperatorProjection(
             packages: (snapshot.modulePackages ?? []).compactMap {
-                EngineConsoleModuleResourceSummary($0, fallbackKind: "worker_package")
+                EngineConsoleModuleResourceSummary($0, defaultKind: "worker_package")
             },
             configs: (snapshot.moduleConfigs ?? []).compactMap {
-                EngineConsoleModuleResourceSummary($0, fallbackKind: "module_config")
+                EngineConsoleModuleResourceSummary($0, defaultKind: "module_config")
             },
             activations: (snapshot.activationRecords ?? []).compactMap {
-                EngineConsoleModuleResourceSummary($0, fallbackKind: "activation_record")
+                EngineConsoleModuleResourceSummary($0, defaultKind: "activation_record")
             },
             health: (snapshot.moduleHealth ?? []).compactMap(EngineConsoleModuleHealthSummary.init),
             sourceTrust: (snapshot.moduleSourceTrust ?? []).compactMap(EngineConsoleModuleSourceTrustSummary.init),
@@ -63,7 +63,7 @@ struct EngineConsoleModuleResourceSummary: Equatable, Identifiable {
 
     var id: String { resourceId }
 
-    init?(_ value: AnyCodable, fallbackKind: String) {
+    init?(_ value: AnyCodable, defaultKind: String) {
         guard let dictionary = value.dictionaryValue else { return nil }
         guard let resourceId = moduleString(dictionary, keys: ["resourceId", "resource_id", "id"]) else {
             return nil
@@ -73,7 +73,7 @@ struct EngineConsoleModuleResourceSummary: Equatable, Identifiable {
             dictionary,
             keys: ["currentVersionId", "current_version_id", "versionId", "version_id"]
         )
-        self.kind = moduleString(dictionary, keys: ["kind", "resourceKind"]) ?? fallbackKind
+        self.kind = moduleString(dictionary, keys: ["kind", "resourceKind"]) ?? defaultKind
         self.lifecycle = moduleString(dictionary, keys: ["lifecycle", "state", "status"])
         self.scope = moduleString(dictionary, keys: ["scope", "scopeId", "workspaceId", "sessionId"])
     }

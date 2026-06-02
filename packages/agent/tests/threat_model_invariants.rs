@@ -3435,7 +3435,7 @@ fn capability_registry_ownership_stays_split() {
         "pub(crate) struct CapabilityContextPrimerPolicy",
         "impl CapabilityRegistrySnapshot",
         "pub(crate) fn render_capability_primer(",
-        "rendered_entries > 0",
+        "let total_entries = entries.len();",
         "CORE_CONTEXT_CAPABILITIES",
     ] {
         assert!(
@@ -5010,7 +5010,7 @@ fn module_package_activation_gates_stay_on() {
             && module.contains("mod activation_lifecycle;")
             && module_activation_lifecycle.contains("pub(super) async fn activate(")
             && module_activation_lifecycle.contains("async fn activate_inner(")
-            && module_activation_lifecycle.contains("fn upgrade_source(")
+            && module_activation_lifecycle.contains("fn replacement_source(")
             && module.contains("mod evidence;")
             && module_evidence.contains("pub(super) struct EvidenceCreation")
             && module_evidence.contains("pub(super) fn create_evidence_resource(")
@@ -5277,6 +5277,17 @@ fn module_package_activation_gates_stay_on() {
     for forbidden in [
         "module::act\"",
         "module::run_action",
+        "module::package_action",
+        "module::mutate_package",
+        "module::dispatch_action",
+        "module::dispatch_package",
+        "module::generic_action",
+        "module::generic_package",
+        "package_action_multiplexer",
+        "module_action_multiplexer",
+        "generic_package_mutation",
+        "dispatch_package_action",
+        "mutate_package_action",
         "control::act",
         "sandbox::spawn_worker",
         "authorityCeiling",
@@ -5410,6 +5421,20 @@ fn module_package_activation_gates_stay_on() {
             && !control_tree.contains("module::act\""),
         "control projections must expose module resources/actions without a mutation multiplexer"
     );
+    for forbidden in [
+        "module::package_action",
+        "module::mutate_package",
+        "module::dispatch_package",
+        "module::generic_action",
+        "module_action_multiplexer",
+        "package_action_multiplexer",
+        "generic_package_mutation",
+    ] {
+        assert!(
+            !control_tree.contains(forbidden),
+            "control projections must not reintroduce generic module/package action escape hatch `{forbidden}`"
+        );
+    }
 
     let resources = [
         crate_root.join("src/engine/resources/types.rs"),
@@ -5510,6 +5535,21 @@ fn module_package_activation_gates_stay_on() {
             && ui_tree.contains("module::run_conformance"),
         "generated UI authoring must support module package targets through canonical actions"
     );
+    for forbidden in [
+        "module::act\"",
+        "module::package_action",
+        "module::mutate_package",
+        "module::dispatch_package",
+        "module::generic_action",
+        "module_action_multiplexer",
+        "package_action_multiplexer",
+        "generic_package_mutation",
+    ] {
+        assert!(
+            !ui_tree.contains(forbidden),
+            "generated UI authoring must not reintroduce generic module/package action escape hatch `{forbidden}`"
+        );
+    }
     assert!(
         ui.contains("trust_review_operation_input_schema")
             && ui.contains("TRUST_REVIEW_OPERATIONS")
@@ -5547,6 +5587,30 @@ fn module_package_activation_gates_stay_on() {
             && !capability_client.contains("targetFunctionId ="),
         "iOS must not construct module/control action targets locally"
     );
+    let ios_sources_root = repo_root.join("packages").join("ios-app").join("Sources");
+    for path in files_with_extensions(&ios_sources_root, &["swift"]) {
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        for forbidden in [
+            "module::act",
+            "module::package_action",
+            "module::mutate_package",
+            "module::configure",
+            "module::activate",
+            "module::approve_source",
+            "module::run_conformance",
+            "modulePolicy",
+            "packagePolicy",
+            "ModulePolicy",
+            "PackagePolicy",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "iOS production source must not own module action or policy target `{forbidden}`: {}",
+                path.display()
+            );
+        }
+    }
 }
 
 #[test]

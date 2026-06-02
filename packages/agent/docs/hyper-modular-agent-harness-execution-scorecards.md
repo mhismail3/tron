@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **58.5/100**
+Current score: **60/100**
 
 Status: **running**
 
@@ -199,7 +199,7 @@ Planes to delete or prevent:
 | HMH-A | Source, baseline, and primitive audit | 10 | passed | docs_or_scorecard | Attachment synthesis, official iii source check, current-code audit, README link, static gate. |
 | HMH-B | Agent self-modifying capability lifecycle | 20 | passed | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
 | HMH-C | Harness knowledge and context compiler | 15 | passed | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
-| HMH-D | Plug-and-play module/package lifecycle | 15 | pending | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
+| HMH-D | Plug-and-play module/package lifecycle | 15 | passed | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
 | HMH-E | Human harness and generated UI | 15 | pending | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy. |
 | HMH-F | Causality, safety, loops, and rollback | 15 | pending | engine_policy_ledger | Idempotency, approval resume, leases, trigger budgets, queues/DLQ, compensation, and trace/ledger proof fail closed. |
 | HMH-G | Final adversarial closeout and absence gates | 10 | pending | test_harness | Static scans, integration tests, transcript audit, docs/README/ledger, and score math prove no parallel planes remain. |
@@ -696,8 +696,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D1 through HMH-D7 are also closed; continue with HMH-D8 to prove
-  no generic module action escape hatch.
+  proven. HMH-D is also closed; continue with HMH-E1 to prove the Engine
+  Console remains substrate-first.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -714,7 +714,7 @@ Out of scope: remote marketplace trust without explicit local policy.
 | HMH-D5 | Upgrade, rollback, disable, quarantine work | 15 | passed | Upgrade and rollback require expected versions and idempotency; disable/quarantine stop workers or fail closed; stale invocations cannot use quarantined functions. | Stop if rollback is doc-only. |
 | HMH-D6 | Local marketplace shape exists | 10 | passed | Installing a first-party/local package is a capability operation over local package resources; remote source approval is explicit and policy-bound. | Reject implicit network trust. |
 | HMH-D7 | iOS/operator projection is complete | 10 | passed_after_fix | Engine Console shows package/config/activation/trust/conformance actions and evidence without hardcoded package policy. | Fix iOS projection only after server truth is proven. |
-| HMH-D8 | No generic action escape hatch | 10 | pending | Static scan rejects `module::act`, generic package mutation multiplexers, and client-side module policy. | Remove escape hatches before closeout. |
+| HMH-D8 | No generic action escape hatch | 10 | passed_after_fix | Static scan rejects `module::act`, generic package mutation multiplexers, and client-side module policy. | Remove escape hatches before closeout. |
 
 Closeout commands:
 
@@ -931,11 +931,34 @@ HMH-D7 evidence, 2026-06-02:
 - Passing iOS source-boundary proof:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`.
 
-Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7:
+HMH-D8 evidence, 2026-06-02:
 
-- HMH-D remains open. Continue with HMH-D8 to prove no generic action escape
-  hatch exists: static scans must reject `module::act`, generic package
-  mutation multiplexers, and client-side module policy.
+- The existing module static gate already rejected `module::act`,
+  `module::run_action`, sync `module::dispatch`, `control::act`, and local
+  iOS `targetFunctionId` construction in `CapabilityClient.swift`.
+- The strengthened gate now rejects generic package/action multiplexer names in
+  the module primitive, control projections, generated module UI authoring, and
+  every production Swift source file. The forbidden set includes generic
+  `module::package_action`, `module::mutate_package`,
+  `module::dispatch_package`, `module_action_multiplexer`,
+  `package_action_multiplexer`, and `generic_package_mutation` markers.
+- The iOS `SourceGuardTests` production-source scan now also rejects
+  client-side module policy/action ownership strings such as `modulePolicy`,
+  `packagePolicy`, `module::act`, and direct module lifecycle action ids while
+  still allowing the server-owned generated-UI DTO shape.
+- README now documents the absence rule: there is no generic `module::act` or
+  package mutation multiplexer; module operator controls are server-advertised
+  summaries over canonical `module::*` functions.
+- Passing Rust absence proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`.
+- Passing iOS source-boundary proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`.
+
+Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7/HMH-D8:
+
+- HMH-D is closed. Continue with HMH-E1 to prove the Engine Console remains
+  substrate-first over workers, capabilities, modules, generated UI, traces,
+  primer, conformance, and audit without a hardcoded tool catalog.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -1091,9 +1114,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, and HMH-D1 through HMH-D7 are closed. Continue with
-HMH-D8: prove no generic action escape hatch.
+HMH-A, HMH-B, HMH-C, and HMH-D are closed. Continue with HMH-E1: prove the
+Engine Console remains substrate-first without a hardcoded tool catalog.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests
 ```

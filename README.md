@@ -674,7 +674,9 @@ stores engine-owned source trust fields such as `sourceTrustStatus`,
 `conformanceEvidenceRefs`, and bounded `policyDiagnostics`; the manifest's
 declared `trustTier` is never permission truth. `module::configure` validates
 config and rejects raw secret-like values unless they are `secret_ref`/vault
-handles.
+handles. There is no generic `module::act` or package mutation multiplexer;
+operator controls are server-advertised summaries over canonical `module::*`
+functions.
 
 Package source trust is explicit. `module::verify_source` verifies unsigned
 digest-pinned package provenance, materialized file refs/hashes, and redaction,

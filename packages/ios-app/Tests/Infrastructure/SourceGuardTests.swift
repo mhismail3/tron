@@ -564,6 +564,39 @@ struct SourceGuardTests {
         ] {
             #expect(!moduleProjection.contains(forbiddenModulePolicy))
         }
+        let forbiddenProductionModulePolicy = [
+            "module::act",
+            "module::package_action",
+            "module::mutate_package",
+            "module::configure",
+            "module::activate",
+            "module::approve_source",
+            "module::run_conformance",
+            "modulePolicy",
+            "packagePolicy",
+            "ModulePolicy",
+            "PackagePolicy"
+        ]
+        let sourcesRoot = iosRoot.appendingPathComponent("Sources")
+        guard let enumerator = FileManager.default.enumerator(
+            at: sourcesRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            Issue.record("Could not enumerate \(sourcesRoot.path)")
+            return
+        }
+        while let any = enumerator.nextObject() {
+            guard let url = any as? URL else { continue }
+            guard url.pathExtension == "swift" else { continue }
+            let content = try String(contentsOf: url, encoding: .utf8)
+            for forbidden in forbiddenProductionModulePolicy {
+                #expect(
+                    !content.contains(forbidden),
+                    "\(url.lastPathComponent) must not own module action/policy target `\(forbidden)`"
+                )
+            }
+        }
         #expect(engineConsoleSurface.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
         #expect(engineConsoleSurface.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
         #expect(engineConsoleSurface.contains("SheetDismissButton(color: tint)"))
