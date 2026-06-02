@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **10/100**
+Current score: **12/100**
 
 Status: **running**
 
@@ -196,7 +196,7 @@ Planes to delete or prevent:
 | ID | Scorecard | Weight | Status | Owner | Evidence contract |
 |----|-----------|--------|--------|-------|-------------------|
 | HMH-A | Source, baseline, and primitive audit | 10 | passed | docs_or_scorecard | Attachment synthesis, official iii source check, current-code audit, README link, static gate. |
-| HMH-B | Agent self-modifying capability lifecycle | 20 | pending | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
+| HMH-B | Agent self-modifying capability lifecycle | 20 | running | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
 | HMH-C | Harness knowledge and context compiler | 15 | pending | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
 | HMH-D | Plug-and-play module/package lifecycle | 15 | pending | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
 | HMH-E | Human harness and generated UI | 15 | pending | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy. |
@@ -276,7 +276,7 @@ Out of scope: remote worker hosting or unscoped global package installation.
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
 | HMH-B1 | Model is taught the lifecycle | 10 | pending | Provider-visible transcript or deterministic runner fixture shows the model names discovery, `worker::protocol_guide`, worker authoring, `worker::spawn`, catalog watch/inspect, conformance/test, `execute`, promotion/disconnect, and evidence. | Stop if lifecycle appears only in hidden docs or test code. |
-| HMH-B2 | Worker guide is sufficient | 10 | pending | `execute` can call `worker::protocol_guide`; returned template/protocol/env/rules let the agent write a worker without source-searching or probing HTTP paths. | Fix guide/primer before testing spawn. |
+| HMH-B2 | Worker guide is sufficient | 10 | passed_after_fix | `execute` can call `worker::protocol_guide`; returned template/protocol/env/rules let the agent write a worker without source-searching or probing HTTP paths. | Fix guide/primer before testing spawn. |
 | HMH-B3 | Session worker creation is scoped | 15 | pending | Live temp worker registers one harmless function under a session namespace through `worker::spawn`; result includes derived grant, expected ids, process id, visibility, and catalog revision. | Stop if default visibility is not session or grant exceeds parent. |
 | HMH-B4 | Live catalog update and inspection work | 10 | pending | Catalog watch or revision delta shows the new function; `execute` discovery/inspect returns schema, health, provenance, trust tier, conformance state, authority, and visibility. | Fix registry/inspection before invocation. |
 | HMH-B5 | Conformance/test evidence is resource-backed | 10 | pending | `module::run_conformance` or capability conformance records pass/fail evidence resources linked to worker/function ids. | Do not promote without evidence resource refs. |
@@ -291,6 +291,41 @@ Closeout commands:
 cargo test --manifest-path packages/agent/Cargo.toml --test integration e2e_local_process_module_activation_health_and_disable_use_real_worker_spawn -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle -- --nocapture
 ```
+
+HMH-B2 evidence, 2026-06-02:
+
+- Initial live WebSocket proof failed in
+  `capability_self_modifying_lifecycle_execute_returns_worker_protocol_guide`
+  because public `invoke -> capability::execute` preserved `ActorKind::Client`.
+  `worker::protocol_guide` is Agent-visible, so execute returned
+  `needs_capability` despite direct system invocation working.
+- The root fix is in `packages/agent/src/transport/engine.rs`: ordinary public
+  `invoke` remains a client actor, but public `capability::execute` dispatches
+  as the profile-backed agent actor while server-owned execution policy scopes
+  and metadata are still derived from the active profile.
+- A second red run resolved the guide but rejected `sessionId` as an extra
+  target argument. `execute` now treats root `sessionId`, `workspaceId`,
+  `traceId`, `parentInvocationId`, and `authorityScopes` as wrapper/context
+  fields so transport context cannot leak into target payload validation.
+- `worker::protocol_guide` now returns a session-complete
+  `spawnWorkerPayloadExample`: the default `visibility` is `session`, the
+  active `sessionId` is included when present, and `workspaceId` is included
+  when the guide was invoked with workspace context.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_execute_returns_worker_protocol_guide -- --nocapture`,
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_execute_invoke_uses_agent_actor -- --nocapture`,
+  `cargo test --manifest-path packages/agent/Cargo.toml orchestrated_execute_keeps_transport_context_out_of_target_arguments -- --nocapture`,
+  and
+  `cargo test --manifest-path packages/agent/Cargo.toml worker_protocol_guide -- --nocapture`.
+
+Open loops after HMH-B2:
+
+- HMH-B2 proves the guide prerequisite only. HMH-B remains running until the
+  model-visible lifecycle instruction, scoped `worker::spawn`, catalog
+  inspection, conformance evidence, invocation, promotion, cleanup, and
+  explanation rows pass.
+- Process note: Cargo accepts one test-name filter per invocation; run multiple
+  focused filters sequentially.
 
 ## HMH-C Scorecard: Harness Knowledge And Context Compiler
 
@@ -492,11 +527,11 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A is closed. Continue with HMH-B, starting from the smallest live-loop
-prerequisite: prove `execute` can call `worker::protocol_guide` and that the
-returned guide is sufficient for a model-visible worker authoring lifecycle:
+HMH-A is closed and HMH-B2 is closed. Continue with HMH-B1/HMH-B3: prove the
+model-visible lifecycle instruction and then the scoped session worker spawn
+path from the guide output.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml worker_protocol_guide -- --nocapture
-cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_model_teaches_worker_spawn_loop -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_spawns_session_worker -- --nocapture
 ```

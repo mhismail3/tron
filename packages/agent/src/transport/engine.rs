@@ -7,9 +7,10 @@
 //! explicit idempotency. Protocol message ids stay outside engine semantics as
 //! correlation ids.
 //!
-//! Direct public `capability::execute` calls still use server-owned execution
-//! policy. The transport derives policy scopes and metadata from the active
-//! profile and rejects client-authored capability policy context.
+//! Direct public `capability::execute` calls dispatch as the profile-backed
+//! agent actor and still use server-owned execution policy. The transport
+//! derives policy scopes and metadata from the active profile and rejects
+//! client-authored capability policy context.
 
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -243,6 +244,11 @@ fn transport_causal_context_for_method(
 fn transport_actor_for_method(method: &str, payload: &Value) -> (ActorKind, &'static str) {
     if method == "promote" {
         return (ActorKind::User, "engine-user");
+    }
+    if method == "invoke"
+        && extract_string(payload, "functionId").as_deref() == Some("capability::execute")
+    {
+        return (ActorKind::Agent, "engine-agent");
     }
     if method == "invoke"
         && extract_string(payload, "functionId").as_deref() == Some("approval::resolve")
@@ -494,6 +500,14 @@ mod tests {
 
         assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
         assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-client");
+    }
+
+    #[test]
+    fn capability_execute_invoke_uses_agent_actor() {
+        let envelope = build_invoke("capability::execute");
+
+        assert_eq!(envelope.causal_context.actor_kind, ActorKind::Agent);
+        assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-agent");
     }
 
     #[test]

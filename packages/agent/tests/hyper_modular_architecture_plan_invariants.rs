@@ -99,7 +99,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
 
     for required in [
         "# Hyper Modular Agent Harness Execution Scorecard Portfolio",
-        "Current score: **10/100**",
+        "Current score: **12/100**",
         "Status: **running**",
         "## Source-Derived Requirements",
         "The agent and the human use the same operation to extend the same system.",
@@ -117,7 +117,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "## Primitive And Plane Budget",
         "## Operating Loop",
         "| HMH-A | Source, baseline, and primitive audit | 10 | passed |",
-        "| HMH-B | Agent self-modifying capability lifecycle | 20 | pending |",
+        "| HMH-B | Agent self-modifying capability lifecycle | 20 | running |",
         "| HMH-C | Harness knowledge and context compiler | 15 | pending |",
         "| HMH-D | Plug-and-play module/package lifecycle | 15 | pending |",
         "| HMH-E | Human harness and generated UI | 15 | pending |",
@@ -131,6 +131,10 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "| HMH-A6 | Fresh execution portfolio linked and guarded | 10 | passed |",
         "HMH-A closeout evidence, 2026-06-02:",
         "## HMH-B Scorecard: Agent Self-Modifying Capability Lifecycle",
+        "| HMH-B2 | Worker guide is sufficient | 10 | passed_after_fix |",
+        "HMH-B2 evidence, 2026-06-02:",
+        "as the profile-backed agent actor while server-owned execution policy scopes",
+        "Open loops after HMH-B2:",
         "| HMH-B3 | Session worker creation is scoped |",
         "| HMH-B6 | Invocation uses the tiny harness |",
         "| HMH-B9 | Agent explains the evidence |",
@@ -156,8 +160,8 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "## Static Gates",
         "## Final Closeout Criteria",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml worker_protocol_guide -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_model_teaches_worker_spawn_loop -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle_spawns_session_worker -- --nocapture",
     ] {
         assert!(
             portfolio.contains(required),
@@ -170,6 +174,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "Current score: **0/100**",
         "Status: **ready_for_execution**",
         "| HMH-A | Source, baseline, and primitive audit | 10 | pending |",
+        "| HMH-B | Agent self-modifying capability lifecycle | 20 | pending |",
         "| HMH-A1 | Attachment synthesis is first-class source | 20 | pending |",
         "Current score: **100/100**",
         "Status: **completed**",

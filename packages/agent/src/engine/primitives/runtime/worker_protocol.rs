@@ -105,6 +105,23 @@ pub(in crate::engine::primitives) fn guide(invocation: &Invocation) -> Result<Va
         "Streams must be published through the worker protocol publish_stream message or stream::publish, never by writing directly to client sockets.",
         "Use sandbox::stop_spawned_worker or worker::disconnect to remove volatile capabilities."
     ]);
+    let mut spawn_worker_payload_example = json!({
+        "workerId": worker_id,
+        "command": "python3",
+        "args": ["demo_worker.py"],
+        "workingDirectory": "/absolute/path/to/worker-directory",
+        "expectedFunctionIds": [function_id],
+        "visibility": "session",
+        "sessionId": invocation
+            .causal_context
+            .session_id
+            .as_deref()
+            .unwrap_or("<active-session-id>"),
+        "timeoutMs": 10000
+    });
+    if let Some(workspace_id) = invocation.causal_context.workspace_id.as_deref() {
+        spawn_worker_payload_example["workspaceId"] = json!(workspace_id);
+    }
 
     Ok(json!({
         "protocolVersion": protocol_version,
@@ -116,15 +133,7 @@ pub(in crate::engine::primitives) fn guide(invocation: &Invocation) -> Result<Va
         "messageFlow": message_flow,
         "functionDefinitionShape": function_definition_shape,
         "pythonTemplate": python_worker_template(&worker_id, &function_id, namespace),
-        "spawnWorkerPayloadExample": {
-            "workerId": worker_id,
-            "command": "python3",
-            "args": ["demo_worker.py"],
-            "workingDirectory": "/absolute/path/to/worker-directory",
-            "expectedFunctionIds": [function_id],
-            "visibility": "session",
-            "timeoutMs": 10000
-        },
+        "spawnWorkerPayloadExample": spawn_worker_payload_example,
         "rules": rules
     }))
 }

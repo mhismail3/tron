@@ -786,11 +786,12 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 idempotency key. Message ids are correlation ids only.
 
 When Engine Console or test clients invoke `capability::execute` directly, the
-server derives capability execution scopes and capability runtime metadata from
-the active profile. Clients may pass session, workspace, trace, and ordinary
-target context, but `contract.allow:*`, `implementation.allow:*`,
-`plugin.allow:*`, and `capability.*` runtime metadata are rejected so execute
-policy remains server-owned.
+transport dispatches it as the profile-backed agent actor, then the server
+derives capability execution scopes and capability runtime metadata from the
+active profile. Clients may pass session, workspace, trace, and ordinary target
+context, but `contract.allow:*`, `implementation.allow:*`, `plugin.allow:*`,
+and `capability.*` runtime metadata are rejected so execute policy remains
+server-owned.
 
 Hidden functions remain in the engine catalog for queue, cron, runtime, and
 domain side effects such as agent apply/run-turn, prompt-history capture, and

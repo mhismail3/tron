@@ -425,6 +425,97 @@ async fn e2e_engine_ws_hello_discover_invoke_and_stream_poll() {
 }
 
 #[tokio::test]
+async fn capability_self_modifying_lifecycle_execute_returns_worker_protocol_guide() {
+    let (url, server) = boot_server_without_deps().await;
+    let mut ws = connect(&url).await;
+    let session_id = "hmh-b-guide-session";
+    let function_id = "hmh_b_guide::echo";
+    let worker_id = "hmh-b-guide-worker";
+
+    let response = rpc_call(
+        &mut ws,
+        3201,
+        "capability::execute",
+        Some(json!({
+            "sessionId": session_id,
+            "target": "worker::protocol_guide",
+            "arguments": {
+                "language": "typescript",
+                "workerId": worker_id,
+                "functionId": function_id
+            },
+            "reason": "HMH-B2 guide sufficiency proof"
+        })),
+    )
+    .await;
+    assert_eq!(response["success"], true, "execute failed: {response}");
+    let result = &response["result"];
+    assert!(
+        result.get("isError").is_none(),
+        "worker guide execute should not be an error: {result}"
+    );
+    assert_eq!(result["details"]["status"], "ok");
+    assert_eq!(result["details"]["functionId"], "worker::protocol_guide");
+    assert_eq!(
+        result["details"]["orchestration"]["phaseDetails"]["selectedTarget"]["functionId"],
+        "worker::protocol_guide"
+    );
+    assert_eq!(
+        result["details"]["orchestration"]["correctedRequest"]["target"],
+        json!({"capabilityId": "worker::protocol_guide"})
+    );
+    assert!(
+        result["details"]["childInvocations"]
+            .as_array()
+            .is_some_and(|ids| ids.len() == 1),
+        "execute should expose the child invocation id: {result}"
+    );
+
+    let output = &result["details"]["output"];
+    assert_eq!(output["requestedLanguage"], "typescript");
+    assert_eq!(output["templateLanguage"], "python");
+    assert_eq!(output["endpoint"], "/engine/workers");
+    assert_eq!(
+        output["environment"]["TRON_ENGINE_WORKER_ENDPOINT"],
+        "Absolute WebSocket endpoint injected by worker::spawn, for example ws://127.0.0.1:9847/engine/workers"
+    );
+    assert_eq!(
+        output["functionDefinitionShape"]["readOnlyEchoMinimum"]["id"],
+        function_id
+    );
+    assert_eq!(
+        output["functionDefinitionShape"]["readOnlyEchoMinimum"]["metadata"]["pluginId"],
+        format!("session_generated.{worker_id}")
+    );
+    assert_eq!(
+        output["spawnWorkerPayloadExample"]["expectedFunctionIds"],
+        json!([function_id])
+    );
+    assert_eq!(output["spawnWorkerPayloadExample"]["workerId"], worker_id);
+    assert_eq!(output["spawnWorkerPayloadExample"]["visibility"], "session");
+    assert_eq!(output["spawnWorkerPayloadExample"]["sessionId"], session_id);
+    assert!(
+        output["pythonTemplate"]
+            .as_str()
+            .expect("python template")
+            .contains("TRON_ENGINE_WORKER_ENDPOINT"),
+        "template must use injected worker endpoint instead of deriving HTTP paths"
+    );
+    assert!(
+        output["rules"]
+            .as_array()
+            .expect("rules")
+            .iter()
+            .any(|rule| rule
+                .as_str()
+                .is_some_and(|text| text.contains("worker::disconnect"))),
+        "guide must include cleanup guidance"
+    );
+
+    server.shutdown().shutdown();
+}
+
+#[tokio::test]
 async fn e2e_local_worker_registers_live_capability_invokes_and_disconnects() {
     let (url, server) = boot_server_without_deps().await;
     let engine_url = engine_ws_url_for(&url);

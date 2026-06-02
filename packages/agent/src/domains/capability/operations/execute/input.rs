@@ -30,6 +30,11 @@ const EXECUTE_WRAPPER_KEYS: &[&str] = &[
     "expectedRevision",
     "expectedSchemaDigest",
     "inspectionHandle",
+    "sessionId",
+    "workspaceId",
+    "traceId",
+    "parentInvocationId",
+    "authorityScopes",
 ];
 
 #[derive(Debug)]

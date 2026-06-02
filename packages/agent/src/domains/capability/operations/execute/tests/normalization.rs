@@ -29,6 +29,30 @@ fn orchestrated_execute_removes_self_target_before_resolution() {
 }
 
 #[test]
+fn orchestrated_execute_keeps_transport_context_out_of_target_arguments() {
+    let input = parse_orchestrated_execute_input(&json!({
+        "target": "worker::protocol_guide",
+        "sessionId": "sess-context",
+        "workspaceId": "workspace-context",
+        "traceId": "trace-context",
+        "parentInvocationId": "parent-invocation",
+        "authorityScopes": ["worker.read"],
+        "arguments": {
+            "language": "typescript"
+        }
+    }))
+    .expect("parse execute input");
+
+    assert_eq!(input.arguments, json!({"language": "typescript"}));
+    assert!(
+        input
+            .corrections
+            .iter()
+            .all(|correction| correction["kind"] != json!("top_level_arguments_to_arguments"))
+    );
+}
+
+#[test]
 fn contextual_normalization_binds_current_session_id_for_session_scoped_targets() {
     let function = function_from_capability("git::list_local_branches");
     let invocation = test_invocation_with_session_context();
