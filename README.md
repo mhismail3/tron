@@ -836,7 +836,9 @@ template, use `execute` with target `worker::spawn` plus expected function ids
 and a stable idempotency key, then invoke the new `namespace::function` through
 `execute` and disconnect it with `worker::disconnect` when finished. Operator
 catalog search/inspect views remain available for debugging, but they are not
-separate model tools.
+separate model tools. The model-facing `execute` schema and generated
+`capabilities.primer` both name this loop so ordinary provider turns do not need
+README-only knowledge to modify the harness.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, `trigger::*`, `resource::*`, `grant::*`, and `approval::*` preserve

@@ -99,6 +99,55 @@ fn primer_guides_approval_gated_write_commands_to_process_run() {
 }
 
 #[test]
+fn primer_teaches_self_modifying_worker_lifecycle() {
+    let snapshot = CapabilityRegistrySnapshot::new(
+        vec![
+            test_function("capability::execute"),
+            test_function("worker::protocol_guide"),
+            test_function("worker::spawn"),
+            test_function("catalog::watch_snapshot"),
+            test_function("capability::inspect"),
+            test_function("capability::conformance_run"),
+            test_function("worker::disconnect"),
+        ],
+        42,
+    );
+    let text = render_capability_primer(
+        &snapshot,
+        &CapabilityContextPrimerPolicy {
+            max_tokens: 1700,
+            include_compact_schemas: true,
+            include_examples: false,
+            ..Default::default()
+        },
+    )
+    .expect("primer");
+
+    for required in [
+        "customize the harness",
+        "`worker::protocol_guide`",
+        "author",
+        "`worker::spawn`",
+        "`catalog::watch_snapshot`",
+        "`capability::inspect`",
+        "conformance",
+        "test",
+        "`execute`",
+        "`engine::promote`",
+        "`worker::disconnect`",
+        "`sandbox::stop_spawned_worker`",
+        "trace id",
+        "resource refs",
+        "catalog revision",
+    ] {
+        assert!(
+            text.contains(required),
+            "self-modification primer missing lifecycle marker `{required}`:\n{text}"
+        );
+    }
+}
+
+#[test]
 fn notification_send_is_core_searchable_and_primed() {
     let notification_spec = crate::domains::notifications::contract::capabilities()
         .expect("notification specs")

@@ -237,7 +237,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
             "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
             "capabilitySchema": {
                 "name": "execute",
-                "description": "Intent-first portal for all Tron capabilities: resolve, prepare, approve when needed, run, and observe one capability per call. Start with natural-language intent alone when the target is not already known; provide target only when the user supplied an exact capability id, a prior execute result selected it, or a primed recipe makes it unambiguous. Put target capability arguments inside arguments when possible, keep wrapper fields top-level, and never invent targets to satisfy a discovery or shape test. Use operation=discover, or a clear discovery-only intent, when you need capability ids, required fields, schemas, examples, or a safe sequence without executing the target. For filesystem repo discovery, list only known directories such as `.` or paths returned by a prior call; do not call filesystem::list_dir on guessed module, file, or extensionless paths. Locate uncertain names with filesystem::find, filesystem::glob, or filesystem::search_text before listing or reading the exact returned path. For approval-gated high-risk write commands or shell redirection, target process::run with executionMode=sandbox_materialized and expectedOutputs; do not target filesystem::write_file or approval::request. For resource lifecycle targets such as artifact::promote, artifact::discard, materialized_file::promote, materialized_file::discard, and patch::merge, pass prior result version ids as expectedCurrentVersionId; use expectedCurrentVersionId, not versionId, as the target CAS guard. If you accidentally place target argument fields at the execute root, execute may move them into arguments and select the target by schema fit, but arguments is the canonical shape. If you accidentally set target to capability::execute itself, execute removes that self-target and resolves the real target from intent; do not intentionally wrap execute inside execute. Do not call separate search, inspect, or approval::request tools; this execute primitive owns discovery, freshness, approval, correction, and child execution. A needs_input result means retry the same selected target with the missing arguments. A needs_decomposition result means the request spans multiple target invocations; call execute once per suggested call only when the user still wants the underlying work performed, and report the decomposition result without running suggestions when the user only asked to test or inspect decomposition. Harmless shape mistakes may be corrected, but mutating or elevated-risk work still pauses for freshness and approval before child execution. Do not invent constraints such as riskMax for ordinary work; use constraints only when the user explicitly gives a hard bound. Network reads such as web::search and web::fetch are medium-risk pure reads, so riskMax=low intentionally rejects them.",
+                "description": "Intent-first portal for all Tron capabilities: resolve, prepare, approve when needed, run, and observe one capability per call. Start with natural-language intent alone when the target is not already known; provide target only when the user supplied an exact capability id, a prior execute result selected it, or a primed recipe makes it unambiguous. Put target capability arguments inside arguments when possible, keep wrapper fields top-level, and never invent targets to satisfy a discovery or shape test. Use operation=discover, or a clear discovery-only intent, when you need capability ids, required fields, schemas, examples, or a safe sequence without executing the target. For filesystem repo discovery, list only known directories such as `.` or paths returned by a prior call; do not call filesystem::list_dir on guessed module, file, or extensionless paths. Locate uncertain names with filesystem::find, filesystem::glob, or filesystem::search_text before listing or reading the exact returned path. For approval-gated high-risk write commands or shell redirection, target process::run with executionMode=sandbox_materialized and expectedOutputs; do not target filesystem::write_file or approval::request. For resource lifecycle targets such as artifact::promote, artifact::discard, materialized_file::promote, materialized_file::discard, and patch::merge, pass prior result version ids as expectedCurrentVersionId; use expectedCurrentVersionId, not versionId, as the target CAS guard. If you accidentally place target argument fields at the execute root, execute may move them into arguments and select the target by schema fit, but arguments is the canonical shape. If you accidentally set target to capability::execute itself, execute removes that self-target and resolves the real target from intent; do not intentionally wrap execute inside execute. Do not call separate search, inspect, or approval::request tools; this execute primitive owns discovery, freshness, approval, correction, and child execution. A needs_input result means retry the same selected target with the missing arguments. A needs_decomposition result means the request spans multiple target invocations; call execute once per suggested call only when the user still wants the underlying work performed, and report the decomposition result without running suggestions when the user only asked to test or inspect decomposition. Harmless shape mistakes may be corrected, but mutating or elevated-risk work still pauses for freshness and approval before child execution. For harness self-modification, target worker::protocol_guide, author the worker, target worker::spawn, watch catalog::watch_snapshot or capability::inspect, run conformance/test evidence, invoke the new function through execute, use engine::promote for governed workspace/system promotion, disconnect with worker::disconnect, and cite trace ids, resource refs, and catalog revision. Do not invent constraints such as riskMax for ordinary work; use constraints only when the user explicitly gives a hard bound. Network reads such as web::search and web::fetch are medium-risk pure reads, so riskMax=low intentionally rejects them.",
                 "parameters": execute_model_request_schema()
             }
         }),
@@ -729,6 +729,31 @@ mod tests {
         let schema = &metadata["capabilitySchema"]["parameters"];
         assert_eq!(schema["type"], json!("object"));
         assert_provider_schema_has_no_unsupported_keywords(schema, "$");
+    }
+
+    #[test]
+    fn execute_description_teaches_self_modifying_worker_lifecycle() {
+        let metadata = model_metadata(EXECUTE_FUNCTION_ID);
+        let description = metadata["capabilitySchema"]["description"]
+            .as_str()
+            .expect("execute description");
+        for required in [
+            "worker::protocol_guide",
+            "worker::spawn",
+            "catalog::watch_snapshot",
+            "capability::inspect",
+            "conformance",
+            "execute",
+            "engine::promote",
+            "worker::disconnect",
+            "trace ids",
+            "resource refs",
+        ] {
+            assert!(
+                description.contains(required),
+                "execute model description missing self-modification marker `{required}`"
+            );
+        }
     }
 
     fn assert_provider_schema_has_no_unsupported_keywords(value: &serde_json::Value, path: &str) {
