@@ -176,6 +176,36 @@ final class EventPluginTests: XCTestCase {
                     "approvalId": "approval-1",
                     "functionId": "worker::spawn",
                     "payload": {"workerId": "demo-worker"},
+                    "authorityGrantId": "grant-1",
+                    "authorityScopes": ["worker.write"],
+                    "idempotencyKey": "spawn-key",
+                    "targetMetadata": {
+                        "effectClass": "ExternalSideEffect",
+                        "riskLevel": "High",
+                        "requiredAuthority": {
+                            "scopes": ["worker.write"],
+                            "approvalRequired": true
+                        },
+                        "idempotency": {
+                            "keySource": "Caller",
+                            "dedupeScope": "System",
+                            "replayBehavior": "ReturnPrevious",
+                            "ledgerKind": "EngineLedger"
+                        },
+                        "resourceLease": {
+                            "resolverId": "payload_template",
+                            "resourceKind": "worker",
+                            "resourceIdTemplate": "worker:{workerId}",
+                            "ttlMs": 60000,
+                            "exclusive": true,
+                            "streamTopic": "resource.leases",
+                            "failureBehavior": "failClosed"
+                        },
+                        "compensation": {
+                            "kind": "eventSourced",
+                            "notes": "worker spawn is event sourced"
+                        }
+                    },
                     "status": "pending",
                     "sessionId": "session-1",
                     "traceId": "trace-1"
@@ -187,7 +217,14 @@ final class EventPluginTests: XCTestCase {
         let result = EventRegistry.shared.parse(type: "approval.pending", data: json)
         XCTAssertEqual(result?.eventType, "approval.pending")
         XCTAssertEqual(result?.sessionId, "session-1")
-        XCTAssertNotNil(result?.getResult())
+        let pluginResult = result?.getResult() as? ApprovalPendingPlugin.Result
+        XCTAssertEqual(pluginResult?.approval.authorityGrantId, "grant-1")
+        XCTAssertEqual(pluginResult?.approval.authorityScopes, ["worker.write"])
+        XCTAssertEqual(pluginResult?.approval.idempotencyKey, "spawn-key")
+        XCTAssertEqual(pluginResult?.approval.targetMetadata?.effectClass, "ExternalSideEffect")
+        XCTAssertEqual(pluginResult?.approval.targetMetadata?.requiredAuthority.approvalRequired, true)
+        XCTAssertEqual(pluginResult?.approval.targetMetadata?.resourceLease?.resourceIdTemplate, "worker:{workerId}")
+        XCTAssertEqual(pluginResult?.approval.targetMetadata?.compensation?.kind, "eventSourced")
     }
 
     @MainActor
@@ -353,12 +390,14 @@ private func makeApprovalRecord(status: EngineApprovalStatus) -> EngineApprovalR
         payload: nil,
         actorId: "agent",
         actorKind: "Agent",
+        authorityGrantId: "grant-1",
         authorityScopes: ["process.run"],
         traceId: "trace-1",
         parentInvocationId: "parent-1",
         sessionId: "session-1",
         workspaceId: nil,
         idempotencyKey: "approval-key",
+        targetMetadata: nil,
         status: status,
         decisionActorId: status == .pending ? nil : "engine-user",
         decidedAt: status == .pending ? nil : "2026-05-10T00:00:00Z",

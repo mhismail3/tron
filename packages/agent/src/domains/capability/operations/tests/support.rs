@@ -39,6 +39,7 @@ pub(super) fn test_approval_record(
         workspace_id: None,
         idempotency_key: Some(idempotency_key.to_owned()),
         delivery_mode: DeliveryMode::Sync,
+        target_metadata: None,
         status: ApprovalStatus::Executed,
         decision_actor_id: Some(ActorId::new("engine-user").expect("actor id")),
         decided_at: Some(now),

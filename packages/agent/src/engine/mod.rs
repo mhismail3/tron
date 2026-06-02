@@ -37,7 +37,9 @@
 //!   scoped outside the production event-store migration;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution,
-//!   idempotency is scoped by target function/session/workspace/caller key, and
+//!   each record snapshots target effect/risk/authority/idempotency/lease/
+//!   compensation metadata for human review, idempotency is scoped by target
+//!   function/session/workspace/caller key, and
 //!   `approval::resolve` remains a user/client-owned primitive routed through
 //!   `EngineHostHandle` so the stored invocation resumes in one trace;
 //! - resource leases and compensation contracts are first-class primitives for
@@ -122,7 +124,7 @@ pub mod types;
 
 pub use approval::{
     ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
-    InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
+    EngineApprovalTargetMetadata, InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
 };
 pub use capabilities::AgentCapabilityClient;
 pub use compensation::{

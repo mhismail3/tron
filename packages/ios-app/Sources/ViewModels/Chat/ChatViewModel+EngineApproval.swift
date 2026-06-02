@@ -38,14 +38,18 @@ extension ChatViewModel {
             params: EngineApprovalParams(
                 action: action,
                 reason: reason,
-                riskLevel: .high
+                riskLevel: EngineApprovalRiskLevel(serverValue: approval.targetMetadata?.riskLevel)
             ),
             status: status,
             decision: decision,
             note: nil,
             result: result,
             engineApprovalId: approval.approvalId,
-            engineFunctionId: approval.functionId
+            engineFunctionId: approval.functionId,
+            authorityGrantId: approval.authorityGrantId,
+            authorityScopes: approval.authorityScopes ?? [],
+            idempotencyKey: approval.idempotencyKey,
+            targetMetadata: approval.targetMetadata
         )
     }
 

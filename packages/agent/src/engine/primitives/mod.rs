@@ -818,6 +818,7 @@ pub(in crate::engine) fn approval_request_from_invocation(
         payload,
         causal_context: invocation.causal_context.clone(),
         delivery_mode: invocation.delivery_mode,
+        target_metadata: None,
     })
 }
 

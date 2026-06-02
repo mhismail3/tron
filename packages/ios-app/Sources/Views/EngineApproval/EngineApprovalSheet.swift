@@ -31,6 +31,8 @@ struct EngineApprovalSheet: View {
                     // Reason section
                     detailSection(title: "Reason", content: capabilityData.params.reason)
 
+                    consequenceSections
+
                     // Note section (read-only for decided, editable for pending)
                     if readOnly {
                         if let note = capabilityData.note, !note.isEmpty {
@@ -76,6 +78,31 @@ struct EngineApprovalSheet: View {
         .tint(accentColor)
         .onAppear {
             noteText = capabilityData.note ?? ""
+        }
+    }
+
+    private var consequenceSections: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(capabilityData.consequenceSections, id: \.title) { section in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(section.title)
+                        .font(TronTypography.codeCaption)
+                        .foregroundStyle(.tronTextMuted)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(section.rows, id: \.label) { row in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.label)
+                                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                                    .foregroundStyle(.tronTextMuted)
+                                Text(inlineMarkdown(from: row.value, size: TronTypography.sizeBodySM))
+                                    .foregroundStyle(.tronTextPrimary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -248,6 +275,7 @@ struct EngineApprovalSheet: View {
         case .low: return "shield"
         case .medium: return "shield.lefthalf.filled"
         case .high: return "exclamationmark.shield.fill"
+        case .critical: return "exclamationmark.octagon.fill"
         }
     }
 
@@ -256,6 +284,7 @@ struct EngineApprovalSheet: View {
         case .low: return "Low Risk"
         case .medium: return "Medium Risk"
         case .high: return "High Risk"
+        case .critical: return "Critical Risk"
         }
     }
 
@@ -263,7 +292,7 @@ struct EngineApprovalSheet: View {
         switch capabilityData.params.riskLevel {
         case .low: return .tronEmerald
         case .medium: return .tronAmber
-        case .high: return .tronError
+        case .high, .critical: return .tronError
         }
     }
 }

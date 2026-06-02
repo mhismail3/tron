@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-use super::approval::EngineApprovalRequest;
+use super::approval::{EngineApprovalRequest, EngineApprovalTargetMetadata};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::host::{CatalogWatchRequest, CatalogWatchResponse, EngineHostHandle};
@@ -155,6 +155,9 @@ impl AgentCapabilityClient {
                         payload,
                         causal_context: invocation.causal_context.clone(),
                         delivery_mode: invocation.delivery_mode,
+                        target_metadata: Some(EngineApprovalTargetMetadata::from_function(
+                            &function,
+                        )),
                     })
                     .await;
                 let details = match approval {

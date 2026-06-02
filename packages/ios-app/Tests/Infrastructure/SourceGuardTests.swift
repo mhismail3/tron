@@ -516,6 +516,40 @@ struct SourceGuardTests {
         #expect(managementSheet.contains("animatesSelection: false"))
     }
 
+    @Test("Engine approval flow stays server-owned")
+    func testEngineApprovalFlowStaysServerOwned() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let client = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/ApprovalClient.swift"),
+            encoding: .utf8
+        )
+        let coordinator = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/Handlers/EngineApprovalCoordinator.swift"),
+            encoding: .utf8
+        )
+        let sheet = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineApproval/EngineApprovalSheet.swift"),
+            encoding: .utf8
+        )
+        let types = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Models/Messages/EngineApprovalTypes.swift"),
+            encoding: .utf8
+        )
+
+        #expect(client.contains("\"approval::resolve\""))
+        #expect(client.contains("authorityScopes: [\"approval.resolve\"]"))
+        #expect(coordinator.contains("status: .resolving"))
+        #expect(coordinator.contains("decision: nil"))
+        #expect(coordinator.contains("updateMessageFromServerApproval"))
+        #expect(sheet.contains("capabilityData.consequenceSections"))
+        #expect(types.contains("targetMetadata"))
+        #expect(types.contains("authorityGrantId"))
+        #expect(types.contains("idempotencyKey"))
+    }
+
     @Test("Engine Console overview and inspection sheet stay native and scoped")
     func testEngineConsoleOverviewAndInspectionBoundary() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)

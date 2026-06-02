@@ -16,6 +16,11 @@ async fn agent_high_risk_invocation_creates_pending_approval_and_stream_event() 
     .with_required_authority(AuthorityRequirement::scope("danger.write").with_approval_required())
     .with_risk(RiskLevel::High)
     .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+        "danger",
+        "danger:{id}",
+        60_000,
+    ))
     .with_compensation(CompensationContract::new(
         CompensationKind::ManualOnly,
         "approval test delete is manually compensated",
@@ -55,6 +60,33 @@ async fn agent_high_risk_invocation_creates_pending_approval_and_stream_event() 
     assert_eq!(record.status, ApprovalStatus::Pending);
     assert_eq!(record.function_id, fid("danger::delete"));
     assert_eq!(record.session_id.as_deref(), Some("session-a"));
+    let metadata = record
+        .target_metadata
+        .as_ref()
+        .expect("approval records snapshot target metadata");
+    assert_eq!(metadata.effect_class, EffectClass::IrreversibleSideEffect);
+    assert_eq!(metadata.risk_level, RiskLevel::High);
+    assert_eq!(
+        metadata.required_authority.scopes,
+        vec!["danger.write".to_owned()]
+    );
+    assert!(metadata.required_authority.approval_required);
+    assert_eq!(
+        metadata.idempotency.as_ref().unwrap().ledger_kind,
+        LedgerKind::EngineLedger
+    );
+    assert_eq!(
+        metadata
+            .resource_lease
+            .as_ref()
+            .unwrap()
+            .resource_id_template,
+        "danger:{id}"
+    );
+    assert_eq!(
+        metadata.compensation.as_ref().unwrap().kind,
+        CompensationKind::ManualOnly
+    );
 
     let page = handle
         .poll_stream(
@@ -70,6 +102,30 @@ async fn agent_high_risk_invocation_creates_pending_approval_and_stream_event() 
     assert_eq!(
         page.events[0].payload["approval"]["approvalId"],
         approval_id
+    );
+    assert_eq!(
+        page.events[0].payload["approval"]["targetMetadata"]["effectClass"],
+        "IrreversibleSideEffect"
+    );
+    assert_eq!(
+        page.events[0].payload["approval"]["targetMetadata"]["riskLevel"],
+        "High"
+    );
+    assert_eq!(
+        page.events[0].payload["approval"]["targetMetadata"]["requiredAuthority"]["scopes"][0],
+        "danger.write"
+    );
+    assert_eq!(
+        page.events[0].payload["approval"]["targetMetadata"]["idempotency"]["ledgerKind"],
+        "EngineLedger"
+    );
+    assert_eq!(
+        page.events[0].payload["approval"]["targetMetadata"]["resourceLease"]["resourceIdTemplate"],
+        "danger:{id}"
+    );
+    assert_eq!(
+        page.events[0].payload["approval"]["targetMetadata"]["compensation"]["kind"],
+        "manualOnly"
     );
 
     let trace = handle
@@ -204,6 +260,7 @@ async fn terminal_approval_replay_does_not_publish_fresh_pending_event() {
         payload: json!({"value": 1}),
         causal_context: mutating_causal("terminal-approval-key").with_scope("danger.write"),
         delivery_mode: DeliveryMode::Sync,
+        target_metadata: None,
     };
     let pending = handle.request_approval(request.clone()).await.unwrap();
     assert_eq!(pending.status, ApprovalStatus::Pending);
@@ -258,6 +315,7 @@ async fn approval_idempotency_is_scoped_to_session() {
             payload: json!({"value": 1}),
             causal_context: mutating_causal("shared-approval-key").with_scope("danger.write"),
             delivery_mode: DeliveryMode::Sync,
+            target_metadata: None,
         })
         .await
         .unwrap();
@@ -269,6 +327,7 @@ async fn approval_idempotency_is_scoped_to_session() {
                 .with_scope("danger.write")
                 .with_session_id("session-b"),
             delivery_mode: DeliveryMode::Sync,
+            target_metadata: None,
         })
         .await
         .unwrap();
@@ -291,6 +350,7 @@ async fn approval_idempotency_still_conflicts_within_session() {
             payload: json!({"value": 1}),
             causal_context: mutating_causal("session-scoped-conflict").with_scope("danger.write"),
             delivery_mode: DeliveryMode::Sync,
+            target_metadata: None,
         })
         .await
         .unwrap();
@@ -300,6 +360,7 @@ async fn approval_idempotency_still_conflicts_within_session() {
             payload: json!({"value": 2}),
             causal_context: mutating_causal("session-scoped-conflict").with_scope("danger.write"),
             delivery_mode: DeliveryMode::Sync,
+            target_metadata: None,
         })
         .await;
 

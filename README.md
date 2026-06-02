@@ -1015,7 +1015,10 @@ without maintaining a second tree-only event shape.
 
 High-risk engine capabilities publish `approval.pending` records to the
 `approvals` stream only after the target payload and authority preflight pass.
-Thin clients render those records and resolve them by invoking the canonical
+Approval records snapshot the target function's server catalog metadata in
+`targetMetadata`: effect class, risk level, required authority, idempotency
+contract, resource lease requirement, and compensation contract. Thin clients
+render those records and resolve them by invoking the canonical
 `approval::resolve` primitive; the decision, resumed child invocation, ledger
 entry, and `approval.resolved` stream event all remain engine-owned. Agents can
 not see or invoke `approval::*` functions in their live catalog. Approval-required

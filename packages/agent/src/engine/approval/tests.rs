@@ -18,6 +18,7 @@ fn request_for_session(session_id: &str, key: &str, payload: Value) -> EngineApp
         .with_workspace_id("workspace-a")
         .with_idempotency_key(key),
         delivery_mode: DeliveryMode::Sync,
+        target_metadata: None,
     }
 }
 
@@ -84,6 +85,7 @@ CREATE TABLE engine_approvals (
         )
         .unwrap();
     assert!(!table_sql.contains("idempotency_key TEXT UNIQUE"));
+    assert!(table_sql.contains("target_metadata_json TEXT"));
 }
 
 #[test]

@@ -1,14 +1,24 @@
 //! Primitive substrate store methods exposed through `EngineHostHandle`.
 
 use super::*;
+use crate::engine::EngineApprovalTargetMetadata;
 
 impl EngineHostHandle {
     /// Create or replay an approval request and publish a pending approval
     /// stream event only for a newly created pending approval.
     pub async fn request_approval(
         &self,
-        request: EngineApprovalRequest,
+        mut request: EngineApprovalRequest,
     ) -> Result<EngineApprovalRecord> {
+        if request.target_metadata.is_none() {
+            request.target_metadata = self
+                .inner
+                .lock()
+                .await
+                .catalog
+                .function(&request.function_id)
+                .map(EngineApprovalTargetMetadata::from_function);
+        }
         let store = self.inner.lock().await.primitives.approvals.clone();
         let outcome = store
             .lock()

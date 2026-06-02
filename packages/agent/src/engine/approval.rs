@@ -2,11 +2,12 @@
 //!
 //! Approvals are resumable authority records for high-risk agent-visible
 //! invocations. A pending approval stores the original invocation intent,
-//! idempotency key, trace, actor, authority scopes, and payload fingerprint so
-//! resolution can resume the same causal action instead of creating a second,
-//! unrelated command path. Approval idempotency is scoped by function, session,
-//! and workspace, matching the engine ledger instead of treating model-chosen
-//! keys as globally unique across unrelated sessions.
+//! idempotency key, trace, actor, authority scopes, target contract metadata,
+//! and payload fingerprint so resolution can resume the same causal action
+//! instead of creating a second, unrelated command path. Approval idempotency is
+//! scoped by function, session, and workspace, matching the engine ledger
+//! instead of treating model-chosen keys as globally unique across unrelated
+//! sessions.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -22,7 +23,11 @@ use super::errors::{EngineError, Result};
 use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId};
 use super::invocation::{CausalContext, InvocationResult};
 use super::ledger::StoredEngineError;
-use super::types::DeliveryMode;
+use super::types::{
+    AuthorityRequirement, CompensationContract, DeliveryMode, EffectClass, FunctionDefinition,
+    IdempotencyContract, IdempotencyKeySource, LedgerKind, ReplayBehavior,
+    ResourceLeaseRequirement, RiskLevel, VisibilityScope,
+};
 
 /// Approval lifecycle status.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +102,9 @@ pub struct EngineApprovalRecord {
     pub idempotency_key: Option<String>,
     /// Original delivery mode.
     pub delivery_mode: DeliveryMode,
+    /// Server-owned target contract snapshot captured when the approval was
+    /// created.
+    pub target_metadata: Option<EngineApprovalTargetMetadata>,
     /// Current status.
     pub status: ApprovalStatus,
     /// Decision actor.
@@ -111,6 +119,86 @@ pub struct EngineApprovalRecord {
     pub created_at: DateTime<Utc>,
     /// Last update timestamp.
     pub updated_at: DateTime<Utc>,
+}
+
+/// Server-owned target contract metadata captured on an approval record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineApprovalTargetMetadata {
+    /// Target side-effect class.
+    pub effect_class: EffectClass,
+    /// Target risk level.
+    pub risk_level: RiskLevel,
+    /// Authority requirement declared by the target function.
+    pub required_authority: EngineApprovalAuthorityMetadata,
+    /// Idempotency contract declared by the target function.
+    pub idempotency: Option<EngineApprovalIdempotencyMetadata>,
+    /// Resource lease requirement declared by the target function.
+    pub resource_lease: Option<ResourceLeaseRequirement>,
+    /// Compensation contract declared by the target function.
+    pub compensation: Option<CompensationContract>,
+}
+
+/// Approval-facing authority metadata with stable transport keys.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineApprovalAuthorityMetadata {
+    /// Required authority scopes.
+    pub scopes: Vec<String>,
+    /// Whether explicit approval is required.
+    pub approval_required: bool,
+}
+
+impl From<&AuthorityRequirement> for EngineApprovalAuthorityMetadata {
+    fn from(requirement: &AuthorityRequirement) -> Self {
+        Self {
+            scopes: requirement.scopes.clone(),
+            approval_required: requirement.approval_required,
+        }
+    }
+}
+
+/// Approval-facing idempotency metadata with stable transport keys.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineApprovalIdempotencyMetadata {
+    /// Key source.
+    pub key_source: IdempotencyKeySource,
+    /// Dedupe scope.
+    pub dedupe_scope: VisibilityScope,
+    /// Duplicate replay behavior.
+    pub replay_behavior: ReplayBehavior,
+    /// Ledger kind.
+    pub ledger_kind: LedgerKind,
+}
+
+impl From<&IdempotencyContract> for EngineApprovalIdempotencyMetadata {
+    fn from(contract: &IdempotencyContract) -> Self {
+        Self {
+            key_source: contract.key_source.clone(),
+            dedupe_scope: contract.dedupe_scope.clone(),
+            replay_behavior: contract.replay_behavior.clone(),
+            ledger_kind: contract.ledger_kind.clone(),
+        }
+    }
+}
+
+impl EngineApprovalTargetMetadata {
+    /// Snapshot target metadata from the function catalog definition.
+    #[must_use]
+    pub fn from_function(function: &FunctionDefinition) -> Self {
+        Self {
+            effect_class: function.effect_class,
+            risk_level: function.risk_level,
+            required_authority: EngineApprovalAuthorityMetadata::from(&function.required_authority),
+            idempotency: function
+                .idempotency
+                .as_ref()
+                .map(EngineApprovalIdempotencyMetadata::from),
+            resource_lease: function.resource_lease.clone(),
+            compensation: function.compensation.clone(),
+        }
+    }
 }
 
 impl EngineApprovalRecord {
@@ -158,6 +246,8 @@ pub struct EngineApprovalRequest {
     pub causal_context: CausalContext,
     /// Original delivery mode.
     pub delivery_mode: DeliveryMode,
+    /// Optional target contract metadata snapshot.
+    pub target_metadata: Option<EngineApprovalTargetMetadata>,
 }
 
 /// Result of creating or replaying an approval request.
@@ -247,6 +337,7 @@ impl InMemoryEngineApprovalStore {
             workspace_id: request.causal_context.workspace_id,
             idempotency_key: request.causal_context.idempotency_key,
             delivery_mode: request.delivery_mode,
+            target_metadata: request.target_metadata,
             status: ApprovalStatus::Pending,
             decision_actor_id: None,
             decided_at: None,
@@ -387,6 +478,7 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
   workspace_id TEXT,
   idempotency_key TEXT,
   delivery_mode TEXT NOT NULL,
+  target_metadata_json TEXT,
   status TEXT NOT NULL,
   decision_actor_id TEXT,
   decided_at TEXT,
@@ -399,6 +491,7 @@ CREATE TABLE IF NOT EXISTS engine_approvals (
             )
             .map_err(|err| sqlite_err("approval.init", err.to_string()))?;
         self.migrate_approval_idempotency_scope()?;
+        self.migrate_target_metadata_column()?;
         self.conn
             .execute_batch(
                 r#"
@@ -452,6 +545,7 @@ CREATE TABLE engine_approvals (
   workspace_id TEXT,
   idempotency_key TEXT,
   delivery_mode TEXT NOT NULL,
+  target_metadata_json TEXT,
   status TEXT NOT NULL,
   decision_actor_id TEXT,
   decided_at TEXT,
@@ -464,20 +558,53 @@ INSERT INTO engine_approvals (
   approval_id, function_id, payload_json, payload_fingerprint,
   actor_id, actor_kind, authority_grant_id, authority_scopes_json,
   trace_id, parent_invocation_id, trigger_id, session_id, workspace_id,
-  idempotency_key, delivery_mode, status, decision_actor_id, decided_at,
+  idempotency_key, delivery_mode, target_metadata_json, status, decision_actor_id, decided_at,
   result_json, error_json, created_at, updated_at
 )
 SELECT
   approval_id, function_id, payload_json, payload_fingerprint,
   actor_id, actor_kind, authority_grant_id, authority_scopes_json,
   trace_id, parent_invocation_id, trigger_id, session_id, workspace_id,
-  idempotency_key, delivery_mode, status, decision_actor_id, decided_at,
+  idempotency_key, delivery_mode, NULL, status, decision_actor_id, decided_at,
   result_json, error_json, created_at, updated_at
 FROM engine_approvals_global_idempotency_migration;
 DROP TABLE engine_approvals_global_idempotency_migration;
 "#,
             )
             .map_err(|err| sqlite_err("approval.migrate.scope", err.to_string()))
+    }
+
+    fn migrate_target_metadata_column(&self) -> Result<()> {
+        let has_column = {
+            let mut stmt = self
+                .conn
+                .prepare("PRAGMA table_info(engine_approvals)")
+                .map_err(|err| sqlite_err("approval.migrate.metadata.inspect", err.to_string()))?;
+            let columns = stmt
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|err| sqlite_err("approval.migrate.metadata.columns", err.to_string()))?;
+            let mut found = false;
+            for column in columns {
+                if column.map_err(|err| {
+                    sqlite_err("approval.migrate.metadata.column", err.to_string())
+                })? == "target_metadata_json"
+                {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+        if has_column {
+            return Ok(());
+        }
+        self.conn
+            .execute(
+                "ALTER TABLE engine_approvals ADD COLUMN target_metadata_json TEXT",
+                [],
+            )
+            .map_err(|err| sqlite_err("approval.migrate.metadata", err.to_string()))?;
+        Ok(())
     }
 
     /// Create or replay an approval request.
@@ -520,6 +647,7 @@ DROP TABLE engine_approvals_global_idempotency_migration;
             workspace_id: request.causal_context.workspace_id,
             idempotency_key: request.causal_context.idempotency_key,
             delivery_mode: request.delivery_mode,
+            target_metadata: request.target_metadata,
             status: ApprovalStatus::Pending,
             decision_actor_id: None,
             decided_at: None,
@@ -673,9 +801,9 @@ DROP TABLE engine_approvals_global_idempotency_migration;
                     approval_id, function_id, payload_json, payload_fingerprint,
                     actor_id, actor_kind, authority_grant_id, authority_scopes_json,
                     trace_id, parent_invocation_id, trigger_id, session_id, workspace_id,
-                    idempotency_key, delivery_mode, status, decision_actor_id, decided_at,
+                    idempotency_key, delivery_mode, target_metadata_json, status, decision_actor_id, decided_at,
                     result_json, error_json, created_at, updated_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 params![
                     record.approval_id.as_str(),
                     record.function_id.as_str(),
@@ -707,6 +835,12 @@ DROP TABLE engine_approvals_global_idempotency_migration;
                     record.workspace_id.as_deref(),
                     record.idempotency_key.as_deref(),
                     record.delivery_mode.as_str(),
+                    record
+                        .target_metadata
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(json_err)?,
                     record.status.as_str(),
                     record.decision_actor_id.as_ref().map(ActorId::as_str),
                     record.decided_at.as_ref().map(DateTime::to_rfc3339),
@@ -790,6 +924,7 @@ fn row_to_record(
     let created_at: String = row.get("created_at")?;
     let updated_at: String = row.get("updated_at")?;
     let decided_at: Option<String> = row.get("decided_at")?;
+    let target_metadata_json: Option<String> = row.get("target_metadata_json")?;
     Ok(EngineApprovalRecord {
         approval_id: row.get("approval_id")?,
         function_id: FunctionId::new(row.get::<_, String>("function_id")?)
@@ -821,6 +956,10 @@ fn row_to_record(
         workspace_id: row.get("workspace_id")?,
         idempotency_key: row.get("idempotency_key")?,
         delivery_mode: parse_delivery_mode(&delivery_mode)
+            .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,
+        target_metadata: target_metadata_json
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
             .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,
         status: parse_status(&status)
             .map_err(|err| rusqlite::Error::ToSqlConversionFailure(Box::new(err)))?,

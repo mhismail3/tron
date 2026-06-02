@@ -148,6 +148,7 @@ pub(super) async fn execute_invoke_value(
                 payload: child.payload.clone(),
                 causal_context: child.causal_context.clone(),
                 delivery_mode: DeliveryMode::Sync,
+                target_metadata: None,
             })
             .await
             .map_err(engine_error_to_capability_error)?;

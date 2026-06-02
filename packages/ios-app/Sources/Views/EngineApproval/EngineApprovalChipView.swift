@@ -96,7 +96,7 @@ struct EngineApprovalChipView: View {
         switch data.params.riskLevel {
         case .low: return .tronEmerald
         case .medium: return .tronAmber
-        case .high: return .tronError
+        case .high, .critical: return .tronError
         }
     }
 

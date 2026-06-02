@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **65.25/100**
+Current score: **67.5/100**
 
 Status: **running**
 
@@ -696,8 +696,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D, HMH-E1, and HMH-E2 are also closed; continue with HMH-E3 to
-  prove approval and consequence clarity.
+  proven. HMH-D, HMH-E1, HMH-E2, and HMH-E3 are also closed; continue with
+  HMH-E4 to prove module controls are native server projections.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -956,8 +956,8 @@ HMH-D8 evidence, 2026-06-02:
 
 Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7/HMH-D8:
 
-- HMH-D, HMH-E1, and HMH-E2 are closed. Continue with HMH-E3 to prove approval
-  and consequence clarity.
+- HMH-D, HMH-E1, HMH-E2, and HMH-E3 are closed. Continue with HMH-E4 to prove
+  module controls are native server projections.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -969,7 +969,7 @@ Out of scope: client-side target reconstruction or native-only feature forks.
 |----|----------|--------|--------|----------|---------------|
 | HMH-E1 | Engine Console is substrate-first | 15 | passed_after_fix | Console search/inspect covers workers, capabilities, modules, generated UI, traces, primer, conformance, and audit without a hardcoded tool catalog. | Stop if UI reads fixed capability descriptors. |
 | HMH-E2 | Generated surface for new capability | 20 | passed_after_fix | Engine creates a `ui_surface` for a session-created function; iOS renders it natively; submit references stored surface/version/action ids only. | Stop if iOS constructs target payloads. |
-| HMH-E3 | Approval and consequence clarity | 15 | pending | iOS approval UI shows server risk/effect/authority/idempotency/lease/compensation metadata and resolves only through `approval::resolve`. | Stop if local approval state becomes final truth. |
+| HMH-E3 | Approval and consequence clarity | 15 | passed_after_fix | iOS approval UI shows server risk/effect/authority/idempotency/lease/compensation metadata and resolves only through `approval::resolve`. | Stop if local approval state becomes final truth. |
 | HMH-E4 | Module controls are native projections | 15 | pending | iOS can inspect/configure/activate/disable/upgrade/rollback/quarantine module packages through canonical server functions with evidence drill-down. | Stop if module policy appears in Swift. |
 | HMH-E5 | Human can understand agent-created harness changes | 15 | pending | Session-created capability, provenance, tests, generated UI, promotion status, cleanup, and trace are visible in an ergonomic iPhone/iPad flow. | Fix UX before declaring north-star proof. |
 | HMH-E6 | Visual proof covers iPhone and iPad | 10 | pending | Browser/Simulator/Computer Use proof includes device, UDID, bundle id, screenshots, action sequence, server rows, and return codes. | No screenshot-only proof without DB/event evidence. |
@@ -1047,11 +1047,46 @@ HMH-E2 evidence, 2026-06-02:
 - Passing iOS renderer proof:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests`.
 
-Open loops after HMH-E1/HMH-E2:
+HMH-E3 evidence, 2026-06-02:
 
-- Continue with HMH-E3: prove iOS approval UI shows server risk/effect/
-  authority/idempotency/lease/compensation metadata and resolves only through
-  `approval::resolve`.
+- The red audit found approval records preserved original causal context
+  (`authorityGrantId`, authority scopes, trace, parent, session/workspace, and
+  idempotency key) but did not snapshot target contract metadata. The iOS sheet
+  rendered action, reason, and a hardcoded high-risk badge, so the human could
+  not inspect the server-declared effect, risk, authority requirement,
+  idempotency contract, resource lease, or compensation contract before
+  resolving.
+- The fix adds `EngineApprovalTargetMetadata` to approval records. The host
+  snapshots the target function's catalog contract at approval creation:
+  effect class, risk level, required authority, idempotency, resource lease, and
+  compensation. The SQLite approval store persists the snapshot in
+  `target_metadata_json`, and old approval tables are migrated to include the
+  column without fabricating metadata for historical records.
+- iOS decodes `targetMetadata`, `authorityGrantId`, authority scopes, and
+  idempotency key from `approval.pending`/`approval.resolved` records. The
+  approval sheet renders server consequence, authority, idempotency, lease, and
+  compensation sections from that record. The client still only sends decisions
+  through `ApprovalClient.resolve -> approval::resolve`; local submission marks
+  the chip as `resolving` with `decision=nil` until the server response or
+  approval stream supplies the terminal state.
+- Passing server proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib engine::tests::approval -- --nocapture`.
+- Passing approval store migration proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib engine::approval -- --nocapture`.
+- Passing iOS state/sheet projection proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineApprovalStateTests`.
+- Passing approval event DTO proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EventPluginTests/testApprovalPendingPluginParsesEngineStreamPayload -only-testing:TronMobileTests/EventPluginTests/testApprovalPendingPluginDispatchesPendingRecordsAsPending -only-testing:TronMobileTests/EventPluginTests/testApprovalPendingPluginDispatchesTerminalRecordsAsResolved`.
+- Passing resolve-client proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ApprovalClientTests`.
+- Passing source-boundary proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`.
+
+Open loops after HMH-E1/HMH-E2/HMH-E3:
+
+- Continue with HMH-E4: prove module controls are native projections over
+  canonical server functions with evidence drill-down and no Swift-owned module
+  policy.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1183,9 +1218,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, and HMH-E2 are closed. Continue with
-HMH-E3: prove approval and consequence clarity stays server-owned.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, HMH-E2, and HMH-E3 are closed. Continue
+with HMH-E4: prove module controls are native server projections.
 
 ```bash
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineApprovalStateTests
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests
 ```
