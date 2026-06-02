@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-02 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -14,7 +14,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - A staged input composer where pending skills and attachments share one wrapping chip row before send; staged skill chips expose separate detail and remove accessibility actions while sent message skill chips stay compact
 - On iPad, hardware Tab in the prompt composer and Agent protected-branch field resigns input focus instead of inserting hidden draft text or submitting a setting; broader control-to-control keyboard traversal remains a separate visual QA concern
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
-- A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, module package/config/activation refs, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle; its section and search-suggestion chips are semantic buttons with hover highlighting and combined accessibility labels
+- A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, module package/config/activation/trust/health/evidence/action refs, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle; its section and search-suggestion chips are semantic buttons with hover highlighting and combined accessibility labels
 - No fixed Automations or Voice Notes dashboards; reusable cron and voice-note protocol pieces remain capability modules until generated/control surfaces replace them
 
 The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
@@ -158,9 +158,11 @@ final class SubagentState {
 | `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state |
+| `ViewModels/State/EngineConsoleModuleProjection.swift` | Typed read-only projection over server-authored module package/config/activation/trust/health/action rows |
 | `Views/EngineConsole/EngineConsoleView.swift` | Top-level capability operator console |
 | `Views/EngineConsole/EngineConsoleSection.swift` | Engine Console section identity |
 | `Views/EngineConsole/EngineConsoleComponents.swift` | Console-specific section chips, metrics, cards, rows, and inspection sheet components |
+| `Views/EngineConsole/EngineConsoleModuleProjectionView.swift` | Native module projection card for package/config/activation/trust/health/evidence/action rows |
 | `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources; uses Tron typography/color tokens, restrained native row expansion, and submits only stored action coordinates |
 | `Models/Messages/CapabilityInvocationTypes.swift` | Capability invocation lifecycle DTOs, artifacts, results, and errors |
 | `Models/Messages/CapabilityInvocationDisplayModel.swift` | Server-authored capability invocation display projection |
@@ -243,8 +245,12 @@ workers, bindings, policies, audit, traces, and primer internals only after the
 user opts in. `EngineConsoleState` owns refresh, search, inspect, local mutation
 state, mutation gating, and disconnected read-only cache snapshots. The server
 remains the source of truth for policy, authority, approval, audit redaction,
-plugin lifecycle, module package/config/activation resources, and binding
-selection.
+plugin lifecycle, module package/config/activation/trust/health/action
+resources, and binding selection. Module operator rows decode
+`control::snapshot` fields such as `moduleHealth`, `moduleSourceTrust`, and
+server-advertised `module::` action summaries; Swift filters by namespace for
+display and does not keep a package-policy allowlist or reconstruct module
+action targets.
 
 The Engine Console uses sheet-native Tron components: section chips, compact
 metric grids, capability cards, status banners, generated action rows, and

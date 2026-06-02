@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **57/100**
+Current score: **58.5/100**
 
 Status: **running**
 
@@ -122,8 +122,9 @@ Current evidence from this worktree:
   resource-backed canonical `module::*` functions and composes activation
   through `worker::spawn`.
 - `packages/ios-app/docs/architecture.md` describes iOS as a thin `/engine`
-  client with Engine Console, generated UI, module projections, approvals, and
-  server-owned action target reconstruction.
+  client with Engine Console, generated UI, module package/config/activation/
+  trust/health/action projections, approvals, and server-owned action target
+  reconstruction.
 - Existing static gates reject many alternate planes: dotted public methods,
   client-owned generated targets, local approval truth, raw worker-token
   authority fallbacks, `sandbox::spawn_worker` as a public creation API, and
@@ -695,8 +696,8 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D1 through HMH-D6 are also closed; continue with HMH-D7 to
-  prove the iOS/operator projection.
+  proven. HMH-D1 through HMH-D7 are also closed; continue with HMH-D8 to prove
+  no generic module action escape hatch.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -712,7 +713,7 @@ Out of scope: remote marketplace trust without explicit local policy.
 | HMH-D4 | Health, integrity, and conformance are inspectable | 15 | passed | `check_health`, `verify_integrity`, and `run_conformance` produce linked evidence, child invocation ids, and recovery recommendations. | Block promotion if evidence is missing/stale. |
 | HMH-D5 | Upgrade, rollback, disable, quarantine work | 15 | passed | Upgrade and rollback require expected versions and idempotency; disable/quarantine stop workers or fail closed; stale invocations cannot use quarantined functions. | Stop if rollback is doc-only. |
 | HMH-D6 | Local marketplace shape exists | 10 | passed | Installing a first-party/local package is a capability operation over local package resources; remote source approval is explicit and policy-bound. | Reject implicit network trust. |
-| HMH-D7 | iOS/operator projection is complete | 10 | pending | Engine Console shows package/config/activation/trust/conformance actions and evidence without hardcoded package policy. | Fix iOS projection only after server truth is proven. |
+| HMH-D7 | iOS/operator projection is complete | 10 | passed_after_fix | Engine Console shows package/config/activation/trust/conformance actions and evidence without hardcoded package policy. | Fix iOS projection only after server truth is proven. |
 | HMH-D8 | No generic action escape hatch | 10 | pending | Static scan rejects `module::act`, generic package mutation multiplexers, and client-side module policy. | Remove escape hatches before closeout. |
 
 Closeout commands:
@@ -898,12 +899,43 @@ HMH-D6 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml module_local_package_install_shape_is_resource_backed_and_rejects_implicit_remote_trust -- --nocapture`.
 
-Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6:
+HMH-D7 evidence, 2026-06-02:
 
-- HMH-D remains open. Continue with HMH-D7 to prove the iOS/operator projection:
-  Engine Console and generated operator surfaces must expose
-  package/config/activation/trust/conformance actions and evidence without
-  hardcoded client-side package policy.
+- Server truth was already proven by
+  `generated_ui_can_author_package_and_activation_operator_surfaces`: generated
+  `ui_surface` resources for package, worker-package resource, trust-root
+  decision, and trust-audit schedule targets expose canonical module actions
+  for source verification, conformance, trust simulation/review, audit
+  scheduling/status/run/retention, trust-root renewal, signature-key rotation,
+  expiry, revocation enforcement, and generated-surface refresh.
+- The iOS red proof initially failed at compile time because
+  `ControlSnapshotDTO` did not decode the server's `moduleHealth` and
+  `moduleSourceTrust` fields and `EngineConsoleState` had no
+  `moduleOperatorProjection`.
+- The fix adds
+  `packages/ios-app/Sources/ViewModels/State/EngineConsoleModuleProjection.swift`
+  as a typed normalization layer over `control::snapshot` data. It preserves
+  package/config/activation resources, module health evidence, source
+  trust/approval/registration/trust-root/conformance evidence refs, warning
+  codes, and every server-advertised `module::` action. Non-module actions are
+  filtered out by namespace only, so Swift does not keep a package-policy
+  allowlist or reconstruct action targets.
+- `EngineConsoleModuleProjectionCard` now renders that projection in the
+  Substrate section, replacing the prior read-only package-count card. The card
+  shows counts, resource rows, trust/evidence rows, health/evidence rows, and
+  server-advertised module action summaries. Mutations still go through
+  generated `ui_surface` actions and `ui::submit_action`; iOS has no direct
+  module lifecycle client or trust policy implementation.
+- Passing iOS proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests`.
+- Passing iOS source-boundary proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`.
+
+Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7:
+
+- HMH-D remains open. Continue with HMH-D8 to prove no generic action escape
+  hatch exists: static scans must reject `module::act`, generic package
+  mutation multiplexers, and client-side module policy.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -1059,9 +1091,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, and HMH-D1 through HMH-D6 are closed. Continue with
-HMH-D7: prove the iOS/operator projection.
+HMH-A, HMH-B, HMH-C, and HMH-D1 through HMH-D7 are closed. Continue with
+HMH-D8: prove no generic action escape hatch.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml generated_ui_can_author_package_and_activation_operator_surfaces -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture
 ```

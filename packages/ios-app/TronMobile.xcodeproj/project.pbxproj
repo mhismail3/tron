@@ -581,6 +581,7 @@
 		ADAA8B743AF8FCEDF40E0D3F /* DateParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12710B01635FE362E0A94A4E /* DateParserTests.swift */; };
 		ADB69A0CBC981EF1BBEF0DB4 /* CleanupGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 589780D036FC613640B842AB /* CleanupGuardTests.swift */; };
 		ADE823483A87985C5E503A9C /* TronStepper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0248F14D0E46BB22AF7EEF3B /* TronStepper.swift */; };
+		AE71497201790CB6E7B9FF98 /* EngineConsoleModuleProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC0E3474D2632EE49F8D4B16 /* EngineConsoleModuleProjection.swift */; };
 		AED982B671C2C03CF5DC27C5 /* FileDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 351971829A487361F5CE86B7 /* FileDetailSheet.swift */; };
 		AF023F680EC37CF8C16E40FD /* background-dark.png in Resources */ = {isa = PBXBuildFile; fileRef = 856A8C3FA5A5743C34F4185E /* background-dark.png */; };
 		AF995741399CFE0412212FE4 /* TronSpacing.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5CD5F330539097040C10CAC /* TronSpacing.swift */; };
@@ -726,6 +727,7 @@
 		DC8727FFEF3FF2E6D6A2F9D2 /* UserInteractionTransformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5143EA8BD7E958A218473E /* UserInteractionTransformer.swift */; };
 		DCB3FF33E969E64ACB4F24A1 /* TronShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F0AA1A9F9B42CCBC0E6BD0EB /* TronShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		DCBB3F7A257EE89410DF5478 /* AgentControlCardAccessibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79C72D2AEE9F01B1915B7880 /* AgentControlCardAccessibilityTests.swift */; };
+		DD15AE953D22517E176054F2 /* EngineConsoleModuleProjectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BA61C9E59C5F1A55E067D95 /* EngineConsoleModuleProjectionView.swift */; };
 		DD9A302305306CE0AE305FE0 /* GlassActionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F33B80C60EF29B3EC1B78C /* GlassActionSheet.swift */; };
 		DDE5DA88B31B18B125FEA6E8 /* FileInfoProperties.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CBEA80BB57374CD72F9173E /* FileInfoProperties.swift */; };
 		DE697ED282ADD5F00BA2EB3C /* MediaClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB6E57FDBBD6080C970423AF /* MediaClient.swift */; };
@@ -1344,6 +1346,7 @@
 		8A37640E7C6E6D4795595EA2 /* DurationFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DurationFormatter.swift; sourceTree = "<group>"; };
 		8A76B4B85A29E6A02017875C /* MergeChangesSubSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MergeChangesSubSheet.swift; sourceTree = "<group>"; };
 		8AB3DFED93B78CDD4F25ACBB /* WorktreeReleasedPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorktreeReleasedPlugin.swift; sourceTree = "<group>"; };
+		8BA61C9E59C5F1A55E067D95 /* EngineConsoleModuleProjectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineConsoleModuleProjectionView.swift; sourceTree = "<group>"; };
 		8CF1ADB153C9B41F03256856 /* MentionPopup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MentionPopup.swift; sourceTree = "<group>"; };
 		8D37BD1828E050B1313AC635 /* ImportSessionFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportSessionFlow.swift; sourceTree = "<group>"; };
 		8D4EF91D1E05A3E9F66489DC /* EngineConnectionProtocolFrames.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineConnectionProtocolFrames.swift; sourceTree = "<group>"; };
@@ -1657,6 +1660,7 @@
 		EB6E57FDBBD6080C970423AF /* MediaClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaClient.swift; sourceTree = "<group>"; };
 		EB7F70E9352280B803D1BF72 /* StrategyPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StrategyPicker.swift; sourceTree = "<group>"; };
 		EBCAC63F963C501D8B16DCAE /* CapabilityResultNote.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityResultNote.swift; sourceTree = "<group>"; };
+		EC0E3474D2632EE49F8D4B16 /* EngineConsoleModuleProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineConsoleModuleProjection.swift; sourceTree = "<group>"; };
 		ECB574CA5B16F48033D035C7 /* ActionButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionButtons.swift; sourceTree = "<group>"; };
 		ECBA63E06BF1573F3F831E9F /* ThinkingBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingBlock.swift; sourceTree = "<group>"; };
 		ECCB5B117F7362AA7E635BD6 /* ProcessListSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessListSheet.swift; sourceTree = "<group>"; };
@@ -2159,6 +2163,7 @@
 			isa = PBXGroup;
 			children = (
 				EF91DE2A2872301B877E47E0 /* EngineConsoleComponents.swift */,
+				8BA61C9E59C5F1A55E067D95 /* EngineConsoleModuleProjectionView.swift */,
 				ABA97D46FB399437EE5965C3 /* EngineConsoleSection.swift */,
 				A4F6FCF6894DD031E725B24C /* EngineConsoleView.swift */,
 				1B6955C3D0C2DC232F198AD4 /* GeneratedUISurfaceView.swift */,
@@ -3337,6 +3342,7 @@
 				EFCC93FE9C92FBEC8986E5C9 /* ContextTrackingState.swift */,
 				D3E656D23A2352751AB4427E /* DisplayStreamState.swift */,
 				7CE7E1AB7DD81261A07F4E2E /* EngineApprovalState.swift */,
+				EC0E3474D2632EE49F8D4B16 /* EngineConsoleModuleProjection.swift */,
 				7580919E2D8CAA94FE15D330 /* EngineConsoleState.swift */,
 				6C1651B2823641DFC3DD68AC /* GitTileGating.swift */,
 				9AF6BBC226CE0D8548900B17 /* GitWorkflowState.swift */,
@@ -3990,6 +3996,8 @@
 				3C592D6B6E14E96FBB24FCBD /* EngineConnectionTypes.swift in Sources */,
 				93A7303FC87BD12FEAB792D2 /* EngineConsoleCache.swift in Sources */,
 				60536FA5B426FB8932BE34CA /* EngineConsoleComponents.swift in Sources */,
+				AE71497201790CB6E7B9FF98 /* EngineConsoleModuleProjection.swift in Sources */,
+				DD15AE953D22517E176054F2 /* EngineConsoleModuleProjectionView.swift in Sources */,
 				64271F61CFB104365BA5BE18 /* EngineConsoleSection.swift in Sources */,
 				251975D2471F2F924E4A8DBC /* EngineConsoleState.swift in Sources */,
 				3B5D8A6D0D6909CFDCF76BCE /* EngineConsoleView.swift in Sources */,

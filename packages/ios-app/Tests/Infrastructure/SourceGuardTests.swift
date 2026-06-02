@@ -530,11 +530,40 @@ struct SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleComponents.swift"),
             encoding: .utf8
         )
+        let engineConsoleState = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleState.swift"),
+            encoding: .utf8
+        )
+        let moduleProjection = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleModuleProjection.swift"),
+            encoding: .utf8
+        )
+        let moduleProjectionView = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleModuleProjectionView.swift"),
+            encoding: .utf8
+        )
         let engineConsoleSurface = engineConsole + "\n" + engineConsoleComponents
 
         #expect(!engineConsole.contains(#".navigationTitle("Engine")"#))
         #expect(engineConsole.contains("DashboardToolbarContent("))
         #expect(engineConsole.contains(#"title: "Engine","#))
+        #expect(engineConsole.contains("EngineConsoleModuleProjectionCard(projection: state.moduleOperatorProjection)"))
+        #expect(engineConsoleState.contains("EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)"))
+        #expect(moduleProjection.contains("snapshot.moduleHealth"))
+        #expect(moduleProjection.contains("snapshot.moduleSourceTrust"))
+        #expect(moduleProjection.contains(#".filter { $0.functionId.hasPrefix("module::") }"#))
+        #expect(moduleProjectionView.contains("projection.evidenceRefCount"))
+        #expect(moduleProjectionView.contains("projection.actions"))
+        for forbiddenModulePolicy in [
+            "module::configure",
+            "module::activate",
+            "module::approve_source",
+            "module::run_conformance",
+            "payloadTemplate",
+            "packagePolicy"
+        ] {
+            #expect(!moduleProjection.contains(forbiddenModulePolicy))
+        }
         #expect(engineConsoleSurface.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
         #expect(engineConsoleSurface.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
         #expect(engineConsoleSurface.contains("SheetDismissButton(color: tint)"))

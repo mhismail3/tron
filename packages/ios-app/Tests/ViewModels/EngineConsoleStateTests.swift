@@ -224,6 +224,125 @@ struct EngineConsoleStateTests {
         #expect(state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: "grant"))
     }
 
+    @Test("module operator projection keeps server actions and evidence")
+    func moduleOperatorProjectionKeepsServerActionsAndEvidence() async throws {
+        let client = FakeEngineConsoleCapabilityClient()
+        client.controlSnapshot = ControlSnapshotDTO(
+            catalogRevision: 9,
+            workers: [],
+            capabilities: [],
+            resourceTypes: [],
+            activeGoals: [],
+            modulePackages: [
+                AnyCodable([
+                    "resourceId": "worker-package:demo",
+                    "currentVersionId": "pkg-v1",
+                    "lifecycle": "available"
+                ])
+            ],
+            moduleConfigs: [
+                AnyCodable([
+                    "resourceId": "module-config:workspace:demo",
+                    "currentVersionId": "cfg-v1",
+                    "lifecycle": "available"
+                ])
+            ],
+            activationRecords: [
+                AnyCodable([
+                    "resourceId": "activation:workspace:demo",
+                    "currentVersionId": "act-v1",
+                    "lifecycle": "available"
+                ])
+            ],
+            moduleHealth: [
+                AnyCodable([
+                    "activationResourceId": "activation:workspace:demo",
+                    "activationVersionId": "act-v1",
+                    "activationStatus": "active",
+                    "workerId": "demo-worker",
+                    "healthResult": ["status": "healthy"],
+                    "healthEvidenceRef": "evidence:health"
+                ])
+            ],
+            moduleSourceTrust: [
+                AnyCodable([
+                    "packageResourceId": "worker-package:demo",
+                    "packageVersionId": "pkg-v1",
+                    "packageId": "demo",
+                    "sourceTrustStatus": "verified",
+                    "effectiveTrustTier": "local_digest_verified",
+                    "sourceEvidenceRefs": ["evidence:source"],
+                    "sourceRegistrationRefs": [
+                        ["resourceId": "decision:source-registration"]
+                    ],
+                    "trustRootRefs": [
+                        ["resourceId": "decision:trust-root"]
+                    ],
+                    "sourceApprovalRefs": [
+                        ["resourceId": "decision:source-approval", "status": "active"]
+                    ],
+                    "conformanceEvidenceRefs": ["evidence:conformance"],
+                    "policyDiagnostics": ["conformance": ["evidenceRef": "evidence:conformance"]]
+                ])
+            ],
+            invocations: [],
+            grants: [],
+            queues: [],
+            leases: [],
+            approvals: [],
+            storage: nil,
+            integrityWarnings: [],
+            availableActions: [
+                moduleAction("module::configure", targetType: "package", targetField: "packageResourceId", risk: "medium", approvalRequired: false),
+                moduleAction("module::activate", targetType: "package", targetField: "packageResourceId", risk: "high", approvalRequired: true),
+                moduleAction("module::disable", targetType: "activation", targetField: "activationResourceId", risk: "high", approvalRequired: true),
+                moduleAction("module::rollback", targetType: "activation", targetField: "activationResourceId", risk: "high", approvalRequired: true),
+                moduleAction("module::quarantine", targetType: "activation", targetField: "resourceId", risk: "high", approvalRequired: true),
+                moduleAction("module::verify_source", targetType: "package", targetField: "packageResourceId", risk: "medium", approvalRequired: false),
+                moduleAction("module::approve_source", targetType: "package", targetField: "packageResourceId", risk: "high", approvalRequired: true),
+                moduleAction("module::run_conformance", targetType: "package", targetField: "resourceId", risk: "medium", approvalRequired: false),
+                moduleAction("module::simulate_trust_change", targetType: "package", targetField: "targetResourceId", risk: "low", approvalRequired: false),
+                moduleAction("module::record_trust_review", targetType: "package", targetField: "targetResourceId", risk: "medium", approvalRequired: false),
+                moduleAction("module::custom_future_operation", targetType: "package", targetField: "packageResourceId", risk: "medium", approvalRequired: false),
+                AnyCodable(["functionId": "worker::disconnect", "targetType": "worker"])
+            ]
+        )
+        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+
+        await state.refresh()
+
+        let projection = state.moduleOperatorProjection
+        #expect(projection.packages.map(\.resourceId) == ["worker-package:demo"])
+        #expect(projection.configs.map(\.resourceId) == ["module-config:workspace:demo"])
+        #expect(projection.activations.map(\.resourceId) == ["activation:workspace:demo"])
+        #expect(projection.health.first?.healthEvidenceRef == "evidence:health")
+        #expect(projection.sourceTrust.first?.sourceEvidenceRefs == ["evidence:source"])
+        #expect(projection.sourceTrust.first?.sourceRegistrationRefs == ["decision:source-registration"])
+        #expect(projection.sourceTrust.first?.trustRootRefs == ["decision:trust-root"])
+        #expect(projection.sourceTrust.first?.sourceApprovalRefs == ["decision:source-approval"])
+        #expect(projection.sourceTrust.first?.conformanceEvidenceRefs == ["evidence:conformance"])
+        #expect(projection.evidenceRefCount == 6)
+
+        let actionIds = Set(projection.actions.map(\.functionId))
+        for required in [
+            "module::configure",
+            "module::activate",
+            "module::disable",
+            "module::rollback",
+            "module::quarantine",
+            "module::verify_source",
+            "module::approve_source",
+            "module::run_conformance",
+            "module::simulate_trust_change",
+            "module::record_trust_review",
+            "module::custom_future_operation"
+        ] {
+            #expect(actionIds.contains(required))
+        }
+        #expect(!actionIds.contains("worker::disconnect"))
+        #expect(projection.actions.first { $0.functionId == "module::activate" }?.approvalRequired == true)
+    }
+
     @Test("engine console loads validates and refreshes generated surfaces through ui primitives")
     func generatedSurfaceFlowUsesServerPrimitives() async throws {
         let client = FakeEngineConsoleCapabilityClient()
@@ -270,6 +389,24 @@ struct EngineConsoleStateTests {
             .appendingPathComponent(UUID().uuidString)
             .appendingPathComponent("EngineConsoleCache.json")
         return EngineConsoleCache(fileURL: url)
+    }
+
+    private func moduleAction(
+        _ functionId: String,
+        targetType: String,
+        targetField: String,
+        risk: String,
+        approvalRequired: Bool
+    ) -> AnyCodable {
+        AnyCodable([
+            "functionId": functionId,
+            "targetType": targetType,
+            "targetField": targetField,
+            "target": NSNull(),
+            "requiredRisk": risk,
+            "approvalRequired": approvalRequired,
+            "state": "available"
+        ])
     }
 }
 

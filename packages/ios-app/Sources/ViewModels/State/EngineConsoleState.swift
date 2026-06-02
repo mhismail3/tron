@@ -146,6 +146,10 @@ final class EngineConsoleState {
         }
     }
 
+    var moduleOperatorProjection: EngineConsoleModuleOperatorProjection {
+        EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)
+    }
+
     func controlAdvertisesAction(functionId: String, targetType: String? = nil) -> Bool {
         controlSnapshot?.availableActions?.contains { action in
             guard let object = action.dictionaryValue else { return false }

@@ -9,6 +9,8 @@ struct ControlSnapshotDTO: Codable, Equatable, Sendable {
     var modulePackages: [AnyCodable]? = nil
     var moduleConfigs: [AnyCodable]? = nil
     var activationRecords: [AnyCodable]? = nil
+    var moduleHealth: [AnyCodable]? = nil
+    var moduleSourceTrust: [AnyCodable]? = nil
     var invocations: [AnyCodable]?
     var grants: [AnyCodable]?
     var queues: [AnyCodable]?

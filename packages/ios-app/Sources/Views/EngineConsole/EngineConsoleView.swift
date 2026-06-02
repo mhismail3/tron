@@ -215,43 +215,7 @@ struct EngineConsoleView: View {
                 }
             }
 
-            EngineConsoleCard {
-                EngineConsoleCardHeader(
-                    symbol: "shippingbox",
-                    title: "Modules",
-                    subtitle: "Worker packages, configs, and activations projected from resource truth."
-                )
-                let packages = substrateSnapshot?.modulePackages ?? []
-                let configs = substrateSnapshot?.moduleConfigs ?? []
-                let activations = substrateSnapshot?.activationRecords ?? []
-                if packages.isEmpty && configs.isEmpty && activations.isEmpty {
-                    EngineConsoleEmptyState(
-                        symbol: "shippingbox",
-                        title: "No modules",
-                        message: "Registered packages and activation records will appear here after module capabilities run."
-                    )
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        EngineConsoleKeyValueRow("Packages", "\(packages.count)")
-                        EngineConsoleKeyValueRow("Configs", "\(configs.count)")
-                        EngineConsoleKeyValueRow("Activations", "\(activations.count)")
-                        ForEach(Array(packages.prefix(4).enumerated()), id: \.offset) { _, package in
-                            EngineConsoleKeyValueRow(
-                                substrateField(
-                                    package,
-                                    keys: ["resourceId", "id"],
-                                    defaultValue: "worker_package"
-                                ),
-                                substrateField(
-                                    package,
-                                    keys: ["lifecycle", "kind"],
-                                    defaultValue: "available"
-                                )
-                            )
-                        }
-                    }
-                }
-            }
+            EngineConsoleModuleProjectionCard(projection: state.moduleOperatorProjection)
 
             EngineConsoleCard {
                 EngineConsoleCardHeader(
