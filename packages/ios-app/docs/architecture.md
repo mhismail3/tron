@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-01 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state, engine thin-client boundary, Engine Console workers/policies/traces/primer/program-runs/substrate sections, read-only module package/config/activation projections, server-authored generated `ui_surface` inspection/refresh/action flow, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -12,7 +12,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Voice transcription input
 - Capability-native invocation/result rendering for the single model-facing `execute` harness and server-owned generated UI actions
 - A staged input composer where pending skills and attachments share one wrapping chip row before send; staged skill chips expose separate detail and remove accessibility actions while sent message skill chips stay compact
-- On iPad, hardware Tab in the prompt composer resigns input focus instead of inserting a hidden draft character; broader control-to-control keyboard traversal remains a separate visual QA concern
+- On iPad, hardware Tab in the prompt composer and Agent protected-branch field resigns input focus instead of inserting hidden draft text or submitting a setting; broader control-to-control keyboard traversal remains a separate visual QA concern
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
 - A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, module package/config/activation refs, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle
 - No fixed Automations or Voice Notes dashboards; reusable cron and voice-note protocol pieces remain capability modules until generated/control surfaces replace them
@@ -563,7 +563,10 @@ Its first grid row launches the surface-oriented settings: App, Server, and
 Providers. Its second row launches agent-behavior settings: Agent, Context, and
 Plugin Sources. The Agent page switches to an iPad-only two-column landscape
 layout so protected-branch controls stay visible near the top of the floating
-form. Server and Providers use the same shared iPad-landscape detector:
+form. The protected-branch add field has an iPad-only hardware Tab handler that
+resigns input focus without invoking Add, so keyboard traversal cannot mutate
+the server settings snapshot. Server and Providers use the same shared
+iPad-landscape detector:
 Servers balances paired-server/transcription/diagnostics controls against the
 updates column, and Providers splits model providers and services into two
 columns so configured rows stay visible without deep scrolling. Server controls

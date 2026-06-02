@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AgentSettingsPage: View {
     @Environment(\.dependencies) var dependencies
+    @FocusState private var focusedField: AgentSettingsFocusedField?
 
     let settingsState: SettingsState
     let selectedModelDisplayName: String
@@ -501,7 +502,11 @@ struct AgentSettingsPage: View {
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .font(TronTypography.sans(size: TronTypography.sizeBody))
+                            .focused($focusedField, equals: .protectedBranch)
                             .onSubmit(addProtected)
+                            .onKeyPress(.tab) {
+                                resignProtectedBranchFocusForKeyboardTraversal()
+                            }
                         Button("Add", action: addProtected)
                             .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                             .foregroundStyle(.tronEmerald)
@@ -536,6 +541,21 @@ struct AgentSettingsPage: View {
         }
     }
 
+    private func resignProtectedBranchFocusForKeyboardTraversal() -> KeyPress.Result {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            return .ignored
+        }
+
+        focusedField = nil
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        return .handled
+    }
+
     // MARK: - Shared Row
 
     private func navigationRow(icon: String, label: String, value: String, action: @escaping () -> Void) -> some View {
@@ -560,4 +580,8 @@ struct AgentSettingsPage: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture { action() }
     }
+}
+
+private enum AgentSettingsFocusedField: Hashable {
+    case protectedBranch
 }

@@ -382,8 +382,8 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipad-balanced-notifications-list-retuned-landscape.png`,
   and `/tmp/tron-psg-evidence/ipad-balanced-notification-detail-retuned-landscape.png`.
   At that checkpoint, open loops still included IPD-7
-  pairing/unavailable-server/protected-branch details and IPD-9 pointer/full
-  keyboard traversal, so no new points were awarded.
+  pairing/unavailable-server/protected-branch details and IPD-9 pointer plus
+  broader keyboard traversal, so no new points were awarded.
 - Follow-up landscape hardening after live Computer Use found the long Agent
   settings sheet still could not be moved deeply enough in the iPad landscape
   Simulator. The iPad-only sheet presentation path now keeps the narrower/taller
@@ -873,6 +873,35 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd-sheet-standardized-notification-landscape-normalized.png`.
   The proof did not invoke approval/deny, commit, push, pull, rebase, merge,
   fork, archive, reset, send, or other action-time-confirmed controls.
+- Additional IPD-9 Agent protected-branch keyboard follow-up fixed the remaining
+  Agent settings Tab subcase documented in the previous landscape pass. The
+  protected-branch add field now has focus state and an iPad-only
+  `.onKeyPress(.tab)` handler that resigns first responder without calling
+  `addProtected`. Source-level TDD guard
+  `packages/ios-app/Tests/Views/Settings/AgentSettingsKeyboardTraversalTests.swift`
+  first failed against the old source in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-51-16--0700.xcresult`,
+  then passed after the fix in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-52-14--0700.xcresult`.
+  The broader focused iPad run passed 4 XCTest cases plus 12 Swift Testing
+  checks across `AgentSettingsKeyboardTraversalTests`,
+  `InputBarKeyboardTraversalTests`, `AgentSettingsPageLayoutTests`, and
+  `AgentContextSettingsPageTests`; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-52-50--0700.xcresult`.
+  Manual non-mutating proof used rebuilt `com.tron.mobile.beta` on iPad Pro
+  13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`, launch pid `20213`:
+  screenshots
+  `/tmp/tron-psg-evidence/ipd9-agent-keyboard-protected-branch-before-tab.png`,
+  `/tmp/tron-psg-evidence/ipd9-agent-keyboard-protected-branch-draft-before-tab.png`,
+  and
+  `/tmp/tron-psg-evidence/ipd9-agent-keyboard-protected-branch-after-tab-no-submit.png`
+  show the Agent sheet, draft value `ipd9-tab-no-submit`, unchanged visible
+  protected branches `main`, `master`, and `develop`, and no Add click. DB
+  evidence
+  `/tmp/tron-psg-evidence/ipd9-agent-keyboard-tab-settings-invocations.json`
+  shows only `settings::get` in the proof window and no `settings::update`.
+  IPD-9 remains running for pointer QA and broader keyboard traversal beyond
+  the now-covered prompt and protected-branch text fields.
 
 Open loops before awarding more iPad points: finish IPD-1 archive execution
 confirmation, IPD-2
@@ -882,4 +911,4 @@ approval decision flows and generated UI details, full
 IPD-6 action-time-confirmed source-control
 actions and conflict resolver, IPD-8
 action-time-confirmed fork execution, IPD-9
-pointer QA and full hardware-keyboard traversal, and IPD-10 closeout.
+pointer QA and broader hardware-keyboard traversal, and IPD-10 closeout.

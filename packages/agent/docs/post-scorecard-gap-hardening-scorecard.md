@@ -625,8 +625,8 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd9-landscape-light-app-settings-accessibility-xxxl.png`,
   and `/tmp/tron-psg-evidence/ipd9-agent-tab-focus-add-branch.png`. Providers
   was visually inspected but not captured because the live view includes
-  credential labels/snippets. IPD-9 remains open because pointer QA and full
-  keyboard traversal are not complete.
+  credential labels/snippets. IPD-9 remains open because pointer QA and broader
+  control-to-control keyboard traversal are not complete.
 - IPD-1 relaunch preload proof terminated and relaunched `com.tron.mobile.beta`
   on the same iPad UDID; relaunch returned PID `14768` while dev takeover stayed
   healthy on PID `79934`. Screenshot
@@ -729,8 +729,38 @@ Owner taxonomy: `server_contract`, `client_projection`,
   No approval, source-control, fork, reset, archive, send, or remote-mutating UI
   action was invoked during this checkpoint. PSG-5 remains running because
   action-time approval decisions, source-control mutations, fork execution,
-  voice-note sheet submission states, pointer QA, and full keyboard traversal
+  voice-note sheet submission states, pointer QA, and broader keyboard traversal
   remain open.
+- 2026-06-01 IPD-9 Agent protected-branch keyboard follow-up fixed the
+  previously documented Agent settings subcase where Tab focused the
+  protected-branch text field but did not visibly advance out of it. Added
+  source-level TDD guard
+  `packages/ios-app/Tests/Views/Settings/AgentSettingsKeyboardTraversalTests.swift`;
+  the initial focused run failed against the existing source in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-51-16--0700.xcresult`.
+  `AgentSettingsPage` now binds the protected-branch field to local focus state
+  and handles iPad hardware Tab by resigning first responder instead of
+  submitting `addProtected`. Focused verification passed on the same iPad UDID:
+  `AgentSettingsKeyboardTraversalTests` alone passed in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-52-14--0700.xcresult`,
+  then the broader iPad keyboard/settings run passed 4 XCTest cases plus 12
+  Swift Testing checks across `AgentSettingsKeyboardTraversalTests`,
+  `InputBarKeyboardTraversalTests`, `AgentSettingsPageLayoutTests`, and
+  `AgentContextSettingsPageTests`; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-52-50--0700.xcresult`.
+  Manual non-mutating proof used rebuilt bundle `com.tron.mobile.beta`, launch
+  pid `20213`, typed draft-only value `ipd9-tab-no-submit` in the Agent
+  protected-branch field, pressed Tab, and did not click Add. Screenshots:
+  `/tmp/tron-psg-evidence/ipd9-agent-keyboard-protected-branch-before-tab.png`,
+  `/tmp/tron-psg-evidence/ipd9-agent-keyboard-protected-branch-draft-before-tab.png`,
+  and
+  `/tmp/tron-psg-evidence/ipd9-agent-keyboard-protected-branch-after-tab-no-submit.png`.
+  DB evidence
+  `/tmp/tron-psg-evidence/ipd9-agent-keyboard-tab-settings-invocations.json`
+  shows only `settings::get` in the proof window and no `settings::update`, so
+  the draft did not mutate protected-branch settings. IPD-9 remains open for
+  pointer QA and broader keyboard traversal beyond the prompt/protected-branch
+  text fields.
 
 ## Verification Plan
 
@@ -792,9 +822,9 @@ UDID before continuing.
   History and fork controls have live iPad proof without invoking fork
   execution; IPD-8 load-earlier pagination, sidebar
   selection, back/sidebar toggle, and existing fork lineage now have live iPad
-  proof; IPD-9 input focus and prompt Tab no-draft behavior have live
-  portrait/landscape proof, with pointer and full hardware-keyboard traversal
-  still open.
+  proof; IPD-9 input focus, prompt Tab no-draft behavior, and Agent
+  protected-branch Tab no-submit behavior have live proof, with pointer and
+  broader keyboard traversal still open.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.
