@@ -551,8 +551,28 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd9-keyboard-focus-accessibility.txt` records the
   focused `Message input` element. A follow-up `Tab` while editing the
   multiline input inserted a tab character into the draft instead of advancing
-  focus. The draft was cleared, no message was sent, and this remains partial
-  IPD-9 evidence pending full hardware-keyboard traversal and pointer QA.
+  focus. The draft was cleared, no message was sent, and the failure was
+  classified as a prompt-composer bug.
+- IPD-9 prompt-keyboard follow-up added
+  `packages/ios-app/Tests/Views/InputBarKeyboardTraversalTests.swift` and
+  changed `InputBar` so iPad hardware Tab resigns prompt focus instead of
+  inserting hidden draft text. The new source guard failed before the fix in
+  xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-00-15--0700.xcresult`,
+  then passed after the fix with existing composer coverage:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/InputBarKeyboardTraversalTests -only-testing:TronMobileTests/InputBarContentAreaChipTests`
+  passed 8 XCTest cases plus 1 Swift Testing check; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-03-11--0700.xcresult`.
+  Manual Computer Use proof on the same iPad Pro 13-inch (M5) UDID, bundle
+  `com.tron.mobile.beta`, verified the existing direct-branch session's
+  `Message input` in portrait and landscape: pressing `Tab` left `Type here`
+  visible, no accessibility draft value appeared, and no prompt was sent.
+  Screenshots:
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-no-draft-mutation-fixed-portrait.png`
+  and
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-no-draft-mutation-fixed-landscape.png`.
+  IPD-9 still remains open for pointer QA and broader control-to-control
+  hardware-keyboard traversal.
 - IPD-9 landscape sheet/appearance proof then verified the retuned iPad sheet
   containers in dark landscape, Settings/Server/Agent at
   `accessibility-extra-extra-extra-large`, and temporary Light mode through the
@@ -685,8 +705,9 @@ UDID before continuing.
   proof; IPD-7 model-picker, provider-settings, and provider list rendering
   have live iPad proof; IPD-8 History and fork controls have live iPad proof
   without invoking fork execution; IPD-8 load-earlier pagination and sidebar
-  selection now have live iPad proof; IPD-9 input focus has partial live proof,
-  with pointer and full hardware-keyboard traversal still open.
+  selection now have live iPad proof; IPD-9 input focus and prompt Tab
+  no-draft behavior have live portrait/landscape proof, with pointer and full
+  hardware-keyboard traversal still open.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

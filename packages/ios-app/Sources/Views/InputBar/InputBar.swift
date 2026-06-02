@@ -399,11 +399,29 @@ struct InputBar: View {
                         actions.onSend()
                     }
                 }
+                .onKeyPress(.tab) {
+                    resignInputFocusForKeyboardTraversal()
+                }
         }
         .frame(minHeight: actionButtonSize)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(.tronStandard, value: shouldShowActionButton)
         .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMicButton)
+    }
+
+    private func resignInputFocusForKeyboardTraversal() -> KeyPress.Result {
+        guard UIDevice.current.userInterfaceIdiom == .pad else {
+            return .ignored
+        }
+
+        isFocused = false
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        return .handled
     }
 
     // MARK: - Mention Detection

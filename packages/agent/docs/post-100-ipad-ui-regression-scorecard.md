@@ -655,9 +655,28 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/tmp/tron-psg-evidence/ipd9-keyboard-focus-accessibility.txt` records the
   focused `Message input` element. A follow-up `Tab` while the multiline input
   was active inserted a tab character into the draft instead of advancing focus;
-  the draft was cleared and no message was sent. This is recorded as partial
-  keyboard evidence only, because changing multiline prompt editing semantics
-  needs a separate product decision.
+  the draft was cleared and no message was sent. This failure was isolated to
+  the prompt composer rather than source control, sessions, or server state.
+- Follow-up IPD-9 prompt-keyboard fix added
+  `packages/ios-app/Tests/Views/InputBarKeyboardTraversalTests.swift` and
+  changed `InputBar` so iPad hardware Tab resigns the prompt input focus instead
+  of inserting a hidden draft character. The new source guard first failed
+  against the old source in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-00-15--0700.xcresult`,
+  then passed after the fix with focused composer coverage:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=E2A39D89-9AF3-431E-A43B-0030C3716482' -only-testing:TronMobileTests/InputBarKeyboardTraversalTests -only-testing:TronMobileTests/InputBarContentAreaChipTests`
+  passed 8 XCTest cases plus 1 Swift Testing check; xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_20-03-11--0700.xcresult`.
+  Manual proof used the same iPad Pro 13-inch (M5) UDID and
+  `com.tron.mobile.beta`: after focusing the existing direct-branch session's
+  `Message input`, pressing `Tab` left the placeholder visible, no accessibility
+  draft value appeared, and no message was sent in portrait and landscape.
+  Screenshots:
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-no-draft-mutation-fixed-portrait.png`
+  and
+  `/tmp/tron-psg-evidence/ipd9-keyboard-tab-no-draft-mutation-fixed-landscape.png`.
+  IPD-9 remains running because pointer QA and broader control-to-control
+  hardware-keyboard traversal are still open.
 - Additional IPD-9 landscape sheet/appearance pass used the same iPad Pro
   13-inch (M5) `E2A39D89-9AF3-431E-A43B-0030C3716482`, bundle
   `com.tron.mobile.beta`, with dev takeover still healthy on PID `79934`.
@@ -674,10 +693,10 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   app's own Color Mode setting before restoring Dark plus Simulator
   `content_size large`/`appearance dark`. Providers was visually inspected in
   landscape but not captured because the live view includes credential
-  labels/snippets. Hardware keyboard traversal remains partial: Tab focused the
-  Agent protected-branch text field, but a second Tab did not visibly advance
-  out of that field. IPD-9 stays running pending pointer QA and a broader
-  keyboard traversal decision/fix.
+  labels/snippets. Broader hardware keyboard traversal remains partial: Tab
+  focused the Agent protected-branch text field, but a second Tab did not
+  visibly advance out of that field. IPD-9 stays running pending pointer QA and
+  a broader keyboard traversal decision/fix.
 - Additional IPD-1 relaunch preload proof terminated and relaunched
   `com.tron.mobile.beta` on the same iPad UDID; relaunch returned PID `14768`
   while dev takeover stayed healthy on PID `79934`. Screenshot
