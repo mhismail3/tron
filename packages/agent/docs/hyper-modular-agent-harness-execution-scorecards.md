@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **43.5/100**
+Current score: **45/100**
 
 Status: **running**
 
@@ -197,7 +197,7 @@ Planes to delete or prevent:
 |----|-----------|--------|--------|-------|-------------------|
 | HMH-A | Source, baseline, and primitive audit | 10 | passed | docs_or_scorecard | Attachment synthesis, official iii source check, current-code audit, README link, static gate. |
 | HMH-B | Agent self-modifying capability lifecycle | 20 | passed | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
-| HMH-C | Harness knowledge and context compiler | 15 | running | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
+| HMH-C | Harness knowledge and context compiler | 15 | passed | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
 | HMH-D | Plug-and-play module/package lifecycle | 15 | pending | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
 | HMH-E | Human harness and generated UI | 15 | pending | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy. |
 | HMH-F | Causality, safety, loops, and rollback | 15 | pending | engine_policy_ledger | Idempotency, approval resume, leases, trigger budgets, queues/DLQ, compensation, and trace/ledger proof fail closed. |
@@ -527,7 +527,7 @@ Out of scope: dumping the full catalog into prompts.
 | HMH-C3 | Execute correction covers lifecycle errors | 20 | passed_after_fix | Missing `expectedFunctionIds`, missing `sessionId`, stale revision, target trigger id, missing idempotency, ambiguous target, and approval-required states return actionable repair guidance. | Fix result presentation before model-run proof. |
 | HMH-C4 | Harness docs are resources | 15 | passed_after_fix | Agent-readable harness guide/recipes are versioned resources or capability-backed docs tied to catalog revision, not only repo prose. | Add resource/doc projection before closeout. |
 | HMH-C5 | Model-run proof across providers | 20 | passed_after_fix | At least one high-capability hosted model and one alternate provider/local path answer "how can you customize your harness?" with current live capabilities and safety gates. | Classify provider-quality failures only after substrate proof. |
-| HMH-C6 | Prompt surface stays tiny | 10 | pending | Provider schemas expose only `execute`; `search`/`inspect`/admin functions stay operator/internal unless intentionally invoked through execute discovery. | Static gate or provider test must fail if prompt-expanded tools return. |
+| HMH-C6 | Prompt surface stays tiny | 10 | passed_after_fix | Provider schemas expose only `execute`; `search`/`inspect`/admin functions stay operator/internal unless intentionally invoked through execute discovery. | Static gate or provider test must fail if prompt-expanded tools return. |
 
 Closeout commands:
 
@@ -536,6 +536,7 @@ cargo test --manifest-path packages/agent/Cargo.toml capability_primer -- --noca
 cargo test --manifest-path packages/agent/Cargo.toml execute_guidance -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml harness_docs_are_versioned_resources -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml model_run_proves_harness_customization_across_providers -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml provider_prompt_surface_stays_tiny -- --nocapture
 ```
 
 HMH-C1 evidence, 2026-06-02:
@@ -669,13 +670,34 @@ HMH-C5 evidence, 2026-06-02:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml model_run_proves_harness_customization_across_providers -- --nocapture`.
 
-Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5:
+HMH-C6 evidence, 2026-06-02:
 
-- HMH-C1 through HMH-C5 prove compact lifecycle knowledge, bounded context,
-  repair guidance, versioned resource-backed harness docs, and provider-visible
-  hosted/local model-run answers. Continue with HMH-C6 to prove the provider
-  prompt surface stays tiny through static/negative gates and cannot re-expose
-  separate `search`, `inspect`, or admin tools.
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml provider_prompt_surface_stays_tiny -- --nocapture`
+  initially returned a false green with zero matching tests. After adding the
+  prompt-surface proof, the first real run failed because a rogue registered
+  function could set `capabilityPrimitive=true` and `modelPrimitiveName=execute`
+  with a lower sort order, causing the provider surface to bind model-visible
+  `execute` to `rogue::execute` instead of the canonical orchestrator.
+- The fix pins model-facing capability primitives to the canonical
+  `capability::execute` function id before reading model primitive metadata, so
+  arbitrary worker metadata cannot prompt-expand or replace the tiny provider
+  surface.
+- The passing proof seeds the normal capability-domain contracts plus a rogue
+  worker and resolves provider schemas for both `Provider::OpenAi` and
+  `Provider::Ollama`. Each path must expose exactly one schema named `execute`,
+  bind it to `capability::execute`, and exclude the rogue schema text.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml provider_prompt_surface_stays_tiny -- --nocapture`.
+
+Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
+
+- HMH-C is closed: compact lifecycle knowledge, bounded context, repair
+  guidance, versioned resource-backed harness docs, provider-visible
+  hosted/local model-run answers, and the tiny provider prompt surface are now
+  proven. Continue with HMH-D1 to prove module package registration writes
+  resource-backed `worker_package` truth with declared capabilities, expected
+  ids, digest, provenance, and runtime entry point.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -855,11 +877,11 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C1, HMH-C2, HMH-C3, HMH-C4, and HMH-C5 are closed. Continue
-with HMH-C6: prove provider schemas expose only `execute`; `search`,
-`inspect`, and admin functions stay operator/internal unless intentionally
-invoked through execute discovery.
+HMH-A, HMH-B, and HMH-C are closed. Continue with HMH-D1: prove
+`module::register_package` writes resource-backed `worker_package` truth with
+declared capabilities, expected ids, digest, provenance, and runtime entry
+point.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml provider_prompt_surface_stays_tiny -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml module_register_package_validates_digest_namespace_and_contracts -- --nocapture
 ```

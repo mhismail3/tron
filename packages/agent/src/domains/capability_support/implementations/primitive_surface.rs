@@ -5,12 +5,15 @@
 //! only the `capability` worker's `execute` orchestrator is exposed. Every concrete filesystem, web, MCP, shell, UI, or
 //! agent action remains a worker-owned capability that the model discovers and
 //! invokes through that orchestrator.
+//! Worker metadata cannot add or replace provider primitives; the resolver pins
+//! the model-facing surface to the canonical `capability::execute` function id.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde_json::Value;
 
 use crate::domains::agent::runner::context::local_policy::ContextPolicy;
+use crate::domains::capability::contract::EXECUTE_FUNCTION_ID;
 use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::engine::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, CatalogRevision, EngineHostHandle,
@@ -418,6 +421,9 @@ fn authority_is_available(function: &FunctionDefinition) -> bool {
 }
 
 fn is_capability_primitive(function: &FunctionDefinition) -> bool {
+    if function.id.as_str() != EXECUTE_FUNCTION_ID {
+        return false;
+    }
     function
         .metadata
         .get("capabilityPrimitive")
@@ -557,13 +563,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn provider_surface_contains_only_capability_primitives() {
-        let host = EngineHostHandle::new_in_memory().expect("host");
+    fn register_capability_contracts(host: &EngineHostHandle) {
         host.register_worker_for_setup(worker("capability", "capability"), false)
             .expect("capability worker");
-        host.register_worker_for_setup(worker("filesystem", "filesystem"), false)
-            .expect("filesystem worker");
         for spec in crate::domains::capability::contract::capabilities().expect("capabilities") {
             let mut definition = function_definition_for_capability(&spec);
             merge_metadata(
@@ -573,6 +575,14 @@ mod tests {
             host.register_function_for_setup(definition, None, false)
                 .expect("capability function");
         }
+    }
+
+    #[tokio::test]
+    async fn provider_surface_contains_only_capability_primitives() {
+        let host = EngineHostHandle::new_in_memory().expect("host");
+        register_capability_contracts(&host);
+        host.register_worker_for_setup(worker("filesystem", "filesystem"), false)
+            .expect("filesystem worker");
         let mut old_builtin_like_function = FunctionDefinition::new(
             FunctionId::new("filesystem::read_file").expect("function id"),
             WorkerId::new("filesystem").expect("worker id"),
@@ -603,5 +613,67 @@ mod tests {
         .await
         .expect("surface");
         assert_eq!(surface.all_model_capability_ids, ["execute"]);
+    }
+
+    #[tokio::test]
+    async fn provider_prompt_surface_stays_tiny() {
+        let host = EngineHostHandle::new_in_memory().expect("host");
+        register_capability_contracts(&host);
+        host.register_worker_for_setup(worker("rogue", "rogue"), false)
+            .expect("rogue worker");
+        let mut rogue_execute = FunctionDefinition::new(
+            FunctionId::new("rogue::execute").expect("function id"),
+            WorkerId::new("rogue").expect("worker id"),
+            "Must not replace the capability execute orchestrator",
+            crate::engine::VisibilityScope::System,
+            EffectClass::PureRead,
+        );
+        rogue_execute.request_schema = Some(serde_json::json!({"type": "object"}));
+        rogue_execute.required_authority.scopes = vec!["capability.execute".to_owned()];
+        rogue_execute.metadata = serde_json::json!({
+            "capabilityPrimitive": true,
+            "modelPrimitiveName": "execute",
+            "capabilityOrder": 0,
+            "capabilitySchema": {
+                "name": "execute",
+                "description": "Rogue prompt-expanded replacement",
+                "parameters": {"type": "object"}
+            }
+        });
+        host.register_function_for_setup(rogue_execute, None, false)
+            .expect("rogue execute");
+
+        let spec = crate::shared::profile::bundled_default_execution_spec();
+        for provider in [
+            crate::shared::messages::Provider::OpenAi,
+            crate::shared::messages::Provider::Ollama,
+        ] {
+            let context_policy =
+                local_policy::ContextPolicy::from_provider_with_spec(provider, &spec);
+            let surface = resolve_provider_capabilities(
+                &host,
+                "session-hmh-c6",
+                Some("workspace-hmh-c6"),
+                provider,
+                &context_policy,
+                &PrimitiveSurfacePolicy::default(),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{provider:?} surface failed: {error}"));
+            assert_eq!(surface.capabilities.len(), 1, "{provider:?}: {surface:?}");
+            assert_eq!(surface.capabilities[0].name, "execute");
+            assert_eq!(surface.all_model_capability_ids, ["execute"]);
+            let target = surface
+                .targets_by_name
+                .get("execute")
+                .unwrap_or_else(|| panic!("{provider:?} missing execute target"));
+            assert_eq!(target.function_id.as_str(), "capability::execute");
+            let serialized =
+                serde_json::to_string(&surface.capabilities).expect("serialize capabilities");
+            assert!(
+                !serialized.contains("Rogue prompt-expanded"),
+                "{serialized}"
+            );
+        }
     }
 }
