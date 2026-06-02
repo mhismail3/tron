@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use super::index::trust_rank;
 use super::{AgentCapabilityRecipeDisplay, CapabilityRegistryEntry, CapabilityRegistrySnapshot};
 
+const TRUNCATION_NOTICE: &str = "- Additional capabilities are available through the same `execute` primitive; provide intent or a target hint and the engine resolves the catalog entry.\n";
+
 const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
     "capability::execute",
     "filesystem::list_dir",
@@ -109,9 +111,9 @@ pub(crate) fn render_capability_primer(
         snapshot.catalog_revision
     ));
     out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with executionMode=sandbox_materialized and expectedOutputs, not filesystem::write_file; the command must write the same relative sandbox path declared in expectedOutputs. Nested declared output paths are allowed, but do not write absolute, home-relative, shell-expanded, parent-escaping, or undeclared command output paths. Freshness and approval happen inside execute. Approved execute results include idempotencyKey; reuse that exact top-level key to replay the approved command without creating another child.\n\n");
-    out.push_str("To customize the harness, stay on the same `execute` primitive: call `worker::protocol_guide`, author the worker from the returned template/protocol, call `worker::spawn` with session visibility, expected function ids, and idempotency, then prove the live catalog with `catalog::watch_snapshot` or `capability::inspect`. Run conformance or test evidence before relying on the new function, invoke it through `execute`, expose human/operator controls only as generated `ui_surface` resources through `ui::surface_for_target` and `ui::inspect_surface`, and submit generated actions with `ui::submit_action` using stored surface/version/action ids instead of reconstructed client targets. Use `engine::promote` only for governed workspace/system promotion, and clean up volatile entries with `worker::disconnect` or `sandbox::stop_spawned_worker`. Report trace id, resource refs, catalog revision, child invocation ids, and cleanup state.\n\n");
-    let mut rendered_entries = 0usize;
-    for entry in entries.drain(..) {
+    out.push_str("To customize the harness, stay on the same `execute` primitive: call `worker::protocol_guide`, author the worker from the returned template/protocol, call `worker::spawn` with session visibility, expected function ids, and idempotency, then prove the live catalog with `catalog::watch_snapshot` or `capability::inspect`. Run conformance or test evidence before relying on the new function, invoke it through `execute`, install packaged modules with `module::register_package` over `worker_package` resources, verify source trust, activate with `module::activate` through `worker::spawn`, and record `module::run_conformance` or health evidence before upgrade, rollback, disable, or quarantine. Expose human/operator controls only as generated `ui_surface` resources through `ui::surface_for_target` and `ui::inspect_surface`, and submit generated actions with `ui::submit_action` using stored surface/version/action ids instead of reconstructed client targets. Use `engine::promote` only for governed workspace/system promotion, and clean up volatile entries with `worker::disconnect` or `sandbox::stop_spawned_worker`. Report trace id, resource refs, catalog revision, child invocation ids, and cleanup state.\n\n");
+    let total_entries = entries.len();
+    for (index, entry) in entries.drain(..).enumerate() {
         let recipe = entry.agent_recipe();
         let display = AgentCapabilityRecipeDisplay::new(&recipe);
         let mut line = format!(
@@ -141,14 +143,19 @@ pub(crate) fn render_capability_primer(
             line.push_str(guidance);
         }
         line.push('\n');
-        if rendered_entries > 0 && estimated_tokens(out.len() + line.len()) > policy.max_tokens {
-            out.push_str(
-                "- Additional capabilities are available through the same `execute` primitive; provide intent or a target hint and the engine resolves the catalog entry.\n",
-            );
+        let has_more_entries = index + 1 < total_entries;
+        let reserved_notice_len = if has_more_entries {
+            TRUNCATION_NOTICE.len()
+        } else {
+            0
+        };
+        if estimated_tokens(out.len() + line.len() + reserved_notice_len) > policy.max_tokens {
+            if estimated_tokens(out.len() + TRUNCATION_NOTICE.len()) <= policy.max_tokens {
+                out.push_str(TRUNCATION_NOTICE);
+            }
             break;
         }
         out.push_str(&line);
-        rendered_entries += 1;
     }
     Some(out)
 }

@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **33/100**
+Current score: **35.25/100**
 
 Status: **running**
 
@@ -523,7 +523,7 @@ Out of scope: dumping the full catalog into prompts.
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
 | HMH-C1 | Primer contains the north-star recipe | 20 | passed_after_fix | `capabilities.primer` includes a compact "customize the harness" sequence with `worker::protocol_guide`, `worker::spawn`, inspection, conformance/test, generated UI, promotion, and cleanup. | Stop if the model must infer the loop from unrelated recipes. |
-| HMH-C2 | Context budget remains bounded | 15 | pending | Snapshot fixture records primer token estimate under profile budget while preserving core worker/module/generated-UI recipes. | Split recipe docs into resources if budget exceeds policy. |
+| HMH-C2 | Context budget remains bounded | 15 | passed_after_fix | Snapshot fixture records primer token estimate under profile budget while preserving core worker/module/generated-UI recipes. | Split recipe docs into resources if budget exceeds policy. |
 | HMH-C3 | Execute correction covers lifecycle errors | 20 | pending | Missing `expectedFunctionIds`, missing `sessionId`, stale revision, target trigger id, missing idempotency, ambiguous target, and approval-required states return actionable repair guidance. | Fix result presentation before model-run proof. |
 | HMH-C4 | Harness docs are resources | 15 | pending | Agent-readable harness guide/recipes are versioned resources or capability-backed docs tied to catalog revision, not only repo prose. | Add resource/doc projection before closeout. |
 | HMH-C5 | Model-run proof across providers | 20 | pending | At least one high-capability hosted model and one alternate provider/local path answer "how can you customize your harness?" with current live capabilities and safety gates. | Classify provider-quality failures only after substrate proof. |
@@ -564,6 +564,38 @@ Open loops after HMH-C1:
 - HMH-C1 proves the compact recipe content only. Continue with HMH-C2 to prove
   the context compiler keeps that recipe inside budget while preserving core
   worker, module, and generated-UI guidance in a provider-visible snapshot.
+
+HMH-C2 evidence, 2026-06-02:
+
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_primer_context_stays_within_budget -- --nocapture`
+  initially failed with a `2633` estimated-token primer against the default
+  profile `2600` token budget. The noisy snapshot exposed that
+  `render_capability_primer` checked the candidate entry before appending the
+  truncation notice, so the notice itself could push the provider-visible
+  primer over budget.
+- The same fixture requires the bounded primer to preserve worker,
+  module/package, and generated-UI recipe markers while rendering a noisy core
+  catalog. It checks catalog revision, the approximate token estimate, explicit
+  truncation through the same `execute` primitive, `worker::protocol_guide`,
+  `worker::spawn`, catalog/inspection proof, conformance/test evidence,
+  `module::register_package`, `worker_package`, source trust,
+  `module::activate`, `module::run_conformance`, generated `ui_surface`,
+  `ui::surface_for_target`, `ui::inspect_surface`, `ui::submit_action`, stored
+  surface/version/action ids, governed `engine::promote`, cleanup, trace ids,
+  resource refs, catalog revision, child invocation ids, and cleanup state.
+- The fix reserves `TRUNCATION_NOTICE` before adding another rendered catalog
+  entry and skips the entry if the line plus notice would exceed the active
+  policy. The fixed header now also carries the compact module/package recipe,
+  so module guidance is preserved even when entries are truncated.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_primer_context_stays_within_budget -- --nocapture`.
+
+Open loops after HMH-C1/HMH-C2:
+
+- HMH-C1 and HMH-C2 prove recipe content and default-profile budget behavior.
+  Continue with HMH-C3 to prove execute correction/guidance covers the common
+  lifecycle error cases instead of leaving the model to guess repair steps.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -743,10 +775,11 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, and HMH-C1 are closed. Continue with HMH-C2: prove the context
-compiler keeps the primer bounded while preserving core worker/module/generated
-UI recipes.
+HMH-A, HMH-B, HMH-C1, and HMH-C2 are closed. Continue with HMH-C3: prove
+execute correction covers lifecycle errors such as missing expected function
+ids, missing session context, stale revisions, trigger targets, missing
+idempotency, ambiguity, and approval-required states.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml capability_primer_context_stays_within_budget -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml execute_guidance_covers_self_modifying_lifecycle_errors -- --nocapture
 ```

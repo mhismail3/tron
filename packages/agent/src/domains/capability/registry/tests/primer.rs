@@ -156,6 +156,82 @@ fn primer_teaches_self_modifying_worker_lifecycle() {
 }
 
 #[test]
+fn capability_primer_context_stays_within_budget() {
+    let profile_budget =
+        crate::shared::profile::CapabilityContextPrimerPolicySpec::default().max_tokens;
+    let mut functions = vec![
+        test_function("capability::execute"),
+        test_function("worker::protocol_guide"),
+        test_function("worker::spawn"),
+        test_function("catalog::watch_snapshot"),
+        test_function("capability::inspect"),
+        test_function("capability::conformance_run"),
+        test_function("module::register_package"),
+        test_function("module::activate"),
+        test_function("module::run_conformance"),
+        test_function("ui::surface_for_target"),
+        test_function("ui::inspect_surface"),
+        test_function("ui::submit_action"),
+        test_function("worker::disconnect"),
+    ];
+    for index in 0..80 {
+        functions.push(verbose_core_function(index));
+    }
+    let snapshot = CapabilityRegistrySnapshot::new(functions, 314);
+    let policy = CapabilityContextPrimerPolicy {
+        max_tokens: profile_budget,
+        include_compact_schemas: true,
+        include_examples: true,
+        ..Default::default()
+    };
+    let text = render_capability_primer(&snapshot, &policy).expect("primer");
+    let estimated_tokens = text.len() / 4;
+
+    assert!(
+        estimated_tokens <= profile_budget,
+        "primer estimate {estimated_tokens} exceeded profile budget {profile_budget}:\n{text}"
+    );
+    assert!(
+        text.contains("Catalog revision: 314."),
+        "primer snapshot must identify the live catalog revision:\n{text}"
+    );
+    assert!(
+        text.contains("Additional capabilities are available through the same `execute` primitive"),
+        "noisy core snapshot should truncate entries with execute guidance instead of expanding the catalog:\n{text}"
+    );
+    for required in [
+        "`worker::protocol_guide`",
+        "`worker::spawn`",
+        "`catalog::watch_snapshot`",
+        "`capability::inspect`",
+        "conformance or test evidence",
+        "`module::register_package`",
+        "worker_package",
+        "`module::activate`",
+        "`module::run_conformance`",
+        "source trust",
+        "generated `ui_surface`",
+        "`ui::surface_for_target`",
+        "`ui::inspect_surface`",
+        "`ui::submit_action`",
+        "stored surface/version/action ids",
+        "`engine::promote`",
+        "`worker::disconnect`",
+        "`sandbox::stop_spawned_worker`",
+        "trace id",
+        "resource refs",
+        "catalog revision",
+        "child invocation ids",
+        "cleanup state",
+    ] {
+        assert!(
+            text.contains(required),
+            "bounded primer missing core recipe marker `{required}`:\n{text}"
+        );
+    }
+}
+
+#[test]
 fn notification_send_is_core_searchable_and_primed() {
     let notification_spec = crate::domains::notifications::contract::capabilities()
         .expect("notification specs")
@@ -192,4 +268,41 @@ fn notification_send_is_core_searchable_and_primed() {
     assert!(text.contains("\"target\":\"notifications::send\""));
     assert!(!text.contains("\"capabilityId\""));
     assert!(!text.contains("inspectRevision=1"));
+}
+
+fn verbose_core_function(index: usize) -> FunctionDefinition {
+    let mut function = test_function(&format!("noise_{index}::inspect"));
+    function.description = format!(
+        "Verbose primer budget fixture {index} with enough wording to force compact truncation before the rendered catalog becomes a prompt-expanded tool list"
+    );
+    function.request_schema = Some(json!({
+        "type": "object",
+        "required": [
+            "resourceId",
+            "expectedRevision",
+            "includeDiagnostics",
+            "reason"
+        ],
+        "additionalProperties": false,
+        "properties": {
+            "resourceId": {"type": "string"},
+            "expectedRevision": {"type": "integer"},
+            "includeDiagnostics": {"type": "boolean"},
+            "reason": {"type": "string"}
+        }
+    }));
+    function.metadata = json!({
+        "contextPrimerLevel": "core",
+        "trustTier": "first_party_signed",
+        "examples": [{
+            "target": function.id.as_str(),
+            "arguments": {
+                "resourceId": format!("resource-{index}"),
+                "expectedRevision": index,
+                "includeDiagnostics": true,
+                "reason": "budget fixture"
+            }
+        }]
+    });
+    function
 }
