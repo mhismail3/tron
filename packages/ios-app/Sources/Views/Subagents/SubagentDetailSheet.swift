@@ -85,7 +85,6 @@ struct SubagentDetailSheet: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(titleColor)
         .task(id: data.status) {
             guard data.hasSubagentSession else {

@@ -78,7 +78,6 @@ struct NotificationInboxDetailSheet: View {
                 }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .task {
             if autoMarkRead && !notification.isRead {

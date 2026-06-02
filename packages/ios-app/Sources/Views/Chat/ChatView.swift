@@ -94,7 +94,6 @@ struct ChatView: View {
                 onClose: { viewModel.showProcessSheet = false }
             )
             .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)
-            .presentationDragIndicator(.hidden)
         }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },

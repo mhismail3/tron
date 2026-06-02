@@ -535,7 +535,7 @@ struct SourceGuardTests {
         #expect(!engineConsole.contains(#".navigationTitle("Engine")"#))
         #expect(engineConsole.contains("DashboardToolbarContent("))
         #expect(engineConsole.contains(#"title: "Engine","#))
-        #expect(engineConsole.contains(".presentationDragIndicator(.hidden)"))
+        #expect(engineConsole.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
         #expect(engineConsoleSurface.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
         #expect(engineConsoleSurface.contains("SheetDismissButton(color: tint)"))
         #expect(engineConsoleSurface.contains("EngineConsoleCard(tint: tint)"))

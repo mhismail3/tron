@@ -65,6 +65,5 @@ struct VoiceNoteDetailSheet: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
     }
 }

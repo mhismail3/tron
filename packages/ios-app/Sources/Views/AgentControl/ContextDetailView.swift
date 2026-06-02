@@ -253,7 +253,6 @@ struct ContextDetailView: View {
         .tronErrorAlert(message: $errorMessage)
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronCyan)
     }
 

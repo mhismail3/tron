@@ -89,7 +89,6 @@ struct SettingsView: View {
     private var settingsView: some View {
         settingsWithAlerts
             .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-            .presentationDragIndicator(.hidden)
             .tint(.tronEmerald)
     }
 
@@ -114,12 +113,10 @@ struct SettingsView: View {
             .sheet(isPresented: $showLogViewer) {
                 LogViewer()
                     .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
-                    .presentationDragIndicator(.hidden)
             }
             .sheet(item: $activePage) { page in
                 settingsPageSheet(for: page)
                     .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-                    .presentationDragIndicator(.hidden)
             }
             .sheet(item: $feedbackMailDraft) { draft in
                 FeedbackMailView(

@@ -62,7 +62,6 @@ struct GitSubSheetContainer<Content: View, Leading: View, Trailing: View>: View 
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(accent)
     }
 }

@@ -194,7 +194,6 @@ struct SourceControlSheet: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronTeal)
         .sheet(item: $selectedFileDetail) { fileData in
             FileDetailSheet(
@@ -210,7 +209,6 @@ struct SourceControlSheet: View {
                     activeGitAction = .conflictResolver
                 }
             )
-            .presentationDragIndicator(.hidden)
             .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
         }
         .sheet(item: $activeGitAction, onDismiss: {

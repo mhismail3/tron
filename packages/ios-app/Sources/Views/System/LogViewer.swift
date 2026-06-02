@@ -49,7 +49,6 @@ struct LogViewer: View {
             .onAppear { refreshLogs() }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
     }
 

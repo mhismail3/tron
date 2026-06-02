@@ -102,7 +102,6 @@ struct PromptLibrarySheet: View {
             .tronErrorAlert(message: $state.errorMessage)
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .sheet(isPresented: $showManagement) {
             PromptLibraryManagementSurfaceSheet(engineClient: engineClient)

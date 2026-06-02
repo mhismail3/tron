@@ -28,7 +28,6 @@ struct MemoryRetainDetailSheet: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronPink)
         .task(id: summary ?? "") {
             parsedBlocks = MarkdownBlockParser.parse(summary ?? "")

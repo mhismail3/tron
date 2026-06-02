@@ -121,7 +121,6 @@ struct OAuthLoginSheet: View {
             }
         }
         .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
     }
 
     // MARK: - Subviews

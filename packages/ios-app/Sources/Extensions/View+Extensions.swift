@@ -245,6 +245,7 @@ extension View {
     /// Presentation detents with adaptive sizing for iPad/iPhone:
     /// - iPad: Uses balanced `.balancedLargeForm` or `.compactForm` sizing
     /// - iPad material background keeps floating sheets glassy so dashboard context remains visible
+    /// - Drag indicators are hidden consistently for Tron app sheets
     /// - iPhone keeps the existing detent sizing and background behavior
     ///
     /// On iPad, `presentationDetents` is ignored for floating modals.
@@ -253,14 +254,16 @@ extension View {
         selection: Binding<PresentationDetent>? = nil,
         ipadSizing: AdaptivePresentationSizing = .largeForm,
         phoneSizing: AdaptivePhonePresentationSizing = .largeForm,
-        phoneBackground: AdaptivePhonePresentationBackground = .automaticLargeDetent
+        phoneBackground: AdaptivePhonePresentationBackground = .automaticLargeDetent,
+        dragIndicator: Visibility = .hidden
     ) -> some View {
         self.modifier(AdaptivePresentationModifier(
             detents: detents,
             selection: selection,
             ipadSizing: ipadSizing,
             phoneSizing: phoneSizing,
-            phoneBackground: phoneBackground
+            phoneBackground: phoneBackground,
+            dragIndicator: dragIndicator
         ))
     }
 }
@@ -271,6 +274,7 @@ private struct AdaptivePresentationModifier: ViewModifier {
     let ipadSizing: AdaptivePresentationSizing
     let phoneSizing: AdaptivePhonePresentationSizing
     let phoneBackground: AdaptivePhonePresentationBackground
+    let dragIndicator: Visibility
     @State private var selectedDetent: PresentationDetent
     @Environment(\.colorScheme) private var colorScheme
 
@@ -279,13 +283,15 @@ private struct AdaptivePresentationModifier: ViewModifier {
         selection: Binding<PresentationDetent>?,
         ipadSizing: AdaptivePresentationSizing,
         phoneSizing: AdaptivePhonePresentationSizing,
-        phoneBackground: AdaptivePhonePresentationBackground
+        phoneBackground: AdaptivePhonePresentationBackground,
+        dragIndicator: Visibility
     ) {
         self.detents = detents
         self.selection = selection
         self.ipadSizing = ipadSizing
         self.phoneSizing = phoneSizing
         self.phoneBackground = phoneBackground
+        self.dragIndicator = dragIndicator
         // Initialize to the smallest detent so the selection binding stays in sync.
         // When only [.large] is provided, this ensures the initial state matches
         // what SwiftUI will present, avoiding a stale .medium default.
@@ -331,10 +337,12 @@ private struct AdaptivePresentationModifier: ViewModifier {
                 ipadBase
                     .presentationSizing(.balancedLargeForm)
                     .presentationBackground(.ultraThinMaterial)
+                    .presentationDragIndicator(dragIndicator)
             case .compactForm:
                 ipadBase
                     .presentationSizing(.compactForm)
                     .presentationBackground(.ultraThinMaterial)
+                    .presentationDragIndicator(dragIndicator)
             }
         } else {
             phoneBody(content: content)
@@ -343,7 +351,9 @@ private struct AdaptivePresentationModifier: ViewModifier {
 
     @ViewBuilder
     private func phoneBody(content: Content) -> some View {
-        let detented = content.presentationDetents(detents, selection: phoneSelection)
+        let detented = content
+            .presentationDetents(detents, selection: phoneSelection)
+            .presentationDragIndicator(dragIndicator)
         switch phoneSizing {
         case .largeForm:
             phoneBackgroundBody(content: detented.presentationSizing(.largeForm))

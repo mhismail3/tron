@@ -95,7 +95,6 @@ struct WorkspaceSelector: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
     }
 
     private func connectionErrorView(_ error: String) -> some View {

@@ -46,6 +46,14 @@ final class IPadSheetPresentationTests: XCTestCase {
             content.contains("func glassPopoverPresentationBackground() -> some View"),
             "Glass popover background styling should live beside the canonical sheet presentation helpers"
         )
+        XCTAssertTrue(
+            content.contains("dragIndicator: Visibility = .hidden"),
+            "The adaptive presentation helper should own the app sheet drag-indicator policy"
+        )
+        XCTAssertTrue(
+            content.contains(".presentationDragIndicator(dragIndicator)"),
+            "The adaptive presentation helper should apply the centralized drag-indicator policy"
+        )
     }
 
     func testRepresentativeAppSheetsUseCanonicalIPadSizing() throws {
@@ -158,6 +166,24 @@ final class IPadSheetPresentationTests: XCTestCase {
         XCTAssertTrue(
             offenders.isEmpty,
             "Raw presentationBackground styling bypasses canonical sheet/popover helpers: \(offenders.joined(separator: ", "))"
+        )
+    }
+
+    func testPresentationDragIndicatorStylingStaysCentralized() throws {
+        let sourceRoot = try projectRoot()
+            .appendingPathComponent("Sources")
+        let files = try swiftFiles(under: sourceRoot)
+        let offenders = try files.compactMap { file -> String? in
+            guard file.lastPathComponent != "View+Extensions.swift" else { return nil }
+            let content = try String(contentsOf: file, encoding: .utf8)
+            return content.contains(".presentationDragIndicator(")
+                ? relativePath(file, under: sourceRoot)
+                : nil
+        }
+
+        XCTAssertTrue(
+            offenders.isEmpty,
+            "Raw presentationDragIndicator styling bypasses the adaptive sheet helper: \(offenders.joined(separator: ", "))"
         )
     }
 

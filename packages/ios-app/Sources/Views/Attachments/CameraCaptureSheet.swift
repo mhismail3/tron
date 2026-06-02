@@ -78,7 +78,6 @@ struct CameraCaptureSheet: View {
         }
         .padding(.horizontal, 24)
         .adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)
-        .presentationDragIndicator(.hidden)
         .task {
             await cameraModel.requestPermissionAndSetup()
         }

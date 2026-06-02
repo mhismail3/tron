@@ -900,6 +900,23 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-26-53--0700.xcresult`.
   No action-time-confirmed UI control was invoked by this source-level
   guardrail checkpoint.
+- Additional iPad sheet drag-indicator standardization moved the repeated
+  hidden drag-indicator policy into `adaptivePresentationDetents` beside the
+  existing size/background policy. The new source guard first failed because
+  the helper did not own a `dragIndicator` default and 38 app source files still
+  called raw `.presentationDragIndicator(.hidden)`; red xcresult:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-31-05--0700.xcresult`.
+  The fix added `dragIndicator: Visibility = .hidden` to the adaptive helper,
+  applied it on both iPad sizing branches and the iPhone detent branch, removed
+  the raw call sites, updated the stale Engine Console source guard, and aligned
+  the notification source guard with the helper's multiline phone branch.
+  `IPadSheetPresentationTests` plus `NotificationSheetPresentationTests` then
+  passed 10 XCTest cases in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-34-29--0700.xcresult`;
+  suite-level `SourceGuardTests` passed 14 Swift Testing checks in xcresult
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-35-00--0700.xcresult`.
+  No action-time-confirmed UI control was invoked by this source-level
+  guardrail checkpoint.
 - Additional IPD-9 Agent protected-branch keyboard follow-up fixed the remaining
   Agent settings Tab subcase documented in the previous landscape pass. The
   protected-branch add field now has focus state and an iPad-only

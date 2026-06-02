@@ -926,6 +926,20 @@ UDID before continuing.
   `glassPopoverPresentationBackground()` replaced those raw popover-background
   call sites:
   `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-26-53--0700.xcresult`.
+  The guard now also centralizes raw `.presentationDragIndicator(...)` styling
+  in the adaptive helper: it first failed because the helper lacked a
+  `dragIndicator` default and 38 app source files still called raw
+  `.presentationDragIndicator(.hidden)` in
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-31-05--0700.xcresult`,
+  then passed 10 focused XCTest cases across `IPadSheetPresentationTests` and
+  `NotificationSheetPresentationTests` after
+  `dragIndicator: Visibility = .hidden` was applied on both iPad sizing branches
+  and the iPhone detent branch, the raw app-source call sites were removed, and
+  the notification source guard was aligned to the helper shape:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-34-29--0700.xcresult`.
+  Suite-level `SourceGuardTests` also passed 14 Swift Testing checks after the
+  stale Engine Console source guard was updated:
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.01_22-35-00--0700.xcresult`.
   Remaining IPD rows must still close or be explicitly successor-owned before
   final PSG-5 points.
 - Checkpoint 5: PSG-6/PSG-7 final cleanup, broad gates, ledger, final commit.

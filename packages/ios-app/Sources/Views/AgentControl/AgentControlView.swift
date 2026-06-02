@@ -178,7 +178,6 @@ struct AgentControlView: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .sheet(isPresented: $showAnalytics) {
             AnalyticsSheet(

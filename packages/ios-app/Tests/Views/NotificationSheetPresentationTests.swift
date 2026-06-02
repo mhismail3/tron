@@ -68,8 +68,12 @@ final class NotificationSheetPresentationTests: XCTestCase {
             "The non-iPad branch should keep its existing background behavior"
         )
         XCTAssertTrue(
-            content.contains("let detented = content.presentationDetents(detents, selection: phoneSelection)"),
+            content.contains(".presentationDetents(detents, selection: phoneSelection)"),
             "Phone presentation detents must remain on the non-iPad branch"
+        )
+        XCTAssertTrue(
+            content.contains(".presentationDragIndicator(dragIndicator)"),
+            "App sheet drag-indicator styling should stay centralized in the adaptive helper"
         )
         XCTAssertTrue(
             content.contains("case .unchanged:\n            phoneBackgroundBody(content: detented)"),

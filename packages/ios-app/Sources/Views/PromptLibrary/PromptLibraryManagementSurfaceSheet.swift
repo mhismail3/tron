@@ -76,7 +76,6 @@ struct PromptLibraryManagementSurfaceSheet: View {
             .withToastBanner()
         }
         .adaptivePresentationDetents([.large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronEmerald)
         .task { await load(selectedTab) }
         .onChange(of: selectedTab) { _, tab in

@@ -59,7 +59,6 @@ struct EngineConsoleView: View {
             if let inspection = state.selectedInspection {
                 CapabilityInspectionSheet(inspection: inspection)
                     .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-                    .presentationDragIndicator(.hidden)
             }
         }
     }

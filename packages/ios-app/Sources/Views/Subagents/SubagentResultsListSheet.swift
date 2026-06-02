@@ -62,7 +62,6 @@ struct SubagentResultsListSheet: View {
                 )
             }
         }
-        .presentationDragIndicator(.hidden)
     }
 
     @ViewBuilder

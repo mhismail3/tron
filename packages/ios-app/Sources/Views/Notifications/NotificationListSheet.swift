@@ -95,7 +95,6 @@ struct NotificationListSheet: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)
-        .presentationDragIndicator(.hidden)
         .task {
             await notificationStore.refresh()
             autoOpenPendingNotification()

@@ -84,6 +84,5 @@ struct StreamSheetView: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)
-        .presentationDragIndicator(.hidden)
     }
 }

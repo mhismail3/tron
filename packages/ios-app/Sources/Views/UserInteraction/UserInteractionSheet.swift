@@ -82,7 +82,6 @@ struct UserInteractionSheet: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronAmber)
         .onAppear {
             answers = capabilityData.answers

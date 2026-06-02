@@ -73,7 +73,6 @@ struct EngineApprovalSheet: View {
             }
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)
-        .presentationDragIndicator(.hidden)
         .tint(accentColor)
         .onAppear {
             noteText = capabilityData.note ?? ""

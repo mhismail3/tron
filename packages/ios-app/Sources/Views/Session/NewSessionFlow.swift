@@ -280,7 +280,6 @@ struct NewSessionFlow: View {
             }
         }
         .adaptivePresentationDetents(NewSessionFlowPresentation.detents, ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled(isCreating)
         .tint(.tronEmerald)
     }

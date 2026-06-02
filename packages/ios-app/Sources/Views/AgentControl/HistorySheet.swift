@@ -61,7 +61,6 @@ struct HistorySheet: View {
             .tronErrorAlert(message: $forkError)
         }
         .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
-        .presentationDragIndicator(.hidden)
         .tint(.tronCoral)
     }
 

@@ -107,7 +107,6 @@ struct PluginSourcesPage: View {
                 await addServer(params)
             })
             .adaptivePresentationDetents([.medium], ipadSizing: .largeForm)
-            .presentationDragIndicator(.hidden)
         }
         .onReceive(NotificationCenter.default.publisher(for: .mcpStatusChanged)) { _ in
             Task { await loadStatus() }
