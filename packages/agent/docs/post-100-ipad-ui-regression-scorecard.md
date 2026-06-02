@@ -202,6 +202,22 @@ are tracked by the IPD rows above and PSG-5 in the active campaign.
   Working tree clean, Commit/Merge/Sessions/Pull disabled with visible help
   text, and Rebase/Push present but not triggered because those actions require
   action-time confirmation.
+- Additional IPD-6 direct-branch landscape proof used existing session
+  `sess_019e84d4-8c5b-7ba1-893c-583594bb9087` on the same iPad UDID and did
+  not invoke source-control actions. Agent Control showed the Source Control row
+  immediately with branch `next/modular-capability-engine` and `Direct branch`;
+  screenshot
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-agent-control-landscape.png`.
+  Opening the drill-down showed repo path `~/Downloads/projects/tron`, clean
+  working tree, Commit disabled because there were no uncommitted changes,
+  Merge/Rebase disabled as isolated-only, Sessions disabled because there were
+  no peer sessions, Pull disabled as up-to-date, and Push available but not
+  clicked; screenshot
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-source-control-sheet-landscape.png`.
+  Local git/status evidence in
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-source-control-landscape.json`
+  records branch `next/modular-capability-engine`, `aheadOfOrigin=35`, and
+  `workingTreeClean=true`, matching the enabled Push/disabled Commit state.
 - Additional IPD-3 input proof: Computer Use focused the iPad input bar, typed
   `IPD-3 iPad input check. Reply exactly: IPD-3 input ready.`, and clicked the
   active send icon. During the run the row rendered the user prompt, the input

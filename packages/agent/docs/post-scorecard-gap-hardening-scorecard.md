@@ -137,6 +137,17 @@ Owner taxonomy: `server_contract`, `client_projection`,
   `/tmp/tron-psg-evidence/ipd6-isolated-agent-control-window-recovery.png`, and
   isolated Source Control clean drill-down gating in
   `/tmp/tron-psg-evidence/ipd6-isolated-source-control-clean-sheet-window-recovery.png`.
+  A later landscape pass added direct-branch iPad Source Control proof for
+  existing session `sess_019e84d4-8c5b-7ba1-893c-583594bb9087`: Agent Control
+  row proof
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-agent-control-landscape.png`,
+  drill-down gating proof
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-source-control-sheet-landscape.png`,
+  and git/UI evidence
+  `/tmp/tron-psg-evidence/ipd6-direct-branch-source-control-landscape.json`
+  show branch `next/modular-capability-engine`, clean working tree,
+  Commit/Merge/Rebase/Sessions/Pull disabled for their stated reasons, and Push
+  available but not clicked because it mutates remote state.
 - 2026-06-01 IPD-3 input audit sent a small local `gemma4:e4b` prompt through
   Computer Use on the iPad input bar. In-flight evidence
   `/tmp/tron-psg-evidence/ipd3-input-inflight-stop-state.png` shows the user
