@@ -11,9 +11,14 @@ use super::discovery::ActorKind;
 use super::errors::EngineError;
 use super::host::EngineHostHandle;
 use super::ids::{ActorId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
-use super::invocation::{CausalContext, Invocation, InvocationResult};
+use super::invocation::{
+    CausalContext, Invocation, InvocationResult, RUNTIME_METADATA_TRIGGER_DEPTH,
+    RUNTIME_METADATA_TRIGGER_PATH,
+};
 use super::queue::{EnqueueInvocation, publish_queue_lifecycle_event};
 use super::types::{DeliveryMode, FunctionRevision, TriggerDefinition};
+
+const DEFAULT_TRIGGER_MAX_DEPTH: u32 = 8;
 
 struct PreparedTriggerInvocation {
     trigger: TriggerDefinition,
@@ -103,6 +108,7 @@ impl EngineTriggerRuntime {
                     actor_kind: invocation.causal_context.actor_kind.clone(),
                     authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
                     authority_scopes: invocation.causal_context.authority_scopes.clone(),
+                    runtime_metadata: invocation.causal_context.runtime_metadata.clone(),
                     trace_id: invocation.causal_context.trace_id.clone(),
                     parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
                     trigger_id: invocation.causal_context.trigger_id.clone(),
@@ -126,6 +132,9 @@ impl EngineTriggerRuntime {
                             .await
                     }
                 }
+            }
+            Ok(prepared) if prepared.invocation.delivery_mode == DeliveryMode::Void => {
+                handle.invoke_trigger_target(prepared.invocation).await
             }
             Ok(prepared) => handle.invoke(prepared.invocation).await,
             Err((trigger, error, request)) => {
@@ -208,6 +217,10 @@ impl EngineTriggerRuntime {
                 request,
             ));
         }
+        let cascade = match trigger_cascade_metadata(&trigger, &request) {
+            Ok(cascade) => cascade,
+            Err(error) => return Err((Some(trigger), error, request)),
+        };
 
         let mut context = CausalContext::new(
             request.actor_id.clone(),
@@ -220,8 +233,17 @@ impl EngineTriggerRuntime {
             context = context.with_scope(scope.clone());
         }
         for (key, value) in &request.runtime_metadata {
+            if key == RUNTIME_METADATA_TRIGGER_DEPTH || key == RUNTIME_METADATA_TRIGGER_PATH {
+                continue;
+            }
             context = context.with_runtime_metadata(key.clone(), value.clone());
         }
+        context = context
+            .with_runtime_metadata(
+                RUNTIME_METADATA_TRIGGER_DEPTH,
+                cascade.next_depth.to_string(),
+            )
+            .with_runtime_metadata(RUNTIME_METADATA_TRIGGER_PATH, cascade.next_path);
         if let Some(parent) = &request.parent_invocation_id {
             context = context.with_parent_invocation(parent.clone());
         }
@@ -249,4 +271,60 @@ impl EngineTriggerRuntime {
             invocation,
         })
     }
+}
+
+struct TriggerCascadeMetadata {
+    next_depth: u32,
+    next_path: String,
+}
+
+fn trigger_cascade_metadata(
+    trigger: &TriggerDefinition,
+    request: &TriggerDispatchRequest,
+) -> Result<TriggerCascadeMetadata, EngineError> {
+    let current_depth = trigger_depth(&request.runtime_metadata)?;
+    let mut path = trigger_path(&request.runtime_metadata)?;
+    let max_depth = trigger.max_depth.unwrap_or(DEFAULT_TRIGGER_MAX_DEPTH);
+    if current_depth > max_depth {
+        return Err(EngineError::PolicyViolation(format!(
+            "trigger cascade depth {current_depth} exceeds max depth {max_depth} for {}",
+            trigger.id
+        )));
+    }
+    if path.iter().any(|id| id == trigger.id.as_str()) {
+        return Err(EngineError::PolicyViolation(format!(
+            "trigger cascade loop detected for {}",
+            trigger.id
+        )));
+    }
+    path.push(trigger.id.to_string());
+    let next_path = serde_json::to_string(&path).map_err(|error| {
+        EngineError::PolicyViolation(format!("trigger cascade path is not serializable: {error}"))
+    })?;
+    Ok(TriggerCascadeMetadata {
+        next_depth: current_depth.saturating_add(1),
+        next_path,
+    })
+}
+
+fn trigger_depth(metadata: &BTreeMap<String, String>) -> Result<u32, EngineError> {
+    let Some(value) = metadata.get(RUNTIME_METADATA_TRIGGER_DEPTH) else {
+        return Ok(0);
+    };
+    value.parse::<u32>().map_err(|_| {
+        EngineError::PolicyViolation(format!(
+            "trigger cascade depth metadata must be an unsigned integer, got {value:?}"
+        ))
+    })
+}
+
+fn trigger_path(metadata: &BTreeMap<String, String>) -> Result<Vec<String>, EngineError> {
+    let Some(value) = metadata.get(RUNTIME_METADATA_TRIGGER_PATH) else {
+        return Ok(Vec::new());
+    };
+    serde_json::from_str::<Vec<String>>(value).map_err(|error| {
+        EngineError::PolicyViolation(format!(
+            "trigger cascade path metadata must be a JSON string array: {error}"
+        ))
+    })
 }

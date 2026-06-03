@@ -19,6 +19,10 @@ use super::types::{CatalogRevision, DeliveryMode, FunctionRevision, IdempotencyS
 /// This is engine-owned context, not model-supplied payload. Domain workers use it
 /// when a relative path needs to resolve against the active session/worktree.
 pub const RUNTIME_METADATA_WORKING_DIRECTORY: &str = "agent.workingDirectory";
+/// Runtime metadata key carrying the current trigger cascade depth.
+pub const RUNTIME_METADATA_TRIGGER_DEPTH: &str = "engine.triggerDepth";
+/// Runtime metadata key carrying the JSON trigger-id path for loop detection.
+pub const RUNTIME_METADATA_TRIGGER_PATH: &str = "engine.triggerPath";
 
 /// Causal context carried by every invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

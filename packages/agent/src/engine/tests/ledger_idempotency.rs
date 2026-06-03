@@ -120,6 +120,7 @@ fn sqlite_queue_blobs_large_payload_but_claim_returns_original_payload() {
             actor_kind: ActorKind::Agent,
             authority_grant_id: grant("grant"),
             authority_scopes: vec!["agent.run".to_owned()],
+            runtime_metadata: Default::default(),
             trace_id: TraceId::generate(),
             parent_invocation_id: None,
             trigger_id: None,

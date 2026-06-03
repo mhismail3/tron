@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **92.25/100**
+Current score: **94.50/100**
 
 Status: **running**
 
@@ -1244,8 +1244,9 @@ HMH-E7 evidence, 2026-06-02/2026-06-03:
 
 Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6/HMH-E7:
 
-- HMH-E is closed. HMH-F1 and HMH-F2 are now closed. Continue with HMH-F3:
-  prove trigger delivery modes carry bounded causal metadata and fail closed.
+- HMH-E is closed. HMH-F1 through HMH-F3 are now closed. Continue with
+  HMH-F4: prove Queue/DLQ receipt, attempt, lease, retry, cancellation,
+  dead-letter, replay, and compensation references are inspectable.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1258,7 +1259,7 @@ external effects.
 |----|----------|--------|--------|----------|---------------|
 | HMH-F1 | Idempotency is mandatory for mutations | 15 | passed | Mutating worker/module/ui/promotion/queue/resource paths reject missing/conflicting idempotency before handler execution. | Stop if child invocation starts before idempotency reservation. |
 | HMH-F2 | Approval resume preserves original context | 15 | passed | Approval-required execute stores pause state and resumes same trace/grant/parent/idempotency after `approval::resolve`; agent cannot self-resolve. | Stop if approval creates disconnected child commands. |
-| HMH-F3 | Trigger delivery modes are bounded | 15 | pending | Sync, Void, and Enqueue carry causal metadata; Void is restricted to loss-tolerant effects; trigger cascades have loop/depth budgets and fail closed. | Stop on unbounded trigger recursion. |
+| HMH-F3 | Trigger delivery modes are bounded | 15 | passed_after_fix | Sync, Void, and Enqueue carry causal metadata; Void is restricted to loss-tolerant effects; trigger cascades have loop/depth budgets and fail closed. | Stop on unbounded trigger recursion. |
 | HMH-F4 | Queue/DLQ is inspectable | 15 | pending | Enqueue records receipt, attempts, leases, retries, cancellation, DLQ, replay, and compensation refs. | Stop if queue errors are log-only. |
 | HMH-F5 | Leases and compensation are visible | 15 | pending | Shared worktree/files/process/module/generated-action mutations acquire leases and record compensation/manual recovery status. | Stop if high-risk effects lack recovery notes. |
 | HMH-F6 | Trace and ledger explain the full graph | 15 | pending | One scenario traces client request to agent turn, worker spawn, catalog change, function invocation, approval/queue/resource events, and UI action. | Stop if trace correlation relies on timestamps. |
@@ -1337,12 +1338,45 @@ HMH-F2 evidence, 2026-06-03:
   `cargo test --manifest-path packages/agent/Cargo.toml approval_required_execute_resumes_child_with_original_causal_context -- --nocapture`;
   `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::approval -- --nocapture`.
 
-Open loops after HMH-F1/HMH-F2:
+HMH-F3 evidence, 2026-06-03:
 
-- HMH-F1 and HMH-F2 are closed. Continue with HMH-F3 to prove Sync, Void, and
-  Enqueue trigger delivery modes carry causal metadata, Void is restricted to
-  loss-tolerant effects, and trigger cascades have loop/depth budgets that
-  fail closed.
+- Red tests first exposed three concrete gaps: Void trigger registration could
+  target ordinary important mutating functions, Void dispatch reached the host
+  as an unsupported delivery mode instead of a bounded trigger-owned path, and
+  `TriggerDefinition.max_depth` did not stop a recursive dispatch before the
+  second handler ran.
+- The fix makes trigger delivery policy explicit. `DeliveryMode::Void` trigger
+  registration now requires target metadata
+  `delivery.voidLossTolerant=true`, low risk, and a read/compute/append-only
+  effect class. Void execution is routed through a private trigger-target host
+  path; direct Void invocations remain unsupported even if they forge trigger
+  id/depth/path metadata.
+- Trigger runtime now attaches engine-owned `engine.triggerDepth` and
+  `engine.triggerPath` runtime metadata to every prepared target invocation,
+  rejects malformed cascade metadata, rejects repeated trigger ids in the path,
+  and enforces per-trigger `max_depth` with a default budget before the target
+  handler can run.
+- Queue handoff now persists and restores invocation runtime metadata in
+  `EngineQueueItem`/`EnqueueInvocation`, including SQLite queue rows via
+  `runtime_metadata_json`, so Enqueue delivery cannot erase trigger depth/path
+  budgets before the queued target drains.
+- Added trigger proofs for explicit Void loss-tolerance registration, direct
+  Void rejection with and without forged trigger metadata, Void dispatch causal
+  ledger metadata, and cascade max-depth fail-closed behavior. Strengthened
+  queue proof so an Enqueue trigger receipt stores transport runtime metadata
+  plus trigger depth metadata and still drains under the original
+  trace/trigger/idempotency lineage.
+- README and `engine/mod.rs` now document the working trigger contract rather
+  than only the aspirational iii-derived design.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::triggers -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture`.
+
+Open loops after HMH-F1/HMH-F2/HMH-F3:
+
+- HMH-F1 through HMH-F3 are closed. Continue with HMH-F4 to prove queued work
+  has inspectable receipt, attempts, leases, retries, cancellation,
+  dead-letter, replay, and compensation references instead of log-only errors.
 
 ## HMH-G Scorecard: Final Adversarial Closeout And Absence Gates
 
@@ -1450,9 +1484,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F1, and HMH-F2 are closed. Continue
-with HMH-F3: prove trigger delivery modes are bounded and fail closed.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F1, HMH-F2, and HMH-F3 are closed.
+Continue with HMH-F4: prove Queue/DLQ is inspectable.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml engine::tests::triggers -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture
 ```

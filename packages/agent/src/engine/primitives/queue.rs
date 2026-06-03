@@ -167,6 +167,7 @@ impl InProcessFunctionHandler for QueuePrimitiveHandler {
                     actor_kind: invocation.causal_context.actor_kind.clone(),
                     authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
                     authority_scopes: invocation.causal_context.authority_scopes.clone(),
+                    runtime_metadata: invocation.causal_context.runtime_metadata.clone(),
                     trace_id: invocation.causal_context.trace_id.clone(),
                     parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
                     trigger_id: invocation.causal_context.trigger_id.clone(),

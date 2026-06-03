@@ -243,6 +243,9 @@ pub(crate) async fn enqueue_prompt_queue_drain(
                     AuthorityGrantId::new("prompt-runtime").expect("valid static grant id")
                 }),
             authority_scopes,
+            runtime_metadata: causality
+                .map(|causality| causality.context.runtime_metadata.clone())
+                .unwrap_or_default(),
             trace_id: causality
                 .map(|causality| causality.context.trace_id.clone())
                 .unwrap_or_else(TraceId::generate),

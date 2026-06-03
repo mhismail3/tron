@@ -83,6 +83,26 @@ impl EngineHostHandle {
         .await
     }
 
+    /// Invoke a target prepared by the trigger runtime.
+    pub(in crate::engine) async fn invoke_trigger_target(
+        &self,
+        invocation: Invocation,
+    ) -> InvocationResult {
+        if invocation.delivery_mode == DeliveryMode::Sync {
+            return self.invoke(invocation).await;
+        }
+
+        let prepared = {
+            let mut host = self.inner.lock().await;
+            host.catalog.prepare_trigger_target_invocation(invocation)
+        };
+        let prepared = match prepared {
+            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
+            PreparedSyncInvocationDecision::Finished(result) => return *result,
+        };
+        self.execute_prepared_regular(*prepared).await
+    }
+
     async fn invoke_approval_request_unlocked(&self, invocation: Invocation) -> InvocationResult {
         let prepared = {
             let mut host = self.inner.lock().await;

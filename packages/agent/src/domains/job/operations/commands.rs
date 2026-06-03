@@ -38,6 +38,7 @@ pub(crate) async fn enqueue_and_sync_drain_job_apply(
             actor_kind: invocation.causal_context.actor_kind.clone(),
             authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
             authority_scopes,
+            runtime_metadata: invocation.causal_context.runtime_metadata.clone(),
             trace_id: invocation.causal_context.trace_id.clone(),
             parent_invocation_id: Some(invocation.id.clone()),
             trigger_id: invocation.causal_context.trigger_id.clone(),

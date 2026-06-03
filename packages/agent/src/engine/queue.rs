@@ -83,6 +83,8 @@ pub struct EngineQueueItem {
     pub authority_grant_id: AuthorityGrantId,
     /// Authority scopes.
     pub authority_scopes: Vec<String>,
+    /// Engine runtime metadata.
+    pub runtime_metadata: BTreeMap<String, String>,
     /// Trace id.
     pub trace_id: TraceId,
     /// Parent invocation id.
@@ -130,6 +132,8 @@ pub struct EnqueueInvocation {
     pub authority_grant_id: AuthorityGrantId,
     /// Authority scopes.
     pub authority_scopes: Vec<String>,
+    /// Engine runtime metadata.
+    pub runtime_metadata: BTreeMap<String, String>,
     /// Trace id.
     pub trace_id: TraceId,
     /// Parent invocation id.
@@ -171,6 +175,7 @@ impl InMemoryEngineQueueStore {
             actor_kind: request.actor_kind,
             authority_grant_id: request.authority_grant_id,
             authority_scopes: request.authority_scopes,
+            runtime_metadata: request.runtime_metadata,
             trace_id: request.trace_id,
             parent_invocation_id: request.parent_invocation_id,
             trigger_id: request.trigger_id,
@@ -384,11 +389,37 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
   lease_expires_at TEXT,
   not_before TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  runtime_metadata_json TEXT NOT NULL DEFAULT '{}'
 );
 "#,
             )
             .map_err(|err| sqlite_err("queue.init", err.to_string()))
+            .and_then(|_| self.ensure_runtime_metadata_column())
+    }
+
+    fn ensure_runtime_metadata_column(&self) -> Result<()> {
+        let mut stmt = self
+            .conn
+            .prepare("PRAGMA table_info(engine_queue_items)")
+            .map_err(|err| sqlite_err("queue.schema.prepare", err.to_string()))?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|err| sqlite_err("queue.schema.query", err.to_string()))?;
+        for column in columns {
+            if column.map_err(|err| sqlite_err("queue.schema.row", err.to_string()))?
+                == "runtime_metadata_json"
+            {
+                return Ok(());
+            }
+        }
+        self.conn
+            .execute(
+                "ALTER TABLE engine_queue_items ADD COLUMN runtime_metadata_json TEXT NOT NULL DEFAULT '{}'",
+                [],
+            )
+            .map_err(|err| sqlite_err("queue.schema.alter_runtime_metadata", err.to_string()))?;
+        Ok(())
     }
 
     /// Borrow the underlying connection for focused tests.
@@ -412,6 +443,7 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
             actor_kind: request.actor_kind,
             authority_grant_id: request.authority_grant_id,
             authority_scopes: request.authority_scopes,
+            runtime_metadata: request.runtime_metadata,
             trace_id: request.trace_id,
             parent_invocation_id: request.parent_invocation_id,
             trigger_id: request.trigger_id,
@@ -605,9 +637,14 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
     fn insert_item(&mut self, item: &EngineQueueItem) -> Result<()> {
         self.conn
             .execute(
-                "INSERT INTO engine_queue_items
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                         ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                "INSERT INTO engine_queue_items (
+                   receipt_id, queue, function_id, target_revision, payload_json,
+                   actor_id, actor_kind, authority_grant_id, authority_scopes_json,
+                   trace_id, parent_invocation_id, trigger_id, session_id, workspace_id,
+                   idempotency_key, status, attempts, lease_owner, lease_expires_at,
+                   not_before, created_at, updated_at, runtime_metadata_json
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
+                           ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 item_params(&self.conn, item)?,
             )
             .map_err(|err| sqlite_err("queue.insert", err.to_string()))?;
@@ -638,7 +675,8 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
                    lease_expires_at = ?19,
                    not_before = ?20,
                    created_at = ?21,
-                   updated_at = ?22
+                   updated_at = ?22,
+                   runtime_metadata_json = ?23
                  WHERE receipt_id = ?1",
                 item_params(&self.conn, item)?,
             )
@@ -672,6 +710,8 @@ fn item_params(
         message: err.to_string(),
     })?;
     let scopes = serde_json::to_string(&item.authority_scopes).unwrap_or_else(|_| "[]".to_owned());
+    let runtime_metadata =
+        serde_json::to_string(&item.runtime_metadata).unwrap_or_else(|_| "{}".to_owned());
     Ok(params_from_vec(vec![
         SqlValue::Text(item.receipt_id.clone()),
         SqlValue::Text(item.queue.clone()),
@@ -717,6 +757,7 @@ fn item_params(
         SqlValue::Text(item.not_before.to_rfc3339()),
         SqlValue::Text(item.created_at.to_rfc3339()),
         SqlValue::Text(item.updated_at.to_rfc3339()),
+        SqlValue::Text(runtime_metadata),
     ]))
 }
 
@@ -734,6 +775,7 @@ fn row_to_queue_item(
     let payload = crate::shared::storage::resolve_stored_json_value(conn, &payload_json)
         .map_err(storage_to_sql_err)?;
     let scopes_json: String = row.get(8)?;
+    let runtime_metadata_json: String = row.get(22)?;
     let target_revision: Option<i64> = row.get(3)?;
     let parent_invocation_id: Option<String> = row.get(10)?;
     let trigger_id: Option<String> = row.get(11)?;
@@ -750,6 +792,7 @@ fn row_to_queue_item(
         authority_grant_id: AuthorityGrantId::new(row.get::<_, String>(7)?)
             .expect("stored queue authority id should be valid"),
         authority_scopes: serde_json::from_str(&scopes_json).unwrap_or_default(),
+        runtime_metadata: serde_json::from_str(&runtime_metadata_json).unwrap_or_default(),
         trace_id: TraceId::new(row.get::<_, String>(9)?)
             .expect("stored queue trace id should be valid"),
         parent_invocation_id: parent_invocation_id.and_then(|id| InvocationId::new(id).ok()),

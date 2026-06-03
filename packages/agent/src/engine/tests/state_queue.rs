@@ -1,5 +1,7 @@
 use super::*;
 
+use std::collections::BTreeMap;
+
 #[tokio::test]
 async fn state_primitive_revisions_cas_list_and_delete_are_idempotent() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
@@ -148,6 +150,7 @@ async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
     );
     request.delivery_mode = Some(DeliveryMode::Enqueue);
     request.authority_scopes = vec!["queue.test".to_owned()];
+    request.runtime_metadata = BTreeMap::from([("transport".to_owned(), "queue-test".to_owned())]);
     request.trace_id = Some(trace("queued-trace"));
     request.session_id = Some("session-a".to_owned());
     request.idempotency_key = Some("queue-target-key".to_owned());
@@ -158,6 +161,21 @@ async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
         .unwrap()
         .to_owned();
     assert_eq!(queued.value.as_ref().unwrap()["queued"], true);
+    let item = handle
+        .get_queue_item(&receipt)
+        .await
+        .unwrap()
+        .expect("queued trigger receipt should be inspectable");
+    assert_eq!(
+        item.runtime_metadata.get("transport").map(String::as_str),
+        Some("queue-test")
+    );
+    assert_eq!(
+        item.runtime_metadata
+            .get(crate::engine::invocation::RUNTIME_METADATA_TRIGGER_DEPTH)
+            .map(String::as_str),
+        Some("1")
+    );
 
     let drained = EngineQueueDrainer::drain_once(&handle, "default", "worker-a")
         .await
@@ -341,6 +359,7 @@ async fn queue_failure_event_records_updated_retry_state() {
             actor_kind: ActorKind::Agent,
             authority_grant_id: grant("manual-grant"),
             authority_scopes: vec!["queue.test".to_owned()],
+            runtime_metadata: Default::default(),
             trace_id: trace("rwo-n16-queue-failure"),
             parent_invocation_id: None,
             trigger_id: None,
@@ -434,6 +453,7 @@ async fn queue_cancel_during_claim_preserves_terminal_cancelled_state() {
             actor_kind: ActorKind::Agent,
             authority_grant_id: grant("manual-grant"),
             authority_scopes: vec!["queue.test".to_owned()],
+            runtime_metadata: Default::default(),
             trace_id: trace("rwo-n16b-cancel"),
             parent_invocation_id: None,
             trigger_id: None,
@@ -554,6 +574,7 @@ async fn queue_terminal_failure_publishes_dead_letter_lifecycle_event() {
             actor_kind: ActorKind::Agent,
             authority_grant_id: grant("manual-grant"),
             authority_scopes: vec!["queue.test".to_owned()],
+            runtime_metadata: Default::default(),
             trace_id: trace("rwo-n16b-dead-letter"),
             parent_invocation_id: None,
             trigger_id: None,

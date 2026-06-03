@@ -885,6 +885,11 @@ Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, `trigger::*`, `resource::*`, `grant::*`, and `approval::*` preserve
 the runtime semantics for delivery, projection state, queued handoff, trigger
 dispatch, typed durable objects, engine-owned authority, and human approval.
+Trigger dispatch records trigger id, trace, parent, session/workspace,
+idempotency, and runtime metadata across Sync, Void, and Enqueue delivery; Void
+is restricted to the private trigger runtime path for explicitly loss-tolerant
+low-risk targets, and trigger cascades carry depth/path budgets that fail closed
+before unbounded recursion.
 `artifact::*`, `goal::*`,
 `claim::*`, `evidence::*`, and `decision::*` are wrapper capabilities that
 compose the generic resource kernel; they do not create separate stores.

@@ -2,10 +2,12 @@
 
 use super::discovery::{ActorContext, ActorKind};
 use super::errors::{EngineError, Result};
-use super::invocation::{CausalContext, Invocation};
+use super::invocation::{
+    CausalContext, Invocation, RUNTIME_METADATA_TRIGGER_DEPTH, RUNTIME_METADATA_TRIGGER_PATH,
+};
 use super::schema;
 use super::types::{
-    CompensationKind, DeliveryMode, FunctionDefinition, RiskLevel, TriggerDefinition,
+    CompensationKind, DeliveryMode, EffectClass, FunctionDefinition, RiskLevel, TriggerDefinition,
     TriggerTypeDefinition, VisibilityScope,
 };
 
@@ -183,6 +185,12 @@ pub fn validate_trigger_registration(
             mode: trigger.delivery_mode.as_str(),
         });
     }
+    if trigger.delivery_mode == DeliveryMode::Void && !is_void_loss_tolerant_target(function) {
+        return Err(EngineError::PolicyViolation(format!(
+            "Void trigger delivery for {} requires explicit loss-tolerant target metadata",
+            function.id
+        )));
+    }
     if let Some(target_revision) = trigger.target_revision {
         if target_revision != function.revision {
             return Err(EngineError::StaleFunctionRevision {
@@ -195,6 +203,22 @@ pub fn validate_trigger_registration(
     Ok(())
 }
 
+fn is_void_loss_tolerant_target(function: &FunctionDefinition) -> bool {
+    let explicitly_loss_tolerant = function
+        .metadata
+        .pointer("/delivery/voidLossTolerant")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    explicitly_loss_tolerant
+        && matches!(
+            function.effect_class,
+            EffectClass::PureRead
+                | EffectClass::DeterministicCompute
+                | EffectClass::AppendOnlyEvent
+        )
+        && function.risk_level <= RiskLevel::Low
+}
+
 /// Validate invocation policy.
 pub fn validate_invocation(function: &FunctionDefinition, invocation: &Invocation) -> Result<()> {
     if invocation.delivery_mode != DeliveryMode::Sync {
@@ -202,7 +226,38 @@ pub fn validate_invocation(function: &FunctionDefinition, invocation: &Invocatio
             mode: invocation.delivery_mode.as_str(),
         });
     }
+    validate_invocation_contract(function, invocation)
+}
 
+/// Validate a trigger runtime target invocation.
+pub(in crate::engine) fn validate_trigger_target_invocation(
+    function: &FunctionDefinition,
+    invocation: &Invocation,
+) -> Result<()> {
+    if invocation.delivery_mode == DeliveryMode::Void {
+        if !is_trigger_void_invocation(invocation) {
+            return Err(EngineError::UnsupportedDeliveryMode {
+                mode: invocation.delivery_mode.as_str(),
+            });
+        }
+        if !is_void_loss_tolerant_target(function) {
+            return Err(EngineError::PolicyViolation(format!(
+                "Void trigger delivery for {} requires explicit loss-tolerant target metadata",
+                function.id
+            )));
+        }
+    } else if invocation.delivery_mode != DeliveryMode::Sync {
+        return Err(EngineError::UnsupportedDeliveryMode {
+            mode: invocation.delivery_mode.as_str(),
+        });
+    }
+    validate_invocation_contract(function, invocation)
+}
+
+fn validate_invocation_contract(
+    function: &FunctionDefinition,
+    invocation: &Invocation,
+) -> Result<()> {
     let actor = actor_from_causal_context(&invocation.causal_context);
     if !is_visible_to_actor(function, Some(&actor)) {
         return Err(EngineError::PolicyViolation(format!(
@@ -236,6 +291,19 @@ pub fn validate_invocation(function: &FunctionDefinition, invocation: &Invocatio
     }
 
     Ok(())
+}
+
+fn is_trigger_void_invocation(invocation: &Invocation) -> bool {
+    invocation.delivery_mode == DeliveryMode::Void
+        && invocation.causal_context.trigger_id.is_some()
+        && invocation
+            .causal_context
+            .runtime_metadata(RUNTIME_METADATA_TRIGGER_DEPTH)
+            .is_some()
+        && invocation
+            .causal_context
+            .runtime_metadata(RUNTIME_METADATA_TRIGGER_PATH)
+            .is_some()
 }
 
 /// Whether a function is visible to the actor for discovery.

@@ -60,8 +60,11 @@
 //! - durable-output capabilities declare output contracts and finish validation
 //!   requires canonical resource refs for every resource-backed path;
 //! - the trigger runtime records trigger metadata, transport/domain authority
-//!   scopes, and prepare failures before invoking in-process functions, and
-//!   `DeliveryMode::Enqueue` durably hands work to the queue primitive;
+//!   scopes, and prepare failures before invoking in-process functions;
+//!   `DeliveryMode::Void` is limited to the private trigger runtime path for
+//!   explicit low-risk loss-tolerant targets, trigger cascades carry depth/path
+//!   budgets that fail closed, and `DeliveryMode::Enqueue` durably hands work
+//!   plus runtime metadata to the queue primitive;
 //! - the local external-worker runtime speaks the `/engine/workers` loopback
 //!   protocol, registers scoped functions/triggers, publishes streams only
 //!   through `stream::publish`, cleans volatile workers on disconnect, marks

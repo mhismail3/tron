@@ -55,6 +55,9 @@ impl EngineQueueRuntime {
         for scope in &item.authority_scopes {
             context = context.with_scope(scope.clone());
         }
+        for (key, value) in &item.runtime_metadata {
+            context = context.with_runtime_metadata(key.clone(), value.clone());
+        }
         if let Some(parent) = &item.parent_invocation_id {
             context = context.with_parent_invocation(parent.clone());
         }

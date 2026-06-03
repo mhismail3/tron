@@ -574,6 +574,7 @@ async fn queued_external_worker_disconnect_records_queue_retry_not_failed_target
             actor_kind: ActorKind::Agent,
             authority_grant_id: grant("agent-grant"),
             authority_scopes: Vec::new(),
+            runtime_metadata: Default::default(),
             trace_id: trace("queue-disconnect"),
             parent_invocation_id: None,
             trigger_id: None,
