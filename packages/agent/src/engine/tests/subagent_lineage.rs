@@ -76,9 +76,9 @@ async fn create_subagent_result_resource(handle: &EngineHostHandle) {
                 "selectedModel": "claude-sonnet-4-6",
                 "selectedModelLabel": "Claude Sonnet 4.6",
                 "modelClass": "hosted",
-                "fallbackUsed": true,
-                "fallbackLabel": "Hosted fallback",
-                "fallbackReason": "Local model is unavailable for this flow.",
+                "hostedRouteUsed": true,
+                "hostedRouteLabel": "Hosted route",
+                "hostedRouteReason": "Local model is unavailable for this flow.",
                 "localOptIn": true
             },
             "success": true,
@@ -199,7 +199,7 @@ async fn generated_subagent_lineage_surface_uses_resource_truth_and_stored_actio
         "Review",
         "Local when possible",
         "Claude Sonnet 4.6",
-        "Hosted fallback",
+        "Hosted route",
         "Local model is unavailable for this flow.",
     ] {
         assert!(

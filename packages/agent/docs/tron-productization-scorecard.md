@@ -60,7 +60,7 @@ Each row must record:
 - Open loops and the next test before moving to the next row.
 
 Stop on the first failed evidence contract. Fix the owning layer, remove stale
-fallback/dead compatibility code nearby, rerun the failed scenario, update this
+retired/dead compatibility code nearby, rerun the failed scenario, update this
 scorecard plus the evidence manifest, and commit a coherent checkpoint.
 
 ## Scorecard
@@ -106,7 +106,7 @@ scorecard plus the evidence manifest, and commit a coherent checkpoint.
 
 1. Create an automation with `Local when possible`.
 2. Prove the chosen model is visible after the agent decides.
-3. Prove hosted fallback is disclosed when local is unavailable.
+3. Prove hosted route is disclosed when local is unavailable.
 4. Spawn at least two subagents with different model/task profiles.
 5. Show parent/child lineage and result resources in chat and Console.
 

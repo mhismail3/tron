@@ -4,7 +4,7 @@
 //! domain contracts, services, and tests beside the worker that uses them.
 //! Model listing, model switching, reasoning-level mutation, and product preset
 //! routing live here. `presets` owns the server-side `Local when possible`,
-//! `Balanced`, and `Deep` vocabulary plus selected-model/fallback presentation
+//! `Balanced`, and `Deep` vocabulary plus selected-model/hosted-route presentation
 //! used by automations and subagents.
 //! Operation bodies live in `operations/`; provider catalog helpers remain in `catalog.rs`.
 //! Provider-native stream and function-call details are isolated under

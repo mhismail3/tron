@@ -68,7 +68,7 @@ construct target function ids or payload templates in the client.
 ## Model Or Subagent Route Is Unexpected
 
 Start with the selected preset. Local when possible prefers local execution
-when profile policy and availability allow it, then records any hosted fallback.
+when profile policy and availability allow it, then records any hosted route.
 Balanced and Deep allow different policy tradeoffs. Inspect the subagent event,
 agent-result resource, and generated lineage UI; they should agree on task
 profile, selected route, result, and parent/child lineage.

@@ -78,12 +78,12 @@ server reconstructs the canonical capability call.
 Use the product presets:
 
 - Local when possible: prefer local execution when policy and availability
-  allow it, and disclose any hosted fallback.
+  allow it, and disclose any hosted route.
 - Balanced: use the default tradeoff for everyday work.
 - Deep: spend more reasoning/model budget for harder work.
 
 Subagent chips should show the helper task, selected preset/model route, result,
-and lineage. The exact model and fallback explanation remain server-owned and
+and lineage. The exact model and hosted-route explanation remain server-owned and
 inspectable after the run.
 
 ## Boundaries

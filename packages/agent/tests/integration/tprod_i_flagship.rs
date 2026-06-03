@@ -99,7 +99,7 @@ impl Provider for TprodIFlagshipProvider {
         }
         if is_tprod_i_review_subagent_turn(context) {
             return Ok(text_stream(
-                "TPROD-I review subagent: helper evidence is review-ready. Task profile Review used Local when possible routing and should disclose hosted fallback when local execution is unavailable.",
+                "TPROD-I review subagent: helper evidence is review-ready. Task profile Review used Local when possible routing and should disclose hosted route when local execution is unavailable.",
             ));
         }
         let call = self.call_count.fetch_add(1, Ordering::SeqCst);
@@ -822,7 +822,7 @@ fn flagship_final_answer(context: &ModelContext, scenario: &TprodIFlagshipScenar
         .expect("subagent session id");
 
     format!(
-        "TPROD-I review-ready: workspace autonomy {grant_id} says Safe in this workspace; helper {function_id} on worker {worker_id} registered at catalog revision {catalog_revision}; source history materialized_file {source_resource}@{source_version} has {version_count} versions including the broken draft repair; invocation echoed scorecard nonce 9; conformance evidence:{evidence_resource}@{evidence_version} is healthy for plugin {plugin_id} implementation {implementation_id}; generated UI ui_surface {ui_resource}@{ui_version} targets the helper; review subagent agent_result:subagent:{subagent_session_id} used task profile {task_label} and model preset {preset_label} ({selected_model}, fallback={fallback_used}); docs/evidence are ready for local review and there was no push/merge/release/deploy.",
+        "TPROD-I review-ready: workspace autonomy {grant_id} says Safe in this workspace; helper {function_id} on worker {worker_id} registered at catalog revision {catalog_revision}; source history materialized_file {source_resource}@{source_version} has {version_count} versions including the broken draft repair; invocation echoed scorecard nonce 9; conformance evidence:{evidence_resource}@{evidence_version} is healthy for plugin {plugin_id} implementation {implementation_id}; generated UI ui_surface {ui_resource}@{ui_version} targets the helper; review subagent agent_result:subagent:{subagent_session_id} used task profile {task_label} and model preset {preset_label} ({selected_model}, hostedRoute={hosted_route_used}); docs/evidence are ready for local review and there was no push/merge/release/deploy.",
         grant_id = scenario.autonomy_grant_id,
         function_id = scenario.function_id,
         worker_id = scenario.worker_id,
@@ -842,7 +842,7 @@ fn flagship_final_answer(context: &ModelContext, scenario: &TprodIFlagshipScenar
             .as_str()
             .unwrap_or("Local when possible"),
         selected_model = routing["selectedModel"].as_str().unwrap_or("pending"),
-        fallback_used = routing["fallbackUsed"].as_bool().unwrap_or(false),
+        hosted_route_used = routing["hostedRouteUsed"].as_bool().unwrap_or(false),
     )
 }
 

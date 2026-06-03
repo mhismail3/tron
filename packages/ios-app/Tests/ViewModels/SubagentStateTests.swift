@@ -39,9 +39,9 @@ final class SubagentStateTests: XCTestCase {
             selectedModel: "claude-sonnet-4-6",
             selectedModelLabel: "Claude Sonnet 4.6",
             modelClass: "hosted",
-            fallbackUsed: true,
-            fallbackLabel: "Hosted fallback",
-            fallbackReason: "Local model is unavailable for this flow.",
+            hostedRouteUsed: true,
+            hostedRouteLabel: "Hosted route",
+            hostedRouteReason: "Local model is unavailable for this flow.",
             policyProfile: "normal"
         )
     }
@@ -163,7 +163,7 @@ final class SubagentStateTests: XCTestCase {
 
         let data = sut.subagents["sub-1"]
         XCTAssertEqual(data?.taskProfile?.label, "Review")
-        XCTAssertEqual(data?.modelRouting?.fallbackLabel, "Hosted fallback")
+        XCTAssertEqual(data?.modelRouting?.hostedRouteLabel, "Hosted route")
         XCTAssertEqual(data?.resultPreview, "Reviewed successfully")
     }
 

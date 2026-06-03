@@ -86,7 +86,7 @@ or enforcing revocation.
 Model routing also stays server-owned. Pack hints may recommend a preset or
 subagent role, but profile policy chooses what is allowed. Stored events,
 agent-result resources, generated lineage UI, and chips should agree on the
-selected preset/model route and any hosted fallback.
+selected preset/model route and any hosted route.
 
 ## Boundaries
 

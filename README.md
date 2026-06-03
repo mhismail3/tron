@@ -973,7 +973,7 @@ stream events are therefore reconstructable from substrate records rather than
 in-memory runner state or client-owned bookkeeping. Subagents may request a
 server-owned `modelPreset` (`localWhenPossible`, `balanced`, or `deep`) and a
 validated `taskProfile`; the runner resolves the concrete model from active
-profile settings, records the selected route and any hosted fallback, and
+profile settings, records the selected route and any hosted route, and
 projects that same route/profile into events, result resources, generated
 lineage UI, and iOS chips.
 
@@ -1171,7 +1171,7 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
   "agent": {
     "maxTurns": 250,
     "subagentMaxDepth": 3,
-    "subagentModel": "claude-haiku-4-5-20251001" // Default hosted fallback for subagent preset routing
+    "subagentModel": "claude-haiku-4-5-20251001" // Default hosted route for subagent preset routing
   },
 
   "context": {

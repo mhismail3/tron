@@ -302,7 +302,7 @@ pub(super) fn subagent_collection_layout(projection: &TargetProjection, rows: &[
                 ],
             );
             if row
-                .pointer("/modelRouting/fallbackUsed")
+                .pointer("/modelRouting/hostedRouteUsed")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
             {
@@ -310,9 +310,10 @@ pub(super) fn subagent_collection_layout(projection: &TargetProjection, rows: &[
                     &mut row_children,
                     "Routing",
                     row,
-                    &["/modelRouting/fallbackLabel"],
+                    &["/modelRouting/hostedRouteLabel"],
                 );
-                if let Some(reason) = first_non_empty_string(row, &["/modelRouting/fallbackReason"])
+                if let Some(reason) =
+                    first_non_empty_string(row, &["/modelRouting/hostedRouteReason"])
                 {
                     row_children.push(json!({"type": "Text", "props": {
                         "text": reason

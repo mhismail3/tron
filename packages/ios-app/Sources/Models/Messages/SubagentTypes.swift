@@ -91,9 +91,9 @@ struct SubagentModelRoutingPresentation: Codable, Equatable, Sendable {
     let selectedModel: String?
     let selectedModelLabel: String?
     let modelClass: String?
-    let fallbackUsed: Bool
-    let fallbackLabel: String?
-    let fallbackReason: String?
+    let hostedRouteUsed: Bool
+    let hostedRouteLabel: String?
+    let hostedRouteReason: String?
     let policyProfile: String?
 
     var chipModelLabel: String? {

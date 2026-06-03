@@ -22,7 +22,7 @@
 //! are not the product source of truth for cron schedule definitions or
 //! completed run observations. Agent-turn payloads may carry a product
 //! `modelPreset`; schedule truth stores a pending route presentation and
-//! execution truth records the selected model/fallback route after profile
+//! execution truth records the selected model/hosted route after profile
 //! policy resolves it.
 //!
 //! ## Invariants

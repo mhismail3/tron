@@ -1,5 +1,9 @@
-use super::*;
-use crate::domains::capability_support::implementations::traits::SubagentTaskProfile;
+use crate::domains::capability_support::implementations::traits::{
+    SubagentSpawner, SubagentTaskProfile,
+};
+use std::sync::Arc;
+
+use super::{MockProvider, make_config, make_subagent_manager};
 
 #[tokio::test]
 async fn spawn_persists_task_profile_and_model_routing_to_events_and_resource() {

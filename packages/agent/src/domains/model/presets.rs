@@ -3,7 +3,7 @@
 //! The model domain owns the user-facing preset vocabulary shared by chat,
 //! automations, and subagents. Callers may request an exact model, but product
 //! flows should prefer these presets so the server can disclose the concrete
-//! selected model and any hosted fallback without client policy logic.
+//! selected model and any hosted route without client policy logic.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -20,7 +20,7 @@ use crate::shared::messages::Provider;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ModelPreset {
-    /// Prefer a local model for this flow, using hosted fallback only when
+    /// Prefer a local model for this flow, using hosted route only when
     /// local execution is unavailable.
     LocalWhenPossible,
     /// Use the profile's normal default model.
@@ -134,14 +134,14 @@ pub struct ModelRoutingPresentation {
     /// `local` or `hosted` after routing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_class: Option<String>,
-    /// Whether a hosted fallback was used for a local opt-in preset.
-    pub fallback_used: bool,
-    /// Product label for fallback state.
+    /// Whether a hosted route was used for a local opt-in preset.
+    pub hosted_route_used: bool,
+    /// Product label for hosted-route state.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fallback_label: Option<String>,
-    /// Plain reason for fallback.
+    pub hosted_route_label: Option<String>,
+    /// Plain reason for the hosted route.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub fallback_reason: Option<String>,
+    pub hosted_route_reason: Option<String>,
     /// Profile that supplied the policy, when available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub policy_profile: Option<String>,
@@ -159,9 +159,9 @@ impl ModelRoutingPresentation {
             selected_model: None,
             selected_model_label: None,
             model_class: None,
-            fallback_used: false,
-            fallback_label: None,
-            fallback_reason: None,
+            hosted_route_used: false,
+            hosted_route_label: None,
+            hosted_route_reason: None,
             policy_profile: None,
         }
     }
@@ -265,8 +265,8 @@ pub async fn observe_local_model_availability() -> LocalModelAvailability {
 fn selected_presentation(
     preset: Option<ModelPreset>,
     model: &str,
-    fallback_used: bool,
-    fallback_reason: Option<String>,
+    hosted_route_used: bool,
+    hosted_route_reason: Option<String>,
     policy_profile: Option<String>,
 ) -> ModelRoutingPresentation {
     let model_class = if model_is_local(model) {
@@ -282,9 +282,9 @@ fn selected_presentation(
         selected_model: Some(model.to_owned()),
         selected_model_label: Some(model_display_name(model)),
         model_class: Some(model_class.to_owned()),
-        fallback_used,
-        fallback_label: fallback_used.then(|| "Hosted fallback".to_owned()),
-        fallback_reason,
+        hosted_route_used,
+        hosted_route_label: hosted_route_used.then(|| "Hosted route".to_owned()),
+        hosted_route_reason,
         policy_profile,
     }
 }
@@ -354,12 +354,12 @@ mod tests {
 
         assert_eq!(route.selected_model.as_deref(), Some("ollama/gemma4:26b"));
         assert_eq!(route.model_class.as_deref(), Some("local"));
-        assert!(!route.fallback_used);
+        assert!(!route.hosted_route_used);
         assert!(route.local_opt_in);
     }
 
     #[test]
-    fn local_when_possible_discloses_hosted_fallback_when_unavailable() {
+    fn local_when_possible_discloses_hosted_route_when_unavailable() {
         let policy = ModelRoutingPolicy {
             default_model: CLAUDE_SONNET_4_6.to_owned(),
             subagent_model: "claude-haiku-4-5-20251001".to_owned(),
@@ -376,10 +376,10 @@ mod tests {
 
         assert_eq!(route.selected_model.as_deref(), Some(CLAUDE_SONNET_4_6));
         assert_eq!(route.model_class.as_deref(), Some("hosted"));
-        assert!(route.fallback_used);
-        assert_eq!(route.fallback_label.as_deref(), Some("Hosted fallback"));
+        assert!(route.hosted_route_used);
+        assert_eq!(route.hosted_route_label.as_deref(), Some("Hosted route"));
         assert_eq!(
-            route.fallback_reason.as_deref(),
+            route.hosted_route_reason.as_deref(),
             Some("Ollama is not running.")
         );
     }

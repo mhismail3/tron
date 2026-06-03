@@ -493,7 +493,7 @@ row, note command return codes, and keep open loops explicit.
 
 - Closed for TPROD-G. TPROD-H must add model preset, automation, and subagent
   routing proof with server-owned policy, selected-model disclosure, hosted
-  fallback disclosure, subagent chips, and parent/child lineage.
+  route disclosure, subagent chips, and parent/child lineage.
 
 ## TPROD-H Evidence
 
@@ -541,7 +541,7 @@ row, note command return codes, and keep open loops explicit.
 | Command | Result | Purpose |
 |---|---:|---|
 | `cargo test --manifest-path packages/agent/Cargo.toml cron_agent_turn_model_preset_is_decision_backed_and_product_presented -- --nocapture` | 101 then 0 | Red/green proof: first failed because cron agent-turn payloads had no `modelPreset`/pending `modelRouting`; after implementation it proved schedule-time `Local when possible` presentation is persisted as pending route truth. |
-| `cargo test --manifest-path packages/agent/Cargo.toml generated_subagent_lineage_surface_uses_resource_truth_and_stored_actions -- --nocapture` | 101 then 0 | Red/green proof: first failed because generated subagent lineage UI ignored `taskProfile`/`modelRouting`; after implementation it proved Review, Local when possible, selected hosted model, hosted fallback label, and fallback reason render from resource truth with stored actions. |
+| `cargo test --manifest-path packages/agent/Cargo.toml generated_subagent_lineage_surface_uses_resource_truth_and_stored_actions -- --nocapture` | 101 then 0 | Red/green proof: first failed because generated subagent lineage UI ignored `taskProfile`/`modelRouting`; after implementation it proved Review, Local when possible, selected hosted model, hosted route label, and hosted route reason render from resource truth with stored actions. |
 | `cargo test --manifest-path packages/agent/Cargo.toml spawn_persists_task_profile_and_model_routing_to_events_and_resource -- --nocapture` | 0 | Proved live subagent spawn resolves model route from policy, returns route/profile on the handle, persists them in parent spawn/completion events, and writes them to the final `agent_result` resource. |
 | `cargo test --manifest-path packages/agent/Cargo.toml subagent_manager::tests --lib -- --nocapture` | 0 | Proved the full subagent manager namespace after extracting child event forwarding and moving the route/profile persistence case into a focused child test module; 64 tests passed. |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all` | 0 | Formatted Rust changes after model preset, cron, and subagent routing implementation. |
@@ -561,9 +561,9 @@ row, note command return codes, and keep open loops explicit.
 
 - The model domain now owns the product preset vocabulary and
   `ModelRoutingPresentation`. `Local when possible` records explicit local
-  opt-in, selected model, local/hosted class, hosted fallback label, fallback
+  opt-in, selected model, local/hosted class, hosted route label, hosted route
   reason, and profile policy name. Pure route tests cover both local available
-  and hosted fallback cases.
+  and hosted route cases.
 - Cron agent-turn payloads can carry `modelPreset`; schedule creation/update
   stamps pending route presentation, while execution resolves the concrete
   model at the boundary and uses that same model for profile planning,
@@ -579,7 +579,7 @@ row, note command return codes, and keep open loops explicit.
   The cleanup scorecard exact LOC audit was updated without widening existing
   budgets.
 - Generated subagent lineage surfaces render task profile, preset, selected
-  model, hosted fallback label, and fallback reason from resource or invocation
+  model, hosted route label, and hosted route reason from resource or invocation
   truth. The layout still submits only stored action coordinates.
 - iOS remains a thin client for routing: it decodes server `taskProfile` and
   `modelRouting`, stores them in `SubagentInvocationData`, reconstructs them
@@ -824,3 +824,37 @@ row, note command return codes, and keep open loops explicit.
 - Closed for TPROD-L. The productization scorecard is complete at 100/100.
 - Existing successor scope for confirmation-gated iPad action flows remains in
   [`ipad-action-time-followup-scorecard.md`](ipad-action-time-followup-scorecard.md).
+
+## Post-Closeout Static Gate Follow-Up: 2026-06-03
+
+### Findings
+
+- The closeout missed a later `threat_model_invariants` run. The failures were
+  real: target UI-surface projections needed the canonical bounded `limit: 500`
+  resource query, one subagent routing test still imported parent wildcard
+  exports, and the model/iOS presentation used retired route wording.
+- The model routing contract now uses `hostedRouteUsed`,
+  `hostedRouteLabel`, and `hostedRouteReason` across Rust resources,
+  generated lineage UI, iOS decoding, tests, README, and product docs.
+- The remaining historical `legacy-fallback-cleanup-pass-scorecard.md` filename
+  stays as a completed cleanup scorecard reference; current code and product
+  docs no longer use fallback vocabulary for active routing.
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `rg -n "fallback\|fallbackUsed\|fallbackLabel\|fallbackReason\|fallback_used\|fallback_label\|fallback_reason" packages/agent/src packages/ios-app/Sources -g '*.rs' -g '*.swift'` | 1 | Confirmed no active Rust/Swift source matches remain. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture` | 0 | Re-ran the exact failing static gate; 69 tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib` | 0 | Re-ran the Rust library suite, including capability primer coverage; 5,877 tests passed. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Rust formatting check. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Rust compile check. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 0 | Large-file budget gate; 1 test passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test integration tprod_i_flagship_chat_loop_reaches_review_ready -- --nocapture` | 0 | Re-ran the full TPROD-I local-helper/subagent proof after hosted-route field rename; 1 selected test passed. |
+| `cd packages/ios-app && xcodegen generate && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=7BDA4AF9-1C40-47E3-A925-0F88C191F263' -only-testing:TronMobileTests/SubagentStateTests` | 0 | Re-ran the focused iOS subagent projection suite; 53 tests passed. |
+| `git diff --check` | 0 | Whitespace/diff hygiene check. |
+
+### Open Loops
+
+- Closed for this follow-up. The productization scorecard remains 100/100, and
+  no productization row is reopened.

@@ -376,6 +376,7 @@ fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> 
 }
 
 fn ui_surface_refs(host: &dyn PrimitiveRuntimeHost, limit: usize) -> Result<Vec<Value>> {
+    let limit = limit.clamp(1, 500);
     host.list_resources(ListResources {
         kind: Some(UI_SURFACE_KIND.to_owned()),
         scope: None,
@@ -396,7 +397,17 @@ fn ui_surface_refs_for_target(
         include_internal: true,
         ..FunctionQuery::default()
     });
-    Ok(ui_surface_refs(host, 100)?
+    let surfaces = host
+        .list_resources(ListResources {
+            kind: Some(UI_SURFACE_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?
+        .into_iter()
+        .filter_map(|resource| ui_surface_ref_for_resource(host, resource).transpose())
+        .collect::<Result<Vec<_>>>()?;
+    Ok(surfaces
         .into_iter()
         .filter(|surface| {
             let bound_to_target = surface_targets(surface).iter().any(|target| {
