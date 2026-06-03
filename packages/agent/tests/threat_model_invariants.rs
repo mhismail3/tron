@@ -1397,6 +1397,7 @@ fn ios_thin_client_boundaries_stay_split() {
         "packages/ios-app/Sources/Views/EngineConsole/EngineConsoleSection.swift",
         "packages/ios-app/Sources/Models/Messages/CapabilityInvocationTypes.swift",
         "packages/ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift",
+        "packages/ios-app/Sources/Models/Messages/CapabilityInvocationProgressModel.swift",
         "packages/ios-app/Sources/Models/Messages/CapabilityPresentation.swift",
         "packages/ios-app/Sources/Services/Network/EngineConnection.swift",
         "packages/ios-app/Sources/Services/Network/EngineConnectionTypes.swift",
@@ -1428,6 +1429,9 @@ fn ios_thin_client_boundaries_stay_split() {
     let new_session = read("packages/ios-app/Sources/Views/Session/NewSessionFlow.swift");
     let invocation_views =
         read("packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationViews.swift");
+    let invocation_detail_components = read(
+        "packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationDetailComponents.swift",
+    );
     assert!(
         !engine_console.contains("struct EngineConsoleSectionChips")
             && !engine_console.contains("struct PluginCard")
@@ -1443,6 +1447,21 @@ fn ios_thin_client_boundaries_stay_split() {
             && !invocation_views.contains("struct CapabilityDetailHeader")
             && !invocation_views.contains("struct CapabilityResultRenderer"),
         "CLC-7 parents must not regain extracted iOS component/type/protocol-frame bodies"
+    );
+
+    let progress_journey = invocation_detail_components
+        .split("struct CapabilityProgressJourneyView")
+        .nth(1)
+        .and_then(|text| {
+            text.split("private struct CapabilityProgressStepCard")
+                .next()
+        })
+        .expect("CapabilityProgressJourneyView must stay present");
+    assert!(
+        progress_journey
+            .contains(".clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))")
+            && !progress_journey.contains("scrollClipDisabled"),
+        "Capability progress journey must clip horizontal cards inside the progress container"
     );
 }
 

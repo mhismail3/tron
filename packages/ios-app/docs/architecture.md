@@ -138,6 +138,8 @@ as a horizontal Choose/Prepare/Run/Finish progression. Execution path,
 selection policy, schema digests, raw requests, and raw results are available
 behind Advanced so the default sheet explains the action before showing audit
 metadata.
+The progression is a clipped horizontal viewport inside the Progress section;
+cards may scroll, but must not paint outside the section container.
 Live `agent.compaction_started` events render a single transient progress pill.
 Successful `agent.compaction` events become visible compaction summaries, while
 server terminal no-op events only retire the spinner because no

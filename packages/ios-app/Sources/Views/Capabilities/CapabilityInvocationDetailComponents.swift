@@ -80,7 +80,8 @@ struct CapabilityProgressJourneyView: View {
             .padding(.horizontal, 1)
             .padding(.vertical, 2)
         }
-        .scrollClipDisabled()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
