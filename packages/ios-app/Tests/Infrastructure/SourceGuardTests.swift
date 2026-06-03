@@ -29,6 +29,23 @@ struct SourceGuardTests {
         #expect(!toolbar.contains(#"Text("Navigation")"#))
     }
 
+    @Test("Message metadata cost is not double-prefixed")
+    func testMessageMetadataCostIsNotDoublePrefixed() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let badge = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/MessageBubble/MessageMetadataBadge.swift"),
+            encoding: .utf8
+        )
+
+        #expect(badge.contains("Text(record.formattedInput)"))
+        #expect(!badge.contains("Text(record.formattedNewInput)"))
+        #expect(badge.contains("Text(formatCost(cost.totalCost))"))
+        #expect(!badge.contains(#"Image(systemName: "dollarsign")"#))
+    }
+
     @Test("No personal-info literals in iOS Sources or Tests")
     func testNoPersonalInfoLiterals() throws {
         let needles: [String] = [

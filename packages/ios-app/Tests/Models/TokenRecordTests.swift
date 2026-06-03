@@ -58,6 +58,8 @@ final class TokenRecordTests: XCTestCase {
         XCTAssertEqual(record.source.rawCachedInputTokens, 3_000)
         XCTAssertEqual(record.computed.contextWindowTokens, 5_000)
         XCTAssertEqual(record.computed.newInputTokens, 1_000)
+        XCTAssertEqual(record.formattedInput, "5.0k")
+        XCTAssertEqual(record.formattedNewInput, "1.0k")
     }
 
     func testDecodesGoogleThoughtAndToolUseTokens() throws {

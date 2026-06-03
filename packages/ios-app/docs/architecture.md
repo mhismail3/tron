@@ -128,6 +128,11 @@ that the app maps into native Tron components; they never replace identity,
 lineage, approval, or policy fields. Clean-slate local storage means
 unsupported or malformed events are treated as diagnostics rather than
 normalized through retired names.
+Assistant message metadata renders server `tokenRecord` truth directly: the
+up-arrow value is provider-reported raw input, the down-arrow value is raw
+output, and server cost is locally printed once as a dollar amount. The
+computed new-input delta remains server-owned context-accounting state rather
+than a visible substitute for provider input.
 
 ### @Observable State Objects
 

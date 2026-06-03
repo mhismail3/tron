@@ -230,6 +230,9 @@ extension TokenSource {
 // MARK: - Display Formatting Extensions
 
 extension TokenRecord {
+    /// Formatted provider-reported input tokens.
+    var formattedInput: String { source.rawInputTokens.formattedTokenCount }
+
     /// Formatted new input tokens (delta for stats line)
     var formattedNewInput: String { computed.newInputTokens.formattedTokenCount }
 

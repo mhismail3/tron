@@ -10,7 +10,7 @@ struct TokenBadge: View {
             HStack(spacing: 2) {
                 Image(systemName: "arrow.up")
                     .font(TronTypography.labelSM)
-                Text(record.formattedNewInput)
+                Text(record.formattedInput)
             }
 
             HStack(spacing: 2) {
@@ -28,11 +28,7 @@ struct TokenBadge: View {
             }
 
             if let cost = record.pricing.cost {
-                HStack(spacing: 2) {
-                    Image(systemName: "dollarsign")
-                        .font(TronTypography.labelSM)
-                    Text(formatCost(cost.totalCost))
-                }
+                Text(formatCost(cost.totalCost))
             } else if !record.pricing.available {
                 Text("cost unavailable")
             }
