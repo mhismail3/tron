@@ -64,6 +64,101 @@ struct CapabilityDetailHeader: View {
         display.summaryText
     }
 }
+
+@available(iOS 26.0, *)
+struct CapabilityProgressJourneyView: View {
+    let steps: [CapabilityProgressStep]
+    let tint: TintedColors
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                ForEach(steps) { step in
+                    CapabilityProgressStepCard(step: step, tint: tint)
+                }
+            }
+            .padding(.horizontal, 1)
+            .padding(.vertical, 2)
+        }
+        .scrollClipDisabled()
+    }
+}
+
+@available(iOS 26.0, *)
+private struct CapabilityProgressStepCard: View {
+    let step: CapabilityProgressStep
+    let tint: TintedColors
+
+    private var color: Color {
+        switch step.state {
+        case .completed:
+            return tint.accent
+        case .current:
+            return .tronBlue
+        case .attention:
+            return .tronError
+        case .pending:
+            return tint.subtle
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: step.iconName)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                    .foregroundStyle(color)
+                    .frame(width: 24, height: 24)
+                    .background {
+                        Circle().fill(color.opacity(step.state == .pending ? 0.08 : 0.16))
+                    }
+
+                Text(stateLabel)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(step.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
+
+                Text(step.detail)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                    .foregroundStyle(tint.secondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(width: 174, alignment: .topLeading)
+        .frame(minHeight: 118, alignment: .topLeading)
+        .padding(12)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.tronSurface.opacity(0.50))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(color.opacity(step.state == .current ? 0.32 : 0.16), lineWidth: 1)
+                }
+        }
+    }
+
+    private var stateLabel: String {
+        switch step.state {
+        case .completed:
+            return "Done"
+        case .current:
+            return "Now"
+        case .attention:
+            return "Check"
+        case .pending:
+            return "Next"
+        }
+    }
+}
+
 @available(iOS 26.0, *)
 struct CapabilityExecutionGroupView: View {
     let group: CapabilityDisplayGroup

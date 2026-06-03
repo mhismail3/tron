@@ -205,6 +205,10 @@ extension ChatViewModel {
         pullUpPanelState.awaitingSuggestions = false
 
         if isCompacting {
+            if let inProgressId = compactionInProgressMessageId,
+               let index = messageIndex.index(for: inProgressId) {
+                removeFromMessages(at: index)
+            }
             isCompacting = false
             compactionInProgressMessageId = nil
         }

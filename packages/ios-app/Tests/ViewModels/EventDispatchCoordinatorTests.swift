@@ -228,6 +228,7 @@ final class EventDispatchCoordinatorTests: XCTestCase {
     func testDispatch_compaction_callsHandleCompaction() {
         // Given: A compaction result
         let result = CompactionPlugin.Result(
+            success: true,
             tokensBefore: 50000,
             tokensAfter: 30000,
             compressionRatio: 0.6,

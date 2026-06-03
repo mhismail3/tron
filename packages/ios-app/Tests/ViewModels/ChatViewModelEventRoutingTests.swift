@@ -109,6 +109,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     }
 
     private func makeCompactionResult(
+        success: Bool = true,
         tokensBefore: Int,
         tokensAfter: Int,
         reason: String = "context_limit",
@@ -116,6 +117,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
     ) -> CompactionPlugin.Result {
         let ratio = tokensBefore > 0 ? Double(tokensAfter) / Double(tokensBefore) : 1.0
         return CompactionPlugin.Result(
+            success: success,
             tokensBefore: tokensBefore,
             tokensAfter: tokensAfter,
             compressionRatio: ratio,
@@ -572,6 +574,24 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
         // Then
         XCTAssertNil(viewModel.thinkingMessageId)
+    }
+
+    func test_turnStartRemovesStaleCompactionSpinnerWhenNoTerminalEventArrived() {
+        let spinner = ChatMessage.compactionInProgress(reason: "threshold_exceeded")
+        viewModel.appendToMessages(spinner)
+        viewModel.compactionInProgressMessageId = spinner.id
+        viewModel.isCompacting = true
+
+        viewModel.handleTurnStart(TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing"))
+
+        XCTAssertFalse(viewModel.isCompacting)
+        XCTAssertNil(viewModel.compactionInProgressMessageId)
+        XCTAssertFalse(viewModel.messages.contains { message in
+            if case .systemEvent(.compactionInProgress) = message.content {
+                return true
+            }
+            return false
+        })
     }
 
     func test_turnEnd_updatesContextState() {

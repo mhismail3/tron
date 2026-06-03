@@ -133,6 +133,15 @@ up-arrow value is provider-reported raw input, the down-arrow value is raw
 output, and server cost is locally printed once as a dollar amount. The
 computed new-input delta remains server-owned context-accounting state rather
 than a visible substitute for provider input.
+Capability detail sheets lead with server-owned request, status, and identity
+as a horizontal Choose/Prepare/Run/Finish progression. Execution path,
+selection policy, schema digests, raw requests, and raw results are available
+behind Advanced so the default sheet explains the action before showing audit
+metadata.
+Live `agent.compaction_started` events render a single transient progress pill.
+Successful `agent.compaction` events become visible compaction summaries, while
+server terminal no-op events only retire the spinner because no
+`compact.boundary` was committed.
 
 ### @Observable State Objects
 

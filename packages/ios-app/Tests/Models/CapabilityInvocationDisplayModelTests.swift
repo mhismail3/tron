@@ -79,6 +79,8 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(invocation.display.commandText, "date +%s")
         XCTAssertEqual(invocation.display.requestRows.first?.label, "Command")
         XCTAssertEqual(invocation.display.requestRows.first?.value, "date +%s")
+        XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
+        XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.completed, .completed, .attention, .attention])
         XCTAssertFalse(invocation.display.commandText.contains("first_party.capability.v1.execute"))
     }
 
@@ -241,6 +243,9 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
 
         XCTAssertEqual(invocation.display.commandText, "pwd && sed -n '1,3p' README.md")
         XCTAssertEqual(invocation.display.sheetTitle, "Run Command")
+        XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
+        XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.completed, .completed, .completed, .completed])
+        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Run Command selected")
         XCTAssertEqual(
             invocation.display.requestRows.map(\.label),
             ["Command", "Execution mode", "Intent", "Reason"]
@@ -457,6 +462,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(running.display.summaryText, "Safe in this workspace")
         XCTAssertEqual(running.display.statusText, "Creating helper capability")
         XCTAssertEqual(running.display.statusWithDuration, "Creating helper capability")
+        XCTAssertEqual(running.display.progressSteps.map(\.state), [.completed, .current, .current, .pending])
         XCTAssertTrue(
             running.display.executionGroups
                 .first { $0.title == "Run" }?
@@ -521,9 +527,32 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(invocation.display.chipTitle, "Allow local capability work")
         XCTAssertEqual(invocation.display.commandText, "Current workspace")
         XCTAssertEqual(invocation.display.summaryText, "Current workspace")
+        XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
+        XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.completed, .current, .current, .pending])
+        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Allow local capability work selected")
         XCTAssertFalse(invocation.display.chipTitle.contains("Grant"))
         XCTAssertFalse(invocation.display.commandText.contains("reason="))
         XCTAssertFalse(invocation.display.summaryText.contains("self_extension"))
+    }
+
+    func testExecuteWithoutTargetShowsResolutionAsCurrentProgressStep() {
+        let invocation = testCapabilityInvocation(
+            status: .running,
+            arguments: #"{"intent":"find a capability that can safely update a file"}"#,
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "execute",
+                contractId: "capability::execute",
+                implementationId: "first_party.capability.v1.execute",
+                functionId: "capability::execute",
+                pluginId: "first_party.capability",
+                trustTier: "first_party_signed"
+            )
+        )
+
+        XCTAssertEqual(invocation.display.sheetTitle, "Execute")
+        XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
+        XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.current, .pending, .pending, .pending])
+        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Finding the right capability")
     }
 
     func testSelfExtensionRepairChipsKeepCatalogAndWorkerIdsInInspectOnly() {

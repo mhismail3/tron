@@ -151,6 +151,7 @@ struct CapabilityInvocationDetailSheet: View {
     let data: CapabilityInvocationData
 
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isAdvancedExpanded = false
 
     private var display: CapabilityInvocationDisplayModel { data.display }
     private var accent: Color {
@@ -174,19 +175,29 @@ struct CapabilityInvocationDetailSheet: View {
                     CapabilityDetailHeader(data: data)
                         .sheetSection()
 
+                    journeySection
                     progressSection
                     requestSection
-                    executionSection
                     approvalSection
                     resultSection
                     artifactsSection
                     logsSection
                     errorSection
-                    technicalSection
+                    advancedSection
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 28)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var journeySection: some View {
+        if !display.progressSteps.isEmpty {
+            CapabilityDetailSection(title: "Progress", accent: accent, tint: tint) {
+                CapabilityProgressJourneyView(steps: display.progressSteps, tint: tint)
+            }
+            .sheetSection()
         }
     }
 
@@ -221,20 +232,6 @@ struct CapabilityInvocationDetailSheet: View {
             CapabilityDetailSection(title: "Request", accent: accent, tint: tint) {
                 VStack(alignment: .leading, spacing: 12) {
                     CapabilityReadableRows(rows: display.requestRows, tint: tint)
-                }
-            }
-            .sheetSection()
-        }
-    }
-
-    @ViewBuilder
-    private var executionSection: some View {
-        if !display.executionGroups.isEmpty {
-            CapabilityDetailSection(title: "Execution Path", accent: accent, tint: tint) {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(display.executionGroups) { group in
-                        CapabilityExecutionGroupView(group: group, tint: tint)
-                    }
                 }
             }
             .sheetSection()
@@ -320,12 +317,19 @@ struct CapabilityInvocationDetailSheet: View {
     }
 
     @ViewBuilder
-    private var technicalSection: some View {
-        if !display.technicalRows.isEmpty || display.prettyArguments != nil || display.prettyResult != nil {
-            CapabilityDetailSection(title: "Metadata", accent: .tronSlate, tint: tint) {
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 14) {
+    private var advancedSection: some View {
+        if hasAdvancedContent {
+            CapabilityDetailSection(title: "Advanced", accent: .tronSlate, tint: tint) {
+                DisclosureGroup(isExpanded: $isAdvancedExpanded) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if !display.executionGroups.isEmpty {
+                            advancedSubheading("Execution path")
+                            ForEach(display.executionGroups) { group in
+                                CapabilityExecutionGroupView(group: group, tint: tint)
+                            }
+                        }
                         if !display.technicalRows.isEmpty {
+                            advancedSubheading("Metadata")
                             CapabilityReadableRows(rows: display.technicalRows, tint: tint)
                         }
                         if let prettyArguments = display.prettyArguments {
@@ -335,9 +339,9 @@ struct CapabilityInvocationDetailSheet: View {
                             CapabilityRawDisclosure(title: "Raw result", text: prettyResult, tint: tint)
                         }
                     }
-                    .padding(.top, 8)
+                    .padding(.top, 10)
                 } label: {
-                    Text("Audit metadata and raw payloads")
+                    Label("Execution path, policy, and raw payloads", systemImage: "slider.horizontal.3")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(tint.heading)
                 }
@@ -351,6 +355,20 @@ struct CapabilityInvocationDetailSheet: View {
             || data.status == .generating
             || data.progressMessage?.nilIfEmpty != nil
             || data.progressPercent != nil
+    }
+
+    private var hasAdvancedContent: Bool {
+        !display.executionGroups.isEmpty
+            || !display.technicalRows.isEmpty
+            || display.prettyArguments != nil
+            || display.prettyResult != nil
+    }
+
+    private func advancedSubheading(_ title: String) -> some View {
+        Text(title)
+            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+            .foregroundStyle(tint.subtle)
+            .textCase(.uppercase)
     }
 
     private var boundedProgress: Double? {

@@ -54,6 +54,18 @@ final class CompactionCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.compactionInProgressMessageId, mockContext.messages[0].id)
     }
 
+    func testRepeatedCompactionStartedKeepsSingleInProgressMessage() {
+        coordinator.handleCompactionStarted(CompactionStartedPlugin.Result(reason: "threshold_exceeded"), context: mockContext)
+        coordinator.handleCompactionStarted(CompactionStartedPlugin.Result(reason: "threshold_exceeded"), context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 1)
+        if case .systemEvent(.compactionInProgress(let reason)) = mockContext.messages[0].content {
+            XCTAssertEqual(reason, "threshold_exceeded")
+        } else {
+            XCTFail("Expected one compactionInProgress content")
+        }
+    }
+
     // MARK: - handleCompaction Tests
 
     func testCompactionClearsIsCompacting() {
@@ -126,6 +138,26 @@ final class CompactionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.refreshContextInBackgroundCalled)
     }
 
+    func testNoOpCompactionRetiresInProgressMessageWithoutChatArtifact() {
+        let inProgressMsg = ChatMessage.compactionInProgress(reason: "threshold_exceeded")
+        mockContext.appendToMessages(inProgressMsg)
+        mockContext.compactionInProgressMessageId = inProgressMsg.id
+        mockContext.isCompacting = true
+
+        let result = makeCompactionResult(
+            success: false,
+            tokensBefore: 10000,
+            tokensAfter: 10000,
+            summary: "Compaction skipped: no durable context reduction."
+        )
+        coordinator.handleCompaction(result, context: mockContext)
+
+        XCTAssertFalse(mockContext.isCompacting)
+        XCTAssertTrue(mockContext.messages.isEmpty)
+        XCTAssertNil(mockContext.compactionInProgressMessageId)
+        XCTAssertTrue(mockContext.refreshContextInBackgroundCalled)
+    }
+
     func testCompactionThenRefreshOverwritesEstimate() {
         // Compaction sets estimatedContextTokens
         let result = makeCompactionResult(tokensBefore: 66000, tokensAfter: 18000, estimatedContextTokens: 29000)
@@ -143,16 +175,19 @@ final class CompactionCoordinatorTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeCompactionResult(
+        success: Bool = true,
         tokensBefore: Int,
         tokensAfter: Int,
+        summary: String = "Summarized conversation",
         estimatedContextTokens: Int? = nil
     ) -> CompactionPlugin.Result {
         CompactionPlugin.Result(
+            success: success,
             tokensBefore: tokensBefore,
             tokensAfter: tokensAfter,
             compressionRatio: Double(tokensAfter) / Double(tokensBefore),
             reason: "auto",
-            summary: "Summarized conversation",
+            summary: summary,
             estimatedContextTokens: estimatedContextTokens,
             preservedTurns: 3,
             summarizedTurns: 5

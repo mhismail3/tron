@@ -295,6 +295,7 @@ async fn h13_failed_compaction_persists_neither_event() {
 async fn noop_compaction_persists_neither_event() {
     let (persister, store, session_id) = make_persister_and_session().await;
     let emitter = make_event_emitter_for_test();
+    let mut rx = emitter.subscribe();
 
     let result = Ok(
         crate::domains::agent::runner::context::types::CompactionResult {
@@ -323,6 +324,34 @@ async fn noop_compaction_persists_neither_event() {
     )
     .await;
     assert!(!persist_ok, "no-op compaction returns false");
+
+    let broadcast = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("no-op terminal broadcast should arrive")
+        .expect("broadcast channel should stay open");
+    match broadcast {
+        TronEvent::CompactionComplete {
+            success,
+            tokens_before,
+            tokens_after,
+            summary,
+            summarized_turns,
+            ..
+        } => {
+            assert!(
+                !success,
+                "no-op terminal event is not a committed compaction"
+            );
+            assert_eq!(tokens_before, 100);
+            assert_eq!(tokens_after, 100);
+            assert_eq!(
+                summary.as_deref(),
+                Some("Compaction skipped: no durable context reduction.")
+            );
+            assert_eq!(summarized_turns, Some(0));
+        }
+        other => panic!("expected no-op terminal compaction event, got {other:?}"),
+    }
 
     let opts = crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions::default();
     let events = store.get_events_by_session(&session_id, &opts).unwrap();

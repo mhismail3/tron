@@ -8,6 +8,8 @@
 //!
 //! Event types and process commands are recorded between compactions and
 //! cleared after successful compaction.
+//! No-op attempts do not persist `compact.boundary`, but they still emit a
+//! terminal live compaction event so clients can retire progress indicators.
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -684,6 +686,38 @@ impl CompactionHandler {
                         tokens_after,
                         "compaction produced no durable reduction; suppressing boundary"
                     );
+                    let summary =
+                        Some("Compaction skipped: no durable context reduction.".to_owned());
+                    if let Some(counter) = sequence_counter {
+                        let _ = emitter.emit_sequenced(
+                            TronEvent::CompactionComplete {
+                                base: BaseEvent::now(session_id),
+                                success: false,
+                                tokens_before,
+                                tokens_after: tokens_before,
+                                compression_ratio: 1.0,
+                                reason: Some(reason),
+                                summary,
+                                estimated_context_tokens: Some(tokens_before),
+                                preserved_turns: Some(compaction_result.preserved_turns),
+                                summarized_turns: Some(compaction_result.summarized_turns),
+                            },
+                            counter,
+                        );
+                    } else {
+                        let _ = emitter.emit(TronEvent::CompactionComplete {
+                            base: BaseEvent::now(session_id),
+                            success: false,
+                            tokens_before,
+                            tokens_after: tokens_before,
+                            compression_ratio: 1.0,
+                            reason: Some(reason),
+                            summary,
+                            estimated_context_tokens: Some(tokens_before),
+                            preserved_turns: Some(compaction_result.preserved_turns),
+                            summarized_turns: Some(compaction_result.summarized_turns),
+                        });
+                    }
                     return false;
                 }
 

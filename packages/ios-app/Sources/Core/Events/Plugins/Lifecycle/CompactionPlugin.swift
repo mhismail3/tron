@@ -14,6 +14,7 @@ enum CompactionPlugin: DispatchableEventPlugin {
         let data: DataPayload
 
         struct DataPayload: Decodable, Sendable {
+            let success: Bool
             let tokensBefore: Int
             let tokensAfter: Int
             let compressionRatio: Double?
@@ -28,6 +29,7 @@ enum CompactionPlugin: DispatchableEventPlugin {
     // MARK: - Result
 
     struct Result: EventResult {
+        let success: Bool
         let tokensBefore: Int
         let tokensAfter: Int
         let compressionRatio: Double
@@ -46,6 +48,7 @@ enum CompactionPlugin: DispatchableEventPlugin {
         let ratio = event.data.compressionRatio ??
             (event.data.tokensBefore > 0 ? Double(event.data.tokensAfter) / Double(event.data.tokensBefore) : 1.0)
         return Result(
+            success: event.data.success,
             tokensBefore: event.data.tokensBefore,
             tokensAfter: event.data.tokensAfter,
             compressionRatio: ratio,
