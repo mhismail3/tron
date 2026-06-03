@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **83/100**
+Current score: **88/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -35,7 +35,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-H | passed_after_fix | Model presets, automation routing truth, subagent task/model routing, generated lineage UI, and iOS chip data are server-owned and covered by focused Rust/iOS evidence. Details below. |
 | TPROD-I | passed_after_fix | Flagship Tron-maintains-Tron chat loop creates, repairs, tests, reviews, and cleans up a workspace helper with generated UI plus model/subagent evidence. Details below. |
 | TPROD-J | passed_after_fix | Three polished local example packs ship as local-process templates and pass registration, source, conformance, activation, invocation, generated UI, and Python syntax proof. Details below. |
-| TPROD-K | pending | Product user/operator/release-note docs not yet complete. |
+| TPROD-K | passed_after_fix | Product user/operator/release-note/troubleshooting docs are linked from README and guarded by focused static tests. Details below. |
 | TPROD-L | pending | Full hardening, visual QA, soak, and closeout gates not yet run. |
 
 ## TPROD-A Evidence
@@ -714,3 +714,46 @@ row, note command return codes, and keep open loops explicit.
 - Closed for TPROD-J. TPROD-K must complete product user/operator docs,
   release-note-style notes, README/progressive docs, and troubleshooting for the
   full self-extending local product flow.
+
+## TPROD-K Evidence
+
+### Files
+
+- [`packages/agent/docs/self-extending-local-product-user-guide.md`](self-extending-local-product-user-guide.md)
+- [`packages/agent/docs/self-extending-local-product-operator-guide.md`](self-extending-local-product-operator-guide.md)
+- [`packages/agent/docs/self-extending-local-product-release-notes.md`](self-extending-local-product-release-notes.md)
+- [`packages/agent/docs/self-extending-local-product-troubleshooting.md`](self-extending-local-product-troubleshooting.md)
+- [`packages/agent/tests/productization_docs_invariants.rs`](../tests/productization_docs_invariants.rs)
+- [`README.md`](../../../README.md)
+- [`packages/agent/docs/tron-productization-scorecard.md`](tron-productization-scorecard.md)
+- [`packages/agent/docs/tron-productization-evidence-manifest.md`](tron-productization-evidence-manifest.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml --test productization_docs_invariants -- --nocapture` | 101 then 0 | Red/green documentation proof. First failed because the user-guide path was absent; intermediate reruns caught a wrapped boundary marker and a negated forbidden implementation phrase; final run passed for all required docs, README links, and forbidden-behavior guards. |
+
+### Findings
+
+- The user guide documents chat as the primary surface, Created by Agent,
+  local Packs, generated UI, server-owned trust labels, Inspect boundaries, and
+  the `Local when possible`, `Balanced`, and `Deep` presets.
+- The operator guide documents the local-only helper and pack lifecycle through
+  `worker::protocol_guide`, `worker::spawn`, `module::*` lifecycle functions,
+  `ui::submit_action`, source trust, evidence refs, and server-owned model
+  routing.
+- The product notes summarize TPROD-A through TPROD-J as release-note-style
+  user-visible changes while explicitly excluding release, deploy, push, merge,
+  notarization, rollout, remote discovery, and marketplace install.
+- The troubleshooting guide covers workspace autonomy, catalog registration,
+  materialized local files, source verification, conformance, `trustPresentation`,
+  generated UI validation, model routing, example-pack activation, and cleanup.
+- The root README living-doc map links all four product docs beside the active
+  scorecard and evidence manifest.
+
+### Open Loops
+
+- Closed for TPROD-K. TPROD-L must run hardening, visual QA, soak, Mac/CLI
+  smoke, static absence gates, docs drift checks, and final closeout before the
+  productization scorecard can reach 100/100.

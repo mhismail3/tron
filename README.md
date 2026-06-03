@@ -122,6 +122,18 @@ Current living entry points:
   campaign.
 - `packages/agent/docs/tron-productization-evidence-manifest.md`: companion
   command/source/UI/soak evidence manifest for the productization scorecard.
+- `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
+  for chat-led self-extension, Created by Agent, Packs, generated UI, trust
+  labels, and model presets.
+- `packages/agent/docs/self-extending-local-product-operator-guide.md`:
+  operator guide for local helper creation, pack lifecycle, source trust,
+  generated UI actions, and evidence refs.
+- `packages/agent/docs/self-extending-local-product-release-notes.md`:
+  release-note-style product notes for the active self-extending local product
+  campaign, without release/deploy steps.
+- `packages/agent/docs/self-extending-local-product-troubleshooting.md`:
+  troubleshooting guide for workspace autonomy, worker/catalog registration,
+  source/conformance evidence, generated UI, trust labels, and model routing.
 - `packages/agent/docs/token-accounting-hardening-scorecard.md`: completed
   server-authoritative token accounting, pricing, provider-cache, and
   iPhone-only UI hardening scorecard with final evidence caveats.

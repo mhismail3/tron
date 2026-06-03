@@ -643,8 +643,8 @@ fn productization_scorecard_stays_formalized() {
 
     for required in [
         "# Tron Productization Scorecard: Self-Extending Agentic Product",
-        "Current score: **83/100**",
-        "Status: **active; TPROD-J passed after fix; TPROD-K next**",
+        "Current score: **88/100**",
+        "Status: **active; TPROD-K passed after fix; TPROD-L next**",
         "| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix |",
         "| TPROD-B | `self-extend` managed skill | 7 | passed_after_fix |",
         "| TPROD-C | Chat-led self-extension UX | 10 | passed_after_fix |",
@@ -655,10 +655,10 @@ fn productization_scorecard_stays_formalized() {
         "| TPROD-H | Model, automation, and subagent routing | 10 | passed_after_fix |",
         "| TPROD-I | Tron replaces Codex for local work loop | 9 | passed_after_fix |",
         "| TPROD-J | Mixed real-world example packs | 6 | passed_after_fix |",
-        "| TPROD-K | User, operator, and release-note docs | 5 | pending |",
+        "| TPROD-K | User, operator, and release-note docs | 5 | passed_after_fix |",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending |",
         "No remote package install/discovery path beyond explicit deferred docs",
-        "TPROD-K is active",
+        "TPROD-L is active",
     ] {
         assert!(
             scorecard.contains(required),
@@ -668,7 +668,6 @@ fn productization_scorecard_stays_formalized() {
     for premature_claim in [
         "Current score: **100/100**",
         "Status: **completed**",
-        "| TPROD-K | User, operator, and release-note docs | 5 | passed",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | passed",
     ] {
         assert!(
@@ -677,7 +676,7 @@ fn productization_scorecard_stays_formalized() {
         );
     }
     assert!(
-        manifest.contains("Current score: **83/100**")
+        manifest.contains("Current score: **88/100**")
             && manifest.contains("| TPROD-A | passed_after_fix |")
             && manifest.contains("| TPROD-B | passed_after_fix |")
             && manifest.contains("| TPROD-C | passed_after_fix |")
@@ -688,7 +687,7 @@ fn productization_scorecard_stays_formalized() {
             && manifest.contains("| TPROD-H | passed_after_fix |")
             && manifest.contains("| TPROD-I | passed_after_fix |")
             && manifest.contains("| TPROD-J | passed_after_fix |")
-            && manifest.contains("| TPROD-K | pending |")
+            && manifest.contains("| TPROD-K | passed_after_fix |")
             && manifest.contains("No remote package discovery"),
         "productization evidence manifest must track the same score, next row, and deferred remote boundary"
     );
@@ -696,7 +695,13 @@ fn productization_scorecard_stays_formalized() {
     assert!(
         readme.contains("packages/agent/docs/tron-productization-scorecard.md")
             && readme.contains("packages/agent/docs/tron-productization-evidence-manifest.md")
-            && readme.contains("packages/agent/examples/local-packs"),
+            && readme.contains("packages/agent/examples/local-packs")
+            && readme.contains("packages/agent/docs/self-extending-local-product-user-guide.md")
+            && readme
+                .contains("packages/agent/docs/self-extending-local-product-operator-guide.md")
+            && readme.contains("packages/agent/docs/self-extending-local-product-release-notes.md")
+            && readme
+                .contains("packages/agent/docs/self-extending-local-product-troubleshooting.md"),
         "README living-doc map must link the productization docs and local example packs"
     );
 }
