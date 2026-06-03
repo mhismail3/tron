@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **98/100**
+Current score: **99/100**
 
 Status: **running**
 
@@ -1556,7 +1556,7 @@ is pending, indirectly verified, or stale.
 | HMH-G3 | Transcript/session audit | 15 | passed | Session audit searches prior failures and current campaign transcripts for repeated architecture drift, stale claims, or unfinished rows. | Add successor rows if patterns remain. |
 | HMH-G4 | Live recursive loop rerun | 20 | passed | End-to-end HMH-B/HMH-E scenario reruns from clean temp state after fixes and passes without harness pollution. | Do not use earlier partial run as final proof. |
 | HMH-G5 | Docs and README are canonical | 10 | passed_after_fix | README, engine docs, iOS docs, scorecards, and module docs agree on current commands, surfaces, status, and residual risk. | Remove aspirational or stale claims. |
-| HMH-G6 | Diff hygiene and dead-code scan | 10 | pending | Diff scan removes unrelated churn, AI-ish comments, redundant defensive checks, type escapes, stale compatibility code, and metadata noise. | Fix before ledger/final. |
+| HMH-G6 | Diff hygiene and dead-code scan | 10 | passed_after_fix | Diff scan removes unrelated churn, AI-ish comments, redundant defensive checks, type escapes, stale compatibility code, and metadata noise. | Fix before ledger/final. |
 | HMH-G7 | Ledger and final status are honest | 10 | pending | Ledger entry records completed work and remaining successor scope; no scorecard says 100/100 while Next Test implies active work. | Keep goal active if implementation is not fully proven. |
 
 Closeout commands:
@@ -1762,6 +1762,46 @@ Open loops after HMH-G1/HMH-G2/HMH-G3/HMH-G4/HMH-G5:
 - HMH-G5 is closed. Continue with HMH-G6: perform diff hygiene, dead-code scan,
   and final static checks before ledger/final honesty.
 
+HMH-G6 evidence, 2026-06-03:
+
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture`
+  initially failed because this portfolio still had the previous 98/100 score,
+  HMH-G6 was pending, and no hygiene evidence existed.
+- Worktree and diff hygiene:
+  `git status --short --branch` showed the branch ahead of origin and a clean
+  worktree before G6 started; `git diff --stat` was empty after the G5 commit;
+  `git diff --check` passed; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  passed; and `git diff --check origin/next/modular-capability-engine...HEAD`
+  passed for the cumulative branch diff.
+- Branch-scale review:
+  `git diff --stat origin/next/modular-capability-engine...HEAD` reported 281
+  changed files with 22,292 insertions and 1,524 deletions. That size is why G6
+  used current-tree scans and targeted suite reruns instead of relying on a
+  visual skim.
+- Dead-code/slop scans:
+  current-tree production-source added-line scans found no TODO/FIXME/HACK,
+  AI-generated wording, band-aid wording, temporary-workaround wording,
+  `todo!`, `unimplemented!`, `panic!("TODO")`, forced Swift casts, forced
+  Swift tries, `fatalError`, `unsafeBitCast`, `unwrap_unchecked`,
+  `std::mem::transmute`, or remaining `AnyCodable(value)` rewraps.
+- AnyCodable rewrap cleanup:
+  the type-escape scan found that
+  `EngineConsoleHarnessChangeProjection.harnessUInt64` rewrapped an existing
+  `AnyCodable` before reading numeric/string accessors. G6 changed that helper
+  to use the existing wrapper directly and changed `harnessAnyCodable` to
+  preserve an existing wrapper before wrapping raw values.
+- Verification:
+  `cargo check --manifest-path packages/agent/Cargo.toml` passed;
+  `xcodegen generate` completed without project diffs; and
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests`
+  passed with `14 tests in 1 suite passed`.
+
+Open loops after HMH-G1/HMH-G2/HMH-G3/HMH-G4/HMH-G5/HMH-G6:
+
+- HMH-G6 is closed. Continue with HMH-G7: update the ledger, make the final
+  status honest, and keep the goal active until the G7 row is proven.
+
 ## Adversarial Audit Of This Portfolio
 
 Strong findings:
@@ -1842,12 +1882,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, HMH-G2, HMH-G3, HMH-G4, and
-HMH-G5 are closed. Continue with HMH-G6: perform diff hygiene, dead-code scan,
-and final static checks.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, HMH-G2, HMH-G3, HMH-G4,
+HMH-G5, and HMH-G6 are closed. Continue with HMH-G7: update the ledger and make
+the final status honest.
 
 ```bash
-git diff --stat
-git diff --check
-cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+git status --short --branch
 ```

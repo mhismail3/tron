@@ -421,13 +421,13 @@ private func harnessUInt64(_ dictionary: [String: Any], keys: [String]) -> UInt6
         case let value as Double where value >= 0:
             return UInt64(exactly: value.rounded(.towardZero))
         case let value as AnyCodable:
-            if let int = AnyCodable(value).intValue, int >= 0 {
+            if let int = value.intValue, int >= 0 {
                 return UInt64(int)
             }
-            if let double = AnyCodable(value).doubleValue, double >= 0 {
+            if let double = value.doubleValue, double >= 0 {
                 return UInt64(exactly: double.rounded(.towardZero))
             }
-            if let string = AnyCodable(value).stringValue, let parsed = UInt64(string) {
+            if let string = value.stringValue, let parsed = UInt64(string) {
                 return parsed
             }
         case let value as String:
@@ -443,8 +443,11 @@ private func harnessUInt64(_ dictionary: [String: Any], keys: [String]) -> UInt6
 
 private func harnessAnyCodable(_ dictionary: [String: Any], keys: [String]) -> AnyCodable? {
     for key in keys {
-        guard let value = dictionary[key] else { continue }
-        return AnyCodable(value)
+        guard let raw = dictionary[key] else { continue }
+        if let codable = raw as? AnyCodable {
+            return codable
+        }
+        return AnyCodable(raw)
     }
     return nil
 }
