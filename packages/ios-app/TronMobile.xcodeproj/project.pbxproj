@@ -223,6 +223,7 @@
 		410A12359B1A50994D59624F /* SubagentFailedPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 075202841B4A49CB41C8E4A5 /* SubagentFailedPlugin.swift */; };
 		415F5CD2A33F59D31047E9E9 /* CapabilityInvocationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAA212F4A1040609C59305B5 /* CapabilityInvocationViews.swift */; };
 		41CE03BF257C2AC139F240A8 /* EngineApprovalStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B15DF172D4CAAB100426FE9 /* EngineApprovalStateTests.swift */; };
+		42C0A628CC23C971DA64B54D /* CapabilityInvocationProgressModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88AD90A09085A0DB59A4E0AF /* CapabilityInvocationProgressModel.swift */; };
 		4343B09F9AC2B0516581752C /* ReconstructedState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E25DDCAA3985A00F90FE413 /* ReconstructedState.swift */; };
 		438EA45152F6E9E07B1B5826 /* ContentViewCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D856AD2A85E9EF07FFC1B3 /* ContentViewCoordinator.swift */; };
 		439B9BD7A124E381ADB7974D /* QueuedMessageChipsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D7AD1B96B2C212ED477C66 /* QueuedMessageChipsView.swift */; };
@@ -1351,6 +1352,7 @@
 		88756EFFE19EE26ED65B3283 /* BlobClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlobClientTests.swift; sourceTree = "<group>"; };
 		8878C9A16390B62C79B0C2A3 /* TypewriterAnimationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypewriterAnimationState.swift; sourceTree = "<group>"; };
 		887FAA60E6696C5099018531 /* EventDatabaseProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDatabaseProtocol.swift; sourceTree = "<group>"; };
+		88AD90A09085A0DB59A4E0AF /* CapabilityInvocationProgressModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationProgressModel.swift; sourceTree = "<group>"; };
 		88BA14D5A667445C7EC8347C /* ImportClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImportClient.swift; sourceTree = "<group>"; };
 		88FC6BA4355CDFB0CA86DBDC /* UnifiedEventTransformerReconstructionOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedEventTransformerReconstructionOrderTests.swift; sourceTree = "<group>"; };
 		8991F9313A206B5CCF36C2A6 /* EventDispatchContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventDispatchContext.swift; sourceTree = "<group>"; };
@@ -2256,6 +2258,7 @@
 			isa = PBXGroup;
 			children = (
 				3558CCE2C75BF2BF2F8AB456 /* CapabilityInvocationDisplayModel.swift */,
+				88AD90A09085A0DB59A4E0AF /* CapabilityInvocationProgressModel.swift */,
 				A02A16877174000E21D20775 /* CapabilityInvocationTypes.swift */,
 				3747011E73718F6FD98BD7D7 /* CapabilityPresentation.swift */,
 				FAFA611B03297C4E8A5F765E /* ChatMessage.swift */,
@@ -3904,6 +3907,7 @@
 				6B41A8A2EE777EB64FA2C7C4 /* CapabilityInvocationHandlers.swift in Sources */,
 				68F0BB2A7B5116AABB885111 /* CapabilityInvocationOutputPlugin.swift in Sources */,
 				A56762CB559E16FAEB2DFE96 /* CapabilityInvocationPayloads.swift in Sources */,
+				42C0A628CC23C971DA64B54D /* CapabilityInvocationProgressModel.swift in Sources */,
 				9FE6D09E76B2E6749B9B6597 /* CapabilityInvocationProgressPlugin.swift in Sources */,
 				53C6C8D7D22664AFC47DC323 /* CapabilityInvocationStartedPlugin.swift in Sources */,
 				D303DFFCF0047FC5EF854E90 /* CapabilityInvocationTypes.swift in Sources */,

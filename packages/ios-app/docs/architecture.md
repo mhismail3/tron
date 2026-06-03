@@ -190,6 +190,7 @@ policy from raw model ids.
 | `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources, including session-generated capability surfaces; uses Tron typography/color tokens, restrained native row expansion, and submits only stored action coordinates |
 | `Models/Messages/CapabilityInvocationTypes.swift` | Capability invocation lifecycle DTOs, artifacts, results, and errors |
 | `Models/Messages/CapabilityInvocationDisplayModel.swift` | Server-authored capability invocation display projection |
+| `Models/Messages/CapabilityInvocationProgressModel.swift` | Choose/Prepare/Run/Finish progress projection for capability detail sheets |
 | `Models/Messages/CapabilityPresentation.swift` | Capability status color, icon, and label presentation helpers |
 | `Views/Capabilities/CapabilityInvocationViews.swift` | Capability invocation chip/detail/result shell |
 | `Views/Capabilities/CapabilityInvocationDetailComponents.swift` | Detail sheet header, execution groups, readable rows, and raw disclosure components |
