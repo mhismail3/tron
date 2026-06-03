@@ -274,6 +274,25 @@ impl EvidenceExplainingProvider {
     }
 }
 
+fn is_hmh_title_hook_turn(context: &ModelContext) -> bool {
+    hmh_user_context_contains(context, "Generate a 3-5 word title")
+}
+
+fn is_hmh_branch_name_hook_turn(context: &ModelContext) -> bool {
+    hmh_user_context_contains(context, "Generate a random memorable 3-word branch name")
+}
+
+fn is_hmh_suggestion_hook_turn(context: &ModelContext) -> bool {
+    hmh_user_context_contains(context, "generate 3-5 short follow-up prompts")
+}
+
+fn hmh_user_context_contains(context: &ModelContext, expected: &str) -> bool {
+    context.messages.iter().any(|message| match message {
+        ModelMessage::User { content, .. } => format!("{content:?}").contains(expected),
+        _ => false,
+    })
+}
+
 #[async_trait]
 impl Provider for EvidenceExplainingProvider {
     fn provider_type(&self) -> ProviderKind {
@@ -289,6 +308,17 @@ impl Provider for EvidenceExplainingProvider {
         context: &ModelContext,
         _o: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
+        if is_hmh_title_hook_turn(context) {
+            return Ok(hmh_text_stream("Explaining worker evidence"));
+        }
+        if is_hmh_branch_name_hook_turn(context) {
+            return Ok(hmh_text_stream("steady-worker-evidence"));
+        }
+        if is_hmh_suggestion_hook_turn(context) {
+            return Ok(hmh_text_stream(
+                "Inspect evidence refs\nRerun conformance proof\nCheck worker cleanup",
+            ));
+        }
         let scenario = self
             .scenario
             .lock()
@@ -322,6 +352,28 @@ impl Provider for EvidenceExplainingProvider {
             call => panic!("HMH evidence explanation provider called too many times: {call}"),
         }
     }
+}
+
+fn hmh_text_stream(text: &str) -> StreamEventStream {
+    let text = text.to_owned();
+    let events = vec![
+        Ok(StreamEvent::Start),
+        Ok(StreamEvent::TextDelta {
+            delta: text.clone(),
+        }),
+        Ok(StreamEvent::Done {
+            message: AssistantMessage {
+                content: vec![AssistantContent::text(&text)],
+                token_usage: Some(TokenUsage {
+                    input_tokens: 20,
+                    output_tokens: 20,
+                    ..Default::default()
+                }),
+            },
+            stop_reason: "end_turn".into(),
+        }),
+    ];
+    Box::pin(stream::iter(events))
 }
 
 fn hmh_evidence_inspect_stream(scenario: &HmhEvidenceExplanationScenario) -> StreamEventStream {

@@ -858,3 +858,37 @@ row, note command return codes, and keep open loops explicit.
 
 - Closed for this follow-up. The productization scorecard remains 100/100, and
   no productization row is reopened.
+
+## Post-Closeout Dev Gate Follow-Up: 2026-06-03
+
+### Findings
+
+- `scripts/tron dev -bdt` still found one configured integration failure after
+  the static-gate follow-up: `capability_self_modifying_lifecycle_explains_session_worker_evidence`.
+- The failure was in the integration fixture provider, not the production
+  session-worker path. The session had no existing title, so the enabled
+  built-in title hook legitimately called the same test provider before the
+  evidence explanation turn. That hook call advanced the provider's evidence
+  `call_count`, then the real evidence turn could not find the inspected
+  resource output in the hook context.
+- The HMH evidence provider now classifies built-in title, branch-name, and
+  prompt-suggestion hook contexts and returns harmless text without advancing
+  the two-step evidence sequence. The evidence path remains unchanged: first
+  inspect the live evidence resource, then answer from the inspected resource
+  truth.
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml --test integration capability_self_modifying_lifecycle_explains_session_worker_evidence -- --nocapture` | 101 then 0 | Reproduced the configured HMH-B provider sequencing failure, then proved the focused worker-evidence path after hook classification; 1 selected test passed. |
+| `scripts/tron dev -bdt` | 101 then 0 | Re-ran the exact developer command. Final pass built the dev server, ran 5,877 library tests, 46 main-binary tests, 13 DB path guard tests, 69 threat-model invariant tests, and 91 integration tests, then started the background dev server on PID 91430. |
+| `curl -fsS http://localhost:9847/health` | 0 | Confirmed the background dev server returned `{"status":"ok"}` after the passing dev command. |
+| `scripts/tron status --json` | 0 | Confirmed `mode=dev_takeover`, `healthy=true`, and listener PID 91430. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Rust formatting check for the harness fix. |
+| `git diff --check` | 0 | Whitespace/diff hygiene check. |
+
+### Open Loops
+
+- Closed for this dev-gate follow-up. The productization scorecard remains
+  100/100, and `tron dev -bdt` is the current passing closeout command.
