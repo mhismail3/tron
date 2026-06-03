@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **94.50/100**
+Current score: **96.75/100**
 
 Status: **running**
 
@@ -1244,9 +1244,9 @@ HMH-E7 evidence, 2026-06-02/2026-06-03:
 
 Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6/HMH-E7:
 
-- HMH-E is closed. HMH-F1 through HMH-F3 are now closed. Continue with
-  HMH-F4: prove Queue/DLQ receipt, attempt, lease, retry, cancellation,
-  dead-letter, replay, and compensation references are inspectable.
+- HMH-E is closed. HMH-F1 through HMH-F4 are now closed. Continue with
+  HMH-F5: prove shared worktree/files/process/module/generated-action
+  mutations acquire leases and record compensation/manual recovery status.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1260,7 +1260,7 @@ external effects.
 | HMH-F1 | Idempotency is mandatory for mutations | 15 | passed | Mutating worker/module/ui/promotion/queue/resource paths reject missing/conflicting idempotency before handler execution. | Stop if child invocation starts before idempotency reservation. |
 | HMH-F2 | Approval resume preserves original context | 15 | passed | Approval-required execute stores pause state and resumes same trace/grant/parent/idempotency after `approval::resolve`; agent cannot self-resolve. | Stop if approval creates disconnected child commands. |
 | HMH-F3 | Trigger delivery modes are bounded | 15 | passed_after_fix | Sync, Void, and Enqueue carry causal metadata; Void is restricted to loss-tolerant effects; trigger cascades have loop/depth budgets and fail closed. | Stop on unbounded trigger recursion. |
-| HMH-F4 | Queue/DLQ is inspectable | 15 | pending | Enqueue records receipt, attempts, leases, retries, cancellation, DLQ, replay, and compensation refs. | Stop if queue errors are log-only. |
+| HMH-F4 | Queue/DLQ is inspectable | 15 | passed_after_fix | Enqueue records receipt, attempts, leases, retries, cancellation, DLQ, replay, and compensation refs. | Stop if queue errors are log-only. |
 | HMH-F5 | Leases and compensation are visible | 15 | pending | Shared worktree/files/process/module/generated-action mutations acquire leases and record compensation/manual recovery status. | Stop if high-risk effects lack recovery notes. |
 | HMH-F6 | Trace and ledger explain the full graph | 15 | pending | One scenario traces client request to agent turn, worker spawn, catalog change, function invocation, approval/queue/resource events, and UI action. | Stop if trace correlation relies on timestamps. |
 | HMH-F7 | Restart/disconnect chaos fails closed | 10 | pending | Server restart, worker socket loss, approval worker absence, vector index unavailable, and client reconnect states are explicit and non-optimistic. | Fix fail-open paths before final UI proof. |
@@ -1372,11 +1372,42 @@ HMH-F3 evidence, 2026-06-03:
   `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::triggers -- --nocapture`;
   `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture`.
 
-Open loops after HMH-F1/HMH-F2/HMH-F3:
+HMH-F4 evidence, 2026-06-03:
 
-- HMH-F1 through HMH-F3 are closed. Continue with HMH-F4 to prove queued work
-  has inspectable receipt, attempts, leases, retries, cancellation,
-  dead-letter, replay, and compensation references instead of log-only errors.
+- Red tests exposed that queue receipt inspection stopped at current
+  `status`/failed-attempt count/current lease timing. Delivery/result
+  invocation ids, replay source ids, attempt errors, resource lease ids, and
+  compensation refs were only recoverable indirectly from lifecycle stream
+  events or invocation/compensation ledgers.
+- The fix adds `EngineQueueAttemptRecord` to `EngineQueueItem` and persists it
+  in SQLite queue rows through `attempt_records_json`. The queue drainer writes
+  one attempt record when a delivery completes, retries, or reaches DLQ; records
+  carry the queue lease owner, delivery invocation id, result invocation id when
+  a target row exists, replay source id, error, recorded-invocation flag,
+  resource lease ids, compensation status, and compensation id.
+- Queue lifecycle events now project `attemptRecords`/`lastAttempt` from the
+  same queue item truth, so streams and `queue::get`/`queue::list` agree.
+  Retryable non-mutating worker transport failures still avoid a failed target
+  invocation row, but the delivery attempt id remains visible on the receipt.
+- The queue tests now prove retry state records the failed attempt on the item,
+  terminal DLQ has all three attempt records with the final outcome marked
+  `dead_lettered`, cancellation remains terminal and inspectable after a late
+  successful handler result, and a queued compensated target exposes released
+  resource lease refs plus compensation record ids through `queue::get`.
+- The same compensated queue proof enqueues a second item with the same target
+  idempotency key and verifies the completed receipt records
+  `replayedFromInvocationId` while avoiding duplicate resource lease or
+  compensation refs.
+- README, `engine/mod.rs`, and `queue.rs` now document queue receipt
+  inspectability as working behavior, not log-only observability.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture`.
+
+Open loops after HMH-F1/HMH-F2/HMH-F3/HMH-F4:
+
+- HMH-F1 through HMH-F4 are closed. Continue with HMH-F5 to prove leases and
+  compensation are visible for shared worktree/files/process/module/generated
+  action mutations, not only synthetic engine fixtures.
 
 ## HMH-G Scorecard: Final Adversarial Closeout And Absence Gates
 
@@ -1484,9 +1515,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F1, HMH-F2, and HMH-F3 are closed.
-Continue with HMH-F4: prove Queue/DLQ is inspectable.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F1, HMH-F2, HMH-F3, and HMH-F4 are
+closed. Continue with HMH-F5: prove leases and compensation are visible.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::leases_compensation -- --nocapture
 ```

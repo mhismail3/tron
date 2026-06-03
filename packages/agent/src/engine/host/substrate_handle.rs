@@ -290,6 +290,19 @@ impl EngineHostHandle {
             .complete(receipt_id)
     }
 
+    /// Complete a queue item and append an attempt record.
+    pub async fn complete_queue_item_with_attempt(
+        &self,
+        receipt_id: &str,
+        attempt: EngineQueueAttemptRecord,
+    ) -> Result<bool> {
+        let store = self.inner.lock().await.primitives.queue.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
+            .complete_with_attempt(receipt_id, attempt)
+    }
+
     /// Fail a queue item.
     pub async fn fail_queue_item(
         &self,
@@ -302,6 +315,21 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
             .fail(receipt_id, max_attempts, backoff_ms)
+    }
+
+    /// Fail a queue item and append an attempt record.
+    pub async fn fail_queue_item_with_attempt(
+        &self,
+        receipt_id: &str,
+        max_attempts: u32,
+        backoff_ms: i64,
+        attempt: EngineQueueAttemptRecord,
+    ) -> Result<bool> {
+        let store = self.inner.lock().await.primitives.queue.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
+            .fail_with_attempt(receipt_id, max_attempts, backoff_ms, attempt)
     }
 
     /// Inspect a queue item by receipt.

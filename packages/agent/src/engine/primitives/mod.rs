@@ -59,7 +59,8 @@ use super::leases::{
     SqliteEngineResourceLeaseStore,
 };
 use super::queue::{
-    EngineQueueItem, EnqueueInvocation, InMemoryEngineQueueStore, SqliteEngineQueueStore,
+    EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation, InMemoryEngineQueueStore,
+    SqliteEngineQueueStore,
 };
 use super::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
@@ -340,6 +341,17 @@ impl QueueStoreBackend {
         }
     }
 
+    pub(in crate::engine) fn complete_with_attempt(
+        &mut self,
+        receipt_id: &str,
+        attempt: EngineQueueAttemptRecord,
+    ) -> Result<bool> {
+        match self {
+            Self::InMemory(store) => store.complete_with_attempt(receipt_id, Some(attempt)),
+            Self::Sqlite(store) => store.complete_with_attempt(receipt_id, Some(attempt)),
+        }
+    }
+
     pub(in crate::engine) fn fail(
         &mut self,
         receipt_id: &str,
@@ -349,6 +361,23 @@ impl QueueStoreBackend {
         match self {
             Self::InMemory(store) => store.fail(receipt_id, max_attempts, backoff_ms),
             Self::Sqlite(store) => store.fail(receipt_id, max_attempts, backoff_ms),
+        }
+    }
+
+    pub(in crate::engine) fn fail_with_attempt(
+        &mut self,
+        receipt_id: &str,
+        max_attempts: u32,
+        backoff_ms: i64,
+        attempt: EngineQueueAttemptRecord,
+    ) -> Result<bool> {
+        match self {
+            Self::InMemory(store) => {
+                store.fail_with_attempt(receipt_id, max_attempts, backoff_ms, Some(attempt))
+            }
+            Self::Sqlite(store) => {
+                store.fail_with_attempt(receipt_id, max_attempts, backoff_ms, Some(attempt))
+            }
         }
     }
 

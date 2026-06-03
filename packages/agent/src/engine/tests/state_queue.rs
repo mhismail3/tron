@@ -384,6 +384,26 @@ async fn queue_failure_event_records_updated_retry_state() {
     assert_eq!(updated.attempts, 1);
     assert_eq!(updated.lease_owner, None);
     assert_eq!(updated.lease_expires_at, None);
+    assert_eq!(updated.attempt_records.len(), 1);
+    let attempt = &updated.attempt_records[0];
+    assert_eq!(attempt.attempt, 1);
+    assert_eq!(attempt.outcome, queue::QueueAttemptOutcome::Failed);
+    assert_eq!(attempt.lease_owner.as_deref(), Some("worker-a"));
+    assert_eq!(
+        attempt.delivery_invocation_id.as_ref(),
+        Some(&drained.invocation_id)
+    );
+    assert_eq!(
+        attempt.result_invocation_id.as_ref(),
+        Some(&drained.invocation_id)
+    );
+    assert_eq!(attempt.replayed_from_invocation_id, None);
+    assert!(
+        attempt
+            .error
+            .as_deref()
+            .is_some_and(|message| message.contains("boom"))
+    );
 
     let page = handle
         .poll_stream(
@@ -604,6 +624,22 @@ async fn queue_terminal_failure_publishes_dead_letter_lifecycle_event() {
     assert_eq!(updated.attempts, 3);
     assert_eq!(updated.lease_owner, None);
     assert_eq!(updated.lease_expires_at, None);
+    assert_eq!(updated.attempt_records.len(), 3);
+    assert_eq!(
+        updated
+            .attempt_records
+            .iter()
+            .map(|attempt| attempt.attempt)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3]
+    );
+    assert_eq!(
+        updated
+            .attempt_records
+            .last()
+            .map(|attempt| attempt.outcome),
+        Some(queue::QueueAttemptOutcome::DeadLettered)
+    );
 
     let page = handle
         .poll_stream(
@@ -639,6 +675,138 @@ async fn queue_terminal_failure_publishes_dead_letter_lifecycle_event() {
             .and_then(Value::as_str)
             .is_some_and(|message| message.contains("boom"))
     );
+}
+
+#[tokio::test]
+async fn queue_inspection_records_replay_lease_and_compensation_refs() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("alpha", "alpha"), false)
+        .unwrap();
+    let compensated = write_function("alpha::compensated_write", "alpha")
+        .with_allowed_delivery_modes(vec![DeliveryMode::Sync, DeliveryMode::Enqueue])
+        .with_required_authority(AuthorityRequirement::scope("alpha.write"))
+        .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+            "session",
+            "session:{sessionId}:queue-write",
+            30_000,
+        ))
+        .with_compensation(CompensationContract::new(
+            CompensationKind::ManualOnly,
+            "queued writes expose manual recovery references",
+        ));
+    handle
+        .register_function_for_setup(compensated, Some(handler()), false)
+        .unwrap();
+
+    let first_item = handle
+        .enqueue_invocation(crate::engine::EnqueueInvocation {
+            queue: "default".to_owned(),
+            function_id: fid("alpha::compensated_write"),
+            target_revision: None,
+            payload: json!({"sessionId": "session-a", "message": "first"}),
+            actor_id: actor("agent"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: grant("manual-grant"),
+            authority_scopes: vec!["alpha.write".to_owned()],
+            runtime_metadata: Default::default(),
+            trace_id: trace("queue-compensated"),
+            parent_invocation_id: None,
+            trigger_id: None,
+            session_id: Some("session-a".to_owned()),
+            workspace_id: Some("workspace-a".to_owned()),
+            idempotency_key: Some("queue-compensated-target".to_owned()),
+        })
+        .await
+        .unwrap();
+    let first = EngineQueueDrainer::drain_receipt(&handle, &first_item.receipt_id, "worker-a")
+        .await
+        .unwrap()
+        .expect("queued compensated item should drain");
+    assert_eq!(first.error, None);
+    let first_inspected = handle
+        .invoke(host_invocation(
+            "queue::get",
+            json!({"receiptId": first_item.receipt_id}),
+            causal()
+                .with_scope("queue.read")
+                .with_session_id("session-a")
+                .with_workspace_id("workspace-a"),
+        ))
+        .await;
+    assert_eq!(first_inspected.error, None);
+    let first_json = &first_inspected.value.as_ref().unwrap()["item"];
+    let first_attempts = first_json["attemptRecords"].as_array().unwrap();
+    assert_eq!(first_attempts.len(), 1);
+    let first_attempt = &first_attempts[0];
+    assert_eq!(first_attempt["outcome"], "completed");
+    assert_eq!(
+        first_attempt["deliveryInvocationId"],
+        first.invocation_id.as_str()
+    );
+    assert_eq!(
+        first_attempt["resultInvocationId"],
+        first.invocation_id.as_str()
+    );
+    assert_eq!(first_attempt["leaseOwner"], "worker-a");
+    assert_eq!(first_attempt["compensationStatus"], "recorded");
+    let lease_id = first_attempt["resourceLeaseIds"][0].as_str().unwrap();
+    let compensation_id = first_attempt["compensationId"].as_str().unwrap();
+    let lease = handle
+        .get_resource_lease(lease_id)
+        .await
+        .unwrap()
+        .expect("queue attempt lease ref should be inspectable");
+    assert_eq!(lease.status, EngineResourceLeaseStatus::Released);
+    let compensation = handle.list_compensation_records().await.unwrap();
+    assert!(compensation.iter().any(|record| {
+        record.compensation_id == compensation_id && record.resource_lease_ids == vec![lease_id]
+    }));
+
+    let replay_item = handle
+        .enqueue_invocation(crate::engine::EnqueueInvocation {
+            queue: "default".to_owned(),
+            function_id: fid("alpha::compensated_write"),
+            target_revision: None,
+            payload: json!({"sessionId": "session-a", "message": "first"}),
+            actor_id: actor("agent"),
+            actor_kind: ActorKind::Agent,
+            authority_grant_id: grant("manual-grant"),
+            authority_scopes: vec!["alpha.write".to_owned()],
+            runtime_metadata: Default::default(),
+            trace_id: trace("queue-compensated-replay"),
+            parent_invocation_id: None,
+            trigger_id: None,
+            session_id: Some("session-a".to_owned()),
+            workspace_id: Some("workspace-a".to_owned()),
+            idempotency_key: Some("queue-compensated-target".to_owned()),
+        })
+        .await
+        .unwrap();
+    let replay = EngineQueueDrainer::drain_receipt(&handle, &replay_item.receipt_id, "worker-b")
+        .await
+        .unwrap()
+        .expect("queued replay item should drain");
+    assert_eq!(replay.error, None);
+    assert_eq!(replay.replayed_from.as_ref(), Some(&first.invocation_id));
+    let replay_inspected = handle
+        .get_queue_item(&replay_item.receipt_id)
+        .await
+        .unwrap()
+        .expect("replay queue item should stay inspectable");
+    assert_eq!(replay_inspected.status, queue::QueueItemStatus::Completed);
+    assert_eq!(replay_inspected.attempt_records.len(), 1);
+    let replay_attempt = &replay_inspected.attempt_records[0];
+    assert_eq!(
+        replay_attempt.outcome,
+        queue::QueueAttemptOutcome::Completed
+    );
+    assert_eq!(
+        replay_attempt.replayed_from_invocation_id.as_ref(),
+        Some(&first.invocation_id)
+    );
+    assert_eq!(replay_attempt.resource_lease_ids, Vec::<String>::new());
+    assert_eq!(replay_attempt.compensation_id, None);
 }
 
 #[tokio::test]

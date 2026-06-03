@@ -73,8 +73,12 @@
 //!   implementations once healthy, classifies socket loss separately from
 //!   application handler failures, and supplies the sandbox-created worker path
 //!   used by `worker::spawn`;
-//! - queued non-mutating worker transport failures retry through queue
-//!   lifecycle truth without committing a failed target invocation row.
+//! - queue receipts retain inspectable delivery truth: current lease state,
+//!   retry/dead-letter/cancellation status, delivery and result invocation ids,
+//!   replay refs, errors, resource lease ids, and compensation refs are stored
+//!   on the queue item instead of living only in stream logs; queued
+//!   non-mutating worker transport failures retry through queue lifecycle truth
+//!   without committing a failed target invocation row.
 //!
 //! # INVARIANT: one production execution shape
 //!
@@ -165,8 +169,9 @@ pub use protocol::{
     WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
 pub use queue::{
-    EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime, EnqueueInvocation,
-    InMemoryEngineQueueStore, QueueItemStatus, SqliteEngineQueueStore,
+    EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime,
+    EnqueueInvocation, InMemoryEngineQueueStore, QueueAttemptOutcome, QueueItemStatus,
+    SqliteEngineQueueStore,
 };
 pub use registry::LiveCatalog;
 pub use resources::{

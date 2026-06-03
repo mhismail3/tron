@@ -59,6 +59,9 @@ impl EngineHostHandle {
             return QueueTargetInvocation {
                 result: self.invoke(invocation).await,
                 recorded_invocation: true,
+                resource_lease_ids: Vec::new(),
+                compensation_status: None,
+                compensation_id: None,
             };
         }
 
@@ -72,6 +75,9 @@ impl EngineHostHandle {
                 return QueueTargetInvocation {
                     result: *result,
                     recorded_invocation: true,
+                    resource_lease_ids: Vec::new(),
+                    compensation_status: None,
+                    compensation_id: None,
                 };
             }
         };
@@ -191,6 +197,9 @@ impl EngineHostHandle {
                     error,
                 ),
                 recorded_invocation: false,
+                resource_lease_ids: Vec::new(),
+                compensation_status: None,
+                compensation_id: None,
             };
         }
         let compensation_status = prepared
@@ -207,18 +216,30 @@ impl EngineHostHandle {
                 prepared,
                 handler_result,
                 lease_ids.clone(),
-                compensation_status,
+                compensation_status.clone(),
             );
-        self.record_compensation_for_result(
-            &compensation_invocation,
-            compensation_contract,
-            &result,
-            lease_ids,
-        )
-        .await;
+        let resource_lease_ids = lease_ids.clone();
+        let compensation = self
+            .record_compensation_for_result(
+                &compensation_invocation,
+                compensation_contract,
+                &result,
+                lease_ids,
+            )
+            .await;
+        let compensation_id = compensation
+            .as_ref()
+            .map(|record| record.compensation_id.clone());
+        let compensation_status = compensation
+            .as_ref()
+            .map(|record| record.status.as_str().to_owned())
+            .or(compensation_status);
         QueueTargetInvocation {
             result,
             recorded_invocation: true,
+            resource_lease_ids,
+            compensation_status,
+            compensation_id,
         }
     }
 
@@ -251,9 +272,9 @@ impl EngineHostHandle {
         contract: Option<CompensationContract>,
         result: &InvocationResult,
         resource_lease_ids: Vec<String>,
-    ) {
+    ) -> Option<EngineCompensationRecord> {
         let Some(contract) = contract else {
-            return;
+            return None;
         };
         let record = compensation_record(invocation, result, contract, resource_lease_ids);
         let store = self.inner.lock().await.primitives.compensation.clone();
@@ -268,7 +289,7 @@ impl EngineHostHandle {
                         topic: "compensation.records".to_owned(),
                         payload: json!({
                             "type": "compensation.recorded",
-                            "compensation": record,
+                            "compensation": record.clone(),
                         }),
                         visibility: VisibilityScope::System,
                         session_id: None,
@@ -278,9 +299,11 @@ impl EngineHostHandle {
                         parent_invocation_id: Some(result.invocation_id.clone()),
                     })
                     .await;
+                Some(record)
             }
             Err(error) => {
                 tracing::error!(?error, "failed to record engine compensation contract");
+                None
             }
         }
     }

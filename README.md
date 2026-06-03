@@ -890,6 +890,10 @@ idempotency, and runtime metadata across Sync, Void, and Enqueue delivery; Void
 is restricted to the private trigger runtime path for explicitly loss-tolerant
 low-risk targets, and trigger cascades carry depth/path budgets that fail closed
 before unbounded recursion.
+Queue receipts remain inspectable after retry, cancellation, completion, and
+dead-letter states: `queue::get`/`queue::list` expose current lease state,
+failed-attempt count, retry timing, durable attempt records, delivery/result
+invocation ids, replay refs, errors, resource lease ids, and compensation refs.
 `artifact::*`, `goal::*`,
 `claim::*`, `evidence::*`, and `decision::*` are wrapper capabilities that
 compose the generic resource kernel; they do not create separate stores.

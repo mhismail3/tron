@@ -4,7 +4,7 @@ use crate::engine::{
     CausalContext, DeliveryMode, EngineHostHandle, Invocation, InvocationResult, Result,
 };
 
-use super::{EngineQueueItem, QueueItemStatus};
+use super::{EngineQueueAttemptRecord, EngineQueueItem, QueueAttemptOutcome, QueueItemStatus};
 
 /// Queue drain runtime.
 pub struct EngineQueueRuntime;
@@ -83,10 +83,14 @@ impl EngineQueueRuntime {
             Invocation::new_sync(item.function_id.clone(), item.payload.clone(), context);
         invocation.expected_function_revision = item.target_revision;
         let target = handle.invoke_queue_target(invocation).await;
+        let attempt = queue_attempt_record(&item, &target);
         let recorded_invocation = target.recorded_invocation;
         let result = target.result;
         if result.error.is_some() {
-            if handle.fail_queue_item(&item.receipt_id, 3, 1_000).await? {
+            if handle
+                .fail_queue_item_with_attempt(&item.receipt_id, 3, 1_000, attempt)
+                .await?
+            {
                 let updated = handle
                     .get_queue_item(&item.receipt_id)
                     .await?
@@ -99,7 +103,10 @@ impl EngineQueueRuntime {
                 )
                 .await;
             }
-        } else if handle.complete_queue_item(&item.receipt_id).await? {
+        } else if handle
+            .complete_queue_item_with_attempt(&item.receipt_id, attempt)
+            .await?
+        {
             let updated = handle
                 .get_queue_item(&item.receipt_id)
                 .await?
@@ -113,6 +120,32 @@ impl EngineQueueRuntime {
             .await;
         }
         Ok(result)
+    }
+}
+
+fn queue_attempt_record(
+    item: &EngineQueueItem,
+    target: &super::super::host::QueueTargetInvocation,
+) -> EngineQueueAttemptRecord {
+    let result = &target.result;
+    EngineQueueAttemptRecord {
+        attempt: item.attempts.saturating_add(1),
+        outcome: if result.error.is_some() {
+            QueueAttemptOutcome::Failed
+        } else {
+            QueueAttemptOutcome::Completed
+        },
+        lease_owner: item.lease_owner.clone(),
+        delivery_invocation_id: Some(result.invocation_id.clone()),
+        result_invocation_id: target
+            .recorded_invocation
+            .then(|| result.invocation_id.clone()),
+        replayed_from_invocation_id: result.replayed_from.clone(),
+        error: result.error.as_ref().map(ToString::to_string),
+        recorded_invocation: target.recorded_invocation,
+        resource_lease_ids: target.resource_lease_ids.clone(),
+        compensation_status: target.compensation_status.clone(),
+        compensation_id: target.compensation_id.clone(),
     }
 }
 
@@ -190,6 +223,8 @@ pub(in crate::engine) fn queue_lifecycle_stream_event(
             "error": result
                 .and_then(|(value, _)| value.error.as_ref())
                 .map(ToString::to_string),
+            "attemptRecords": &item.attempt_records,
+            "lastAttempt": item.attempt_records.last(),
         }),
         visibility: super::super::types::VisibilityScope::Session,
         session_id: item.session_id.clone(),

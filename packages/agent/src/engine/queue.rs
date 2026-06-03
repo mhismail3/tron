@@ -11,6 +11,9 @@
 //! Cancellation is terminal for an in-flight item: the queue clears the lease,
 //! publishes cancellation, and a late target result cannot complete or fail the
 //! cancelled receipt.
+//! Attempt records live on the queue item, not only in lifecycle streams. They
+//! keep delivery/result ids, replay refs, errors, lease owner, resource leases,
+//! and compensation refs for `queue::get`/`queue::list` inspection.
 //! Worker transport loss before a non-mutating queued target returns is treated
 //! as delivery failure: the queue publishes retry state, but the target
 //! invocation ledger does not record an application-level handler failure.
@@ -61,6 +64,46 @@ impl QueueItemStatus {
     }
 }
 
+/// Durable queue attempt outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QueueAttemptOutcome {
+    /// Target completed successfully.
+    Completed,
+    /// Target failed and will retry if attempts remain.
+    Failed,
+    /// Target failed and exhausted retry attempts.
+    DeadLettered,
+}
+
+/// One durable queue delivery attempt.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineQueueAttemptRecord {
+    /// One-based delivery attempt number.
+    pub attempt: u32,
+    /// Outcome for this attempt.
+    pub outcome: QueueAttemptOutcome,
+    /// Queue lease owner that executed the attempt.
+    pub lease_owner: Option<String>,
+    /// Delivery result id even when no target invocation row was committed.
+    pub delivery_invocation_id: Option<InvocationId>,
+    /// Target invocation row id, when the target result was ledgered.
+    pub result_invocation_id: Option<InvocationId>,
+    /// Idempotent source invocation reused by this attempt, if any.
+    pub replayed_from_invocation_id: Option<InvocationId>,
+    /// Stable error string, if the attempt failed.
+    pub error: Option<String>,
+    /// Whether an invocation row was recorded for the target attempt.
+    pub recorded_invocation: bool,
+    /// Resource leases acquired by the target invocation.
+    pub resource_lease_ids: Vec<String>,
+    /// Compensation status recorded for the target invocation.
+    pub compensation_status: Option<String>,
+    /// Compensation audit record id, when one was written.
+    pub compensation_id: Option<String>,
+}
+
 /// Durable queued engine invocation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -101,6 +144,8 @@ pub struct EngineQueueItem {
     pub status: QueueItemStatus,
     /// Number of failed attempts.
     pub attempts: u32,
+    /// Durable delivery attempt records.
+    pub attempt_records: Vec<EngineQueueAttemptRecord>,
     /// Current lease owner.
     pub lease_owner: Option<String>,
     /// Current lease expiry.
@@ -184,6 +229,7 @@ impl InMemoryEngineQueueStore {
             idempotency_key: request.idempotency_key,
             status: QueueItemStatus::Ready,
             attempts: 0,
+            attempt_records: Vec::new(),
             lease_owner: None,
             lease_expires_at: None,
             not_before: now,
@@ -267,6 +313,15 @@ impl InMemoryEngineQueueStore {
 
     /// Complete one queue item.
     pub fn complete(&mut self, receipt_id: &str) -> Result<bool> {
+        self.complete_with_attempt(receipt_id, None)
+    }
+
+    /// Complete one queue item and append an attempt record.
+    pub fn complete_with_attempt(
+        &mut self,
+        receipt_id: &str,
+        attempt: Option<EngineQueueAttemptRecord>,
+    ) -> Result<bool> {
         let Some(item) = self.items.get_mut(receipt_id) else {
             return Ok(false);
         };
@@ -279,12 +334,26 @@ impl InMemoryEngineQueueStore {
         item.status = QueueItemStatus::Completed;
         item.lease_owner = None;
         item.lease_expires_at = None;
+        if let Some(attempt) = attempt {
+            item.attempt_records.push(attempt);
+        }
         item.updated_at = Utc::now();
         Ok(true)
     }
 
     /// Fail one queue item, retrying until `max_attempts`.
     pub fn fail(&mut self, receipt_id: &str, max_attempts: u32, backoff_ms: i64) -> Result<bool> {
+        self.fail_with_attempt(receipt_id, max_attempts, backoff_ms, None)
+    }
+
+    /// Fail one queue item and append an attempt record.
+    pub fn fail_with_attempt(
+        &mut self,
+        receipt_id: &str,
+        max_attempts: u32,
+        backoff_ms: i64,
+        attempt: Option<EngineQueueAttemptRecord>,
+    ) -> Result<bool> {
         let Some(item) = self.items.get_mut(receipt_id) else {
             return Ok(false);
         };
@@ -302,6 +371,13 @@ impl InMemoryEngineQueueStore {
         } else {
             QueueItemStatus::Ready
         };
+        if let Some(mut attempt) = attempt {
+            attempt.attempt = item.attempts;
+            if item.status == QueueItemStatus::DeadLettered {
+                attempt.outcome = QueueAttemptOutcome::DeadLettered;
+            }
+            item.attempt_records.push(attempt);
+        }
         item.not_before = Utc::now() + Duration::milliseconds(backoff_ms.max(0));
         item.updated_at = Utc::now();
         Ok(true)
@@ -390,12 +466,14 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
   not_before TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  runtime_metadata_json TEXT NOT NULL DEFAULT '{}'
+  runtime_metadata_json TEXT NOT NULL DEFAULT '{}',
+  attempt_records_json TEXT NOT NULL DEFAULT '[]'
 );
 "#,
             )
             .map_err(|err| sqlite_err("queue.init", err.to_string()))
             .and_then(|_| self.ensure_runtime_metadata_column())
+            .and_then(|_| self.ensure_attempt_records_column())
     }
 
     fn ensure_runtime_metadata_column(&self) -> Result<()> {
@@ -419,6 +497,30 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
                 [],
             )
             .map_err(|err| sqlite_err("queue.schema.alter_runtime_metadata", err.to_string()))?;
+        Ok(())
+    }
+
+    fn ensure_attempt_records_column(&self) -> Result<()> {
+        let mut stmt = self
+            .conn
+            .prepare("PRAGMA table_info(engine_queue_items)")
+            .map_err(|err| sqlite_err("queue.schema.prepare", err.to_string()))?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|err| sqlite_err("queue.schema.query", err.to_string()))?;
+        for column in columns {
+            if column.map_err(|err| sqlite_err("queue.schema.row", err.to_string()))?
+                == "attempt_records_json"
+            {
+                return Ok(());
+            }
+        }
+        self.conn
+            .execute(
+                "ALTER TABLE engine_queue_items ADD COLUMN attempt_records_json TEXT NOT NULL DEFAULT '[]'",
+                [],
+            )
+            .map_err(|err| sqlite_err("queue.schema.alter_attempt_records", err.to_string()))?;
         Ok(())
     }
 
@@ -452,6 +554,7 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
             idempotency_key: request.idempotency_key,
             status: QueueItemStatus::Ready,
             attempts: 0,
+            attempt_records: Vec::new(),
             lease_owner: None,
             lease_expires_at: None,
             not_before: now,
@@ -540,6 +643,15 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
 
     /// Complete one queue item.
     pub fn complete(&mut self, receipt_id: &str) -> Result<bool> {
+        self.complete_with_attempt(receipt_id, None)
+    }
+
+    /// Complete one queue item and append an attempt record.
+    pub fn complete_with_attempt(
+        &mut self,
+        receipt_id: &str,
+        attempt: Option<EngineQueueAttemptRecord>,
+    ) -> Result<bool> {
         let Some(mut item) = self.get(receipt_id)? else {
             return Ok(false);
         };
@@ -552,6 +664,9 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
         item.status = QueueItemStatus::Completed;
         item.lease_owner = None;
         item.lease_expires_at = None;
+        if let Some(attempt) = attempt {
+            item.attempt_records.push(attempt);
+        }
         item.updated_at = Utc::now();
         self.update_item(&item)?;
         Ok(true)
@@ -559,6 +674,17 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
 
     /// Fail one queue item, retrying until `max_attempts`.
     pub fn fail(&mut self, receipt_id: &str, max_attempts: u32, backoff_ms: i64) -> Result<bool> {
+        self.fail_with_attempt(receipt_id, max_attempts, backoff_ms, None)
+    }
+
+    /// Fail one queue item and append an attempt record.
+    pub fn fail_with_attempt(
+        &mut self,
+        receipt_id: &str,
+        max_attempts: u32,
+        backoff_ms: i64,
+        attempt: Option<EngineQueueAttemptRecord>,
+    ) -> Result<bool> {
         let Some(mut item) = self.get(receipt_id)? else {
             return Ok(false);
         };
@@ -576,6 +702,13 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
         } else {
             QueueItemStatus::Ready
         };
+        if let Some(mut attempt) = attempt {
+            attempt.attempt = item.attempts;
+            if item.status == QueueItemStatus::DeadLettered {
+                attempt.outcome = QueueAttemptOutcome::DeadLettered;
+            }
+            item.attempt_records.push(attempt);
+        }
         item.not_before = Utc::now() + Duration::milliseconds(backoff_ms.max(0));
         item.updated_at = Utc::now();
         self.update_item(&item)?;
@@ -642,9 +775,10 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
                    actor_id, actor_kind, authority_grant_id, authority_scopes_json,
                    trace_id, parent_invocation_id, trigger_id, session_id, workspace_id,
                    idempotency_key, status, attempts, lease_owner, lease_expires_at,
-                   not_before, created_at, updated_at, runtime_metadata_json
+                   not_before, created_at, updated_at, runtime_metadata_json,
+                   attempt_records_json
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                           ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                           ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
                 item_params(&self.conn, item)?,
             )
             .map_err(|err| sqlite_err("queue.insert", err.to_string()))?;
@@ -676,7 +810,8 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
                    not_before = ?20,
                    created_at = ?21,
                    updated_at = ?22,
-                   runtime_metadata_json = ?23
+                   runtime_metadata_json = ?23,
+                   attempt_records_json = ?24
                  WHERE receipt_id = ?1",
                 item_params(&self.conn, item)?,
             )
@@ -712,6 +847,8 @@ fn item_params(
     let scopes = serde_json::to_string(&item.authority_scopes).unwrap_or_else(|_| "[]".to_owned());
     let runtime_metadata =
         serde_json::to_string(&item.runtime_metadata).unwrap_or_else(|_| "{}".to_owned());
+    let attempt_records =
+        serde_json::to_string(&item.attempt_records).unwrap_or_else(|_| "[]".to_owned());
     Ok(params_from_vec(vec![
         SqlValue::Text(item.receipt_id.clone()),
         SqlValue::Text(item.queue.clone()),
@@ -758,6 +895,7 @@ fn item_params(
         SqlValue::Text(item.created_at.to_rfc3339()),
         SqlValue::Text(item.updated_at.to_rfc3339()),
         SqlValue::Text(runtime_metadata),
+        SqlValue::Text(attempt_records),
     ]))
 }
 
@@ -776,6 +914,7 @@ fn row_to_queue_item(
         .map_err(storage_to_sql_err)?;
     let scopes_json: String = row.get(8)?;
     let runtime_metadata_json: String = row.get(22)?;
+    let attempt_records_json: String = row.get(23)?;
     let target_revision: Option<i64> = row.get(3)?;
     let parent_invocation_id: Option<String> = row.get(10)?;
     let trigger_id: Option<String> = row.get(11)?;
@@ -802,6 +941,7 @@ fn row_to_queue_item(
         idempotency_key: row.get(14)?,
         status: status_from_str(&row.get::<_, String>(15)?),
         attempts: row.get::<_, i64>(16)? as u32,
+        attempt_records: serde_json::from_str(&attempt_records_json).unwrap_or_default(),
         lease_owner: row.get(17)?,
         lease_expires_at: row
             .get::<_, Option<String>>(18)?

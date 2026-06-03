@@ -42,7 +42,7 @@ use super::primitives::{
     APPROVAL_REQUEST_FUNCTION, APPROVAL_RESOLVE_FUNCTION, PrimitiveStores,
     approval_request_from_invocation, primitive_function_definitions, primitive_workers,
 };
-use super::queue::{EngineQueueItem, EnqueueInvocation};
+use super::queue::{EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation};
 use super::registry::{
     InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocation,
     PreparedSyncInvocationDecision,
@@ -98,6 +98,9 @@ enum InvocationRecordingPolicy {
 pub(in crate::engine) struct QueueTargetInvocation {
     pub result: InvocationResult,
     pub recorded_invocation: bool,
+    pub resource_lease_ids: Vec<String>,
+    pub compensation_status: Option<String>,
+    pub compensation_id: Option<String>,
 }
 
 /// Host for the in-process live capability engine.
