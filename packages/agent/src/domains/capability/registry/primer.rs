@@ -1,9 +1,9 @@
 //! Context-primer rendering for capability discovery.
 //!
 //! Primer policy and rendering live here so catalog persistence and search
-//! indexing do not own model-facing documentation text. The fixed header carries
-//! the compact harness-customization recipe because it must survive aggressive
-//! entry truncation and should not depend on README-only prose.
+//! indexing do not own model-facing documentation text. The fixed header stays
+//! compact so tight budgets still include actual capability entries; longer
+//! product recipes are appended only when they fit.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +11,13 @@ use super::index::trust_rank;
 use super::{AgentCapabilityRecipeDisplay, CapabilityRegistryEntry, CapabilityRegistrySnapshot};
 
 const TRUNCATION_NOTICE: &str = "- Additional capabilities are available through the same `execute` primitive; provide intent or a target hint and the engine resolves the catalog entry.\n";
+
+const COMPACT_EXECUTE_ROUTING_GUIDANCE: &str =
+    "Use `execute`; target the real work capability, not approval::request.\n\n";
+
+const EXECUTE_ROUTING_GUIDANCE: &str = "The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with {\"executionMode\":\"sandbox_materialized\",\"expectedOutputs\":[{\"path\":\"result.txt\"}]}, not filesystem::write_file. Each path must be relative and the command must write the same declared sandbox path. Worktree discard uses worktree::discard_files with repo-relative paths only and pauses for user approval. Freshness and approval happen inside execute.\n\n";
+
+const SELF_EXTENSION_GUIDANCE: &str = "To customize the harness: target `self_extension::grant_workspace_autonomy` with absolute workspacePath; omit workspaceId for the current workspace unless a prior result gave the exact id. Approval returns `Safe in this workspace`. Workspace-visible helper work passes `workspaceAutonomyGrantId` and the returned workspaceId to `worker::spawn`; if resourceSelectors is omitted, spawn uses `workspace:<workspaceId>`. Use that returned workspaceId as execute's top-level workspaceId for `catalog::watch_snapshot`, `capability::inspect`, and helper calls. Then call `worker::protocol_guide`, author the worker, `worker::spawn`, prove catalog visibility, run conformance or test evidence, and invoke through `execute`. For packs: `module::register_package` over worker_package, inspect, source trust, configure, `module::activate`, `module::run_conformance`, upgrade, rollback, disable, revoke, or remove. Use generated `ui_surface`: `ui::surface_for_target`, `ui::inspect_surface`, `ui::submit_action` with stored surface/version/action ids. Use `engine::promote` for governed promotion; clean sandbox-spawned helpers with `sandbox::stop_spawned_worker`; use `worker::disconnect` only for raw volatile protocol cleanup; discard helper files with `worktree::discard_files` and repository-relative paths only. Report plain status in chat. Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, and function ids in Inspect; mention cleanup state.\n\n";
 
 const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
     "capability::execute",
@@ -111,8 +118,19 @@ pub(crate) fn render_capability_primer(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision
     ));
-    out.push_str("The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with executionMode=sandbox_materialized and expectedOutputs, not filesystem::write_file; the command must write the same relative sandbox path declared in expectedOutputs. Nested declared output paths are allowed, but do not write absolute, home-relative, shell-expanded, parent-escaping, or undeclared command output paths. Worktree discard uses worktree::discard_files with repo-relative paths only and pauses for user approval. Freshness and approval happen inside execute. Approved execute results include idempotencyKey; reuse that exact top-level key to replay the approved command without creating another child.\n\n");
-    out.push_str("To customize the harness, stay on the same `execute` primitive. For workspace self-extension, first target `self_extension::grant_workspace_autonomy` with absolute workspacePath, optional sessionId/reason, and omit workspaceId for the current workspace so execute binds the invocation context; only pass workspaceId when a prior result gave the exact context id. After the user approves, the returned summary is `Safe in this workspace`. Workspace-visible helper work must pass the returned grantId as `workspaceAutonomyGrantId` and the returned workspaceId as `workspaceId` when calling `worker::spawn`; if resourceSelectors is omitted, spawn derives the child selector as `workspace:<workspaceId>`. Use that same returned workspaceId as execute's top-level workspaceId when watching, inspecting, or invoking the workspace-visible helper. Then call `worker::protocol_guide`, author the worker from the returned template/protocol, call `worker::spawn` with expected function ids and idempotency, and prove the live catalog with `catalog::watch_snapshot` or `capability::inspect`. Run conformance or test evidence before relying on the new function, invoke it through `execute`, install packaged modules with `module::register_package` over `worker_package` resources, inspect with `module::inspect_package`, verify source trust, configure with `module::configure`, activate with `module::activate` through `worker::spawn`, and record `module::run_conformance` or health evidence before upgrade, rollback, disable, revoke, or remove. Use `module::rollback` for prior activation versions, `module::revoke_source_approval` for source approval cleanup, and `module::remove_package` only after live activations are disabled or quarantined. Expose human/operator controls only as generated `ui_surface` resources through `ui::surface_for_target` and `ui::inspect_surface`, and submit generated actions with `ui::submit_action` using stored surface/version/action ids instead of reconstructed client targets. Use `engine::promote` only for governed workspace/system promotion, clean up sandbox-spawned helpers with `sandbox::stop_spawned_worker`, and discard temporary repo helper files with approval-gated `worktree::discard_files` using repository-relative paths only; reserve `worker::disconnect` for raw volatile worker protocol cleanup. Report plain status in chat. Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, and function ids in Inspect unless the user explicitly asks for audit/debug details; still mention cleanup state in plain language.\n\n");
+    if estimated_tokens(out.len() + EXECUTE_ROUTING_GUIDANCE.len() + TRUNCATION_NOTICE.len())
+        <= policy.max_tokens
+    {
+        out.push_str(EXECUTE_ROUTING_GUIDANCE);
+    } else {
+        out.push_str(COMPACT_EXECUTE_ROUTING_GUIDANCE);
+    }
+    if has_self_extension_entries(&entries)
+        && estimated_tokens(out.len() + SELF_EXTENSION_GUIDANCE.len() + TRUNCATION_NOTICE.len())
+            <= policy.max_tokens
+    {
+        out.push_str(SELF_EXTENSION_GUIDANCE);
+    }
     let total_entries = entries.len();
     for (index, entry) in entries.drain(..).enumerate() {
         let recipe = entry.agent_recipe();
@@ -173,6 +191,27 @@ fn primer_rank(entry: &CapabilityRegistryEntry) -> (u8, u8, u8) {
         1
     };
     (primitive, core, trust_rank(&entry.trust_tier))
+}
+
+fn has_self_extension_entries(entries: &[CapabilityRegistryEntry]) -> bool {
+    entries.iter().any(|entry| {
+        matches!(
+            entry.function_id.as_str(),
+            "self_extension::grant_workspace_autonomy"
+                | "worker::protocol_guide"
+                | "worker::spawn"
+                | "catalog::watch_snapshot"
+                | "capability::inspect"
+                | "capability::conformance_run"
+                | "module::register_package"
+                | "module::activate"
+                | "module::run_conformance"
+                | "ui::surface_for_target"
+                | "ui::inspect_surface"
+                | "ui::submit_action"
+                | "worker::disconnect"
+        )
+    })
 }
 
 fn estimated_tokens(chars: usize) -> usize {
