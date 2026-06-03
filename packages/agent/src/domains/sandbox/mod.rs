@@ -4,11 +4,12 @@
 //! keeps domain contracts, services, sandbox-created worker launch/stop
 //! lifecycle, and tests beside the worker that uses them. Spawned workers are
 //! local `/engine/workers` participants with a derived child grant and scoped
-//! endpoint/token environment; sandbox-owned cleanup stops the process and
-//! unregisters the volatile worker through the engine. Lifecycle events publish
-//! to `sandbox.lifecycle`. The contract owns the product presentation hints for
-//! local helper creation; runtime execute details only overlay the
-//! scope-specific summary.
+//! endpoint/token environment; sandbox-owned cleanup stops the process,
+//! unregisters volatile registrations through the engine, and leaves durable
+//! disconnect/health transitions to the external worker manager. Lifecycle
+//! events publish to `sandbox.lifecycle`. The contract owns the product
+//! presentation hints for local helper creation; runtime execute overlays only
+//! the scope-specific summary.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -27,8 +28,8 @@ use crate::domains::worker::DomainRegistrationContext;
 use crate::domains::worker::DomainWorkerModule;
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::{
-    ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, FunctionId,
-    Invocation, TraceId, WorkerId,
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, EngineError,
+    FunctionId, Invocation, TraceId, WorkerId,
 };
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{CapabilityError, NOT_FOUND};
@@ -683,13 +684,7 @@ async fn disconnect_worker_id_with_context(
     match deps.engine_host.worker_is_volatile(worker_id).await {
         Some(true) => {}
         None => return Ok(()),
-        Some(false) => {
-            return Err(CapabilityError::Internal {
-                message: format!(
-                    "worker::disconnect can only disconnect volatile workers ({worker_id})"
-                ),
-            });
-        }
+        Some(false) => return Ok(()),
     }
     let trace_id = parent
         .map(|invocation| invocation.causal_context.trace_id.clone())
@@ -729,6 +724,13 @@ async fn disconnect_worker_id_with_context(
         )
         .await;
     if let Some(error) = result.error {
+        if matches!(
+            &error,
+            EngineError::PolicyViolation(message)
+                if message.contains("worker::disconnect can only disconnect volatile workers")
+        ) {
+            return Ok(());
+        }
         return Err(engine_internal(error));
     }
     Ok(())

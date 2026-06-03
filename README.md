@@ -986,8 +986,9 @@ local capability work with scope-aware summaries such as `Safe in this chat` or
 `Safe in this workspace`; raw worker ids, grants, traces, and schemas remain
 metadata. `sandbox::list_spawned_workers`,
 `sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the
-local process lifecycle; stop kills the process, unregisters volatile catalog
-entries through `worker::disconnect`, and publishes `sandbox.lifecycle`.
+local process lifecycle; stop kills the process, unregisters volatile
+registrations through `worker::disconnect`, leaves durable disconnect/health
+transitions to the external worker manager, and publishes `sandbox.lifecycle`.
 Discarding helper files from the repository worktree is a separate
 approval-gated `worktree::discard_files` action and accepts repository-relative
 paths only.

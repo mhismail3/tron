@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **68/100**
+Current score: **77/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -33,7 +33,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-F | passed_after_fix | Server-owned plain trust presentation is evidence-backed and rendered by iOS without client-owned trust mapping. Details below. |
 | TPROD-G | passed_after_fix | Generated UI authoring product matrix is server-authored through fixed catalog components and covered by Rust/iOS source-guard evidence. Details below. |
 | TPROD-H | passed_after_fix | Model presets, automation routing truth, subagent task/model routing, generated lineage UI, and iOS chip data are server-owned and covered by focused Rust/iOS evidence. Details below. |
-| TPROD-I | pending | Flagship Tron-maintains-Tron loop not yet run. |
+| TPROD-I | passed_after_fix | Flagship Tron-maintains-Tron chat loop creates, repairs, tests, reviews, and cleans up a workspace helper with generated UI plus model/subagent evidence. Details below. |
 | TPROD-J | pending | Three polished local example packs not yet shipped. |
 | TPROD-K | pending | Product user/operator/release-note docs not yet complete. |
 | TPROD-L | pending | Full hardening, visual QA, soak, and closeout gates not yet run. |
@@ -588,6 +588,70 @@ row, note command return codes, and keep open loops explicit.
 
 ### Open Loops
 
-- Closed for TPROD-H. TPROD-I must now run the flagship Tron-maintains-Tron
-  local work loop with generated UI, model/subagent routing evidence, docs, and
-  review-ready output, stopping before push, merge, release, or deploy.
+- Closed for TPROD-H. TPROD-I now owns the flagship Tron-maintains-Tron
+  local work-loop proof.
+
+## TPROD-I Evidence
+
+### Files
+
+- [`packages/agent/tests/integration/tprod_i_flagship.rs`](../tests/integration/tprod_i_flagship.rs)
+- [`packages/agent/tests/integration/tests.rs`](../tests/integration/tests.rs)
+- [`packages/agent/tests/integration.rs`](../tests/integration.rs)
+- [`packages/agent/src/domains/sandbox/mod.rs`](../src/domains/sandbox/mod.rs)
+- [`packages/agent/src/domains/sandbox/contract.rs`](../src/domains/sandbox/contract.rs)
+- [`packages/agent/tests/threat_model_invariants.rs`](../tests/threat_model_invariants.rs)
+- [`README.md`](../../../README.md)
+- [`packages/agent/docs/tron-productization-scorecard.md`](tron-productization-scorecard.md)
+- [`packages/agent/docs/tron-productization-evidence-manifest.md`](tron-productization-evidence-manifest.md)
+- [`packages/agent/docs/codebase-cleanup-scorecard.md`](codebase-cleanup-scorecard.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml --test integration tprod_i_flagship_chat_loop_reaches_review_ready -- --nocapture` | 101 then 0 | Red/green flagship proof. Failures exposed stack pressure, materialized-file inspect shape, agent-owned autonomy grant validation, workspace id mismatch, approval-required conformance, missing subagent-manager wiring in provider-backed integration servers, and sandbox cleanup's stale volatile-only disconnect guard. Final run passed after root-cause fixes. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all` | 0 | Formatted Rust changes while stabilizing the proof. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 0 | Verified touched large-file audit rows in the cleanup scorecard remain exact after the flagship proof. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants codebase_cleanup_scorecard_stays_formalized -- --nocapture` | 0 | Confirmed the cleanup scorecard remains formalized after TPROD-I file-count updates. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Confirmed the productization scorecard/evidence manifest state is formalized at 77/100 with TPROD-I passed_after_fix and TPROD-J pending. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Verified the Rust server compiles after integration harness and sandbox cleanup changes. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Verified committed Rust formatting. |
+| `git diff --check` | 0 | Verified whitespace/diff hygiene before checkpoint review. |
+
+### Findings
+
+- The flagship proof starts from `agent::prompt` and exercises the normal chat
+  loop, not a direct-only harness: the scripted assistant calls `execute`
+  through model capability invocations and waits for `agent.ready`.
+- The session grants workspace-local autonomy to the session agent, fetches
+  live `worker::protocol_guide`, writes an intentionally broken
+  `materialized_file`, repairs it from the live guide, and verifies version
+  history includes both draft and repair.
+- The repaired helper registers `tprod_i_flagship::review_ready` as a
+  workspace-visible sandbox capability. The proof watches
+  `catalog::watch_snapshot`, invokes the helper through `execute`, and inspects
+  the helper in product-facing guidance.
+- Conformance remains policy-owned: `capability::conformance_run` pauses for a
+  user approval, the test resolves `approval::resolve` as a user actor, and the
+  approved replay produces `evidence` resource refs before the final answer.
+- Generated UI evidence is created through `ui::surface_for_target`; the final
+  review-ready answer cites the resulting `ui_surface` resource ref.
+- Subagent routing evidence is live: the provider-backed integration server now
+  wires the production `SubagentManager`, and the proof spawns a Review
+  subagent with `Local when possible` routing, then verifies streamed
+  `agent.subagent_spawned` and `agent.subagent_completed` evidence plus the
+  `agent_result:subagent:<session>` lineage reference.
+- Cleanup stays local and non-release: the helper is stopped with
+  `sandbox::stop_spawned_worker`; no push, merge, release, deploy, production
+  rollout, or remote package discovery occurs.
+- Sandbox cleanup no longer treats a post-stop non-volatile worker state as a
+  failed stop. It kills the sandbox-created process and lets the external worker
+  manager own durable disconnect/health transitions instead of routing through
+  the volatile-only `worker::disconnect` primitive.
+
+### Open Loops
+
+- Closed for TPROD-I. TPROD-J must ship three local example packs: Tron
+  maintainer, everyday local automation, and creative/knowledge, with tests,
+  docs, no remote discovery, and no personal-info literals.

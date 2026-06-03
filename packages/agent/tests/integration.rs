@@ -693,27 +693,45 @@ async fn boot_server_with_provider_config_and_handles(
     let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
     let settings_path = unique_settings_path();
     tron::domains::settings::reload_settings_from_path(&settings_path).unwrap();
+    let profile_runtime = profile_runtime_for_settings_path(&settings_path);
+    let provider_factory: Arc<dyn ProviderFactory> = Arc::new(FixedProviderFactory(provider));
+    let engine_host = tron::engine::EngineHostHandle::new_in_memory().unwrap();
+    let subagent_manager = Arc::new(
+        tron::domains::agent::runner::orchestrator::subagent_manager::SubagentManager::new(
+            session_manager.clone(),
+            event_store.clone(),
+            orchestrator.broadcast().clone(),
+            provider_factory.clone(),
+            profile_runtime.clone(),
+            None,
+            None,
+        ),
+    );
+    subagent_manager.set_self_ref();
+    subagent_manager.set_run_state_probe(orchestrator.run_state_probe());
+    subagent_manager.set_skill_registry(skill_registry.clone());
+    subagent_manager.set_engine_host(engine_host.clone());
 
     let runtime_context = ServerRuntimeContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
-        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
+        engine_host,
         skill_registry,
         memory_registry: Arc::new(parking_lot::Mutex::new(
             tron::domains::agent::runner::memory::MemoryRegistry::new(),
         )),
-        profile_runtime: profile_runtime_for_settings_path(&settings_path),
+        profile_runtime,
         settings_path,
         agent_deps: Some(AgentDeps {
-            provider_factory: Arc::new(FixedProviderFactory(provider)),
+            provider_factory,
             guardrails: None,
         }),
         capability_support_config: tron::shared::server::context::CapabilitySupportConfig::default(
         ),
         server_start_time: std::time::Instant::now(),
         transcription_engine: Arc::new(std::sync::OnceLock::new()),
-        subagent_manager: None,
+        subagent_manager: Some(subagent_manager),
         health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         cron_scheduler: None,

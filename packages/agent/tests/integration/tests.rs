@@ -1,5 +1,7 @@
 use super::*;
 
+mod tprod_i_flagship;
+
 #[tokio::test]
 async fn e2e_engine_hello_on_connect() {
     let (url, server) = boot_server().await;
