@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **93.5/100**
+Current score: **95/100**
 
 Status: **running**
 
@@ -1553,7 +1553,7 @@ is pending, indirectly verified, or stale.
 |----|----------|--------|--------|----------|---------------|
 | HMH-G1 | Requirement-by-requirement completion audit | 20 | passed_after_fix | Matrix maps each source-derived requirement and user objective clause to authoritative files, commands, tests, screenshots, DB rows, and scorecard rows. | Keep goal active if any requirement is indirect or missing. |
 | HMH-G2 | Absence gates are current | 15 | passed_after_fix | Static scans reject client policy/targets, prompt-expanded tool catalogs, discovery bypasses, global dynamic visibility, alternate spawn, generic module action, and stale scorecard states. | Tighten tests before closeout. |
-| HMH-G3 | Transcript/session audit | 15 | pending | Session audit searches prior failures and current campaign transcripts for repeated architecture drift, stale claims, or unfinished rows. | Add successor rows if patterns remain. |
+| HMH-G3 | Transcript/session audit | 15 | passed | Session audit searches prior failures and current campaign transcripts for repeated architecture drift, stale claims, or unfinished rows. | Add successor rows if patterns remain. |
 | HMH-G4 | Live recursive loop rerun | 20 | pending | End-to-end HMH-B/HMH-E scenario reruns from clean temp state after fixes and passes without harness pollution. | Do not use earlier partial run as final proof. |
 | HMH-G5 | Docs and README are canonical | 10 | pending | README, engine docs, iOS docs, scorecards, and module docs agree on current commands, surfaces, status, and residual risk. | Remove aspirational or stale claims. |
 | HMH-G6 | Diff hygiene and dead-code scan | 10 | pending | Diff scan removes unrelated churn, AI-ish comments, redundant defensive checks, type escapes, stale compatibility code, and metadata noise. | Fix before ledger/final. |
@@ -1636,6 +1636,49 @@ Open loops after HMH-G1/HMH-G2:
   architecture drift, stale claims, unfinished rows, and process notes before
   rerunning the live recursive loop.
 
+HMH-G3 evidence, 2026-06-03:
+
+- Session audit index refreshed:
+  `/Users/moose/.codex/audit/session_audit.py index` returned
+  `ok=true`, database `/Users/moose/.codex/audit/session_audit.sqlite`,
+  `files_seen=86`, `threads_indexed=86`, `files_changed=1`, and
+  `app_logs_changed=1040`.
+- Scope discovery used the project cwd, updated timestamps, scorecard names,
+  ledger records, user continuation prompts, recent commits, and campaign terms
+  instead of title-only matching.
+
+| Session | Canonical scope | Included because | Hygiene result |
+|---------|-----------------|------------------|----------------|
+| `019e8780-9bf0-76c1-be22-9106bc24d32d` (`Inspect pasted text content`) | 2026-06-02 08:43 through indexed 2026-06-03 03:52, 24,787 events, active file | Current iii source correction and HMH-A through HMH-G2 execution campaign. | Canonical active transcript, no parse errors. |
+| `019e8658-ee09-73b3-9b96-f640a1ed869d` (`Follow pasted text`) | 2026-06-02 03:20 through 08:43, 7,574 events | Precursor pasted-source/planning continuation that changed the scorecard source assumptions. | Deduplicated active/archive transcript copies; one logical session counted. |
+| `019e7a07-4b7f-77f2-b15b-242f2c005ca8` (`Implement plan end to end`) | 2026-05-30 through 2026-06-02, 50,764 events | Precursor process and UI hardening run that supplied user interventions, simulator lessons, and scorecard process failures. | Deduplicated active/archive transcript copies; one logical session counted. |
+| `019e7a06-865b-7cb1-8b63-3782b12e20b4` (`Complete plan implementation`) | 11 events | Short aborted start. | Excluded from failure counts. |
+
+Transcript failure taxonomy:
+
+| Pattern | Evidence observed | Resolution or owner |
+|---------|-------------------|---------------------|
+| Stale architecture or scorecard claims | The current campaign corrected the initial false attachment-source claim, stale HMH open-loop text, stale large-file audit rows, and the HMH-G1 `99/100` score drift. | Static portfolio guards now reject stale scores, missing evidence, and stale pending rows; HMH-G5 still owns the final docs pass. |
+| Product red tests | HMH-F5 exposed missing real lease/compensation contracts; HMH-F7 exposed SQLite restart losing durable external function definitions; HMH-F6 exposed trace gaps before the full graph proof. | Fixed in committed HMH-F checkpoints with targeted tests and scorecard evidence. No new unowned product row was found. |
+| Command hygiene lessons | Indexed failures include a wrong `sed` path, an `rg` no-match exit, Cargo's one-filter rule violation, and Cargo package-cache locks when tests ran in parallel. | Future rows should run Cargo filters sequentially, use one test filter per invocation, treat `rg` exit 1 as no-match when expected, and prefer focused reads over broad dumps. |
+| UI/simulator proof loops | Precursor sessions include user feedback to skip iPad temporarily, later resume robust iPad sheet proof, and work around missing Simulator CLI rotation with toolbar-driven visual checks. | HMH-G4 must rerun the clean live loop from temp state and cannot use those partial UI runs as final proof. |
+| Token-efficiency lessons | Broad timeline and `rg` queries produced very large previews; focused SQLite queries and small scorecard sections were more useful. | Future audit rows should query `sessions` first, then targeted `events` predicates by session id, term, and timestamp; avoid broad transcript dumps unless exporting for offline review. |
+
+Audit conclusion:
+
+- No new successor rows are needed. The observed remaining risks already map to
+  HMH-G4 (clean live rerun), HMH-G5 (canonical docs), HMH-G6 (diff/dead-code
+  scan), and HMH-G7 (ledger/final honesty).
+- Hidden reasoning was not used as evidence. The audit relied on user prompts,
+  assistant-visible updates, tool calls/outputs, commits, scorecard rows, and
+  ledger records.
+
+Open loops after HMH-G1/HMH-G2/HMH-G3:
+
+- HMH-G3 is closed. Continue with HMH-G4: rerun the clean live recursive loop
+  from current code and temp state, then prove it did not depend on earlier
+  partial campaign runs or simulator state.
+
 ## Adversarial Audit Of This Portfolio
 
 Strong findings:
@@ -1716,10 +1759,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, and HMH-G2 are closed.
-Continue with HMH-G3: audit current campaign transcripts and prior session
-history for drift.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, HMH-G2, and HMH-G3 are
+closed. Continue with HMH-G4: rerun the clean live recursive loop from current
+code and temp state.
 
 ```bash
-/Users/moose/.codex/audit/session_audit.py index
+cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle -- --nocapture
 ```
