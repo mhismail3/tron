@@ -925,7 +925,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 
 | File | Current LOC | Owner | Reason | Budget | Decomposition checkpoint |
 |------|-------------|-------|--------|--------|--------------------------|
-| `packages/agent/tests/threat_model_invariants.rs` | 7589 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, CLC-10, post-closeout cleanup pass, productization scorecard formalization, split-boundary/final-state gates, full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 7600 | CLC-10 |
+| `packages/agent/tests/threat_model_invariants.rs` | 7591 | CLC-9 static gates | Cross-cutting architecture gates and cleanup scorecard enforcement, including CLC-1, CLC-2, CLC-3, CLC-4, CLC-5, CLC-6, CLC-7, CLC-8, CLC-9, CLC-10, post-closeout cleanup pass, productization scorecard formalization, split-boundary/final-state gates, full host-meta, host-runtime-host, host-handle-surface, module lifecycle/store/evidence, source-trust, manifest, grant, resource, schema, payload, action-catalog, session/storage/protocol, model-provider/profile, runner/context, smaller-domain, iOS thin-client, Mac script/startup/platform, and test harness subtree checks. | 7600 | CLC-10 |
 | `packages/agent/tests/integration/tests.rs` | 4726 | CLC-9 harnesses | Transport e2e suite with shared WebSocket harness. | 4800 | CLC-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2799 | CLC-9 iOS tests | Event transformer matrix should split only when concepts separate. | 2900 | CLC-9 |
 | `packages/agent/src/domains/worktree/implementation/runtime/coordinator/tests.rs` | 2769 | CLC-9 worktree tests | Worktree coordinator lifecycle matrix. | 2800 | CLC-9 |
@@ -945,9 +945,11 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/agent/src/domains/agent/runner/context/context_manager_tests.rs` | 1164 | CLC-9 context tests | Context manager policy/rules matrix. | 1200 | CLC-9 |
 | `packages/agent/src/shared/protocol/events/tron/catalog.rs` | 1160 | CLC-3 protocol | Exhaustive generated `TronEvent` enum catalog and accessors stay together for serde tagging, grep-ability, and match exhaustiveness without introducing a compatibility macro layer. | 1200 | CLC-3 |
 | `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | 1127 | CLC-9 context tests | Compaction engine scenario matrix. | 1175 | CLC-9 |
-| `packages/agent/src/domains/capability/operations/mod.rs` | 1095 | CLC-1 capability operations | Capability operation orchestration keeps validation, lifecycle, and projection together until a narrower operation boundary appears. | 1150 | CLC-1 |
+| `packages/agent/src/domains/capability/operations/mod.rs` | 1109 | CLC-1 capability operations | Capability operation orchestration keeps validation, lifecycle, and projection together until a narrower operation boundary appears. | 1150 | CLC-1 |
+| `packages/agent/src/domains/sandbox/mod.rs` | 1091 | TPROD-C sandbox lifecycle | Sandbox worker lifecycle now owns workspace-autonomy selector derivation, cleanup helpers, live-worker evidence, and product-facing helper labels together until a narrower spawn/cleanup boundary appears. | 1150 | TPROD-C |
 | `packages/ios-app/Tests/Infrastructure/EventDatabaseTests.swift` | 1089 | CLC-9 iOS tests | Event database test matrix. | 1100 | CLC-9 |
 | `packages/agent/src/engine/primitives/mod.rs` | 1023 | CLC-2 primitive surface | Primitive registration glue is one line over the threshold and remains the discoverable index for built-in primitive modules. | 1050 | CLC-2 |
+| `packages/agent/src/engine/tests/meta_primitives.rs` | 1013 | TPROD-C engine tests | Meta primitive tests now cover host primitive presentation, worker protocol guide ordering, sandbox cleanup guidance, and product vocabulary for self-extension. | 1100 | TPROD-C |
 
 ## Test Plan
 

@@ -103,6 +103,7 @@ fn primer_teaches_self_modifying_worker_lifecycle() {
     let snapshot = CapabilityRegistrySnapshot::new(
         vec![
             test_function("capability::execute"),
+            test_function("self_extension::grant_workspace_autonomy"),
             test_function("worker::protocol_guide"),
             test_function("worker::spawn"),
             test_function("catalog::watch_snapshot"),
@@ -128,6 +129,15 @@ fn primer_teaches_self_modifying_worker_lifecycle() {
 
     for required in [
         "customize the harness",
+        "`self_extension::grant_workspace_autonomy`",
+        "omit workspaceId for the current workspace",
+        "Workspace-visible helper work",
+        "`workspaceAutonomyGrantId`",
+        "returned workspaceId",
+        "resourceSelectors is omitted",
+        "`workspace:<workspaceId>`",
+        "execute's top-level workspaceId",
+        "`Safe in this workspace`",
         "`worker::protocol_guide`",
         "author",
         "`worker::spawn`",
@@ -142,17 +152,23 @@ fn primer_teaches_self_modifying_worker_lifecycle() {
         "`ui::submit_action`",
         "stored surface/version/action ids",
         "`engine::promote`",
+        "sandbox-spawned helpers",
         "`worker::disconnect`",
         "`sandbox::stop_spawned_worker`",
-        "trace id",
-        "resource refs",
-        "catalog revision",
+        "`worktree::discard_files`",
+        "repository-relative paths only",
+        "plain status in chat",
+        "Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, and function ids in Inspect",
     ] {
         assert!(
             text.contains(required),
             "self-modification primer missing lifecycle marker `{required}`:\n{text}"
         );
     }
+    assert!(
+        !text.contains("Report trace id"),
+        "self-modification primer must not instruct normal chat to expose raw evidence ids:\n{text}"
+    );
 }
 
 #[test]
@@ -161,6 +177,7 @@ fn capability_primer_context_stays_within_budget() {
         crate::shared::profile::CapabilityContextPrimerPolicySpec::default().max_tokens;
     let mut functions = vec![
         test_function("capability::execute"),
+        test_function("self_extension::grant_workspace_autonomy"),
         test_function("worker::protocol_guide"),
         test_function("worker::spawn"),
         test_function("catalog::watch_snapshot"),
@@ -200,6 +217,14 @@ fn capability_primer_context_stays_within_budget() {
         "noisy core snapshot should truncate entries with execute guidance instead of expanding the catalog:\n{text}"
     );
     for required in [
+        "`self_extension::grant_workspace_autonomy`",
+        "omit workspaceId for the current workspace",
+        "`workspaceAutonomyGrantId`",
+        "returned workspaceId",
+        "resourceSelectors is omitted",
+        "`workspace:<workspaceId>`",
+        "execute's top-level workspaceId",
+        "`Safe in this workspace`",
         "`worker::protocol_guide`",
         "`worker::spawn`",
         "`catalog::watch_snapshot`",
@@ -216,12 +241,13 @@ fn capability_primer_context_stays_within_budget() {
         "`ui::submit_action`",
         "stored surface/version/action ids",
         "`engine::promote`",
+        "sandbox-spawned helpers",
         "`worker::disconnect`",
         "`sandbox::stop_spawned_worker`",
-        "trace id",
-        "resource refs",
-        "catalog revision",
-        "child invocation ids",
+        "`worktree::discard_files`",
+        "repository-relative paths only",
+        "plain status in chat",
+        "Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, and function ids in Inspect",
         "cleanup state",
     ] {
         assert!(

@@ -70,14 +70,25 @@ enum ApprovalEventText {
         workspaceId: String?,
         sessionId: String?
     ) -> String? {
-        guard functionId == "self_extension::grant_workspace_autonomy" else { return nil }
-        if isWorkspaceLocal(payload, workspaceId: workspaceId) {
-            return "Allow local capability work in this workspace"
+        switch functionId {
+        case "self_extension::grant_workspace_autonomy":
+            if isWorkspaceLocal(payload, workspaceId: workspaceId) {
+                return "Allow local capability work in this workspace"
+            }
+            if isSessionLocal(payload, sessionId: sessionId) {
+                return "Allow local capability work in this chat"
+            }
+            return "Allow local capability work"
+        case "worker::disconnect", "sandbox::stop_spawned_worker":
+            return "Stop local helper capability"
+        case "process::run":
+            if payload?.string("executionMode")?.lowercased() == "sandbox_materialized" {
+                return "Run local command in a sandbox"
+            }
+            return "Run local command"
+        default:
+            return nil
         }
-        if isSessionLocal(payload, sessionId: sessionId) {
-            return "Allow local capability work in this chat"
-        }
-        return "Allow local capability work"
     }
 
     private static func localCapabilityReason(
@@ -86,14 +97,28 @@ enum ApprovalEventText {
         workspaceId: String?,
         sessionId: String?
     ) -> String? {
-        guard functionId == "self_extension::grant_workspace_autonomy" else { return nil }
-        if isWorkspaceLocal(payload, workspaceId: workspaceId) {
-            return "Tron needs your approval before creating or updating a local capability in this workspace."
+        switch functionId {
+        case "self_extension::grant_workspace_autonomy":
+            if isWorkspaceLocal(payload, workspaceId: workspaceId) {
+                return "Tron needs your approval before creating or updating a local capability in this workspace."
+            }
+            if isSessionLocal(payload, sessionId: sessionId) {
+                return "Tron needs your approval before creating or updating a local capability in this chat."
+            }
+            return "Tron needs your approval before creating or updating a local capability."
+        case "worker::disconnect", "sandbox::stop_spawned_worker":
+            return "Tron needs your approval before stopping a local helper capability."
+        case "process::run":
+            if isWorkspaceLocal(payload, workspaceId: workspaceId) {
+                return "Tron needs your approval before running a local command for this workspace."
+            }
+            if isSessionLocal(payload, sessionId: sessionId) {
+                return "Tron needs your approval before running a local command for this chat."
+            }
+            return "Tron needs your approval before running a local command."
+        default:
+            return nil
         }
-        if isSessionLocal(payload, sessionId: sessionId) {
-            return "Tron needs your approval before creating or updating a local capability in this chat."
-        }
-        return "Tron needs your approval before creating or updating a local capability."
     }
 
     private static func isWorkspaceLocal(_ payload: [String: AnyCodable]?, workspaceId: String?) -> Bool {

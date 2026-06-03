@@ -296,3 +296,75 @@ fn capability_execute_child_invocations_preserve_runtime_metadata() {
     assert!(child.has_scope("filesystem.read"));
     assert_eq!(child.idempotency_key.as_deref(), Some("child-key"));
 }
+
+#[test]
+fn capability_execute_wrapper_workspace_id_binds_actor_when_context_is_absent() {
+    let invocation = Invocation::new_sync(
+        FunctionId::new("capability::execute").expect("function id"),
+        json!({
+            "target": "disposable::ping",
+            "workspaceId": "workspace_path_test"
+        }),
+        CausalContext::new(
+            crate::engine::ActorId::new("agent:s1").expect("actor id"),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
+            crate::engine::TraceId::new("trace").expect("trace id"),
+        )
+        .with_session_id("sess-1"),
+    );
+
+    let actor = actor_from_invocation(&invocation).expect("actor context");
+
+    assert_eq!(actor.session_id.as_deref(), Some("sess-1"));
+    assert_eq!(actor.workspace_id.as_deref(), Some("workspace_path_test"));
+}
+
+#[test]
+fn capability_execute_transport_workspace_context_wins_over_payload_wrapper() {
+    let invocation = Invocation::new_sync(
+        FunctionId::new("capability::execute").expect("function id"),
+        json!({
+            "target": "disposable::ping",
+            "workspaceId": "workspace_path_payload"
+        }),
+        CausalContext::new(
+            crate::engine::ActorId::new("agent:s1").expect("actor id"),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
+            crate::engine::TraceId::new("trace").expect("trace id"),
+        )
+        .with_session_id("sess-1")
+        .with_workspace_id("workspace_transport"),
+    );
+
+    let actor = actor_from_invocation(&invocation).expect("actor context");
+
+    assert_eq!(actor.workspace_id.as_deref(), Some("workspace_transport"));
+}
+
+#[test]
+fn capability_execute_child_invocations_use_wrapper_workspace_id_when_context_is_absent() {
+    let function = test_function("disposable::ping");
+    let parent = Invocation::new_sync(
+        FunctionId::new("capability::execute").expect("function id"),
+        json!({
+            "functionId": "disposable::ping",
+            "mode": "invoke",
+            "workspaceId": "workspace_path_test",
+            "payload": {"ping": "ok"}
+        }),
+        CausalContext::new(
+            crate::engine::ActorId::new("agent:s1").expect("actor id"),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
+            crate::engine::TraceId::new("trace").expect("trace id"),
+        )
+        .with_session_id("sess-1"),
+    );
+
+    let child = child_execute_causal_context(&parent, &function, None);
+
+    assert_eq!(child.session_id.as_deref(), Some("sess-1"));
+    assert_eq!(child.workspace_id.as_deref(), Some("workspace_path_test"));
+}

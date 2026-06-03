@@ -584,6 +584,69 @@ async fn approval_resolution_resumes_original_invocation_with_original_causality
 }
 
 #[tokio::test]
+async fn approval_resolution_resumes_host_dispatched_primitives() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("volatile-helper", "demo"), true)
+        .unwrap();
+    let pending = handle
+        .request_approval(crate::engine::EngineApprovalRequest {
+            function_id: fid("worker::disconnect"),
+            payload: json!({
+                "workerId": "volatile-helper",
+                "reason": "approval cleanup proof"
+            }),
+            causal_context: mutating_causal("approval-worker-disconnect-child")
+                .with_scope("worker.write"),
+            delivery_mode: DeliveryMode::Sync,
+            target_metadata: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(pending.status, ApprovalStatus::Pending);
+
+    let resolved = handle
+        .invoke(host_invocation(
+            "approval::resolve",
+            json!({"approvalId": pending.approval_id, "decision": "approve"}),
+            CausalContext::new(
+                actor("admin"),
+                ActorKind::Admin,
+                grant("approval-admin"),
+                trace("approval-host-primitive-trace"),
+            )
+            .with_scope("approval.resolve")
+            .with_idempotency_key("approval-host-primitive-resolve"),
+        ))
+        .await;
+
+    assert_eq!(resolved.error, None);
+    assert_eq!(
+        resolved.value.as_ref().unwrap()["approval"]["status"],
+        "executed"
+    );
+    assert_eq!(
+        resolved.value.as_ref().unwrap()["child"]["value"]["disconnected"],
+        true
+    );
+
+    let missing = handle
+        .invoke(host_invocation(
+            "worker::get",
+            json!({"workerId": "volatile-helper"}),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("system-grant"),
+                trace("approval-host-primitive-worker-get"),
+            )
+            .with_scope("worker.read"),
+        ))
+        .await;
+    assert!(matches!(missing.error, Some(EngineError::NotFound { .. })));
+}
+
+#[tokio::test]
 async fn engine_invoke_routes_approval_resolve_through_host_resume_path() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle

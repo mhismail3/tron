@@ -643,14 +643,15 @@ fn productization_scorecard_stays_formalized() {
 
     for required in [
         "# Tron Productization Scorecard: Self-Extending Agentic Product",
-        "Current score: **12/100**",
-        "Status: **active; TPROD-C running; plain projection slice passed, visual chat proof next**",
+        "Current score: **22/100**",
+        "Status: **active; TPROD-C passed after live proof; TPROD-D next**",
         "| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix |",
         "| TPROD-B | `self-extend` managed skill | 7 | passed_after_fix |",
-        "| TPROD-C | Chat-led self-extension UX | 10 | running |",
+        "| TPROD-C | Chat-led self-extension UX | 10 | passed_after_fix |",
+        "| TPROD-D | Created-by-agent gallery/history | 9 | pending |",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending |",
         "No remote package install/discovery path beyond explicit deferred docs",
-        "TPROD-C remains active",
+        "TPROD-D is active",
     ] {
         assert!(
             scorecard.contains(required),
@@ -660,7 +661,7 @@ fn productization_scorecard_stays_formalized() {
     for premature_claim in [
         "Current score: **100/100**",
         "Status: **completed**",
-        "| TPROD-C | Chat-led self-extension UX | 10 | passed",
+        "| TPROD-D | Created-by-agent gallery/history | 9 | passed",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | passed",
     ] {
         assert!(
@@ -669,10 +670,11 @@ fn productization_scorecard_stays_formalized() {
         );
     }
     assert!(
-        manifest.contains("Current score: **12/100**")
+        manifest.contains("Current score: **22/100**")
             && manifest.contains("| TPROD-A | passed_after_fix |")
             && manifest.contains("| TPROD-B | passed_after_fix |")
-            && manifest.contains("| TPROD-C | running |")
+            && manifest.contains("| TPROD-C | passed_after_fix |")
+            && manifest.contains("| TPROD-D | pending |")
             && manifest.contains("No remote package discovery"),
         "productization evidence manifest must track the same score, next row, and deferred remote boundary"
     );

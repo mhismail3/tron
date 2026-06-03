@@ -17,7 +17,7 @@ enum CapabilityPresentation {
             ?? presentationString("title", for: identity) {
             return displayName
         }
-        if let targetId, !targetId.hasPrefix("capability::") {
+        if let targetId, targetId != "capability::execute" {
             return humanizeCapabilityId(targetId)
         }
         if let contractId = identity.contractId, identity.modelPrimitiveName != contractId {
@@ -190,8 +190,10 @@ enum CapabilityPresentation {
         "agent::subagent_result": "Subagent Result",
         "agent::subagent_status": "Subagent Status",
         "capability::execute": "Execute",
-        "capability::inspect": "Inspect",
-        "capability::search": "Search",
+        "capability::inspect": "Check capability",
+        "capability::search": "Find capabilities",
+        "catalog::list": "Check capabilities",
+        "catalog::watch_snapshot": "Check capabilities",
         "display::show": "Display",
         "filesystem::apply_patch": "Apply Patch",
         "filesystem::diff": "Diff Files",
@@ -213,8 +215,14 @@ enum CapabilityPresentation {
         "process::stream_output": "Stream Process Output",
         "process::wait": "Wait For Process",
         "sandbox::promote_worker": "Promote Worker",
-        "worker::spawn": "Spawn Worker",
-        "sandbox::stop_spawned_worker": "Stop Worker",
+        "sandbox::list_spawned_workers": "Check helper capabilities",
+        "sandbox::get_spawned_worker": "Check helper capability",
+        "self_extension::grant_workspace_autonomy": "Allow local capability work",
+        "worker::spawn": "Create helper capability",
+        "worker::disconnect": "Stop helper capability",
+        "worker::health": "Check helper capability",
+        "worker::protocol_guide": "Prepare helper capability",
+        "sandbox::stop_spawned_worker": "Stop helper capability",
         "web::fetch": "Fetch Web Page",
         "web::scrape": "Scrape Web Page",
         "web::search": "Search Web"

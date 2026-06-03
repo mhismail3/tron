@@ -56,6 +56,51 @@ pub struct ActivitySummaryLine {
     /// Provider-visible primitive name or resolved capability id for capability lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_primitive_name: Option<String>,
+    /// Resolved capability contract id, present when a wrapper primitive completed a concrete target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_id: Option<String>,
+    /// Resolved implementation id, present when the completion event exposed binding metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub implementation_id: Option<String>,
+    /// Resolved engine function id, present when the completion event exposed binding metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function_id: Option<String>,
+    /// Source plugin id for the resolved target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
+    /// Worker id for the resolved target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker_id: Option<String>,
+    /// Resolved target schema digest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_digest: Option<String>,
+    /// Catalog revision used for the resolved target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_revision: Option<u64>,
+    /// Trust tier for the resolved target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_tier: Option<String>,
+    /// Risk level for the resolved target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub risk_level: Option<String>,
+    /// Effect class for the resolved target.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effect_class: Option<String>,
+    /// Trace id for Inspect/debug surfaces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// Root invocation id for Inspect/debug surfaces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_invocation_id: Option<String>,
+    /// Binding decision id for Inspect/debug surfaces.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_decision_id: Option<String>,
+    /// Product presentation hints owned by the resolved capability contract.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presentation_hints: Option<Value>,
+    /// Plain product summary for the dashboard chip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     /// Capability invocation arguments, present for capability lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability_args: Option<Value>,
@@ -76,6 +121,76 @@ const MAX_ASSISTANT_TEXT_LEN: usize = 200;
 const MAX_SUBAGENT_TEXT_LEN: usize = 50;
 const MAX_ACTIVITY_LINES: usize = 5;
 
+#[derive(Clone, Debug, Default)]
+struct CapabilityCompletionSummary {
+    is_error: bool,
+    duration_ms: Option<i64>,
+    model_primitive_name: Option<String>,
+    contract_id: Option<String>,
+    implementation_id: Option<String>,
+    function_id: Option<String>,
+    plugin_id: Option<String>,
+    worker_id: Option<String>,
+    schema_digest: Option<String>,
+    catalog_revision: Option<u64>,
+    trust_tier: Option<String>,
+    risk_level: Option<String>,
+    effect_class: Option<String>,
+    trace_id: Option<String>,
+    root_invocation_id: Option<String>,
+    binding_decision_id: Option<String>,
+    presentation_hints: Option<Value>,
+    summary: Option<String>,
+}
+
+impl CapabilityCompletionSummary {
+    fn from_payload(payload: &Value) -> Self {
+        let details = payload.get("details");
+        let binding = details.and_then(|value| value.get("bindingDecision"));
+        let presentation_hints = payload
+            .get("presentationHints")
+            .cloned()
+            .or_else(|| details.and_then(|value| value.get("presentationHints").cloned()));
+        let summary = presentation_hints
+            .as_ref()
+            .and_then(|value| value.get("summary"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+
+        Self {
+            is_error: payload
+                .get("isError")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            duration_ms: payload.get("duration").and_then(Value::as_i64),
+            model_primitive_name: string_field(payload, "modelPrimitiveName"),
+            contract_id: string_field(payload, "contractId")
+                .or_else(|| string_field_opt(binding, "contractId")),
+            implementation_id: string_field(payload, "implementationId")
+                .or_else(|| string_field_opt(binding, "selectedImplementation")),
+            function_id: string_field(payload, "functionId")
+                .or_else(|| string_field_opt(binding, "selectedFunctionId")),
+            plugin_id: string_field(payload, "pluginId"),
+            worker_id: string_field(payload, "workerId"),
+            schema_digest: string_field(payload, "schemaDigest")
+                .or_else(|| string_field_opt(binding, "schemaDigest")),
+            catalog_revision: u64_field(payload, "catalogRevision")
+                .or_else(|| u64_field_opt(binding, "catalogRevision")),
+            trust_tier: string_field(payload, "trustTier"),
+            risk_level: string_field(payload, "riskLevel"),
+            effect_class: string_field(payload, "effectClass"),
+            trace_id: string_field(payload, "traceId")
+                .or_else(|| string_field_opt(details, "traceId")),
+            root_invocation_id: string_field(payload, "rootInvocationId")
+                .or_else(|| string_field_opt(details, "rootInvocationId")),
+            binding_decision_id: string_field(payload, "bindingDecisionId")
+                .or_else(|| string_field_opt(binding, "decisionId")),
+            presentation_hints,
+            summary,
+        }
+    }
+}
+
 /// Extract first non-empty line from text.
 fn first_non_empty_line(text: &str) -> String {
     text.split('\n')
@@ -91,6 +206,45 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     } else {
         s.chars().take(max_len).collect()
+    }
+}
+
+fn string_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn string_field_opt(value: Option<&Value>, key: &str) -> Option<String> {
+    value.and_then(|value| string_field(value, key))
+}
+
+fn u64_field(value: &Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(Value::as_u64)
+}
+
+fn u64_field_opt(value: Option<&Value>, key: &str) -> Option<u64> {
+    value.and_then(|value| u64_field(value, key))
+}
+
+fn display_capability_args(
+    model_primitive_name: &str,
+    input: Option<Value>,
+    completion: Option<&CapabilityCompletionSummary>,
+) -> Option<Value> {
+    let input = input?;
+    let resolved_target = completion
+        .and_then(|summary| summary.contract_id.as_deref())
+        .is_some_and(|contract_id| contract_id != "capability::execute");
+    if model_primitive_name == "execute" || resolved_target {
+        input
+            .get("arguments")
+            .cloned()
+            .or_else(|| input.get("payload").cloned())
+            .or(Some(input))
+    } else {
+        Some(input)
     }
 }
 
@@ -186,18 +340,16 @@ impl SessionRepo {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        // Pass 1: collect capability result info by invocationId
-        let mut capability_results: HashMap<String, (bool, Option<i64>)> = HashMap::new();
+        // Pass 1: collect capability result info by invocationId.
+        let mut capability_results: HashMap<String, CapabilityCompletionSummary> = HashMap::new();
         for (event_type, payload_str, _) in &rows {
             if event_type == "capability.invocation.completed" {
                 if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
                     if let Some(tcid) = payload.get("invocationId").and_then(|v| v.as_str()) {
-                        let is_error = payload
-                            .get("isError")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        let duration = payload.get("duration").and_then(|v| v.as_i64());
-                        let _ = capability_results.insert(tcid.to_string(), (is_error, duration));
+                        let _ = capability_results.insert(
+                            tcid.to_string(),
+                            CapabilityCompletionSummary::from_payload(&payload),
+                        );
                     }
                 }
             }
@@ -265,15 +417,53 @@ impl SessionRepo {
                                         .get("input")
                                         .cloned()
                                         .or_else(|| block.get("arguments").cloned());
-                                    let result =
+                                    let completion =
                                         invocation_id.and_then(|id| capability_results.get(id));
+                                    let display_args =
+                                        display_capability_args(name, input, completion);
 
                                     lines.push(ActivitySummaryLine {
                                         kind: "capability".into(),
-                                        model_primitive_name: Some(name.to_string()),
-                                        capability_args: input,
-                                        duration_ms: result.and_then(|(_, d)| *d),
-                                        is_error: result.map(|(e, _)| *e),
+                                        model_primitive_name: completion
+                                            .and_then(|summary| {
+                                                summary.model_primitive_name.clone()
+                                            })
+                                            .or_else(|| Some(name.to_string())),
+                                        contract_id: completion
+                                            .and_then(|summary| summary.contract_id.clone()),
+                                        implementation_id: completion
+                                            .and_then(|summary| summary.implementation_id.clone()),
+                                        function_id: completion
+                                            .and_then(|summary| summary.function_id.clone()),
+                                        plugin_id: completion
+                                            .and_then(|summary| summary.plugin_id.clone()),
+                                        worker_id: completion
+                                            .and_then(|summary| summary.worker_id.clone()),
+                                        schema_digest: completion
+                                            .and_then(|summary| summary.schema_digest.clone()),
+                                        catalog_revision: completion
+                                            .and_then(|summary| summary.catalog_revision),
+                                        trust_tier: completion
+                                            .and_then(|summary| summary.trust_tier.clone()),
+                                        risk_level: completion
+                                            .and_then(|summary| summary.risk_level.clone()),
+                                        effect_class: completion
+                                            .and_then(|summary| summary.effect_class.clone()),
+                                        trace_id: completion
+                                            .and_then(|summary| summary.trace_id.clone()),
+                                        root_invocation_id: completion
+                                            .and_then(|summary| summary.root_invocation_id.clone()),
+                                        binding_decision_id: completion.and_then(|summary| {
+                                            summary.binding_decision_id.clone()
+                                        }),
+                                        presentation_hints: completion
+                                            .and_then(|summary| summary.presentation_hints.clone()),
+                                        summary: completion
+                                            .and_then(|summary| summary.summary.clone()),
+                                        capability_args: display_args,
+                                        duration_ms: completion
+                                            .and_then(|summary| summary.duration_ms),
+                                        is_error: completion.map(|summary| summary.is_error),
                                         ..Default::default()
                                     });
                                 }

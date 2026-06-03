@@ -4,7 +4,9 @@
 //! local capability creation and repair inside one workspace. The approval
 //! target is product-facing; the handler derives the underlying engine grant
 //! through `grant::derive`, and sandbox-created helpers consume that grant when
-//! deriving their narrower worker grants.
+//! deriving their narrower worker grants. The returned workspace id is the
+//! stable context key for later workspace-visible spawn, inspect, catalog watch,
+//! and invocation calls.
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +16,7 @@ pub(crate) mod handlers;
 pub(crate) use deps::Deps;
 
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::domains::worker::{DomainRegistrationContext, DomainWorkerModule};
 use crate::engine::{
@@ -40,9 +43,9 @@ async fn grant_workspace_autonomy(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let payload = &invocation.payload;
-    let workspace_id = non_empty_param(payload, "workspaceId")?;
     let workspace_path =
         canonical_workspace_path(&require_string_param(Some(payload), "workspacePath")?)?;
+    let workspace_id = workspace_id_from_payload_or_context(payload, invocation, &workspace_path)?;
     let session_id = opt_string(Some(payload), "sessionId")
         .or_else(|| invocation.causal_context.session_id.clone());
     let reason = opt_string(Some(payload), "reason").unwrap_or_else(|| {
@@ -132,14 +135,37 @@ async fn grant_workspace_autonomy(
     }))
 }
 
-fn non_empty_param(payload: &Value, key: &str) -> Result<String, CapabilityError> {
-    let value = require_string_param(Some(payload), key)?;
-    if value.trim().is_empty() {
-        return Err(CapabilityError::InvalidParams {
-            message: format!("Parameter '{key}' must not be empty"),
-        });
+fn workspace_id_from_payload_or_context(
+    payload: &Value,
+    invocation: &Invocation,
+    workspace_path: &Path,
+) -> Result<String, CapabilityError> {
+    let explicit = opt_string(Some(payload), "workspaceId")
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    let context = invocation
+        .causal_context
+        .workspace_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    match (explicit, context) {
+        (Some(explicit), Some(context)) if explicit != context => {
+            Err(CapabilityError::InvalidParams {
+                message: "workspaceId does not match invocation context".to_owned(),
+            })
+        }
+        (Some(explicit), _) => Ok(explicit),
+        (None, Some(context)) => Ok(context),
+        (None, None) => Ok(workspace_id_from_path(workspace_path)),
     }
-    Ok(value)
+}
+
+fn workspace_id_from_path(workspace_path: &Path) -> String {
+    let digest = Sha256::digest(workspace_path.to_string_lossy().as_bytes());
+    format!("workspace_path_{}", hex::encode(&digest[..12]))
 }
 
 fn canonical_workspace_path(path: &str) -> Result<PathBuf, CapabilityError> {
@@ -230,6 +256,123 @@ mod tests {
         assert_eq!(
             grant["provenance"]["source"],
             "self_extension::grant_workspace_autonomy"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_autonomy_grant_uses_invocation_workspace_context_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let deps = Deps {
+            engine_host: EngineHostHandle::new_in_memory().unwrap(),
+        };
+        let invocation = Invocation::new_sync(
+            FunctionId::new("self_extension::grant_workspace_autonomy").unwrap(),
+            json!({
+                "workspacePath": dir.path().display().to_string(),
+                "reason": "test local helper creation"
+            }),
+            CausalContext::new(
+                ActorId::new("agent:workspace-context-self-extension-test").unwrap(),
+                ActorKind::Agent,
+                AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+                TraceId::new("trace-context-self-extension-test").unwrap(),
+            )
+            .with_scope("self_extension.write")
+            .with_session_id("session-context-self-extension-test")
+            .with_workspace_id("workspace-context-self-extension-test")
+            .with_idempotency_key("self-extension-context-test-key"),
+        );
+
+        let value = grant_workspace_autonomy(&invocation, &deps)
+            .await
+            .expect("workspace autonomy grant should use context workspace");
+        let grant = &value["grant"];
+
+        assert_eq!(
+            value["workspaceId"],
+            "workspace-context-self-extension-test"
+        );
+        assert_eq!(
+            grant["resourceSelectors"],
+            json!(["workspace:workspace-context-self-extension-test"])
+        );
+        assert_eq!(
+            grant["budget"]["workspaceId"],
+            "workspace-context-self-extension-test"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_autonomy_grant_derives_path_workspace_id_without_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let deps = Deps {
+            engine_host: EngineHostHandle::new_in_memory().unwrap(),
+        };
+        let invocation = Invocation::new_sync(
+            FunctionId::new("self_extension::grant_workspace_autonomy").unwrap(),
+            json!({
+                "workspacePath": dir.path().display().to_string(),
+                "reason": "test local helper creation"
+            }),
+            CausalContext::new(
+                ActorId::new("agent:path-self-extension-test").unwrap(),
+                ActorKind::Agent,
+                AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+                TraceId::new("trace-path-self-extension-test").unwrap(),
+            )
+            .with_scope("self_extension.write")
+            .with_session_id("session-path-self-extension-test")
+            .with_idempotency_key("self-extension-path-test-key"),
+        );
+
+        let value = grant_workspace_autonomy(&invocation, &deps)
+            .await
+            .expect("workspace autonomy grant should derive a path-scoped workspace id");
+        let workspace_id = value["workspaceId"].as_str().unwrap();
+        let grant = &value["grant"];
+
+        assert!(workspace_id.starts_with("workspace_path_"));
+        assert!(!workspace_id.contains(dir.path().to_str().unwrap()));
+        assert_eq!(
+            grant["resourceSelectors"],
+            json!([format!("workspace:{workspace_id}")])
+        );
+        assert_eq!(grant["budget"]["workspaceId"], workspace_id);
+    }
+
+    #[tokio::test]
+    async fn workspace_autonomy_grant_rejects_explicit_workspace_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let deps = Deps {
+            engine_host: EngineHostHandle::new_in_memory().unwrap(),
+        };
+        let invocation = Invocation::new_sync(
+            FunctionId::new("self_extension::grant_workspace_autonomy").unwrap(),
+            json!({
+                "workspaceId": "guessed-workspace",
+                "workspacePath": dir.path().display().to_string(),
+            }),
+            CausalContext::new(
+                ActorId::new("agent:workspace-context-self-extension-test").unwrap(),
+                ActorKind::Agent,
+                AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+                TraceId::new("trace-context-self-extension-test").unwrap(),
+            )
+            .with_scope("self_extension.write")
+            .with_session_id("session-context-self-extension-test")
+            .with_workspace_id("workspace-context-self-extension-test")
+            .with_idempotency_key("self-extension-context-test-key"),
+        );
+
+        let error = grant_workspace_autonomy(&invocation, &deps)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("workspaceId"));
+        assert!(
+            error
+                .to_string()
+                .contains("does not match invocation context")
         );
     }
 

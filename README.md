@@ -378,8 +378,9 @@ local profiles strip heavier context blocks without dropping the harness recipe.
 Workspace-local self-extension starts with the approval-required
 `self_extension::grant_workspace_autonomy` capability. That capability derives a
 bounded grant through `grant::derive`, returns product text such as
-`Safe in this workspace`, and keeps grant ids, traces, and raw authority fields
-available for Inspect instead of putting them in the chat copy.
+`Safe in this workspace`, returns the workspace id to reuse as execute context
+for workspace-visible helper work, and keeps grant ids, traces, and raw
+authority fields available for Inspect instead of putting them in the chat copy.
 
 The default `coreFirstParty` primer is generated from registry metadata and
 includes the high-use first-party capabilities the agent should know without a
@@ -884,14 +885,19 @@ derive socket paths from client URLs. The intended loop is: use `execute` with
 intent or target `worker::protocol_guide`, write the worker script from that
 template, use `execute` with target `worker::spawn` plus expected function ids
 and a stable idempotency key, then invoke the new `namespace::function` through
-`execute`. Human/operator controls for the new capability remain server-owned:
+`execute`. Workspace-visible helper work uses the approved workspace autonomy
+grant id and the returned workspace id; when `resourceSelectors` are omitted,
+`worker::spawn` derives a child selector of `workspace:<workspaceId>` instead of
+asking the model to repair an overbroad `*` selector. Human/operator controls
+for the new capability remain server-owned:
 author or inspect generated `ui_surface` resources through
 `ui::surface_for_target` and `ui::inspect_surface`, and submit stored actions
 through `ui::submit_action` using surface/version/action ids rather than
 reconstructing targets in the client. For session-created functions with
 renderable required request fields, `ui::surface_for_target` authors the native
-input controls and stored invoke action from the server-side schema. Disconnect
-volatile worker entries with `worker::disconnect` when finished. Operator
+input controls and stored invoke action from the server-side schema. Stop
+sandbox-created helpers with `sandbox::stop_spawned_worker` when finished;
+reserve `worker::disconnect` for raw volatile worker protocol cleanup. Operator
 catalog search/inspect views remain available for debugging, but they are not
 separate model tools. The model-facing `execute` schema and generated
 `capabilities.primer` both name this loop so ordinary provider turns do not
@@ -948,14 +954,17 @@ supplied `workspaceAutonomyGrantId` from
 expected function ids, namespaces, resource selectors, file roots, network
 policy, risk, budget, and delegation=false. Workspace autonomy grants are
 validated for source, actor, workspace selector, and file root before they can
-be used as child-grant parents. It starts a local worker process with scoped
-`/engine/workers` environment plus a worker token carrying `authorityGrantId`,
-parent grant id, grant revision/hash, and resource selectors, waits for the
-expected registration, and returns the worker id, derived grant id, parent
-grant id, registered functions, catalog revision, visibility, and process
-metadata without a separate approval prompt. Session visibility is the default;
-workspace helpers use the approved workspace autonomy grant, and system
-promotion is still only governed by `engine::promote`, with
+be used as child-grant parents. For approved workspace autonomy spawns,
+omitting `resourceSelectors` defaults the child grant to the validated
+`workspace:<workspaceId>` selector; ordinary non-workspace spawns keep the
+existing explicit-or-default grant bounds. It starts a local worker process
+with scoped `/engine/workers` environment plus a worker token carrying
+`authorityGrantId`, parent grant id, grant revision/hash, and resource
+selectors, waits for the expected registration, and returns the worker id,
+derived grant id, parent grant id, registered functions, catalog revision,
+visibility, and process metadata without a separate approval prompt. Session
+visibility is the default; workspace helpers use the approved workspace autonomy
+grant, and system promotion is still only governed by `engine::promote`, with
 revision/idempotency guards and catalog-watch evidence. The contract also
 carries product `presentationHints` so chat surfaces render helper creation as
 local capability work with scope-aware summaries such as `Safe in this chat` or
@@ -964,6 +973,9 @@ metadata. `sandbox::list_spawned_workers`,
 `sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the
 local process lifecycle; stop kills the process, unregisters volatile catalog
 entries through `worker::disconnect`, and publishes `sandbox.lifecycle`.
+Discarding helper files from the repository worktree is a separate
+approval-gated `worktree::discard_files` action and accepts repository-relative
+paths only.
 
 ---
 

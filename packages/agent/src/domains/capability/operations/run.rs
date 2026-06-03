@@ -493,11 +493,21 @@ pub(super) fn child_execute_causal_context(
         invocation.causal_context.trace_id.clone(),
     )
     .with_parent_invocation(invocation.id.clone());
-    if let Some(session_id) = &invocation.causal_context.session_id {
-        causal_context = causal_context.with_session_id(session_id.clone());
+    if let Some(session_id) = invocation
+        .causal_context
+        .session_id
+        .clone()
+        .or_else(|| context_string(&invocation.payload, "sessionId"))
+    {
+        causal_context = causal_context.with_session_id(session_id);
     }
-    if let Some(workspace_id) = &invocation.causal_context.workspace_id {
-        causal_context = causal_context.with_workspace_id(workspace_id.clone());
+    if let Some(workspace_id) = invocation
+        .causal_context
+        .workspace_id
+        .clone()
+        .or_else(|| context_string(&invocation.payload, "workspaceId"))
+    {
+        causal_context = causal_context.with_workspace_id(workspace_id);
     }
     for (key, value) in &invocation.causal_context.runtime_metadata {
         causal_context = causal_context.with_runtime_metadata(key.clone(), value.clone());
@@ -516,6 +526,12 @@ pub(super) fn child_execute_causal_context(
         causal_context = causal_context.with_idempotency_key(key);
     }
     causal_context
+}
+
+fn context_string(payload: &Value, field: &str) -> Option<String> {
+    string_field(payload, field)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 async fn await_approval_result(

@@ -23,6 +23,8 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
     let traceId: String?
     let rootInvocationId: String?
     let bindingDecisionId: String?
+    let presentationHints: [String: AnyCodable]?
+    let summary: String?
 
     func toActivityLine() -> ActivityLine {
         switch kind {
@@ -35,18 +37,22 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
         case "capability":
             let identity = capabilityIdentity
             let name = identity.stableCapabilityId
-            let argsJSON = serializeArgs(capabilityArgs)
             let durationStr = durationMs.map { SessionStreamBuffer.formatDuration($0) }
             return ActivityLine(
                 kind: .capabilityInvocationStarted,
                 text: name,
-                icon: CapabilityPresentation.symbol(for: identity),
+                icon: CapabilityActivityPresentation.symbol(for: identity, arguments: capabilityArgs),
                 iconColor: CapabilityColor.fromCapability(identity),
                 modelPrimitiveName: name,
-                displayName: CapabilityPresentation.title(for: identity),
-                summary: argsJSON == "{}" ? nil : argsJSON,
+                displayName: CapabilityActivityPresentation.title(for: identity, arguments: capabilityArgs),
+                summary: CapabilityActivityPresentation.summary(
+                    explicit: summary,
+                    arguments: capabilityArgs,
+                    identity: identity
+                ),
                 duration: durationStr,
-                status: (isError == true) ? .error : .success
+                status: (isError == true) ? .error : .success,
+                capabilityIdentity: identity
             )
         case "subagentDone":
             let t = turns ?? 0
@@ -74,16 +80,8 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
             effectClass: effectClass,
             traceId: traceId,
             rootInvocationId: rootInvocationId,
-            bindingDecisionId: bindingDecisionId
+            bindingDecisionId: bindingDecisionId,
+            presentationHints: presentationHints
         )
-    }
-
-    private func serializeArgs(_ args: AnyCodable?) -> String {
-        guard let args = args else { return "{}" }
-        let val = args.value
-        guard JSONSerialization.isValidJSONObject(val) else { return "{}" }
-        guard let data = try? JSONSerialization.data(withJSONObject: val),
-              let str = String(data: data, encoding: .utf8) else { return "{}" }
-        return str
     }
 }

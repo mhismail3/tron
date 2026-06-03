@@ -27,7 +27,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "expectedFunctionIds": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 128},
                     "allowedAuthorityScopes": {"type": "array", "items": {"type": "string"}},
                     "allowedResourceKinds": {"type": "array", "items": {"type": "string"}},
-                    "resourceSelectors": {"type": "array", "items": {"type": "string"}},
+                    "resourceSelectors": {"type": "array", "items": {"type": "string"}, "description": "Optional child grant resource selectors. When workspaceAutonomyGrantId and workspaceId are supplied, omission defaults to workspace:<workspaceId>; otherwise omission defaults to *."},
                     "fileRoots": {"type": "array", "items": {"type": "string"}},
                     "workspaceAutonomyGrantId": {"type": "string"},
                     "networkPolicy": {"type": "string", "enum": ["none", "loopback", "declared", "unrestricted"]},
@@ -61,8 +61,8 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             }))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox-worker", "worker:{workerId}", 300000))
-            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "if worker launch fails the spawned process is killed and partial volatile catalog entries are unregistered; successful workers can be disconnected with worker::disconnect"))
-            .high_risk_contract(json!({"sandboxAutonomy":{"withoutUserApproval":true,"requiresIdempotency":true,"requiresLease":true,"requiresCompensation":true,"visibilityDefault":"session","reason":"sandbox-created workers run under scoped worker identity and are audited by engine ledger, stream, lease, and cleanup records"},"resourceLock":{"idTemplate":"worker:{workerId}","kind":"sandbox-worker","reason":"serializes lifecycle operations for one sandbox-created worker","required":true,"ttlMs":300000},"rollbackOrCompensation":"failed launches kill the process and unregister partial volatile catalog entries; successful workers can be disconnected with worker::disconnect","streamTopics": STREAM_TOPICS,"version":1}))
+            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "if worker launch fails the spawned process is killed and partial volatile catalog entries are unregistered; successful sandbox workers are stopped with sandbox::stop_spawned_worker"))
+            .high_risk_contract(json!({"sandboxAutonomy":{"withoutUserApproval":true,"requiresIdempotency":true,"requiresLease":true,"requiresCompensation":true,"visibilityDefault":"session","workspaceAutonomyResourceSelectorDefault":"workspace:<workspaceId>","reason":"sandbox-created workers run under scoped worker identity and are audited by engine ledger, stream, lease, and cleanup records"},"resourceLock":{"idTemplate":"worker:{workerId}","kind":"sandbox-worker","reason":"serializes lifecycle operations for one sandbox-created worker","required":true,"ttlMs":300000},"rollbackOrCompensation":"failed launches kill the process and unregister partial volatile catalog entries; successful sandbox workers are stopped with sandbox::stop_spawned_worker","streamTopics": STREAM_TOPICS,"version":1}))
             .presentation_hints(json!({
                 "displayName": "Create helper capability",
                 "chipTitle": "Creating helper capability",

@@ -3,8 +3,10 @@
 //! Client protocols reach this worker through engine triggers targeting
 //! canonical `worktree::*` function ids. This root module owns registration and
 //! workflow splits; `operations/` owns status, index, branch, diff summary,
-//! full diff, and destructive worktree command bodies behind narrow `Deps`. Read-only
-//! inspection contracts are intentionally tagged and described for the
+//! full diff, and destructive worktree command bodies behind narrow `Deps`.
+//! Destructive file discard accepts only repository-relative paths and pauses
+//! for user approval before deleting untracked files or restoring tracked
+//! changes. Read-only inspection contracts are intentionally tagged and described for the
 //! model-facing `capability::execute` resolver, while the trusted current
 //! session binding remains owned by the capability orchestration layer.
 

@@ -146,7 +146,14 @@ impl EngineHostHandle {
             .finish_prepared_sync_invocation(prepared, result)
     }
 
-    async fn invoke_prepared_regular_unlocked(&self, invocation: Invocation) -> InvocationResult {
+    async fn invoke_approved_child_unlocked(&self, invocation: Invocation) -> InvocationResult {
+        if is_host_dispatched_primitive_function(&invocation.function_id) {
+            return self
+                .inner
+                .lock()
+                .await
+                .invoke_sync_host_dispatched_primitive(invocation);
+        }
         let prepared = {
             let mut host = self.inner.lock().await;
             host.catalog.prepare_sync_invocation(invocation)
@@ -562,9 +569,7 @@ impl EngineHostHandle {
                 resolved.causal_context(),
             )
             .with_delivery_mode(resolved.delivery_mode);
-            let result = self
-                .invoke_prepared_regular_unlocked(child_invocation)
-                .await;
+            let result = self.invoke_approved_child_unlocked(child_invocation).await;
             let completed = approval_store
                 .lock()
                 .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))

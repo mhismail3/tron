@@ -78,7 +78,9 @@ struct CapabilityInvocationDisplayModel: Equatable {
         self.summaryText = Self.summaryText(
             primitive: primitive,
             target: target,
-            identity: data.identity
+            identity: data.identity,
+            capabilityName: capabilityName,
+            payloadSummary: payloadSummary
         )
         self.capabilityRows = Self.capabilityRows(
             primitive: primitive,
@@ -231,10 +233,16 @@ struct CapabilityInvocationDisplayModel: Equatable {
     private static func summaryText(
         primitive: String,
         target: String?,
-        identity: CapabilityIdentity
+        identity: CapabilityIdentity,
+        capabilityName: String,
+        payloadSummary: String?
     ) -> String {
         if let summary = presentationString(["summary", "subtitle"], for: identity) {
             return summary.truncated(to: 160)
+        }
+
+        if primitive == "execute", target != nil {
+            return (payloadSummary ?? capabilityName).truncated(to: 160)
         }
 
         var parts = [primitiveTitle(primitive)]
@@ -313,6 +321,39 @@ struct CapabilityInvocationDisplayModel: Equatable {
     }
 
     private static func payloadSummary(target: String?, from object: [String: Any]) -> String? {
+        if target == "self_extension::grant_workspace_autonomy" {
+            return "Current workspace"
+        }
+        if target == "worker::protocol_guide" {
+            return "Helper capability template"
+        }
+        if target == "worker::spawn",
+           let visibility = firstString(["visibility"], in: object)?.lowercased() {
+            switch visibility {
+            case "workspace":
+                return "Safe in this workspace"
+            case "session":
+                return "Safe in this chat"
+            case "system":
+                return "Requires promotion approval"
+            default:
+                break
+            }
+        }
+        if target == "sandbox::stop_spawned_worker" || target == "worker::disconnect" {
+            return "Local helper capability"
+        }
+        if target == "worker::health" {
+            return "Helper capability status"
+        }
+        if target == "capability::inspect" {
+            return "Capability details"
+        }
+        if target == "capability::search"
+            || target == "catalog::watch_snapshot"
+            || target == "catalog::list" {
+            return "Capability catalog"
+        }
         if let command = firstString(["command", "cmd", "shellCommand"], in: object)?.nilIfEmpty {
             return command.truncated(to: 96)
         }
@@ -325,7 +366,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         if let url = firstString(["url", "apiUrl", "endpoint"], in: object)?.nilIfEmpty {
             return url.truncated(to: 96)
         }
-        if let path = firstString(["path", "filePath", "cwd"], in: object)?.nilIfEmpty {
+        if let path = firstString(["workspacePath", "path", "filePath", "cwd"], in: object)?.nilIfEmpty {
             return compactPathLabel(path).truncated(to: 80)
         }
         if let code = firstString(["code"], in: object)?.nilIfEmpty {
@@ -336,6 +377,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         let simplePairs = object
             .filter { key, value in
                 !["payload", "allowedContracts", "allowedImplementations"].contains(key)
+                    && !technicalSummaryKeys.contains(key)
                     && Self.simpleDisplayValue(value) != nil
             }
             .sorted { $0.key < $1.key }
@@ -346,6 +388,35 @@ struct CapabilityInvocationDisplayModel: Equatable {
         guard !simplePairs.isEmpty else { return nil }
         return simplePairs.joined(separator: ", ").truncated(to: 96)
     }
+
+    private static let technicalSummaryKeys: Set<String> = [
+        "afterRevision",
+        "approvalId",
+        "bindingDecisionId",
+        "catalogRevision",
+        "classes",
+        "contractId",
+        "functionId",
+        "grantId",
+        "idempotencyKey",
+        "implementationId",
+        "includeDocs",
+        "includeExamples",
+        "kind",
+        "kinds",
+        "limit",
+        "namespacePrefix",
+        "ownerWorker",
+        "pluginId",
+        "resourceRefs",
+        "schemaDigest",
+        "sessionId",
+        "subjectPrefix",
+        "traceId",
+        "versionId",
+        "workerId",
+        "workspaceId"
+    ]
 
     private static func capabilityRows(
         primitive: String,

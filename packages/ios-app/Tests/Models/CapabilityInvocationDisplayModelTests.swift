@@ -493,6 +493,140 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(failed.display.statusText, "Repair needed")
     }
 
+    func testWorkspaceAutonomyExecuteStartKeepsChatProjectionPlainBeforeResolution() {
+        let identity = CapabilityIdentity(
+            modelPrimitiveName: "execute",
+            contractId: "capability::execute",
+            implementationId: "first_party.capability.v1.execute",
+            functionId: "capability::execute",
+            pluginId: "first_party.capability",
+            trustTier: "first_party_signed"
+        )
+        let invocation = CapabilityInvocationData(
+            id: "cap-workspace-autonomy-start",
+            status: .running,
+            arguments: #"""
+            {
+                "target": "self_extension::grant_workspace_autonomy",
+                "arguments": {
+                    "workspacePath": "/Users/moose/Downloads/projects/tron",
+                    "reason": "Approve workspace-local disposable helper capability work only."
+                },
+                "reason": "Request approval before local capability work."
+            }
+            """#,
+            identity: identity
+        )
+
+        XCTAssertEqual(invocation.display.chipTitle, "Allow local capability work")
+        XCTAssertEqual(invocation.display.commandText, "Current workspace")
+        XCTAssertEqual(invocation.display.summaryText, "Current workspace")
+        XCTAssertFalse(invocation.display.chipTitle.contains("Grant"))
+        XCTAssertFalse(invocation.display.commandText.contains("reason="))
+        XCTAssertFalse(invocation.display.summaryText.contains("self_extension"))
+    }
+
+    func testSelfExtensionRepairChipsKeepCatalogAndWorkerIdsInInspectOnly() {
+        let identity = CapabilityIdentity(
+            modelPrimitiveName: "execute",
+            contractId: "capability::execute",
+            implementationId: "first_party.capability.v1.execute",
+            functionId: "capability::execute",
+            pluginId: "first_party.capability",
+            trustTier: "first_party_signed"
+        )
+        let inspect = CapabilityInvocationData(
+            id: "cap-inspect-helper",
+            status: .error,
+            arguments: #"""
+            {
+                "target": "capability::inspect",
+                "arguments": {
+                    "functionId": "disposable::tiny_ping",
+                    "includeDocs": true,
+                    "includeExamples": true
+                },
+                "reason": "Check whether the disposable helper registered."
+            }
+            """#,
+            identity: identity
+        )
+        let catalog = CapabilityInvocationData(
+            id: "cap-watch-helper",
+            status: .error,
+            arguments: #"""
+            {
+                "target": "catalog::watch_snapshot",
+                "arguments": {
+                    "namespacePrefix": "disposable",
+                    "limit": 20
+                },
+                "reason": "Check the live catalog for the helper."
+            }
+            """#,
+            identity: identity
+        )
+        let health = CapabilityInvocationData(
+            id: "cap-health-helper",
+            status: .success,
+            arguments: #"""
+            {
+                "target": "worker::health",
+                "arguments": {
+                    "workerId": "disposable-helper-worker-2"
+                },
+                "reason": "Check helper health."
+            }
+            """#,
+            identity: identity
+        )
+        let stop = CapabilityInvocationData(
+            id: "cap-stop-helper",
+            status: .approvalRequired,
+            arguments: #"""
+            {
+                "target": "sandbox::stop_spawned_worker",
+                "arguments": {
+                    "workerId": "disposable-helper-worker-2",
+                    "reason": "Cleanup after repair."
+                },
+                "reason": "Stop the disposable helper."
+            }
+            """#,
+            identity: identity
+        )
+
+        XCTAssertEqual(inspect.display.chipTitle, "Check capability")
+        XCTAssertEqual(inspect.display.commandText, "Capability details")
+        XCTAssertEqual(catalog.display.chipTitle, "Check capabilities")
+        XCTAssertEqual(catalog.display.commandText, "Capability catalog")
+        XCTAssertEqual(health.display.chipTitle, "Check helper capability")
+        XCTAssertEqual(health.display.commandText, "Helper capability status")
+        XCTAssertEqual(stop.display.chipTitle, "Stop helper capability")
+        XCTAssertEqual(stop.display.commandText, "Local helper capability")
+
+        let visibleChatText = [inspect, catalog, health, stop]
+            .flatMap { invocation in
+                [
+                    invocation.display.chipTitle,
+                    invocation.display.commandText,
+                    invocation.display.summaryText,
+                    invocation.display.statusText,
+                    invocation.display.statusWithDuration
+                ]
+            }
+            .joined(separator: " ")
+        for forbidden in [
+            "functionId",
+            "namespacePrefix",
+            "workerId",
+            "disposable::tiny_ping",
+            "disposable-helper-worker"
+        ] {
+            XCTAssertFalse(visibleChatText.contains(forbidden), "visible chat text leaked \(forbidden): \(visibleChatText)")
+        }
+    }
+
     func testPresentationDerivesThemeColorFromResolvedCapabilityWhenEventOmitsHint() {
         let process = CapabilityIdentity(
             modelPrimitiveName: "execute",

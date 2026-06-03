@@ -210,6 +210,9 @@ def main():
         "supportedCapabilities": [FUNCTION_ID],
         "workerToken": WORKER_TOKEN,
     })
+    while True:
+        if recv_json(sock).get("type") == "catalog_snapshot":
+            break
     send_json(sock, {
         "type": "register_function",
         "definition": function_definition(),

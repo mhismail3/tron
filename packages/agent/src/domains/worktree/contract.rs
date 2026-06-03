@@ -131,7 +131,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .build()?,
         CapabilityContract::new("worktree::discard_files", "worktree", EffectClass::IrreversibleSideEffect, RiskLevel::High, Some("worktree.write"))
             .approval_required(true)
-            .request_schema(json!({"additionalProperties":false,"properties":{"paths":{"items":{"type":"string"},"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","paths"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"paths":{"items":{"type":"string","description":"Repository-relative path only; absolute paths, home-relative paths, and parent traversal are rejected before mutation."},"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","paths"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("worktree", "session:{sessionId}:index", 300000))

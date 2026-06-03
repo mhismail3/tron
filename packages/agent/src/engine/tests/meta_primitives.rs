@@ -297,11 +297,31 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
     assert!(template.contains("import select"));
     assert!(template.contains("select.select([sock], [], [], 0.25)"));
     assert!(template.contains("\"type\": \"register_function\""));
+    assert!(
+        template.find("catalog_snapshot").unwrap() < template.find("register_function").unwrap(),
+        "worker template must wait for the hello catalog snapshot before registering functions"
+    );
     assert!(template.contains("\"output_contract\": {\"kind\": \"none\"}"));
     assert!(template.contains("\"sequence\": heartbeat_sequence"));
     assert!(template.contains("demo::echo"));
     assert!(template.contains("endpoint = \"ws://\" + endpoint"));
     assert!(template.contains("must target /engine/workers"));
+    let rules = guide_value["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|rule| rule.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        rules
+            .iter()
+            .any(|rule| rule.contains("Copy pythonTemplate as-is"))
+    );
+    assert!(
+        rules
+            .iter()
+            .any(|rule| rule.contains("Do not hand-roll WebSocket framing"))
+    );
 
     let node_guide = handle
         .invoke(host_invocation(

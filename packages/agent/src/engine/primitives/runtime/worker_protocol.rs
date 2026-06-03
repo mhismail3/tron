@@ -99,11 +99,13 @@ pub(in crate::engine::primitives) fn guide(invocation: &Invocation) -> Result<Va
     });
     let rules = json!([
         "Use this guide instead of searching Tron source when asked to register a worker or create capabilities.",
+        "Copy pythonTemplate as-is for connection, auth, hello, function registration, heartbeat, invoke, and disconnect; change only worker/function ids and function body.",
+        "Do not hand-roll WebSocket framing, defaultVisibility casing, workerToken fields, or authorization headers; use the template helpers unless a runtime port has equivalent tests.",
         "Every executable unit is a canonical namespace::function registered by exactly one worker.",
         "Worker registrations appear in catalog::list and capability::search after catalog change propagation.",
         "Mutating functions must declare idempotency and require callers to provide stable idempotency keys.",
         "Streams must be published through the worker protocol publish_stream message or stream::publish, never by writing directly to client sockets.",
-        "Use sandbox::stop_spawned_worker or worker::disconnect to remove volatile capabilities."
+        "Use sandbox::stop_spawned_worker for sandbox-spawned helper cleanup; reserve worker::disconnect for raw volatile worker protocol cleanup."
     ]);
     let mut spawn_worker_payload_example = json!({
         "workerId": worker_id,

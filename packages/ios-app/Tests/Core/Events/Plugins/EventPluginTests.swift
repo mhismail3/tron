@@ -268,6 +268,92 @@ final class EventPluginTests: XCTestCase {
         XCTAssertFalse(pluginResult?.reasonText.contains("approval-1") == true)
     }
 
+    func testApprovalPendingPluginUsesPlainCleanupTextForWorkerDisconnect() {
+        EventRegistry.shared.registerAll()
+
+        let json = """
+        {
+            "type": "approval.pending",
+            "sessionId": "session-1",
+            "timestamp": "2026-05-10T00:00:00Z",
+            "data": {
+                "type": "approval.pending",
+                "approval": {
+                    "approvalId": "approval-1",
+                    "functionId": "worker::disconnect",
+                    "payload": {
+                        "workerId": "disposable-helper",
+                        "reason": "Clean up the disposable helper after the test run."
+                    },
+                    "authorityGrantId": "grant-1",
+                    "authorityScopes": ["worker.write"],
+                    "idempotencyKey": "disconnect-disposable-helper-v1",
+                    "status": "pending",
+                    "sessionId": "session-1",
+                    "workspaceId": "workspace-1",
+                    "traceId": "trace-1"
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let result = EventRegistry.shared.parse(type: "approval.pending", data: json)
+        let pluginResult = result?.getResult() as? ApprovalPendingPlugin.Result
+
+        XCTAssertEqual(pluginResult?.actionText, "Stop local helper capability")
+        XCTAssertEqual(
+            pluginResult?.reasonText,
+            "Tron needs your approval before stopping a local helper capability."
+        )
+        XCTAssertFalse(pluginResult?.actionText.contains("worker::disconnect") == true)
+        XCTAssertFalse(pluginResult?.actionText.contains("disposable-helper") == true)
+        XCTAssertFalse(pluginResult?.reasonText.contains("approval-1") == true)
+    }
+
+    func testApprovalPendingPluginUsesPlainLocalCommandTextForProcessRun() {
+        EventRegistry.shared.registerAll()
+
+        let json = """
+        {
+            "type": "approval.pending",
+            "sessionId": "session-1",
+            "timestamp": "2026-05-10T00:00:00Z",
+            "data": {
+                "type": "approval.pending",
+                "approval": {
+                    "approvalId": "approval-1",
+                    "functionId": "process::run",
+                    "payload": {
+                        "command": "python3 -m py_compile /repo/disposable_tiny_helper.py > pycheck.txt 2>&1 || true",
+                        "executionMode": "sandbox_materialized",
+                        "expectedOutputs": [{"path": "pycheck.txt"}],
+                        "timeoutMs": 10000
+                    },
+                    "authorityGrantId": "grant-1",
+                    "authorityScopes": ["process.run"],
+                    "idempotencyKey": "pycheck-disposable-helper",
+                    "status": "pending",
+                    "sessionId": "session-1",
+                    "workspaceId": "workspace-1",
+                    "traceId": "trace-1"
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let result = EventRegistry.shared.parse(type: "approval.pending", data: json)
+        let pluginResult = result?.getResult() as? ApprovalPendingPlugin.Result
+
+        XCTAssertEqual(pluginResult?.actionText, "Run local command in a sandbox")
+        XCTAssertEqual(
+            pluginResult?.reasonText,
+            "Tron needs your approval before running a local command for this workspace."
+        )
+        XCTAssertFalse(pluginResult?.actionText.contains("process::run") == true)
+        XCTAssertFalse(pluginResult?.actionText.contains("py_compile") == true)
+        XCTAssertFalse(pluginResult?.reasonText.contains("approval-1") == true)
+    }
+
     @MainActor
     func testApprovalPendingPluginDispatchesPendingRecordsAsPending() {
         let context = MockEventDispatchContext()

@@ -783,8 +783,16 @@ fn actor_from_invocation(invocation: &Invocation) -> Result<ActorContext, Capabi
         )?,
     );
     actor.authority_scopes = invocation.causal_context.authority_scopes.clone();
-    actor.session_id = invocation.causal_context.session_id.clone();
-    actor.workspace_id = invocation.causal_context.workspace_id.clone();
+    actor.session_id = invocation
+        .causal_context
+        .session_id
+        .clone()
+        .or_else(|| payload_context_string(invocation, "sessionId"));
+    actor.workspace_id = invocation
+        .causal_context
+        .workspace_id
+        .clone()
+        .or_else(|| payload_context_string(invocation, "workspaceId"));
     if !matches!(
         actor.actor_kind,
         ActorKind::Agent | ActorKind::System | ActorKind::Admin
@@ -795,6 +803,12 @@ fn actor_from_invocation(invocation: &Invocation) -> Result<ActorContext, Capabi
         );
     }
     Ok(actor)
+}
+
+fn payload_context_string(invocation: &Invocation, field: &str) -> Option<String> {
+    string_field(&invocation.payload, field)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 fn is_capability_primitive(function: &FunctionDefinition) -> bool {

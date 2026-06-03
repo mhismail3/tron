@@ -96,6 +96,7 @@
 		1E13F7873F51339204F92448 /* ModelNameFormatterThreadSafetyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B89ED66392E98153F672BB /* ModelNameFormatterThreadSafetyTests.swift */; };
 		1FA882885D178E8A26CE71E4 /* TronLoggerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3016F1B688D0D7FCAF508D6 /* TronLoggerTests.swift */; };
 		1FE35E0E4725BABFC3C3BAA6 /* IBMPlexSerif-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = AF444904C1F00E1BF54091DF /* IBMPlexSerif-Regular.ttf */; };
+		20192693F53CD91B8A0431C1 /* CapabilityActivityPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 413A9F2179EE058A9A26B4DB /* CapabilityActivityPresentation.swift */; };
 		2029A0226C0FF0082626A2FA /* CardEntranceModifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 603785D7A8D672C3E393F0EA /* CardEntranceModifierTests.swift */; };
 		203A96EF9C879334C0F19511 /* AsyncSemaphore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA8AC1E14D8133BB15831EFC /* AsyncSemaphore.swift */; };
 		205D5817B17A6727B534E628 /* MessagingCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 092C8B51A3BD92C3D3D861F2 /* MessagingCoordinatorTests.swift */; };
@@ -1097,6 +1098,7 @@
 		407482A51B59B07BFA79C149 /* SourceControlCardStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceControlCardStateTests.swift; sourceTree = "<group>"; };
 		40F00830901945DE9A072A4A /* DateParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParser.swift; sourceTree = "<group>"; };
 		41145C128CF6914A6FF51074 /* MessageIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageIndexTests.swift; sourceTree = "<group>"; };
+		413A9F2179EE058A9A26B4DB /* CapabilityActivityPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityActivityPresentation.swift; sourceTree = "<group>"; };
 		41F3F49288E68CB2894749F3 /* MessageQueueState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageQueueState.swift; sourceTree = "<group>"; };
 		421BD4A3602412E72CDAD573 /* SettingsParityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsParityTests.swift; sourceTree = "<group>"; };
 		4259DA2296EAA363DF05CA2F /* GitActionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitActionSheet.swift; sourceTree = "<group>"; };
@@ -2423,6 +2425,7 @@
 			isa = PBXGroup;
 			children = (
 				49A38C826117C42F3C25FF4B /* ActivityLine.swift */,
+				413A9F2179EE058A9A26B4DB /* CapabilityActivityPresentation.swift */,
 				37AB1C9655886345E087CCEC /* DashboardEvent.swift */,
 				030E672C2CF3D76FB1DB23BA /* ServerActivityLine.swift */,
 			);
@@ -3869,6 +3872,7 @@
 				771E95BB58DD7043419577D7 /* CachedSession+Display.swift in Sources */,
 				93E99092C770262E59A0A4B4 /* CachedSession.swift in Sources */,
 				6E00951C7D16D0203600F030 /* CameraCaptureSheet.swift in Sources */,
+				20192693F53CD91B8A0431C1 /* CapabilityActivityPresentation.swift in Sources */,
 				BA47FC558AE9DBC1B4259171 /* CapabilityArgumentExtractor.swift in Sources */,
 				8C785840F0C2FD2746EAA0A2 /* CapabilityArgumentParser.swift in Sources */,
 				87B3BE889D9615A5DE1048EE /* CapabilityClassifiedErrorSection.swift in Sources */,

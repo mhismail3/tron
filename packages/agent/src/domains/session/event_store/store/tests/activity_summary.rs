@@ -180,6 +180,84 @@ fn get_activity_summary_capability_invocation_with_result() {
 }
 
 #[test]
+fn get_activity_summary_capability_invocation_uses_resolved_target_identity() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
+        .unwrap();
+    store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::MessageAssistant,
+            payload: serde_json::json!({"content": [
+                {
+                    "type": "capability_invocation",
+                    "id": "call_1",
+                    "name": "execute",
+                    "input": {
+                        "target": "worker::spawn",
+                        "arguments": {
+                            "visibility": "workspace",
+                            "expectedFunctionIds": ["disposable::hello"]
+                        }
+                    }
+                }
+            ]}),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+    store
+        .append(&AppendOptions {
+            session_id: &cr.session.id,
+            event_type: EventType::CapabilityInvocationCompleted,
+            payload: serde_json::json!({
+                "invocationId": "call_1",
+                "modelPrimitiveName": "execute",
+                "contractId": "worker::spawn",
+                "implementationId": "first_party.worker.v1.spawn",
+                "functionId": "worker::spawn",
+                "pluginId": "core",
+                "workerId": "worker",
+                "catalogRevision": 42,
+                "trustTier": "first_party_signed",
+                "riskLevel": "High",
+                "effectClass": "ExternalSideEffect",
+                "traceId": "trace-worker-spawn",
+                "rootInvocationId": "root-worker-spawn",
+                "bindingDecisionId": "binding-worker-spawn",
+                "presentationHints": {
+                    "displayName": "Local capability",
+                    "summary": "Safe in this workspace",
+                    "icon": "puzzlepiece.extension"
+                },
+                "isError": false,
+                "duration": 150
+            }),
+            parent_id: None,
+            sequence: None,
+        })
+        .unwrap();
+
+    let lines = store
+        .get_session_activity_summaries(&cr.session.id)
+        .unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].kind, "capability");
+    assert_eq!(lines[0].model_primitive_name.as_deref(), Some("execute"));
+    assert_eq!(lines[0].contract_id.as_deref(), Some("worker::spawn"));
+    assert_eq!(lines[0].function_id.as_deref(), Some("worker::spawn"));
+    assert_eq!(lines[0].summary.as_deref(), Some("Safe in this workspace"));
+    assert_eq!(
+        lines[0].capability_args.as_ref().unwrap(),
+        &serde_json::json!({
+            "visibility": "workspace",
+            "expectedFunctionIds": ["disposable::hello"]
+        })
+    );
+}
+
+#[test]
 fn get_activity_summary_capability_invocation_no_result() {
     let store = setup();
     let cr = store

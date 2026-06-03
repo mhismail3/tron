@@ -487,6 +487,7 @@ async fn execute_orchestrated_value(
 
     let mut prepared_invocation = invocation.clone();
     prepared_invocation.payload = prepared_payload;
+    apply_execute_context_overrides(&mut prepared_invocation, &invocation.payload);
     let mut result = match run::execute_invoke_value(&prepared_invocation, deps).await {
         Ok(result) => result,
         Err(error) => {
@@ -548,6 +549,31 @@ async fn execute_orchestrated_value(
     record_orchestration_audit(deps, invocation, diagnostics.clone()).await?;
     result = attach_orchestration_details(result, diagnostics)?;
     Ok(result)
+}
+
+fn apply_execute_context_overrides(invocation: &mut Invocation, source_payload: &Value) {
+    if invocation.causal_context.session_id.is_none()
+        && let Some(session_id) = context_string(source_payload, "sessionId")
+    {
+        invocation.causal_context = invocation
+            .causal_context
+            .clone()
+            .with_session_id(session_id);
+    }
+    if invocation.causal_context.workspace_id.is_none()
+        && let Some(workspace_id) = context_string(source_payload, "workspaceId")
+    {
+        invocation.causal_context = invocation
+            .causal_context
+            .clone()
+            .with_workspace_id(workspace_id);
+    }
+}
+
+fn context_string(payload: &Value, field: &str) -> Option<String> {
+    string_field(payload, field)
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
 }
 
 #[derive(Debug)]

@@ -4,10 +4,11 @@
 //! keeps domain contracts, services, sandbox-created worker launch/stop
 //! lifecycle, and tests beside the worker that uses them. Spawned workers are
 //! local `/engine/workers` participants with a derived child grant and scoped
-//! endpoint/token environment; cleanup routes through `worker::disconnect` and
-//! lifecycle events publish to `sandbox.lifecycle`. The contract owns the
-//! product presentation hints for local helper creation; runtime execute
-//! details only overlay the scope-specific summary.
+//! endpoint/token environment; sandbox-owned cleanup stops the process and
+//! unregisters the volatile worker through the engine. Lifecycle events publish
+//! to `sandbox.lifecycle`. The contract owns the product presentation hints for
+//! local helper creation; runtime execute details only overlay the
+//! scope-specific summary.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -290,6 +291,8 @@ async fn derive_sandbox_worker_grant(
     if let Some(workspace_id) = invocation.causal_context.workspace_id.clone() {
         context = context.with_workspace_id(workspace_id);
     }
+    let default_resource_selectors =
+        default_child_resource_selectors(payload, workspace_id.as_deref());
     let grant_payload = json!({
         "grantId": grant_id,
         "parentGrantId": parent_grant_id,
@@ -298,7 +301,7 @@ async fn derive_sandbox_worker_grant(
         "allowedNamespaces": allowed_namespaces,
         "allowedAuthorityScopes": optional_string_array_or(payload, "allowedAuthorityScopes", vec!["*".to_owned()])?,
         "allowedResourceKinds": optional_string_array_or(payload, "allowedResourceKinds", vec!["*".to_owned()])?,
-        "resourceSelectors": optional_string_array_or(payload, "resourceSelectors", vec!["*".to_owned()])?,
+        "resourceSelectors": optional_string_array_or(payload, "resourceSelectors", default_resource_selectors)?,
         "fileRoots": optional_string_array_or(
             payload,
             "fileRoots",
@@ -335,6 +338,15 @@ async fn derive_sandbox_worker_grant(
         .ok_or_else(|| CapabilityError::Internal {
             message: "grant::derive did not return a grant".to_owned(),
         })
+}
+
+fn default_child_resource_selectors(payload: &Value, workspace_id: Option<&str>) -> Vec<String> {
+    if opt_string(Some(payload), "workspaceAutonomyGrantId").is_some()
+        && let Some(workspace_id) = workspace_id.filter(|value| !value.trim().is_empty())
+    {
+        return vec![format!("workspace:{workspace_id}")];
+    }
+    vec!["*".to_owned()]
 }
 
 async fn sandbox_parent_grant_id(
@@ -978,6 +990,102 @@ mod tests {
         assert_eq!(
             child["resourceSelectors"],
             json!(["workspace:workspace-sandbox-test"])
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_autonomy_spawn_defaults_child_resource_selector_to_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine_host = EngineHostHandle::new_in_memory().unwrap();
+        let deps = Deps {
+            engine_host: engine_host.clone(),
+            origin: "http://127.0.0.1:19847".to_owned(),
+            auth_path: dir.path().join("auth.json"),
+            worker_processes: Arc::new(sandbox_service::SandboxWorkerProcessStore::default()),
+        };
+        let actor_id = ActorId::new("agent:workspace-sandbox-default-selector-test").unwrap();
+        let autonomy = engine_host
+            .invoke(
+                Invocation::new_sync(
+                    FunctionId::new("grant::derive").unwrap(),
+                    json!({
+                        "parentGrantId": "agent-capability-runtime",
+                        "subjectActorId": actor_id.as_str(),
+                        "allowedCapabilities": ["helper::summarize"],
+                        "allowedNamespaces": ["helper"],
+                        "allowedAuthorityScopes": ["helper.read"],
+                        "allowedResourceKinds": ["evidence"],
+                        "resourceSelectors": ["workspace:workspace-sandbox-default-selector-test"],
+                        "fileRoots": [dir.path().canonicalize().unwrap().display().to_string()],
+                        "networkPolicy": "loopback",
+                        "maxRisk": "medium",
+                        "canDelegate": true,
+                        "approvalRequired": false,
+                        "provenance": {
+                            "source": "self_extension::grant_workspace_autonomy",
+                            "workspaceId": "workspace-sandbox-default-selector-test"
+                        }
+                    }),
+                    CausalContext::new(
+                        ActorId::new("test-system").unwrap(),
+                        ActorKind::System,
+                        AuthorityGrantId::new("engine-system").unwrap(),
+                        TraceId::new("trace-workspace-sandbox-default-selector-grant").unwrap(),
+                    )
+                    .with_scope("grant.write")
+                    .with_workspace_id("workspace-sandbox-default-selector-test")
+                    .with_idempotency_key("workspace-sandbox-default-selector-grant"),
+                )
+                .with_delivery_mode(DeliveryMode::Sync),
+            )
+            .await;
+        assert_eq!(
+            autonomy.error, None,
+            "autonomy grant should derive: {autonomy:?}"
+        );
+        let autonomy_grant_id = autonomy.value.unwrap()["grant"]["grantId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let spawn_invocation = Invocation::new_sync(
+            FunctionId::new("worker::spawn").unwrap(),
+            json!({}),
+            CausalContext::new(
+                actor_id,
+                ActorKind::Agent,
+                AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+                TraceId::new("trace-workspace-sandbox-default-selector-spawn").unwrap(),
+            )
+            .with_scope("worker.write")
+            .with_workspace_id("workspace-sandbox-default-selector-test")
+            .with_idempotency_key("workspace-sandbox-default-selector-spawn"),
+        );
+
+        let child = derive_sandbox_worker_grant(
+            &deps,
+            &spawn_invocation,
+            "helper-worker",
+            &["helper::summarize".to_owned()],
+            Some(dir.path().to_str().unwrap()),
+            &json!({
+                "workspaceAutonomyGrantId": autonomy_grant_id,
+                "workspaceId": "workspace-sandbox-default-selector-test",
+                "visibility": "workspace",
+                "workingDirectory": dir.path().display().to_string(),
+                "allowedAuthorityScopes": ["helper.read"],
+                "allowedResourceKinds": ["evidence"],
+                "fileRoots": [dir.path().canonicalize().unwrap().display().to_string()],
+                "networkPolicy": "loopback",
+                "maxRisk": "medium"
+            }),
+        )
+        .await
+        .expect("worker child grant should inherit the workspace resource selector");
+
+        assert_eq!(child["parentGrantId"], autonomy_grant_id);
+        assert_eq!(
+            child["resourceSelectors"],
+            json!(["workspace:workspace-sandbox-default-selector-test"])
         );
     }
 }

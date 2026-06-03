@@ -53,17 +53,16 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        let argsJSON = Self.serializeArguments(arguments)
         let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelPrimitiveName ?? "capability"
 
         let line = ActivityLine(
             kind: .capabilityInvocationStarted,
             text: name,
-            icon: CapabilityPresentation.symbol(for: identity),
+            icon: CapabilityActivityPresentation.symbol(for: identity, arguments: arguments),
             iconColor: CapabilityColor.fromCapability(identity),
             modelPrimitiveName: name,
-            displayName: CapabilityPresentation.title(for: identity),
-            summary: argsJSON == "{}" ? nil : argsJSON,
+            displayName: CapabilityActivityPresentation.title(for: identity, arguments: arguments),
+            summary: CapabilityActivityPresentation.summary(arguments: arguments, identity: identity),
             status: .running,
             invocationId: invocationId,
             capabilityIdentity: identity
@@ -81,6 +80,11 @@ struct SessionStreamBuffer {
            let idx = lines.lastIndex(where: { $0.kind == .capabilityInvocationStarted && $0.invocationId == invocationId }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
+            lines[idx].icon = CapabilityActivityPresentation.symbol(for: identity)
+            lines[idx].iconColor = CapabilityColor.fromCapability(identity)
+            lines[idx].displayName = CapabilityActivityPresentation.title(for: identity)
+            lines[idx].summary = CapabilityActivityPresentation.summary(identity: identity) ?? lines[idx].summary
+            lines[idx].capabilityIdentity = identity
             return
         }
 
@@ -88,16 +92,22 @@ struct SessionStreamBuffer {
         if let idx = lines.lastIndex(where: { $0.kind == .capabilityInvocationStarted && $0.modelPrimitiveName == name && $0.status == .running }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration
+            lines[idx].icon = CapabilityActivityPresentation.symbol(for: identity)
+            lines[idx].iconColor = CapabilityColor.fromCapability(identity)
+            lines[idx].displayName = CapabilityActivityPresentation.title(for: identity)
+            lines[idx].summary = CapabilityActivityPresentation.summary(identity: identity) ?? lines[idx].summary
+            lines[idx].capabilityIdentity = identity
             return
         }
 
         let line = ActivityLine(
             kind: .capabilityInvocationCompleted,
             text: name,
-            icon: CapabilityPresentation.symbol(for: identity),
+            icon: CapabilityActivityPresentation.symbol(for: identity),
             iconColor: CapabilityColor.fromCapability(identity),
             modelPrimitiveName: name,
-            displayName: CapabilityPresentation.title(for: identity),
+            displayName: CapabilityActivityPresentation.title(for: identity),
+            summary: CapabilityActivityPresentation.summary(identity: identity),
             duration: formattedDuration,
             status: success ? .success : .error,
             capabilityIdentity: identity
@@ -210,17 +220,6 @@ struct SessionStreamBuffer {
         }
     }
 
-    // MARK: - Capability Metadata
-
-    /// Serialize AnyCodable arguments to a compact JSON summary.
-    static func serializeArguments(_ arguments: [String: AnyCodable]?) -> String {
-        guard let args = arguments else { return "{}" }
-        let dict = args.mapValues { $0.value }
-        guard JSONSerialization.isValidJSONObject(dict) else { return "{}" }
-        guard let data = try? JSONSerialization.data(withJSONObject: dict),
-              let str = String(data: data, encoding: .utf8) else { return "{}" }
-        return str
-    }
 }
 
 // MARK: - DashboardStreamManager

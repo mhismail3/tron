@@ -26,9 +26,12 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .request_schema(json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["workspaceId", "workspacePath"],
+            "required": ["workspacePath"],
             "properties": {
-                "workspaceId": {"type": "string"},
+                "workspaceId": {
+                    "type": "string",
+                    "description": "Optional exact invocation context workspace id. Omit for the current workspace."
+                },
                 "workspacePath": {"type": "string"},
                 "sessionId": {"type": "string"},
                 "reason": {"type": "string"}
@@ -63,7 +66,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .resource_lease(ResourceLeaseRequirement::exclusive_template(
             "workspace-autonomy",
-            "workspace-autonomy:{workspaceId}",
+            "workspace-autonomy:{workspacePath}",
             60000,
         ))
         .compensation(CompensationContract::new(
@@ -81,7 +84,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "summary": "Safe in this workspace"
             },
             "resourceLock": {
-                "idTemplate": "workspace-autonomy:{workspaceId}",
+                "idTemplate": "workspace-autonomy:{workspacePath}",
                 "kind": "workspace-autonomy",
                 "reason": "serializes autonomy grant creation for one workspace",
                 "required": true,
@@ -112,7 +115,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         .examples(vec![json!({
             "summary": "Approve local capability creation for the active workspace.",
             "payload": {
-                "workspaceId": "current-workspace",
                 "workspacePath": "/path/to/workspace",
                 "reason": "Create and test a local helper capability."
             }
@@ -142,6 +144,23 @@ mod tests {
         assert_eq!(
             idempotency.ledger_kind,
             crate::engine::LedgerKind::EngineLedger
+        );
+        assert_eq!(
+            grant
+                .request_schema
+                .as_ref()
+                .and_then(|schema| schema.pointer("/required")),
+            Some(&json!(["workspacePath"]))
+        );
+        assert_eq!(
+            grant.examples[0].pointer("/payload/workspaceId"),
+            None,
+            "workspace id should be bound from invocation context by default"
+        );
+        assert_eq!(
+            grant.resource_lease.as_ref().unwrap().resource_id_template,
+            "workspace-autonomy:{workspacePath}",
+            "resource locks must not require model-visible internal workspace ids"
         );
         assert_eq!(
             grant
