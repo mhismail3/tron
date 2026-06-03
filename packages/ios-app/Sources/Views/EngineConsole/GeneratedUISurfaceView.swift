@@ -771,6 +771,7 @@ struct GeneratedUISurfaceView: View {
     }
 
     private func submit(actionId: String?) {
+        guard !isOfflineCached else { return }
         guard let actionId,
               let action = action(for: actionId),
               GeneratedUIRenderer.inputIsSatisfied(formValues, for: action),

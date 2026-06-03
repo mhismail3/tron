@@ -122,6 +122,125 @@ struct EngineConsoleStateTests {
         #expect(state.loadState == .offlineCached)
     }
 
+    @Test("offline cached state refuses every Engine Console mutation path")
+    func offlineCachedStateRefusesEveryMutationPath() async throws {
+        let cache = ephemeralCache()
+        try cache.save(
+            EngineConsoleCacheSnapshot(
+                catalogRevision: 1,
+                registryRevision: 1,
+                pluginSummaries: [],
+                workerSummaries: [],
+                controlSnapshot: ControlSnapshotDTO(
+                    catalogRevision: 1,
+                    workers: [],
+                    capabilities: [],
+                    resourceTypes: [],
+                    activeGoals: [],
+                    modulePackages: [AnyCodable(["resourceId": "worker-package:offline"])],
+                    moduleConfigs: [],
+                    activationRecords: [],
+                    invocations: [],
+                    grants: [],
+                    queues: [],
+                    leases: [],
+                    approvals: [AnyCodable(["approvalId": "approval-offline"])],
+                    storage: nil,
+                    integrityWarnings: [],
+                    availableActions: [
+                        moduleAction(
+                            "module::activate",
+                            targetType: "package",
+                            targetField: "packageResourceId",
+                            risk: "high",
+                            approvalRequired: true
+                        )
+                    ],
+                    uiSurfaceRefs: [
+                        UiSurfaceRefDTO(
+                            resourceId: "res-ui-offline",
+                            versionId: "ver-ui-offline",
+                            kind: "ui_surface",
+                            lifecycle: "active",
+                            surfaceId: "surface-offline",
+                            title: "Offline Surface",
+                            purpose: "Cached generated action",
+                            catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+                            expiresAt: "2100-01-01T00:00:00Z",
+                            targets: [],
+                            actions: [
+                                UiActionSummaryDTO(
+                                    actionId: "activate-package",
+                                    label: "Activate",
+                                    targetFunctionId: "module::activate",
+                                    requiredGrant: "module.write",
+                                    requiredRisk: "high",
+                                    targetRevision: 1,
+                                    expiresAt: "2100-01-01T00:00:00Z"
+                                )
+                            ]
+                        )
+                    ]
+                ),
+                recentAuditRows: [],
+                recentTraceSummaries: [],
+                recentProgramRuns: [],
+                indexStatus: nil,
+                fetchedAt: Date(timeIntervalSince1970: 0)
+            )
+        )
+        let client = FakeEngineConsoleCapabilityClient()
+        client.statusError = EngineConnectionError.notConnected
+        let state = EngineConsoleState(
+            capabilityClient: client,
+            connectionState: { .disconnected },
+            cache: cache
+        )
+        let readOnlyReason = "Offline Engine Console cache is read-only; reconnect before submitting actions."
+
+        await state.refresh()
+        await state.authorSurface(targetType: "package", targetId: "worker-package:offline")
+        await state.refreshSelectedSurface()
+        await state.submitSurfaceAction(
+            UiActionSubmissionDTO(
+                surfaceResourceId: "res-ui-offline",
+                surfaceVersionId: "ver-ui-offline",
+                actionId: "activate-package",
+                userInput: [:],
+                idempotencyKey: "offline-submit"
+            )
+        )
+        await state.inspectProgramRuntime()
+        await state.executeProgramFromInspection()
+        await state.setImplementationState(implementationId: "impl.offline", state: "disabled")
+        await state.setPluginState(pluginId: "plugin.offline", state: "disabled")
+        await state.runConformance(pluginId: "plugin.offline")
+        await state.promotePlugin(pluginId: "plugin.offline", targetVisibility: "workspace")
+        await state.setBindingEnabled(
+            CapabilityBindingDTO(
+                contractId: "contract.offline",
+                scopeKind: "workspace",
+                scopeValue: "workspace-offline",
+                selectedImplementation: "impl.offline",
+                selectionPolicy: "explicit",
+                secondaryImplementations: [],
+                enabled: true,
+                priority: 0,
+                updatedAt: nil
+            ),
+            enabled: false
+        )
+
+        #expect(state.loadState == .offlineCached)
+        #expect(state.mutationState == .failed(readOnlyReason))
+        #expect(state.surfaceError == readOnlyReason)
+        #expect(state.programError == readOnlyReason)
+        #expect(client.mutationCalls.isEmpty)
+        #expect(client.lastSurfaceRequest == nil)
+        #expect(client.lastRefreshRequest == nil)
+        #expect(client.lastSubmission == nil)
+    }
+
     @Test("plugin mutation records local action state without failing console")
     func pluginMutationUsesLocalMutationState() async throws {
         let client = FakeEngineConsoleCapabilityClient()
@@ -908,6 +1027,7 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
     var lastRefreshRequest: UiSurfaceRefreshRequestDTO?
     var lastSurfaceRequest: UiSurfaceForTargetRequestDTO?
     var lastSubmission: UiActionSubmissionDTO?
+    var mutationCalls: [String] = []
     var controlSnapshot = ControlSnapshotDTO(
         catalogRevision: 1,
         workers: [],
@@ -995,6 +1115,7 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         _ request: UiSurfaceForTargetRequestDTO,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> UiSurfaceMutationResultDTO {
+        mutationCalls.append("surfaceForTarget")
         lastSurfaceRequest = request
         return UiSurfaceMutationResultDTO(
             surface: nil,
@@ -1022,6 +1143,7 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         _ request: UiSurfaceRefreshRequestDTO,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> UiSurfaceMutationResultDTO {
+        mutationCalls.append("refreshUiSurface")
         lastRefreshRequest = request
         return try await surfaceForTarget(
             UiSurfaceForTargetRequestDTO(targetType: "worker", targetId: "demo"),
@@ -1033,6 +1155,7 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         _ submission: UiActionSubmissionDTO,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> UiActionResultDTO {
+        mutationCalls.append("submitUiAction")
         lastSubmission = submission
         return UiActionResultDTO(
             surfaceResourceId: submission.surfaceResourceId,
@@ -1099,7 +1222,8 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         reason: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> CapabilityProgramExecutionDTO {
-        CapabilityProgramExecutionDTO(
+        mutationCalls.append("executeProgram")
+        return CapabilityProgramExecutionDTO(
             status: "ok",
             output: nil,
             error: nil,
@@ -1131,7 +1255,8 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         reason: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> AnyCodable {
-        AnyCodable(["updated": true])
+        mutationCalls.append("setBinding")
+        return AnyCodable(["updated": true])
     }
 
     func setImplementationState(
@@ -1140,7 +1265,8 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         reason: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> AnyCodable {
-        AnyCodable(["updated": true])
+        mutationCalls.append("setImplementationState")
+        return AnyCodable(["updated": true])
     }
 
     func setPluginState(
@@ -1149,7 +1275,8 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         reason: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> AnyCodable {
-        AnyCodable(["updated": true])
+        mutationCalls.append("setPluginState")
+        return AnyCodable(["updated": true])
     }
 
     func promotePlugin(
@@ -1158,7 +1285,8 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         reason: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> AnyCodable {
-        AnyCodable(["promoted": true])
+        mutationCalls.append("promotePlugin")
+        return AnyCodable(["promoted": true])
     }
 
     func runConformance(
@@ -1167,6 +1295,7 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         reason: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> AnyCodable {
-        AnyCodable(["queued": true])
+        mutationCalls.append("runConformance")
+        return AnyCodable(["queued": true])
     }
 }

@@ -285,9 +285,17 @@ final class EngineConsoleState {
     var programAllowedImplementationsText: String = ""
 
     var isMutatingDisabled: Bool {
+        readOnlyMutationReason != nil
+    }
+
+    private var readOnlyMutationReason: String? {
         switch loadState {
-        case .offlineCached: true
-        default: !connectionState().isConnected
+        case .offlineCached:
+            return "Offline Engine Console cache is read-only; reconnect before submitting actions."
+        default:
+            return connectionState().isConnected
+                ? nil
+                : "Engine Console is read-only while disconnected; reconnect before submitting actions."
         }
     }
 
@@ -471,7 +479,7 @@ final class EngineConsoleState {
     }
 
     func authorSurface(targetType: String, targetId: String) async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly(surface: true) else { return }
         mutationState = .running("Creating generated surface")
         do {
             let request = UiSurfaceForTargetRequestDTO(
@@ -503,7 +511,7 @@ final class EngineConsoleState {
     }
 
     func refreshSelectedSurface() async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly(surface: true) else { return }
         guard let ref = selectedSurface?.resourceRef,
               let versionId = ref.versionId
         else {
@@ -530,7 +538,7 @@ final class EngineConsoleState {
     }
 
     func submitSurfaceAction(_ submission: UiActionSubmissionDTO) async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly(surface: true) else { return }
         mutationState = .running("Submitting surface action")
         do {
             surfaceActionResult = try await capabilityClient.submitUiAction(
@@ -545,7 +553,7 @@ final class EngineConsoleState {
     }
 
     func inspectProgramRuntime() async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly(program: true) else { return }
         do {
             programInspection = try await capabilityClient.inspect(
                 capabilityId: nil,
@@ -560,7 +568,7 @@ final class EngineConsoleState {
     }
 
     func executeProgramFromInspection() async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly(program: true) else { return }
         guard let inspection = programInspection else {
             programError = "Inspect the program runtime before running."
             return
@@ -608,7 +616,7 @@ final class EngineConsoleState {
         implementationId: String,
         state: String
     ) async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly() else { return }
         mutationState = .running("Updating implementation state")
         do {
             _ = try await capabilityClient.setImplementationState(
@@ -625,7 +633,7 @@ final class EngineConsoleState {
     }
 
     func setPluginState(pluginId: String, state: String) async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly() else { return }
         mutationState = .running("Updating plugin state")
         do {
             _ = try await capabilityClient.setPluginState(
@@ -642,7 +650,7 @@ final class EngineConsoleState {
     }
 
     func runConformance(pluginId: String, implementationId: String? = nil) async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly() else { return }
         mutationState = .running("Running conformance")
         do {
             _ = try await capabilityClient.runConformance(
@@ -659,7 +667,7 @@ final class EngineConsoleState {
     }
 
     func promotePlugin(pluginId: String, targetVisibility: String = "workspace") async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly() else { return }
         mutationState = .running("Promoting plugin")
         do {
             _ = try await capabilityClient.promotePlugin(
@@ -676,7 +684,7 @@ final class EngineConsoleState {
     }
 
     func setBindingEnabled(_ binding: CapabilityBindingDTO, enabled: Bool) async {
-        guard !isMutatingDisabled else { return }
+        guard !failMutationIfReadOnly() else { return }
         mutationState = .running(enabled ? "Enabling binding" : "Disabling binding")
         do {
             _ = try await capabilityClient.setBinding(
@@ -700,6 +708,20 @@ final class EngineConsoleState {
 
     func clearMutationState() {
         mutationState = .idle
+    }
+
+    private func failMutationIfReadOnly(surface: Bool = false, program: Bool = false) -> Bool {
+        guard let reason = readOnlyMutationReason else { return false }
+        mutationState = .failed(reason)
+        if surface {
+            surfaceError = reason
+            surfaceActionResult = nil
+        }
+        if program {
+            programError = reason
+            programResult = nil
+        }
+        return true
     }
 
     private func parseProgramArgs() throws -> [String: AnyCodable] {

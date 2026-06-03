@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-02 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Harness Changes projection over registry plus live catalog snapshots, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-02 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, disconnected approval decision fail-closed guard, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Harness Changes projection over registry plus live catalog snapshots, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, Engine Console offline cache fail-closed mutation guards, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -292,11 +292,19 @@ lexical search only when vectors are unavailable; that policy is visible in the
 search result status and is not applied to model turns.
 
 The console cache is intentionally read-only. On disconnect, the UI shows stale
-catalog/registry/index/module summaries and disables mutations. Reconnect
-refreshes the live snapshot and replaces cached summaries when the server
-reports a newer catalog or registry revision. The cache stores redacted audit
-rows and generated UI refs only; full payload reveal and module lifecycle
-actions are server-authorized flows and must not be reconstructed locally.
+catalog/registry/index/module summaries and disables mutations; direct
+`EngineConsoleState` mutation calls for generated surface authoring, refresh,
+action submission, program execution, implementation/plugin state,
+conformance, promotion, and binding updates also fail closed with a read-only
+error before reaching `CapabilityClient`. Cached generated UI views return
+before submitting even if a stale control fires. Reconnect refreshes the live
+snapshot and replaces cached summaries when the server reports a newer catalog
+or registry revision. The cache stores redacted audit rows and generated UI
+refs only; full payload reveal and module lifecycle actions are
+server-authorized flows and must not be reconstructed locally. Approval
+decisions use the same read-only rule: while disconnected, the sheet stays open,
+the chip stays pending, and no pending `approval::resolve` submission is
+queued.
 
 ## Data Flow
 

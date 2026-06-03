@@ -12,6 +12,9 @@ protocol EngineApprovalContext: LoggingContext {
     /// engine client for server communication
     var engineClient: EngineClient { get }
 
+    /// Mirrored connection state used for read-only UI policy.
+    var connectionState: ConnectionState { get }
+
 }
 
 /// Coordinates EngineApproval event handling and user interaction for ChatViewModel.
@@ -75,6 +78,12 @@ final class EngineApprovalCoordinator {
             context.showError("This approval is no longer active")
             context.engineApprovalState.showSheet = false
             context.engineApprovalState.currentData = nil
+            return
+        }
+
+        guard context.connectionState.isConnected else {
+            context.logWarning("Cannot submit decision - engine approval is read-only while disconnected")
+            context.showError("Approval decisions are read-only while disconnected; reconnect before resolving approval.")
             return
         }
 

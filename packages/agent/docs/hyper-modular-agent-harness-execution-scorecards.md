@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **86.25/100**
+Current score: **87.75/100**
 
 Status: **running**
 
@@ -200,7 +200,7 @@ Planes to delete or prevent:
 | HMH-B | Agent self-modifying capability lifecycle | 20 | passed | engine_capability_runtime | Live agent/harness scenario creates, registers, discovers, tests, invokes, promotes/discards, and cleans a session worker. |
 | HMH-C | Harness knowledge and context compiler | 15 | passed | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
 | HMH-D | Plug-and-play module/package lifecycle | 15 | passed | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
-| HMH-E | Human harness and generated UI | 15 | pending | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy. |
+| HMH-E | Human harness and generated UI | 15 | passed_after_fix | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy, and disconnected cache/approval paths fail closed. |
 | HMH-F | Causality, safety, loops, and rollback | 15 | pending | engine_policy_ledger | Idempotency, approval resume, leases, trigger budgets, queues/DLQ, compensation, and trace/ledger proof fail closed. |
 | HMH-G | Final adversarial closeout and absence gates | 10 | pending | test_harness | Static scans, integration tests, transcript audit, docs/README/ledger, and score math prove no parallel planes remain. |
 
@@ -957,8 +957,9 @@ HMH-D8 evidence, 2026-06-02:
 
 Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7/HMH-D8:
 
-- HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, HMH-E5, and HMH-E6 are closed.
-  Continue with HMH-E7 to prove disconnected cache submissions fail closed.
+- HMH-D and HMH-E1 through HMH-E7 are closed. Continue with HMH-F1 to prove
+  mutating worker/module/ui/promotion/queue/resource paths reject missing or
+  conflicting idempotency before handler execution.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -974,7 +975,7 @@ Out of scope: client-side target reconstruction or native-only feature forks.
 | HMH-E4 | Module controls are native projections | 15 | passed_after_fix | iOS can inspect/configure/activate/disable/upgrade/rollback/quarantine module packages through canonical server functions with evidence drill-down. | Stop if module policy appears in Swift. |
 | HMH-E5 | Human can understand agent-created harness changes | 15 | passed_after_fix | Session-created capability, provenance, tests, generated UI, promotion status, cleanup, and trace are visible in an ergonomic iPhone/iPad flow. | Fix UX before declaring north-star proof. |
 | HMH-E6 | Visual proof covers iPhone and iPad | 10 | passed_after_fix | iPhone 17 Pro and iPad Pro 13-inch simulator proof shows live Engine Console Harness Changes for a session-created catalog function, with device UDIDs, bundle id, launch/screenshot return codes, screenshots, server rows, and cleanup rows. | No screenshot-only proof without DB/event evidence. |
-| HMH-E7 | Disconnected cache is read-only | 10 | pending | Offline Engine Console cache cannot submit generated actions, approvals, module changes, or policy edits. | Fix before live UI closeout. |
+| HMH-E7 | Disconnected cache is read-only | 10 | passed_after_fix | Offline Engine Console cache cannot submit generated actions, approvals, module changes, policy/binding edits, or program runs; disconnected approval submissions leave chips pending until reconnect. | Fix before live UI closeout. |
 
 Closeout commands:
 
@@ -1202,10 +1203,50 @@ HMH-E6 evidence, 2026-06-02/2026-06-03:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`;
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleAccessibilityTests`.
 
-Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6:
+HMH-E7 evidence, 2026-06-02/2026-06-03:
 
-- Continue with HMH-E7: prove disconnected Engine Console cache cannot submit
-  generated actions, approvals, module changes, or policy edits.
+- Red path: `EngineConsoleState.isMutatingDisabled` disabled controls, but the
+  state mutation methods silently returned while offline and left
+  `mutationState`, `surfaceError`, and `programError` idle/nil. A direct call
+  to approval submission while disconnected moved the chip into `resolving` and
+  queued `pendingSubmission` before any server-owned `approval::resolve` could
+  run.
+- The fix adds a single `readOnlyMutationReason`/
+  `failMutationIfReadOnly` gate in `EngineConsoleState`. Offline cached
+  generated-surface authoring, surface refresh, generated UI action submit,
+  program inspect/execute, implementation state, plugin state, conformance,
+  promotion, and binding/policy edits now fail closed with a read-only error
+  before reaching `CapabilityClient`. `GeneratedUISurfaceView.submit` also
+  returns early for cached offline surfaces.
+- `EngineApprovalCoordinator.prepareSubmission` now checks the UI context's
+  mirrored connection state before changing sheet/chip state. While
+  disconnected, the approval sheet remains open, no pending resolve submission
+  is queued, and the existing approval chip stays pending with no local
+  decision/result.
+- New regression proof:
+  `offlineCachedStateRefusesEveryMutationPath` seeds a cached
+  `EngineConsoleCache` with module package, approval, and generated UI refs,
+  forces a disconnected refresh, calls every Engine Console mutation path, and
+  asserts no fake client mutation call was made.
+- New approval proof:
+  `testOfflineApprovalSubmissionFailsClosedBeforeResolvingChip` verifies a
+  disconnected approval decision produces the read-only error before a chip can
+  enter `resolving`.
+- Source guards now assert the approval read-only check, the Engine Console
+  read-only mutation gate, and the generated UI offline submit early return.
+- Passing verification:
+  `xcodegen generate`;
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineApprovalStateTests`;
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests`;
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests`;
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`;
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleAccessibilityTests`.
+
+Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6/HMH-E7:
+
+- HMH-E is closed. Continue with HMH-F1: prove mutating
+  worker/module/ui/promotion/queue/resource paths reject missing or conflicting
+  idempotency before handler execution.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1337,11 +1378,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, HMH-E5, and
-HMH-E6 are closed. Continue with HMH-E7: prove disconnected Engine Console
-cache cannot submit generated actions, approvals, module changes, or policy
-edits.
+HMH-A, HMH-B, HMH-C, HMH-D, and HMH-E are closed. Continue with HMH-F1:
+prove mutating worker/module/ui/promotion/queue/resource paths reject missing
+or conflicting idempotency before handler execution.
 
 ```bash
-xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::idempotency -- --nocapture
 ```

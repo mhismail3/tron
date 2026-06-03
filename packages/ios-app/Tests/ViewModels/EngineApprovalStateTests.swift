@@ -153,6 +153,7 @@ final class EngineApprovalStateTests: XCTestCase {
         viewModel.messages = [ChatMessage(role: .assistant, content: .engineApproval(pending))]
         viewModel.engineApprovalState.currentData = pending
         viewModel.engineApprovalState.showSheet = true
+        viewModel.connectionState = .connected
 
         viewModel.prepareEngineApprovalSubmission(.approved, note: "ok")
 
@@ -165,6 +166,34 @@ final class EngineApprovalStateTests: XCTestCase {
             XCTAssertEqual(data.note, "ok")
         } else {
             XCTFail("expected resolving engine approval chip")
+        }
+    }
+
+    func testOfflineApprovalSubmissionFailsClosedBeforeResolvingChip() {
+        let viewModel = ChatViewModel(
+            engineClient: EngineClient(serverURL: URL(string: "ws://localhost:0")!),
+            sessionId: "session-1"
+        )
+        let pending = approvalData(approvalId: "approval-1")
+        viewModel.messages = [ChatMessage(role: .assistant, content: .engineApproval(pending))]
+        viewModel.engineApprovalState.currentData = pending
+        viewModel.engineApprovalState.showSheet = true
+
+        viewModel.prepareEngineApprovalSubmission(.approved, note: "ok")
+
+        XCTAssertTrue(viewModel.engineApprovalState.showSheet)
+        XCTAssertNil(viewModel.engineApprovalState.pendingSubmission)
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            "Approval decisions are read-only while disconnected; reconnect before resolving approval."
+        )
+        if case .engineApproval(let data) = viewModel.messages.first?.content {
+            XCTAssertEqual(data.status, .pending)
+            XCTAssertNil(data.decision)
+            XCTAssertNil(data.result)
+            XCTAssertNil(data.note)
+        } else {
+            XCTFail("expected pending engine approval chip")
         }
     }
 
