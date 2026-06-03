@@ -96,17 +96,18 @@ struct EngineConsoleModuleProjectionCard: View {
                 EngineConsoleKeyValueRow(
                     trust.packageId ?? trust.packageResourceId,
                     [
-                        trust.sourceTrustStatus,
-                        trust.effectiveTrustTier,
-                        evidenceText("source", trust.sourceEvidenceRefs.count),
-                        evidenceText("approval", trust.sourceApprovalRefs.count),
-                        evidenceText("conformance", trust.conformanceEvidenceRefs.count)
+                        trust.presentation.statusLabel,
+                        trust.presentation.summary,
+                        trust.presentation.sourceLabel,
+                        trust.presentation.approvalLabel,
+                        trust.presentation.conformanceLabel,
+                        trust.presentation.cleanupLabel
                     ]
                     .compactMap { $0 }
                     .joined(separator: " / ")
                 )
-                if !trust.approvalWarningCodes.isEmpty || !trust.trustWarningCodes.isEmpty {
-                    EngineConsoleBadgeRow(values: trust.approvalWarningCodes + trust.trustWarningCodes)
+                if !trust.presentation.warningLabels.isEmpty {
+                    EngineConsoleBadgeRow(values: trust.presentation.warningLabels)
                 }
             }
         }
@@ -151,7 +152,4 @@ struct EngineConsoleModuleProjectionCard: View {
             .padding(.top, 2)
     }
 
-    private func evidenceText(_ label: String, _ count: Int) -> String? {
-        count > 0 ? "\(label) \(count)" : nil
-    }
 }

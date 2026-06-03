@@ -461,6 +461,26 @@ async fn module_remove_package_requires_disabled_activations_and_discards_config
     let config = inspect_resource(&handle, "module-config:workspace-a:removable-tools").await;
     assert_eq!(config["resource"]["lifecycle"], "discarded");
 
+    let snapshot = handle
+        .invoke(host_invocation(
+            "control::snapshot",
+            json!({}),
+            causal().with_scope("control.read"),
+        ))
+        .await;
+    assert_eq!(snapshot.error, None);
+    let source_trust = snapshot.value.as_ref().unwrap()["moduleSourceTrust"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["packageResourceId"] == "worker-package:removable-tools")
+        .expect("removed package source trust projection");
+    assert_eq!(source_trust["trustPresentation"]["statusLabel"], "Removed");
+    assert_eq!(
+        source_trust["trustPresentation"]["cleanupLabel"],
+        "Removed locally"
+    );
+
     let configure_removed = handle
         .invoke(host_invocation(
             "module::configure",

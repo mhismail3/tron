@@ -643,17 +643,18 @@ fn productization_scorecard_stays_formalized() {
 
     for required in [
         "# Tron Productization Scorecard: Self-Extending Agentic Product",
-        "Current score: **40/100**",
-        "Status: **active; TPROD-E passed after fix; TPROD-F next**",
+        "Current score: **49/100**",
+        "Status: **active; TPROD-F passed after fix; TPROD-G next**",
         "| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix |",
         "| TPROD-B | `self-extend` managed skill | 7 | passed_after_fix |",
         "| TPROD-C | Chat-led self-extension UX | 10 | passed_after_fix |",
         "| TPROD-D | Created-by-agent gallery/history | 9 | passed_after_fix |",
         "| TPROD-E | Local capability pack install/manage | 9 | passed_after_fix |",
-        "| TPROD-F | Trust, promotion, revocation UX | 9 | pending |",
+        "| TPROD-F | Trust, promotion, revocation UX | 9 | passed_after_fix |",
+        "| TPROD-G | Generated UI authoring | 9 | pending |",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending |",
         "No remote package install/discovery path beyond explicit deferred docs",
-        "TPROD-F is active",
+        "TPROD-G is active",
     ] {
         assert!(
             scorecard.contains(required),
@@ -663,7 +664,7 @@ fn productization_scorecard_stays_formalized() {
     for premature_claim in [
         "Current score: **100/100**",
         "Status: **completed**",
-        "| TPROD-F | Trust, promotion, revocation UX | 9 | passed",
+        "| TPROD-G | Generated UI authoring | 9 | passed",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | passed",
     ] {
         assert!(
@@ -672,13 +673,14 @@ fn productization_scorecard_stays_formalized() {
         );
     }
     assert!(
-        manifest.contains("Current score: **40/100**")
+        manifest.contains("Current score: **49/100**")
             && manifest.contains("| TPROD-A | passed_after_fix |")
             && manifest.contains("| TPROD-B | passed_after_fix |")
             && manifest.contains("| TPROD-C | passed_after_fix |")
             && manifest.contains("| TPROD-D | passed_after_fix |")
             && manifest.contains("| TPROD-E | passed_after_fix |")
-            && manifest.contains("| TPROD-F | pending |")
+            && manifest.contains("| TPROD-F | passed_after_fix |")
+            && manifest.contains("| TPROD-G | pending |")
             && manifest.contains("No remote package discovery"),
         "productization evidence manifest must track the same score, next row, and deferred remote boundary"
     );
@@ -5463,13 +5465,24 @@ fn module_package_activation_gates_stay_on() {
     let control_actions =
         std::fs::read_to_string(crate_root.join("src/engine/primitives/control/actions.rs"))
             .expect("failed to read control action catalog boundary");
-    let control_tree = [control.as_str(), control_actions.as_str()].join("\n");
+    let control_trust_projection = std::fs::read_to_string(
+        crate_root.join("src/engine/primitives/control/trust_projection.rs"),
+    )
+    .expect("failed to read control trust projection boundary");
+    let control_tree = [
+        control.as_str(),
+        control_actions.as_str(),
+        control_trust_projection.as_str(),
+    ]
+    .join("\n");
     assert!(
         control.contains("mod actions;")
+            && control.contains("mod trust_projection;")
             && control.contains("modulePackages")
             && control.contains("moduleConfigs")
             && control.contains("activationRecords")
             && control.contains("moduleSourceTrust")
+            && control_tree.contains("trustPresentation")
             && control_tree.contains("module::inspect_package")
             && control_tree.contains("module::check_health")
             && control_tree.contains("module::verify_integrity")

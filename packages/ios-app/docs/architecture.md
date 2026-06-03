@@ -260,9 +260,10 @@ remains the source of truth for policy, authority, approval, audit redaction,
 plugin lifecycle, local pack/config/activation/trust/health/action resources,
 and binding selection. Module operator rows decode `control::snapshot` fields
 such as `moduleHealth`, `moduleSourceTrust`, and server-advertised `module::`
-action summaries; Swift uses server labels and pack display names for display
-and does not keep a package-policy allowlist or reconstruct module action
-targets.
+action summaries; Swift uses server labels, server-owned `trustPresentation`
+strings, and pack display names for display and does not keep a package-policy
+allowlist, reconstruct module action targets, or map raw trust codes into UX
+truth.
 
 The Engine Console uses sheet-native Tron components: section chips, compact
 metric grids, capability cards, status banners, generated action rows, and

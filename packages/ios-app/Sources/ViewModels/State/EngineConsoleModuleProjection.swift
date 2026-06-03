@@ -179,6 +179,7 @@ struct EngineConsoleModuleSourceTrustSummary: Equatable, Identifiable {
     var packageResourceId: String
     var packageVersionId: String?
     var packageId: String?
+    var presentation: EngineConsoleModuleTrustPresentation
     var sourceTrustStatus: String?
     var effectiveTrustTier: String?
     var signatureStatus: String?
@@ -206,7 +207,11 @@ struct EngineConsoleModuleSourceTrustSummary: Equatable, Identifiable {
         guard let packageResourceId = moduleString(dictionary, keys: ["packageResourceId", "resourceId"]) else {
             return nil
         }
+        guard let presentation = EngineConsoleModuleTrustPresentation(dictionary["trustPresentation"]) else {
+            return nil
+        }
         self.packageResourceId = packageResourceId
+        self.presentation = presentation
         self.packageVersionId = moduleString(dictionary, keys: ["packageVersionId", "versionId"])
         self.packageId = moduleString(dictionary, keys: ["packageId"])
         self.sourceTrustStatus = moduleString(dictionary, keys: ["sourceTrustStatus", "status"])
@@ -222,6 +227,50 @@ struct EngineConsoleModuleSourceTrustSummary: Equatable, Identifiable {
         self.policyDiagnosticKeys = (dictionary["policyDiagnostics"] as? [String: Any])?
             .keys
             .sorted() ?? []
+    }
+}
+
+struct EngineConsoleModuleTrustPresentation: Equatable {
+    var statusLabel: String
+    var statusTone: String
+    var summary: String
+    var sourceLabel: String
+    var signatureLabel: String
+    var approvalLabel: String
+    var conformanceLabel: String
+    var revocationLabel: String
+    var promotionLabel: String
+    var cleanupLabel: String
+    var evidenceLabels: [String]
+    var warningLabels: [String]
+
+    init?(_ value: Any?) {
+        guard let dictionary = value as? [String: Any],
+              let statusLabel = moduleString(dictionary, keys: ["statusLabel"]),
+              let statusTone = moduleString(dictionary, keys: ["statusTone"]),
+              let summary = moduleString(dictionary, keys: ["summary"]),
+              let sourceLabel = moduleString(dictionary, keys: ["sourceLabel"]),
+              let signatureLabel = moduleString(dictionary, keys: ["signatureLabel"]),
+              let approvalLabel = moduleString(dictionary, keys: ["approvalLabel"]),
+              let conformanceLabel = moduleString(dictionary, keys: ["conformanceLabel"]),
+              let revocationLabel = moduleString(dictionary, keys: ["revocationLabel"]),
+              let promotionLabel = moduleString(dictionary, keys: ["promotionLabel"]),
+              let cleanupLabel = moduleString(dictionary, keys: ["cleanupLabel"])
+        else {
+            return nil
+        }
+        self.statusLabel = statusLabel
+        self.statusTone = statusTone
+        self.summary = summary
+        self.sourceLabel = sourceLabel
+        self.signatureLabel = signatureLabel
+        self.approvalLabel = approvalLabel
+        self.conformanceLabel = conformanceLabel
+        self.revocationLabel = revocationLabel
+        self.promotionLabel = promotionLabel
+        self.cleanupLabel = cleanupLabel
+        self.evidenceLabels = moduleStringArray(dictionary["evidenceLabels"])
+        self.warningLabels = moduleStringArray(dictionary["warningLabels"])
     }
 }
 
@@ -342,6 +391,11 @@ private func moduleWarningCodes(_ value: Any?) -> [String] {
         guard let dictionary = item as? [String: Any] else { return nil }
         return moduleString(dictionary, keys: ["code", "message"])
     }
+}
+
+private func moduleStringArray(_ value: Any?) -> [String] {
+    guard let array = value as? [Any] else { return [] }
+    return array.compactMap(moduleDisplayString)
 }
 
 private func moduleNestedSummary(_ value: Any?) -> String? {

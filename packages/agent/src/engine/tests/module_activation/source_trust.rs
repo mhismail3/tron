@@ -489,6 +489,19 @@ async fn module_source_approval_revocation_and_conformance_are_resource_backed()
             .iter()
             .any(|warning| warning["code"] == "source_approval_revoked")
     );
+    let presentation = &source_trust["trustPresentation"];
+    assert_eq!(presentation["statusLabel"], "Trust revoked");
+    assert_eq!(presentation["statusTone"], "danger");
+    assert_eq!(presentation["sourceLabel"], "Source verified");
+    assert_eq!(presentation["signatureLabel"], "Unsigned local pack");
+    assert_eq!(presentation["approvalLabel"], "Approval revoked");
+    assert_eq!(presentation["conformanceLabel"], "Conformance passed");
+    assert_eq!(
+        presentation["revocationLabel"],
+        "Revocation evidence present"
+    );
+    assert_eq!(presentation["promotionLabel"], "No promotion evidence");
+    assert_eq!(presentation["cleanupLabel"], "Cleanup not needed");
 }
 
 #[tokio::test]
@@ -620,6 +633,25 @@ async fn module_trust_root_signature_policy_allows_signed_activation() {
         audit.value.as_ref().unwrap()["audit"]["approval"]["status"],
         "trusted_signature"
     );
+    let snapshot = handle
+        .invoke(host_invocation(
+            "control::snapshot",
+            json!({}),
+            causal().with_scope("control.read"),
+        ))
+        .await;
+    assert_eq!(snapshot.error, None);
+    let source_trust = snapshot.value.as_ref().unwrap()["moduleSourceTrust"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["packageResourceId"] == package_resource_id)
+        .expect("signed package source trust projection");
+    let presentation = &source_trust["trustPresentation"];
+    assert_eq!(presentation["statusLabel"], "Needs conformance");
+    assert_eq!(presentation["signatureLabel"], "Signature verified");
+    assert_eq!(presentation["approvalLabel"], "Signature trust active");
+    assert_eq!(presentation["conformanceLabel"], "Conformance not run");
 
     let configured_verified = handle
         .invoke(host_invocation(
@@ -1206,6 +1238,30 @@ async fn module_trust_operations_manage_renewal_expiry_and_rotation() {
     assert_eq!(
         audit_without_trust.value.as_ref().unwrap()["audit"]["decision"],
         "deny"
+    );
+    let snapshot_without_trust = handle
+        .invoke(host_invocation(
+            "control::snapshot",
+            json!({}),
+            causal().with_scope("control.read"),
+        ))
+        .await;
+    assert_eq!(snapshot_without_trust.error, None);
+    let expired_trust = snapshot_without_trust.value.as_ref().unwrap()["moduleSourceTrust"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["packageResourceId"] == package_resource_id)
+        .expect("expired signed package source trust projection");
+    let presentation = &expired_trust["trustPresentation"];
+    assert_eq!(presentation["statusLabel"], "Trust expired");
+    assert_eq!(presentation["approvalLabel"], "Approval required");
+    assert!(
+        presentation["warningLabels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|label| label == "Signature trust expired")
     );
     let audit_after_rotation = handle
         .invoke(host_invocation(

@@ -574,7 +574,27 @@ struct EngineConsoleStateTests {
                         ["resourceId": "decision:source-approval", "status": "active"]
                     ],
                     "conformanceEvidenceRefs": ["evidence:conformance"],
-                    "policyDiagnostics": ["conformance": ["evidenceRef": "evidence:conformance"]]
+                    "policyDiagnostics": ["conformance": ["evidenceRef": "evidence:conformance"]],
+                    "trustPresentation": [
+                        "statusLabel": "Ready to activate",
+                        "statusTone": "success",
+                        "summary": "Source, approval, and conformance evidence are current.",
+                        "sourceLabel": "Source verified",
+                        "signatureLabel": "Unsigned local pack",
+                        "approvalLabel": "Approval active",
+                        "conformanceLabel": "Conformance passed",
+                        "revocationLabel": "No active revocation",
+                        "promotionLabel": "No promotion evidence",
+                        "cleanupLabel": "Cleanup not needed",
+                        "evidenceLabels": [
+                            "Source evidence 1",
+                            "Source registration 1",
+                            "Trust root 1",
+                            "Approval decision 1",
+                            "Conformance evidence 1"
+                        ],
+                        "warningLabels": []
+                    ]
                 ])
             ],
             invocations: [],
@@ -613,6 +633,10 @@ struct EngineConsoleStateTests {
         #expect(projection.sourceTrust.first?.trustRootRefs == ["decision:trust-root"])
         #expect(projection.sourceTrust.first?.sourceApprovalRefs == ["decision:source-approval"])
         #expect(projection.sourceTrust.first?.conformanceEvidenceRefs == ["evidence:conformance"])
+        #expect(projection.sourceTrust.first?.presentation.statusLabel == "Ready to activate")
+        #expect(projection.sourceTrust.first?.presentation.statusTone == "success")
+        #expect(projection.sourceTrust.first?.presentation.approvalLabel == "Approval active")
+        #expect(projection.sourceTrust.first?.presentation.evidenceLabels.contains("Conformance evidence 1") == true)
         #expect(projection.evidenceRefCount == 6)
 
         let actionIds = Set(projection.actions.map(\.functionId))

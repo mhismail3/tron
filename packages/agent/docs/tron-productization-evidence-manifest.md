@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **40/100**
+Current score: **49/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -30,7 +30,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-C | passed_after_fix | Live chat-led self-extension proof completed after repairing approval replay, workspace context propagation, sandbox child selector defaults, dashboard helper labels, and cleanup guidance. Details below. |
 | TPROD-D | passed_after_fix | Created by Agent shelf/history is product-labeled, server-derived, and covered by focused projection/source/accessibility tests. Details below. |
 | TPROD-E | passed_after_fix | Local pack lifecycle product flow is server-owned, product-labeled, and covered by focused engine/iOS tests. Details below. |
-| TPROD-F | pending | Plain trust/promotion/revocation UX not yet proven. |
+| TPROD-F | passed_after_fix | Server-owned plain trust presentation is evidence-backed and rendered by iOS without client-owned trust mapping. Details below. |
 | TPROD-G | pending | Generated UI authoring product matrix not yet complete. |
 | TPROD-H | pending | Model preset, automation, and subagent routing product proof not yet complete. |
 | TPROD-I | pending | Flagship Tron-maintains-Tron loop not yet run. |
@@ -400,6 +400,56 @@ row, note command return codes, and keep open loops explicit.
 
 ### Open Loops
 
-- Closed for TPROD-E. TPROD-F must add plain-language trust, promotion,
-  revocation, and cleanup state labels backed by source approval, signature,
-  conformance, promotion, revocation, and cleanup evidence.
+- Closed for TPROD-E. TPROD-F is now closed by the evidence below.
+
+## TPROD-F Evidence
+
+### Files
+
+- [`packages/agent/src/engine/primitives/control.rs`](../src/engine/primitives/control.rs)
+- [`packages/agent/src/engine/primitives/control/trust_projection.rs`](../src/engine/primitives/control/trust_projection.rs)
+- [`packages/agent/src/engine/tests/module_activation/source_trust.rs`](../src/engine/tests/module_activation/source_trust.rs)
+- [`packages/agent/src/engine/tests/module_activation/lifecycle_controls.rs`](../src/engine/tests/module_activation/lifecycle_controls.rs)
+- [`packages/agent/tests/threat_model_invariants.rs`](../tests/threat_model_invariants.rs)
+- [`packages/ios-app/Sources/ViewModels/State/EngineConsoleModuleProjection.swift`](../../ios-app/Sources/ViewModels/State/EngineConsoleModuleProjection.swift)
+- [`packages/ios-app/Sources/Views/EngineConsole/EngineConsoleModuleProjectionView.swift`](../../ios-app/Sources/Views/EngineConsole/EngineConsoleModuleProjectionView.swift)
+- [`packages/ios-app/Tests/ViewModels/EngineConsoleStateTests.swift`](../../ios-app/Tests/ViewModels/EngineConsoleStateTests.swift)
+- [`README.md`](../../../README.md)
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+- [`packages/agent/docs/tron-productization-scorecard.md`](tron-productization-scorecard.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml module_source_approval_revocation_and_conformance_are_resource_backed -- --nocapture` | 101 then 0 | Red/green proof: first failed because `moduleSourceTrust` had no `trustPresentation`; after implementation it proved revoked source approval produces `Trust revoked`, `Approval revoked`, `Conformance passed`, `Revocation evidence present`, and `Cleanup not needed` labels from real decision/evidence refs. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_trust_root_signature_policy_allows_signed_activation -- --nocapture` | 0 | Proved signed local packs use `Signature verified` and `Signature trust active` labels from trust-root signature evidence, without showing source approval as required. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_trust_operations_manage_renewal_expiry_and_rotation -- --nocapture` | 101 then 0 | Red/green proof: first exposed that archived expired trust-root decisions rendered as revocation; after the precedence fix, expired signature trust now projects `Trust expired` with a `Signature trust expired` warning. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_remove_package_requires_disabled_activations_and_discards_configs -- --nocapture` | 0 | Proved removed local packs project `Removed` and `Removed locally` labels from discarded package/config resources and removal metadata. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests/moduleOperatorProjectionKeepsServerActionsAndEvidence` | 65 | Red proof: failed to compile because iOS had no `presentation` member on `EngineConsoleModuleSourceTrustSummary`. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests` | 0 | Green proof: after implementation all 12 Engine Console state tests passed and the module projection consumed server-owned trust presentation labels. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Verified Rust formatting after the trust-presentation implementation. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Verified the extracted trust projection module compiles through the server crate. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Verified the productization scorecard/evidence manifest state is formalized at 49/100 with TPROD-F passed and TPROD-G next. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants codebase_cleanup_scorecard_stays_formalized -- --nocapture` | 0 | Verified the touched large-file ledger remains formalized after updating current LOC rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 0 | Verified touched Rust files stay inside the cleanup scorecard large-file budgets after extracting `trust_projection.rs`. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests -only-testing:TronMobileTests/EngineConsolePackProjectionTests -only-testing:TronMobileTests/SourceGuardTests` | 0 | Verified thin-client Engine Console trust projection, pack projection, and iOS source guards together: 29 tests passed. |
+| `git diff --check` | 0 | Verified whitespace/diff hygiene before the checkpoint commit. |
+
+### Findings
+
+- `control::snapshot.moduleSourceTrust` now includes a server-owned
+  `trustPresentation` object with plain status, source, signature, approval,
+  conformance, revocation, promotion, cleanup, evidence, and warning labels.
+- The presentation is derived from existing resource-backed truth: package
+  source evidence refs, source registration decisions, trust-root decisions,
+  source approval decisions, approval/trust warnings, conformance evidence,
+  optional promotion evidence refs, and removed package lifecycle metadata.
+- iOS requires `trustPresentation` before rendering a source-trust row and no
+  longer maps raw `sourceTrustStatus`/warning codes into product labels.
+
+### Open Loops
+
+- Closed for TPROD-F. TPROD-G must complete generated UI authoring product
+  coverage: preview, plain diff, allowed actions, validation state, Inspect
+  details, and no iOS app update for new capability surfaces.

@@ -665,7 +665,10 @@ projections over catalog, invocation, grant, resource, queue, lease, approval,
 storage, module, and worker truth; they may include `uiSurfaceRefs`,
 `modulePackages`, `moduleConfigs`, `activationRecords`, `moduleHealth`,
 `moduleSourceTrust`, and server-advertised module action summaries, but do not
-inline large layouts or stored action templates.
+inline large layouts or stored action templates. `moduleSourceTrust` rows carry
+server-owned `trustPresentation` labels for source, signature, approval,
+conformance, revocation, promotion, and cleanup state, derived from resource
+evidence rather than client-side trust mapping.
 Generated UI is persisted as
 `Resource(kind = "ui_surface")` and managed by `ui::catalog`,
 `ui::create_surface`, `ui::surface_for_target`, `ui::validate_surface`,
