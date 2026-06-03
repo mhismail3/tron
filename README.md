@@ -706,6 +706,11 @@ matching config resources discarded with removal reason/timestamp fields, and
 prevents later configure/activate calls until the pack is registered again.
 There is no generic `module::act` or package mutation multiplexer; operator
 controls are server-advertised summaries over canonical `module::*` functions.
+Product example packs live under `packages/agent/examples/local-packs/`: Tron
+maintainer, everyday organizer, and creative/knowledge. They are local-process
+templates with `local_digest_pinned` manifests, executable worker entrypoints,
+and generated package UI coverage; they do not implement remote package
+discovery.
 
 Package source trust is explicit. `module::verify_source` verifies unsigned
 digest-pinned package provenance, materialized file refs/hashes, and redaction,

@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **77/100**
+Current score: **83/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -34,7 +34,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-G | passed_after_fix | Generated UI authoring product matrix is server-authored through fixed catalog components and covered by Rust/iOS source-guard evidence. Details below. |
 | TPROD-H | passed_after_fix | Model presets, automation routing truth, subagent task/model routing, generated lineage UI, and iOS chip data are server-owned and covered by focused Rust/iOS evidence. Details below. |
 | TPROD-I | passed_after_fix | Flagship Tron-maintains-Tron chat loop creates, repairs, tests, reviews, and cleans up a workspace helper with generated UI plus model/subagent evidence. Details below. |
-| TPROD-J | pending | Three polished local example packs not yet shipped. |
+| TPROD-J | passed_after_fix | Three polished local example packs ship as local-process templates and pass registration, source, conformance, activation, invocation, generated UI, and Python syntax proof. Details below. |
 | TPROD-K | pending | Product user/operator/release-note docs not yet complete. |
 | TPROD-L | pending | Full hardening, visual QA, soak, and closeout gates not yet run. |
 
@@ -655,3 +655,62 @@ row, note command return codes, and keep open loops explicit.
 - Closed for TPROD-I. TPROD-J must ship three local example packs: Tron
   maintainer, everyday local automation, and creative/knowledge, with tests,
   docs, no remote discovery, and no personal-info literals.
+
+## TPROD-J Evidence
+
+### Files
+
+- [`packages/agent/examples/local-packs/README.md`](../examples/local-packs/README.md)
+- [`packages/agent/examples/local-packs/pack_runtime.py`](../examples/local-packs/pack_runtime.py)
+- [`packages/agent/examples/local-packs/tron-maintainer/`](../examples/local-packs/tron-maintainer/)
+- [`packages/agent/examples/local-packs/everyday-organizer/`](../examples/local-packs/everyday-organizer/)
+- [`packages/agent/examples/local-packs/creative-knowledge/`](../examples/local-packs/creative-knowledge/)
+- [`packages/agent/src/engine/tests/module_activation/example_packs.rs`](../src/engine/tests/module_activation/example_packs.rs)
+- [`packages/agent/src/engine/tests/module_activation.rs`](../src/engine/tests/module_activation.rs)
+- [`README.md`](../../../README.md)
+- [`packages/agent/tests/threat_model_invariants.rs`](../tests/threat_model_invariants.rs)
+- [`packages/agent/docs/tron-productization-scorecard.md`](tron-productization-scorecard.md)
+- [`packages/agent/docs/tron-productization-evidence-manifest.md`](tron-productization-evidence-manifest.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml tprod_j_local_example_packs_ship_with_manifest_templates -- --nocapture` | 101 | Red gate proving the example pack directories/templates were missing before implementation. |
+| `cargo test --manifest-path packages/agent/Cargo.toml tprod_j_local_example_packs_register_activate_and_author_generated_ui -- --nocapture` | 101 then 0 | Red/green lifecycle proof. Failures first exposed the intentionally missing examples, then tightened the local-only README boundary phrase. Final run passed registration, source verification, conformance, source approval, configuration, activation, invocation, and generated package UI for all three examples. |
+| `python3 -m py_compile packages/agent/examples/local-packs/pack_runtime.py packages/agent/examples/local-packs/tron-maintainer/worker.py packages/agent/examples/local-packs/everyday-organizer/worker.py packages/agent/examples/local-packs/creative-knowledge/worker.py` | 0 | Verified the shipped Python runtime and worker entrypoints parse. Generated `__pycache__` files were removed before checkpointing. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all` | 0 | Formatted the new Rust module-activation proof. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Confirmed the productization scorecard/evidence manifest state is formalized at 83/100 with TPROD-J passed_after_fix and TPROD-K pending. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 101 then 0 | First failed because `packages/agent/tests/threat_model_invariants.rs` grew from 7614 to 7617 LOC; after updating the cleanup scorecard audit row, passed. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Verified Rust formatting for committed files. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Verified the Rust server compiles after the example-pack test and scorecard updates. |
+| `git diff --check` | 0 | Verified whitespace/diff hygiene before checkpoint review. |
+
+### Findings
+
+- The examples are shipped under `packages/agent/examples/local-packs/` as
+  local templates, not as remote discovery. Each manifest uses
+  `local_digest_pinned` provenance and placeholders for materialized local file
+  refs that registration fills before computing `packageDigest`.
+- The Tron maintainer pack covers repo health, focused test summary, and
+  scorecard/evidence artifact creation.
+- The everyday organizer pack covers local digest computation, organizer
+  artifact creation, and local notification delivery records without external
+  services.
+- The creative/knowledge pack covers prompt transformation, notes-to-outline
+  transformation, and saved transformation artifacts intended for generated UI
+  review.
+- The lifecycle proof materializes the shipped worker/runtime files, registers
+  all three worker packages, verifies local source hashes, records conformance,
+  approves source with each manifest grant ceiling, configures and activates the
+  packs, invokes one registered read/compute function, and authors generated
+  package UI with stored module actions.
+- The test-only spawn handler exists only in the engine test. It registers the
+  exact capabilities declared by each manifest so activation validates real
+  effect, risk, authority, idempotency, and output-resource contracts.
+
+### Open Loops
+
+- Closed for TPROD-J. TPROD-K must complete product user/operator docs,
+  release-note-style notes, README/progressive docs, and troubleshooting for the
+  full self-extending local product flow.

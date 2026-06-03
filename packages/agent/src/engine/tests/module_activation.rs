@@ -9,6 +9,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
+mod example_packs;
 mod health_integrity;
 mod lifecycle_controls;
 mod local_process_activation;

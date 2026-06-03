@@ -1,0 +1,131 @@
+{
+  "packageId": "everyday-organizer-example",
+  "version": "1.0.0",
+  "manifestSchemaId": "tron.module.package_manifest.v1",
+  "sourceProvenance": {
+    "kind": "local_digest_pinned",
+    "pathHint": "packages/agent/examples/local-packs/everyday-organizer"
+  },
+  "packageDigest": "__PACKAGE_DIGEST__",
+  "trustTier": "local_digest_pinned",
+  "signatureStatus": "unsigned_digest_pinned",
+  "declaredWorkerKind": "local_process",
+  "namespace": "everyday_organizer_example",
+  "presentation": {
+    "title": "Everyday Organizer Example Pack",
+    "summary": "Local digest, organizer artifact, and local notification delivery.",
+    "category": "everyday-organizer",
+    "modelPreset": "localWhenPossible",
+    "subagentRoles": ["organizer"],
+    "generatedUiTarget": "package"
+  },
+  "declaredCapabilities": [
+    {
+      "functionId": "everyday_organizer_example::daily_digest",
+      "displayName": "Daily Digest",
+      "effectClass": "DeterministicCompute",
+      "risk": "low",
+      "requiredAuthority": ["everyday_organizer_example.read"],
+      "outputResourceKinds": []
+    },
+    {
+      "functionId": "everyday_organizer_example::organize_items",
+      "displayName": "Organize Items",
+      "effectClass": "IdempotentWrite",
+      "risk": "medium",
+      "requiredAuthority": ["everyday_organizer_example.write"],
+      "idempotent": true,
+      "outputResourceKinds": ["artifact"]
+    },
+    {
+      "functionId": "everyday_organizer_example::deliver_notification",
+      "displayName": "Deliver Notification",
+      "effectClass": "ExternalSideEffect",
+      "risk": "medium",
+      "requiredAuthority": ["everyday_organizer_example.notify"],
+      "idempotent": true,
+      "outputResourceKinds": ["notification"]
+    }
+  ],
+  "requiredGrants": {
+    "allowedCapabilities": [
+      "everyday_organizer_example::daily_digest",
+      "everyday_organizer_example::organize_items",
+      "everyday_organizer_example::deliver_notification"
+    ],
+    "allowedNamespaces": ["everyday_organizer_example"],
+    "allowedAuthorityScopes": [
+      "everyday_organizer_example.read",
+      "everyday_organizer_example.write",
+      "everyday_organizer_example.notify"
+    ],
+    "allowedResourceKinds": ["artifact", "notification"],
+    "resourceSelectors": ["*"],
+    "fileRoots": ["*"],
+    "networkPolicy": "none",
+    "maxRisk": "medium",
+    "canDelegate": false,
+    "approvalRequired": false
+  },
+  "configSchema": {
+    "type": "object",
+    "required": ["enabled", "digestFolder", "notifyOnCompletion"],
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {"type": "boolean", "default": true},
+      "digestFolder": {"type": "string", "default": "local-digests"},
+      "notifyOnCompletion": {"type": "boolean", "default": true}
+    }
+  },
+  "declaredFiles": [
+    {
+      "resourceId": "__WORKER_RESOURCE_ID__",
+      "versionId": "__WORKER_VERSION_ID__",
+      "contentHash": "__WORKER_CONTENT_HASH__"
+    },
+    {
+      "resourceId": "__RUNTIME_RESOURCE_ID__",
+      "versionId": "__RUNTIME_VERSION_ID__",
+      "contentHash": "__RUNTIME_CONTENT_HASH__"
+    }
+  ],
+  "runtimeEntryPoint": {
+    "kind": "local_process",
+    "workerId": "everyday-organizer-example-worker",
+    "commandTemplate": {
+      "kind": "materialized_file",
+      "resourceId": "__WORKER_RESOURCE_ID__",
+      "versionId": "__WORKER_VERSION_ID__",
+      "contentHash": "__WORKER_CONTENT_HASH__"
+    },
+    "argsTemplate": [],
+    "workingDirectory": {
+      "kind": "package_file_parent",
+      "resourceId": "__WORKER_RESOURCE_ID__",
+      "versionId": "__WORKER_VERSION_ID__"
+    },
+    "executableRefs": [
+      {
+        "resourceId": "__WORKER_RESOURCE_ID__",
+        "versionId": "__WORKER_VERSION_ID__",
+        "contentHash": "__WORKER_CONTENT_HASH__"
+      },
+      {
+        "resourceId": "__RUNTIME_RESOURCE_ID__",
+        "versionId": "__RUNTIME_VERSION_ID__",
+        "contentHash": "__RUNTIME_CONTENT_HASH__"
+      }
+    ],
+    "expectedFunctionIds": [
+      "everyday_organizer_example::daily_digest",
+      "everyday_organizer_example::organize_items",
+      "everyday_organizer_example::deliver_notification"
+    ],
+    "environmentPolicy": {"mode": "empty"},
+    "visibility": "workspace",
+    "timeoutMs": 10000
+  },
+  "healthPolicy": {"mode": "catalog_registered"},
+  "sandboxProcessPolicy": {"networkPolicy": "none", "fileRoots": ["*"]},
+  "redactionPolicy": {"mode": "redacted"}
+}
