@@ -134,6 +134,19 @@ pub(super) fn quarantine_schema() -> Value {
     })
 }
 
+pub(super) fn remove_package_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["packageResourceId"],
+        "additionalProperties": false,
+        "properties": {
+            "packageResourceId": {"type": "string"},
+            "expectedCurrentVersionId": {"type": "string"},
+            "reason": {"type": "string"}
+        }
+    })
+}
+
 pub(super) fn module_resource_response_schema(kind: &str) -> Value {
     json!({
         "type": "object",

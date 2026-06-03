@@ -210,6 +210,7 @@ impl ModulePrimitiveHandler {
             required_string_owned(&invocation.payload, "moduleConfigResourceId")?;
         let config_version_id = required_string_owned(&invocation.payload, "configVersionId")?;
         let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        ensure_resource_not_removed(&package, "pack", "activated")?;
         let config = require_inspection(self, &config_resource_id_value, MODULE_CONFIG_KIND)?;
         let manifest = version_payload(&package, &package_version_id)?;
         let config_payload = version_payload(&config, &config_version_id)?;

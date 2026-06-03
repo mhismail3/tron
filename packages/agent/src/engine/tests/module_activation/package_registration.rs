@@ -64,6 +64,7 @@ async fn module_resource_types_and_capabilities_are_registered() {
         "module::upgrade",
         "module::rollback",
         "module::quarantine",
+        "module::remove_package",
         "module::check_health",
         "module::verify_integrity",
         "module::recover_activation",

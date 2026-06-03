@@ -339,6 +339,169 @@ async fn module_quarantine_stale_activation_fails_before_stop_and_blocks_stale_g
 }
 
 #[tokio::test]
+async fn module_remove_package_requires_disabled_activations_and_discards_configs() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    register_demo_worker(&handle, "demo", "demo-worker");
+    let registered = register_package(
+        &handle,
+        manifest_with_digest(package_manifest("removable-tools", "demo", "demo-worker")),
+        "module-remove-register",
+    )
+    .await;
+    assert_eq!(registered.error, None);
+    let package_version_id = registered.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let configured = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": "worker-package:removable-tools",
+                "packageVersionId": package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true}
+            }),
+            mutating_causal("module-remove-configure").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(configured.error, None);
+    let config_version_id = configured.value.as_ref().unwrap()["resourceRefs"][0]["versionId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let activated = handle
+        .invoke(host_invocation(
+            "module::activate",
+            json!({
+                "packageResourceId": "worker-package:removable-tools",
+                "packageVersionId": package_version_id,
+                "moduleConfigResourceId": "module-config:workspace-a:removable-tools",
+                "configVersionId": config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "workerId": "demo-worker",
+                "childGrantRequest": grant_ceiling_for_namespace("demo")
+            }),
+            mutating_causal("module-remove-activate").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(activated.error, None);
+
+    let blocked_remove = handle
+        .invoke(host_invocation(
+            "module::remove_package",
+            json!({
+                "packageResourceId": "worker-package:removable-tools",
+                "expectedCurrentVersionId": package_version_id,
+                "reason": "local pack cleanup"
+            }),
+            mutating_causal("module-remove-blocked").with_scope("module.write"),
+        ))
+        .await;
+    assert!(
+        error_contains(&blocked_remove, "active activation"),
+        "remove must fail closed while activations are still live"
+    );
+
+    let disabled = handle
+        .invoke(host_invocation(
+            "module::disable",
+            json!({
+                "activationResourceId": "activation:workspace-a:removable-tools",
+                "expectedCurrentVersionId": activated.value.as_ref().unwrap()["resourceRefs"][0]["versionId"].as_str().unwrap()
+            }),
+            mutating_causal("module-remove-disable").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(disabled.error, None);
+
+    let removed = handle
+        .invoke(host_invocation(
+            "module::remove_package",
+            json!({
+                "packageResourceId": "worker-package:removable-tools",
+                "expectedCurrentVersionId": package_version_id,
+                "reason": "local pack cleanup"
+            }),
+            mutating_causal("module-remove-package").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(removed.error, None);
+    let refs = removed.value.as_ref().unwrap()["resourceRefs"]
+        .as_array()
+        .unwrap();
+    assert!(refs.iter().any(|reference| {
+        reference["resourceId"] == "worker-package:removable-tools"
+            && reference["kind"] == "worker_package"
+            && reference["role"] == "removed"
+    }));
+    assert!(refs.iter().any(|reference| {
+        reference["resourceId"] == "module-config:workspace-a:removable-tools"
+            && reference["kind"] == "module_config"
+            && reference["role"] == "removed"
+    }));
+
+    let package = inspect_resource(&handle, "worker-package:removable-tools").await;
+    assert_eq!(package["resource"]["lifecycle"], "discarded");
+    let current_package_version = package["resource"]["currentVersionId"].as_str().unwrap();
+    let package_payload = package["versions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|version| version["versionId"] == current_package_version)
+        .unwrap()["payload"]
+        .clone();
+    assert_eq!(package_payload["packageStatus"], "removed");
+    assert_eq!(package_payload["removalReason"], "local pack cleanup");
+
+    let config = inspect_resource(&handle, "module-config:workspace-a:removable-tools").await;
+    assert_eq!(config["resource"]["lifecycle"], "discarded");
+
+    let configure_removed = handle
+        .invoke(host_invocation(
+            "module::configure",
+            json!({
+                "packageResourceId": "worker-package:removable-tools",
+                "packageVersionId": package_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "config": {"enabled": true}
+            }),
+            mutating_causal("module-remove-configure-discarded").with_scope("module.write"),
+        ))
+        .await;
+    assert!(
+        error_contains(&configure_removed, "removed"),
+        "removed packs must be read-only until explicitly re-registered"
+    );
+
+    let activate_removed = handle
+        .invoke(host_invocation(
+            "module::activate",
+            json!({
+                "packageResourceId": "worker-package:removable-tools",
+                "packageVersionId": package_version_id,
+                "moduleConfigResourceId": "module-config:workspace-a:removable-tools",
+                "configVersionId": config_version_id,
+                "scope": "workspace",
+                "workspaceId": "workspace-a",
+                "workerId": "demo-worker",
+                "childGrantRequest": grant_ceiling_for_namespace("demo")
+            }),
+            mutating_causal("module-remove-activate-discarded").with_scope("module.write"),
+        ))
+        .await;
+    assert!(
+        error_contains(&activate_removed, "removed"),
+        "removed packs must not be activatable until explicitly re-registered"
+    );
+}
+
+#[tokio::test]
 async fn module_local_process_replacement_spawn_failure_marks_activation_failed_closed() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let _initial_spawn_calls = register_recording_worker_spawn(&handle);

@@ -8,6 +8,15 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
     var sourceTrust: [EngineConsoleModuleSourceTrustSummary]
     var actions: [EngineConsoleModuleActionSummary]
 
+    var cardTitle: String { "Packs" }
+    var cardSubtitle: String {
+        "Local capability packs, trust, health, evidence, and server-authored controls."
+    }
+    var emptyTitle: String { "No packs" }
+    var emptyMessage: String {
+        "Registered packs and activation records will appear here after local pack capabilities run."
+    }
+
     static let empty = EngineConsoleModuleOperatorProjection(
         packages: [],
         configs: [],
@@ -38,16 +47,16 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
             EngineConsoleModuleSurfaceTarget(
                 targetType: "package",
                 targetId: $0.resourceId,
-                title: "Package Surface",
-                subtitle: $0.resourceId,
+                title: "Pack Controls",
+                subtitle: $0.displayName,
                 symbol: "shippingbox"
             )
         } + activations.map {
             EngineConsoleModuleSurfaceTarget(
                 targetType: "activation",
                 targetId: $0.resourceId,
-                title: "Activation Surface",
-                subtitle: $0.resourceId,
+                title: "Activation Controls",
+                subtitle: $0.displayName,
                 symbol: "bolt.badge.clock"
             )
         }
@@ -92,6 +101,34 @@ struct EngineConsoleModuleResourceSummary: Equatable, Identifiable {
     var scope: String?
 
     var id: String { resourceId }
+    var displayName: String {
+        resourceId
+            .replacingOccurrences(of: "worker-package:", with: "")
+            .replacingOccurrences(of: "module-config:", with: "")
+            .replacingOccurrences(of: "activation:", with: "")
+    }
+    var lifecycleLabel: String {
+        switch lifecycle {
+        case "available":
+            kind == "worker_package" ? "Registered" : "Available"
+        case "active":
+            kind == "module_config" ? "Configured" : "Activated"
+        case "disabled":
+            "Disabled"
+        case "rolled_back":
+            "Rolled back"
+        case "quarantined":
+            "Quarantined"
+        case "discarded", "removed":
+            "Removed"
+        case "failed":
+            "Failed"
+        case let lifecycle?:
+            lifecycle
+        case nil:
+            "Unknown"
+        }
+    }
 
     init?(_ value: AnyCodable, defaultKind: String) {
         guard let dictionary = value.dictionaryValue else { return nil }
@@ -190,6 +227,7 @@ struct EngineConsoleModuleSourceTrustSummary: Equatable, Identifiable {
 
 struct EngineConsoleModuleActionSummary: Equatable, Identifiable {
     var functionId: String
+    var label: String?
     var targetType: String?
     var targetField: String?
     var targetValue: String?
@@ -201,6 +239,7 @@ struct EngineConsoleModuleActionSummary: Equatable, Identifiable {
     var id: String {
         [
             functionId,
+            label,
             targetType,
             targetField,
             targetValue
@@ -208,6 +247,8 @@ struct EngineConsoleModuleActionSummary: Equatable, Identifiable {
         .compactMap { $0 }
         .joined(separator: "|")
     }
+
+    var displayLabel: String { label ?? functionId }
 
     var detailText: String {
         [
@@ -230,6 +271,7 @@ struct EngineConsoleModuleActionSummary: Equatable, Identifiable {
             return nil
         }
         self.functionId = functionId
+        self.label = moduleString(dictionary, keys: ["label"])
         self.targetType = moduleString(dictionary, keys: ["targetType"])
         let target = dictionary["target"] as? [String: Any]
         self.targetField = moduleString(dictionary, keys: ["targetField"]) ?? moduleString(target, keys: ["field"])

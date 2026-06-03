@@ -342,7 +342,13 @@ pub(in crate::engine::primitives::ui) fn target_projection(
                 )));
             }
             Ok(TargetProjection {
-                title: format!("Package {}", request.target_id),
+                title: format!(
+                    "Pack {}",
+                    request
+                        .target_id
+                        .strip_prefix("worker-package:")
+                        .unwrap_or(&request.target_id)
+                ),
                 summary: format!(
                     "{} / {}",
                     inspection.resource.kind, inspection.resource.lifecycle

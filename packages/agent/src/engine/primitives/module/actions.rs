@@ -99,6 +99,24 @@ pub(super) fn module_actions_for_package(package_id: Option<&str>) -> Vec<Value>
     let target = package_id.map(package_resource_id).map(Value::String);
     vec![
         module_action(
+            REGISTER_PACKAGE_FUNCTION,
+            "package",
+            "manifest",
+            Value::Null,
+            "medium",
+            false,
+        ),
+        module_action(
+            INSPECT_PACKAGE_FUNCTION,
+            "package",
+            "packageId",
+            package_id
+                .map(|package_id| Value::String(package_id.to_owned()))
+                .unwrap_or(Value::Null),
+            "low",
+            false,
+        ),
+        module_action(
             VERIFY_SOURCE_FUNCTION,
             "package",
             "packageResourceId",
@@ -196,6 +214,14 @@ pub(super) fn module_actions_for_package(package_id: Option<&str>) -> Vec<Value>
         ),
         module_action(
             ACTIVATE_FUNCTION,
+            "package",
+            "packageResourceId",
+            target.clone().unwrap_or(Value::Null),
+            "high",
+            true,
+        ),
+        module_action(
+            REMOVE_PACKAGE_FUNCTION,
             "package",
             "packageResourceId",
             target.unwrap_or(Value::Null),

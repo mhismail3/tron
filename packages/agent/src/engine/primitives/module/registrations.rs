@@ -96,6 +96,17 @@ pub(in crate::engine::primitives) fn registrations(
             ACTIVATION_RECORD_KIND,
         ])),
         module_write(
+            REMOVE_PACKAGE_FUNCTION,
+            "remove a local pack after live activations are disabled",
+            remove_package_schema(),
+            module_resource_response_schema("worker_package"),
+            RiskLevel::High,
+        )
+        .with_output_contract(DurableOutputContract::resource_backed([
+            WORKER_PACKAGE_KIND,
+            MODULE_CONFIG_KIND,
+        ])),
+        module_write(
             CHECK_HEALTH_FUNCTION,
             "record resource-backed module activation health evidence",
             check_health_schema(),
@@ -412,6 +423,7 @@ fn module_write_lease_template(function_id: &str) -> &'static str {
         DISABLE_FUNCTION | UPGRADE_FUNCTION | ROLLBACK_FUNCTION | CHECK_HEALTH_FUNCTION => {
             "module:activation:{activationResourceId}"
         }
+        REMOVE_PACKAGE_FUNCTION => "module:package:{packageResourceId}",
         QUARANTINE_FUNCTION | VERIFY_INTEGRITY_FUNCTION | RUN_CONFORMANCE_FUNCTION => {
             "module:resource:{resourceId}"
         }

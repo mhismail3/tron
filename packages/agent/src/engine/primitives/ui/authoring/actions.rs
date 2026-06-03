@@ -58,9 +58,9 @@ pub(in crate::engine::primitives::ui::authoring) fn generated_actions(
             .find(|function| function.id.as_str() == "module::inspect_package")
         {
             actions.push(json!({
-                "actionId": "inspect-package",
-                "label": "Inspect Package",
-                "targetFunctionId": "module::inspect_package",
+                    "actionId": "inspect-package",
+                    "label": "Inspect Pack",
+                    "targetFunctionId": "module::inspect_package",
                 "inputSchema": {"type": "object", "additionalProperties": false, "properties": {}},
                 "payloadTemplate": {
                     "packageId": request.target_id.strip_prefix("worker-package:").unwrap_or(&request.target_id)
@@ -559,6 +559,35 @@ pub(in crate::engine::primitives::ui::authoring) fn generated_actions(
                     "requiredRisk": risk_label(&approve_source.risk_level),
                     "approvalPolicy": {"required": approve_source.required_authority.approval_required},
                     "targetRevision": approve_source.revision.0,
+                    "expiresAt": default_expires_at()
+                }));
+            }
+            if let Some(remove_package) = functions
+                .iter()
+                .find(|function| function.id.as_str() == "module::remove_package")
+            {
+                actions.push(json!({
+                    "actionId": "remove-package",
+                    "label": "Remove Pack",
+                    "targetFunctionId": "module::remove_package",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["reason"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "reason": {"type": "string"}
+                        }
+                    },
+                    "payloadTemplate": {
+                        "packageResourceId": resource_id,
+                        "expectedCurrentVersionId": version_id,
+                        "reason": "${input.reason}"
+                    },
+                    "idempotencyKeyTemplate": "${submission.idempotencyKey}",
+                    "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
+                    "requiredRisk": risk_label(&remove_package.risk_level),
+                    "approvalPolicy": {"required": remove_package.required_authority.approval_required},
+                    "targetRevision": remove_package.revision.0,
                     "expiresAt": default_expires_at()
                 }));
             }

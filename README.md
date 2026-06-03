@@ -675,12 +675,12 @@ submits only the stored
 surface/version/action coordinates, user input, and idempotency key; the server
 reconstructs and authorizes the canonical target invocation.
 Generated authoring currently covers substrate targets, session-created
-capability invoke surfaces with renderable request schemas, module package and
+capability invoke surfaces with renderable request schemas, local pack and
 activation operator surfaces, prompt-library, notification, subagent-lineage,
-source-control, and AgentControl review surfaces. Module package surfaces
-derive configure/activate actions from the package manifest/config resources;
+source-control, and AgentControl review surfaces. Pack surfaces derive
+configure/activate/remove actions from the package manifest/config resources;
 activation surfaces derive disable/upgrade/rollback/quarantine actions from
-current and prior activation versions. Capability, module, source-control, and
+current and prior activation versions. Capability, pack, source-control, and
 review mutations remain stored canonical actions; clients render fixed-catalog
 native controls and never construct target function ids or payload templates.
 
@@ -693,9 +693,13 @@ stores engine-owned source trust fields such as `sourceTrustStatus`,
 `conformanceEvidenceRefs`, and bounded `policyDiagnostics`; the manifest's
 declared `trustTier` is never permission truth. `module::configure` validates
 config and rejects raw secret-like values unless they are `secret_ref`/vault
-handles. There is no generic `module::act` or package mutation multiplexer;
-operator controls are server-advertised summaries over canonical `module::*`
-functions.
+handles. `module::remove_package` is a high-risk local pack lifecycle action:
+it requires live activations to be disabled, quarantined, damaged, discarded, or
+removed first, honors an optional expected current version, marks the pack and
+matching config resources discarded with removal reason/timestamp fields, and
+prevents later configure/activate calls until the pack is registered again.
+There is no generic `module::act` or package mutation multiplexer; operator
+controls are server-advertised summaries over canonical `module::*` functions.
 
 Package source trust is explicit. `module::verify_source` verifies unsigned
 digest-pinned package provenance, materialized file refs/hashes, and redaction,
@@ -1422,7 +1426,7 @@ packages/ios-app/Sources/
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Capability-native chat UI**: active work is rendered as `capabilityInvocation` / `capabilityResult` content from capability identity and schema/result metadata. Retired capability descriptors, old built-in names, and plugin source-specific capability sheets are not active UI routes.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, catalog watch snapshot, vector index state, program runs, substrate workers/resources/grants/module packages, module trust/health/evidence/action projections, and generated `ui_surface` refs through a simplified Overview/Capabilities/Program Runs/Substrate flow. Advanced sections expose plugin manifests, workers, bindings, policies, redacted audit rows, trace summaries, and primer inputs behind an explicit toggle. Search suggestions and Created by Agent shelf rows are derived from live registry/catalog/control/audit/program/primer state, and the Console invokes capability admin functions rather than hardcoded capability descriptors. The Created by Agent shelf summarizes session-created capability lineage with product-facing titles plus created, updated, auto-repaired, tested, failed, promoted, revoked, discarded, and reused history labels; deeper evidence still comes from server DTOs for provenance, generated UI, promotion scope, cleanup, traces, and program-run child invocations, including volatile live catalog functions that may not yet appear in the registry snapshot. Module package and activation rows can open server-authored generated surfaces; configure/activate/disable/upgrade/rollback/quarantine remain stored module actions submitted through `ui::submit_action`. Generated UI surface writes and action submissions are leased under the server's `ui_surface` lifecycle contract and record compensation status alongside the canonical child invocation. `EngineConsoleCache` stores read-only summaries and redacted generated-UI refs for disconnected browsing; surface authoring, refresh, validation, module actions, generated-UI actions, and program runs stay server-authoritative and fail closed with read-only errors while offline. Disconnected approval decisions remain pending and cannot move chips into resolving state until the app reconnects.
+- **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, catalog watch snapshot, vector index state, program runs, substrate workers/resources/grants/module packages, module trust/health/evidence/action projections, and generated `ui_surface` refs through a simplified Overview/Capabilities/Program Runs/Substrate flow. Advanced sections expose plugin manifests, workers, bindings, policies, redacted audit rows, trace summaries, and primer inputs behind an explicit toggle. Search suggestions and Created by Agent shelf rows are derived from live registry/catalog/control/audit/program/primer state, and the Console invokes capability admin functions rather than hardcoded capability descriptors. The Created by Agent shelf summarizes session-created capability lineage with product-facing titles plus created, updated, auto-repaired, tested, failed, promoted, revoked, discarded, and reused history labels; deeper evidence still comes from server DTOs for provenance, generated UI, promotion scope, cleanup, traces, and program-run child invocations, including volatile live catalog functions that may not yet appear in the registry snapshot. Local pack and activation rows can open server-authored generated surfaces; configure/activate/remove/disable/upgrade/rollback/quarantine remain stored module actions submitted through `ui::submit_action`. Generated UI surface writes and action submissions are leased under the server's `ui_surface` lifecycle contract and record compensation status alongside the canonical child invocation. `EngineConsoleCache` stores read-only summaries and redacted generated-UI refs for disconnected browsing; surface authoring, refresh, validation, module actions, generated-UI actions, and program runs stay server-authoritative and fail closed with read-only errors while offline. Disconnected approval decisions remain pending and cannot move chips into resolving state until the app reconnects.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.

@@ -18,6 +18,8 @@
 //! shared module substrate helpers. Every module lifecycle write declares the
 //! resource-scoped module lifecycle lease and compensation notes so package/
 //! config/activation/trust mutations leave one inspectable recovery trail.
+//! Package removal is a lifecycle update to discarded package/config resources,
+//! not a hard delete of inspectable history.
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -88,16 +90,17 @@ pub(super) use registrations::registrations;
 use resources::{
     UpsertResource, activation_resource_id, activation_trust_summary, config_resource_id,
     current_payload, current_payload_from_json_inspection, current_version, decision_summary,
-    ensure_expected_current_version, ensure_version_is_current, filter_resources_by_package,
-    link_if_possible, next_config_revision, package_resource_id, package_resource_id_from_payload,
-    package_trust_summary, require_inspection, resource_ref_from_resource,
-    resource_ref_from_version, resource_scope_and_token, trust_decision_metadata,
-    trust_target_status, trust_warnings_for_status, upsert_resource, version_payload,
+    ensure_expected_current_version, ensure_resource_not_removed, ensure_version_is_current,
+    filter_resources_by_package, link_if_possible, next_config_revision, package_resource_id,
+    package_resource_id_from_payload, package_trust_summary, require_inspection,
+    resource_ref_from_resource, resource_ref_from_version, resource_scope_and_token,
+    trust_decision_metadata, trust_target_status, trust_warnings_for_status, upsert_resource,
+    version_payload,
 };
 use schemas::{
     activate_schema, configure_schema, disable_schema, inspect_package_schema,
-    module_resource_response_schema, quarantine_schema, register_package_schema, rollback_schema,
-    upgrade_schema,
+    module_resource_response_schema, quarantine_schema, register_package_schema,
+    remove_package_schema, rollback_schema, upgrade_schema,
 };
 use source_trust::{
     approve_source_schema, audit_policy_schema, enforce_revocation_schema,
@@ -132,6 +135,7 @@ pub(crate) const DISABLE_FUNCTION: &str = "module::disable";
 pub(crate) const UPGRADE_FUNCTION: &str = "module::upgrade";
 pub(crate) const ROLLBACK_FUNCTION: &str = "module::rollback";
 pub(crate) const QUARANTINE_FUNCTION: &str = "module::quarantine";
+pub(crate) const REMOVE_PACKAGE_FUNCTION: &str = "module::remove_package";
 pub(crate) const CHECK_HEALTH_FUNCTION: &str = "module::check_health";
 pub(crate) const VERIFY_INTEGRITY_FUNCTION: &str = "module::verify_integrity";
 pub(crate) const RECOVER_ACTIVATION_FUNCTION: &str = "module::recover_activation";
@@ -176,6 +180,7 @@ impl InProcessFunctionHandler for ModulePrimitiveHandler {
             UPGRADE_FUNCTION => self.upgrade(&invocation).await,
             ROLLBACK_FUNCTION => self.rollback(&invocation).await,
             QUARANTINE_FUNCTION => self.quarantine(&invocation).await,
+            REMOVE_PACKAGE_FUNCTION => self.remove_package(&invocation),
             CHECK_HEALTH_FUNCTION => self.check_health(&invocation).await,
             VERIFY_INTEGRITY_FUNCTION => self.verify_integrity(&invocation).await,
             RECOVER_ACTIVATION_FUNCTION => self.recover_activation(&invocation).await,

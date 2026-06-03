@@ -55,10 +55,16 @@ capability packs.
    `capability::execute`. If the capability needs a human control surface,
    author or inspect it with `ui::surface_for_target` and submit only stored
    generated-UI action coordinates.
-8. If evidence fails, repair the owning file or package, record what changed,
+8. For local capability packs, keep the sequence local and evidence-backed:
+   `module::register_package`, `module::inspect_package`,
+   `module::configure`, `module::activate`, `module::disable`,
+   `module::rollback`, `module::revoke_source_approval`, and
+   `module::remove_package`. Remove a pack only after live activations are
+   disabled or quarantined, and keep remote package discovery out of the flow.
+9. If evidence fails, repair the owning file or package, record what changed,
    rerun the failed path, and keep version history clear enough for a user to
    see created, updated, failed, repaired, tested, and discarded states.
-9. Finish by explaining evidence in product terms. Promote only through
+10. Finish by explaining evidence in product terms. Promote only through
    `engine::promote` when explicitly requested; otherwise clean up volatile
    workers with `worker::disconnect` or `sandbox::stop_spawned_worker`.
 

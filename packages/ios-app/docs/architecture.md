@@ -161,12 +161,12 @@ final class SubagentState {
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state |
 | `ViewModels/State/EngineConsoleCreatedByAgentProjection.swift` | Read-only Created by Agent shelf projection over session-created capability lineage from registry/catalog snapshots, generated surfaces, audit, and program runs |
-| `ViewModels/State/EngineConsoleModuleProjection.swift` | Typed read-only projection over server-authored module package/config/activation/trust/health/action rows and package/activation generated-surface targets |
+| `ViewModels/State/EngineConsoleModuleProjection.swift` | Typed read-only projection over server-authored local pack/config/activation/trust/health/action rows and pack/activation generated-surface targets |
 | `Views/EngineConsole/EngineConsoleView.swift` | Top-level capability operator console |
 | `Views/EngineConsole/EngineConsoleSection.swift` | Engine Console section identity |
 | `Views/EngineConsole/EngineConsoleComponents.swift` | Console-specific section chips, metrics, cards, rows, and inspection sheet components |
 | `Views/EngineConsole/EngineConsoleCreatedByAgentView.swift` | Native Created by Agent shelf for session-created capability history, provenance, tests, surfaces, promotion, cleanup, and trace evidence |
-| `Views/EngineConsole/EngineConsoleModuleProjectionView.swift` | Native module projection card for package/config/activation/trust/health/evidence/action rows and server-authored surface-open controls |
+| `Views/EngineConsole/EngineConsoleModuleProjectionView.swift` | Native local pack projection card for pack/config/activation/trust/health/evidence/action rows and server-authored surface-open controls |
 | `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources, including session-generated capability surfaces; uses Tron typography/color tokens, restrained native row expansion, and submits only stored action coordinates |
 | `Models/Messages/CapabilityInvocationTypes.swift` | Capability invocation lifecycle DTOs, artifacts, results, and errors |
 | `Models/Messages/CapabilityInvocationDisplayModel.swift` | Server-authored capability invocation display projection |
@@ -257,12 +257,12 @@ workers, bindings, policies, audit, traces, and primer internals only after the
 user opts in. `EngineConsoleState` owns refresh, search, inspect, local mutation
 state, mutation gating, and disconnected read-only cache snapshots. The server
 remains the source of truth for policy, authority, approval, audit redaction,
-plugin lifecycle, module package/config/activation/trust/health/action
-resources, and binding selection. Module operator rows decode
-`control::snapshot` fields such as `moduleHealth`, `moduleSourceTrust`, and
-server-advertised `module::` action summaries; Swift filters by namespace for
-display and does not keep a package-policy allowlist or reconstruct module
-action targets.
+plugin lifecycle, local pack/config/activation/trust/health/action resources,
+and binding selection. Module operator rows decode `control::snapshot` fields
+such as `moduleHealth`, `moduleSourceTrust`, and server-advertised `module::`
+action summaries; Swift uses server labels and pack display names for display
+and does not keep a package-policy allowlist or reconstruct module action
+targets.
 
 The Engine Console uses sheet-native Tron components: section chips, compact
 metric grids, capability cards, status banners, generated action rows, and

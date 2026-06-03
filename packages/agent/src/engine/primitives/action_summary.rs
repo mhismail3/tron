@@ -18,6 +18,7 @@ pub(crate) fn operator_action_summary(
 ) -> Value {
     json!({
         "functionId": function_id,
+        "label": action_label(function_id),
         "targetType": target_type,
         "targetField": target_field,
         "target": target,
@@ -102,6 +103,7 @@ fn action_presentation(
             "discard",
             "expire",
             "quarantine",
+            "remove",
             "revoke",
             "cancel",
         ],
@@ -141,4 +143,44 @@ fn action_presentation(
 
 fn contains_any(text: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| text.contains(needle))
+}
+
+fn action_label(function_id: &str) -> String {
+    match function_id {
+        "module::register_package" => "Register pack",
+        "module::inspect_package" => "Inspect pack",
+        "module::configure" => "Configure pack",
+        "module::activate" => "Activate pack",
+        "module::disable" => "Disable pack",
+        "module::upgrade" => "Upgrade pack",
+        "module::rollback" => "Roll back",
+        "module::quarantine" => "Quarantine",
+        "module::remove_package" => "Remove pack",
+        "module::check_health" => "Check health",
+        "module::verify_integrity" => "Verify integrity",
+        "module::recover_activation" => "Recover activation",
+        "module::verify_source" => "Verify source",
+        "module::approve_source" => "Approve source",
+        "module::revoke_source_approval" => "Revoke source approval",
+        "module::policy_decide" => "Check policy",
+        "module::run_conformance" => "Run conformance",
+        "module::register_source" => "Register source",
+        "module::verify_signature" => "Verify signature",
+        "module::audit_policy" => "Audit policy",
+        "module::record_policy_audit" => "Record audit",
+        "module::reconcile_trust" => "Reconcile trust",
+        "module::inspect_trust" => "Inspect trust",
+        "module::renew_trust_root" => "Renew trust root",
+        "module::rotate_signature_key" => "Rotate signature key",
+        "module::expire_trust_decision" => "Expire trust decision",
+        "module::enforce_revocation" => "Enforce revocation",
+        "module::simulate_trust_change" => "Simulate trust",
+        "module::record_trust_review" => "Record review",
+        "module::trust_audit_status" => "Audit status",
+        "module::schedule_trust_audit" => "Schedule audit",
+        "module::run_scheduled_trust_audit" => "Run audit",
+        "module::record_trust_audit_retention" => "Review retention",
+        _ => function_id,
+    }
+    .to_owned()
 }

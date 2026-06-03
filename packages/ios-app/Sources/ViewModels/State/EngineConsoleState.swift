@@ -485,7 +485,7 @@ final class EngineConsoleState {
             let request = UiSurfaceForTargetRequestDTO(
                 targetType: targetType,
                 targetId: targetId,
-                purpose: "Inspect \(targetType) \(targetId)",
+                purpose: surfacePurpose(targetType: targetType, targetId: targetId),
                 layoutProfile: "compact",
                 expectedTargetRevision: nil,
                 existingSurfaceResourceId: nil,
@@ -508,6 +508,13 @@ final class EngineConsoleState {
         } catch {
             mutationState = .failed(error.localizedDescription)
         }
+    }
+
+    private func surfacePurpose(targetType: String, targetId: String) -> String {
+        if targetType == "package" {
+            return "Manage pack \(targetId.replacingOccurrences(of: "worker-package:", with: ""))"
+        }
+        return "Inspect \(targetType) \(targetId)"
     }
 
     func refreshSelectedSurface() async {

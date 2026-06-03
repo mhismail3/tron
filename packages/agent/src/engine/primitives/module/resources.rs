@@ -99,6 +99,23 @@ pub(super) fn ensure_version_is_current(
     }
 }
 
+pub(super) fn ensure_resource_not_removed(
+    inspection: &EngineResourceInspection,
+    label: &str,
+    operation: &str,
+) -> Result<()> {
+    if matches!(
+        inspection.resource.lifecycle.as_str(),
+        "discarded" | "removed"
+    ) {
+        return Err(EngineError::PolicyViolation(format!(
+            "{label} {} is removed and cannot be {operation}",
+            inspection.resource.resource_id
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn resource_scope_and_token(
     invocation: &Invocation,
 ) -> Result<(EngineResourceScope, String)> {

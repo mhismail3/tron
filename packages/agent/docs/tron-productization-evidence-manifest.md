@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **31/100**
+Current score: **40/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -29,7 +29,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-B | passed_after_fix | Added the managed `self-extend` skill, synced it locally, and verified live worker protocol plus sample local worker flow with focused integration tests. Details below. |
 | TPROD-C | passed_after_fix | Live chat-led self-extension proof completed after repairing approval replay, workspace context propagation, sandbox child selector defaults, dashboard helper labels, and cleanup guidance. Details below. |
 | TPROD-D | passed_after_fix | Created by Agent shelf/history is product-labeled, server-derived, and covered by focused projection/source/accessibility tests. Details below. |
-| TPROD-E | pending | Local pack lifecycle product flow not yet proven. |
+| TPROD-E | passed_after_fix | Local pack lifecycle product flow is server-owned, product-labeled, and covered by focused engine/iOS tests. Details below. |
 | TPROD-F | pending | Plain trust/promotion/revocation UX not yet proven. |
 | TPROD-G | pending | Generated UI authoring product matrix not yet complete. |
 | TPROD-H | pending | Model preset, automation, and subagent routing product proof not yet complete. |
@@ -327,3 +327,79 @@ row, note command return codes, and keep open loops explicit.
 - Closed for TPROD-D. TPROD-E must prove the local disk pack lifecycle through
   chat entry plus Console/detail surfaces while preserving the explicit remote
   discovery deferral.
+
+## TPROD-E Evidence
+
+### Files
+
+- [`packages/agent/src/engine/primitives/module.rs`](../src/engine/primitives/module.rs)
+- [`packages/agent/src/engine/primitives/module/package_lifecycle.rs`](../src/engine/primitives/module/package_lifecycle.rs)
+- [`packages/agent/src/engine/primitives/module/activation_lifecycle.rs`](../src/engine/primitives/module/activation_lifecycle.rs)
+- [`packages/agent/src/engine/primitives/module/actions.rs`](../src/engine/primitives/module/actions.rs)
+- [`packages/agent/src/engine/primitives/module/registrations.rs`](../src/engine/primitives/module/registrations.rs)
+- [`packages/agent/src/engine/primitives/module/resources.rs`](../src/engine/primitives/module/resources.rs)
+- [`packages/agent/src/engine/primitives/module/schemas.rs`](../src/engine/primitives/module/schemas.rs)
+- [`packages/agent/src/engine/primitives/action_summary.rs`](../src/engine/primitives/action_summary.rs)
+- [`packages/agent/src/engine/primitives/control/actions.rs`](../src/engine/primitives/control/actions.rs)
+- [`packages/agent/src/engine/primitives/ui/authoring/actions.rs`](../src/engine/primitives/ui/authoring/actions.rs)
+- [`packages/agent/src/engine/primitives/ui/authoring/mod.rs`](../src/engine/primitives/ui/authoring/mod.rs)
+- [`packages/agent/src/domains/capability/contract.rs`](../src/domains/capability/contract.rs)
+- [`packages/agent/src/domains/capability/registry/primer.rs`](../src/domains/capability/registry/primer.rs)
+- [`packages/agent/skills/self-extend/SKILL.md`](../skills/self-extend/SKILL.md)
+- [`packages/agent/tests/managed_skill_sources.rs`](../tests/managed_skill_sources.rs)
+- [`packages/agent/src/engine/tests/module_activation/lifecycle_controls.rs`](../src/engine/tests/module_activation/lifecycle_controls.rs)
+- [`packages/agent/src/engine/tests/module_activation/operator_surfaces.rs`](../src/engine/tests/module_activation/operator_surfaces.rs)
+- [`packages/agent/src/engine/tests/module_activation/package_registration.rs`](../src/engine/tests/module_activation/package_registration.rs)
+- [`packages/ios-app/Sources/ViewModels/State/EngineConsoleModuleProjection.swift`](../../ios-app/Sources/ViewModels/State/EngineConsoleModuleProjection.swift)
+- [`packages/ios-app/Sources/Views/EngineConsole/EngineConsoleModuleProjectionView.swift`](../../ios-app/Sources/Views/EngineConsole/EngineConsoleModuleProjectionView.swift)
+- [`packages/ios-app/Sources/ViewModels/State/EngineConsoleState.swift`](../../ios-app/Sources/ViewModels/State/EngineConsoleState.swift)
+- [`packages/ios-app/Tests/ViewModels/EngineConsolePackProjectionTests.swift`](../../ios-app/Tests/ViewModels/EngineConsolePackProjectionTests.swift)
+- [`packages/ios-app/Tests/ViewModels/EngineConsoleStateTests.swift`](../../ios-app/Tests/ViewModels/EngineConsoleStateTests.swift)
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+- [`README.md`](../../../README.md)
+- [`packages/agent/docs/codebase-cleanup-scorecard.md`](codebase-cleanup-scorecard.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml module_remove_package_requires_disabled_activations_and_discards_configs -- --nocapture` | 101 then 0 | Red/green proof: the new lifecycle test first failed before `module::remove_package`; after implementation it proved active activations block removal, disabled activations allow removal, package/config resources are discarded with removal evidence, and removed packs are read-only for configure/activate. |
+| `cd packages/ios-app && xcodegen generate` | 0 | Regenerated the project after adding `EngineConsolePackProjectionTests.swift`. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsolePackProjectionTests` | 65 then 0 | Red/green proof: the new focused Swift test first failed because the module projection lacked pack title/subtitle/lifecycle/action labels; after implementation it passed and proved pack product labels, server-owned action labels, generated package surface request purpose, and no worker action leakage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml generated_ui_can_author_package_and_activation_operator_surfaces -- --nocapture` | 0 | Proved generated package surfaces use `Pack` vocabulary and expose stored `remove-package` action alongside inspect/configure/activate/source/conformance/trust actions; activation surfaces still expose disable/upgrade/rollback/quarantine. |
+| `cargo test --manifest-path packages/agent/Cargo.toml module_resource_types_and_capabilities_are_registered -- --nocapture` | 0 | Proved `module::remove_package` is discoverable, idempotent, resource-backed, and part of the canonical module primitive catalogue. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test managed_skill_sources self_extend_skill_is_managed_and_uses_live_worker_protocol_guide -- --nocapture` | 0 | Proved the managed `self-extend` chat entry names register, inspect, configure, activate, disable, rollback, revoke-source-approval, and remove while still requiring live `worker::protocol_guide` and forbidding copied protocol details. |
+| `diff -qr packages/agent/skills/self-extend ~/.tron/skills/self-extend` | 0 | Verified the local installed managed skill matches the repo source after the local-pack lifecycle update. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Verified Rust formatting after the lifecycle/action-summary/static-gate edits. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Verified the Rust server compiles after the pack lifecycle changes. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Verified the productization scorecard/evidence manifest state is formalized at 40/100 with TPROD-F next. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants codebase_cleanup_scorecard_stays_formalized -- --nocapture` | 0 | Verified the cleanup scorecard still remains formalized after updating the large-file audit row. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 0 | Verified exact large-file audit rows after `threat_model_invariants.rs` grew to 7,595 LOC and generated-UI action authoring remained within budget. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsolePackProjectionTests -only-testing:TronMobileTests/EngineConsoleStateTests -only-testing:TronMobileTests/SourceGuardTests` | 0 | Verified the new pack projection, touched Engine Console state expectations, and iOS source guards in one selected suite: 29 Swift Testing tests passed. |
+| `git diff --check` | 0 | Verified no whitespace errors before staging the checkpoint. |
+
+### Findings
+
+- `module::remove_package` is a high-risk canonical module write. It requires a
+  current `worker_package`, honors `expectedCurrentVersionId`, fails closed
+  while any matching activation remains live, then marks the package and
+  matching configs `discarded` with removal timestamp/reason evidence. It does
+  not hard-delete resource history.
+- Removed packs cannot be configured or activated until explicitly
+  re-registered. This keeps disconnected/offline and removed states
+  inspectable but read-only for mutation paths.
+- Server action summaries now provide product labels for module actions. iOS
+  renders those labels and presentation icons but continues to submit only
+  server-authored generated-surface coordinates.
+- Generated package surfaces are server-authored `Pack ...` surfaces and expose
+  the stored `remove-package` action. The generated UI renderer/client still
+  never constructs module target payloads.
+- The managed `self-extend` skill and model-facing primer/schema now describe
+  the local pack lifecycle through `capability::execute`, including the remote
+  discovery deferral.
+
+### Open Loops
+
+- Closed for TPROD-E. TPROD-F must add plain-language trust, promotion,
+  revocation, and cleanup state labels backed by source approval, signature,
+  conformance, promotion, revocation, and cleanup evidence.

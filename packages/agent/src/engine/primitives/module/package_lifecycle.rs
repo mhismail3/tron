@@ -1,4 +1,4 @@
-//! Package registration, configuration, inspection, and diagnostics.
+//! Package registration, configuration, removal, inspection, and diagnostics.
 
 use super::*;
 
@@ -110,6 +110,7 @@ impl ModulePrimitiveHandler {
         let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
         let package_version_id = required_string_owned(&invocation.payload, "packageVersionId")?;
         let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        ensure_resource_not_removed(&package, "pack", "configured")?;
         let manifest = version_payload(&package, &package_version_id)?;
         let config = invocation.payload.get("config").cloned().ok_or_else(|| {
             EngineError::PolicyViolation("module::configure requires config".to_owned())
@@ -172,6 +173,152 @@ impl ModulePrimitiveHandler {
             "version": version,
             "config": {"payload": version.payload},
             "resourceRefs": [resource_ref_from_version(&version, MODULE_CONFIG_KIND, role)],
+        }))
+    }
+
+    pub(super) fn remove_package(&self, invocation: &Invocation) -> Result<Value> {
+        let package_resource_id = required_string_owned(&invocation.payload, "packageResourceId")?;
+        let package = require_inspection(self, &package_resource_id, WORKER_PACKAGE_KIND)?;
+        if let Some(expected) = optional_string(invocation.payload.get("expectedCurrentVersionId"))?
+        {
+            ensure_expected_current_version(&package, &expected)?;
+        }
+        let package_payload = current_payload(&package).unwrap_or_else(|| json!({}));
+        let package_id = package_payload
+            .get("packageId")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned)
+            .or_else(|| {
+                package_resource_id
+                    .strip_prefix("worker-package:")
+                    .map(ToOwned::to_owned)
+            })
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(format!(
+                    "worker_package {package_resource_id} is missing packageId"
+                ))
+            })?;
+        let activations = self.list_resources(ListResources {
+            kind: Some(ACTIVATION_RECORD_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        let live_activations = live_activations_for_package(self, activations, &package_id)?;
+        if !live_activations.is_empty() {
+            return Err(EngineError::PolicyViolation(format!(
+                "module::remove_package requires no active activation; active activation refs: {}",
+                live_activations.join(", ")
+            )));
+        }
+
+        let removed_at = Utc::now().to_rfc3339();
+        let reason = optional_string(invocation.payload.get("reason"))?
+            .unwrap_or_else(|| "operator removed local pack".to_owned());
+        let mut refs = Vec::new();
+        let mut removed_configs = Vec::new();
+
+        let package_version =
+            if matches!(package.resource.lifecycle.as_str(), "discarded" | "removed") {
+                current_version(&package).cloned().ok_or_else(|| {
+                    EngineError::PolicyViolation(format!(
+                        "worker_package {package_resource_id} has no current version"
+                    ))
+                })?
+            } else {
+                let mut removed_payload = package_payload;
+                removed_payload["packageStatus"] = json!("removed");
+                removed_payload["removedAt"] = json!(removed_at.clone());
+                removed_payload["removalReason"] = json!(reason.clone());
+                self.update_resource(UpdateResource {
+                    resource_id: package_resource_id.clone(),
+                    expected_current_version_id: optional_string(
+                        invocation.payload.get("expectedCurrentVersionId"),
+                    )?
+                    .or_else(|| package.resource.current_version_id.clone()),
+                    lifecycle: Some("discarded".to_owned()),
+                    payload: removed_payload,
+                    state: None,
+                    locations: Vec::new(),
+                    trace_id: invocation.causal_context.trace_id.clone(),
+                    invocation_id: Some(invocation.id.clone()),
+                })?
+            };
+        refs.push(resource_ref_from_version(
+            &package_version,
+            WORKER_PACKAGE_KIND,
+            "removed",
+        ));
+
+        let configs = self.list_resources(ListResources {
+            kind: Some(MODULE_CONFIG_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 500,
+        })?;
+        for config in configs {
+            let Some(config_inspection) = self.inspect_resource(&config.resource_id)? else {
+                continue;
+            };
+            let Some(config_payload) = current_payload(&config_inspection) else {
+                continue;
+            };
+            if !config_matches_package(&config_payload, &package_id, &package_resource_id) {
+                continue;
+            }
+            let version = if matches!(
+                config_inspection.resource.lifecycle.as_str(),
+                "discarded" | "removed"
+            ) {
+                current_version(&config_inspection)
+                    .cloned()
+                    .ok_or_else(|| {
+                        EngineError::PolicyViolation(format!(
+                            "module_config {} has no current version",
+                            config.resource_id
+                        ))
+                    })?
+            } else {
+                let mut removed_payload = config_payload;
+                removed_payload["configStatus"] = json!("removed");
+                removed_payload["packageStatus"] = json!("removed");
+                removed_payload["removedAt"] = json!(removed_at.clone());
+                removed_payload["removalReason"] = json!(reason.clone());
+                self.update_resource(UpdateResource {
+                    resource_id: config.resource_id.clone(),
+                    expected_current_version_id: config_inspection
+                        .resource
+                        .current_version_id
+                        .clone(),
+                    lifecycle: Some("discarded".to_owned()),
+                    payload: removed_payload,
+                    state: None,
+                    locations: Vec::new(),
+                    trace_id: invocation.causal_context.trace_id.clone(),
+                    invocation_id: Some(invocation.id.clone()),
+                })?
+            };
+            refs.push(resource_ref_from_version(
+                &version,
+                MODULE_CONFIG_KIND,
+                "removed",
+            ));
+            removed_configs.push(json!({
+                "resourceId": config.resource_id,
+                "versionId": version.version_id,
+            }));
+        }
+
+        Ok(json!({
+            "package": {
+                "resourceId": package_resource_id,
+                "packageId": package_id,
+                "status": "removed",
+                "removedAt": removed_at,
+                "reason": reason
+            },
+            "removedConfigs": removed_configs,
+            "resourceRefs": refs,
         }))
     }
 
@@ -359,4 +506,46 @@ impl ModulePrimitiveHandler {
                 .unwrap_or_else(|| json!([])),
         })
     }
+}
+
+fn live_activations_for_package(
+    host: &ModulePrimitiveHandler,
+    resources: Vec<EngineResource>,
+    package_id: &str,
+) -> Result<Vec<String>> {
+    let package_resource_id = package_resource_id(package_id);
+    let mut live = Vec::new();
+    for resource in resources {
+        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
+            continue;
+        };
+        let Some(payload) = current_payload(&inspection) else {
+            continue;
+        };
+        if !config_matches_package(&payload, package_id, &package_resource_id) {
+            continue;
+        }
+        if !activation_is_terminal(&inspection, &payload) {
+            live.push(resource.resource_id);
+        }
+    }
+    Ok(live)
+}
+
+fn config_matches_package(payload: &Value, package_id: &str, package_resource_id: &str) -> bool {
+    payload.get("packageId").and_then(Value::as_str) == Some(package_id)
+        || payload
+            .get("packageResourceId")
+            .and_then(Value::as_str)
+            .is_some_and(|id| id == package_resource_id)
+}
+
+fn activation_is_terminal(inspection: &EngineResourceInspection, payload: &Value) -> bool {
+    matches!(
+        inspection.resource.lifecycle.as_str(),
+        "disabled" | "failed" | "quarantined" | "discarded" | "removed" | "damaged"
+    ) || matches!(
+        payload.get("activationStatus").and_then(Value::as_str),
+        Some("disabled" | "failed" | "quarantined" | "removed")
+    )
 }

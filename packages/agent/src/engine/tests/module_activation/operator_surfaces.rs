@@ -405,6 +405,7 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                 "module::inspect_package",
                 "module::configure",
                 "module::activate",
+                "module::remove_package",
                 "module::verify_source",
                 "module::run_conformance",
                 "module::simulate_trust_change",
@@ -426,6 +427,24 @@ async fn generated_ui_can_author_package_and_activation_operator_surfaces() {
                     .to_string()
                     .contains("configure-package"),
                 "package layout must render stored module action controls"
+            );
+            assert_eq!(
+                surface.value.as_ref().unwrap()["surface"]["title"],
+                "Pack demo-tools",
+                "generated package surfaces must use product pack vocabulary"
+            );
+            assert!(
+                surface.value.as_ref().unwrap()["surface"]["actions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(
+                        |action| action["targetFunctionId"] == "module::remove_package"
+                            && action["actionId"] == "remove-package"
+                            && action["consequence"]["recommendedCanonicalAction"]
+                                == "module::remove_package"
+                    ),
+                "package surface must expose server-authored removal"
             );
         }
         if target_type == "activation" {

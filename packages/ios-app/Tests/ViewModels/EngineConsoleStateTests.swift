@@ -643,7 +643,7 @@ struct EngineConsoleStateTests {
         await state.authorSurface(targetType: packageSurface.targetType, targetId: packageSurface.targetId)
         #expect(client.lastSurfaceRequest?.targetType == "package")
         #expect(client.lastSurfaceRequest?.targetId == "worker-package:demo")
-        #expect(client.lastSurfaceRequest?.purpose == "Inspect package worker-package:demo")
+        #expect(client.lastSurfaceRequest?.purpose == "Manage pack demo")
     }
 
     @Test("engine console loads validates and refreshes generated surfaces through ui primitives")

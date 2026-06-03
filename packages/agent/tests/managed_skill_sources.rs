@@ -42,9 +42,18 @@ fn self_extend_skill_is_managed_and_uses_live_worker_protocol_guide() {
         "catalog::watch_snapshot",
         "capability::inspect",
         "ui::surface_for_target",
+        "module::register_package",
+        "module::inspect_package",
+        "module::configure",
+        "module::activate",
+        "module::disable",
+        "module::rollback",
+        "module::revoke_source_approval",
+        "module::remove_package",
         "engine::promote",
         "worker::disconnect",
         "sandbox::stop_spawned_worker",
+        "Remote package discovery and marketplace install are outside this campaign.",
         "## Gotchas",
     ] {
         assert!(

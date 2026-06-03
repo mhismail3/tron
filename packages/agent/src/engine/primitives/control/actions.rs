@@ -39,6 +39,13 @@ pub(super) fn substrate_actions() -> Vec<Value> {
         ),
         action_summary("agent::abort", "goal", "sessionId", "high", true),
         action_summary(
+            "module::register_package",
+            "package",
+            "manifest",
+            "medium",
+            false,
+        ),
+        action_summary(
             "module::inspect_package",
             "package",
             "packageId",
@@ -84,6 +91,13 @@ pub(super) fn substrate_actions() -> Vec<Value> {
             "module::quarantine",
             "activation",
             "resourceId",
+            "high",
+            true,
+        ),
+        action_summary(
+            "module::remove_package",
+            "package",
+            "packageResourceId",
             "high",
             true,
         ),
@@ -272,21 +286,55 @@ pub(super) fn actions_for_target(target_type: &str, target_id: &str) -> Vec<Valu
                 })
         })
         .map(|mut action| {
-            let key = match target_type {
-                "worker" => "workerId",
-                "grant" => "grantId",
-                "package" => "packageId",
-                "activation" => "activationResourceId",
-                "goal" | "resource" => "resourceId",
-                _ => "targetId",
+            let target_field = action
+                .get("targetField")
+                .and_then(Value::as_str)
+                .unwrap_or("targetId");
+            let (key, value) = match target_type {
+                "worker" => ("workerId", json!(target_id)),
+                "grant" => ("grantId", json!(target_id)),
+                "package" => package_target(target_field, target_id),
+                "activation" => ("activationResourceId", json!(target_id)),
+                "goal" | "resource" => ("resourceId", json!(target_id)),
+                _ => ("targetId", json!(target_id)),
             };
             action["target"] = json!({
                 "field": key,
-                "value": target_id,
+                "value": value,
             });
             action
         })
         .collect()
+}
+
+fn package_target<'a>(target_field: &'a str, target_id: &str) -> (&'a str, Value) {
+    match target_field {
+        "packageResourceId" | "resourceId" | "targetResourceId" => (
+            target_field,
+            json!(if target_id.starts_with("worker-package:") {
+                target_id.to_owned()
+            } else {
+                format!("worker-package:{target_id}")
+            }),
+        ),
+        "packageId" => (
+            target_field,
+            json!(
+                target_id
+                    .strip_prefix("worker-package:")
+                    .unwrap_or(target_id)
+                    .to_owned()
+            ),
+        ),
+        "selectors" => (
+            target_field,
+            json!([target_id
+                .strip_prefix("worker-package:")
+                .unwrap_or(target_id)
+                .to_owned()]),
+        ),
+        _ => (target_field, json!(target_id)),
+    }
 }
 
 fn action_summary(

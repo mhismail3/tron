@@ -10,20 +10,20 @@ struct EngineConsoleModuleProjectionCard: View {
         EngineConsoleCard {
             EngineConsoleCardHeader(
                 symbol: "shippingbox",
-                title: "Modules",
-                subtitle: "Package, config, activation, trust, health, evidence, and action projection."
+                title: projection.cardTitle,
+                subtitle: projection.cardSubtitle
             )
 
             if projection.isEmpty {
                 EngineConsoleEmptyState(
                     symbol: "shippingbox",
-                    title: "No modules",
-                    message: "Registered packages and activation records will appear here after module capabilities run."
+                    title: projection.emptyTitle,
+                    message: projection.emptyMessage
                 )
             } else {
                 VStack(alignment: .leading, spacing: 12) {
                     EngineConsoleBadgeRow(values: [
-                        "\(projection.packages.count) packages",
+                        "\(projection.packages.count) packs",
                         "\(projection.configs.count) configs",
                         "\(projection.activations.count) activations",
                         "\(projection.sourceTrust.count) trust rows",
@@ -45,7 +45,7 @@ struct EngineConsoleModuleProjectionCard: View {
     @ViewBuilder
     private var surfaceSection: some View {
         if !projection.surfaceTargets.isEmpty {
-            moduleSectionTitle("Operator Surfaces")
+            moduleSectionTitle("Pack Surfaces")
             ForEach(Array(projection.surfaceTargets.prefix(6)), id: \.id) { target in
                 Button {
                     openSurface(target)
@@ -66,23 +66,23 @@ struct EngineConsoleModuleProjectionCard: View {
     @ViewBuilder
     private var resourceSection: some View {
         if !projection.packages.isEmpty || !projection.configs.isEmpty || !projection.activations.isEmpty {
-            moduleSectionTitle("Resources")
+            moduleSectionTitle("Pack Resources")
             ForEach(Array(projection.packages.prefix(4)), id: \.id) { package in
                 EngineConsoleKeyValueRow(
-                    package.resourceId,
-                    [package.lifecycle, package.versionId].compactMap { $0 }.joined(separator: " / ")
+                    package.displayName,
+                    [package.lifecycleLabel, package.versionId].compactMap { $0 }.joined(separator: " / ")
                 )
             }
             ForEach(Array(projection.configs.prefix(3)), id: \.id) { config in
                 EngineConsoleKeyValueRow(
-                    config.resourceId,
-                    [config.lifecycle, config.versionId].compactMap { $0 }.joined(separator: " / ")
+                    config.displayName,
+                    [config.lifecycleLabel, config.versionId].compactMap { $0 }.joined(separator: " / ")
                 )
             }
             ForEach(Array(projection.activations.prefix(3)), id: \.id) { activation in
                 EngineConsoleKeyValueRow(
-                    activation.resourceId,
-                    [activation.lifecycle, activation.versionId].compactMap { $0 }.joined(separator: " / ")
+                    activation.displayName,
+                    [activation.lifecycleLabel, activation.versionId].compactMap { $0 }.joined(separator: " / ")
                 )
             }
         }
@@ -134,10 +134,10 @@ struct EngineConsoleModuleProjectionCard: View {
     @ViewBuilder
     private var actionSection: some View {
         if !projection.actions.isEmpty {
-            moduleSectionTitle("Actions")
+            moduleSectionTitle("Pack Actions")
             ForEach(Array(projection.actions.prefix(12)), id: \.id) { action in
                 EngineConsoleKeyValueRow(
-                    action.functionId,
+                    action.displayLabel,
                     action.detailText.isEmpty ? "available" : action.detailText
                 )
             }
