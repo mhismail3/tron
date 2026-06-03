@@ -643,8 +643,8 @@ fn productization_scorecard_stays_formalized() {
 
     for required in [
         "# Tron Productization Scorecard: Self-Extending Agentic Product",
-        "Current score: **88/100**",
-        "Status: **active; TPROD-K passed after fix; TPROD-L next**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix |",
         "| TPROD-B | `self-extend` managed skill | 7 | passed_after_fix |",
         "| TPROD-C | Chat-led self-extension UX | 10 | passed_after_fix |",
@@ -656,27 +656,28 @@ fn productization_scorecard_stays_formalized() {
         "| TPROD-I | Tron replaces Codex for local work loop | 9 | passed_after_fix |",
         "| TPROD-J | Mixed real-world example packs | 6 | passed_after_fix |",
         "| TPROD-K | User, operator, and release-note docs | 5 | passed_after_fix |",
-        "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending |",
+        "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | passed_after_fix |",
         "No remote package install/discovery path beyond explicit deferred docs",
-        "TPROD-L is active",
+        "No productization scorecard rows remain open",
     ] {
         assert!(
             scorecard.contains(required),
             "productization scorecard missing required text: {required}"
         );
     }
-    for premature_claim in [
-        "Current score: **100/100**",
-        "Status: **completed**",
-        "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | passed",
+    for stale_marker in [
+        "Current score: **88/100**",
+        "Status: **active; TPROD-K passed after fix; TPROD-L next**",
+        "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending |",
+        "TPROD-L is active",
     ] {
         assert!(
-            !scorecard.contains(premature_claim),
-            "productization scorecard must not overclaim before evidence: {premature_claim}"
+            !scorecard.contains(stale_marker),
+            "productization scorecard must not retain stale active closeout text: {stale_marker}"
         );
     }
     assert!(
-        manifest.contains("Current score: **88/100**")
+        manifest.contains("Current score: **100/100**")
             && manifest.contains("| TPROD-A | passed_after_fix |")
             && manifest.contains("| TPROD-B | passed_after_fix |")
             && manifest.contains("| TPROD-C | passed_after_fix |")
@@ -688,12 +689,19 @@ fn productization_scorecard_stays_formalized() {
             && manifest.contains("| TPROD-I | passed_after_fix |")
             && manifest.contains("| TPROD-J | passed_after_fix |")
             && manifest.contains("| TPROD-K | passed_after_fix |")
+            && manifest.contains("| TPROD-L | passed_after_fix |")
+            && manifest.contains("## TPROD-L Evidence")
+            && manifest
+                .contains("tprod_l_external_worker_soak_registers_invokes_disconnects_and_reopens")
+            && manifest.contains("/tmp/tron-tprod-l-iphone17pro-light-large.png")
+            && manifest.contains("/tmp/tron-tprod-l-ipadpro13-dark-accessibility-large.png")
             && manifest.contains("No remote package discovery"),
-        "productization evidence manifest must track the same score, next row, and deferred remote boundary"
+        "productization evidence manifest must track the completed score, final soak/visual proof, and deferred remote boundary"
     );
     let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
     assert!(
         readme.contains("packages/agent/docs/tron-productization-scorecard.md")
+            && readme.contains("completed master\n  productization scorecard at 100/100")
             && readme.contains("packages/agent/docs/tron-productization-evidence-manifest.md")
             && readme.contains("packages/agent/examples/local-packs")
             && readme.contains("packages/agent/docs/self-extending-local-product-user-guide.md")

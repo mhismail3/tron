@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **88/100**
+Current score: **100/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -36,7 +36,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-I | passed_after_fix | Flagship Tron-maintains-Tron chat loop creates, repairs, tests, reviews, and cleans up a workspace helper with generated UI plus model/subagent evidence. Details below. |
 | TPROD-J | passed_after_fix | Three polished local example packs ship as local-process templates and pass registration, source, conformance, activation, invocation, generated UI, and Python syntax proof. Details below. |
 | TPROD-K | passed_after_fix | Product user/operator/release-note/troubleshooting docs are linked from README and guarded by focused static tests. Details below. |
-| TPROD-L | pending | Full hardening, visual QA, soak, and closeout gates not yet run. |
+| TPROD-L | passed_after_fix | Hardening, visual QA, soak, Mac/CLI smoke, static gates, docs drift checks, and closeout passed. Details below. |
 
 ## TPROD-A Evidence
 
@@ -757,3 +757,70 @@ row, note command return codes, and keep open loops explicit.
 - Closed for TPROD-K. TPROD-L must run hardening, visual QA, soak, Mac/CLI
   smoke, static absence gates, docs drift checks, and final closeout before the
   productization scorecard can reach 100/100.
+
+## TPROD-L Evidence
+
+### Files
+
+- [`packages/agent/src/engine/tests/productization_closeout.rs`](../src/engine/tests/productization_closeout.rs)
+- [`packages/agent/src/engine/tests/mod.rs`](../src/engine/tests/mod.rs)
+- [`packages/agent/tests/threat_model_invariants.rs`](../tests/threat_model_invariants.rs)
+- [`packages/agent/docs/codebase-cleanup-scorecard.md`](codebase-cleanup-scorecard.md)
+- [`README.md`](../../../README.md)
+- [`packages/agent/docs/self-extending-local-product-release-notes.md`](self-extending-local-product-release-notes.md)
+- [`packages/agent/docs/tron-productization-scorecard.md`](tron-productization-scorecard.md)
+- [`packages/agent/docs/tron-productization-evidence-manifest.md`](tron-productization-evidence-manifest.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml tprod_l_external_worker_soak_registers_invokes_disconnects_and_reopens -- --nocapture` | 101 then 0 | Red/green deterministic external-worker soak. First run exposed the test's direct host-invocation route as `NotRoutable`; after attaching the real external invoker and session provenance, the test passed six connect/register/invoke/disconnect cycles and reopened SQLite without stale function leakage. |
+| `cargo test --manifest-path packages/agent/Cargo.toml tprod_j_local_example_packs_register_activate_and_author_generated_ui -- --nocapture` | 0 | Re-ran local example-pack registration, source verification, conformance, approval, configure, activate, invoke, and generated UI proof. |
+| `cargo test --manifest-path packages/agent/Cargo.toml sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect -- --nocapture` | 0 | Proved stale durable workers reopen unhealthy and not routable without socket reconnect. |
+| `cargo test --manifest-path packages/agent/Cargo.toml generated_ui_resource_and_renderer_gates_stay_on -- --nocapture` | 0 | Re-ran generated UI/resource/static gate for renderer ownership and coordinate-only client submission. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test integration tprod_i_flagship_chat_loop_reaches_review_ready -- --nocapture` | 0 | Re-ran flagship chat-led Tron-maintains-Tron loop; 1 selected test passed in 121.69s. |
+| `cd packages/ios-app && xcodegen generate` | 0 | Regenerated the iOS project before focused product UI tests and simulator build. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,id=7BDA4AF9-1C40-47E3-A925-0F88C191F263' -only-testing:TronMobileTests/GeneratedUIRendererTests -only-testing:TronMobileTests/EngineConsoleCreatedByAgentProjectionTests -only-testing:TronMobileTests/EngineConsolePackProjectionTests -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests -only-testing:TronMobileTests/SubagentStateTests -only-testing:TronMobileTests/EngineConsoleAccessibilityTests -only-testing:TronMobileTests/SourceGuardTests` | 0 | Focused iPhone 17 Pro product UI matrix; 28 selected tests passed for generated UI, Created by Agent, Packs, capability display, subagent state, accessibility, and source guards. |
+| `cd packages/ios-app && xcodebuild build -scheme 'Tron Beta' -destination 'platform=iOS Simulator,id=7BDA4AF9-1C40-47E3-A925-0F88C191F263' -derivedDataPath /tmp/tron-ios-tprod-l-derived` | 0 | Built the stable Beta simulator app used for visual screenshots. |
+| `xcrun simctl ... screenshot /tmp/tron-tprod-l-iphone17pro-light-large.png` | 0 | iPhone 17 Pro visual proof, light appearance request with large content size; screenshot dimensions 1206x2622 and visible chat/capability-chip state. |
+| `xcrun simctl ... screenshot /tmp/tron-tprod-l-ipadpro13-dark-accessibility-large.png` | 0 | iPad Pro 13-inch visual proof, dark appearance with accessibility-large content size; screenshot dimensions 2064x2752 and visible session/sidebar state. |
+| `cd packages/mac-app && xcodegen generate` | 0 | Regenerated the Mac project before wrapper smoke. |
+| `cd packages/mac-app && xcodebuild build-for-testing -scheme TronMac -destination 'platform=macOS'` | 0 | Mac Debug wrapper compile/link/signing smoke for the hosted test bundle without release packaging. |
+| `cd packages/mac-app && xcodebuild test -scheme TronMac -destination 'platform=macOS' -only-testing:TronMacTests/MacRuntimeVariantTests -only-testing:TronMacTests/MenuBarItemBuilderTests -only-testing:TronMacTests/ServerStatusPollerTests -only-testing:TronMacTests/InstallPlannerTests -only-testing:TronMacTests/ManagedSkillInstallerTests -only-testing:TronMacTests/TronPathsTests -only-testing:TronMacTests/ServerPingTests` | 0 | Focused Mac wrapper smoke; 59 selected tests passed for runtime variant, menu/status, install planning, managed skill sync, path constants, and server ping behavior. |
+| `scripts/tron --help` | 0 | CLI dispatcher smoke without invoking deploy/release paths. |
+| `scripts/tron version print` | 0 | Version mirror readout: `0.1.0-beta.7` / `v0.1 (Beta 7)`. |
+| `scripts/tron version check` | 0 | Version mirrors in sync. |
+| `scripts/tron status --json` | 0 | Read-only service smoke; dev takeover server was healthy on port 9847. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Final scorecard guard: confirmed 100/100 completed status, TPROD-L `passed_after_fix`, final soak/visual evidence refs, README links, and stale active/pending closeout text absence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test productization_docs_invariants -- --nocapture` | 0 | Product user/operator/release-note/troubleshooting docs and README links remain current. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 101 then 0 | Final closeout first caught exact LOC drift in `threat_model_invariants.rs`; after syncing the current LOC row to 7630 without widening the 7650 ceiling, the gate passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants codebase_cleanup_scorecard_stays_formalized -- --nocapture` | 0 | Confirmed the cleanup scorecard remains formalized after the large-file audit row sync. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Rust formatting check. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Rust compile check. |
+| `if rg -n "tron deploy\|remote package discovery is implemented\|remote marketplace install is implemented\|client-owned trust\|client-owned policy\|client-owned model routing\|client-authored generated action target" packages/agent/docs/self-extending-local-product-*.md packages/agent/examples/local-packs; then exit 1; else exit 0; fi` | 0 | Static absence scan for forbidden product-doc/example claims. |
+| `git diff --check` | 0 | Final whitespace/diff hygiene check. |
+
+### Findings
+
+- Tiered soak is now explicit: a new engine test covers repeated local
+  external-worker registration, invocation, disconnect cleanup, catalog
+  revision movement, and post-reopen absence of stale functions; existing
+  package and restart-chaos tests cover pack activation and stale durable-worker
+  failure modes.
+- Visual QA has current simulator artifacts for iPhone 17 Pro and iPad Pro
+  13-inch, plus focused iOS tests for generated UI, Created by Agent, Packs,
+  capability chips/details, subagent chips, accessibility, and source guards.
+- Mac and CLI closeout stayed local and non-release: Debug wrapper build/test
+  smoke and read-only CLI/version/status commands passed; no push, merge,
+  release, deploy, notarization, packaging, or rollout command was run.
+- Static gates passed for scorecard state, product docs, large-file budgets,
+  generated UI ownership, Rust formatting/compile, whitespace hygiene, and
+  forbidden remote/release/client-owned behavior claims in the product
+  docs/examples.
+
+### Open Loops
+
+- Closed for TPROD-L. The productization scorecard is complete at 100/100.
+- Existing successor scope for confirmation-gated iPad action flows remains in
+  [`ipad-action-time-followup-scorecard.md`](ipad-action-time-followup-scorecard.md).

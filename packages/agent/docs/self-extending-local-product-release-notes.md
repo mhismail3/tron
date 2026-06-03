@@ -1,12 +1,12 @@
 # Self-Extending Local Product Notes
 
-These notes summarize the productization work completed so far in the active
-scorecard campaign. This is not a release, deploy, push, merge, notarization, or rollout checklist.
+These notes summarize the completed productization scorecard campaign.
+This is not a release, deploy, push, merge, notarization, or rollout checklist.
 
 ## Product Shape
 
-Tron is being productized as a local, chat-led self-extending agent
-environment. The main flow is chat-led self-extension: a user can approve a
+Tron is productized as a local, chat-led self-extending agent environment. The
+main flow is chat-led self-extension: a user can approve a
 workspace-local grant, watch capability chips, inspect evidence, and let Tron
 create, repair, test, and clean up local capabilities or packs.
 
@@ -56,5 +56,6 @@ Local pack discovery is disk-only. Remote package discovery, remote marketplace
 install, package publishing, production rollout, and release automation are not
 part of this campaign.
 
-TPROD-K owns these docs. TPROD-L still owns final hardening, visual QA, soak,
-Mac/CLI smoke, static gates, docs drift checks, and closeout evidence.
+TPROD-K added these docs. TPROD-L completed final hardening, visual QA, soak,
+Mac/CLI smoke, static gates, docs drift checks, and closeout evidence for the
+100/100 productization scorecard.

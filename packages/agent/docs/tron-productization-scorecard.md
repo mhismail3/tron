@@ -2,8 +2,8 @@
 
 Created: **2026-06-03**
 Initial score: **0/100**
-Current score: **88/100**
-Status: **active; TPROD-K passed after fix; TPROD-L next**
+Current score: **100/100**
+Status: **completed**
 Evidence manifest: [`tron-productization-evidence-manifest.md`](tron-productization-evidence-manifest.md)
 
 ## Scope
@@ -78,7 +78,7 @@ scorecard plus the evidence manifest, and commit a coherent checkpoint.
 | TPROD-I | Tron replaces Codex for local work loop | 9 | passed_after_fix | Flagship proof: a Tron chat session creates or updates a Tron helper capability/skill, tests it, updates docs, shows UI evidence, and reaches local review-ready state without push/merge/release. | Added `tprod_i_flagship_chat_loop_reaches_review_ready`, a full chat-led integration proof that grants workspace-local autonomy, fetches live `worker::protocol_guide`, writes an intentionally broken helper draft, repairs it from the guide, inspects materialized-file version history, spawns workspace-visible `tprod_i_flagship::review_ready`, proves catalog visibility, invokes the helper, inspects it, user-approves and runs conformance evidence, creates a generated `ui_surface`, spawns a Review subagent with `Local when possible` routing evidence, emits a review-ready final answer, stores it in session history, and stops the sandbox helper without push, merge, release, or deploy. Fixes made during proof: provider-backed integration servers now wire the production subagent manager, workspace ids come from persisted session workspace truth, and sandbox cleanup tolerates non-volatile worker disconnect state after process stop. | Closed. TPROD-J must ship three polished local example packs without remote discovery or personal-info literals. |
 | TPROD-J | Mixed real-world example packs | 6 | passed_after_fix | Ship three polished local examples: Tron maintainer pack, everyday local automation pack, and creative/knowledge pack. | Added `packages/agent/examples/local-packs/` with three local-process pack examples: `tron-maintainer`, `everyday-organizer`, and `creative-knowledge`. Each ships a README, executable `worker.py`, `manifest.template.json` with local-digest-pinned provenance, exact declared capabilities, config schema, local runtime refs, model/subagent presentation hints, and no remote package discovery. Added a focused engine proof that materializes the shipped files, renders real manifests, computes digests, registers all three packages, verifies source, records conformance, approves source, configures, activates through a test-only exact-capability spawn handler, invokes a registered function, and authors generated package UI with stored module actions. Python syntax checks passed for the shared runtime and all worker entrypoints. | Closed. TPROD-K must complete user/operator/release-note docs and troubleshooting. |
 | TPROD-K | User, operator, and release-note docs | 5 | passed_after_fix | User guide, operator guide, release-note-style product notes, README/progressive docs updates, and troubleshooting docs are current. | Added four durable product docs: `self-extending-local-product-user-guide.md`, `self-extending-local-product-operator-guide.md`, `self-extending-local-product-release-notes.md`, and `self-extending-local-product-troubleshooting.md`. They cover chat-led self-extension, Created by Agent, local Packs, generated UI, trust labels, model presets, operator lifecycle commands, local-only boundaries, release-note-style product notes, and troubleshooting for workspace autonomy, source verification, conformance, generated UI, trust presentation, catalog registration, and cleanup. Added `productization_docs_invariants` to guard required markers, README links, and forbidden remote/release/client-owned behavior claims. | Closed. TPROD-L must run hardening, visual QA, soak, Mac/CLI smoke, static gates, docs drift checks, and closeout. |
-| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending | Tiered worker soak, focused iOS visual matrix, Mac/CLI smoke, static absence gates, targeted tests, docs drift checks, and ledger closeout all pass. | This checkpoint adds the first static scorecard gate only. | Full closeout remains open until all rows are implemented and verified. |
+| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | passed_after_fix | Tiered worker soak, focused iOS visual matrix, Mac/CLI smoke, static absence gates, targeted tests, docs drift checks, and ledger closeout all pass. | Added `tprod_l_external_worker_soak_registers_invokes_disconnects_and_reopens`, a deterministic SQLite-backed external-worker soak that repeats local worker connect/register/invoke/disconnect cycles, verifies cleanup after each cycle, and reopens the database to prove stale function leakage does not survive. Closeout reran the flagship chat loop, local example pack lifecycle, stale durable-worker restart gate, generated UI/resource renderer guard, product docs invariant, large-file budget, Rust fmt/check, iOS focused product UI tests, iPhone/iPad simulator screenshot proof, Mac wrapper build/test smoke, CLI/version/status smoke, and forbidden remote/release/client-owned behavior scan. Screenshots: `/tmp/tron-tprod-l-iphone17pro-light-large.png`, `/tmp/tron-tprod-l-ipadpro13-dark-accessibility-large.png`. | Closed. No productization scorecard rows remain open. |
 
 ## Required Scenarios
 
@@ -193,6 +193,6 @@ Baseline was audited on 2026-06-03 from branch
 
 ## Next Test
 
-TPROD-L is active. The next required proof is hardening, visual QA, soak,
-Mac/CLI smoke, static gates, docs drift checks, and final closeout for the
-self-extending local product flow.
+The productization scorecard is complete at 100/100. No productization rows
+remain open. Existing successor scope for confirmation-gated iPad action flows
+stays in `packages/agent/docs/ipad-action-time-followup-scorecard.md`.

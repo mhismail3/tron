@@ -117,11 +117,12 @@ Current living entry points:
 - `packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md`:
   active execution scorecard portfolio for proving the recursive agent/human
   plug-and-play harness loop from the current baseline.
-- `packages/agent/docs/tron-productization-scorecard.md`: active master
-  productization scorecard for the chat-led, self-extending local agent product
-  campaign.
+- `packages/agent/docs/tron-productization-scorecard.md`: completed master
+  productization scorecard at 100/100 for the chat-led, self-extending local
+  agent product campaign.
 - `packages/agent/docs/tron-productization-evidence-manifest.md`: companion
-  command/source/UI/soak evidence manifest for the productization scorecard.
+  command/source/UI/soak evidence manifest for the completed productization
+  scorecard.
 - `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
   for chat-led self-extension, Created by Agent, Packs, generated UI, trust
   labels, and model presets.
@@ -129,8 +130,8 @@ Current living entry points:
   operator guide for local helper creation, pack lifecycle, source trust,
   generated UI actions, and evidence refs.
 - `packages/agent/docs/self-extending-local-product-release-notes.md`:
-  release-note-style product notes for the active self-extending local product
-  campaign, without release/deploy steps.
+  release-note-style product notes for the completed self-extending local
+  product campaign, without release/deploy steps.
 - `packages/agent/docs/self-extending-local-product-troubleshooting.md`:
   troubleshooting guide for workspace autonomy, worker/catalog registration,
   source/conformance evidence, generated UI, trust labels, and model routing.
