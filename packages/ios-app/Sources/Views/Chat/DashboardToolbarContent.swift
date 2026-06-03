@@ -11,8 +11,7 @@ struct DashboardToolbarContent: ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             if let onToggleSidebar {
                 Button(action: onToggleSidebar) {
-                    Label("Show sidebar", systemImage: "sidebar.leading")
-                        .labelStyle(.iconOnly)
+                    Image(systemName: "sidebar.leading")
                         .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                         .foregroundStyle(accent)
                 }
@@ -28,18 +27,13 @@ struct DashboardToolbarContent: ToolbarContent {
                         }
                     }
                 } label: {
-                    Label {
-                        Text("Navigation")
-                    } icon: {
-                        Image("TronLogoVector")
-                            .renderingMode(.template)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(height: 28)
-                            .offset(y: 1)
-                            .foregroundStyle(accent)
-                    }
-                    .labelStyle(.iconOnly)
+                    Image("TronLogoVector")
+                        .renderingMode(.template)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 28)
+                        .offset(y: 1)
+                        .foregroundStyle(accent)
                 }
                 .accessibilityLabel("Navigation")
                 .hoverEffect(.highlight)
@@ -59,8 +53,7 @@ struct DashboardToolbarContent: ToolbarContent {
                 )
             }
             Button(action: actions.onSettings) {
-                Label("Settings", systemImage: "gearshape")
-                    .labelStyle(.iconOnly)
+                Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))
                     .foregroundStyle(accent)
             }

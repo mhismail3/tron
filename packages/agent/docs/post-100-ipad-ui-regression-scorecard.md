@@ -1055,6 +1055,15 @@ were closed here, with confirmation-gated residuals transferred to
   Engine section selection, and screenshots; no capability search submit,
   approval, generated UI submit/refresh, source-control action, fork, archive,
   delete, reset, send, voice-record, or git mutation was invoked.
+- 2026-06-03 iPhone follow-up: the iPad accessibility change above made the
+  compact dashboard toolbar render a floating `...` overflow button instead of
+  the intended explicit Tron-logo navigation menu on the left and Settings gear
+  on the right. `DashboardToolbarContent` keeps the explicit accessibility
+  labels, but uses direct `Image` toolbar labels again for sidebar/navigation/
+  settings so compact iPhone restores the pre-regression visual controls.
+  `SourceGuardTests.testDashboardToolbarKeepsExplicitIPhoneIcons` guards the
+  direct-image shape and blocks reintroducing `Label("Settings"` or
+  `Text("Navigation")` in this toolbar.
 - Additional iPad sheet-standardization follow-up audited reusable `.sheet`
   content for presenter-owned adaptive sizing. `IPadSheetPresentationTests`
   first failed because `ProcessListSheet` and `SubagentResultsListSheet`

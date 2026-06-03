@@ -10,6 +10,24 @@ import Foundation
 /// contain them.
 @Suite("Source Guards")
 struct SourceGuardTests {
+    @Test("Dashboard toolbar keeps explicit iPhone icons")
+    func testDashboardToolbarKeepsExplicitIPhoneIcons() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let toolbar = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/Chat/DashboardToolbarContent.swift"),
+            encoding: .utf8
+        )
+
+        #expect(toolbar.contains(#"Image("TronLogoVector")"#))
+        #expect(toolbar.contains(#"Image(systemName: "gearshape")"#))
+        #expect(toolbar.contains(#".accessibilityLabel("Navigation")"#))
+        #expect(toolbar.contains(#".accessibilityLabel("Settings")"#))
+        #expect(!toolbar.contains(#"Label("Settings", systemImage:"#))
+        #expect(!toolbar.contains(#"Text("Navigation")"#))
+    }
 
     @Test("No personal-info literals in iOS Sources or Tests")
     func testNoPersonalInfoLiterals() throws {
