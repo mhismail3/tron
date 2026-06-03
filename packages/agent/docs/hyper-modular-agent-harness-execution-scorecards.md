@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **99/100**
+Current score: **92/100**
 
 Status: **running**
 
@@ -1551,7 +1551,7 @@ is pending, indirectly verified, or stale.
 
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
-| HMH-G1 | Requirement-by-requirement completion audit | 20 | pending | Matrix maps each source-derived requirement and user objective clause to authoritative files, commands, tests, screenshots, DB rows, and scorecard rows. | Keep goal active if any requirement is indirect or missing. |
+| HMH-G1 | Requirement-by-requirement completion audit | 20 | passed_after_fix | Matrix maps each source-derived requirement and user objective clause to authoritative files, commands, tests, screenshots, DB rows, and scorecard rows. | Keep goal active if any requirement is indirect or missing. |
 | HMH-G2 | Absence gates are current | 15 | pending | Static scans reject client policy/targets, prompt-expanded tool catalogs, fallback discovery, global dynamic visibility, alternate spawn, generic module action, and stale scorecard states. | Tighten tests before closeout. |
 | HMH-G3 | Transcript/session audit | 15 | pending | Session audit searches prior failures and current campaign transcripts for repeated architecture drift, stale claims, or unfinished rows. | Add successor rows if patterns remain. |
 | HMH-G4 | Live recursive loop rerun | 20 | pending | End-to-end HMH-B/HMH-E scenario reruns from clean temp state after fixes and passes without harness pollution. | Do not use earlier partial run as final proof. |
@@ -1567,6 +1567,43 @@ cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_archit
 cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture
 git diff --check
 ```
+
+HMH-G1 evidence, 2026-06-03:
+
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture`
+  initially failed because this portfolio still said `Current score:
+  **99/100**` while HMH-G was entirely pending and no
+  requirement-by-requirement audit matrix existed.
+- Score math correction: A-F closed total is 90 points. HMH-G is worth 10
+  points, and HMH-G1 contributes 2 points because it is 20% of HMH-G. The
+  current score is therefore 92/100 after this audit, not 99/100 and not a
+  final-completion claim.
+
+Requirement-by-requirement completion audit matrix:
+
+| Requirement source | Requirement | Authoritative evidence inspected | Current result | Remaining gate |
+|--------------------|-------------|----------------------------------|----------------|----------------|
+| objective: fully implement the execution portfolio | Implement and address every row in this file without narrowing the scope. | Master ledger rows show HMH-A through HMH-F closed; HMH-G1 is now audited; HMH-G2 through HMH-G7 remain pending in this same file. | Not complete; progress is honest and scoped to G1. | HMH-G2, HMH-G3, HMH-G4, HMH-G5, HMH-G6, HMH-G7. |
+| objective: remove legacy, fallback, dead, or compatibility logic | Prove the old alternate planes did not return and remove stale escape hatches before final closeout. | `packages/agent/tests/threat_model_invariants.rs`, `packages/agent/tests/hyper_modular_architecture_plan_invariants.rs`, README `Primitive And Plane Budget`, and HMH-D8/HMH-E/HMH-F evidence. | Partly proven by existing gates; not final because the current absence pass has not rerun under HMH-G2 and diff hygiene has not run under HMH-G6. | HMH-G2 and HMH-G6. |
+| objective: keep architecture clean, robust, and maintainable | Server substrate owns truth; iOS and provider prompts remain projection/instruction surfaces. | README `Architecture`/`Living Architecture Docs`; `packages/agent/src/engine/mod.rs`; `packages/agent/src/domains/capability/mod.rs`; `packages/ios-app/docs/architecture.md`; HMH-B through HMH-F evidence. | Proven for completed lanes; final doc consistency still needs a dedicated canonical-doc pass. | HMH-G5 and HMH-G6. |
+| objective: evaluate, checkpoint, commit, and continue after each phase | Each phase records evidence, open loops, ledger context, and a coherent commit. | Scorecard open-loop sections, `~/LEDGER.jsonl` records for HMH-B through HMH-F7, and recent commits through `a7861edb7 fix: fail closed restart chaos`. | Current campaign process is evidenced; final ledger/status honesty is still pending. | HMH-G7. |
+| source: iii installable shared system surface | Tron equivalent of `iii worker add` must be capability-native worker/module installation, not a bespoke sidecar. | HMH-B guide/spawn lifecycle; HMH-D `module::register_package`, `module::activate`, source trust, activation, health, rollback, quarantine evidence; README `/engine/workers`. | Proven in completed rows. | HMH-G4 reruns the clean end-to-end loop before final closeout. |
+| source: iii worker/function/trigger primitive graph | Worker, trigger, function, resource, grant, and ledger remain one bus-level substrate. | `packages/agent/src/engine/mod.rs`; HMH-A primitive budget; HMH-F trigger/queue/lease/trace evidence; `engine::tests::trigger_runtime`, `engine::tests::state_queue`, `engine::tests::leases_compensation`, `engine::tests::trace_observability`. | Proven for completed rows. | HMH-G2 reruns absence gates against alternate planes. |
+| source: iii live discovery | Workers connect and register live catalog changes without restart, redeploy, prompt schema rebuild, or global visibility defaults. | HMH-B4 catalog watch/inspect; HMH-C6 tiny provider surface; HMH-F7 durable restart hydration; `provider_surface_contains_only_capability_primitives`; `catalog::watch_snapshot`. | Proven for completed rows. | HMH-G4 clean rerun from temp state. |
+| source: agent and human use the same operation | Agent and human extend/operate the same server substrate through canonical invocations and generated/native UI projections. | HMH-B live agent lifecycle; HMH-D module package/action resources; HMH-E Engine Console, generated UI, approval, module, harness-change, and reconnect evidence; iOS architecture thin-client boundary. | Proven for completed rows. | HMH-G4 live rerun and HMH-G5 docs pass. |
+| source: composition slider with stable function ids | Replacing policy, approval, budget, modules, generated UI, or workers must register/route canonical function ids instead of rewriting neighbors. | HMH-D upgrade/rollback/quarantine; HMH-B7 governed promotion; HMH-F2 approval resume; HMH-F5 compensation; HMH-F7 missing `approval::resolve` fail-closed proof. | Proven for completed rows. | HMH-G2 absence scan for compatibility dispatch and generic action paths. |
+| source: skills and prompt assembly are live harness workers | Provider sees bounded `execute` guidance and fetches live docs/resources instead of a prompt-expanded catalog dump. | HMH-C primer budget, harness docs as resources, provider-run proof, and `provider_prompt_surface_stays_tiny`; README worker-protocol section. | Proven for completed rows. | HMH-G2 and HMH-G5. |
+| source: approval, policy, queue, and observability fail closed | Missing policy/approval/vector/worker paths deny, stay pending, retry/DLQ visibly, or become not-routable with traceable ledger truth. | HMH-F1 through HMH-F7 evidence, including idempotency, approval resume, trigger budgets, queue attempts/DLQ, leases/compensation, trace graph, durable restart, vector unavailable/indexing, and reconnect read-only tests. | Proven for completed rows. | HMH-G2 absence gates and HMH-G3 transcript audit. |
+| Final closeout criterion: clean end-to-end ordinary-agent run | An ordinary agent must learn, author or install, spawn/activate, discover, inspect, test, invoke, explain, expose UI, promote/discard, and clean up a scoped capability from clean temp state. | HMH-B and HMH-E contain prior live/UI proofs, but HMH-G4 explicitly forbids using earlier partial runs as final proof. | Missing for final completion. | HMH-G4. |
+| Final closeout criteria: docs, static gates, diff hygiene, ledger | README/docs must describe only verified behavior, static gates must be current, diff must be clean, and ledger/final status must be honest. | README and docs are current through HMH-F7; static commands are listed; ledger entries exist through HMH-F7. | Not complete; these are the remaining closeout rows. | HMH-G2, HMH-G5, HMH-G6, HMH-G7. |
+
+Open loops after HMH-G1:
+
+- HMH-G1 is closed. Continue with HMH-G2: prove absence gates are current for
+  client policy/targets, prompt-expanded tool catalogs, fallback discovery,
+  global dynamic visibility, alternate spawn, generic module actions, stale
+  scorecard states, and the stale-score regression fixed above.
 
 ## Adversarial Audit Of This Portfolio
 
@@ -1648,9 +1685,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, and HMH-F are closed. Continue with HMH-G1:
-produce the requirement-by-requirement completion audit.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, and HMH-G1 are closed. Continue with
+HMH-G2: prove absence gates are current.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture
 ```
