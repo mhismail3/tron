@@ -686,6 +686,9 @@ activation surfaces derive disable/upgrade/rollback/quarantine actions from
 current and prior activation versions. Capability, pack, source-control, and
 review mutations remain stored canonical actions; clients render fixed-catalog
 native controls and never construct target function ids or payload templates.
+Source-control review surfaces use the same fixed catalog to show preview,
+plain diff preview, allowed action metadata, validation/Inspect cues, and
+review controls without adding target-specific client screens.
 
 The module package lifecycle is also resource-native. `module::register_package`
 validates manifest digest, provenance, namespace ownership, declared capability

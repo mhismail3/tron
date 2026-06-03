@@ -1,4 +1,9 @@
 //! Generated UI source-control authoring.
+//!
+//! Source-control surfaces prove the fixed generated-UI product path: preview,
+//! plain diff preview, allowed actions, validation/Inspect cues, and action
+//! controls are server-authored as catalog components instead of Swift-owned
+//! target-specific screens.
 
 use super::*;
 
@@ -15,10 +20,13 @@ pub(super) fn source_control_projection(
     let recent = source_control_invocation_rows(host, session_id, request);
     let latest_status = latest_source_control_result(host, session_id, "worktree::get_status")
         .unwrap_or_else(|| json!({}));
+    let latest_diff = latest_source_control_result(host, session_id, "worktree::get_diff")
+        .unwrap_or_else(|| json!({}));
     let latest_conflicts =
         latest_source_control_result(host, session_id, "worktree::list_conflicts")
             .unwrap_or_else(|| json!({"conflicts": []}));
     let changed_files = source_control_file_rows(&latest_status, request);
+    let plain_diffs = source_control_plain_diff_rows(&latest_diff, request);
     let branch = bounded_text_preview(
         latest_status
             .get("branch")
@@ -68,8 +76,10 @@ pub(super) fn source_control_projection(
                 "dirty": dirty,
                 "conflictState": conflict_state,
                 "changedFiles": changed_files,
+                "plainDiffs": plain_diffs,
                 "recentInvocations": recent,
                 "latestStatus": bounded_json(latest_status, request.max_preview_bytes),
+                "latestDiff": bounded_json(latest_diff, request.max_preview_bytes),
                 "latestConflicts": bounded_json(latest_conflicts, request.max_preview_bytes),
                 "warnings": warnings,
                 "limit": SOURCE_CONTROL_INVOCATION_LIMIT,
@@ -162,6 +172,27 @@ fn source_control_file_rows(status: &Value, request: &SurfaceAuthoringRequest) -
         .collect()
 }
 
+fn source_control_plain_diff_rows(diff: &Value, request: &SurfaceAuthoringRequest) -> Vec<Value> {
+    let preview = diff
+        .get("diffPreview")
+        .or_else(|| diff.get("diff"))
+        .and_then(Value::as_str)
+        .map(|value| bounded_text_preview(value, request.max_preview_bytes));
+    let Some(preview) = preview else {
+        return Vec::new();
+    };
+    let file = diff
+        .get("file")
+        .or_else(|| diff.get("path"))
+        .and_then(Value::as_str)
+        .map(|value| bounded_text_preview(value, request.max_preview_bytes))
+        .unwrap_or_else(|| "worktree diff".to_owned());
+    vec![json!({
+        "file": file,
+        "preview": preview,
+    })]
+}
+
 fn is_source_control_function(function_id: &str) -> bool {
     function_id.starts_with("worktree::") || function_id.starts_with("git::")
 }
@@ -180,7 +211,10 @@ fn invocation_result_summary(
     bounded_text_preview(&text, request.max_preview_bytes)
 }
 
-pub(super) fn source_control_session_layout(projection: &TargetProjection) -> Value {
+pub(super) fn source_control_session_layout(
+    projection: &TargetProjection,
+    actions: &[Value],
+) -> Value {
     let source = projection
         .graph
         .get("sourceControl")
@@ -196,7 +230,14 @@ pub(super) fn source_control_session_layout(projection: &TargetProjection) -> Va
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let plain_diffs = source
+        .get("plainDiffs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let action_rows = source_control_action_rows(actions);
     let mut children = vec![
+        json!({"type": "Badge", "props": {"text": "Preview"}}),
         json!({"type": "Metric", "props": {
             "label": "Session",
             "value": source
@@ -221,7 +262,7 @@ pub(super) fn source_control_session_layout(projection: &TargetProjection) -> Va
     ];
     children.push(json!({
         "type": "Disclosure",
-        "props": {"title": "Changed Files", "open": !files.is_empty()},
+        "props": {"title": "Preview", "open": !files.is_empty()},
         "children": if files.is_empty() {
             vec![json!({"type": "EmptyState", "props": {
                 "title": "No changed files",
@@ -234,8 +275,47 @@ pub(super) fn source_control_session_layout(projection: &TargetProjection) -> Va
             }})]
         }
     }));
+    children.push(json!({
+        "type": "Disclosure",
+        "props": {"title": "Plain Diff Preview", "open": !plain_diffs.is_empty()},
+        "children": if plain_diffs.is_empty() {
+            vec![json!({"type": "EmptyState", "props": {
+                "title": "No diff preview",
+                "message": "Run Inspect diff to generate a plain diff preview."
+            }})]
+        } else {
+            plain_diffs
+                .iter()
+                .flat_map(|row| {
+                    vec![
+                        json!({"type": "Text", "props": {
+                            "text": row.get("file").cloned().unwrap_or_else(|| json!("worktree diff"))
+                        }}),
+                        json!({"type": "Monospace", "props": {
+                            "text": row.get("preview").cloned().unwrap_or_else(|| json!(""))
+                        }}),
+                    ]
+                })
+                .collect::<Vec<_>>()
+        }
+    }));
+    children.push(json!({
+        "type": "Disclosure",
+        "props": {"title": "Allowed Actions", "open": true},
+        "children": if action_rows.is_empty() {
+            vec![json!({"type": "EmptyState", "props": {
+                "title": "No allowed actions",
+                "message": "The current server policy did not expose generated actions."
+            }})]
+        } else {
+            vec![json!({"type": "Table", "props": {
+                "columns": ["label", "risk", "approval"],
+                "rows": action_rows
+            }})]
+        }
+    }));
     let mut invocation_children = Vec::new();
-    for row in recent {
+    for row in &recent {
         if let Some(invocation_id) = row.get("invocationId").and_then(Value::as_str) {
             invocation_children.push(json!({"type": "InvocationRef", "props": {
                 "invocationId": invocation_id,
@@ -256,6 +336,28 @@ pub(super) fn source_control_session_layout(projection: &TargetProjection) -> Va
             "message": "Source-control capability invocations will appear here."
         }}));
     }
+    children.push(json!({
+        "type": "Disclosure",
+        "props": {"title": "Inspect Details", "open": false},
+        "children": [
+            {"type": "Metric", "props": {
+                "label": "Validation State",
+                "value": "Current state is reported by ui::inspect_surface"
+            }},
+            {"type": "Metric", "props": {
+                "label": "Target Revision",
+                "value": projection.revision
+            }},
+            {"type": "Metric", "props": {
+                "label": "Recent invocations",
+                "value": recent.len()
+            }},
+            {"type": "Metric", "props": {
+                "label": "Plain diff previews",
+                "value": plain_diffs.len()
+            }}
+        ]
+    }));
     children.push(json!({
         "type": "Disclosure",
         "props": {"title": "Recent Source-Control Invocations", "open": false},
@@ -294,6 +396,34 @@ pub(super) fn source_control_session_layout(projection: &TargetProjection) -> Va
         ]
     }));
     json!({"type": "Section", "props": {"title": projection.title}, "children": children})
+}
+
+fn source_control_action_rows(actions: &[Value]) -> Vec<Value> {
+    actions
+        .iter()
+        .filter(|action| {
+            action
+                .get("actionId")
+                .and_then(Value::as_str)
+                .is_some_and(|action_id| action_id != "refresh-surface")
+        })
+        .filter_map(|action| {
+            let label = action.get("label").and_then(Value::as_str)?;
+            Some(json!({
+                "label": label,
+                "risk": action.get("requiredRisk").cloned().unwrap_or_else(|| json!("unknown")),
+                "approval": if action
+                    .get("approvalPolicy")
+                    .and_then(|policy| policy.get("required"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false) {
+                    "approval required"
+                } else {
+                    "ready"
+                },
+            }))
+        })
+        .collect()
 }
 
 pub(super) fn source_control_actions(

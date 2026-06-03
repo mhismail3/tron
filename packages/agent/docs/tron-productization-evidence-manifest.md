@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **49/100**
+Current score: **58/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -31,7 +31,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-D | passed_after_fix | Created by Agent shelf/history is product-labeled, server-derived, and covered by focused projection/source/accessibility tests. Details below. |
 | TPROD-E | passed_after_fix | Local pack lifecycle product flow is server-owned, product-labeled, and covered by focused engine/iOS tests. Details below. |
 | TPROD-F | passed_after_fix | Server-owned plain trust presentation is evidence-backed and rendered by iOS without client-owned trust mapping. Details below. |
-| TPROD-G | pending | Generated UI authoring product matrix not yet complete. |
+| TPROD-G | passed_after_fix | Generated UI authoring product matrix is server-authored through fixed catalog components and covered by Rust/iOS source-guard evidence. Details below. |
 | TPROD-H | pending | Model preset, automation, and subagent routing product proof not yet complete. |
 | TPROD-I | pending | Flagship Tron-maintains-Tron loop not yet run. |
 | TPROD-J | pending | Three polished local example packs not yet shipped. |
@@ -450,6 +450,47 @@ row, note command return codes, and keep open loops explicit.
 
 ### Open Loops
 
-- Closed for TPROD-F. TPROD-G must complete generated UI authoring product
-  coverage: preview, plain diff, allowed actions, validation state, Inspect
-  details, and no iOS app update for new capability surfaces.
+- Closed for TPROD-F. TPROD-G is now closed by the evidence below.
+
+## TPROD-G Evidence
+
+### Files
+
+- [`packages/agent/src/engine/primitives/ui/authoring/mod.rs`](../src/engine/primitives/ui/authoring/mod.rs)
+- [`packages/agent/src/engine/primitives/ui/authoring/source_control.rs`](../src/engine/primitives/ui/authoring/source_control.rs)
+- [`packages/agent/src/engine/tests/generated_ui.rs`](../src/engine/tests/generated_ui.rs)
+- [`packages/agent/tests/threat_model_invariants.rs`](../tests/threat_model_invariants.rs)
+- [`README.md`](../../../README.md)
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+- [`packages/agent/docs/tron-productization-scorecard.md`](tron-productization-scorecard.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml ui_surface_for_target_authors_source_control_session_surface -- --nocapture` | 101 then 0 | Red/green proof: first failed because the generated source-control surface lacked `Plain Diff Preview`; after implementation it proved preview, diff preview, allowed actions, validation-state cue, Inspect details, stored actions, and no layout-embedded templates. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Verified Rust formatting after the source-control generated UI authoring changes. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Verified the generated UI authoring changes compile through the server crate. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Verified the productization scorecard/evidence manifest state is formalized at 58/100 with TPROD-G passed and TPROD-H next. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants codebase_cleanup_scorecard_stays_formalized -- --nocapture` | 0 | Verified the touched large-file ledger remains formalized after updating current LOC rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 0 | Verified touched Rust files stay inside the cleanup scorecard large-file budgets. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/GeneratedUIRendererTests -only-testing:TronMobileTests/SourceGuardTests` | 0 | Verified the fixed renderer supports the component catalog, submits only stored coordinates, and source guards keep target function/payload-template construction out of Swift: 22 tests passed. |
+| `git diff --check` | 0 | Verified whitespace/diff hygiene before the checkpoint commit. |
+
+### Findings
+
+- Source-control generated surfaces now project a product review matrix using
+  only fixed catalog components: preview, plain diff preview, allowed actions,
+  validation-state cue, Inspect details, recent invocations, and review action
+  controls.
+- The action table carries product labels, risk, and approval requirement but
+  does not inline payload templates or target construction into the layout.
+- Existing iOS generated UI rendering remains generic: new review content uses
+  existing catalog components and action submissions still carry only stored
+  surface/version/action coordinates.
+
+### Open Loops
+
+- Closed for TPROD-G. TPROD-H must add model preset, automation, and subagent
+  routing proof with server-owned policy, selected-model disclosure, hosted
+  fallback disclosure, subagent chips, and parent/child lineage.

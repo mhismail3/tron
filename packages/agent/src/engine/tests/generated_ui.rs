@@ -661,8 +661,15 @@ async fn ui_surface_for_target_authors_source_control_session_surface() {
     let layout_text = surface["layout"].to_string();
     for required in [
         "Source Control Review",
+        "Preview",
         "feature/source-control-generated-ui",
         "README.md",
+        "Plain Diff Preview",
+        "@@ bounded diff preview @@",
+        "Allowed Actions",
+        "Refresh Status",
+        "Validation State",
+        "Inspect Details",
         "worktree::get_status",
         "worktree::get_diff",
     ] {

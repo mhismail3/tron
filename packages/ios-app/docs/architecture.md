@@ -291,6 +291,10 @@ coordinates, user input, and idempotency key through
 generated `ui_surface` resources through the generic server-advertised surface
 authoring action, so configure, activate, disable, upgrade, rollback, and
 quarantine remain stored server actions rather than Swift-owned payload policy.
+Source-control generated surfaces can add preview, plain diff preview, allowed
+actions, validation/Inspect cues, and review controls without adding a
+target-specific Swift surface because the content is expressed as fixed-catalog
+components.
 Capability cards avoid duplicate titles when a contract id and function id are
 identical, and inspection sheets reuse the same capability color, sheet title,
 and hidden drag-handle conventions as the rest of the app. Capability mutations

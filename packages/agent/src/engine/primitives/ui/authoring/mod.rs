@@ -735,7 +735,7 @@ fn layout_for_projection(
         return resource_collection_layout(request, projection);
     }
     if request.target_type == SOURCE_CONTROL_TARGET {
-        return source_control_session_layout(projection);
+        return source_control_session_layout(projection, actions);
     }
     if request.target_type == AGENT_CONTROL_TARGET {
         return agent_control_session_layout(projection);
