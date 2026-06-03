@@ -29,6 +29,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "allowedResourceKinds": {"type": "array", "items": {"type": "string"}},
                     "resourceSelectors": {"type": "array", "items": {"type": "string"}},
                     "fileRoots": {"type": "array", "items": {"type": "string"}},
+                    "workspaceAutonomyGrantId": {"type": "string"},
                     "networkPolicy": {"type": "string", "enum": ["none", "loopback", "declared", "unrestricted"]},
                     "maxRisk": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
                     "budget": {"type": "object"},
@@ -47,6 +48,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "workerId": {"type": "string"},
                     "authorityGrantId": {"type": "string"},
                     "authorityGrantRevision": {"type": "integer"},
+                    "authorityGrantParentId": {"type": "string"},
                     "processId": {"type": ["integer", "null"]},
                     "registeredFunctionIds": {"type": "array", "items": {"type": "string"}},
                     "catalogRevision": {"type": "integer"},
@@ -54,7 +56,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                     "workerEndpoint": {"type": "string"},
                     "streamTopic": {"type": "string"}
                 },
-                "required": ["workerId", "authorityGrantId", "authorityGrantRevision", "registeredFunctionIds", "catalogRevision", "visibility", "workerEndpoint", "streamTopic"],
+                "required": ["workerId", "authorityGrantId", "authorityGrantRevision", "authorityGrantParentId", "registeredFunctionIds", "catalogRevision", "visibility", "workerEndpoint", "streamTopic"],
                 "type": "object"
             }))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())

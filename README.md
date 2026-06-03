@@ -375,6 +375,11 @@ They are worker-owned capabilities discovered and invoked through the single
 names directly. Hosted and local model profiles receive the same provider-facing
 contract: one `execute` primitive plus the compact live primer/resource pointer;
 local profiles strip heavier context blocks without dropping the harness recipe.
+Workspace-local self-extension starts with the approval-required
+`self_extension::grant_workspace_autonomy` capability. That capability derives a
+bounded grant through `grant::derive`, returns product text such as
+`Safe in this workspace`, and keeps grant ids, traces, and raw authority fields
+available for Inspect instead of putting them in the chat copy.
 
 The default `coreFirstParty` primer is generated from registry metadata and
 includes the high-use first-party capabilities the agent should know without a
@@ -937,18 +942,23 @@ Sandbox-created capabilities enter through the high-risk `worker::spawn`
 capability. It requires explicit idempotency, `worker.write` authority, a
 worker resource lease, compensation notes, and the sandbox autonomy contract
 recorded on the capability. Before launch it derives
-a child worker grant from the caller's parent grant; the child grant is limited
-by expected function ids, namespaces, resource selectors, file roots, network
-policy, risk, budget, and delegation=false. It starts a local worker process
-with scoped `/engine/workers` environment plus a worker token carrying
-`authorityGrantId`, grant revision/hash, and resource selectors, waits for the
-expected registration, and returns the worker id, derived grant id, registered
-functions, catalog revision, visibility, and process metadata without a
-separate approval prompt. Session visibility is the default; workspace/system
-promotion is still only governed `engine::promote`, with revision/idempotency
-guards and catalog-watch evidence. The contract also carries product
-`presentationHints` so chat surfaces render helper creation as local capability
-work with scope-aware summaries such as `Safe in this chat` or
+a child worker grant from either the caller's parent grant or an explicitly
+supplied `workspaceAutonomyGrantId` from
+`self_extension::grant_workspace_autonomy`; the child grant is limited by
+expected function ids, namespaces, resource selectors, file roots, network
+policy, risk, budget, and delegation=false. Workspace autonomy grants are
+validated for source, actor, workspace selector, and file root before they can
+be used as child-grant parents. It starts a local worker process with scoped
+`/engine/workers` environment plus a worker token carrying `authorityGrantId`,
+parent grant id, grant revision/hash, and resource selectors, waits for the
+expected registration, and returns the worker id, derived grant id, parent
+grant id, registered functions, catalog revision, visibility, and process
+metadata without a separate approval prompt. Session visibility is the default;
+workspace helpers use the approved workspace autonomy grant, and system
+promotion is still only governed by `engine::promote`, with
+revision/idempotency guards and catalog-watch evidence. The contract also
+carries product `presentationHints` so chat surfaces render helper creation as
+local capability work with scope-aware summaries such as `Safe in this chat` or
 `Safe in this workspace`; raw worker ids, grants, traces, and schemas remain
 metadata. `sandbox::list_spawned_workers`,
 `sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the

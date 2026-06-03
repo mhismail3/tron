@@ -70,7 +70,7 @@ enum ApprovalEventText {
         workspaceId: String?,
         sessionId: String?
     ) -> String? {
-        guard functionId == "worker::spawn" else { return nil }
+        guard functionId == "self_extension::grant_workspace_autonomy" else { return nil }
         if isWorkspaceLocal(payload, workspaceId: workspaceId) {
             return "Allow local capability work in this workspace"
         }
@@ -86,7 +86,7 @@ enum ApprovalEventText {
         workspaceId: String?,
         sessionId: String?
     ) -> String? {
-        guard functionId == "worker::spawn" else { return nil }
+        guard functionId == "self_extension::grant_workspace_autonomy" else { return nil }
         if isWorkspaceLocal(payload, workspaceId: workspaceId) {
             return "Tron needs your approval before creating or updating a local capability in this workspace."
         }

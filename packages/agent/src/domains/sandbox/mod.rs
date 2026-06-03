@@ -242,6 +242,7 @@ async fn spawn_worker(invocation: &Invocation, deps: &Deps) -> Result<Value, Cap
         "workerId": worker_id,
         "authorityGrantId": derived_grant["grantId"],
         "authorityGrantRevision": derived_grant["revision"],
+        "authorityGrantParentId": derived_grant["parentGrantId"],
         "processId": process_id,
         "registeredFunctionIds": registered_function_ids,
         "catalogRevision": catalog_revision,
@@ -262,6 +263,16 @@ async fn derive_sandbox_worker_grant(
     let allowed_namespaces = expected_function_namespaces(expected_function_ids)?;
     let grant_id = opt_string(Some(payload), "grantId")
         .unwrap_or_else(|| format!("sandbox-worker:{worker_id}"));
+    let workspace_id = opt_string(Some(payload), "workspaceId")
+        .or_else(|| invocation.causal_context.workspace_id.clone());
+    let parent_grant_id = sandbox_parent_grant_id(
+        deps,
+        invocation,
+        payload,
+        working_directory,
+        workspace_id.as_deref(),
+    )
+    .await?;
     let mut context = CausalContext::new(
         ActorId::new("sandbox-spawn-worker").map_err(engine_invalid_params)?,
         ActorKind::System,
@@ -281,7 +292,7 @@ async fn derive_sandbox_worker_grant(
     }
     let grant_payload = json!({
         "grantId": grant_id,
-        "parentGrantId": invocation.causal_context.authority_grant_id.as_str(),
+        "parentGrantId": parent_grant_id,
         "subjectWorkerId": worker_id,
         "allowedCapabilities": expected_function_ids,
         "allowedNamespaces": allowed_namespaces,
@@ -324,6 +335,183 @@ async fn derive_sandbox_worker_grant(
         .ok_or_else(|| CapabilityError::Internal {
             message: "grant::derive did not return a grant".to_owned(),
         })
+}
+
+async fn sandbox_parent_grant_id(
+    deps: &Deps,
+    invocation: &Invocation,
+    payload: &Value,
+    working_directory: Option<&str>,
+    workspace_id: Option<&str>,
+) -> Result<String, CapabilityError> {
+    let Some(grant_id) = opt_string(Some(payload), "workspaceAutonomyGrantId") else {
+        return Ok(invocation
+            .causal_context
+            .authority_grant_id
+            .as_str()
+            .to_owned());
+    };
+    if grant_id.trim().is_empty() {
+        return Err(CapabilityError::InvalidParams {
+            message: "workspaceAutonomyGrantId must not be empty".to_owned(),
+        });
+    }
+    let Some(workspace_id) = workspace_id.filter(|value| !value.trim().is_empty()) else {
+        return Err(CapabilityError::InvalidParams {
+            message: "workspaceAutonomyGrantId requires workspaceId".to_owned(),
+        });
+    };
+    let visibility =
+        opt_string(Some(payload), "visibility").unwrap_or_else(|| "session".to_owned());
+    if visibility != "workspace" {
+        return Err(CapabilityError::InvalidParams {
+            message: "workspaceAutonomyGrantId requires workspace visibility".to_owned(),
+        });
+    }
+    let Some(working_directory) = working_directory.filter(|value| !value.trim().is_empty()) else {
+        return Err(CapabilityError::InvalidParams {
+            message: "workspaceAutonomyGrantId requires workingDirectory".to_owned(),
+        });
+    };
+    let working_directory = std::path::Path::new(working_directory)
+        .canonicalize()
+        .map_err(|error| CapabilityError::InvalidParams {
+            message: format!("workingDirectory must be an existing directory: {error}"),
+        })?;
+    if !working_directory.is_dir() {
+        return Err(CapabilityError::InvalidParams {
+            message: "workingDirectory must be an existing directory".to_owned(),
+        });
+    }
+    let grant = inspect_workspace_autonomy_grant(deps, invocation, &grant_id).await?;
+    validate_workspace_autonomy_grant(
+        &grant,
+        invocation,
+        &grant_id,
+        workspace_id,
+        &working_directory,
+    )?;
+    Ok(grant_id)
+}
+
+async fn inspect_workspace_autonomy_grant(
+    deps: &Deps,
+    invocation: &Invocation,
+    grant_id: &str,
+) -> Result<Value, CapabilityError> {
+    let mut context = CausalContext::new(
+        ActorId::new("sandbox-grant-inspect").map_err(engine_internal)?,
+        ActorKind::System,
+        AuthorityGrantId::new("engine-system").map_err(engine_internal)?,
+        invocation.causal_context.trace_id.clone(),
+    )
+    .with_scope("grant.read")
+    .with_parent_invocation(invocation.id.clone());
+    if let Some(session_id) = invocation.causal_context.session_id.clone() {
+        context = context.with_session_id(session_id);
+    }
+    if let Some(workspace_id) = invocation.causal_context.workspace_id.clone() {
+        context = context.with_workspace_id(workspace_id);
+    }
+    let result = deps
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("grant::inspect").map_err(engine_internal)?,
+            json!({"grantId": grant_id}),
+            context,
+        ))
+        .await;
+    if let Some(error) = result.error {
+        return Err(engine_internal(error));
+    }
+    result
+        .value
+        .and_then(|value| value.get("grant").cloned())
+        .filter(|grant| !grant.is_null())
+        .ok_or_else(|| CapabilityError::InvalidParams {
+            message: format!("workspace autonomy grant not found: {grant_id}"),
+        })
+}
+
+fn validate_workspace_autonomy_grant(
+    grant: &Value,
+    invocation: &Invocation,
+    grant_id: &str,
+    workspace_id: &str,
+    working_directory: &Path,
+) -> Result<(), CapabilityError> {
+    if grant.pointer("/provenance/source").and_then(Value::as_str)
+        != Some("self_extension::grant_workspace_autonomy")
+    {
+        return Err(invalid_workspace_autonomy_grant(
+            grant_id,
+            "unexpected grant source",
+        ));
+    }
+    if grant.get("lifecycle").and_then(Value::as_str) != Some("active") {
+        return Err(invalid_workspace_autonomy_grant(
+            grant_id,
+            "grant is not active",
+        ));
+    }
+    if grant.get("canDelegate").and_then(Value::as_bool) != Some(true) {
+        return Err(invalid_workspace_autonomy_grant(
+            grant_id,
+            "grant cannot delegate",
+        ));
+    }
+    if grant.get("approvalRequired").and_then(Value::as_bool) != Some(false) {
+        return Err(invalid_workspace_autonomy_grant(
+            grant_id,
+            "grant still requires child approval",
+        ));
+    }
+    if let Some(subject_actor) = grant.get("subjectActorId").and_then(Value::as_str)
+        && subject_actor != invocation.causal_context.actor_id.as_str()
+    {
+        return Err(invalid_workspace_autonomy_grant(grant_id, "actor mismatch"));
+    }
+    let workspace_selector = format!("workspace:{workspace_id}");
+    if !json_string_array_contains(grant, "resourceSelectors", &workspace_selector) {
+        return Err(invalid_workspace_autonomy_grant(
+            grant_id,
+            "workspace mismatch",
+        ));
+    }
+    if !grant_file_roots_cover(grant, working_directory) {
+        return Err(invalid_workspace_autonomy_grant(
+            grant_id,
+            "working directory is outside the grant file roots",
+        ));
+    }
+    Ok(())
+}
+
+fn grant_file_roots_cover(grant: &Value, working_directory: &Path) -> bool {
+    grant
+        .get("fileRoots")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|root| *root != "*")
+        .any(|root| working_directory.starts_with(Path::new(root)))
+}
+
+fn json_string_array_contains(value: &Value, key: &str, expected: &str) -> bool {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(|value| value == expected)
+}
+
+fn invalid_workspace_autonomy_grant(grant_id: &str, reason: &str) -> CapabilityError {
+    CapabilityError::InvalidParams {
+        message: format!("invalid workspace autonomy grant {grant_id}: {reason}"),
+    }
 }
 
 fn sandbox_worker_token_json(
@@ -668,6 +856,9 @@ fn expected_function_namespaces(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    use crate::engine::{EngineHostHandle, TraceId};
 
     #[test]
     fn worker_bearer_token_is_loaded_from_auth_json() {
@@ -690,5 +881,103 @@ mod tests {
 
         let error = read_worker_bearer_token(&path).unwrap_err();
         assert!(error.to_string().contains("bearerToken"));
+    }
+
+    #[tokio::test]
+    async fn worker_spawn_child_grant_can_use_workspace_autonomy_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let engine_host = EngineHostHandle::new_in_memory().unwrap();
+        let deps = Deps {
+            engine_host: engine_host.clone(),
+            origin: "http://127.0.0.1:19847".to_owned(),
+            auth_path: dir.path().join("auth.json"),
+            worker_processes: Arc::new(sandbox_service::SandboxWorkerProcessStore::default()),
+        };
+        let actor_id = ActorId::new("agent:workspace-sandbox-test").unwrap();
+        let autonomy = engine_host
+            .invoke(
+                Invocation::new_sync(
+                    FunctionId::new("grant::derive").unwrap(),
+                    json!({
+                        "parentGrantId": "agent-capability-runtime",
+                        "subjectActorId": actor_id.as_str(),
+                        "allowedCapabilities": ["helper::summarize"],
+                        "allowedNamespaces": ["helper"],
+                        "allowedAuthorityScopes": ["helper.read"],
+                        "allowedResourceKinds": ["evidence"],
+                        "resourceSelectors": ["workspace:workspace-sandbox-test"],
+                        "fileRoots": [dir.path().canonicalize().unwrap().display().to_string()],
+                        "networkPolicy": "loopback",
+                        "maxRisk": "medium",
+                        "canDelegate": true,
+                        "approvalRequired": false,
+                        "provenance": {
+                            "source": "self_extension::grant_workspace_autonomy",
+                            "workspaceId": "workspace-sandbox-test"
+                        }
+                    }),
+                    CausalContext::new(
+                        ActorId::new("test-system").unwrap(),
+                        ActorKind::System,
+                        AuthorityGrantId::new("engine-system").unwrap(),
+                        TraceId::new("trace-workspace-sandbox-test-grant").unwrap(),
+                    )
+                    .with_scope("grant.write")
+                    .with_workspace_id("workspace-sandbox-test")
+                    .with_idempotency_key("workspace-sandbox-test-grant"),
+                )
+                .with_delivery_mode(DeliveryMode::Sync),
+            )
+            .await;
+        assert_eq!(
+            autonomy.error, None,
+            "autonomy grant should derive: {autonomy:?}"
+        );
+        let autonomy_grant_id = autonomy.value.unwrap()["grant"]["grantId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let spawn_invocation = Invocation::new_sync(
+            FunctionId::new("worker::spawn").unwrap(),
+            json!({}),
+            CausalContext::new(
+                actor_id,
+                ActorKind::Agent,
+                AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+                TraceId::new("trace-workspace-sandbox-test-spawn").unwrap(),
+            )
+            .with_scope("worker.write")
+            .with_workspace_id("workspace-sandbox-test")
+            .with_idempotency_key("workspace-sandbox-test-spawn"),
+        );
+
+        let child = derive_sandbox_worker_grant(
+            &deps,
+            &spawn_invocation,
+            "helper-worker",
+            &["helper::summarize".to_owned()],
+            Some(dir.path().to_str().unwrap()),
+            &json!({
+                "workspaceAutonomyGrantId": autonomy_grant_id,
+                "workspaceId": "workspace-sandbox-test",
+                "visibility": "workspace",
+                "workingDirectory": dir.path().display().to_string(),
+                "allowedAuthorityScopes": ["helper.read"],
+                "allowedResourceKinds": ["evidence"],
+                "resourceSelectors": ["workspace:workspace-sandbox-test"],
+                "fileRoots": [dir.path().canonicalize().unwrap().display().to_string()],
+                "networkPolicy": "loopback",
+                "maxRisk": "medium"
+            }),
+        )
+        .await
+        .expect("worker child grant should derive from autonomy grant");
+
+        assert_eq!(child["parentGrantId"], autonomy_grant_id);
+        assert_eq!(child["allowedCapabilities"], json!(["helper::summarize"]));
+        assert_eq!(
+            child["resourceSelectors"],
+            json!(["workspace:workspace-sandbox-test"])
+        );
     }
 }

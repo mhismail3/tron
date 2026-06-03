@@ -8,7 +8,7 @@
 //! Domain workers such as `capability`, `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
 //! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
 //! `git`, `worktree`, `auth`, `device`, `voice_notes`, `transcription`,
-//! `browser`, `display`, `sandbox`, `mcp`, `process`, `web`, and `system` own
+//! `browser`, `display`, `sandbox`, `self_extension`, `mcp`, `process`, `web`, and `system` own
 //! executable function contracts and behavior metadata. Provider requests now
 //! resolve schemas from the live catalog, so first-party, MCP, sandbox, and
 //! external capabilities are all surfaced through the same agent-facing
@@ -35,8 +35,8 @@ use crate::domains::worker::{
 use crate::domains::{
     agent, auth, blob, browser, capability, context, cron, device, display, events, filesystem,
     git, import, job, logs, mcp, memory, message, model, notifications, plan, process, program,
-    prompt_library, repo, sandbox, session, settings, skills, system, transcription, tree,
-    voice_notes, web, worktree,
+    prompt_library, repo, sandbox, self_extension, session, settings, skills, system,
+    transcription, tree, voice_notes, web, worktree,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -98,6 +98,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         transcription::worker_module(&deps)?,
         voice_notes::worker_module(&deps)?,
         web::worker_module(&deps)?,
+        self_extension::worker_module(&deps)?,
         sandbox::worker_module(&deps)?,
         git::worker_module(&deps)?,
         worktree::worker_module(&deps)?,

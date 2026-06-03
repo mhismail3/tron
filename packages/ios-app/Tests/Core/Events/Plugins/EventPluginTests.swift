@@ -227,7 +227,7 @@ final class EventPluginTests: XCTestCase {
         XCTAssertEqual(pluginResult?.approval.targetMetadata?.compensation?.kind, "eventSourced")
     }
 
-    func testApprovalPendingPluginUsesPlainWorkspaceAutonomyTextForWorkerSpawn() {
+    func testApprovalPendingPluginUsesPlainWorkspaceAutonomyTextForSelfExtensionGrant() {
         EventRegistry.shared.registerAll()
 
         let json = """
@@ -239,14 +239,14 @@ final class EventPluginTests: XCTestCase {
                 "type": "approval.pending",
                 "approval": {
                     "approvalId": "approval-1",
-                    "functionId": "worker::spawn",
+                    "functionId": "self_extension::grant_workspace_autonomy",
                     "payload": {
-                        "workerId": "tron-maintainer-helper",
-                        "expectedFunctionIds": ["tron_maintainer::scorecard_summary"]
+                        "workspaceId": "workspace-1",
+                        "workspacePath": "/Users/example/project"
                     },
                     "authorityGrantId": "grant-1",
-                    "authorityScopes": ["worker.write"],
-                    "idempotencyKey": "spawn-key",
+                    "authorityScopes": ["self_extension.write"],
+                    "idempotencyKey": "workspace-autonomy-key",
                     "status": "pending",
                     "sessionId": "session-1",
                     "workspaceId": "workspace-1",
@@ -264,7 +264,7 @@ final class EventPluginTests: XCTestCase {
             pluginResult?.reasonText,
             "Tron needs your approval before creating or updating a local capability in this workspace."
         )
-        XCTAssertFalse(pluginResult?.actionText.contains("worker::spawn") == true)
+        XCTAssertFalse(pluginResult?.actionText.contains("self_extension::grant_workspace_autonomy") == true)
         XCTAssertFalse(pluginResult?.reasonText.contains("approval-1") == true)
     }
 

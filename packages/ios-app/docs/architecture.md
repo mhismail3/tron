@@ -189,6 +189,10 @@ delivered cursors for ACK coalescing and diagnostics, not as the source of
 session catch-up. The same session-scoped subscription setup also subscribes to
 the engine `approvals` topic so high-risk capability gates surface from the
 approval primitive worker instead of through a separate UI-only approval path.
+Workspace self-extension approvals are keyed to
+`self_extension::grant_workspace_autonomy`, so chat copy can say "Allow local
+capability work in this workspace" while grant ids, traces, and target metadata
+stay in Inspect.
 Approval records carry server-snapshotted `targetMetadata` for the requested
 function's effect class, risk level, required authority, idempotency contract,
 resource lease requirement, and compensation contract; the sheet renders those

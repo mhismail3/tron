@@ -145,6 +145,9 @@ row, note command return codes, and keep open loops explicit.
 ### Files
 
 - [`packages/agent/src/domains/sandbox/contract.rs`](../src/domains/sandbox/contract.rs)
+- [`packages/agent/src/domains/self_extension/contract.rs`](../src/domains/self_extension/contract.rs)
+- [`packages/agent/src/domains/self_extension/mod.rs`](../src/domains/self_extension/mod.rs)
+- [`packages/agent/skills/self-extend/SKILL.md`](../skills/self-extend/SKILL.md)
 - [`packages/agent/src/domains/capability/operations/run.rs`](../src/domains/capability/operations/run.rs)
 - [`packages/agent/tests/integration/tests.rs`](../tests/integration/tests.rs)
 - [`packages/ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift`](../../ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift)
@@ -170,11 +173,19 @@ row, note command return codes, and keep open loops explicit.
 | `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 101 then 0 | First failed because the static guard still expected TPROD-C as `next`; after updating the guard, passed and preserved the no-overclaim score. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 101 then 0 | First failed because `packages/agent/tests/integration/tests.rs` grew from 4708 to 4726 LOC; after updating the cleanup scorecard budget row, passed. |
 | `git diff --check` | 0 | Verified whitespace/diff hygiene. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants external_workers_and_sandbox_spawn_are_first_class_engine_surfaces -- --nocapture` | 101 then 0 | Red proof failed because `self_extension` did not exist; green proof now requires approval-owned workspace autonomy beside sandbox-autonomous worker lifecycle. |
+| `cargo test --manifest-path packages/agent/Cargo.toml workspace_autonomy -- --nocapture` | 101 then 0 | Red compile proof caught a stale idempotency assertion; green proof covers the self-extension contract and handler-derived workspace grant. |
+| `cargo test --manifest-path packages/agent/Cargo.toml worker_spawn_child_grant_can_use_workspace_autonomy_parent -- --nocapture` | 0 | Proved `worker::spawn` can derive a helper child grant from the approved workspace autonomy grant after validating source, actor, workspace, and file root. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EventPluginTests/testApprovalPendingPluginUsesPlainWorkspaceAutonomyTextForSelfExtensionGrant` | 65 then 0 | Red proof showed generic engine approval copy for `self_extension::grant_workspace_autonomy`; green proof renders product-facing workspace autonomy copy without raw function ids or approval ids. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants external_workers_and_sandbox_spawn_are_first_class_engine_surfaces -- --nocapture` | 0 | Re-ran the final focused static guard after the workspace autonomy and sandbox validation edits. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Re-ran the scorecard guard and confirmed TPROD-C remains running with no early point claim. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 101 then 0 | First failed because `packages/agent/tests/threat_model_invariants.rs` grew from 7577 to 7589 LOC; after updating the cleanup scorecard budget row, passed. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EventPluginTests` | 0 | Broader affected approval/event plugin coverage: 21 selected tests passed. |
 
 ### Findings
 
 - `worker::spawn` now carries server-owned product hints for helper capability
-  creation: display name, chip title, summary fallback, lifecycle status
+  creation: display name, chip title, summary text, lifecycle status
   labels, icon, and theme color. The main hints intentionally do not include
   `worker::spawn`.
 - `capability::execute` overlays the presentation summary from the actual child
@@ -183,9 +194,18 @@ row, note command return codes, and keep open loops explicit.
   language.
 - iOS now maps `summary`/`subtitle` into chip and detail-header text and maps
   lifecycle label hints into status rows and accessibility text.
-- `approval.pending` for `worker::spawn` now renders workspace-local autonomy
-  approval in plain language instead of `Approve engine capability
-  worker::spawn`.
+- `self_extension::grant_workspace_autonomy` now owns the user approval for
+  workspace-local self-extension, derives a bounded grant through
+  `grant::derive`, and returns product-facing status text while keeping raw
+  authority details under Inspect.
+- `worker::spawn` remains sandbox-autonomous. When passed
+  `workspaceAutonomyGrantId`, it validates that grant's source, actor,
+  workspace selector, and file root before using it as the parent for the
+  helper worker child grant.
+- `approval.pending` for `self_extension::grant_workspace_autonomy` now renders
+  workspace-local autonomy approval in plain language instead of generic
+  engine-function copy. The dead `worker::spawn` approval special case was
+  removed.
 
 ### Open Loops
 

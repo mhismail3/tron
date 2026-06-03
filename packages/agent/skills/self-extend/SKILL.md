@@ -33,33 +33,40 @@ capability packs.
 1. Establish the requested local capability or pack, the workspace, expected
    function ids, allowed file/network scope, and the evidence needed before it
    can be reused.
-2. Call `worker::protocol_guide` at the start of every run through
+2. For workspace-local hands-off work, call `capability::execute` targeting
+   `self_extension::grant_workspace_autonomy` with `workspaceId`,
+   `workspacePath`, and a plain reason. Use the returned grant id as
+   `workspaceAutonomyGrantId` when spawning workspace-visible helpers.
+3. Call `worker::protocol_guide` at the start of every run through
    `capability::execute`. Treat that response as the only source for worker
    protocol fields, message shapes, templates, enum values, and environment
    details.
-3. Author or update the worker, skill, package manifest, docs, and tests in the
+4. Author or update the worker, skill, package manifest, docs, and tests in the
    repo or local workspace. Keep the implementation scoped to the requested
    capability and remove stale dead paths while you work.
-4. Spawn local workers through `capability::execute` targeting `worker::spawn`
-   with expected function ids, session visibility unless promotion is requested,
-   a stable idempotency key, and bounded authority.
-5. Watch registration with `catalog::watch_snapshot` and inspect the new
+5. Spawn local workers through `capability::execute` targeting `worker::spawn`
+   with expected function ids, workspace visibility and
+   `workspaceAutonomyGrantId` after a workspace grant, session visibility for
+   chat-only experiments, a stable idempotency key, and bounded authority.
+6. Watch registration with `catalog::watch_snapshot` and inspect the new
    capability with `capability::inspect`. Capture catalog revision, invocation
    ids, worker id, and any diagnostics.
-6. Run conformance, targeted tests, and one real invocation through
+7. Run conformance, targeted tests, and one real invocation through
    `capability::execute`. If the capability needs a human control surface,
    author or inspect it with `ui::surface_for_target` and submit only stored
    generated-UI action coordinates.
-7. If evidence fails, repair the owning file or package, record what changed,
+8. If evidence fails, repair the owning file or package, record what changed,
    rerun the failed path, and keep version history clear enough for a user to
    see created, updated, failed, repaired, tested, and discarded states.
-8. Finish by explaining evidence in product terms. Promote only through
+9. Finish by explaining evidence in product terms. Promote only through
    `engine::promote` when explicitly requested; otherwise clean up volatile
    workers with `worker::disconnect` or `sandbox::stop_spawned_worker`.
 
 ## Evidence Checklist
 
 - User request, workspace, grant boundary, and out-of-scope exclusions.
+- Workspace autonomy approval id and derived grant id when hands-off workspace
+  work is used.
 - Live `worker::protocol_guide` invocation id or result reference.
 - Changed files, package ids, expected function ids, and idempotency keys.
 - Spawn invocation id, worker id, catalog revision, inspect result, and health

@@ -201,6 +201,11 @@ use contract and implementation metadata, not retired built-in-name dispatch.
 First-party and external capabilities may provide presentation hints, but those
 hints are advisory metadata attached to capability records; the generic sheet
 must remain useful without them.
+Approval copy is also target-specific only when the server-owned function has a
+stable product meaning. Workspace self-extension approvals use
+`self_extension::grant_workspace_autonomy` and render as local capability work;
+`worker::spawn` stays sandbox-autonomous and appears as a capability chip rather
+than an approval prompt.
 
 Generated UI surfaces are not used for chat execution forensics in this phase.
 The generated UI system remains server-authored and fixed-catalog for operator

@@ -14,6 +14,7 @@
 //! | `contract` | Method-agnostic builders for domain-owned `contract.rs` records |
 //! | `registration` | Startup loop that registers worker modules returned by domains |
 //! | `resource_projection` | Bounded helpers for domain-owned resource collection projections over `resource::list` and `resource::inspect` |
+//! | `self_extension` | User-approved workspace autonomy grants for local capability creation and repair |
 //! | `worker` | Shared setup-only domain worker module and function registration types |
 //! | domain modules | Engine-owned behavior for agent, settings, capability support, MCP, git/worktree, session, cron, and the rest of Tron |
 //!
@@ -75,6 +76,7 @@ pub mod registration;
 pub mod repo;
 pub(crate) mod resource_projection;
 pub mod sandbox;
+pub mod self_extension;
 /// Session domain: lifecycle, reads, reconstruction, and context artifact services.
 pub mod session;
 pub mod settings;

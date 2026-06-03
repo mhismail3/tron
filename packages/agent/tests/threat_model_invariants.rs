@@ -6434,6 +6434,18 @@ fn external_workers_and_sandbox_spawn_are_first_class_engine_surfaces() {
         !sandbox_contract.contains(".approval_required(true)"),
         "sandbox lifecycle capabilities are sandbox-autonomous and must not create user approvals"
     );
+    let self_extension_contract =
+        std::fs::read_to_string(crate_root.join("src/domains/self_extension/contract.rs"))
+            .expect("failed to read self_extension contract");
+    assert!(
+        self_extension_contract.contains("self_extension::grant_workspace_autonomy")
+            && self_extension_contract.contains(".approval_required(true)")
+            && self_extension_contract.contains("Allow local capability work in this workspace")
+            && self_extension_contract.contains("\"grant::derive\"")
+            && self_extension_contract.contains("\"worker::spawn\"")
+            && self_extension_contract.contains("\"Safe in this workspace\""),
+        "workspace-local autonomy must be approval-owned by self_extension and derive a bounded worker grant"
+    );
 
     let sandbox = std::fs::read_to_string(crate_root.join("src/domains/sandbox/mod.rs"))
         .expect("failed to read sandbox domain");
