@@ -318,12 +318,7 @@ impl EngineHost {
             let handler = registration.handler;
             match self.catalog.function(&definition.id) {
                 Some(existing) if existing.owner_worker == definition.owner_worker => {
-                    if existing.description != definition.description
-                        || existing.visibility != definition.visibility
-                        || existing.effect_class != definition.effect_class
-                        || existing.required_authority != definition.required_authority
-                        || existing.idempotency != definition.idempotency
-                    {
+                    if !same_primitive_function_contract(existing, &definition) {
                         self.catalog.register_function(definition, handler, false)?;
                     }
                 }
@@ -383,8 +378,26 @@ impl EngineHost {
             }
         };
 
-        let value = primitives::runtime::dispatch(self, &invocation);
-        self.finish_meta_invocation(invocation, function, value, idempotency)
+        let compensation_contract = function.compensation.clone();
+        let lease_result = self.acquire_resource_lease_for_invocation(&function, &invocation);
+        let mut lease_ids = Vec::new();
+        let value = match lease_result {
+            Ok(Some(lease)) => {
+                lease_ids.push(lease.lease_id.clone());
+                let result = primitives::runtime::dispatch(self, &invocation);
+                release_after_primary(self.release_resource_lease_sync(&lease.lease_id), result)
+            }
+            Ok(None) => primitives::runtime::dispatch(self, &invocation),
+            Err(error) => Err(error),
+        };
+        self.finish_meta_invocation_with_contracts(
+            invocation,
+            function,
+            value,
+            idempotency,
+            lease_ids,
+            compensation_contract,
+        )
     }
 
     fn invoke_sync_meta(&mut self, mut invocation: Invocation) -> InvocationResult {
@@ -406,17 +419,44 @@ impl EngineHost {
             }
         };
 
-        let value = match invocation.function_id.as_str() {
-            DISCOVER_FUNCTION => self.meta_discover(&invocation),
-            INSPECT_FUNCTION => self.meta_inspect(&invocation),
-            WATCH_FUNCTION => self.meta_watch(&invocation),
-            PROMOTE_FUNCTION => self.meta_promote(&invocation),
-            _ => Err(EngineError::NotFound {
-                kind: "function",
-                id: invocation.function_id.to_string(),
-            }),
+        let compensation_contract = function.compensation.clone();
+        let lease_result = self.acquire_resource_lease_for_invocation(&function, &invocation);
+        let mut lease_ids = Vec::new();
+        let value = match lease_result {
+            Ok(Some(lease)) => {
+                lease_ids.push(lease.lease_id.clone());
+                let result = match invocation.function_id.as_str() {
+                    DISCOVER_FUNCTION => self.meta_discover(&invocation),
+                    INSPECT_FUNCTION => self.meta_inspect(&invocation),
+                    WATCH_FUNCTION => self.meta_watch(&invocation),
+                    PROMOTE_FUNCTION => self.meta_promote(&invocation),
+                    _ => Err(EngineError::NotFound {
+                        kind: "function",
+                        id: invocation.function_id.to_string(),
+                    }),
+                };
+                release_after_primary(self.release_resource_lease_sync(&lease.lease_id), result)
+            }
+            Ok(None) => match invocation.function_id.as_str() {
+                DISCOVER_FUNCTION => self.meta_discover(&invocation),
+                INSPECT_FUNCTION => self.meta_inspect(&invocation),
+                WATCH_FUNCTION => self.meta_watch(&invocation),
+                PROMOTE_FUNCTION => self.meta_promote(&invocation),
+                _ => Err(EngineError::NotFound {
+                    kind: "function",
+                    id: invocation.function_id.to_string(),
+                }),
+            },
+            Err(error) => Err(error),
         };
-        self.finish_meta_invocation(invocation, function, value, idempotency)
+        self.finish_meta_invocation_with_contracts(
+            invocation,
+            function,
+            value,
+            idempotency,
+            lease_ids,
+            compensation_contract,
+        )
     }
 
     async fn invoke_delegated(&mut self, mut invocation: Invocation) -> InvocationResult {
@@ -510,6 +550,25 @@ impl EngineHost {
         value: Result<Value>,
         idempotency: Option<IdempotencyReservation>,
     ) -> InvocationResult {
+        self.finish_meta_invocation_with_contracts(
+            invocation,
+            function,
+            value,
+            idempotency,
+            Vec::new(),
+            None,
+        )
+    }
+
+    fn finish_meta_invocation_with_contracts(
+        &mut self,
+        invocation: Invocation,
+        function: FunctionDefinition,
+        value: Result<Value>,
+        idempotency: Option<IdempotencyReservation>,
+        resource_lease_ids: Vec<String>,
+        compensation_contract: Option<CompensationContract>,
+    ) -> InvocationResult {
         let mut result = match value {
             Ok(value) => InvocationResult::success(
                 &invocation,
@@ -539,8 +598,26 @@ impl EngineHost {
                 result = completion_error;
             }
         }
-        self.catalog
-            .record_invocation_result(&invocation, result, idempotency_scope)
+        let compensation_status = compensation_contract
+            .as_ref()
+            .map(|_| "recorded".to_owned());
+        let compensation = self.record_compensation_for_result_sync(
+            &invocation,
+            compensation_contract,
+            &result,
+            resource_lease_ids.clone(),
+        );
+        let compensation_status = compensation
+            .as_ref()
+            .map(|record| record.status.as_str().to_owned())
+            .or(compensation_status);
+        self.catalog.record_invocation_result_with_contracts(
+            &invocation,
+            result,
+            idempotency_scope,
+            resource_lease_ids,
+            compensation_status,
+        )
     }
 
     fn meta_error(&mut self, invocation: &Invocation, err: EngineError) -> InvocationResult {
@@ -815,4 +892,29 @@ impl EngineHost {
 
 fn storage_error(error: anyhow::Error) -> EngineError {
     EngineError::HandlerFailed(format!("storage primitive failed: {error:#}"))
+}
+
+fn same_primitive_function_contract(
+    existing: &FunctionDefinition,
+    expected: &FunctionDefinition,
+) -> bool {
+    existing.id == expected.id
+        && existing.owner_worker == expected.owner_worker
+        && existing.description == expected.description
+        && existing.request_schema == expected.request_schema
+        && existing.response_schema == expected.response_schema
+        && existing.opaque_response == expected.opaque_response
+        && existing.tags == expected.tags
+        && existing.visibility == expected.visibility
+        && existing.effect_class == expected.effect_class
+        && existing.risk_level == expected.risk_level
+        && existing.idempotency == expected.idempotency
+        && existing.resource_lease == expected.resource_lease
+        && existing.compensation == expected.compensation
+        && existing.output_contract == expected.output_contract
+        && existing.required_authority == expected.required_authority
+        && existing.allowed_delivery_modes == expected.allowed_delivery_modes
+        && existing.health == expected.health
+        && existing.provenance == expected.provenance
+        && existing.metadata == expected.metadata
 }

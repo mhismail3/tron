@@ -6,7 +6,7 @@ use crate::domains::catalog::CapabilitySpec;
 use crate::domains::contract::CapabilityContract;
 use crate::engine::{
     CompensationContract, CompensationKind, DurableOutputContract, EffectClass,
-    IdempotencyContract, Result as EngineResult, RiskLevel,
+    IdempotencyContract, ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
 };
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["filesystem.changes"];
@@ -34,6 +34,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(filesystem_resource_backed_response(json!({"created":{"type":"boolean"},"path":{"type":"string"}}), vec!["created", "path"]))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .output_contract(DurableOutputContract::resource_backed(["materialized_file"]))
+            .resource_lease(filesystem_write_lease())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .build()?,
         CapabilityContract::new("filesystem::read_file", "filesystem", EffectClass::PureRead, RiskLevel::Low, Some("filesystem.read"))
@@ -50,6 +51,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(filesystem_resource_backed_response(json!({"bytesWritten":{"type":"integer"},"created":{"type":"boolean"},"path":{"type":"string"}}), vec!["path", "bytesWritten", "created"]))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .output_contract(DurableOutputContract::resource_backed(["materialized_file"]))
+            .resource_lease(filesystem_write_lease())
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "writes are audited with byte counts; callers should inspect/diff before replacing important content"))
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::write_file","payload":{"path":"scratch/example.txt","content":"hello"},"idempotencyKey":"write-example-<turn>","reason":"Create a small scratch file."})])
             .build()?,
@@ -60,6 +62,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(filesystem_resource_backed_response(json!({"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}}), vec!["path", "replacements", "diff"]))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .output_contract(DurableOutputContract::resource_backed(["materialized_file", "patch_proposal"]))
+            .resource_lease(filesystem_write_lease())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "the returned diff contains enough context for manual reversal when the edited file still exists"))
             .examples(vec![json!({"mode":"invoke","contractId":"filesystem::edit_file","payload":{"path":"README.md","oldString":"old text","newString":"new text"},"idempotencyKey":"edit-readme-<turn>","reason":"Replace exact text in README.md."})])
             .build()?,
@@ -101,6 +104,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(filesystem_resource_backed_response(json!({"diff":{"type":"string"},"path":{"type":"string"},"replacements":{"type":"integer"}}), vec!["path", "replacements", "diff"]))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .output_contract(DurableOutputContract::resource_backed(["materialized_file", "patch_proposal"]))
+            .resource_lease(filesystem_write_lease())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "patch edits return a diff for manual reversal when the edited file still exists"))
             .examples(vec![
                 json!({"mode":"invoke","contractId":"filesystem::apply_patch","payload":{"path":"README.md","oldString":"old text","newString":"new text"},"idempotencyKey":"patch-readme-<turn>","reason":"Apply an exact text replacement."}),
@@ -108,6 +112,10 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             ])
             .build()?
     ])
+}
+
+fn filesystem_write_lease() -> ResourceLeaseRequirement {
+    ResourceLeaseRequirement::exclusive_template("filesystem", "session:{sessionId}:writes", 300000)
 }
 
 fn filesystem_resource_backed_response(

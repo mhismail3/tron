@@ -12,6 +12,9 @@
 //! for session-created functions when the required request fields map to the
 //! fixed native catalog. Resource-collection authoring uses bounded projections
 //! over `PrimitiveRuntimeHost::list_resources` and `inspect_resource`.
+//! Generated UI writes and action submissions share a `ui_surface` lifecycle
+//! lease and compensation notes so server-authored surfaces and stored action
+//! submissions are visible in the invocation, lease, and compensation ledgers.
 
 mod authoring;
 mod schemas;
@@ -42,8 +45,8 @@ use crate::engine::resources::{
     UpdateResource, ui_component_catalog, validate_ui_surface_payload,
 };
 use crate::engine::types::{
-    DurableOutputContract, EffectClass, FunctionDefinition, IdempotencyContract, RiskLevel,
-    VisibilityScope,
+    CompensationKind, DurableOutputContract, EffectClass, FunctionDefinition, IdempotencyContract,
+    ResourceLeaseRequirement, RiskLevel, VisibilityScope,
 };
 use crate::engine::{EngineError, EngineResourceScope, Result, WorkerId, schema};
 
@@ -243,6 +246,15 @@ fn ui_write(
         "ui.write",
     )
     .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+    .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+        UI_SURFACE_KIND,
+        "ui_surface:lifecycle",
+        300000,
+    ))
+    .with_compensation(super::primitive_compensation(
+        CompensationKind::ManualOnly,
+        "generated UI surface writes and action submissions retain server-owned resource versions and canonical child invocation records for manual recovery",
+    ))
     .with_request_schema(request_schema)
     .with_response_schema(response_schema);
     definition.visibility = VisibilityScope::System;

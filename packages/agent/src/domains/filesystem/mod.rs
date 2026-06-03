@@ -8,6 +8,9 @@
 //! before reaching the raw service helpers.
 //! File-content mutation idempotency is scoped to the session because the same
 //! relative payload points at different isolated worktrees across sessions.
+//! Mutating filesystem contracts also declare a session-scoped filesystem lease
+//! plus compensation notes so file writes, edits, patches, and directory
+//! creation leave visible recovery evidence in the engine ledger.
 //! `filesystem::write_file` owns new-file creation and exact overwrite writes.
 //! `filesystem::apply_patch` owns exact replacement and explicit append
 //! semantics for existing files only: `oldString == ""` appends `newString`

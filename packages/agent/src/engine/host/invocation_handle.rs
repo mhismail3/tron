@@ -403,20 +403,46 @@ impl EngineHostHandle {
                         .record_invocation_result(&invocation, result, scope);
                 }
             };
-            match primitives::ui::action_child_invocation(&*host, &invocation) {
-                Ok(child) => Ok((invocation.clone(), function, idempotency, child)),
-                Err(err) => Err(host.finish_meta_invocation(
+            let compensation_contract = function.compensation.clone();
+            let lease_result = host.acquire_resource_lease_for_invocation(&function, &invocation);
+            let mut lease_ids = Vec::new();
+            if let Ok(Some(lease)) = &lease_result {
+                lease_ids.push(lease.lease_id.clone());
+            }
+            let lease_id = lease_ids.first().cloned();
+            match lease_result
+                .and_then(|_| primitives::ui::action_child_invocation(&*host, &invocation))
+            {
+                Ok(child) => Ok((
                     invocation.clone(),
                     function,
-                    Err(err),
                     idempotency,
+                    lease_id,
+                    compensation_contract,
+                    child,
                 )),
+                Err(err) => {
+                    let value = if let Some(lease_id) = lease_id.as_deref() {
+                        release_after_primary(host.release_resource_lease_sync(lease_id), Err(err))
+                    } else {
+                        Err(err)
+                    };
+                    Err(host.finish_meta_invocation_with_contracts(
+                        invocation.clone(),
+                        function,
+                        value,
+                        idempotency,
+                        lease_ids,
+                        compensation_contract,
+                    ))
+                }
             }
         };
-        let (meta_invocation, meta_function, idempotency, child) = match prepared {
-            Ok(prepared) => prepared,
-            Err(result) => return result,
-        };
+        let (meta_invocation, meta_function, idempotency, lease_id, compensation_contract, child) =
+            match prepared {
+                Ok(prepared) => prepared,
+                Err(result) => return result,
+            };
         let child = if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
             let mut host = self.inner.lock().await;
             host.catalog.prepare_sync_invocation(child)
@@ -449,11 +475,20 @@ impl EngineHostHandle {
                 &child_result,
             ))
         };
-        self.inner.lock().await.finish_meta_invocation(
+        let mut host = self.inner.lock().await;
+        let resource_lease_ids = lease_id.iter().cloned().collect::<Vec<_>>();
+        let submit_value = if let Some(lease_id) = lease_id.as_deref() {
+            release_after_primary(host.release_resource_lease_sync(lease_id), submit_value)
+        } else {
+            submit_value
+        };
+        host.finish_meta_invocation_with_contracts(
             meta_invocation,
             meta_function,
             submit_value,
             idempotency,
+            resource_lease_ids,
+            compensation_contract,
         )
     }
 

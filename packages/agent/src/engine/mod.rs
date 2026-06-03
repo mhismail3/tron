@@ -43,10 +43,10 @@
 //!   `approval::resolve` remains a user/client-owned primitive routed through
 //!   `EngineHostHandle` so the stored invocation resumes in one trace;
 //! - resource leases and compensation contracts are first-class primitives for
-//!   high-risk shared-state mutations, so the host can acquire/release one
-//!   domain resource from payload fields plus causal context such as `sessionId`,
-//!   record auditable rollback/compensation state, and avoid blocking the whole
-//!   host or inventing per-handler locks;
+//!   shared-state mutations, so the host can acquire/release one domain resource
+//!   from payload fields plus causal context such as `sessionId`, record
+//!   auditable rollback/compensation state for direct and host-dispatched
+//!   functions, and avoid blocking the whole host or inventing per-handler locks;
 //! - typed resources are the durable object substrate: artifacts, goals, claims,
 //!   evidence, decisions, generated UI surfaces, worker packages, and
 //!   materialized files are modeled as versioned resources with links and
@@ -55,8 +55,9 @@
 //!   can author deterministic target surfaces from substrate projections,
 //!   validate/refresh/expire generated versions, and clients render the
 //!   declared component tree while submitting stored action ids through
-//!   `ui::submit_action` so the engine reconstructs and authorizes the target
-//!   capability invocation;
+//!   `ui::submit_action` so the engine leases the generated-action surface,
+//!   reconstructs and authorizes the target capability invocation, and records
+//!   the submit/child lineage;
 //! - durable-output capabilities declare output contracts and finish validation
 //!   requires canonical resource refs for every resource-backed path;
 //! - the trigger runtime records trigger metadata, transport/domain authority

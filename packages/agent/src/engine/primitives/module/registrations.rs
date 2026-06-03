@@ -376,6 +376,7 @@ fn module_write(
     response_schema: Value,
     risk: RiskLevel,
 ) -> FunctionDefinition {
+    let resource_id_template = module_write_lease_template(id);
     let mut definition = primitive_function(
         id,
         MODULE_WORKER_ID,
@@ -384,16 +385,53 @@ fn module_write(
         "module.write",
     )
     .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+    .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
+        "module",
+        resource_id_template,
+        600000,
+    ))
+    .with_compensation(primitive_compensation(
+        CompensationKind::ManualOnly,
+        "module lifecycle writes are recovered through explicit disable, rollback, quarantine, trust revocation, or evidence review capabilities",
+    ))
     .with_request_schema(request_schema)
     .with_response_schema(response_schema)
     .with_risk(risk);
     if risk >= RiskLevel::High {
         definition.required_authority = definition.required_authority.with_approval_required();
-        definition.compensation = Some(primitive_compensation(
-            CompensationKind::None,
-            "module lifecycle writes are compensated by explicit disable, rollback, or quarantine capabilities",
-        ));
     }
     definition.visibility = VisibilityScope::System;
     definition
+}
+
+fn module_write_lease_template(function_id: &str) -> &'static str {
+    match function_id {
+        REGISTER_PACKAGE_FUNCTION => "module:package:{manifest.packageId}",
+        CONFIGURE_FUNCTION => "module:config:{scope}:{packageResourceId}",
+        ACTIVATE_FUNCTION => "module:activation:{scope}:{packageResourceId}",
+        DISABLE_FUNCTION | UPGRADE_FUNCTION | ROLLBACK_FUNCTION | CHECK_HEALTH_FUNCTION => {
+            "module:activation:{activationResourceId}"
+        }
+        QUARANTINE_FUNCTION | VERIFY_INTEGRITY_FUNCTION | RUN_CONFORMANCE_FUNCTION => {
+            "module:resource:{resourceId}"
+        }
+        RECOVER_ACTIVATION_FUNCTION
+        | REGISTER_SOURCE_FUNCTION
+        | RECONCILE_TRUST_FUNCTION
+        | ENFORCE_REVOCATION_FUNCTION
+        | SCHEDULE_TRUST_AUDIT_FUNCTION => "module:operation:{idempotencyKey}",
+        VERIFY_SOURCE_FUNCTION | VERIFY_SIGNATURE_FUNCTION | RECORD_POLICY_AUDIT_FUNCTION => {
+            "module:package:{packageResourceId}"
+        }
+        APPROVE_SOURCE_FUNCTION => "module:source-approval:{scope}:{packageResourceId}",
+        REVOKE_SOURCE_APPROVAL_FUNCTION | EXPIRE_TRUST_DECISION_FUNCTION => {
+            "module:decision:{decisionResourceId}"
+        }
+        RENEW_TRUST_ROOT_FUNCTION => "module:decision:{trustRootDecisionResourceId}",
+        ROTATE_SIGNATURE_KEY_FUNCTION => "module:decision:{oldTrustRootDecisionResourceId}",
+        RUN_SCHEDULED_TRUST_AUDIT_FUNCTION | RECORD_TRUST_AUDIT_RETENTION_FUNCTION => {
+            "module:decision:{scheduleDecisionResourceId}"
+        }
+        _ => "module:operation:{idempotencyKey}",
+    }
 }

@@ -15,7 +15,9 @@
 //! package and activation records. Source-trust, health/integrity, activation
 //! runtime cleanup, trust review, and scheduled audit code live in focused
 //! submodules; this file owns the package lifecycle registration surface and
-//! shared module substrate helpers.
+//! shared module substrate helpers. Every module lifecycle write declares the
+//! resource-scoped module lifecycle lease and compensation notes so package/
+//! config/activation/trust mutations leave one inspectable recovery trail.
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -39,7 +41,7 @@ use crate::engine::resources::{
 };
 use crate::engine::types::{
     CompensationKind, DurableOutputContract, EffectClass, FunctionDefinition, IdempotencyContract,
-    RiskLevel, VisibilityScope,
+    ResourceLeaseRequirement, RiskLevel, VisibilityScope,
 };
 use crate::engine::{ActorId, EngineError, EngineResourceScope, Invocation, Result, schema};
 

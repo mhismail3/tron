@@ -213,6 +213,118 @@ impl ValueRef<'_> {
     }
 }
 
+impl EngineHost {
+    pub(super) fn acquire_resource_lease_for_invocation(
+        &mut self,
+        function: &FunctionDefinition,
+        invocation: &Invocation,
+    ) -> Result<Option<EngineResourceLease>> {
+        let Some(requirement) = &function.resource_lease else {
+            return Ok(None);
+        };
+        let request = lease_request_from_requirement(requirement, invocation)?;
+        let lease = {
+            self.primitives
+                .leases
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
+                .acquire(request)?
+        };
+        let _ = self.publish_stream_event_sync(PublishStreamEvent {
+            topic: "resource.leases".to_owned(),
+            payload: json!({
+                "type": "resource_lease.acquired",
+                "lease": lease.clone(),
+            }),
+            visibility: VisibilityScope::System,
+            session_id: None,
+            workspace_id: None,
+            producer: "resource_lease".to_owned(),
+            trace_id: Some(lease.trace_id.clone()),
+            parent_invocation_id: Some(lease.holder_invocation_id.clone()),
+        });
+        Ok(Some(lease))
+    }
+
+    pub(super) fn release_resource_lease_sync(
+        &mut self,
+        lease_id: &str,
+    ) -> Result<Option<EngineResourceLease>> {
+        let lease = {
+            self.primitives
+                .leases
+                .lock()
+                .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
+                .release(lease_id)?
+        };
+        if let Some(lease) = lease.as_ref() {
+            let _ = self.publish_stream_event_sync(PublishStreamEvent {
+                topic: "resource.leases".to_owned(),
+                payload: json!({
+                    "type": "resource_lease.released",
+                    "lease": lease,
+                }),
+                visibility: VisibilityScope::System,
+                session_id: None,
+                workspace_id: None,
+                producer: "resource_lease".to_owned(),
+                trace_id: Some(lease.trace_id.clone()),
+                parent_invocation_id: Some(lease.holder_invocation_id.clone()),
+            });
+        }
+        Ok(lease)
+    }
+
+    pub(super) fn record_compensation_for_result_sync(
+        &mut self,
+        invocation: &Invocation,
+        contract: Option<CompensationContract>,
+        result: &InvocationResult,
+        resource_lease_ids: Vec<String>,
+    ) -> Option<EngineCompensationRecord> {
+        let Some(contract) = contract else {
+            return None;
+        };
+        let record = compensation_record(invocation, result, contract, resource_lease_ids);
+        let stored = self
+            .primitives
+            .compensation
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))
+            .and_then(|mut store| store.record(record));
+        match stored {
+            Ok(record) => {
+                let _ = self.publish_stream_event_sync(PublishStreamEvent {
+                    topic: "compensation.records".to_owned(),
+                    payload: json!({
+                        "type": "compensation.recorded",
+                        "compensation": record.clone(),
+                    }),
+                    visibility: VisibilityScope::System,
+                    session_id: None,
+                    workspace_id: None,
+                    producer: "compensation".to_owned(),
+                    trace_id: Some(result.trace_id.clone()),
+                    parent_invocation_id: Some(result.invocation_id.clone()),
+                });
+                Some(record)
+            }
+            Err(error) => {
+                tracing::error!(?error, "failed to record engine compensation contract");
+                None
+            }
+        }
+    }
+
+    fn publish_stream_event_sync(&mut self, event: PublishStreamEvent) -> Result<StreamCursor> {
+        self.primitives
+            .streams
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
+            .publish(event)
+    }
+}
+
 pub(super) fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&'static str>() {
         (*message).to_owned()

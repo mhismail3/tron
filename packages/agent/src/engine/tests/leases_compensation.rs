@@ -1,4 +1,128 @@
 use super::*;
+use sha2::{Digest, Sha256};
+
+#[tokio::test]
+async fn real_shared_mutation_contracts_declare_leases_and_compensation() {
+    let mut domain_specs = Vec::new();
+    domain_specs.extend(crate::domains::filesystem::contract::capabilities().unwrap());
+    domain_specs.extend(crate::domains::process::contract::capabilities().unwrap());
+    domain_specs.extend(crate::domains::worktree::contract::capabilities().unwrap());
+    for spec in domain_specs
+        .iter()
+        .filter(|spec| spec.effect_class.is_mutating())
+    {
+        assert!(
+            spec.resource_lease.is_some(),
+            "{} must declare an engine resource lease",
+            spec.function_id
+        );
+        let compensation = spec
+            .compensation
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} must declare compensation", spec.function_id));
+        assert!(
+            compensation.has_notes(),
+            "{} compensation must include recovery notes",
+            spec.function_id
+        );
+    }
+
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let host = handle.lock().await;
+    for function_id in module_write_functions()
+        .into_iter()
+        .chain(ui_write_functions())
+    {
+        let function = host
+            .catalog()
+            .function(&fid(function_id))
+            .unwrap_or_else(|| panic!("{function_id} must be registered"));
+        assert!(
+            function.resource_lease.is_some(),
+            "{function_id} must declare an engine resource lease"
+        );
+        let compensation = function
+            .compensation
+            .as_ref()
+            .unwrap_or_else(|| panic!("{function_id} must declare compensation"));
+        assert!(
+            compensation.has_notes(),
+            "{function_id} compensation must include recovery notes"
+        );
+    }
+}
+
+#[tokio::test]
+async fn real_primitive_mutations_record_visible_leases_and_compensation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tron.sqlite");
+    let handle = EngineHostHandle::open_sqlite(&path).unwrap();
+
+    register_demo_module_worker(&handle, "lease_demo", "lease-demo-worker");
+    let module_result = handle
+        .invoke(host_invocation(
+            "module::register_package",
+            json!({"manifest": manifest_with_digest(package_manifest(
+                "lease-demo-tools",
+                "lease_demo",
+                "lease-demo-worker"
+            ))}),
+            mutating_causal("hmh-f5-module-register").with_scope("module.write"),
+        ))
+        .await;
+    assert_eq!(module_result.error, None);
+    assert_invocation_has_recovery_record(
+        &handle,
+        module_result.invocation_id.as_str(),
+        "module::register_package",
+    )
+    .await;
+
+    handle
+        .register_worker_for_setup(worker("ui-lease-demo", "ui_lease_demo"), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function("ui_lease_demo::inspect", "ui-lease-demo")
+                .with_required_authority(AuthorityRequirement::scope("ui_lease_demo.read")),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+    let ui_result = handle
+        .invoke(host_invocation(
+            "ui::create_surface",
+            json!({
+                "resourceId": "hmh-f5-ui-surface",
+                "surface": valid_ui_surface("ui_lease_demo::inspect", 1)
+            }),
+            mutating_causal("hmh-f5-ui-create").with_scope("ui.write"),
+        ))
+        .await;
+    assert_eq!(ui_result.error, None);
+    assert_invocation_has_recovery_record(
+        &handle,
+        ui_result.invocation_id.as_str(),
+        "ui::create_surface",
+    )
+    .await;
+
+    drop(handle);
+    let reopened = EngineHostHandle::open_sqlite(&path).unwrap();
+    let compensation = reopened.list_compensation_records().await.unwrap();
+    assert!(
+        compensation.iter().any(
+            |record| record.function_id == fid("module::register_package") && record.succeeded
+        ),
+        "module compensation record must survive reopen"
+    );
+    assert!(
+        compensation
+            .iter()
+            .any(|record| record.function_id == fid("ui::create_surface") && record.succeeded),
+        "ui compensation record must survive reopen"
+    );
+}
 
 #[tokio::test]
 async fn resource_lease_acquire_release_conflict_and_stream_records() {
@@ -306,4 +430,212 @@ async fn host_resource_lease_conflict_fails_before_handler_execution() {
     assert_eq!(compensation.len(), 1);
     assert!(!compensation[0].succeeded);
     let _ = handle.release_resource_lease(&held.lease_id).await.unwrap();
+}
+
+async fn assert_invocation_has_recovery_record(
+    handle: &EngineHostHandle,
+    invocation_id: &str,
+    function_id: &str,
+) {
+    let host = handle.lock().await;
+    let record = host
+        .catalog()
+        .invocations()
+        .iter()
+        .find(|record| record.invocation_id.as_str() == invocation_id)
+        .unwrap_or_else(|| panic!("{function_id} invocation must be recorded"));
+    assert_eq!(record.function_id, fid(function_id));
+    assert!(
+        matches!(
+            record.compensation_status.as_deref(),
+            Some("recorded") | Some("succeeded")
+        ),
+        "{function_id} invocation must expose compensation status"
+    );
+    assert_eq!(
+        record.resource_lease_ids.len(),
+        1,
+        "{function_id} must record exactly one lease"
+    );
+    let lease_id = record.resource_lease_ids[0].clone();
+    drop(host);
+
+    let lease = handle.get_resource_lease(&lease_id).await.unwrap().unwrap();
+    assert_eq!(lease.status, EngineResourceLeaseStatus::Released);
+    assert_eq!(lease.function_id, fid(function_id));
+
+    let compensation = handle.list_compensation_records().await.unwrap();
+    assert!(
+        compensation
+            .iter()
+            .any(|record| record.function_id == fid(function_id)
+                && record.resource_lease_ids == vec![lease_id.clone()]
+                && record.succeeded),
+        "{function_id} must have a matching succeeded compensation record"
+    );
+}
+
+fn module_write_functions() -> Vec<&'static str> {
+    vec![
+        "module::register_package",
+        "module::configure",
+        "module::activate",
+        "module::disable",
+        "module::upgrade",
+        "module::rollback",
+        "module::quarantine",
+        "module::check_health",
+        "module::verify_integrity",
+        "module::recover_activation",
+        "module::verify_source",
+        "module::approve_source",
+        "module::revoke_source_approval",
+        "module::run_conformance",
+        "module::register_source",
+        "module::verify_signature",
+        "module::record_policy_audit",
+        "module::reconcile_trust",
+        "module::renew_trust_root",
+        "module::rotate_signature_key",
+        "module::expire_trust_decision",
+        "module::enforce_revocation",
+        "module::record_trust_review",
+        "module::schedule_trust_audit",
+        "module::run_scheduled_trust_audit",
+        "module::record_trust_audit_retention",
+    ]
+}
+
+fn ui_write_functions() -> Vec<&'static str> {
+    vec![
+        "ui::create_surface",
+        "ui::surface_for_target",
+        "ui::update_surface",
+        "ui::refresh_surface",
+        "ui::expire_surface",
+        "ui::discard_surface",
+        "ui::submit_action",
+    ]
+}
+
+fn register_demo_module_worker(handle: &EngineHostHandle, namespace: &str, worker_id: &str) {
+    handle
+        .register_worker_for_setup(worker(worker_id, namespace), false)
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            read_function(&format!("{namespace}::inspect"), worker_id)
+                .with_required_authority(AuthorityRequirement::scope(format!("{namespace}.read"))),
+            Some(handler()),
+            false,
+        )
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            write_function(&format!("{namespace}::write_artifact"), worker_id)
+                .with_required_authority(AuthorityRequirement::scope(format!("{namespace}.write")))
+                .with_output_contract(DurableOutputContract::resource_backed(["artifact"])),
+            Some(Arc::new(StaticValueHandler(json!({
+                "resourceRefs": [{
+                    "resourceId": "artifact-from-hmh-f5",
+                    "kind": "artifact",
+                    "versionId": "ver-artifact-from-hmh-f5",
+                    "role": "created",
+                    "contentHash": "sha256:artifact"
+                }]
+            })))),
+            false,
+        )
+        .unwrap();
+}
+
+fn package_manifest(package_id: &str, namespace: &str, worker_id: &str) -> Value {
+    json!({
+        "packageId": package_id,
+        "version": "1.0.0",
+        "manifestSchemaId": "tron.module.package_manifest.v1",
+        "sourceProvenance": {"kind": "builtin"},
+        "trustTier": "builtin",
+        "signatureStatus": "trusted_builtin",
+        "declaredWorkerKind": "in_process",
+        "namespace": namespace,
+        "declaredCapabilities": [
+            {
+                "functionId": format!("{namespace}::inspect"),
+                "effectClass": "PureRead",
+                "risk": "low",
+                "requiredAuthority": [format!("{namespace}.read")],
+                "outputResourceKinds": []
+            },
+            {
+                "functionId": format!("{namespace}::write_artifact"),
+                "effectClass": "IdempotentWrite",
+                "risk": "medium",
+                "requiredAuthority": [format!("{namespace}.write")],
+                "idempotent": true,
+                "outputResourceKinds": ["artifact"]
+            }
+        ],
+        "requiredGrants": {
+            "allowedCapabilities": [
+                format!("{namespace}::inspect"),
+                format!("{namespace}::write_artifact")
+            ],
+            "allowedNamespaces": [namespace],
+            "allowedAuthorityScopes": [
+                format!("{namespace}.read"),
+                format!("{namespace}.write")
+            ],
+            "allowedResourceKinds": ["artifact"],
+            "resourceSelectors": ["*"],
+            "fileRoots": ["*"],
+            "networkPolicy": "none",
+            "maxRisk": "medium",
+            "canDelegate": false,
+            "approvalRequired": false
+        },
+        "configSchema": {
+            "type": "object",
+            "required": ["enabled"],
+            "additionalProperties": false,
+            "properties": {
+                "enabled": {"type": "boolean"},
+                "apiKeyRef": {"type": "string"}
+            }
+        },
+        "runtimeEntryPoint": {"kind": "existing_worker", "workerId": worker_id},
+        "healthPolicy": {"mode": "catalog_registered"},
+        "sandboxProcessPolicy": {"networkPolicy": "none", "fileRoots": ["*"]},
+        "redactionPolicy": {"mode": "redacted"}
+    })
+}
+
+fn manifest_with_digest(mut manifest: Value) -> Value {
+    let digest = manifest_digest(&manifest);
+    manifest["packageDigest"] = json!(digest);
+    manifest
+}
+
+fn manifest_digest(manifest: &Value) -> String {
+    let mut canonical = manifest.clone();
+    if let Some(object) = canonical.as_object_mut() {
+        for field in [
+            "packageDigest",
+            "sourceRef",
+            "sourceDigest",
+            "sourceTrustStatus",
+            "effectiveTrustTier",
+            "signature",
+            "signatureKeyRef",
+            "signatureVerification",
+            "sourceEvidenceRefs",
+            "sourceApprovalRefs",
+            "conformanceEvidenceRefs",
+            "policyDiagnostics",
+        ] {
+            object.remove(field);
+        }
+    }
+    let bytes = serde_json::to_vec(&canonical).unwrap();
+    format!("sha256:{:x}", Sha256::digest(bytes))
 }
