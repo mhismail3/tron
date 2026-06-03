@@ -44,7 +44,9 @@
 //!   compensation metadata for human review, idempotency is scoped by target
 //!   function/session/workspace/caller key, and
 //!   `approval::resolve` remains a user/client-owned primitive routed through
-//!   `EngineHostHandle` so the stored invocation resumes in one trace;
+//!   `EngineHostHandle` so the stored invocation resumes in one trace; if that
+//!   resolve primitive is unavailable, the approval remains pending and the
+//!   child target is not executed;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   shared-state mutations, so the host can acquire/release one domain resource
 //!   from payload fields plus causal context such as `sessionId`, record
@@ -72,11 +74,12 @@
 //! - the local external-worker runtime speaks the `/engine/workers` loopback
 //!   protocol, registers scoped functions/triggers, publishes streams only
 //!   through `stream::publish`, cleans volatile workers on disconnect, marks
-//!   durable disconnected workers unhealthy, treats engine-issued scoped
-//!   worker tokens from `worker::spawn` as selectable session-generated
-//!   implementations once healthy, classifies socket loss separately from
-//!   application handler failures, and supplies the sandbox-created worker path
-//!   used by `worker::spawn`;
+//!   durable disconnected workers unhealthy, hydrates durable external-worker
+//!   definitions from SQLite restart as stopped/unhealthy until the socket
+//!   reconnects, treats engine-issued scoped worker tokens from `worker::spawn`
+//!   as selectable session-generated implementations once healthy, classifies
+//!   socket loss separately from application handler failures, and supplies the
+//!   sandbox-created worker path used by `worker::spawn`;
 //! - queue receipts retain inspectable delivery truth: current lease state,
 //!   retry/dead-letter/cancellation status, delivery and result invocation ids,
 //!   replay refs, errors, resource lease ids, and compensation refs are stored

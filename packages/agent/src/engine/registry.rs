@@ -1,6 +1,6 @@
 //! In-memory live catalog registry.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use chrono::Utc;
@@ -13,9 +13,9 @@ use super::invocation::{InProcessFunctionHandler, InvocationRecord};
 use super::ledger::{EngineLedgerStore, InMemoryEngineLedgerStore};
 use super::policy;
 use super::types::{
-    CatalogChange, CatalogChangeKind, CatalogRevision, FunctionDefinition, FunctionRevision,
-    TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
-    WorkerKind, WorkerRevision,
+    CatalogChange, CatalogChangeKind, CatalogRevision, FunctionDefinition, FunctionHealth,
+    FunctionRevision, TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope,
+    WorkerDefinition, WorkerKind, WorkerLifecycleState, WorkerRevision,
 };
 
 mod catalog_changes;
@@ -133,6 +133,49 @@ impl LiveCatalog {
         self.ledger.list_catalog_changes()
     }
 
+    /// Hydrate durable external catalog entries from the ledger after a process
+    /// restart. Handlers are intentionally not restored; external sockets must
+    /// reconnect and re-register before their functions become healthy again.
+    pub(in crate::engine) fn hydrate_durable_catalog_from_ledger(&mut self) -> Result<()> {
+        let changes = self.ledger.list_catalog_changes()?;
+        self.revision = changes
+            .iter()
+            .map(|change| change.after)
+            .max()
+            .unwrap_or(CatalogRevision(0));
+        self.changes = changes;
+
+        for mut worker in self.ledger.list_durable_worker_definitions()? {
+            if worker.kind == WorkerKind::External {
+                worker.lifecycle = WorkerLifecycleState::Stopped;
+            }
+            self.workers.insert(
+                worker.id.clone(),
+                WorkerEntry {
+                    definition: worker,
+                    volatile: false,
+                },
+            );
+        }
+
+        let worker_ids = self.workers.keys().cloned().collect::<BTreeSet<_>>();
+        for mut function in self.ledger.list_durable_function_definitions()? {
+            if !worker_ids.contains(&function.owner_worker) {
+                continue;
+            }
+            function.health = FunctionHealth::Unhealthy;
+            self.functions.insert(
+                function.id.clone(),
+                FunctionEntry {
+                    definition: function,
+                    handler: None,
+                    volatile: false,
+                },
+            );
+        }
+        Ok(())
+    }
+
     /// Register or update a worker.
     pub fn register_worker(
         &mut self,
@@ -160,6 +203,12 @@ impl LiveCatalog {
         let revision = definition.revision;
         let subject = worker_change_subject(&definition);
         self.record_change(kind, subject)?;
+        if !volatile && definition.kind == WorkerKind::External {
+            self.ledger.upsert_durable_worker_definition(&definition)?;
+        } else {
+            self.ledger
+                .remove_durable_worker_definition(&definition.id)?;
+        }
         let _ = self.workers.insert(
             definition.id.clone(),
             WorkerEntry {
@@ -220,6 +269,7 @@ impl LiveCatalog {
         let subject = worker_change_subject(&entry.definition);
         self.cleanup_owned_volatile(id)?;
         self.record_change(CatalogChangeKind::WorkerUnregistered, subject)?;
+        self.ledger.remove_durable_worker_definition(id)?;
         let _ = self.workers.remove(id);
         Ok(())
     }
@@ -238,6 +288,7 @@ impl LiveCatalog {
                 kind: "worker",
                 id: definition.owner_worker.to_string(),
             })?;
+        let persist_durable_external = !volatile && owner.kind == WorkerKind::External;
         if !owner
             .namespace_claims
             .iter()
@@ -270,6 +321,13 @@ impl LiveCatalog {
         let revision = definition.revision;
         let subject = function_change_subject(&definition);
         self.record_change(kind, subject)?;
+        if persist_durable_external {
+            self.ledger
+                .upsert_durable_function_definition(&definition)?;
+        } else {
+            self.ledger
+                .remove_durable_function_definition(&definition.id)?;
+        }
         let _ = self.functions.insert(
             definition.id.clone(),
             FunctionEntry {
@@ -324,6 +382,7 @@ impl LiveCatalog {
         let subject = function_change_subject(&entry.definition);
         self.cleanup_triggers_targeting(id)?;
         self.record_change(CatalogChangeKind::FunctionUnregistered, subject)?;
+        self.ledger.remove_durable_function_definition(id)?;
         let _ = self.functions.remove(id).expect("entry exists");
         Ok(())
     }

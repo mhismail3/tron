@@ -852,11 +852,14 @@ effect/risk, idempotency, approval, lease, compensation, visibility, and
 provenance metadata as in-process domain workers. Volatile worker entries are
 removed on disconnect or missed heartbeat. Durable local worker entries stay in
 the catalog but are marked unhealthy when the worker disconnects, so invocation
-fails closed until the worker reconnects and re-registers. Workers publish
-events by asking the engine to invoke `stream::publish`; there is no direct
-socket event bypass. Worker connect/register/disconnect/heartbeat-timeout
-events are stored on `worker.lifecycle` through the stream primitive and are
-visible in `observability::trace_get`.
+fails closed until the worker reconnects and re-registers. On SQLite-backed
+server restart, durable external worker/function definitions hydrate as
+stopped/unhealthy with no handler, so an unclean socket loss cannot become an
+optimistic callable function. Workers publish events by asking the engine to
+invoke `stream::publish`; there is no direct socket event bypass. Worker
+connect/register/disconnect/heartbeat-timeout events are stored on
+`worker.lifecycle` through the stream primitive and are visible in
+`observability::trace_get`.
 
 Agents do not need to inspect Tron source to create a local worker.
 `worker::protocol_guide` is a canonical read-only worker primitive that returns
@@ -1036,8 +1039,10 @@ Approval records snapshot the target function's server catalog metadata in
 contract, resource lease requirement, and compensation contract. Thin clients
 render those records and resolve them by invoking the canonical
 `approval::resolve` primitive; the decision, resumed child invocation, ledger
-entry, and `approval.resolved` stream event all remain engine-owned. Agents can
-not see or invoke `approval::*` functions in their live catalog. Approval-required
+entry, and `approval.resolved` stream event all remain engine-owned. If
+`approval::resolve` is absent or not routable, the pending record remains
+pending and the original high-risk child is not executed. Agents can not see or
+invoke `approval::*` functions in their live catalog. Approval-required
 capability invocations keep the originating turn open until the approval record
 is resolved, denied, failed, or timed out, then return that outcome to the model
 as the original `execute` result; executed approvals include explicit

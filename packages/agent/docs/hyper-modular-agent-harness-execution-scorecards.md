@@ -201,7 +201,7 @@ Planes to delete or prevent:
 | HMH-C | Harness knowledge and context compiler | 15 | passed | agent_runner_context | Provider-visible turn context and execute guidance teach the lifecycle without prompt bloat or guessed fields. |
 | HMH-D | Plug-and-play module/package lifecycle | 15 | passed | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
 | HMH-E | Human harness and generated UI | 15 | passed_after_fix | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy, and disconnected cache/approval paths fail closed. |
-| HMH-F | Causality, safety, loops, and rollback | 15 | pending | engine_policy_ledger | Idempotency, approval resume, leases, trigger budgets, queues/DLQ, compensation, and trace/ledger proof fail closed. |
+| HMH-F | Causality, safety, loops, and rollback | 15 | passed_after_fix | engine_policy_ledger | Idempotency, approval resume, leases, trigger budgets, queues/DLQ, compensation, trace/ledger proof, and restart/disconnect chaos fail closed. |
 | HMH-G | Final adversarial closeout and absence gates | 10 | pending | test_harness | Static scans, integration tests, transcript audit, docs/README/ledger, and score math prove no parallel planes remain. |
 
 ## HMH-A Scorecard: Source, Baseline, And Primitive Audit
@@ -1244,8 +1244,8 @@ HMH-E7 evidence, 2026-06-02/2026-06-03:
 
 Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6/HMH-E7:
 
-- HMH-E is closed. HMH-F1 through HMH-F6 are now closed. Continue with
-  HMH-F7: prove restart/disconnect chaos fails closed.
+- HMH-E and HMH-F are closed. Continue with HMH-G1: run the
+  requirement-by-requirement completion audit before final absence gates.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1262,7 +1262,7 @@ external effects.
 | HMH-F4 | Queue/DLQ is inspectable | 15 | passed_after_fix | Enqueue records receipt, attempts, leases, retries, cancellation, DLQ, replay, and compensation refs. | Stop if queue errors are log-only. |
 | HMH-F5 | Leases and compensation are visible | 15 | passed_after_fix | Shared worktree/files/process/module/generated-action mutations acquire leases and record compensation/manual recovery status. | Stop if high-risk effects lack recovery notes. |
 | HMH-F6 | Trace and ledger explain the full graph | 15 | passed_after_fix | One scenario traces client request to agent turn, worker spawn, catalog change, function invocation, approval/queue/resource events, and UI action. | Stop if trace correlation relies on timestamps. |
-| HMH-F7 | Restart/disconnect chaos fails closed | 10 | pending | Server restart, worker socket loss, approval worker absence, vector index unavailable, and client reconnect states are explicit and non-optimistic. | Fix fail-open paths before final UI proof. |
+| HMH-F7 | Restart/disconnect chaos fails closed | 10 | passed_after_fix | Server restart, worker socket loss, approval worker absence, vector index unavailable, and client reconnect states are explicit and non-optimistic. | Fix fail-open paths before final UI proof. |
 
 Closeout commands:
 
@@ -1273,7 +1273,14 @@ cargo test --manifest-path packages/agent/Cargo.toml engine::tests::approval -- 
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::leases_compensation -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::trace_observability -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::restart_chaos -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::external_worker -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml domains::capability::registry::tests::index -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml sqlite_registry_records_degraded_vector_metadata -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml sqlite_search_degrades_while_filtered_vectors_are_still_indexing -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture
+cd packages/ios-app && xcodegen generate
+cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/InteractionPolicyTests -only-testing:TronMobileTests/EngineConsoleStateTests -only-testing:TronMobileTests/EngineApprovalStateTests
 ```
 
 HMH-F1 evidence, 2026-06-02:
@@ -1478,11 +1485,62 @@ HMH-F6 evidence, 2026-06-03:
   `cargo test --manifest-path packages/agent/Cargo.toml observability_trace_get_explains_full_client_agent_worker_ui_graph -- --nocapture`;
   `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::trace_observability -- --nocapture`.
 
-Open loops after HMH-F1/HMH-F2/HMH-F3/HMH-F4/HMH-F5/HMH-F6:
+HMH-F7 evidence, 2026-06-03:
 
-- HMH-F1 through HMH-F6 are closed. Continue with HMH-F7 to prove restart,
-  worker disconnect, approval absence, vector-index unavailable, and client
-  reconnect states fail closed rather than optimistically.
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::restart_chaos -- --nocapture`
+  initially failed because reopening a SQLite-backed engine after a durable
+  external worker registration could not inspect the worker's function at all.
+  The engine ledger persisted catalog-change events, but not the durable
+  external worker/function definitions needed to rebuild the live catalog into
+  an explicit stopped/unhealthy state.
+- The fix adds a narrow durable external catalog snapshot to the engine ledger:
+  SQLite now stores current non-volatile external worker and function
+  definitions in `engine_catalog_workers` and `engine_catalog_functions`.
+  `EngineHost::open_sqlite` hydrates the durable catalog change log, restores
+  those definitions without handlers, and marks external workers stopped and
+  functions unhealthy until their socket reconnects and re-registers.
+- The restart proof now simulates an unclean server restart: a durable external
+  worker registers a session function, the runtime and host drop without a
+  disconnect message, and the reopened engine must inspect the worker as
+  `Stopped`, inspect the function as `Unhealthy`, and reject invocation as
+  `NotRoutable`
+  (`sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect`).
+- The approval absence proof unregisters the canonical `approval::resolve`
+  primitive after a high-risk agent invocation creates a pending approval.
+  The transport-shaped `engine::invoke` resolve attempt returns a structured
+  child `not_found` error, the approval remains `Pending`, and the original
+  high-risk handler call count stays zero
+  (`missing_approval_resolve_primitive_leaves_pending_child_unexecuted`).
+- Existing external-worker chaos coverage remains part of the closeout: socket
+  disconnect marks durable functions unhealthy, volatile disconnect and
+  heartbeat timeout unregister volatile entries, and queued worker transport
+  disconnect records retryable queue attempt truth without a failed target
+  invocation row.
+- Existing vector-index coverage proves unavailable embedding assets report
+  `CAPABILITY_INDEX_UNAVAILABLE` for strict policy, or explicit
+  `state=unavailable`/`degradedReason` lexical-only degradation for operator
+  policy. Index-warmup-only gaps report `state=indexing` instead of pretending
+  vectors are ready.
+- Existing iOS reconnect coverage proves disconnected, connecting,
+  reconnecting, deploy-restarting, and failed states are read-only;
+  disconnected Engine Console cache mutations stop before `CapabilityClient`;
+  and disconnected approval decisions leave the sheet open, no pending resolve
+  submission queued, and the chip pending rather than locally resolving.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::restart_chaos -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::external_worker -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::registry::tests::index -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml sqlite_registry_records_degraded_vector_metadata -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml sqlite_search_degrades_while_filtered_vectors_are_still_indexing -- --nocapture`;
+  `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/InteractionPolicyTests -only-testing:TronMobileTests/EngineConsoleStateTests -only-testing:TronMobileTests/EngineApprovalStateTests`.
+
+Open loops after HMH-F1/HMH-F2/HMH-F3/HMH-F4/HMH-F5/HMH-F6/HMH-F7:
+
+- HMH-F is closed. Continue with HMH-G1: produce the
+  requirement-by-requirement completion audit with source-derived objectives,
+  authoritative files, commands, and remaining absence gates before final
+  closeout.
 
 ## HMH-G Scorecard: Final Adversarial Closeout And Absence Gates
 
@@ -1590,10 +1648,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F1, HMH-F2, HMH-F3, HMH-F4, HMH-F5, and
-HMH-F6 are closed. Continue with HMH-F7: prove restart/disconnect chaos fails
-closed.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, and HMH-F are closed. Continue with HMH-G1:
+produce the requirement-by-requirement completion audit.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml engine::tests::external_worker -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture
 ```

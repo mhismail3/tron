@@ -34,6 +34,19 @@ CREATE TABLE IF NOT EXISTS engine_catalog_changes (
   timestamp       TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS engine_catalog_workers (
+  worker_id       TEXT PRIMARY KEY,
+  definition_json TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS engine_catalog_functions (
+  function_id     TEXT PRIMARY KEY,
+  owner_worker_id TEXT NOT NULL,
+  definition_json TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS engine_invocations (
   invocation_id            TEXT PRIMARY KEY,
   function_id              TEXT NOT NULL,
@@ -86,6 +99,9 @@ CREATE INDEX IF NOT EXISTS idx_engine_invocations_trace
 
 CREATE INDEX IF NOT EXISTS idx_engine_catalog_changes_after
   ON engine_catalog_changes(after_revision);
+
+CREATE INDEX IF NOT EXISTS idx_engine_catalog_functions_owner
+  ON engine_catalog_functions(owner_worker_id);
 "#;
 
 pub(super) struct RawCatalogChangeRow {
@@ -341,7 +357,10 @@ pub(super) fn to_json_string<T: Serialize>(operation: &'static str, value: &T) -
     })
 }
 
-fn from_json_string<T: DeserializeOwned>(operation: &'static str, value: &str) -> Result<T> {
+pub(super) fn from_json_string<T: DeserializeOwned>(
+    operation: &'static str,
+    value: &str,
+) -> Result<T> {
     serde_json::from_str(value).map_err(|err| EngineError::LedgerFailure {
         operation,
         message: err.to_string(),

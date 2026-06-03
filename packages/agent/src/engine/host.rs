@@ -140,10 +140,9 @@ impl EngineHost {
         drop(storage_runtime.open_connection().map_err(storage_error)?);
         let _startup_checkpoint = storage_runtime.checkpoint().map_err(storage_error)?;
         let ledger = SqliteEngineLedgerStore::open(path)?;
-        let mut host = Self::from_catalog_and_primitives(
-            LiveCatalog::with_ledger_store(Box::new(ledger)),
-            PrimitiveStores::sqlite(path)?,
-        )?;
+        let mut catalog = LiveCatalog::with_ledger_store(Box::new(ledger));
+        catalog.hydrate_durable_catalog_from_ledger()?;
+        let mut host = Self::from_catalog_and_primitives(catalog, PrimitiveStores::sqlite(path)?)?;
         host.storage_path = Some(path.to_path_buf());
         Ok(host)
     }

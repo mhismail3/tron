@@ -25,6 +25,7 @@ mod module_activation;
 mod notification_resources;
 mod prompt_library_resources;
 mod resource_kernel;
+mod restart_chaos;
 mod state_queue;
 mod streams;
 mod subagent_lineage;

@@ -1,9 +1,10 @@
 //! Durable ledger contracts for engine causality and idempotency.
 //!
-//! The ledger is intentionally narrower than the live catalog. Catalog
-//! definitions are still in-memory in this package; the ledger persists audit
-//! records, invocation attempts, and idempotency reservations/results so
-//! mutating capabilities can fail closed across process restarts.
+//! The ledger is intentionally narrower than the live catalog. It persists
+//! audit records, invocation attempts, idempotency reservations/results, catalog
+//! changes, and the current durable external-worker catalog definitions needed
+//! to fail closed across process restarts without pretending disconnected
+//! sockets still have executable handlers.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -16,7 +17,8 @@ use super::errors::Result;
 use super::ids::{FunctionId, InvocationId, TriggerId, WorkerId};
 use super::invocation::InvocationRecord;
 use super::types::{
-    CatalogChange, CatalogRevision, FunctionRevision, IdempotencyScope, ReplayBehavior,
+    CatalogChange, CatalogRevision, FunctionDefinition, FunctionRevision, IdempotencyScope,
+    ReplayBehavior, WorkerDefinition,
 };
 
 mod outcome;
@@ -116,6 +118,39 @@ pub trait EngineLedgerStore: Send {
         revision: CatalogRevision,
         limit: usize,
     ) -> Result<Vec<CatalogChange>>;
+
+    /// Store the current definition for a durable external worker.
+    fn upsert_durable_worker_definition(&mut self, _definition: &WorkerDefinition) -> Result<()> {
+        Ok(())
+    }
+
+    /// Remove a durable external worker definition and its owned functions.
+    fn remove_durable_worker_definition(&mut self, _worker_id: &WorkerId) -> Result<()> {
+        Ok(())
+    }
+
+    /// List durable external worker definitions persisted for restart.
+    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
+        Ok(Vec::new())
+    }
+
+    /// Store the current definition for a durable external function.
+    fn upsert_durable_function_definition(
+        &mut self,
+        _definition: &FunctionDefinition,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Remove a durable external function definition.
+    fn remove_durable_function_definition(&mut self, _function_id: &FunctionId) -> Result<()> {
+        Ok(())
+    }
+
+    /// List durable external function definitions persisted for restart.
+    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
+        Ok(Vec::new())
+    }
 
     /// Append an invocation record.
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()>;
@@ -485,6 +520,133 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             })?);
         }
         Ok(changes)
+    }
+
+    fn upsert_durable_worker_definition(&mut self, definition: &WorkerDefinition) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "INSERT INTO engine_catalog_workers
+                   (worker_id, definition_json, updated_at)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(worker_id) DO UPDATE SET
+                   definition_json = excluded.definition_json,
+                   updated_at = excluded.updated_at",
+                params![
+                    definition.id.as_str(),
+                    to_json_string("upsert_durable_worker_definition", definition)?,
+                    now,
+                ],
+            )
+            .map_err(|err| sqlite_err("upsert_durable_worker_definition", err))?;
+        Ok(())
+    }
+
+    fn remove_durable_worker_definition(&mut self, worker_id: &WorkerId) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM engine_catalog_workers WHERE worker_id = ?1",
+                params![worker_id.as_str()],
+            )
+            .map_err(|err| sqlite_err("remove_durable_worker_definition", err))?;
+        self.conn
+            .execute(
+                "DELETE FROM engine_catalog_functions WHERE owner_worker_id = ?1",
+                params![worker_id.as_str()],
+            )
+            .map_err(|err| sqlite_err("remove_durable_worker_functions", err))?;
+        Ok(())
+    }
+
+    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT definition_json
+                 FROM engine_catalog_workers
+                 ORDER BY worker_id ASC",
+            )
+            .map_err(|err| sqlite_err("list_durable_worker_definitions.prepare", err))?;
+        let mut rows = stmt
+            .query([])
+            .map_err(|err| sqlite_err("list_durable_worker_definitions.query", err))?;
+        let mut definitions = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| sqlite_err("list_durable_worker_definitions.next", err))?
+        {
+            let definition_json: String = row
+                .get(0)
+                .map_err(|err| sqlite_err("durable_worker.definition", err))?;
+            definitions.push(sqlite_codec::from_json_string(
+                "list_durable_worker_definitions.definition",
+                &definition_json,
+            )?);
+        }
+        Ok(definitions)
+    }
+
+    fn upsert_durable_function_definition(
+        &mut self,
+        definition: &FunctionDefinition,
+    ) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "INSERT INTO engine_catalog_functions
+                   (function_id, owner_worker_id, definition_json, updated_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(function_id) DO UPDATE SET
+                   owner_worker_id = excluded.owner_worker_id,
+                   definition_json = excluded.definition_json,
+                   updated_at = excluded.updated_at",
+                params![
+                    definition.id.as_str(),
+                    definition.owner_worker.as_str(),
+                    to_json_string("upsert_durable_function_definition", definition)?,
+                    now,
+                ],
+            )
+            .map_err(|err| sqlite_err("upsert_durable_function_definition", err))?;
+        Ok(())
+    }
+
+    fn remove_durable_function_definition(&mut self, function_id: &FunctionId) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM engine_catalog_functions WHERE function_id = ?1",
+                params![function_id.as_str()],
+            )
+            .map_err(|err| sqlite_err("remove_durable_function_definition", err))?;
+        Ok(())
+    }
+
+    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT definition_json
+                 FROM engine_catalog_functions
+                 ORDER BY function_id ASC",
+            )
+            .map_err(|err| sqlite_err("list_durable_function_definitions.prepare", err))?;
+        let mut rows = stmt
+            .query([])
+            .map_err(|err| sqlite_err("list_durable_function_definitions.query", err))?;
+        let mut definitions = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| sqlite_err("list_durable_function_definitions.next", err))?
+        {
+            let definition_json: String = row
+                .get(0)
+                .map_err(|err| sqlite_err("durable_function.definition", err))?;
+            definitions.push(sqlite_codec::from_json_string(
+                "list_durable_function_definitions.definition",
+                &definition_json,
+            )?);
+        }
+        Ok(definitions)
     }
 
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()> {
