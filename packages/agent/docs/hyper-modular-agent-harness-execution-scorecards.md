@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **95/100**
+Current score: **97/100**
 
 Status: **running**
 
@@ -1554,7 +1554,7 @@ is pending, indirectly verified, or stale.
 | HMH-G1 | Requirement-by-requirement completion audit | 20 | passed_after_fix | Matrix maps each source-derived requirement and user objective clause to authoritative files, commands, tests, screenshots, DB rows, and scorecard rows. | Keep goal active if any requirement is indirect or missing. |
 | HMH-G2 | Absence gates are current | 15 | passed_after_fix | Static scans reject client policy/targets, prompt-expanded tool catalogs, discovery bypasses, global dynamic visibility, alternate spawn, generic module action, and stale scorecard states. | Tighten tests before closeout. |
 | HMH-G3 | Transcript/session audit | 15 | passed | Session audit searches prior failures and current campaign transcripts for repeated architecture drift, stale claims, or unfinished rows. | Add successor rows if patterns remain. |
-| HMH-G4 | Live recursive loop rerun | 20 | pending | End-to-end HMH-B/HMH-E scenario reruns from clean temp state after fixes and passes without harness pollution. | Do not use earlier partial run as final proof. |
+| HMH-G4 | Live recursive loop rerun | 20 | passed | End-to-end HMH-B/HMH-E scenario reruns from clean temp state after fixes and passes without harness pollution. | Do not use earlier partial run as final proof. |
 | HMH-G5 | Docs and README are canonical | 10 | pending | README, engine docs, iOS docs, scorecards, and module docs agree on current commands, surfaces, status, and residual risk. | Remove aspirational or stale claims. |
 | HMH-G6 | Diff hygiene and dead-code scan | 10 | pending | Diff scan removes unrelated churn, AI-ish comments, redundant defensive checks, type escapes, stale compatibility code, and metadata noise. | Fix before ledger/final. |
 | HMH-G7 | Ledger and final status are honest | 10 | pending | Ledger entry records completed work and remaining successor scope; no scorecard says 100/100 while Next Test implies active work. | Keep goal active if implementation is not fully proven. |
@@ -1679,6 +1679,43 @@ Open loops after HMH-G1/HMH-G2/HMH-G3:
   from current code and temp state, then prove it did not depend on earlier
   partial campaign runs or simulator state.
 
+HMH-G4 evidence, 2026-06-03:
+
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture`
+  initially failed because this portfolio still had the previous 95/100 score,
+  HMH-G4 was pending, and no fresh live-rerun evidence existed.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle -- --nocapture`
+  completed with `8 passed; 0 failed; 0 ignored; 0 measured; 82 filtered out;
+  finished in 91.81s`.
+- Clean-state proof: the integration boot helpers allocate
+  `unique_event_store()` under the process-specific temp directory, run event
+  store migrations before each server starts, load settings from
+  `unique_settings_path()` under a temp `.tron/profiles/user/profile.toml`, and
+  build each server with `EngineHostHandle::new_in_memory()`. The lifecycle
+  tests reserve loopback ports per run through `boot_server_without_deps_with_config`
+  or `boot_server_with_provider_config_and_handles`, then shut the server down
+  after the scenario. This is current-code temp state, not a replay of previous
+  campaign artifacts.
+
+| Live rerun segment | Test proof | Behavior covered |
+|--------------------|------------|------------------|
+| Worker protocol guide | `capability_self_modifying_lifecycle_execute_returns_worker_protocol_guide` | `capability::execute` returns the worker guide with endpoint, env, function-definition shape, spawn payload, and cleanup guidance. |
+| Scoped spawn and grant | `capability_self_modifying_lifecycle_spawns_session_worker` | `worker::spawn` registers a session worker, narrowed grant, loopback endpoint, catalog revision, and explicit cleanup. |
+| Live catalog inspection | `capability_self_modifying_lifecycle_inspects_session_worker_catalog` | `catalog::watch_snapshot` observes the session worker/function registration, health, provenance, and schema through the same execute path. |
+| Resource-backed conformance | `capability_self_modifying_lifecycle_records_session_worker_conformance_evidence` | `capability::conformance_run` records an accepted `evidence` resource whose payload carries session id, trace lineage, target ids, and checks. |
+| Tiny harness invocation | `capability_self_modifying_lifecycle_invokes_session_worker_through_execute` | The generated function is invoked through `capability::execute`, not through a second routing surface. |
+| Governed promotion | `capability_self_modifying_lifecycle_governs_session_worker_promotion` | Public promotion requires idempotency, rejects stale `expectedFunctionRevision`, advances catalog revision, and replays duplicate keys. |
+| Cleanup and stale calls | `capability_self_modifying_lifecycle_cleans_up_session_worker_and_stale_calls_fail_closed` | `sandbox::stop_spawned_worker` unregisters function and worker, catalog watch sees removal, stale calls return `needs_capability`, and traces show no stopped-worker route. |
+| Agent explanation | `capability_self_modifying_lifecycle_explains_session_worker_evidence` | A deterministic provider inspects live conformance evidence, then explains function, worker, plugin, implementation, trace, resource refs, promotion, and cleanup. |
+
+Open loops after HMH-G1/HMH-G2/HMH-G3/HMH-G4:
+
+- HMH-G4 is closed. Continue with HMH-G5: audit canonical docs so README,
+  module docs, iOS docs, and this scorecard describe only the verified
+  current substrate.
+
 ## Adversarial Audit Of This Portfolio
 
 Strong findings:
@@ -1759,10 +1796,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, HMH-G2, and HMH-G3 are
-closed. Continue with HMH-G4: rerun the clean live recursive loop from current
-code and temp state.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, HMH-G2, HMH-G3, and HMH-G4
+are closed. Continue with HMH-G5: audit canonical docs and remove any stale or
+aspirational claims.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml capability_self_modifying_lifecycle -- --nocapture
+rg -n "hyper-modular|worker::protocol_guide|capability::execute|module::register_package|ui::surface_for_target|HMH-" README.md packages/agent/src packages/agent/docs packages/ios-app/docs
 ```
