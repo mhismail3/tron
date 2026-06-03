@@ -1,9 +1,9 @@
 # Tron Productization Scorecard: Self-Extending Agentic Product
 
-Created: **2026-06-03**  
-Initial score: **0/100**  
-Current score: **5/100**  
-Status: **active; TPROD-A passed_after_fix; TPROD-B next**  
+Created: **2026-06-03**
+Initial score: **0/100**
+Current score: **12/100**
+Status: **active; TPROD-B passed_after_fix; TPROD-C next**
 Evidence manifest: [`tron-productization-evidence-manifest.md`](tron-productization-evidence-manifest.md)
 
 ## Scope
@@ -67,8 +67,8 @@ scorecard plus the evidence manifest, and commit a coherent checkpoint.
 
 | ID | Lane | Weight | Status | Acceptance Evidence | Current Evidence | Open Loops |
 |---|---:|---:|---|---|---|---|
-| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix | Scorecard + evidence manifest exist; current engine/iOS/Mac/CLI/docs baseline is audited; all out-of-scope boundaries are explicit. | Added this scorecard and companion evidence manifest from `/Users/moose/Downloads/PLAN.md`. Audited README, iOS architecture, Mac architecture, managed skills, engine generated UI, worker protocol guide, module package lifecycle, source trust, subagent docs, and existing static gates. Added `productization_scorecard_stays_formalized` to keep the scorecard discoverable and prevent early overclaiming. | TPROD-B starts next. |
-| TPROD-B | `self-extend` managed skill | 7 | pending | Skill is installed as a managed Tron skill, synced locally, tested against live `worker::protocol_guide`, and validated by a sample local worker flow. | Managed skills exist, but no `packages/agent/skills/self-extend/` exists yet. | Add failing/covering tests first, then implement repo-managed skill and local sync proof. |
+| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix | Scorecard + evidence manifest exist; current engine/iOS/Mac/CLI/docs baseline is audited; all out-of-scope boundaries are explicit. | Added this scorecard and companion evidence manifest from `/Users/moose/Downloads/PLAN.md`. Audited README, iOS architecture, Mac architecture, managed skills, engine generated UI, worker protocol guide, module package lifecycle, source trust, subagent docs, and existing static gates. Added `productization_scorecard_stays_formalized` to keep the scorecard discoverable and prevent early overclaiming. | Closed. |
+| TPROD-B | `self-extend` managed skill | 7 | passed_after_fix | Skill is installed as a managed Tron skill, synced locally, tested against live `worker::protocol_guide`, and validated by a sample local worker flow. | Added `packages/agent/skills/self-extend/.managed` and concise `SKILL.md`; added `managed_skill_sources` coverage proving the skill parses, declares `capability::execute`, requires live `worker::protocol_guide`, and does not copy worker protocol details. Synced to `~/.tron/skills/self-extend/` and verified repo/local copies match. Existing live integration tests passed for `execute -> worker::protocol_guide` and the sample session worker lifecycle through spawn, catalog watch, inspect, and cleanup. | Closed. |
 | TPROD-C | Chat-led self-extension UX | 10 | pending | In chat, a normal user can approve a workspace-local autonomy grant, watch capability chips appear, and understand creation/testing/repair without reading engine terms. | iOS already has capability-native chip rendering and server-owned approval resolution, but the chat-led self-extension product flow has not been proven. | Define product projection DTOs and UI acceptance tests before implementation. |
 | TPROD-D | Created-by-agent gallery/history | 9 | pending | A filter/shelf shows full lineage: created, updated, auto-repaired, tested, failed, promoted, revoked, discarded, and reused capabilities. | Engine Console Harness Changes projection exists for session-created capability provenance, conformance, generated UI, promotion scope, cleanup, and trace evidence. Product shelf/history acceptance is unproven. | Add lineage DTO gaps and UI tests before awarding points. |
 | TPROD-E | Local capability pack install/manage | 9 | pending | Local packs can be registered, inspected, configured, activated, disabled, rolled back, and removed through chat entry plus Console/detail surfaces. | Module package lifecycle, generated package/activation surfaces, source trust, activation records, rollback, quarantine, health, and conformance are documented and tested in existing engine areas. Chat-led pack lifecycle and product manage flow are unproven. | No remote discovery. Prove local disk pack lifecycle through generated UI and chat entry. |
@@ -193,7 +193,7 @@ Baseline was audited on 2026-06-03 from branch
 
 ## Next Test
 
-TPROD-B is next. The first required proof is a failing/covering static or
-behavioral test that requires a repo-managed `packages/agent/skills/self-extend/`
-skill with `.managed`, concise `SKILL.md`, and live `worker::protocol_guide`
-usage rather than copied protocol details.
+TPROD-C is next. The first required proof is a failing/covering chat or UI state
+test that a normal user can approve a workspace-local autonomy grant, watch
+plain capability chip progression, and understand creation/testing/repair
+without reading engine terms.

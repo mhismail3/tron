@@ -643,13 +643,14 @@ fn productization_scorecard_stays_formalized() {
 
     for required in [
         "# Tron Productization Scorecard: Self-Extending Agentic Product",
-        "Current score: **5/100**",
-        "Status: **active; TPROD-A passed_after_fix; TPROD-B next**",
+        "Current score: **12/100**",
+        "Status: **active; TPROD-B passed_after_fix; TPROD-C next**",
         "| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix |",
-        "| TPROD-B | `self-extend` managed skill | 7 | pending |",
+        "| TPROD-B | `self-extend` managed skill | 7 | passed_after_fix |",
+        "| TPROD-C | Chat-led self-extension UX | 10 | pending |",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending |",
         "No remote package install/discovery path beyond explicit deferred docs",
-        "TPROD-B is next",
+        "TPROD-C is next",
     ] {
         assert!(
             scorecard.contains(required),
@@ -659,7 +660,7 @@ fn productization_scorecard_stays_formalized() {
     for premature_claim in [
         "Current score: **100/100**",
         "Status: **completed**",
-        "| TPROD-B | `self-extend` managed skill | 7 | passed",
+        "| TPROD-C | Chat-led self-extension UX | 10 | passed",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | passed",
     ] {
         assert!(
@@ -668,9 +669,10 @@ fn productization_scorecard_stays_formalized() {
         );
     }
     assert!(
-        manifest.contains("Current score: **5/100**")
+        manifest.contains("Current score: **12/100**")
             && manifest.contains("| TPROD-A | passed_after_fix |")
-            && manifest.contains("| TPROD-B | pending |")
+            && manifest.contains("| TPROD-B | passed_after_fix |")
+            && manifest.contains("| TPROD-C | pending |")
             && manifest.contains("No remote package discovery"),
         "productization evidence manifest must track the same score, next row, and deferred remote boundary"
     );

@@ -1,8 +1,8 @@
 # Tron Productization Evidence Manifest
 
-Created: **2026-06-03**  
-Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)  
-Current score: **5/100**
+Created: **2026-06-03**
+Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
+Current score: **12/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -26,7 +26,7 @@ row, note command return codes, and keep open loops explicit.
 | Row | Status | Evidence |
 |---|---|---|
 | TPROD-A | passed_after_fix | This manifest and the master scorecard were created in `packages/agent/docs/`. README was updated to list both documents. `productization_scorecard_stays_formalized` was added to `packages/agent/tests/threat_model_invariants.rs`. Baseline audit commands and source references are listed below. |
-| TPROD-B | pending | No `packages/agent/skills/self-extend/` exists yet. |
+| TPROD-B | passed_after_fix | Added the managed `self-extend` skill, synced it locally, and verified live worker protocol plus sample local worker flow with focused integration tests. Details below. |
 | TPROD-C | pending | Product chat self-extension flow not yet proven. |
 | TPROD-D | pending | Created-by-agent shelf/history not yet proven. |
 | TPROD-E | pending | Local pack lifecycle product flow not yet proven. |
@@ -102,3 +102,40 @@ row, note command return codes, and keep open loops explicit.
 - After each row, update this manifest with exact commands, return codes,
   source references, screenshots or runtime ids where relevant, and the next
   open loop.
+
+## TPROD-B Evidence
+
+### Files
+
+- [`packages/agent/skills/self-extend/.managed`](../skills/self-extend/.managed)
+- [`packages/agent/skills/self-extend/SKILL.md`](../skills/self-extend/SKILL.md)
+- [`packages/agent/tests/managed_skill_sources.rs`](../tests/managed_skill_sources.rs)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml --test managed_skill_sources self_extend_skill_is_managed_and_uses_live_worker_protocol_guide -- --nocapture` | 101 then 0 | Red/green proof: first failed because `self-extend` was absent; after implementation passed and proved `.managed`, parseable frontmatter, `capability::execute`, required flow markers, and absence of copied worker protocol internals. |
+| `rsync -a --delete --exclude=node_modules --exclude=.DS_Store packages/agent/skills/self-extend/ ~/.tron/skills/self-extend/` | 0 | Synced the managed repo skill into the local Tron skill directory. |
+| `diff -qr packages/agent/skills/self-extend ~/.tron/skills/self-extend` | 0 | Verified installed local copy matches the repo-managed source. |
+| `ls -la ~/.tron/skills/self-extend` | 0 | Verified installed `.managed` sentinel and `SKILL.md` are present. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test integration capability_self_modifying_lifecycle_execute_returns_worker_protocol_guide -- --nocapture` | 0 | Proved live `/engine` `capability::execute` path returns current `worker::protocol_guide` output. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test integration capability_self_modifying_lifecycle_inspects_session_worker_catalog -- --nocapture` | 0 | Proved sample local worker flow: guide, spawn, catalog watch, inspect, and cleanup through existing live integration harness. |
+
+### Findings
+
+- The skill is intentionally concise and does not embed worker protocol fields,
+  socket paths, environment variable names, message shapes, or templates.
+- The skill directs every run to fetch live `worker::protocol_guide`, then
+  spawn with `worker::spawn`, watch `catalog::watch_snapshot`, inspect with
+  `capability::inspect`, author generated UI through `ui::surface_for_target`,
+  promote only through `engine::promote`, and clean up with
+  `worker::disconnect` or `sandbox::stop_spawned_worker`.
+- Existing live integration coverage is the sample local worker proof for this
+  row; no new runtime harness was added.
+
+### Open Loops
+
+- TPROD-C must now productize this into chat-led UX: autonomy grant approval,
+  capability chip progression, and plain-language creation/testing/repair
+  status without requiring engine terms.
