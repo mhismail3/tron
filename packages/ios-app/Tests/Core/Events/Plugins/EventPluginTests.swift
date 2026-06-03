@@ -227,6 +227,47 @@ final class EventPluginTests: XCTestCase {
         XCTAssertEqual(pluginResult?.approval.targetMetadata?.compensation?.kind, "eventSourced")
     }
 
+    func testApprovalPendingPluginUsesPlainWorkspaceAutonomyTextForWorkerSpawn() {
+        EventRegistry.shared.registerAll()
+
+        let json = """
+        {
+            "type": "approval.pending",
+            "sessionId": "session-1",
+            "timestamp": "2026-05-10T00:00:00Z",
+            "data": {
+                "type": "approval.pending",
+                "approval": {
+                    "approvalId": "approval-1",
+                    "functionId": "worker::spawn",
+                    "payload": {
+                        "workerId": "tron-maintainer-helper",
+                        "expectedFunctionIds": ["tron_maintainer::scorecard_summary"]
+                    },
+                    "authorityGrantId": "grant-1",
+                    "authorityScopes": ["worker.write"],
+                    "idempotencyKey": "spawn-key",
+                    "status": "pending",
+                    "sessionId": "session-1",
+                    "workspaceId": "workspace-1",
+                    "traceId": "trace-1"
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let result = EventRegistry.shared.parse(type: "approval.pending", data: json)
+        let pluginResult = result?.getResult() as? ApprovalPendingPlugin.Result
+
+        XCTAssertEqual(pluginResult?.actionText, "Allow local capability work in this workspace")
+        XCTAssertEqual(
+            pluginResult?.reasonText,
+            "Tron needs your approval before creating or updating a local capability in this workspace."
+        )
+        XCTAssertFalse(pluginResult?.actionText.contains("worker::spawn") == true)
+        XCTAssertFalse(pluginResult?.reasonText.contains("approval-1") == true)
+    }
+
     @MainActor
     func testApprovalPendingPluginDispatchesPendingRecordsAsPending() {
         let context = MockEventDispatchContext()

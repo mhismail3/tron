@@ -61,11 +61,7 @@ struct CapabilityDetailHeader: View {
     }
 
     private var summaryLine: String {
-        var parts = [display.primitiveTitle]
-        if let target = display.targetId?.nilIfEmpty {
-            parts.append(target)
-        }
-        return parts.joined(separator: " via ")
+        display.summaryText
     }
 }
 @available(iOS 26.0, *)

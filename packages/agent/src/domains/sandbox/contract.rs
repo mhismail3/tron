@@ -61,6 +61,18 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .resource_lease(ResourceLeaseRequirement::exclusive_template("sandbox-worker", "worker:{workerId}", 300000))
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "if worker launch fails the spawned process is killed and partial volatile catalog entries are unregistered; successful workers can be disconnected with worker::disconnect"))
             .high_risk_contract(json!({"sandboxAutonomy":{"withoutUserApproval":true,"requiresIdempotency":true,"requiresLease":true,"requiresCompensation":true,"visibilityDefault":"session","reason":"sandbox-created workers run under scoped worker identity and are audited by engine ledger, stream, lease, and cleanup records"},"resourceLock":{"idTemplate":"worker:{workerId}","kind":"sandbox-worker","reason":"serializes lifecycle operations for one sandbox-created worker","required":true,"ttlMs":300000},"rollbackOrCompensation":"failed launches kill the process and unregister partial volatile catalog entries; successful workers can be disconnected with worker::disconnect","streamTopics": STREAM_TOPICS,"version":1}))
+            .presentation_hints(json!({
+                "displayName": "Create helper capability",
+                "chipTitle": "Creating helper capability",
+                "summary": "Local capability work",
+                "generatingLabel": "Preparing helper capability",
+                "runningLabel": "Creating helper capability",
+                "approvalLabel": "Needs approval",
+                "successLabel": "Capability added",
+                "failureLabel": "Repair needed",
+                "icon": "puzzlepiece.extension",
+                "themeColor": "#A97BFF"
+            }))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("sandbox::list_spawned_workers", "sandbox", EffectClass::PureRead, RiskLevel::Low, Some("sandbox.read"))
@@ -81,4 +93,36 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worker_spawn_has_plain_self_extension_presentation_hints() {
+        let specs = capabilities().expect("sandbox capabilities build");
+        let spawn = specs
+            .iter()
+            .find(|spec| spec.function_id.as_str() == "worker::spawn")
+            .expect("worker::spawn spec exists");
+        let hints = spawn
+            .presentation_hints
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .expect("worker::spawn presentation hints are object");
+
+        assert_eq!(hints["displayName"], "Create helper capability");
+        assert_eq!(hints["chipTitle"], "Creating helper capability");
+        assert_eq!(hints["summary"], "Local capability work");
+        assert_eq!(hints["runningLabel"], "Creating helper capability");
+        assert_eq!(hints["successLabel"], "Capability added");
+        assert_eq!(hints["failureLabel"], "Repair needed");
+        assert!(
+            !serde_json::to_string(hints)
+                .expect("hints serialize")
+                .contains("worker::spawn"),
+            "main presentation hints must stay product-facing"
+        );
+    }
 }

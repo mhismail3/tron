@@ -2,6 +2,24 @@ import Foundation
 
 enum ApprovalEventText {
     static func action(functionId: String, payload: [String: AnyCodable]?) -> String {
+        action(functionId: functionId, payload: payload, workspaceId: nil, sessionId: nil)
+    }
+
+    static func action(
+        functionId: String,
+        payload: [String: AnyCodable]?,
+        workspaceId: String?,
+        sessionId: String?
+    ) -> String {
+        if let action = localCapabilityAction(
+            functionId: functionId,
+            payload: payload,
+            workspaceId: workspaceId,
+            sessionId: sessionId
+        ) {
+            return action
+        }
+
         let payloadSummary = payload?
             .sorted(by: { $0.key < $1.key })
             .prefix(4)
@@ -14,8 +32,80 @@ enum ApprovalEventText {
         return "Approve engine capability \(functionId)"
     }
 
+    static func reason(approvalId: String, functionId: String, payload: [String: AnyCodable]?) -> String {
+        reason(
+            approvalId: approvalId,
+            functionId: functionId,
+            payload: payload,
+            workspaceId: nil,
+            sessionId: nil
+        )
+    }
+
+    static func reason(
+        approvalId: String,
+        functionId: String,
+        payload: [String: AnyCodable]?,
+        workspaceId: String?,
+        sessionId: String?
+    ) -> String {
+        if let reason = localCapabilityReason(
+            functionId: functionId,
+            payload: payload,
+            workspaceId: workspaceId,
+            sessionId: sessionId
+        ) {
+            return reason
+        }
+        return "The engine approval worker requires a user decision before running \(functionId). Approval id: \(approvalId)"
+    }
+
     static func reason(approvalId: String, functionId: String) -> String {
-        "The engine approval worker requires a user decision before running \(functionId). Approval id: \(approvalId)"
+        reason(approvalId: approvalId, functionId: functionId, payload: nil)
+    }
+
+    private static func localCapabilityAction(
+        functionId: String,
+        payload: [String: AnyCodable]?,
+        workspaceId: String?,
+        sessionId: String?
+    ) -> String? {
+        guard functionId == "worker::spawn" else { return nil }
+        if isWorkspaceLocal(payload, workspaceId: workspaceId) {
+            return "Allow local capability work in this workspace"
+        }
+        if isSessionLocal(payload, sessionId: sessionId) {
+            return "Allow local capability work in this chat"
+        }
+        return "Allow local capability work"
+    }
+
+    private static func localCapabilityReason(
+        functionId: String,
+        payload: [String: AnyCodable]?,
+        workspaceId: String?,
+        sessionId: String?
+    ) -> String? {
+        guard functionId == "worker::spawn" else { return nil }
+        if isWorkspaceLocal(payload, workspaceId: workspaceId) {
+            return "Tron needs your approval before creating or updating a local capability in this workspace."
+        }
+        if isSessionLocal(payload, sessionId: sessionId) {
+            return "Tron needs your approval before creating or updating a local capability in this chat."
+        }
+        return "Tron needs your approval before creating or updating a local capability."
+    }
+
+    private static func isWorkspaceLocal(_ payload: [String: AnyCodable]?, workspaceId: String?) -> Bool {
+        payload?.string("visibility")?.lowercased() == "workspace"
+            || payload?.string("workspaceId")?.nilIfEmpty != nil
+            || workspaceId?.nilIfEmpty != nil
+    }
+
+    private static func isSessionLocal(_ payload: [String: AnyCodable]?, sessionId: String?) -> Bool {
+        payload?.string("visibility")?.lowercased() == "session"
+            || payload?.string("sessionId")?.nilIfEmpty != nil
+            || sessionId?.nilIfEmpty != nil
     }
 }
 
@@ -45,10 +135,21 @@ enum ApprovalPendingPlugin: DispatchableEventPlugin {
         var workspaceId: String? { approval.workspaceId }
         var invocationId: String { "engine-approval:\(approval.approvalId)" }
         var actionText: String {
-            ApprovalEventText.action(functionId: approval.functionId, payload: approval.payload)
+            ApprovalEventText.action(
+                functionId: approval.functionId,
+                payload: approval.payload,
+                workspaceId: approval.workspaceId,
+                sessionId: approval.sessionId
+            )
         }
         var reasonText: String {
-            ApprovalEventText.reason(approvalId: approval.approvalId, functionId: approval.functionId)
+            ApprovalEventText.reason(
+                approvalId: approval.approvalId,
+                functionId: approval.functionId,
+                payload: approval.payload,
+                workspaceId: approval.workspaceId,
+                sessionId: approval.sessionId
+            )
         }
     }
 

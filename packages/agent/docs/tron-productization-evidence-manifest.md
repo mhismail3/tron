@@ -27,7 +27,7 @@ row, note command return codes, and keep open loops explicit.
 |---|---|---|
 | TPROD-A | passed_after_fix | This manifest and the master scorecard were created in `packages/agent/docs/`. README was updated to list both documents. `productization_scorecard_stays_formalized` was added to `packages/agent/tests/threat_model_invariants.rs`. Baseline audit commands and source references are listed below. |
 | TPROD-B | passed_after_fix | Added the managed `self-extend` skill, synced it locally, and verified live worker protocol plus sample local worker flow with focused integration tests. Details below. |
-| TPROD-C | pending | Product chat self-extension flow not yet proven. |
+| TPROD-C | running | Plain server-owned self-extension projection and approval wording passed focused tests; visual chat flow proof remains open. Details below. |
 | TPROD-D | pending | Created-by-agent shelf/history not yet proven. |
 | TPROD-E | pending | Local pack lifecycle product flow not yet proven. |
 | TPROD-F | pending | Plain trust/promotion/revocation UX not yet proven. |
@@ -139,3 +139,57 @@ row, note command return codes, and keep open loops explicit.
 - TPROD-C must now productize this into chat-led UX: autonomy grant approval,
   capability chip progression, and plain-language creation/testing/repair
   status without requiring engine terms.
+
+## TPROD-C Evidence
+
+### Files
+
+- [`packages/agent/src/domains/sandbox/contract.rs`](../src/domains/sandbox/contract.rs)
+- [`packages/agent/src/domains/capability/operations/run.rs`](../src/domains/capability/operations/run.rs)
+- [`packages/agent/tests/integration/tests.rs`](../tests/integration/tests.rs)
+- [`packages/ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift`](../../ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift)
+- [`packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationDetailComponents.swift`](../../ios-app/Sources/Views/Capabilities/CapabilityInvocationDetailComponents.swift)
+- [`packages/ios-app/Sources/Core/Events/Plugins/Approval/ApprovalPlugins.swift`](../../ios-app/Sources/Core/Events/Plugins/Approval/ApprovalPlugins.swift)
+- [`packages/ios-app/Tests/Models/CapabilityInvocationDisplayModelTests.swift`](../../ios-app/Tests/Models/CapabilityInvocationDisplayModelTests.swift)
+- [`packages/ios-app/Tests/Core/Events/Plugins/EventPluginTests.swift`](../../ios-app/Tests/Core/Events/Plugins/EventPluginTests.swift)
+- [`packages/ios-app/docs/capability-ui.md`](../../ios-app/docs/capability-ui.md)
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+- [`README.md`](../../../README.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cd packages/ios-app && xcodegen generate && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests/testSelfExtensionPresentationHintsKeepChatProjectionPlain -only-testing:TronMobileTests/EventPluginTests/testApprovalPendingPluginUsesPlainWorkspaceAutonomyTextForWorkerSpawn` | 65 | Red proof: test compile failed because `CapabilityInvocationDisplayModel.summaryText` did not exist yet. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests/testSelfExtensionPresentationHintsKeepChatProjectionPlain -only-testing:TronMobileTests/EventPluginTests/testApprovalPendingPluginUsesPlainWorkspaceAutonomyTextForWorkerSpawn` | 0 | Green proof for iOS plain chip summary/status labels and workspace-local approval wording. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests -only-testing:TronMobileTests/EventPluginTests` | 0 | Broader affected iOS model/event plugin coverage: 39 selected tests passed. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Verified the Rust server changes compile. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Verified Rust formatting after the server and static-gate edits. |
+| `cargo test --manifest-path packages/agent/Cargo.toml worker_spawn_has_plain_self_extension_presentation_hints -- --nocapture` | 0 | Proved `worker::spawn` owns product-facing presentation hints at the sandbox contract layer. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test integration capability_self_modifying_lifecycle_spawns_session_worker -- --nocapture` | 0 | Proved the live `capability::execute -> worker::spawn` session-worker flow returns product presentation hints and a scope-aware `Safe in this chat` summary. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 101 then 0 | First failed because the static guard still expected TPROD-C as `next`; after updating the guard, passed and preserved the no-overclaim score. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 101 then 0 | First failed because `packages/agent/tests/integration/tests.rs` grew from 4708 to 4726 LOC; after updating the cleanup scorecard budget row, passed. |
+| `git diff --check` | 0 | Verified whitespace/diff hygiene. |
+
+### Findings
+
+- `worker::spawn` now carries server-owned product hints for helper capability
+  creation: display name, chip title, summary fallback, lifecycle status
+  labels, icon, and theme color. The main hints intentionally do not include
+  `worker::spawn`.
+- `capability::execute` overlays the presentation summary from the actual child
+  payload visibility: session workers render `Safe in this chat`; workspace
+  workers render `Safe in this workspace`; system visibility renders promotion
+  language.
+- iOS now maps `summary`/`subtitle` into chip and detail-header text and maps
+  lifecycle label hints into status rows and accessibility text.
+- `approval.pending` for `worker::spawn` now renders workspace-local autonomy
+  approval in plain language instead of `Approve engine capability
+  worker::spawn`.
+
+### Open Loops
+
+- No TPROD-C points are awarded yet. The remaining row proof is a visual/action
+  pass from ordinary chat: approve a workspace-local autonomy grant, watch the
+  helper capability chip progress, open the detail sheet, and capture evidence
+  that engine terms are confined to metadata/Inspect.

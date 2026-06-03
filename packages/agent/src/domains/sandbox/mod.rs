@@ -5,7 +5,9 @@
 //! lifecycle, and tests beside the worker that uses them. Spawned workers are
 //! local `/engine/workers` participants with a derived child grant and scoped
 //! endpoint/token environment; cleanup routes through `worker::disconnect` and
-//! lifecycle events publish to `sandbox.lifecycle`.
+//! lifecycle events publish to `sandbox.lifecycle`. The contract owns the
+//! product presentation hints for local helper creation; runtime execute
+//! details only overlay the scope-specific summary.
 
 use std::path::Path;
 use std::time::{Duration, Instant};

@@ -62,8 +62,9 @@ pub struct CapabilityEventIdentity {
     /// Optional capability-owned presentation metadata for native clients.
     ///
     /// This is a bounded hint projection, not authority. Clients may render
-    /// `displayName`, `chipTitle`, `icon`, and `themeColor`, while execution
-    /// identity and policy remain in the typed identity fields above.
+    /// `displayName`, `chipTitle`, `summary`/`subtitle`, lifecycle status
+    /// labels, `icon`, and `themeColor`, while execution identity and policy
+    /// remain in the typed identity fields above.
     #[serde(rename = "presentationHints", skip_serializing_if = "Option::is_none")]
     pub presentation_hints: Option<Value>,
 }

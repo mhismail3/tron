@@ -946,7 +946,11 @@ expected registration, and returns the worker id, derived grant id, registered
 functions, catalog revision, visibility, and process metadata without a
 separate approval prompt. Session visibility is the default; workspace/system
 promotion is still only governed `engine::promote`, with revision/idempotency
-guards and catalog-watch evidence. `sandbox::list_spawned_workers`,
+guards and catalog-watch evidence. The contract also carries product
+`presentationHints` so chat surfaces render helper creation as local capability
+work with scope-aware summaries such as `Safe in this chat` or
+`Safe in this workspace`; raw worker ids, grants, traces, and schemas remain
+metadata. `sandbox::list_spawned_workers`,
 `sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the
 local process lifecycle; stop kills the process, unregisters volatile catalog
 entries through `worker::disconnect`, and publishes `sandbox.lifecycle`.
@@ -1003,8 +1007,9 @@ Active runtime/UI identity is capability-native: payloads carry `modelPrimitiveN
 `catalogRevision`, `trustTier`, `riskLevel`, `effectClass`, `traceId`,
 `rootInvocationId`, and `bindingDecisionId` when available. Payloads may also
 carry capability-owned `presentationHints` for native display name, chip title,
-icon token, and theme color. iOS renders active work from those capability
-fields and does not map retired built-in names to capability identity.
+summary/subtitle, status labels, icon token, and theme color. iOS renders active
+work from those capability fields and does not map retired built-in names to
+capability identity.
 
 ### Event Streaming
 

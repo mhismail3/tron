@@ -652,6 +652,24 @@ async fn spawn_hmh_session_worker_through_execute_for_session(
     );
     assert_eq!(spawn_result["details"]["status"], "ok");
     assert_eq!(spawn_result["details"]["functionId"], "worker::spawn");
+    assert_eq!(
+        spawn_result["details"]["presentationHints"]["displayName"],
+        "Create helper capability"
+    );
+    assert_eq!(
+        spawn_result["details"]["presentationHints"]["chipTitle"],
+        "Creating helper capability"
+    );
+    assert_eq!(
+        spawn_result["details"]["presentationHints"]["summary"],
+        "Safe in this chat"
+    );
+    assert!(
+        !spawn_result["details"]["presentationHints"]
+            .to_string()
+            .contains("worker::spawn"),
+        "main worker creation hints must stay product-facing: {spawn_result}"
+    );
     assert!(
         spawn_result["details"]["childInvocations"]
             .as_array()

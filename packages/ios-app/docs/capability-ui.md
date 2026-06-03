@@ -116,11 +116,13 @@ at the trailing edge while the detail truncates, and a chevron to the detail
 sheet. Chips take only the width they need until the request detail is too long,
 then the detail truncates inside the available row width. Capability metadata
 may include `presentationHints.displayName`, `presentationHints.chipTitle`,
-`presentationHints.icon`, and `presentationHints.themeColor`; iOS treats those
-as server-owned presentation hints and only maps them into native Tron
-components. Execution identity, authority, approval, and lineage still come
-from the typed capability identity and audit fields, not from presentation
-hints. When an early `execute` event has not resolved the binding yet, the chip
+`presentationHints.summary`, `presentationHints.subtitle`, status labels such
+as `runningLabel`/`successLabel`/`failureLabel`, `presentationHints.icon`, and
+`presentationHints.themeColor`; iOS treats those as server-owned presentation
+hints and only maps them into native Tron components. Execution identity,
+authority, approval, and lineage still come from the typed capability identity
+and audit fields, not from presentation hints. When an early `execute` event has
+not resolved the binding yet, the chip
 uses the server-provided hint when available and otherwise derives a stable
 generic color from the requested contract id in the submitted arguments so
 running process, filesystem, notification, and other first-party capability

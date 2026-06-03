@@ -405,6 +405,94 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(CapabilityPresentation.themeColorHex(for: identity), "#38BDF8")
     }
 
+    func testSelfExtensionPresentationHintsKeepChatProjectionPlain() {
+        let identity = CapabilityIdentity(
+            modelPrimitiveName: "execute",
+            contractId: "worker::spawn",
+            implementationId: "first_party.worker.v1.spawn",
+            functionId: "worker::spawn",
+            pluginId: "first_party.worker",
+            workerId: "worker-control",
+            trustTier: "session_generated",
+            presentationHints: [
+                "displayName": "Create helper capability",
+                "chipTitle": "Creating helper capability",
+                "summary": "Safe in this workspace",
+                "runningLabel": "Creating helper capability",
+                "successLabel": "Capability added",
+                "failureLabel": "Repair needed"
+            ]
+        )
+        let arguments = #"""
+        {
+            "target": "worker::spawn",
+            "arguments": {
+                "workerId": "tron-maintainer-helper",
+                "visibility": "workspace",
+                "expectedFunctionIds": ["tron_maintainer::scorecard_summary"]
+            },
+            "intent": "Create a local helper capability for Tron maintenance."
+        }
+        """#
+        let details: [String: AnyCodable] = [
+            "orchestration": [
+                "phaseDetails": [
+                    "selectedTarget": [
+                        "functionId": "worker::spawn",
+                        "implementationId": "first_party.worker.v1.spawn"
+                    ]
+                ]
+            ]
+        ]
+        let running = CapabilityInvocationData(
+            id: "cap-self-extend-running",
+            status: .running,
+            arguments: arguments,
+            details: details,
+            identity: identity
+        )
+
+        XCTAssertEqual(running.display.chipTitle, "Creating helper capability")
+        XCTAssertEqual(running.display.commandText, "Safe in this workspace")
+        XCTAssertEqual(running.display.summaryText, "Safe in this workspace")
+        XCTAssertEqual(running.display.statusText, "Creating helper capability")
+        XCTAssertEqual(running.display.statusWithDuration, "Creating helper capability")
+        XCTAssertTrue(
+            running.display.executionGroups
+                .first { $0.title == "Run" }?
+                .rows
+                .contains(CapabilityDisplayRow(label: "Status", value: "Creating helper capability")) == true
+        )
+
+        let visibleChatText = [
+            running.display.chipTitle,
+            running.display.commandText,
+            running.display.summaryText,
+            running.display.statusText,
+            running.display.statusWithDuration
+        ].joined(separator: " ")
+        XCTAssertFalse(visibleChatText.contains("worker::spawn"))
+        XCTAssertFalse(visibleChatText.contains("first_party"))
+
+        let completed = CapabilityInvocationData(
+            id: "cap-self-extend-complete",
+            status: .success,
+            arguments: arguments,
+            details: details,
+            identity: identity
+        )
+        XCTAssertEqual(completed.display.statusText, "Capability added")
+
+        let failed = CapabilityInvocationData(
+            id: "cap-self-extend-repair",
+            status: .error,
+            arguments: arguments,
+            details: details,
+            identity: identity
+        )
+        XCTAssertEqual(failed.display.statusText, "Repair needed")
+    }
+
     func testPresentationDerivesThemeColorFromResolvedCapabilityWhenEventOmitsHint() {
         let process = CapabilityIdentity(
             modelPrimitiveName: "execute",

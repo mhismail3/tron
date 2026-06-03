@@ -1,6 +1,6 @@
 //! Child capability execution, approval pause/resume, and run-result projection.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use super::{
     ResolvedCapabilityTarget, actor_from_invocation, capability_primitive_target_error,
@@ -22,6 +22,38 @@ use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
+
+fn execution_presentation_hints(
+    function: &FunctionDefinition,
+    target: &ResolvedCapabilityTarget,
+    payload: &Value,
+) -> Option<Value> {
+    let base = target
+        .entry
+        .function
+        .metadata
+        .get("presentationHints")
+        .cloned();
+    if function.id.as_str() != "worker::spawn" {
+        return base;
+    }
+
+    let mut hints = base
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_else(Map::new);
+    let summary = match payload.get("visibility").and_then(Value::as_str) {
+        Some("workspace") => "Safe in this workspace",
+        Some("session") => "Safe in this chat",
+        Some("system") => "Requires promotion approval",
+        _ if payload.get("workspaceId").and_then(Value::as_str).is_some() => {
+            "Safe in this workspace"
+        }
+        _ if payload.get("sessionId").and_then(Value::as_str).is_some() => "Safe in this chat",
+        _ => "Local capability work",
+    };
+    hints.insert("summary".to_owned(), Value::String(summary.to_owned()));
+    Some(Value::Object(hints))
+}
 
 pub(super) async fn execute_invoke_value(
     invocation: &Invocation,
@@ -172,12 +204,7 @@ pub(super) async fn execute_invoke_value(
         output: output.clone(),
         approval_state: None,
         plugin_versions: vec![target.entry.plugin_id.clone()],
-        presentation_hints: target
-            .entry
-            .function
-            .metadata
-            .get("presentationHints")
-            .cloned(),
+        presentation_hints: execution_presentation_hints(&function, &target, &payload),
         binding_decision: target.binding_decision,
         schema_digest: target.entry.schema_digest,
     };
@@ -609,12 +636,7 @@ pub(super) fn approved_execution_result(
         output: output.clone(),
         approval_state: (!replayed_approval).then_some(approval_state.clone()),
         plugin_versions: vec![target.entry.plugin_id.clone()],
-        presentation_hints: target
-            .entry
-            .function
-            .metadata
-            .get("presentationHints")
-            .cloned(),
+        presentation_hints: execution_presentation_hints(function, target, &approval.payload),
         binding_decision: target.binding_decision.clone(),
         schema_digest: target.entry.schema_digest.clone(),
     };

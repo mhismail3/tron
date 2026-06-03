@@ -122,11 +122,12 @@ Active chat, dashboard, detail sheets, and history reconstruction render
 capability invocations from `CapabilityIdentity`
 metadata (`contractId`, `implementationId`, `pluginId`, schema digest, catalog
 revision, trust/risk/effect, trace, and binding decision). Optional
-`presentationHints` such as `displayName`, `chipTitle`, `icon`, and
-`themeColor` are capability-owned server metadata that the app maps into native
-Tron components; they never replace identity, lineage, approval, or policy
-fields. Clean-slate local storage means unsupported or malformed events are
-treated as diagnostics rather than normalized through retired names.
+`presentationHints` such as `displayName`, `chipTitle`, `summary`, lifecycle
+status labels, `icon`, and `themeColor` are capability-owned server metadata
+that the app maps into native Tron components; they never replace identity,
+lineage, approval, or policy fields. Clean-slate local storage means
+unsupported or malformed events are treated as diagnostics rather than
+normalized through retired names.
 
 ### @Observable State Objects
 

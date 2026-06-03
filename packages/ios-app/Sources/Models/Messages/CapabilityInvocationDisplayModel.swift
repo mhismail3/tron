@@ -22,6 +22,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
     let chipTitle: String
     let capabilityName: String
     let commandText: String
+    let summaryText: String
     let statusText: String
     let statusWithDuration: String
     let targetId: String?
@@ -62,8 +63,8 @@ struct CapabilityInvocationDisplayModel: Equatable {
         self.capabilityName = capabilityName
         self.targetId = target
         self.payloadSummary = payloadSummary
-        self.statusText = Self.statusText(data.status)
-        self.statusWithDuration = [Self.statusText(data.status), data.formattedDuration]
+        self.statusText = Self.statusText(data.status, identity: data.identity)
+        self.statusWithDuration = [self.statusText, data.formattedDuration]
             .compactMap { $0?.nilIfEmpty }
             .joined(separator: " · ")
         self.commandText = Self.commandText(
@@ -72,6 +73,11 @@ struct CapabilityInvocationDisplayModel: Equatable {
             target: target,
             payloadSummary: payloadSummary,
             capabilityName: capabilityName,
+            identity: data.identity
+        )
+        self.summaryText = Self.summaryText(
+            primitive: primitive,
+            target: target,
             identity: data.identity
         )
         self.capabilityRows = Self.capabilityRows(
@@ -148,7 +154,13 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? "Execute"
     }
 
-    private static func statusText(_ status: CapabilityInvocationStatus) -> String {
+    private static func statusText(
+        _ status: CapabilityInvocationStatus,
+        identity: CapabilityIdentity
+    ) -> String {
+        if let label = presentationString(statusHintKeys(for: status), for: identity) {
+            return label
+        }
         switch status {
         case .generating: return "Preparing"
         case .running: return "Running"
@@ -160,6 +172,25 @@ struct CapabilityInvocationDisplayModel: Equatable {
         }
     }
 
+    private static func statusHintKeys(for status: CapabilityInvocationStatus) -> [String] {
+        switch status {
+        case .generating:
+            return ["generatingLabel", "progressLabel", "statusLabel"]
+        case .running:
+            return ["runningLabel", "progressLabel", "statusLabel"]
+        case .paused:
+            return ["pausedLabel", "statusLabel"]
+        case .approvalRequired:
+            return ["approvalLabel", "statusLabel"]
+        case .success:
+            return ["successLabel", "statusLabel"]
+        case .error:
+            return ["failureLabel", "errorLabel", "statusLabel"]
+        case .unavailable:
+            return ["unavailableLabel", "statusLabel"]
+        }
+    }
+
     private static func commandText(
         primitive: String,
         query: String?,
@@ -168,6 +199,9 @@ struct CapabilityInvocationDisplayModel: Equatable {
         capabilityName: String,
         identity: CapabilityIdentity
     ) -> String {
+        if let summary = presentationString(["summary", "subtitle", "commandText"], for: identity) {
+            return summary.truncated(to: 140)
+        }
         switch primitive {
         case "search":
             if let query = query?.nilIfEmpty {
@@ -192,6 +226,31 @@ struct CapabilityInvocationDisplayModel: Equatable {
             }
             return "Invocation"
         }
+    }
+
+    private static func summaryText(
+        primitive: String,
+        target: String?,
+        identity: CapabilityIdentity
+    ) -> String {
+        if let summary = presentationString(["summary", "subtitle"], for: identity) {
+            return summary.truncated(to: 160)
+        }
+
+        var parts = [primitiveTitle(primitive)]
+        if let target = target?.nilIfEmpty {
+            parts.append(target)
+        }
+        return parts.joined(separator: " via ")
+    }
+
+    private static func presentationString(_ keys: [String], for identity: CapabilityIdentity) -> String? {
+        for key in keys {
+            if let value = CapabilityPresentation.presentationString(key, for: identity) {
+                return value
+            }
+        }
+        return nil
     }
 
     private static func targetId(
@@ -445,7 +504,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         }
         appendRow("Function", string(selectedTarget?["functionId"]) ?? data.identity.functionId, to: &run, technical: true)
         appendRow("Worker", data.identity.workerId, to: &run, technical: true)
-        appendRow("Status", statusText(data.status), to: &run)
+        appendRow("Status", statusText(data.status, identity: data.identity), to: &run)
         appendRow("Duration", data.formattedDuration, to: &run)
         if !run.isEmpty {
             groups.append(CapabilityDisplayGroup(title: "Run", rows: run))

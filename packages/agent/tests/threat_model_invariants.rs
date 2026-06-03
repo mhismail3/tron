@@ -644,13 +644,13 @@ fn productization_scorecard_stays_formalized() {
     for required in [
         "# Tron Productization Scorecard: Self-Extending Agentic Product",
         "Current score: **12/100**",
-        "Status: **active; TPROD-B passed_after_fix; TPROD-C next**",
+        "Status: **active; TPROD-C running; plain projection slice passed, visual chat proof next**",
         "| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix |",
         "| TPROD-B | `self-extend` managed skill | 7 | passed_after_fix |",
-        "| TPROD-C | Chat-led self-extension UX | 10 | pending |",
+        "| TPROD-C | Chat-led self-extension UX | 10 | running |",
         "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending |",
         "No remote package install/discovery path beyond explicit deferred docs",
-        "TPROD-C is next",
+        "TPROD-C remains active",
     ] {
         assert!(
             scorecard.contains(required),
@@ -672,7 +672,7 @@ fn productization_scorecard_stays_formalized() {
         manifest.contains("Current score: **12/100**")
             && manifest.contains("| TPROD-A | passed_after_fix |")
             && manifest.contains("| TPROD-B | passed_after_fix |")
-            && manifest.contains("| TPROD-C | pending |")
+            && manifest.contains("| TPROD-C | running |")
             && manifest.contains("No remote package discovery"),
         "productization evidence manifest must track the same score, next row, and deferred remote boundary"
     );
