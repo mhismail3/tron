@@ -117,6 +117,11 @@ Current living entry points:
 - `packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md`:
   active execution scorecard portfolio for proving the recursive agent/human
   plug-and-play harness loop from the current baseline.
+- `packages/agent/docs/tron-productization-scorecard.md`: active master
+  productization scorecard for the chat-led, self-extending local agent product
+  campaign.
+- `packages/agent/docs/tron-productization-evidence-manifest.md`: companion
+  command/source/UI/soak evidence manifest for the productization scorecard.
 - `packages/agent/docs/token-accounting-hardening-scorecard.md`: completed
   server-authoritative token accounting, pricing, provider-cache, and
   iPhone-only UI hardening scorecard with final evidence caveats.

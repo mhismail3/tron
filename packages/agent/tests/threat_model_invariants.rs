@@ -616,6 +616,73 @@ fn codebase_cleanup_scorecard_stays_formalized() {
 }
 
 #[test]
+fn productization_scorecard_stays_formalized() {
+    let repo_root = repo_root();
+    let scorecard_path = repo_root
+        .join("packages")
+        .join("agent")
+        .join("docs")
+        .join("tron-productization-scorecard.md");
+    let manifest_path = repo_root
+        .join("packages")
+        .join("agent")
+        .join("docs")
+        .join("tron-productization-evidence-manifest.md");
+    assert!(
+        scorecard_path.is_file(),
+        "productization scorecard must exist"
+    );
+    assert!(
+        manifest_path.is_file(),
+        "productization evidence manifest must exist"
+    );
+    let scorecard = std::fs::read_to_string(&scorecard_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", scorecard_path.display()));
+    let manifest = std::fs::read_to_string(&manifest_path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", manifest_path.display()));
+
+    for required in [
+        "# Tron Productization Scorecard: Self-Extending Agentic Product",
+        "Current score: **5/100**",
+        "Status: **active; TPROD-A passed_after_fix; TPROD-B next**",
+        "| TPROD-A | Baseline, plan, and evidence harness | 5 | passed_after_fix |",
+        "| TPROD-B | `self-extend` managed skill | 7 | pending |",
+        "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | pending |",
+        "No remote package install/discovery path beyond explicit deferred docs",
+        "TPROD-B is next",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "productization scorecard missing required text: {required}"
+        );
+    }
+    for premature_claim in [
+        "Current score: **100/100**",
+        "Status: **completed**",
+        "| TPROD-B | `self-extend` managed skill | 7 | passed",
+        "| TPROD-L | Hardening, visual QA, soak, and closeout gates | 12 | passed",
+    ] {
+        assert!(
+            !scorecard.contains(premature_claim),
+            "productization scorecard must not overclaim before evidence: {premature_claim}"
+        );
+    }
+    assert!(
+        manifest.contains("Current score: **5/100**")
+            && manifest.contains("| TPROD-A | passed_after_fix |")
+            && manifest.contains("| TPROD-B | pending |")
+            && manifest.contains("No remote package discovery"),
+        "productization evidence manifest must track the same score, next row, and deferred remote boundary"
+    );
+    let readme = std::fs::read_to_string(repo_root.join("README.md")).expect("read README");
+    assert!(
+        readme.contains("packages/agent/docs/tron-productization-scorecard.md")
+            && readme.contains("packages/agent/docs/tron-productization-evidence-manifest.md"),
+        "README living-doc map must link the productization scorecard and evidence manifest"
+    );
+}
+
+#[test]
 fn legacy_fallback_cleanup_pass_stays_formalized() {
     let repo_root = repo_root();
     let scorecard_path = repo_root
