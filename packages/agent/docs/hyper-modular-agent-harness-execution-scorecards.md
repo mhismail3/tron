@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **87.75/100**
+Current score: **90.00/100**
 
 Status: **running**
 
@@ -1244,9 +1244,9 @@ HMH-E7 evidence, 2026-06-02/2026-06-03:
 
 Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6/HMH-E7:
 
-- HMH-E is closed. Continue with HMH-F1: prove mutating
-  worker/module/ui/promotion/queue/resource paths reject missing or conflicting
-  idempotency before handler execution.
+- HMH-E is closed. HMH-F1 is now closed. Continue with HMH-F2: prove approval
+  pause/resume preserves original causal context and that agents cannot
+  self-resolve approval-required work.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1257,7 +1257,7 @@ external effects.
 
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
-| HMH-F1 | Idempotency is mandatory for mutations | 15 | pending | Mutating worker/module/ui/promotion/queue/resource paths reject missing/conflicting idempotency before handler execution. | Stop if child invocation starts before idempotency reservation. |
+| HMH-F1 | Idempotency is mandatory for mutations | 15 | passed | Mutating worker/module/ui/promotion/queue/resource paths reject missing/conflicting idempotency before handler execution. | Stop if child invocation starts before idempotency reservation. |
 | HMH-F2 | Approval resume preserves original context | 15 | pending | Approval-required execute stores pause state and resumes same trace/grant/parent/idempotency after `approval::resolve`; agent cannot self-resolve. | Stop if approval creates disconnected child commands. |
 | HMH-F3 | Trigger delivery modes are bounded | 15 | pending | Sync, Void, and Enqueue carry causal metadata; Void is restricted to loss-tolerant effects; trigger cascades have loop/depth budgets and fail closed. | Stop on unbounded trigger recursion. |
 | HMH-F4 | Queue/DLQ is inspectable | 15 | pending | Enqueue records receipt, attempts, leases, retries, cancellation, DLQ, replay, and compensation refs. | Stop if queue errors are log-only. |
@@ -1268,9 +1268,54 @@ external effects.
 Closeout commands:
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml engine::tests::approval engine::tests::queue engine::tests::leases -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::idempotency -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::ledger_idempotency -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::approval -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::leases_compensation -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture
 ```
+
+HMH-F1 evidence, 2026-06-02:
+
+- Source audit found the owning boundary is already central policy, not a
+  surface-specific check: `validate_function_registration` rejects mutating
+  functions without idempotency contracts, and `EngineHost::prepare_meta_invocation`
+  calls `validate_invocation` before grant authorization, schema validation,
+  idempotency reservation, or host-dispatched primitive execution.
+- Added `engine::tests::idempotency` to pin this contract. It proves generic
+  mutating handlers are not called when the caller omits an idempotency key;
+  representative host mutations (`worker::disconnect`, `module::activate`,
+  `ui::surface_for_target`, `engine::promote`, `queue::enqueue`, and
+  `resource::create`) reject the missing key before even invalid empty payloads
+  are handled; and every discovered mutating surface in those families declares
+  an idempotency contract.
+- Existing ledger/promotion coverage proves duplicates and conflicts stay
+  fail-closed: duplicate/replay paths do not reinvoke handlers, idempotency
+  reservation failure prevents handler execution, handler failure is replayed
+  without reinvocation, and a duplicate `engine::promote` key cannot mutate a
+  different target.
+- The broad `threat_model_invariants` rerun initially exposed unrelated
+  approval ownership drift: `approval.rs` had crossed the 1,000-line guard. The
+  checkpoint split SQLite row reconstruction and parsing helpers into
+  `approval/sqlite_codec.rs`, updated the cleanup scorecard, kept the public
+  approval store type stable, and restored the static gate without changing
+  approval or idempotency behavior.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::idempotency -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::ledger_idempotency -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::meta_primitives::engine_promote_conflicting_duplicate_key_does_not_mutate_new_target -- --exact --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib engine::approval -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture`;
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`;
+  `git diff --check`.
+
+Open loops after HMH-F1:
+
+- HMH-F1 is closed. Continue with HMH-F2 to prove approval pause/resume keeps
+  trace, grant, parent, session/workspace, and idempotency lineage attached to
+  the original command, and that an agent cannot self-resolve its own
+  approval-required work.
 
 ## HMH-G Scorecard: Final Adversarial Closeout And Absence Gates
 
@@ -1378,10 +1423,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, and HMH-E are closed. Continue with HMH-F1:
-prove mutating worker/module/ui/promotion/queue/resource paths reject missing
-or conflicting idempotency before handler execution.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, and HMH-F1 are closed. Continue with
+HMH-F2: prove approval resume preserves original context and rejects agent
+self-resolution.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml engine::tests::idempotency -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::approval -- --nocapture
 ```

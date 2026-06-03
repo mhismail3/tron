@@ -15,6 +15,7 @@ mod external_worker;
 mod generated_ui;
 mod grant_authority;
 mod host_invocation;
+mod idempotency;
 mod ids_types;
 mod leases_compensation;
 mod ledger_idempotency;

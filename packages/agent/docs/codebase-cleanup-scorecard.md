@@ -328,9 +328,10 @@ Accepted decomposition:
 - `primitive_workers_are_owned_outside_host_bucket` now gates the queue runtime
   split and rejects runtime draining or lifecycle stream projection returning to
   `queue.rs`.
-- `approval.rs` now owns approval records, requests, stores, transitions, and
-  parsing helpers below the 1,000 LOC threshold, while approval idempotency
-  tests live in `approval/tests.rs`.
+- `approval.rs` now owns approval records, requests, stores, and transitions
+  below the 1,000 LOC threshold, while `approval/sqlite_codec.rs` owns SQLite
+  row reconstruction and parsing helpers and approval idempotency tests live in
+  `approval/tests.rs`.
 - `rust_test_ownership_stays_code_adjacent` now gates the approval test split
   and rejects broad inline tests returning to `approval.rs`.
 - `types.rs` now owns shared engine definition contracts below the 1,000 LOC
