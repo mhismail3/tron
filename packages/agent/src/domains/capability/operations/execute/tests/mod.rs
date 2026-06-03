@@ -1,3 +1,4 @@
+mod approval;
 mod discovery;
 mod normalization;
 mod observe;

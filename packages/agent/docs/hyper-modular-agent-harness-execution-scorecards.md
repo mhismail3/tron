@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **90.00/100**
+Current score: **92.25/100**
 
 Status: **running**
 
@@ -1244,9 +1244,8 @@ HMH-E7 evidence, 2026-06-02/2026-06-03:
 
 Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6/HMH-E7:
 
-- HMH-E is closed. HMH-F1 is now closed. Continue with HMH-F2: prove approval
-  pause/resume preserves original causal context and that agents cannot
-  self-resolve approval-required work.
+- HMH-E is closed. HMH-F1 and HMH-F2 are now closed. Continue with HMH-F3:
+  prove trigger delivery modes carry bounded causal metadata and fail closed.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1258,7 +1257,7 @@ external effects.
 | ID | Scenario | Weight | Status | Evidence | Stop/fix rule |
 |----|----------|--------|--------|----------|---------------|
 | HMH-F1 | Idempotency is mandatory for mutations | 15 | passed | Mutating worker/module/ui/promotion/queue/resource paths reject missing/conflicting idempotency before handler execution. | Stop if child invocation starts before idempotency reservation. |
-| HMH-F2 | Approval resume preserves original context | 15 | pending | Approval-required execute stores pause state and resumes same trace/grant/parent/idempotency after `approval::resolve`; agent cannot self-resolve. | Stop if approval creates disconnected child commands. |
+| HMH-F2 | Approval resume preserves original context | 15 | passed | Approval-required execute stores pause state and resumes same trace/grant/parent/idempotency after `approval::resolve`; agent cannot self-resolve. | Stop if approval creates disconnected child commands. |
 | HMH-F3 | Trigger delivery modes are bounded | 15 | pending | Sync, Void, and Enqueue carry causal metadata; Void is restricted to loss-tolerant effects; trigger cascades have loop/depth budgets and fail closed. | Stop on unbounded trigger recursion. |
 | HMH-F4 | Queue/DLQ is inspectable | 15 | pending | Enqueue records receipt, attempts, leases, retries, cancellation, DLQ, replay, and compensation refs. | Stop if queue errors are log-only. |
 | HMH-F5 | Leases and compensation are visible | 15 | pending | Shared worktree/files/process/module/generated-action mutations acquire leases and record compensation/manual recovery status. | Stop if high-risk effects lack recovery notes. |
@@ -1310,12 +1309,40 @@ HMH-F1 evidence, 2026-06-02:
   `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`;
   `git diff --check`.
 
-Open loops after HMH-F1:
+HMH-F2 evidence, 2026-06-03:
 
-- HMH-F1 is closed. Continue with HMH-F2 to prove approval pause/resume keeps
-  trace, grant, parent, session/workspace, and idempotency lineage attached to
-  the original command, and that an agent cannot self-resolve its own
-  approval-required work.
+- Added
+  `approval_required_execute_resumes_child_with_original_causal_context` in
+  `domains::capability::operations::execute::tests::approval`. The proof runs
+  a real `capability::execute` invocation against an approval-required
+  `danger::write` function, waits for the pending approval, then verifies the
+  stored approval record preserves the original execute trace, grant, parent
+  invocation id, session, workspace, authority scopes, target payload, and
+  caller-supplied child idempotency key.
+- The test attempts an agent-context `approval::resolve` with an otherwise
+  valid grant and `approval.resolve` scope. The host rejects it at the
+  approval-resolver actor policy gate and leaves the approval pending, proving
+  agents cannot self-resolve approval-required work by adding the resolve
+  scope.
+- The same scenario resolves through user-authorized `engine::invoke` of
+  `approval::resolve`, then proves the approved child handler ran exactly once
+  with the original execute trace, grant, parent invocation id, session,
+  workspace, and idempotency key. The persisted child invocation row carries
+  the same lineage, so approval resume is not a disconnected child command.
+- Existing engine approval coverage still proves direct host resume,
+  idempotency/replay, primitive hiding, agent rejection, and the transport
+  route that maps `approval::resolve` invokes to a user-authorized engine
+  action.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml approval_required_execute_resumes_child_with_original_causal_context -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::approval -- --nocapture`.
+
+Open loops after HMH-F1/HMH-F2:
+
+- HMH-F1 and HMH-F2 are closed. Continue with HMH-F3 to prove Sync, Void, and
+  Enqueue trigger delivery modes carry causal metadata, Void is restricted to
+  loss-tolerant effects, and trigger cascades have loop/depth budgets that
+  fail closed.
 
 ## HMH-G Scorecard: Final Adversarial Closeout And Absence Gates
 
@@ -1423,10 +1450,9 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, and HMH-F1 are closed. Continue with
-HMH-F2: prove approval resume preserves original context and rejects agent
-self-resolution.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F1, and HMH-F2 are closed. Continue
+with HMH-F3: prove trigger delivery modes are bounded and fail closed.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml engine::tests::approval -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::triggers -- --nocapture
 ```
