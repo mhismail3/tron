@@ -4,9 +4,9 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **99/100**
+Current score: **100/100**
 
-Status: **running**
+Status: **completed**
 
 Scope:
 - Fresh, source-backed implementation scorecard portfolio for reaching the
@@ -202,7 +202,7 @@ Planes to delete or prevent:
 | HMH-D | Plug-and-play module/package lifecycle | 15 | passed | module_trust_runtime | Module install/verify/approve/configure/activate/health/conformance/upgrade/rollback/quarantine/revoke works through canonical functions/resources. |
 | HMH-E | Human harness and generated UI | 15 | passed_after_fix | ios_generated_ui | iOS renders and operates server-owned capability/module/generated UI/evidence flows on iPhone and iPad without owning policy, and disconnected cache/approval paths fail closed. |
 | HMH-F | Causality, safety, loops, and rollback | 15 | passed_after_fix | engine_policy_ledger | Idempotency, approval resume, leases, trigger budgets, queues/DLQ, compensation, trace/ledger proof, and restart/disconnect chaos fail closed. |
-| HMH-G | Final adversarial closeout and absence gates | 10 | pending | test_harness | Static scans, integration tests, transcript audit, docs/README/ledger, and score math prove no parallel planes remain. |
+| HMH-G | Final adversarial closeout and absence gates | 10 | passed | test_harness | Static scans, integration tests, transcript audit, docs/README/ledger, and score math prove no parallel planes remain. |
 
 ## HMH-A Scorecard: Source, Baseline, And Primitive Audit
 
@@ -1557,7 +1557,7 @@ is pending, indirectly verified, or stale.
 | HMH-G4 | Live recursive loop rerun | 20 | passed | End-to-end HMH-B/HMH-E scenario reruns from clean temp state after fixes and passes without harness pollution. | Do not use earlier partial run as final proof. |
 | HMH-G5 | Docs and README are canonical | 10 | passed_after_fix | README, engine docs, iOS docs, scorecards, and module docs agree on current commands, surfaces, status, and residual risk. | Remove aspirational or stale claims. |
 | HMH-G6 | Diff hygiene and dead-code scan | 10 | passed_after_fix | Diff scan removes unrelated churn, AI-ish comments, redundant defensive checks, type escapes, stale compatibility code, and metadata noise. | Fix before ledger/final. |
-| HMH-G7 | Ledger and final status are honest | 10 | pending | Ledger entry records completed work and remaining successor scope; no scorecard says 100/100 while Next Test implies active work. | Keep goal active if implementation is not fully proven. |
+| HMH-G7 | Ledger and final status are honest | 10 | passed | Ledger entry records completed work and remaining successor scope; no scorecard says 100/100 while Next Test implies active work. | Keep goal active if implementation is not fully proven. |
 
 Closeout commands:
 
@@ -1802,6 +1802,25 @@ Open loops after HMH-G1/HMH-G2/HMH-G3/HMH-G4/HMH-G5/HMH-G6:
 - HMH-G6 is closed. Continue with HMH-G7: update the ledger, make the final
   status honest, and keep the goal active until the G7 row is proven.
 
+HMH-G7 evidence, 2026-06-03:
+
+- Ledger record:
+  `f32a6f61-b08e-49c9-af95-134539311964` was appended to
+  `~/LEDGER.jsonl` before this final scorecard update. It records the HMH-G
+  closeout objective, G1-G6 commits, files touched, decisions, and future-session
+  lessons.
+- Final status honesty:
+  the portfolio only moved to `Current score: **100/100**` and `Status:
+  **completed**` after HMH-G1 through HMH-G7 had direct evidence. Earlier stale
+  99/100, 98/100, and pending-row states are now rejected by
+  `hyper_modular_architecture_plan_invariants`.
+- All HMH rows are closed:
+  HMH-A through HMH-F are passed or passed-after-fix, HMH-G1 through HMH-G7 are
+  passed or passed-after-fix, and the HMH-G parent row is passed.
+- No active Next Test remains:
+  this file no longer carries a `Next Test` section. The final status below
+  names completion instead of pointing a future agent at unfinished work.
+
 ## Adversarial Audit Of This Portfolio
 
 Strong findings:
@@ -1841,14 +1860,12 @@ Failure modes this portfolio is designed to catch:
 
 Residual risk:
 
-- This portfolio is a complete plan, not runtime proof. The north-star system is
-  not complete until HMH-A through HMH-G have passed with live evidence.
-- The official iii docs can evolve. Implementation checkpoints should record
-  retrieval dates or commit hashes for any external facts they still depend on.
-- A single portfolio file is easier to review now, but execution owners may
-  split lanes into separate scorecards once a lane begins; when that happens,
-  each split file must inherit the same row weights, evidence contracts, and
-  static gates.
+- The official iii docs can evolve. Future implementation checkpoints should
+  record retrieval dates or commit hashes for any external facts they still
+  depend on.
+- The portfolio is intentionally broad. Future agents should keep this file as
+  the canonical completed audit and add linked successor scorecards only for new
+  work that changes the verified substrate.
 
 ## Static Gates
 
@@ -1880,12 +1897,8 @@ The north-star objective is not complete until all of the following are true:
 - README and living docs describe only working, verified behavior.
 - Ledger records the campaign checkpoint before final response.
 
-## Next Test
+## Final Status
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, HMH-G2, HMH-G3, HMH-G4,
-HMH-G5, and HMH-G6 are closed. Continue with HMH-G7: update the ledger and make
-the final status honest.
-
-```bash
-git status --short --branch
-```
+The hyper modular agent harness execution portfolio is complete. HMH-A through
+HMH-G are closed with direct evidence, the ledger is updated, and no active
+Next Test remains in this scorecard.
