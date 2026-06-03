@@ -28,4 +28,5 @@ mod resource_kernel;
 mod state_queue;
 mod streams;
 mod subagent_lineage;
+mod trace_observability;
 mod triggers;

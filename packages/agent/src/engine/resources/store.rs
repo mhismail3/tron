@@ -22,6 +22,7 @@ mod events;
 mod sqlite_codec;
 #[cfg(test)]
 mod tests;
+mod trace_events;
 
 use events::{generated_id, resource_event};
 use sqlite_codec::{

@@ -906,12 +906,13 @@ summaries, spans, structured log projections, and metrics through the same
 canonical invocation path.
 `storage::*` owns stats, retention, checkpoints, and portable snapshot export
 for the unified engine database. A practical debugging trace includes
-invocation records, resource versions/links/events, stream publications,
-approvals, resource leases, and compensation records, all tied together by
-`traceId` plus `parentInvocationId`. Query
+invocation records, catalog changes, queue receipts, resource
+versions/links/events, stream publications, approvals, resource leases, and
+compensation records, all tied together by `traceId` plus
+`parentInvocationId`. Query
 response shaping for these privileged primitive workers lives under
 `packages/agent/src/engine/primitives/runtime.rs`; `EngineHost` coordinates
-catalog, ledger, stream, resource, lease, approval, and compensation access
+catalog, ledger, stream, queue, resource, lease, approval, and compensation access
 without owning primitive response contracts.
 
 Subagent orchestration is also engine-native. `agent::spawn_subagent` returns a

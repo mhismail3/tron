@@ -320,11 +320,14 @@ Accepted decomposition:
   IDs.
 - `resources/store/sqlite_codec.rs` owns the resource-store SQLite schema, row
   reconstruction, scope projection, and JSON serialization helpers.
+- `resources/store/trace_events.rs` owns trace-indexed resource event queries
+  for both store backends.
 - `resources/store/tests.rs` owns the store contract tests instead of keeping
   test fixtures in the production store root.
 - `queue.rs` now owns durable queue item types and in-memory/SQLite queue store
-  behavior, while `queue/runtime.rs` owns queue drain orchestration, retry
-  execution, drainer service facade, and queue lifecycle stream projection.
+  behavior, `queue/sqlite_codec.rs` owns row/parameter codecs, and
+  `queue/runtime.rs` owns queue drain orchestration, retry execution, drainer
+  service facade, and queue lifecycle stream projection.
 - `primitive_workers_are_owned_outside_host_bucket` now gates the queue runtime
   split and rejects runtime draining or lifecycle stream projection returning to
   `queue.rs`.
@@ -368,8 +371,9 @@ Accepted decomposition:
   to `grants.rs`.
 - `primitives/runtime.rs` now owns the host-dispatched primitive query
   dispatcher below the 1,000 LOC threshold, while
-  `primitives/runtime/worker_protocol.rs` owns the worker protocol guide
-  response projection and `primitives/runtime/worker_protocol_template.py`
+  `primitives/runtime/trace_projection.rs` owns trace summaries/log
+  projections, `primitives/runtime/worker_protocol.rs` owns the worker protocol
+  guide response projection, and `primitives/runtime/worker_protocol_template.py`
   owns the readable executable Python template source.
 - `registry.rs` now owns live-catalog registration, discovery, grant checks,
   and cleanup below the 1,000 LOC threshold.
@@ -943,7 +947,7 @@ find packages scripts \( -path '*/target/*' -o -path '*/.build/*' -o -path '*/De
 | `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | 1127 | CLC-9 context tests | Compaction engine scenario matrix. | 1175 | CLC-9 |
 | `packages/agent/src/domains/capability/operations/mod.rs` | 1095 | CLC-1 capability operations | Capability operation orchestration keeps validation, lifecycle, and projection together until a narrower operation boundary appears. | 1150 | CLC-1 |
 | `packages/ios-app/Tests/Infrastructure/EventDatabaseTests.swift` | 1089 | CLC-9 iOS tests | Event database test matrix. | 1100 | CLC-9 |
-| `packages/agent/src/engine/primitives/mod.rs` | 1001 | CLC-2 primitive surface | Primitive registration glue is one line over the threshold and remains the discoverable index for built-in primitive modules. | 1050 | CLC-2 |
+| `packages/agent/src/engine/primitives/mod.rs` | 1023 | CLC-2 primitive surface | Primitive registration glue is one line over the threshold and remains the discoverable index for built-in primitive modules. | 1050 | CLC-2 |
 
 ## Test Plan
 

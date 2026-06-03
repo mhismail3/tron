@@ -63,9 +63,9 @@ use super::queue::{
     SqliteEngineQueueStore,
 };
 use super::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
-    EngineResourceVersion, InMemoryEngineResourceStore, LinkResources, ListResources,
-    RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+    CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
+    EngineResourceTypeDefinition, EngineResourceVersion, InMemoryEngineResourceStore,
+    LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
     builtin_resource_type_definitions,
 };
 use super::state::{
@@ -405,6 +405,17 @@ impl QueueStoreBackend {
             Self::Sqlite(store) => store.list(queue, limit),
         }
     }
+
+    pub(in crate::engine) fn list_by_trace(
+        &self,
+        trace_id: &str,
+        limit: usize,
+    ) -> Result<Vec<EngineQueueItem>> {
+        match self {
+            Self::InMemory(store) => store.list_by_trace(trace_id, limit),
+            Self::Sqlite(store) => store.list_by_trace(trace_id, limit),
+        }
+    }
 }
 
 pub(in crate::engine) enum ApprovalStoreBackend {
@@ -602,6 +613,17 @@ impl ResourceStoreBackend {
         match self {
             Self::InMemory(store) => store.inspect(resource_id),
             Self::Sqlite(store) => store.inspect(resource_id),
+        }
+    }
+
+    pub(in crate::engine) fn events_by_trace(
+        &self,
+        trace_id: &str,
+        limit: usize,
+    ) -> Result<Vec<EngineResourceEvent>> {
+        match self {
+            Self::InMemory(store) => store.events_by_trace(trace_id, limit),
+            Self::Sqlite(store) => store.events_by_trace(trace_id, limit),
         }
     }
 

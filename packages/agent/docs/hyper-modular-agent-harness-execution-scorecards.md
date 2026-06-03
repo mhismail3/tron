@@ -1244,9 +1244,8 @@ HMH-E7 evidence, 2026-06-02/2026-06-03:
 
 Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6/HMH-E7:
 
-- HMH-E is closed. HMH-F1 through HMH-F5 are now closed. Continue with
-  HMH-F6: prove trace and ledger explain the full client-to-agent-to-worker-to-UI
-  graph.
+- HMH-E is closed. HMH-F1 through HMH-F6 are now closed. Continue with
+  HMH-F7: prove restart/disconnect chaos fails closed.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1262,7 +1261,7 @@ external effects.
 | HMH-F3 | Trigger delivery modes are bounded | 15 | passed_after_fix | Sync, Void, and Enqueue carry causal metadata; Void is restricted to loss-tolerant effects; trigger cascades have loop/depth budgets and fail closed. | Stop on unbounded trigger recursion. |
 | HMH-F4 | Queue/DLQ is inspectable | 15 | passed_after_fix | Enqueue records receipt, attempts, leases, retries, cancellation, DLQ, replay, and compensation refs. | Stop if queue errors are log-only. |
 | HMH-F5 | Leases and compensation are visible | 15 | passed_after_fix | Shared worktree/files/process/module/generated-action mutations acquire leases and record compensation/manual recovery status. | Stop if high-risk effects lack recovery notes. |
-| HMH-F6 | Trace and ledger explain the full graph | 15 | pending | One scenario traces client request to agent turn, worker spawn, catalog change, function invocation, approval/queue/resource events, and UI action. | Stop if trace correlation relies on timestamps. |
+| HMH-F6 | Trace and ledger explain the full graph | 15 | passed_after_fix | One scenario traces client request to agent turn, worker spawn, catalog change, function invocation, approval/queue/resource events, and UI action. | Stop if trace correlation relies on timestamps. |
 | HMH-F7 | Restart/disconnect chaos fails closed | 10 | pending | Server restart, worker socket loss, approval worker absence, vector index unavailable, and client reconnect states are explicit and non-optimistic. | Fix fail-open paths before final UI proof. |
 
 Closeout commands:
@@ -1273,6 +1272,7 @@ cargo test --manifest-path packages/agent/Cargo.toml engine::tests::ledger_idemp
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::approval -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::state_queue -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::leases_compensation -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::trace_observability -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants -- --nocapture
 ```
 
@@ -1447,11 +1447,42 @@ HMH-F5 evidence, 2026-06-03:
 - Passing proof:
   `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::leases_compensation -- --nocapture`.
 
-Open loops after HMH-F1/HMH-F2/HMH-F3/HMH-F4/HMH-F5:
+HMH-F6 evidence, 2026-06-03:
 
-- HMH-F1 through HMH-F5 are closed. Continue with HMH-F6 to prove one
-  trace/ledger scenario explains the full client-to-agent-to-worker-to-UI
-  graph without timestamp correlation.
+- Red coverage first proved `observability::trace_get` could not explain the
+  full graph. The new trace scenario initially failed with `trace_get must
+  correlate spawned worker catalog registration by durable worker id` because
+  catalog changes were filtered only by trace-id substrings or subject id equal
+  to the trace id; queue receipts and resource events were not projected into
+  `trace_get` at all.
+- The fix makes trace assembly derive invoked function ids and worker ids from
+  the invocation ledger, then correlate catalog changes by subject id and
+  owner worker id. This keeps the trace proof durable-id based and avoids
+  timestamp adjacency.
+- Queue and resource stores now expose trace-indexed reads for in-memory and
+  SQLite backends, with SQLite indexes on `engine_queue_items(trace_id,
+  created_at)` and `engine_resource_events(trace_id, occurred_at)`.
+  `observability::trace_get`, `observability::span_list`, and
+  `observability::log_query` now project queue items and resource events from
+  that same trace component model, and the trace summary includes their counts.
+- Added `engine::tests::trace_observability`. The scenario starts with a
+  client-owned `engine::invoke` of `worker::spawn`, registers a session worker
+  and function, creates an agent-owned artifact, requests approval, enqueues
+  work, creates a generated UI surface, submits a stored UI action, and then
+  proves `trace_get` includes the invocation lineage, spawned worker/function
+  catalog changes, pending approval, queue receipt, resource event, queue
+  lifecycle stream, UI surface lease, and generated-action compensation.
+- The trace test lives in its own focused module so `meta_primitives.rs` stays
+  under the large-file guard.
+- Passing proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml observability_trace_get_explains_full_client_agent_worker_ui_graph -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::trace_observability -- --nocapture`.
+
+Open loops after HMH-F1/HMH-F2/HMH-F3/HMH-F4/HMH-F5/HMH-F6:
+
+- HMH-F1 through HMH-F6 are closed. Continue with HMH-F7 to prove restart,
+  worker disconnect, approval absence, vector-index unavailable, and client
+  reconnect states fail closed rather than optimistically.
 
 ## HMH-G Scorecard: Final Adversarial Closeout And Absence Gates
 
@@ -1559,9 +1590,10 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F1, HMH-F2, HMH-F3, HMH-F4, and HMH-F5
-are closed. Continue with HMH-F6: prove trace and ledger explain the full graph.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F1, HMH-F2, HMH-F3, HMH-F4, HMH-F5, and
+HMH-F6 are closed. Continue with HMH-F7: prove restart/disconnect chaos fails
+closed.
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml engine::tests::meta_primitives -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::external_worker -- --nocapture
 ```

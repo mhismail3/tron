@@ -78,6 +78,25 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .list_by_trace(trace_id, 500)
     }
 
+    fn queue_items_for_trace(&self, trace_id: &str) -> Result<Vec<EngineQueueItem>> {
+        self.primitives
+            .queue
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
+            .list_by_trace(trace_id, 500)
+    }
+
+    fn resource_events_for_trace(
+        &self,
+        trace_id: &str,
+    ) -> Result<Vec<super::super::resources::EngineResourceEvent>> {
+        self.primitives
+            .resources
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .events_by_trace(trace_id, 500)
+    }
+
     fn resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>> {
         self.primitives
             .leases

@@ -2,7 +2,8 @@
 //!
 //! The observability worker reads the engine ledger and primitive stores as
 //! local truth. `observability::trace_get` correlates invocation, catalog,
-//! stream, approval, resource lease, and compensation records for one trace.
+//! stream, queue, resource event, approval, resource lease, and compensation
+//! records for one trace.
 
 use serde_json::{Value, json};
 
@@ -22,11 +23,11 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
     Ok(vec![
         system_read(
             TRACE_GET_FUNCTION,
-            "get one engine trace with correlated invocation and catalog records",
+            "get one engine trace with correlated control-plane records",
             trace_get_schema(),
             json!({
                 "type": "object",
-                "required": ["traceId", "summary", "invocations", "catalogChanges", "streams", "approvals", "leases", "compensation"],
+                "required": ["traceId", "summary", "invocations", "catalogChanges", "streams", "queueItems", "resourceEvents", "approvals", "leases", "compensation"],
                 "additionalProperties": false,
                 "properties": {
                     "traceId": {"type": "string"},
@@ -34,6 +35,8 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                     "invocations": {"type": "array"},
                     "catalogChanges": {"type": "array"},
                     "streams": {"type": "array"},
+                    "queueItems": {"type": "array"},
+                    "resourceEvents": {"type": "array"},
                     "approvals": {"type": "array"},
                     "leases": {"type": "array"},
                     "compensation": {"type": "array"}

@@ -4,6 +4,8 @@
 //! catalog and ledger state. The response contracts live here so `EngineHost`
 //! stays a coordinator rather than a primitive response bucket.
 
+use std::collections::BTreeSet;
+
 use serde_json::{Value, json};
 
 use super::{catalog, control, observability, storage, ui, worker};
@@ -14,9 +16,10 @@ use crate::engine::grants::{EngineGrant, ListGrants};
 use crate::engine::ids::{InvocationId, TriggerId, WorkerId};
 use crate::engine::invocation::{CausalContext, Invocation, InvocationRecord};
 use crate::engine::leases::EngineResourceLease;
+use crate::engine::queue::EngineQueueItem;
 use crate::engine::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
-    EngineResourceVersion, ListResources, UpdateResource,
+    CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
+    EngineResourceTypeDefinition, EngineResourceVersion, ListResources, UpdateResource,
 };
 use crate::engine::streams::EngineStreamEvent;
 use crate::engine::types::{
@@ -25,13 +28,21 @@ use crate::engine::types::{
 };
 use crate::shared::logging::{LogLevel, LogQueryOptions, SortOrder};
 
+mod trace_projection;
 mod worker_protocol;
+
+pub(in crate::engine::primitives) use trace_projection::trace_summary;
+use trace_projection::{
+    catalog_change_belongs_to_trace, queue_item_log_value, resource_event_log_value,
+};
 
 pub(in crate::engine::primitives) struct TraceComponents {
     pub invocations: Vec<InvocationRecord>,
     pub catalog_changes: Vec<CatalogChange>,
     pub approvals: Vec<EngineApprovalRecord>,
     pub streams: Vec<EngineStreamEvent>,
+    pub queue_items: Vec<EngineQueueItem>,
+    pub resource_events: Vec<EngineResourceEvent>,
     pub leases: Vec<EngineResourceLease>,
     pub compensation: Vec<Value>,
 }
@@ -63,6 +74,8 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>>;
     fn approval_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineApprovalRecord>>;
     fn stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineStreamEvent>>;
+    fn queue_items_for_trace(&self, trace_id: &str) -> Result<Vec<EngineQueueItem>>;
+    fn resource_events_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceEvent>>;
     fn resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>>;
     fn resource_lease(&self, lease_id: &str) -> Result<Option<EngineResourceLease>>;
     fn compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>>;
@@ -76,11 +89,7 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
         &self,
         grant_id: &crate::engine::ids::AuthorityGrantId,
     ) -> Result<Option<EngineGrant>>;
-    fn queue_items(
-        &self,
-        queue: &str,
-        limit: usize,
-    ) -> Result<Vec<crate::engine::queue::EngineQueueItem>>;
+    fn queue_items(&self, queue: &str, limit: usize) -> Result<Vec<EngineQueueItem>>;
     fn approval_records(
         &self,
         status: Option<crate::engine::approval::ApprovalStatus>,
@@ -300,6 +309,8 @@ fn trace_get(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
         "invocations": trace.invocations.iter().map(|record| invocation_record_value(record, include_full_payloads)).collect::<Vec<_>>(),
         "catalogChanges": trace.catalog_changes.iter().map(catalog_change_value).collect::<Vec<_>>(),
         "streams": trace.streams.iter().map(|record| json!(record)).collect::<Vec<_>>(),
+        "queueItems": trace.queue_items.iter().map(|record| json!(record)).collect::<Vec<_>>(),
+        "resourceEvents": trace.resource_events.iter().map(|record| json!(record)).collect::<Vec<_>>(),
         "approvals": trace.approvals.iter().map(|record| json!(record)).collect::<Vec<_>>(),
         "leases": trace.leases,
         "compensation": trace.compensation,
@@ -430,6 +441,28 @@ fn span_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
             "timestamp": record.created_at.to_rfc3339(),
         })
     }));
+    spans.extend(trace.queue_items.iter().map(|record| {
+        json!({
+            "spanId": format!("queue:{}", record.receipt_id),
+            "parentSpanId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
+            "kind": "queue_item",
+            "queue": record.queue,
+            "functionId": record.function_id.as_str(),
+            "status": &record.status,
+            "attempts": record.attempts,
+            "timestamp": record.created_at.to_rfc3339(),
+        })
+    }));
+    spans.extend(trace.resource_events.iter().map(|record| {
+        json!({
+            "spanId": format!("resource_event:{}", record.event_id),
+            "parentSpanId": record.invocation_id.as_ref().map(InvocationId::as_str),
+            "kind": "resource_event",
+            "resourceId": record.resource_id,
+            "eventType": record.event_type,
+            "timestamp": record.occurred_at.to_rfc3339(),
+        })
+    }));
     spans.extend(trace.approvals.iter().map(|record| {
         json!({
             "spanId": format!("approval:{}", record.approval_id),
@@ -501,6 +534,8 @@ fn log_query(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
             let trace = trace_components(host, trace_id)?;
             logs.extend(trace.invocations.iter().map(invocation_log_value));
             logs.extend(trace.streams.iter().map(stream_log_value));
+            logs.extend(trace.queue_items.iter().map(queue_item_log_value));
+            logs.extend(trace.resource_events.iter().map(resource_event_log_value));
             logs.extend(trace.approvals.iter().map(approval_log_value));
             logs.extend(trace.leases.iter().map(lease_log_value));
             logs.extend(trace.compensation.iter().map(compensation_log_value));
@@ -549,113 +584,35 @@ pub(in crate::engine::primitives) fn trace_components(
     host: &dyn PrimitiveRuntimeHost,
     trace_id: &str,
 ) -> Result<TraceComponents> {
+    let invocations = host
+        .invocations()
+        .into_iter()
+        .filter(|record| record.trace_id.as_str() == trace_id)
+        .collect::<Vec<_>>();
+    let function_ids = invocations
+        .iter()
+        .map(|record| record.function_id.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
+    let worker_ids = invocations
+        .iter()
+        .map(|record| record.worker_id.as_str().to_owned())
+        .collect::<BTreeSet<_>>();
     Ok(TraceComponents {
-        invocations: host
-            .invocations()
-            .into_iter()
-            .filter(|record| record.trace_id.as_str() == trace_id)
-            .collect(),
+        invocations,
         catalog_changes: host
             .ledger_catalog_changes()?
             .into_iter()
-            .filter(|change| change.id.contains(trace_id) || change.subject_id.as_str() == trace_id)
+            .filter(|change| {
+                catalog_change_belongs_to_trace(change, trace_id, &function_ids, &worker_ids)
+            })
             .collect(),
         approvals: host.approval_records_for_trace(trace_id)?,
         streams: host.stream_records_for_trace(trace_id)?,
+        queue_items: host.queue_items_for_trace(trace_id)?,
+        resource_events: host.resource_events_for_trace(trace_id)?,
         leases: host.resource_leases_for_trace(trace_id)?,
         compensation: host.compensation_records_for_trace(trace_id)?,
     })
-}
-
-pub(in crate::engine::primitives) fn trace_summary(
-    trace_id: &str,
-    trace: &TraceComponents,
-) -> Value {
-    let failed_invocations = trace
-        .invocations
-        .iter()
-        .filter(|record| !record.succeeded)
-        .count();
-    let pending_approvals = trace
-        .approvals
-        .iter()
-        .filter(|record| matches!(record.status.as_str(), "pending" | "approved"))
-        .count();
-    let failed_approvals = trace
-        .approvals
-        .iter()
-        .filter(|record| matches!(record.status.as_str(), "denied" | "failed"))
-        .count();
-    let mut timestamps = trace_timestamps(trace);
-    timestamps.sort();
-    let root_invocation_id = trace
-        .invocations
-        .iter()
-        .find(|record| record.parent_invocation_id.is_none())
-        .or_else(|| trace.invocations.first())
-        .map(|record| record.invocation_id.as_str());
-    json!({
-        "traceId": trace_id,
-        "status": if failed_invocations > 0 || failed_approvals > 0 {
-            "error"
-        } else if pending_approvals > 0 {
-            "pending"
-        } else {
-            "ok"
-        },
-        "rootInvocationId": root_invocation_id,
-        "invocationCount": trace.invocations.len(),
-        "failedInvocations": failed_invocations,
-        "catalogChangeCount": trace.catalog_changes.len(),
-        "streamCount": trace.streams.len(),
-        "approvalCount": trace.approvals.len(),
-        "pendingApprovalCount": pending_approvals,
-        "leaseCount": trace.leases.len(),
-        "compensationCount": trace.compensation.len(),
-        "firstTimestamp": timestamps.first(),
-        "lastTimestamp": timestamps.last(),
-    })
-}
-
-fn trace_timestamps(trace: &TraceComponents) -> Vec<String> {
-    let mut timestamps = Vec::new();
-    timestamps.extend(
-        trace
-            .invocations
-            .iter()
-            .map(|record| record.timestamp.to_rfc3339()),
-    );
-    timestamps.extend(
-        trace
-            .catalog_changes
-            .iter()
-            .map(|record| record.timestamp.to_rfc3339()),
-    );
-    timestamps.extend(
-        trace
-            .streams
-            .iter()
-            .map(|record| record.created_at.to_rfc3339()),
-    );
-    timestamps.extend(
-        trace
-            .approvals
-            .iter()
-            .map(|record| record.updated_at.to_rfc3339()),
-    );
-    timestamps.extend(
-        trace
-            .leases
-            .iter()
-            .map(|record| record.acquired_at.to_rfc3339()),
-    );
-    timestamps.extend(trace.compensation.iter().filter_map(|record| {
-        record
-            .get("createdAt")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-    }));
-    timestamps
 }
 
 fn observe_timestamp(summary: &mut TraceAccumulator, timestamp: String) {

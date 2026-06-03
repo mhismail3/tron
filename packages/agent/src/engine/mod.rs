@@ -34,7 +34,10 @@
 //! - stream, state, queue, approval, catalog, grant, worker, observability, and
 //!   generated-UI workers plus the generic `resource` kernel are registered as
 //!   first-class primitive workers with in-memory and SQLite-backed stores
-//!   scoped outside the production event-store migration;
+//!   scoped outside the production event-store migration; observability traces
+//!   correlate invocation, catalog, stream, queue, resource-event, approval,
+//!   lease, and compensation records by durable ids rather than timestamp
+//!   adjacency;
 //! - approval is a first-class primitive: high-risk agent-visible functions can
 //!   pause into `approval::*` records and scoped stream events before execution,
 //!   each record snapshots target effect/risk/authority/idempotency/lease/

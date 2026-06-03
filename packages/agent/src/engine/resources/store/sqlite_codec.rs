@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS engine_resource_events (
 );
 CREATE INDEX IF NOT EXISTS idx_engine_resource_events_resource
   ON engine_resource_events(resource_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_engine_resource_events_trace
+  ON engine_resource_events(trace_id, occurred_at);
 "#;
 
 pub(super) fn json_string<T: Serialize>(value: &T, operation: &'static str) -> Result<String> {
