@@ -1,9 +1,9 @@
 import Foundation
 
-struct EngineConsoleHarnessChangeProjection: Equatable {
-    var changes: [EngineConsoleHarnessChangeSummary]
+struct EngineConsoleCreatedByAgentProjection: Equatable {
+    var changes: [EngineConsoleCreatedByAgentSummary]
 
-    static let empty = EngineConsoleHarnessChangeProjection(changes: [])
+    static let empty = EngineConsoleCreatedByAgentProjection(changes: [])
 
     var isEmpty: Bool { changes.isEmpty }
 
@@ -13,21 +13,21 @@ struct EngineConsoleHarnessChangeProjection: Equatable {
         controlSnapshot: ControlSnapshotDTO?,
         audit: CapabilityAuditQueryResultDTO?,
         programRuns: CapabilityProgramRunQueryResultDTO?
-    ) -> EngineConsoleHarnessChangeProjection {
+    ) -> EngineConsoleCreatedByAgentProjection {
         let sessionImplementations = uniqueImplementations(
             (registry?.implementations ?? []) + catalogImplementations(from: catalogSnapshot)
         )
             .filter(isSessionCreated)
         let changes = sessionImplementations
             .compactMap { implementation in
-                EngineConsoleHarnessChangeSummary(
+                EngineConsoleCreatedByAgentSummary(
                     implementation: implementation,
                     controlSnapshot: controlSnapshot,
                     audit: audit,
                     programRuns: programRuns
                 )
             }
-        return EngineConsoleHarnessChangeProjection(changes: changes)
+        return EngineConsoleCreatedByAgentProjection(changes: changes)
     }
 
     private static func isSessionCreated(_ implementation: CapabilityImplementationDTO) -> Bool {
@@ -38,7 +38,7 @@ struct EngineConsoleHarnessChangeProjection: Equatable {
             return true
         }
         if let provenance = implementation.provenance?.dictionaryValue,
-           harnessString(provenance, keys: ["sessionId", "session_id"]) != nil {
+           createdByAgentString(provenance, keys: ["sessionId", "session_id"]) != nil {
             return true
         }
         return false
@@ -49,48 +49,48 @@ struct EngineConsoleHarnessChangeProjection: Equatable {
     ) -> [CapabilityImplementationDTO] {
         (catalogSnapshot?.snapshot?.functions ?? []).compactMap { function in
             guard let dictionary = function.dictionaryValue,
-                  let functionId = harnessString(dictionary, keys: ["id", "functionId", "function_id"]) else {
+                  let functionId = createdByAgentString(dictionary, keys: ["id", "functionId", "function_id"]) else {
                 return nil
             }
-            let metadata = harnessDictionary(dictionary, keys: ["metadata"])
-            let provenance = harnessDictionary(dictionary, keys: ["provenance"])
-            let workerId = harnessString(dictionary, keys: ["owner_worker", "ownerWorker", "workerId", "worker_id"])
-            let implementationId = harnessString(
+            let metadata = createdByAgentDictionary(dictionary, keys: ["metadata"])
+            let provenance = createdByAgentDictionary(dictionary, keys: ["provenance"])
+            let workerId = createdByAgentString(dictionary, keys: ["owner_worker", "ownerWorker", "workerId", "worker_id"])
+            let implementationId = createdByAgentString(
                 metadata,
                 keys: ["implementationId", "implementation_id"]
             ) ?? "catalog.\(workerId ?? "worker").\(functionId)"
-            let health = harnessString(dictionary, keys: ["health"])
+            let health = createdByAgentString(dictionary, keys: ["health"])
 
             return CapabilityImplementationDTO(
                 implementationId: implementationId,
-                contractId: harnessString(metadata, keys: ["contractId", "contract_id"])
-                    ?? harnessString(dictionary, keys: ["contractId", "contract_id"])
+                contractId: createdByAgentString(metadata, keys: ["contractId", "contract_id"])
+                    ?? createdByAgentString(dictionary, keys: ["contractId", "contract_id"])
                     ?? functionId,
-                pluginId: harnessString(metadata, keys: ["pluginId", "plugin_id"])
-                    ?? harnessString(dictionary, keys: ["pluginId", "plugin_id"]),
+                pluginId: createdByAgentString(metadata, keys: ["pluginId", "plugin_id"])
+                    ?? createdByAgentString(dictionary, keys: ["pluginId", "plugin_id"]),
                 workerId: workerId,
                 functionId: functionId,
-                version: harnessUInt64(dictionary, keys: ["revision", "version"]),
+                version: createdByAgentUInt64(dictionary, keys: ["revision", "version"]),
                 health: health,
-                visibility: harnessString(dictionary, keys: ["visibility"]),
-                latencyClass: harnessString(metadata, keys: ["latencyClass", "latency_class"]),
-                costClass: harnessString(metadata, keys: ["costClass", "cost_class"]),
-                trustTier: harnessString(metadata, keys: ["trustTier", "trust_tier"]),
-                authorityRequirements: harnessAnyCodable(
+                visibility: createdByAgentString(dictionary, keys: ["visibility"]),
+                latencyClass: createdByAgentString(metadata, keys: ["latencyClass", "latency_class"]),
+                costClass: createdByAgentString(metadata, keys: ["costClass", "cost_class"]),
+                trustTier: createdByAgentString(metadata, keys: ["trustTier", "trust_tier"]),
+                authorityRequirements: createdByAgentAnyCodable(
                     dictionary,
                     keys: ["authorityRequirements", "authority_requirements"]
                 ),
-                runtimeRequirements: harnessAnyCodable(
+                runtimeRequirements: createdByAgentAnyCodable(
                     dictionary,
                     keys: ["runtimeRequirements", "runtime_requirements"]
                 ),
-                schemaDigest: harnessString(metadata, keys: ["schemaDigest", "schema_digest"])
-                    ?? harnessString(dictionary, keys: ["schemaDigest", "schema_digest"]),
+                schemaDigest: createdByAgentString(metadata, keys: ["schemaDigest", "schema_digest"])
+                    ?? createdByAgentString(dictionary, keys: ["schemaDigest", "schema_digest"]),
                 catalogRevision: catalogSnapshot?.currentRevision,
                 provenance: provenance.map(AnyCodable.init),
-                conformanceState: harnessString(metadata, keys: ["conformanceState", "conformance_state"]) ?? health,
-                signatureStatus: harnessString(metadata, keys: ["signatureStatus", "signature_status"]) ?? "catalog",
-                updatedAt: harnessString(dictionary, keys: ["updatedAt", "updated_at"])
+                conformanceState: createdByAgentString(metadata, keys: ["conformanceState", "conformance_state"]) ?? health,
+                signatureStatus: createdByAgentString(metadata, keys: ["signatureStatus", "signature_status"]) ?? "catalog",
+                updatedAt: createdByAgentString(dictionary, keys: ["updatedAt", "updated_at"])
             )
         }
     }
@@ -107,7 +107,7 @@ struct EngineConsoleHarnessChangeProjection: Equatable {
     }
 }
 
-struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
+struct EngineConsoleCreatedByAgentSummary: Equatable, Identifiable {
     var implementationId: String
     var functionId: String
     var contractId: String?
@@ -121,6 +121,9 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
     var traceIds: [String]
     var programRunIds: [String]
     var childInvocationIds: [String]
+    var shelfTitle: String
+    var shelfSubtitle: String
+    var historyLabels: [String]
 
     var id: String { implementationId }
 
@@ -147,7 +150,7 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
     }
 
     var accessibilityLabel: String {
-        "Harness change \(functionId)"
+        "Created by agent capability \(shelfTitle)"
     }
 
     var accessibilityValue: String {
@@ -181,6 +184,8 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
         self.contractId = implementation.contractId
         self.workerId = implementation.workerId
         self.pluginId = implementation.pluginId
+        self.shelfTitle = Self.shelfTitle(for: implementation, functionId: functionId)
+        self.shelfSubtitle = Self.shelfSubtitle(for: implementation)
         self.provenanceText = Self.provenanceText(for: implementation)
         self.testText = implementation.conformanceState ?? "unknown"
         self.generatedSurfaceIds = Self.unique(
@@ -197,6 +202,11 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
         )
         self.programRunIds = Self.unique(matchingRuns.compactMap(\.programRunId))
         self.childInvocationIds = Self.unique(matchingRuns.flatMap { $0.childInvocations ?? [] })
+        self.historyLabels = Self.historyLabels(
+            implementation: implementation,
+            events: matchingEvents,
+            programRuns: matchingRuns
+        )
     }
 
     private static func identifiers(
@@ -217,17 +227,125 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
 
     private static func provenanceText(for implementation: CapabilityImplementationDTO) -> String {
         if let provenance = implementation.provenance?.dictionaryValue {
-            if let sessionId = harnessString(provenance, keys: ["sessionId", "session_id"]) {
+            if let sessionId = createdByAgentString(provenance, keys: ["sessionId", "session_id"]) {
                 return "session \(sessionId)"
             }
-            if let workspaceId = harnessString(provenance, keys: ["workspaceId", "workspace_id"]) {
+            if let workspaceId = createdByAgentString(provenance, keys: ["workspaceId", "workspace_id"]) {
                 return "workspace \(workspaceId)"
             }
-            if let source = harnessString(provenance, keys: ["source", "createdBy", "actor"]) {
+            if let source = createdByAgentString(provenance, keys: ["source", "createdBy", "actor"]) {
                 return source
             }
         }
         return implementation.trustTier ?? "unknown"
+    }
+
+    private static func shelfTitle(
+        for implementation: CapabilityImplementationDTO,
+        functionId: String
+    ) -> String {
+        if let provenance = implementation.provenance?.dictionaryValue,
+           let title = createdByAgentString(provenance, keys: ["displayName", "display_name", "title", "name"]) {
+            return humanizedCapabilityLabel(title)
+        }
+        if let contractId = implementation.contractId,
+           contractId != functionId,
+           !contractId.hasPrefix("capability::") {
+            return humanizedCapabilityLabel(contractId)
+        }
+        return humanizedCapabilityLabel(functionId)
+    }
+
+    private static func shelfSubtitle(for implementation: CapabilityImplementationDTO) -> String {
+        if let provenance = implementation.provenance?.dictionaryValue {
+            let source = createdByAgentString(provenance, keys: ["createdBy", "created_by", "actor", "source"])?
+                .lowercased()
+            if source?.contains("agent") == true {
+                return "Created by agent"
+            }
+            if source?.contains("user") == true {
+                return "Created by user"
+            }
+        }
+        if implementation.visibility?.lowercased() == "workspace" {
+            return "Available in this workspace"
+        }
+        return "Created by agent"
+    }
+
+    private static func historyLabels(
+        implementation: CapabilityImplementationDTO,
+        events: [CapabilityAuditEventDTO],
+        programRuns: [CapabilityProgramRunDTO]
+    ) -> [String] {
+        var labels: [String] = []
+        appendUnique("Created", to: &labels)
+        if implementation.updatedAt != nil || eventMatches(events, terms: ["updated", "upgrade", "refreshed"]) {
+            appendUnique("Updated", to: &labels)
+        }
+        if eventMatches(events, terms: ["auto_repaired", "autorepaired", "repair"]) {
+            appendUnique("Auto-repaired", to: &labels)
+        }
+        if tested(implementation: implementation, events: events, programRuns: programRuns) {
+            appendUnique("Tested", to: &labels)
+        }
+        if failed(events: events, programRuns: programRuns) {
+            appendUnique("Failed", to: &labels)
+        }
+        if promoted(implementation: implementation, events: events) {
+            appendUnique("Promoted", to: &labels)
+        }
+        if eventMatches(events, terms: ["revoked", "revocation"]) {
+            appendUnique("Revoked", to: &labels)
+        }
+        if eventMatches(events, terms: ["discard", "discarded", "deleted", "removed"]) {
+            appendUnique("Discarded", to: &labels)
+        }
+        if !programRuns.isEmpty || eventMatches(events, terms: ["reused", "executed", "invoked", "capability.execute"]) {
+            appendUnique("Reused", to: &labels)
+        }
+        return labels
+    }
+
+    private static func tested(
+        implementation: CapabilityImplementationDTO,
+        events: [CapabilityAuditEventDTO],
+        programRuns: [CapabilityProgramRunDTO]
+    ) -> Bool {
+        if let conformance = implementation.conformanceState?.lowercased(),
+           ["passed", "healthy", "accepted", "ok"].contains(conformance) {
+            return true
+        }
+        if eventMatches(events, terms: ["test_passed", "conformance", "validated"]) {
+            return true
+        }
+        return programRuns.contains { run in
+            guard let status = run.status?.lowercased() else { return false }
+            return ["ok", "passed", "succeeded", "success"].contains(status)
+        }
+    }
+
+    private static func failed(
+        events: [CapabilityAuditEventDTO],
+        programRuns: [CapabilityProgramRunDTO]
+    ) -> Bool {
+        if eventMatches(events, terms: ["test_failed", "failed", "error"]) {
+            return true
+        }
+        return programRuns.contains { run in
+            guard let status = run.status?.lowercased() else { return false }
+            return ["failed", "error", "errored"].contains(status)
+        }
+    }
+
+    private static func promoted(
+        implementation: CapabilityImplementationDTO,
+        events: [CapabilityAuditEventDTO]
+    ) -> Bool {
+        if ["workspace", "system"].contains(implementation.visibility?.lowercased()) {
+            return true
+        }
+        return eventMatches(events, terms: ["promoted", "promotion"])
     }
 
     private static func surface(_ surface: UiSurfaceRefDTO, matches identifiers: Set<String>) -> Bool {
@@ -306,10 +424,10 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
         if let workerId = implementation.workerId,
            let worker = (controlSnapshot?.workers ?? []).first(where: { worker in
                guard let dictionary = worker.dictionaryValue else { return false }
-               return harnessString(dictionary, keys: ["workerId", "id"]) == workerId
+               return createdByAgentString(dictionary, keys: ["workerId", "id"]) == workerId
            }),
            let dictionary = worker.dictionaryValue {
-            return harnessString(dictionary, keys: ["lifecycle", "status", "health"]) ?? "active"
+            return createdByAgentString(dictionary, keys: ["lifecycle", "status", "health"]) ?? "active"
         }
         return "not recorded"
     }
@@ -342,6 +460,58 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
         }
     }
 
+    private static func eventMatches(_ events: [CapabilityAuditEventDTO], terms: [String]) -> Bool {
+        events.contains { event in
+            let text = [
+                event.eventType,
+                event.id,
+                event.payloadSummary.map { flattenedText($0.value) },
+                event.payload.map { flattenedText($0.value) }
+            ]
+            .compactMap { $0 }
+            .joined(separator: " ")
+            .lowercased()
+            return terms.contains { text.contains($0) }
+        }
+    }
+
+    private static func flattenedText(_ value: Any) -> String {
+        switch value {
+        case let string as String:
+            return string
+        case let codable as AnyCodable:
+            return flattenedText(codable.value)
+        case let dictionary as [String: Any]:
+            return dictionary
+                .map { "\($0.key) \(flattenedText($0.value))" }
+                .joined(separator: " ")
+        case let array as [Any]:
+            return array.map(flattenedText).joined(separator: " ")
+        default:
+            return String(describing: value)
+        }
+    }
+
+    private static func humanizedCapabilityLabel(_ value: String) -> String {
+        let base = value
+            .components(separatedBy: "::")
+            .first
+            ?? value
+        let words = base
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+            .split(separator: " ")
+            .map { String($0).lowercased() }
+        guard let first = words.first else { return "Capability" }
+        return ([first.capitalized] + words.dropFirst()).joined(separator: " ")
+    }
+
+    private static func appendUnique(_ value: String, to labels: inout [String]) {
+        if !labels.contains(value) {
+            labels.append(value)
+        }
+    }
+
     private static func unique(_ values: [String]) -> [String] {
         var seen: Set<String> = []
         var result: [String] = []
@@ -354,11 +524,11 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
     }
 }
 
-private func harnessString(_ dictionary: [String: Any]?, keys: [String]) -> String? {
+private func createdByAgentString(_ dictionary: [String: Any]?, keys: [String]) -> String? {
     guard let dictionary else { return nil }
     for key in keys {
         if let value = dictionary[key] as? AnyCodable {
-            return harnessStringValue(value.value)
+            return createdByAgentStringValue(value.value)
         }
         if let uint = dictionary[key] as? UInt64 {
             return String(uint)
@@ -379,7 +549,7 @@ private func harnessString(_ dictionary: [String: Any]?, keys: [String]) -> Stri
     return nil
 }
 
-private func harnessStringValue(_ value: Any) -> String? {
+private func createdByAgentStringValue(_ value: Any) -> String? {
     switch value {
     case let string as String where !string.isEmpty:
         return string
@@ -392,13 +562,13 @@ private func harnessStringValue(_ value: Any) -> String? {
     case let bool as Bool:
         return bool ? "true" : "false"
     case let codable as AnyCodable:
-        return harnessStringValue(codable.value)
+        return createdByAgentStringValue(codable.value)
     default:
         return nil
     }
 }
 
-private func harnessDictionary(_ dictionary: [String: Any], keys: [String]) -> [String: Any]? {
+private func createdByAgentDictionary(_ dictionary: [String: Any], keys: [String]) -> [String: Any]? {
     for key in keys {
         if let nested = dictionary[key] as? [String: Any] {
             return nested
@@ -411,7 +581,7 @@ private func harnessDictionary(_ dictionary: [String: Any], keys: [String]) -> [
     return nil
 }
 
-private func harnessUInt64(_ dictionary: [String: Any], keys: [String]) -> UInt64? {
+private func createdByAgentUInt64(_ dictionary: [String: Any], keys: [String]) -> UInt64? {
     for key in keys {
         switch dictionary[key] {
         case let value as UInt64:
@@ -441,7 +611,7 @@ private func harnessUInt64(_ dictionary: [String: Any], keys: [String]) -> UInt6
     return nil
 }
 
-private func harnessAnyCodable(_ dictionary: [String: Any], keys: [String]) -> AnyCodable? {
+private func createdByAgentAnyCodable(_ dictionary: [String: Any], keys: [String]) -> AnyCodable? {
     for key in keys {
         guard let raw = dictionary[key] else { continue }
         if let codable = raw as? AnyCodable {

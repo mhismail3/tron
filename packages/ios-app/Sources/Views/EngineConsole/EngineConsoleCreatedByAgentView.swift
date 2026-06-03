@@ -1,26 +1,27 @@
 import SwiftUI
 
-struct EngineConsoleHarnessChangeCard: View {
-    let projection: EngineConsoleHarnessChangeProjection
+struct EngineConsoleCreatedByAgentCard: View {
+    let projection: EngineConsoleCreatedByAgentProjection
 
     var body: some View {
         if !projection.isEmpty {
             EngineConsoleCard {
                 EngineConsoleCardHeader(
                     symbol: "wand.and.sparkles",
-                    title: "Harness Changes",
-                    subtitle: "Session-created capability evidence."
+                    title: "Created by Agent",
+                    subtitle: "Capability history and evidence."
                 )
 
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(projection.changes.prefix(6)), id: \.id) { change in
                         VStack(alignment: .leading, spacing: 8) {
                             EngineConsoleActionRow(
-                                symbol: "function",
-                                title: change.title,
-                                subtitle: change.subtitle,
+                                symbol: "sparkle.magnifyingglass",
+                                title: change.shelfTitle,
+                                subtitle: change.shelfSubtitle,
                                 tint: .tronPurple
                             )
+                            historyStrip(for: change)
                             evidenceGrid(for: change)
                         }
                         .accessibilityElement(children: .combine)
@@ -32,7 +33,26 @@ struct EngineConsoleHarnessChangeCard: View {
         }
     }
 
-    private func evidenceGrid(for change: EngineConsoleHarnessChangeSummary) -> some View {
+    private func historyStrip(for change: EngineConsoleCreatedByAgentSummary) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(change.historyLabels, id: \.self) { label in
+                    Label(label, systemImage: symbol(forHistoryLabel: label))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(.tronTextPrimary)
+                        .labelStyle(.titleAndIcon)
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 8)
+                        .background(.tronSurfaceElevated.opacity(0.72), in: Capsule())
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityLabel("Capability history")
+        .accessibilityValue(change.historyLabels.joined(separator: ", "))
+    }
+
+    private func evidenceGrid(for change: EngineConsoleCreatedByAgentSummary) -> some View {
         LazyVGrid(
             columns: [
                 GridItem(.adaptive(minimum: 150), spacing: 8)
@@ -57,7 +77,22 @@ struct EngineConsoleHarnessChangeCard: View {
         }
     }
 
-    private func generatedSurfaceText(for change: EngineConsoleHarnessChangeSummary) -> String {
+    private func symbol(forHistoryLabel label: String) -> String {
+        switch label {
+        case "Created": return "plus.circle"
+        case "Updated": return "arrow.triangle.2.circlepath"
+        case "Auto-repaired": return "wrench.and.screwdriver"
+        case "Tested": return "checkmark.shield"
+        case "Failed": return "exclamationmark.triangle"
+        case "Promoted": return "arrow.up.forward.circle"
+        case "Revoked": return "xmark.shield"
+        case "Discarded": return "trash.circle"
+        case "Reused": return "arrow.clockwise.circle"
+        default: return "circle"
+        }
+    }
+
+    private func generatedSurfaceText(for change: EngineConsoleCreatedByAgentSummary) -> String {
         let count = change.generatedSurfaceIds.count
         if count == 0 {
             return "none"

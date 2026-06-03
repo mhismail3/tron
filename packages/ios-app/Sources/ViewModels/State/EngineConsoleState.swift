@@ -303,8 +303,8 @@ final class EngineConsoleState {
         EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)
     }
 
-    var harnessChangeProjection: EngineConsoleHarnessChangeProjection {
-        EngineConsoleHarnessChangeProjection.make(
+    var createdByAgentProjection: EngineConsoleCreatedByAgentProjection {
+        EngineConsoleCreatedByAgentProjection.make(
             registry: registry,
             catalogSnapshot: catalogSnapshot,
             controlSnapshot: controlSnapshot,

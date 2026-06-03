@@ -75,6 +75,14 @@ does not inherit the console's degraded search allowance.
 Server status refreshes keep metadata responsive and trigger vector warm-up
 without requiring the console to wait for the embedding model on first use.
 
+The Created by Agent shelf is derived from the same state object. It uses
+server-owned implementation provenance, catalog functions, generated UI refs,
+audit events, and program runs to display a product-facing capability name,
+creator summary, and history labels for created, updated, auto-repaired,
+tested, failed, promoted, revoked, discarded, and reused states. Raw function
+ids, trace ids, child invocation ids, and resource refs remain deeper evidence,
+not the shelf title.
+
 When the server is disconnected, the state object loads
 `EngineConsoleCache.Snapshot` and marks it stale. Mutations must stay disabled
 while stale because the cache is read-only and may not reflect current policy,

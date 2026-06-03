@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **22/100**
+Current score: **31/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -28,7 +28,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-A | passed_after_fix | This manifest and the master scorecard were created in `packages/agent/docs/`. README was updated to list both documents. `productization_scorecard_stays_formalized` was added to `packages/agent/tests/threat_model_invariants.rs`. Baseline audit commands and source references are listed below. |
 | TPROD-B | passed_after_fix | Added the managed `self-extend` skill, synced it locally, and verified live worker protocol plus sample local worker flow with focused integration tests. Details below. |
 | TPROD-C | passed_after_fix | Live chat-led self-extension proof completed after repairing approval replay, workspace context propagation, sandbox child selector defaults, dashboard helper labels, and cleanup guidance. Details below. |
-| TPROD-D | pending | Created-by-agent shelf/history not yet proven. |
+| TPROD-D | passed_after_fix | Created by Agent shelf/history is product-labeled, server-derived, and covered by focused projection/source/accessibility tests. Details below. |
 | TPROD-E | pending | Local pack lifecycle product flow not yet proven. |
 | TPROD-F | pending | Plain trust/promotion/revocation UX not yet proven. |
 | TPROD-G | pending | Generated UI authoring product matrix not yet complete. |
@@ -268,7 +268,62 @@ row, note command return codes, and keep open loops explicit.
 
 ### Open Loops
 
-- Closed for TPROD-C. TPROD-D must turn the underlying session-created helper
-  lifecycle into a durable created-by-agent gallery/history surface so users can
-  browse created, repaired, tested, failed, discarded, stopped, and reused
-  helper capabilities without reading raw engine ids.
+- Closed by TPROD-D. The underlying session-created helper lifecycle now has a
+  durable Created by Agent shelf/history surface with product labels, lineage
+  chips, and server-owned evidence.
+
+## TPROD-D Evidence
+
+### Files
+
+- [`packages/ios-app/Sources/ViewModels/State/EngineConsoleCreatedByAgentProjection.swift`](../../ios-app/Sources/ViewModels/State/EngineConsoleCreatedByAgentProjection.swift)
+- [`packages/ios-app/Sources/Views/EngineConsole/EngineConsoleCreatedByAgentView.swift`](../../ios-app/Sources/Views/EngineConsole/EngineConsoleCreatedByAgentView.swift)
+- [`packages/ios-app/Sources/ViewModels/State/EngineConsoleState.swift`](../../ios-app/Sources/ViewModels/State/EngineConsoleState.swift)
+- [`packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift`](../../ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift)
+- [`packages/ios-app/Tests/ViewModels/EngineConsoleCreatedByAgentProjectionTests.swift`](../../ios-app/Tests/ViewModels/EngineConsoleCreatedByAgentProjectionTests.swift)
+- [`packages/ios-app/Tests/Infrastructure/EngineConsoleCreatedByAgentSourceGuardTests.swift`](../../ios-app/Tests/Infrastructure/EngineConsoleCreatedByAgentSourceGuardTests.swift)
+- [`packages/ios-app/Tests/Views/EngineConsoleAccessibilityTests.swift`](../../ios-app/Tests/Views/EngineConsoleAccessibilityTests.swift)
+- [`packages/ios-app/Tests/ViewModels/EngineConsoleStateTests.swift`](../../ios-app/Tests/ViewModels/EngineConsoleStateTests.swift)
+- [`packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift`](../../ios-app/Tests/Infrastructure/SourceGuardTests.swift)
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+- [`packages/ios-app/docs/capability-ui.md`](../../ios-app/docs/capability-ui.md)
+- [`README.md`](../../../README.md)
+- [`packages/agent/docs/codebase-cleanup-scorecard.md`](codebase-cleanup-scorecard.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests/harnessChangeProjectionExplainsSessionCreatedCapabilityEvidence` | 65 | Red proof: the existing projection lacked `shelfTitle`, `shelfSubtitle`, and `historyLabels` for product shelf/history acceptance. |
+| `cd packages/ios-app && xcodegen generate` | 0 | Regenerated the project after renaming the production Created by Agent projection/card and adding focused test files. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleCreatedByAgentProjectionTests` | 0 | Proved the projection derives product-facing titles/subtitles plus created, updated, auto-repaired, tested, failed, promoted, revoked, discarded, and reused history labels from registry/catalog/control/audit/program-run DTOs; 2 Swift Testing tests passed. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleCreatedByAgentSourceGuardTests -only-testing:TronMobileTests/EngineConsoleAccessibilityTests -only-testing:TronMobileTests/SourceGuardTests` | 0 | Proved the shelf remains server-derived, product-labeled, accessible, free of old production `HarnessChange` symbols, and within existing iOS source boundaries; 20 Swift Testing tests passed. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests` | 0 | Re-ran the broader console state suite after extracting the created-by-agent cases; 12 Swift Testing tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Confirmed the master productization scorecard and evidence manifest now record 31/100, TPROD-D passed, TPROD-E active, and no premature 100/100 claim. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants codebase_cleanup_scorecard_stays_formalized -- --nocapture` | 0 | Confirmed the cleanup scorecard remains in its formalized 100/100 maintenance state after the TPROD-D large-file row update. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 0 | Confirmed exact large-file audit rows after splitting created-by-agent tests out of `EngineConsoleStateTests.swift`. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Verified Rust formatting after the static-gate update. |
+| `git diff --check` | 0 | Verified whitespace/diff hygiene for the TPROD-D checkpoint. |
+
+### Findings
+
+- The former user-facing Harness Changes surface is now a Created by Agent shelf
+  in production source, state, view, docs, accessibility tests, and source
+  guards. A dedicated source guard prevents `EngineConsoleHarnessChange` and
+  `Harness Changes` from returning in the production shelf path.
+- `EngineConsoleCreatedByAgentProjection` still uses server-owned registry
+  implementations, live catalog functions, control snapshot generated-UI refs,
+  audit events, and program runs. iOS only projects these DTOs into shelf
+  labels; it does not own trust, policy, generated action targets, or binding.
+- Shelf titles and subtitles are product-facing. Raw function ids, trace ids,
+  child invocation ids, resource refs, and worker ids stay in evidence fields
+  or Inspect-oriented details.
+- Focused tests moved created-by-agent lifecycle coverage out of the broad
+  `EngineConsoleStateTests.swift` matrix. The cleanup large-file audit now
+  records that file at 1,019 LOC with a tighter 1,100-line budget.
+
+### Open Loops
+
+- Closed for TPROD-D. TPROD-E must prove the local disk pack lifecycle through
+  chat entry plus Console/detail surfaces while preserving the explicit remote
+  discovery deferral.

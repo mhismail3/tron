@@ -35,12 +35,14 @@ struct EngineConsoleAccessibilityTests {
         #expect(notificationBell.contains(".hoverEffect(.highlight)"))
     }
 
-    @Test("harness change evidence card keeps named evidence lanes accessible")
-    func testHarnessChangeEvidenceCardStaysAccessible() throws {
-        let source = try Self.source("Sources/Views/EngineConsole/EngineConsoleHarnessChangeView.swift")
+    @Test("created-by-agent evidence card keeps history and evidence lanes accessible")
+    func testCreatedByAgentEvidenceCardStaysAccessible() throws {
+        let source = try Self.source("Sources/Views/EngineConsole/EngineConsoleCreatedByAgentView.swift")
 
         for required in [
-            "Harness Changes",
+            "Created by Agent",
+            "Capability history",
+            "historyLabels",
             "Provenance",
             "Tests",
             "Generated UI",
