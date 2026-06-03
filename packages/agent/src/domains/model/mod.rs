@@ -2,8 +2,11 @@
 //!
 //! This module owns canonical function execution for the model namespace and keeps
 //! domain contracts, services, and tests beside the worker that uses them.
-//! Model listing, model switching, and reasoning-level mutation operation
-//! bodies live in `operations/`; provider catalog helpers remain in `catalog.rs`.
+//! Model listing, model switching, reasoning-level mutation, and product preset
+//! routing live here. `presets` owns the server-side `Local when possible`,
+//! `Balanced`, and `Deep` vocabulary plus selected-model/fallback presentation
+//! used by automations and subagents.
+//! Operation bodies live in `operations/`; provider catalog helpers remain in `catalog.rs`.
 //! Provider-native stream and function-call details are isolated under
 //! `provider_protocol` before being converted to canonical capability history;
 //! malformed provider capability arguments fail closed at that boundary.
@@ -12,6 +15,7 @@ pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) mod operations;
+pub mod presets;
 pub mod provider_protocol;
 pub mod providers;
 pub(crate) use deps::Deps;

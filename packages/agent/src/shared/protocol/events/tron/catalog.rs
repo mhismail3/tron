@@ -708,6 +708,10 @@ tron_events! {
         working_directory: Option<String>,
         #[serde(rename = "spawnType", skip_serializing_if = "Option::is_none")]
         spawn_type: Option<String>,
+        #[serde(rename = "taskProfile", skip_serializing_if = "Option::is_none")]
+        task_profile: Option<Value>,
+        #[serde(rename = "modelRouting", skip_serializing_if = "Option::is_none")]
+        model_routing: Option<Value>,
     } => "subagent_spawned",
 
     /// Subagent status update (forwarded child events).
@@ -738,6 +742,10 @@ tron_events! {
         model: Option<String>,
         #[serde(rename = "spawnType", skip_serializing_if = "Option::is_none")]
         spawn_type: Option<String>,
+        #[serde(rename = "taskProfile", skip_serializing_if = "Option::is_none")]
+        task_profile: Option<Value>,
+        #[serde(rename = "modelRouting", skip_serializing_if = "Option::is_none")]
+        model_routing: Option<Value>,
     } => "subagent_completed",
 
     /// Subagent failed.
@@ -748,6 +756,10 @@ tron_events! {
         duration: u64,
         #[serde(rename = "spawnType", skip_serializing_if = "Option::is_none")]
         spawn_type: Option<String>,
+        #[serde(rename = "taskProfile", skip_serializing_if = "Option::is_none")]
+        task_profile: Option<Value>,
+        #[serde(rename = "modelRouting", skip_serializing_if = "Option::is_none")]
+        model_routing: Option<Value>,
     } => "subagent_failed",
 
     /// Forwarded child event (streaming content for iOS detail sheet).
@@ -772,6 +784,10 @@ tron_events! {
         duration: u64,
         #[serde(rename = "tokenUsage", skip_serializing_if = "Option::is_none")]
         token_usage: Option<Value>,
+        #[serde(rename = "taskProfile", skip_serializing_if = "Option::is_none")]
+        task_profile: Option<Value>,
+        #[serde(rename = "modelRouting", skip_serializing_if = "Option::is_none")]
+        model_routing: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
         #[serde(rename = "completedAt")]

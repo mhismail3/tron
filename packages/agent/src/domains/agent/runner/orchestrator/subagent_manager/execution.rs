@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, info, info_span};
 
+use super::forwarding::spawn_child_event_forwarder;
 use super::{SubagentManager, SubagentResult, TrackedSubagent, elapsed_ms, truncate};
 use crate::domains::agent::lineage::subagent_result_resource_id;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
@@ -22,6 +23,8 @@ use crate::domains::agent::runner::orchestrator::agent_runner;
 use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
 use crate::domains::agent::runner::types::ReasoningLevel;
 use crate::domains::agent::runner::types::{AgentConfig as AgentCfg, RunContext};
+use crate::domains::capability_support::implementations::traits::SubagentTaskProfile;
+use crate::domains::model::presets::ModelRoutingPresentation;
 use crate::domains::session::event_store::EventStore;
 
 pub(super) struct SubsessionTaskLaunch {
@@ -37,7 +40,9 @@ pub(super) struct SubsessionTaskLaunch {
     pub(super) child_session_id: String,
     pub(super) parent_session_id: String,
     pub(super) task: String,
+    pub(super) task_profile: SubagentTaskProfile,
     pub(super) model: String,
+    pub(super) model_routing: ModelRoutingPresentation,
     pub(super) system_prompt: String,
     pub(super) working_directory: String,
     pub(super) max_turns: u32,
@@ -64,6 +69,8 @@ pub(super) struct CapabilityAgentTaskLaunch {
     pub(super) parent_session_id: String,
     pub(super) task: String,
     pub(super) model: String,
+    pub(super) task_profile: SubagentTaskProfile,
+    pub(super) model_routing: ModelRoutingPresentation,
     pub(super) system_prompt: Option<String>,
     pub(super) working_directory: String,
     pub(super) max_turns: u32,
@@ -267,6 +274,8 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             error: error.clone(),
             duration: duration_ms,
             spawn_type: Some(params.spawn_type.clone()),
+            task_profile: Some(params.task_profile.to_value()),
+            model_routing: Some(params.model_routing.to_value()),
         });
 
         SubagentResult {
@@ -276,6 +285,8 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             duration_ms,
             status: "failed".into(),
             turns_executed: result.turns_executed,
+            task_profile: Some(params.task_profile.clone()),
+            model_routing: Some(params.model_routing.clone()),
         }
     } else {
         let _ = params.broadcast.emit(TronEvent::SubagentCompleted {
@@ -288,6 +299,8 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             token_usage: token_usage.clone(),
             model: Some(params.model.clone()),
             spawn_type: Some(params.spawn_type.clone()),
+            task_profile: Some(params.task_profile.to_value()),
+            model_routing: Some(params.model_routing.to_value()),
         });
 
         SubagentResult {
@@ -297,6 +310,8 @@ async fn run_subsession_task(params: SubsessionTaskLaunch) {
             duration_ms,
             status: "completed".into(),
             turns_executed: result.turns_executed,
+            task_profile: Some(params.task_profile.clone()),
+            model_routing: Some(params.model_routing.clone()),
         }
     };
 
@@ -477,13 +492,15 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
                 session_id: &params.tracker.parent_session_id,
                 event_type: EventType::SubagentCompleted,
                 payload: json!({
-                    "subagentSessionId": params.child_session_id,
+                    "subagentSessionId": params.child_session_id.clone(),
                     "totalTurns": result.turns_executed,
                     "duration": duration_ms,
                     "fullOutput": truncate(&output, 4000),
                     "resultSummary": truncate(&output, 200),
-                    "model": params.model,
-                    "spawnType": params.spawn_type,
+                    "model": params.model.clone(),
+                    "spawnType": params.spawn_type.clone(),
+                    "taskProfile": params.task_profile.to_value(),
+                    "modelRouting": params.model_routing.to_value(),
                 }),
                 parent_id: None,
                 sequence: None,
@@ -506,6 +523,8 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
                     token_usage: token_usage.clone(),
                     model: Some(params.model.clone()),
                     spawn_type: Some(params.spawn_type.clone()),
+                    task_profile: Some(params.task_profile.to_value()),
+                    model_routing: Some(params.model_routing.to_value()),
                 });
             }
         } else {
@@ -520,6 +539,8 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
                 token_usage: token_usage.clone(),
                 model: Some(params.model.clone()),
                 spawn_type: Some(params.spawn_type.clone()),
+                task_profile: Some(params.task_profile.to_value()),
+                model_routing: Some(params.model_routing.to_value()),
             });
         }
 
@@ -531,6 +552,8 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
             duration_ms,
             status: "completed".into(),
             turns_executed: result.turns_executed,
+            task_profile: Some(params.task_profile.clone()),
+            model_routing: Some(params.model_routing.clone()),
         }
     } else {
         let error = result.error.unwrap_or_else(|| "Unknown error".into());
@@ -540,10 +563,12 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
                 session_id: &params.tracker.parent_session_id,
                 event_type: EventType::SubagentFailed,
                 payload: json!({
-                    "subagentSessionId": params.child_session_id,
-                    "error": error,
+                    "subagentSessionId": params.child_session_id.clone(),
+                    "error": error.clone(),
                     "duration": duration_ms,
-                    "spawnType": params.spawn_type,
+                    "spawnType": params.spawn_type.clone(),
+                    "taskProfile": params.task_profile.to_value(),
+                    "modelRouting": params.model_routing.to_value(),
                 }),
                 parent_id: None,
                 sequence: None,
@@ -562,6 +587,8 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
                     error: error.clone(),
                     duration: duration_ms,
                     spawn_type: Some(params.spawn_type.clone()),
+                    task_profile: Some(params.task_profile.to_value()),
+                    model_routing: Some(params.model_routing.to_value()),
                 });
             }
         } else {
@@ -572,6 +599,8 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
                 error: error.clone(),
                 duration: duration_ms,
                 spawn_type: Some(params.spawn_type.clone()),
+                task_profile: Some(params.task_profile.to_value()),
+                model_routing: Some(params.model_routing.to_value()),
             });
         }
 
@@ -583,6 +612,8 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
             duration_ms,
             status: "failed".into(),
             turns_executed: result.turns_executed,
+            task_profile: Some(params.task_profile.clone()),
+            model_routing: Some(params.model_routing.clone()),
         }
     };
 
@@ -598,6 +629,8 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
             duration_ms,
             token_usage.clone(),
             &params.spawn_type,
+            &params.task_profile,
+            &params.model_routing,
         )
         .await;
     }
@@ -625,6 +658,8 @@ async fn run_capability_agent_task(params: CapabilityAgentTaskLaunch) {
             total_turns: result.turns_executed,
             duration: duration_ms,
             token_usage,
+            task_profile: Some(params.task_profile.to_value()),
+            model_routing: Some(params.model_routing.to_value()),
             error: if success {
                 None
             } else {
@@ -662,6 +697,8 @@ async fn create_subagent_agent_result_resource(
     duration_ms: u64,
     token_usage: Option<Value>,
     spawn_type: &str,
+    task_profile: &SubagentTaskProfile,
+    model_routing: &ModelRoutingPresentation,
 ) {
     let Some(engine_host) = engine_host else {
         return;
@@ -701,7 +738,9 @@ async fn create_subagent_agent_result_resource(
                 "success": success,
                 "turnsExecuted": turns_executed,
                 "durationMs": duration_ms,
-                "spawnType": spawn_type
+                "spawnType": spawn_type,
+                "taskProfile": task_profile.to_value(),
+                "modelRouting": model_routing.to_value()
             }
         }
     });
@@ -752,158 +791,6 @@ async fn acquire_worktree_directory(
     }
 }
 
-fn spawn_child_event_forwarder(
-    child_broadcast: &EventEmitter,
-    forward_broadcast: Arc<EventEmitter>,
-    child_session_id: String,
-    parent_session_id: String,
-) -> (CancellationToken, tokio::task::JoinHandle<()>) {
-    let mut child_rx = child_broadcast.subscribe();
-    let forward_cancel = CancellationToken::new();
-    let forward_cancel_clone = forward_cancel.clone();
-
-    let handle = tokio::spawn(async move {
-        let mut current_turn: u32 = 0;
-        loop {
-            tokio::select! {
-                event = child_rx.recv() => {
-                    match event {
-                        Ok(ref event) => {
-                            if let TronEvent::TurnStart { turn, .. } = event {
-                                current_turn = *turn;
-                            }
-
-                            if let Some(activity) = activity_text(event) {
-                                let _ = forward_broadcast.emit(TronEvent::SubagentStatusUpdate {
-                                    base: BaseEvent::now(&parent_session_id),
-                                    subagent_session_id: child_session_id.clone(),
-                                    status: "running".into(),
-                                    current_turn,
-                                    activity: Some(activity),
-                                });
-                            }
-
-                            if let Some(forwarded_event) = forwarded_subagent_event(event) {
-                                let _ = forward_broadcast.emit(TronEvent::SubagentEvent {
-                                    base: BaseEvent::now(&parent_session_id),
-                                    subagent_session_id: child_session_id.clone(),
-                                    event: forwarded_event,
-                                });
-                            }
-                        }
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
-                            metrics::counter!("broadcast_lagged_events_total", "source" => "subagent_forward")
-                                .increment(count);
-                        }
-                    }
-                }
-                () = forward_cancel_clone.cancelled() => {
-                    while let Ok(_event) = child_rx.try_recv() {}
-                    break;
-                }
-            }
-        }
-    });
-
-    (forward_cancel, handle)
-}
-
-fn activity_text(event: &TronEvent) -> Option<String> {
-    match event {
-        TronEvent::TurnStart { turn, .. } => Some(format!("Turn {turn} started")),
-        TronEvent::CapabilityInvocationStarted {
-            model_primitive_name,
-            ..
-        } => Some(format!("Executing {model_primitive_name}")),
-        TronEvent::CapabilityInvocationCompleted {
-            model_primitive_name,
-            duration,
-            ..
-        } => Some(format!("{model_primitive_name} completed ({duration}ms)")),
-        _ => None,
-    }
-}
-
-fn forwarded_subagent_event(event: &TronEvent) -> Option<Value> {
-    match event {
-        TronEvent::MessageUpdate { content, .. } => Some(json!({
-            "type": "agent.text_delta",
-            "data": { "delta": content },
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })),
-        TronEvent::CapabilityInvocationStarted {
-            invocation_id,
-            model_primitive_name,
-            arguments,
-            ..
-        } => Some(json!({
-            "type": "capability.invocation.started",
-            "data": {
-                "invocationId": invocation_id,
-                "modelPrimitiveName": model_primitive_name,
-                "arguments": arguments,
-            },
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })),
-        TronEvent::CapabilityInvocationCompleted {
-            invocation_id,
-            model_primitive_name,
-            is_error,
-            duration,
-            result,
-            ..
-        } => {
-            let result_text =
-                result
-                    .as_ref()
-                    .map(|capability_result| match &capability_result.content {
-                        crate::shared::model_capabilities::CapabilityResultBody::Text(text) => {
-                            text.clone()
-                        }
-                        crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
-                            blocks
-                                .iter()
-                                .filter_map(|block| {
-                                    if let crate::shared::content::CapabilityResultContent::Text {
-                                        text,
-                                    } = block
-                                    {
-                                        Some(text.as_str())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                                .join("")
-                        }
-                    });
-            Some(json!({
-                "type": "capability.invocation.completed",
-                "data": {
-                    "invocationId": invocation_id,
-                    "modelPrimitiveName": model_primitive_name,
-                    "isError": is_error.unwrap_or(false),
-                    "content": result_text.unwrap_or_default(),
-                    "duration": duration,
-                },
-                "timestamp": chrono::Utc::now().to_rfc3339(),
-            }))
-        }
-        TronEvent::TurnStart { turn, .. } => Some(json!({
-            "type": "turn_start",
-            "data": { "turn": turn },
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })),
-        TronEvent::TurnEnd { turn, .. } => Some(json!({
-            "type": "turn_end",
-            "data": { "turn": turn },
-            "timestamp": chrono::Utc::now().to_rfc3339(),
-        })),
-        _ => None,
-    }
-}
-
 fn extract_output(messages: &[crate::shared::messages::Message]) -> String {
     messages
         .iter()
@@ -940,6 +827,8 @@ async fn complete_failure(
             duration_ms: elapsed_ms(&tracker.started_at),
             status: "failed".into(),
             turns_executed: 0,
+            task_profile: Some(tracker.task_profile.clone()),
+            model_routing: Some(tracker.model_routing.clone()),
         },
     )
     .await;

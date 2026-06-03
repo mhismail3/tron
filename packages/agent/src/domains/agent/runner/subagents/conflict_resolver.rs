@@ -552,6 +552,8 @@ mod tests {
                     duration_ms: 0,
                     status: "completed".into(),
                     turns_executed: 0,
+                    task_profile: None,
+                    model_routing: None,
                 })
                 .collect())
         }

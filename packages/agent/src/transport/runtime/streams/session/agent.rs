@@ -186,6 +186,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             blocking_timeout_ms,
             working_directory,
             spawn_type,
+            task_profile,
+            model_routing,
             ..
         } => {
             let mut data = json!({
@@ -201,6 +203,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             set_opt(&mut data, "invocationId", invocation_id);
             set_opt(&mut data, "workingDirectory", working_directory);
             set_opt(&mut data, "spawnType", spawn_type);
+            set_opt(&mut data, "taskProfile", task_profile);
+            set_opt(&mut data, "modelRouting", model_routing);
             Some(session_scoped(event, "agent.subagent_spawned", Some(data)))
         }
         TronEvent::SubagentStatusUpdate {
@@ -227,6 +231,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             token_usage,
             model,
             spawn_type,
+            task_profile,
+            model_routing,
             ..
         } => {
             let mut data = json!({
@@ -239,6 +245,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             set_opt(&mut data, "tokenUsage", token_usage);
             set_opt(&mut data, "model", model);
             set_opt(&mut data, "spawnType", spawn_type);
+            set_opt(&mut data, "taskProfile", task_profile);
+            set_opt(&mut data, "modelRouting", model_routing);
             Some(session_scoped(
                 event,
                 "agent.subagent_completed",
@@ -250,6 +258,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             error,
             duration,
             spawn_type,
+            task_profile,
+            model_routing,
             ..
         } => {
             let mut data = json!({
@@ -258,6 +268,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "duration": duration,
             });
             set_opt(&mut data, "spawnType", spawn_type);
+            set_opt(&mut data, "taskProfile", task_profile);
+            set_opt(&mut data, "modelRouting", model_routing);
             Some(session_scoped(event, "agent.subagent_failed", Some(data)))
         }
         TronEvent::SubagentEvent {
@@ -281,6 +293,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             total_turns,
             duration,
             token_usage,
+            task_profile,
+            model_routing,
             error,
             completed_at,
             notify,
@@ -298,6 +312,8 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "notify": notify,
             });
             set_opt(&mut data, "tokenUsage", token_usage);
+            set_opt(&mut data, "taskProfile", task_profile);
+            set_opt(&mut data, "modelRouting", model_routing);
             set_opt(&mut data, "error", error);
             Some(session_scoped(
                 event,

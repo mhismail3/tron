@@ -17,6 +17,8 @@ enum SubagentFailedPlugin: DispatchableEventPlugin {
             let subagentSessionId: String
             let error: String
             let duration: Int
+            let taskProfile: SubagentTaskProfilePresentation?
+            let modelRouting: SubagentModelRoutingPresentation?
         }
     }
 
@@ -26,6 +28,22 @@ enum SubagentFailedPlugin: DispatchableEventPlugin {
         let subagentSessionId: String
         let error: String
         let duration: Int
+        let taskProfile: SubagentTaskProfilePresentation?
+        let modelRouting: SubagentModelRoutingPresentation?
+
+        init(
+            subagentSessionId: String,
+            error: String,
+            duration: Int,
+            taskProfile: SubagentTaskProfilePresentation? = nil,
+            modelRouting: SubagentModelRoutingPresentation? = nil
+        ) {
+            self.subagentSessionId = subagentSessionId
+            self.error = error
+            self.duration = duration
+            self.taskProfile = taskProfile
+            self.modelRouting = modelRouting
+        }
     }
 
     // MARK: - Protocol Implementation
@@ -34,7 +52,9 @@ enum SubagentFailedPlugin: DispatchableEventPlugin {
         Result(
             subagentSessionId: event.data.subagentSessionId,
             error: event.data.error,
-            duration: event.data.duration
+            duration: event.data.duration,
+            taskProfile: event.data.taskProfile,
+            modelRouting: event.data.modelRouting
         )
     }
 

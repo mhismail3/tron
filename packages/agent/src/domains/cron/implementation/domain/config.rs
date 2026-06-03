@@ -234,6 +234,8 @@ mod tests {
         job.payload = Payload::AgentTurn {
             prompt: String::new(),
             model: None,
+            model_preset: None,
+            model_routing: None,
             workspace_id: None,
             system_prompt: None,
         };

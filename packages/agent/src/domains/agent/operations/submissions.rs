@@ -9,8 +9,9 @@ use crate::domains::agent::Deps;
 use crate::domains::agent::lineage::subagent_result_resource_id;
 use crate::domains::capability::types::{CapabilityPauseRecord, CapabilityRunRecord};
 use crate::domains::capability_support::implementations::traits::{
-    SubagentConfig, SubagentMode, SubagentOps, SubagentSpawner,
+    SubagentConfig, SubagentMode, SubagentOps, SubagentSpawner, SubagentTaskProfile,
 };
+use crate::domains::model::presets::ModelPreset;
 use crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY;
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::{ActorKind, FunctionId, Invocation};
@@ -339,6 +340,10 @@ struct SubagentSpawnRequest {
     #[serde(default)]
     model: Option<String>,
     #[serde(default)]
+    model_preset: Option<ModelPreset>,
+    #[serde(default)]
+    task_profile: Option<String>,
+    #[serde(default)]
     system_prompt: Option<String>,
     #[serde(default)]
     working_directory: Option<String>,
@@ -449,11 +454,21 @@ pub(crate) async fn spawn_subagent_value(
         session_working_directory,
         invocation,
     )?;
+    let task_profile = match request.task_profile.as_deref() {
+        Some(profile_id) => Some(SubagentTaskProfile::from_id(profile_id).ok_or_else(|| {
+            CapabilityError::InvalidParams {
+                message: format!("Unknown taskProfile: {profile_id}"),
+            }
+        })?),
+        None => None,
+    };
     let config = SubagentConfig {
         task: request.task.clone(),
         mode: SubagentMode::InProcess,
         blocking_timeout_ms: resolve_subagent_blocking_timeout(request.blocking_timeout_ms),
         model: request.model,
+        model_preset: request.model_preset,
+        task_profile,
         parent_session_id: Some(session_id.clone()),
         system_prompt: request.system_prompt,
         working_directory,
@@ -484,6 +499,8 @@ pub(crate) async fn spawn_subagent_value(
         "task": request.task,
         "sessionId": session_id,
         "workspaceId": workspace_id,
+        "taskProfile": handle.task_profile.clone(),
+        "modelRouting": handle.model_routing.clone(),
         "handle": handle,
     });
     persist_run_record(

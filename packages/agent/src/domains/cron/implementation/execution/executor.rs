@@ -19,6 +19,7 @@ use crate::domains::cron::errors::CronError;
 use crate::domains::cron::types::{
     CapabilityRestrictions, CronJob, CronRun, ExecutionOutput, Payload, RunStatus,
 };
+use crate::domains::model::presets::{ModelPreset, ModelRoutingPresentation};
 
 /// Execute an isolated agent turn. Implemented in `main.rs`.
 #[async_trait]
@@ -28,6 +29,7 @@ pub trait AgentTurnExecutor: Send + Sync {
         &self,
         prompt: &str,
         model: Option<&str>,
+        model_preset: Option<ModelPreset>,
         workspace_id: Option<&str>,
         system_prompt: Option<&str>,
         capability_restrictions: Option<&CapabilityRestrictions>,
@@ -43,6 +45,8 @@ pub struct AgentTurnResult {
     pub output: String,
     /// Whether the output was truncated.
     pub output_truncated: bool,
+    /// Selected model routing presentation.
+    pub model_routing: Option<ModelRoutingPresentation>,
 }
 
 /// Publish cron events to engine streams.
@@ -124,8 +128,10 @@ pub async fn execute_payload(
         Payload::AgentTurn {
             prompt,
             model,
+            model_preset,
             workspace_id,
             system_prompt,
+            ..
         } => {
             let executor = deps
                 .agent_executor
@@ -135,6 +141,7 @@ pub async fn execute_payload(
                 .execute(
                     prompt,
                     model.as_deref(),
+                    *model_preset,
                     workspace_id.as_deref(),
                     system_prompt.as_deref(),
                     job.capability_restrictions.as_ref(),
@@ -148,6 +155,7 @@ pub async fn execute_payload(
                 truncated: result.output_truncated,
                 timed_out: false,
                 session_id: Some(result.session_id),
+                model_routing: result.model_routing,
             })
         }
         Payload::SystemEvent {
@@ -216,6 +224,7 @@ pub async fn execute_with_retries(
                     exit_code: output.exit_code,
                     attempt,
                     session_id: output.session_id,
+                    model_routing: output.model_routing,
                     delivery_status: None,
                 };
             }
@@ -241,6 +250,7 @@ pub async fn execute_with_retries(
                     exit_code: None,
                     attempt,
                     session_id: None,
+                    model_routing: None,
                     delivery_status: None,
                 };
             }
@@ -328,6 +338,7 @@ async fn execute_shell(
                         truncated: out_trunc || err_trunc,
                         timed_out: false,
                         session_id: None,
+                        model_routing: None,
                     };
 
                     // Non-zero exit code is a failure — but SIGPIPE (141) is expected
@@ -447,6 +458,7 @@ async fn execute_webhook(
         truncated: false,
         timed_out: false,
         session_id: None,
+        model_routing: None,
     })
 }
 
@@ -497,6 +509,7 @@ fn make_run(
         exit_code: None,
         attempt,
         session_id: None,
+        model_routing: None,
         delivery_status: None,
     }
 }

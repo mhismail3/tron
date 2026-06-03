@@ -411,7 +411,9 @@ extension UnifiedEventTransformer {
                 model: payload["model"]?.value as? String ?? "unknown",
                 invocationId: payload["invocationId"]?.value as? String,
                 blocking: payload["blocking"]?.value as? Bool ?? false,
-                spawnType: payload["spawnType"]?.value as? String
+                spawnType: payload["spawnType"]?.value as? String,
+                taskProfile: decodePayloadValue(SubagentTaskProfilePresentation.self, payload: payload, key: "taskProfile"),
+                modelRouting: decodePayloadValue(SubagentModelRoutingPresentation.self, payload: payload, key: "modelRouting")
             ))
 
         case .subagentCompleted:
@@ -429,7 +431,9 @@ extension UnifiedEventTransformer {
                 duration: payload["duration"]?.value as? Int ?? 0,
                 tokenUsage: tokenUsage,
                 fullOutput: payload["fullOutput"]?.value as? String,
-                model: payload["model"]?.value as? String
+                model: payload["model"]?.value as? String,
+                taskProfile: decodePayloadValue(SubagentTaskProfilePresentation.self, payload: payload, key: "taskProfile"),
+                modelRouting: decodePayloadValue(SubagentModelRoutingPresentation.self, payload: payload, key: "modelRouting")
             )
 
         case .subagentFailed:
@@ -442,6 +446,19 @@ extension UnifiedEventTransformer {
         default:
             break
         }
+    }
+
+    private static func decodePayloadValue<T: Decodable>(
+        _ type: T.Type,
+        payload: [String: AnyCodable],
+        key: String
+    ) -> T? {
+        guard let value = payload[key]?.value,
+              JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(type, from: data)
     }
 
     private static func handleFileActivityEvent(

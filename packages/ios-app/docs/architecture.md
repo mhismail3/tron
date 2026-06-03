@@ -141,6 +141,12 @@ final class SubagentState {
 }
 ```
 
+Subagent chips are fed by server-owned lifecycle payloads. Live events and
+history reconstruction decode optional `taskProfile` and `modelRouting`
+presentations, store them on `SubagentInvocationData`, and render compact
+task/model/result lineage. The app never chooses fallback models or infers route
+policy from raw model ids.
+
 ## Key Files
 
 | File | Purpose |
@@ -686,6 +692,8 @@ then updates the app-wide active-server snapshot. A failed write rolls visible
 settings back to the last loaded server response. Model picker reasoning
 controls are opt-in: chat/session flows pass a reasoning binding, while Settings
 model pickers hide the control because they do not own reasoning-level writes.
+Automation and subagent model presets are also server-owned: iOS renders the
+returned `modelRouting` presentation but does not select local/hosted fallback.
 When Settings launches server onboarding, `ContentView` records the requested
 prefill, dismisses Settings, and posts the onboarding launch from the sheet's
 dismiss callback so SwiftUI never drops the second modal presentation.

@@ -21,6 +21,8 @@ enum SubagentCompletedPlugin: DispatchableEventPlugin {
             let duration: Int
             let tokenUsage: TokenUsage?
             let model: String?
+            let taskProfile: SubagentTaskProfilePresentation?
+            let modelRouting: SubagentModelRoutingPresentation?
         }
     }
 
@@ -34,6 +36,30 @@ enum SubagentCompletedPlugin: DispatchableEventPlugin {
         let duration: Int
         let tokenUsage: TokenUsage?
         let model: String?
+        let taskProfile: SubagentTaskProfilePresentation?
+        let modelRouting: SubagentModelRoutingPresentation?
+
+        init(
+            subagentSessionId: String,
+            resultSummary: String,
+            fullOutput: String?,
+            totalTurns: Int,
+            duration: Int,
+            tokenUsage: TokenUsage?,
+            model: String?,
+            taskProfile: SubagentTaskProfilePresentation? = nil,
+            modelRouting: SubagentModelRoutingPresentation? = nil
+        ) {
+            self.subagentSessionId = subagentSessionId
+            self.resultSummary = resultSummary
+            self.fullOutput = fullOutput
+            self.totalTurns = totalTurns
+            self.duration = duration
+            self.tokenUsage = tokenUsage
+            self.model = model
+            self.taskProfile = taskProfile
+            self.modelRouting = modelRouting
+        }
     }
 
     // MARK: - Protocol Implementation
@@ -46,7 +72,9 @@ enum SubagentCompletedPlugin: DispatchableEventPlugin {
             totalTurns: event.data.totalTurns,
             duration: event.data.duration,
             tokenUsage: event.data.tokenUsage,
-            model: event.data.model
+            model: event.data.model,
+            taskProfile: event.data.taskProfile,
+            modelRouting: event.data.modelRouting
         )
     }
 

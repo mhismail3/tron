@@ -78,6 +78,29 @@ enum SubagentSpawnType: String, Codable, Equatable {
     }
 }
 
+struct SubagentTaskProfilePresentation: Codable, Equatable, Sendable {
+    let id: String
+    let label: String
+}
+
+struct SubagentModelRoutingPresentation: Codable, Equatable, Sendable {
+    let preset: String?
+    let presetLabel: String?
+    let selectionStatus: String
+    let localOptIn: Bool
+    let selectedModel: String?
+    let selectedModelLabel: String?
+    let modelClass: String?
+    let fallbackUsed: Bool
+    let fallbackLabel: String?
+    let fallbackReason: String?
+    let policyProfile: String?
+
+    var chipModelLabel: String? {
+        selectedModelLabel ?? selectedModel ?? presetLabel ?? preset
+    }
+}
+
 /// Data for tracking a spawned subagent (rendered as a chip in chat)
 struct SubagentInvocationData: Equatable {
     /// The capability invocation ID for the subagent request.
@@ -93,6 +116,10 @@ struct SubagentInvocationData: Equatable {
     let task: String
     /// Model used by the subagent
     var model: String?
+    /// Server-owned task profile presentation
+    var taskProfile: SubagentTaskProfilePresentation? = nil
+    /// Server-owned model route presentation
+    var modelRouting: SubagentModelRoutingPresentation? = nil
     /// Current status
     var status: SubagentStatus
     /// Current turn number (while running)
@@ -127,5 +154,31 @@ struct SubagentInvocationData: Equatable {
     /// Short task preview for chip display
     var taskPreview: String {
         task.truncated(to: 43)
+    }
+
+    var routePreview: String? {
+        let profile = taskProfile?.label
+        let modelLabel = modelRouting?.chipModelLabel ?? model
+        switch (profile, modelLabel) {
+        case (.some(let profile), .some(let modelLabel)):
+            return "\(profile) / \(modelLabel)"
+        case (.some(let profile), .none):
+            return profile
+        case (.none, .some(let modelLabel)):
+            return modelLabel
+        case (.none, .none):
+            return nil
+        }
+    }
+
+    var resultPreview: String? {
+        guard status == .completed || status == .failed else { return nil }
+        if let resultSummary, !resultSummary.isEmpty {
+            return resultSummary.truncated(to: 36)
+        }
+        if let error, !error.isEmpty {
+            return error.truncated(to: 36)
+        }
+        return nil
     }
 }

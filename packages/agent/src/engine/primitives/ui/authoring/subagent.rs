@@ -108,6 +108,8 @@ fn subagent_resource_row(
         "turnsExecuted": metadata.get("turnsExecuted").cloned().unwrap_or(Value::Null),
         "durationMs": metadata.get("durationMs").cloned().unwrap_or(Value::Null),
         "spawnType": metadata.get("spawnType").cloned().unwrap_or(Value::Null),
+        "taskProfile": metadata.get("taskProfile").cloned().unwrap_or(Value::Null),
+        "modelRouting": metadata.get("modelRouting").cloned().unwrap_or(Value::Null),
         "message": message,
         "resourceId": inspection.resource.resource_id,
         "versionId": inspection.resource.current_version_id,
@@ -176,6 +178,14 @@ pub(super) fn append_subagent_invocation_rows(
             "turnsExecuted": result.pointer("/handle/turnsExecuted").cloned().unwrap_or(Value::Null),
             "durationMs": Value::Null,
             "spawnType": result.get("kind").cloned().unwrap_or_else(|| json!("agent")),
+            "taskProfile": result.get("taskProfile")
+                .cloned()
+                .or_else(|| result.pointer("/handle/taskProfile").cloned())
+                .unwrap_or(Value::Null),
+            "modelRouting": result.get("modelRouting")
+                .cloned()
+                .or_else(|| result.pointer("/handle/modelRouting").cloned())
+                .unwrap_or(Value::Null),
             "message": result.pointer("/handle/output")
                 .and_then(Value::as_str)
                 .map(|value| bounded_text_preview(value, request.max_preview_bytes))
@@ -269,6 +279,47 @@ pub(super) fn subagent_collection_layout(projection: &TargetProjection, rows: &[
                     "label": "Duration",
                     "value": row.get("durationMs").cloned().unwrap_or(Value::Null)
                 }}),
+            ]);
+            push_optional_metric(
+                &mut row_children,
+                "Task profile",
+                row,
+                &["/taskProfile/label"],
+            );
+            push_optional_metric(
+                &mut row_children,
+                "Model preset",
+                row,
+                &["/modelRouting/presetLabel", "/modelRouting/preset"],
+            );
+            push_optional_metric(
+                &mut row_children,
+                "Selected model",
+                row,
+                &[
+                    "/modelRouting/selectedModelLabel",
+                    "/modelRouting/selectedModel",
+                ],
+            );
+            if row
+                .pointer("/modelRouting/fallbackUsed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                push_optional_metric(
+                    &mut row_children,
+                    "Routing",
+                    row,
+                    &["/modelRouting/fallbackLabel"],
+                );
+                if let Some(reason) = first_non_empty_string(row, &["/modelRouting/fallbackReason"])
+                {
+                    row_children.push(json!({"type": "Text", "props": {
+                        "text": reason
+                    }}));
+                }
+            }
+            row_children.extend([
                 json!({"type": "Text", "props": {
                     "text": row.get("message").cloned().unwrap_or(Value::Null)
                 }}),
@@ -304,6 +355,23 @@ pub(super) fn subagent_collection_layout(projection: &TargetProjection, rows: &[
         }
     }
     json!({"type": "Section", "props": {"title": projection.title}, "children": children})
+}
+
+fn push_optional_metric(children: &mut Vec<Value>, label: &str, row: &Value, pointers: &[&str]) {
+    if let Some(value) = first_non_empty_string(row, pointers) {
+        children.push(json!({"type": "Metric", "props": {
+            "label": label,
+            "value": value
+        }}));
+    }
+}
+
+fn first_non_empty_string<'a>(row: &'a Value, pointers: &[&str]) -> Option<&'a str> {
+    pointers.iter().find_map(|pointer| {
+        row.pointer(pointer)
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+    })
 }
 
 pub(super) fn subagent_collection_actions(

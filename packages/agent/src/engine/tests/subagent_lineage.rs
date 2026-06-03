@@ -65,6 +65,22 @@ async fn create_subagent_result_resource(handle: &EngineHostHandle) {
             "parentSessionId": "parent-session",
             "subagentSessionId": "subagent-lineage-child",
             "task": "Check the generated surface boundary",
+            "taskProfile": {
+                "id": "review",
+                "label": "Review"
+            },
+            "modelRouting": {
+                "preset": "localWhenPossible",
+                "presetLabel": "Local when possible",
+                "selectionStatus": "selected",
+                "selectedModel": "claude-sonnet-4-6",
+                "selectedModelLabel": "Claude Sonnet 4.6",
+                "modelClass": "hosted",
+                "fallbackUsed": true,
+                "fallbackLabel": "Hosted fallback",
+                "fallbackReason": "Local model is unavailable for this flow.",
+                "localOptIn": true
+            },
             "success": true,
             "turnsExecuted": 2,
             "durationMs": 321,
@@ -178,6 +194,19 @@ async fn generated_subagent_lineage_surface_uses_resource_truth_and_stored_actio
             .contains("Check the generated surface boundary"),
         "surface should render subagent task from resource truth"
     );
+    let layout = authored["layout"].to_string();
+    for required in [
+        "Review",
+        "Local when possible",
+        "Claude Sonnet 4.6",
+        "Hosted fallback",
+        "Local model is unavailable for this flow.",
+    ] {
+        assert!(
+            layout.contains(required),
+            "surface should render subagent product routing field `{required}` from resource truth"
+        );
+    }
     assert!(
         !authored["layout"]
             .to_string()

@@ -10,6 +10,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
+use crate::domains::model::presets::{ModelPreset, ModelRoutingPresentation};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Execution mode
@@ -45,6 +46,12 @@ pub struct SubagentConfig {
     /// Optional model override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Optional model preset resolved by the server at spawn time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_preset: Option<ModelPreset>,
+    /// Task profile used for routing and presentation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_profile: Option<SubagentTaskProfile>,
     /// Parent session ID (for event persistence to parent's linearized chain).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<String>,
@@ -72,6 +79,49 @@ pub struct SubagentConfig {
     /// Model call ID that triggered the spawn (for iOS event correlation).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invocation_id: Option<String>,
+}
+
+/// Product task profile for a subagent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentTaskProfile {
+    /// Stable profile id used in tool requests and events.
+    pub id: String,
+    /// Product label shown in chat, Console, and generated UI.
+    pub label: String,
+}
+
+impl SubagentTaskProfile {
+    /// Resolve a stable task profile id into its presentation.
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        let normalized = id.trim();
+        let label = match normalized {
+            "general" => "General",
+            "implementation" => "Implementation",
+            "review" => "Review",
+            "research" => "Research",
+            "qa" => "QA",
+            "planning" => "Planning",
+            _ => return None,
+        };
+        Some(Self {
+            id: normalized.to_owned(),
+            label: label.to_owned(),
+        })
+    }
+
+    /// Default product profile when the caller did not choose a specialized lane.
+    #[must_use]
+    pub fn general() -> Self {
+        Self::from_id("general").expect("general task profile is defined")
+    }
+
+    /// Convert to JSON for events and resources.
+    #[must_use]
+    pub fn to_value(&self) -> Value {
+        serde_json::to_value(self).expect("subagent task profile serializes")
+    }
 }
 
 /// Subagent execution mode.
@@ -102,6 +152,12 @@ pub struct SubagentHandle {
     /// Whether the subagent completed successfully (only present if blocking completed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub success: Option<bool>,
+    /// Server-owned task profile presentation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_profile: Option<SubagentTaskProfile>,
+    /// Server-owned model routing presentation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_routing: Option<ModelRoutingPresentation>,
 }
 
 /// Wait mode for job and subagent waiting.
@@ -131,6 +187,12 @@ pub struct SubagentResult {
     pub status: String,
     /// Number of turns executed.
     pub turns_executed: u32,
+    /// Server-owned task profile presentation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_profile: Option<SubagentTaskProfile>,
+    /// Server-owned model routing presentation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_routing: Option<ModelRoutingPresentation>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

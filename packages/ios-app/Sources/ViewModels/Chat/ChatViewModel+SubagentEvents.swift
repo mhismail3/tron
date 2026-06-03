@@ -27,7 +27,9 @@ extension ChatViewModel {
             task: result.task,
             model: result.model,
             blocking: result.blocking,
-            spawnType: resolvedSpawnType
+            spawnType: resolvedSpawnType,
+            taskProfile: result.taskProfile,
+            modelRouting: result.modelRouting
         )
 
         updateCapabilityMessageToSubagentChip(
@@ -59,7 +61,9 @@ extension ChatViewModel {
             totalTurns: result.totalTurns,
             duration: result.duration,
             tokenUsage: result.tokenUsage,
-            model: result.model
+            model: result.model,
+            taskProfile: result.taskProfile,
+            modelRouting: result.modelRouting
         )
 
         updateSubagentMessageContent(subagentSessionId: result.subagentSessionId)
@@ -71,7 +75,9 @@ extension ChatViewModel {
         subagentState.fail(
             subagentSessionId: result.subagentSessionId,
             error: result.error,
-            duration: result.duration
+            duration: result.duration,
+            taskProfile: result.taskProfile,
+            modelRouting: result.modelRouting
         )
 
         updateSubagentMessageContent(subagentSessionId: result.subagentSessionId)

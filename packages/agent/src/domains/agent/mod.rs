@@ -27,6 +27,10 @@
 //!    omitted, and every completed capability subagent writes a deterministic
 //!    `agent_result:subagent:{session}` resource before status/result readers
 //!    are expected to reconstruct child output.
+//! 9. Subagent model selection is server-owned: `modelPreset` and `taskProfile`
+//!    requests are resolved against active profile settings, then the selected
+//!    route/profile is persisted in lifecycle events, result resources, stream
+//!    payloads, and generated lineage UI.
 //!
 //! ## Submodules
 //!

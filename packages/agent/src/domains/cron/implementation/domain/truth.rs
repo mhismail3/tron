@@ -458,6 +458,7 @@ fn bounded_run_payload(run: &CronRun) -> Value {
         "exitCode": run.exit_code,
         "attempt": run.attempt,
         "sessionId": run.session_id,
+        "modelRouting": run.model_routing,
         "deliveryStatus": run.delivery_status
     })
 }

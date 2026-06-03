@@ -94,6 +94,8 @@ mod tests {
                 crate::domains::capability_support::implementations::traits::SubagentMode::InProcess,
             blocking_timeout_ms: None,
             model: None,
+            model_preset: None,
+            task_profile: None,
             parent_session_id: None,
             system_prompt: None,
             working_directory: "/tmp".into(),

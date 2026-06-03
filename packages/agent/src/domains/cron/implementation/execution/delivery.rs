@@ -286,6 +286,7 @@ mod tests {
             exit_code: Some(0),
             attempt: 0,
             session_id: None,
+            model_routing: None,
             delivery_status: None,
         }
     }

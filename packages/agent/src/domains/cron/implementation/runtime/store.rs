@@ -716,6 +716,7 @@ fn row_to_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronRun> {
         exit_code: row.get(10)?,
         attempt: row.get(11)?,
         session_id: row.get(12)?,
+        model_routing: None,
         delivery_status: row
             .get::<_, Option<String>>(13)?
             .map(|s| DeliveryOutcome::from_sql(&s)),

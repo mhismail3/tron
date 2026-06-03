@@ -129,14 +129,18 @@ pub(crate) async fn cron_create_value(
     .map_err(|error| CapabilityError::InvalidParams {
         message: format!("Invalid schedule: {error}"),
     })?;
-    let payload_value = serde_json::from_value(job_param.get("payload").cloned().ok_or(
-        CapabilityError::InvalidParams {
-            message: "Missing required field: payload".into(),
-        },
-    )?)
+    let payload_value = serde_json::from_value::<crate::domains::cron::Payload>(
+        job_param
+            .get("payload")
+            .cloned()
+            .ok_or(CapabilityError::InvalidParams {
+                message: "Missing required field: payload".into(),
+            })?,
+    )
     .map_err(|error| CapabilityError::InvalidParams {
         message: format!("Invalid payload: {error}"),
-    })?;
+    })?
+    .with_pending_model_routing();
     let delivery = job_param
         .get("delivery")
         .map(|value| serde_json::from_value(value.clone()))
@@ -305,11 +309,11 @@ pub(crate) async fn cron_update_value(
         })?;
     }
     if let Some(value) = payload.get("payload") {
-        job.payload = serde_json::from_value(value.clone()).map_err(|error| {
-            CapabilityError::InvalidParams {
+        job.payload = serde_json::from_value::<crate::domains::cron::Payload>(value.clone())
+            .map_err(|error| CapabilityError::InvalidParams {
                 message: format!("Invalid payload: {error}"),
-            }
-        })?;
+            })?
+            .with_pending_model_routing();
     }
     if let Some(value) = payload.get("delivery") {
         job.delivery = serde_json::from_value(value.clone()).map_err(|error| {

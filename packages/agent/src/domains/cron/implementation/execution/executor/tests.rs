@@ -107,6 +107,8 @@ async fn agent_turn_no_executor_available() {
         payload: Payload::AgentTurn {
             prompt: "hello".into(),
             model: None,
+            model_preset: None,
+            model_routing: None,
             workspace_id: None,
             system_prompt: None,
         },
@@ -167,6 +169,7 @@ impl MockAgentExecutor {
                 session_id: "sess_mock".into(),
                 output: output.into(),
                 output_truncated: false,
+                model_routing: None,
             })),
         }
     }
@@ -184,6 +187,7 @@ impl AgentTurnExecutor for MockAgentExecutor {
         &self,
         _prompt: &str,
         _model: Option<&str>,
+        _model_preset: Option<crate::domains::model::presets::ModelPreset>,
         _workspace_id: Option<&str>,
         _system_prompt: Option<&str>,
         _capability_restrictions: Option<&CapabilityRestrictions>,
@@ -206,6 +210,8 @@ async fn agent_turn_success() {
         payload: Payload::AgentTurn {
             prompt: "say hello".into(),
             model: None,
+            model_preset: None,
+            model_routing: None,
             workspace_id: None,
             system_prompt: None,
         },
@@ -227,6 +233,8 @@ async fn agent_turn_failure_propagates() {
         payload: Payload::AgentTurn {
             prompt: "say hello".into(),
             model: None,
+            model_preset: None,
+            model_routing: None,
             workspace_id: None,
             system_prompt: None,
         },
@@ -421,6 +429,8 @@ async fn agent_turn_not_blocked_by_payload_capability() {
         payload: Payload::AgentTurn {
             prompt: "hello".into(),
             model: None,
+            model_preset: None,
+            model_routing: None,
             workspace_id: None,
             system_prompt: None,
         },

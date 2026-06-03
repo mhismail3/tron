@@ -626,6 +626,8 @@ async fn agent_job_bypasses_delivery_queue() {
     let agent_payload = Payload::AgentTurn {
         prompt: "diagnose".into(),
         model: None,
+        model_preset: None,
+        model_routing: None,
         workspace_id: None,
         system_prompt: None,
     };

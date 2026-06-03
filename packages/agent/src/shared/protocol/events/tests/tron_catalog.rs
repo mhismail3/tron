@@ -363,6 +363,8 @@ fn tron_event_all_event_types() {
             blocking_timeout_ms: Some(300_000),
             working_directory: None,
             spawn_type: None,
+            task_profile: None,
+            model_routing: None,
         },
         TronEvent::SubagentStatusUpdate {
             base: base.clone(),
@@ -381,6 +383,8 @@ fn tron_event_all_event_types() {
             token_usage: None,
             model: None,
             spawn_type: None,
+            task_profile: None,
+            model_routing: None,
         },
         TronEvent::SubagentFailed {
             base: base.clone(),
@@ -388,6 +392,8 @@ fn tron_event_all_event_types() {
             error: "e".into(),
             duration: 1000,
             spawn_type: None,
+            task_profile: None,
+            model_routing: None,
         },
         TronEvent::SubagentEvent {
             base: base.clone(),
@@ -404,6 +410,8 @@ fn tron_event_all_event_types() {
             total_turns: 2,
             duration: 3000,
             token_usage: None,
+            task_profile: None,
+            model_routing: None,
             error: None,
             completed_at: "2024-01-01T00:00:00Z".into(),
             notify: true,

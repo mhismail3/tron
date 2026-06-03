@@ -9,6 +9,9 @@
 use std::sync::Arc;
 
 use crate::domains::cron::errors::CronError;
+use crate::domains::model::presets::{
+    ModelPreset, ModelRoutingPolicy, observe_local_model_availability, resolve_model_route,
+};
 use async_trait::async_trait;
 // ── Agent Turn Execution ──────────────────────────────────────────────
 
@@ -100,6 +103,7 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
         &self,
         prompt: &str,
         model: Option<&str>,
+        model_preset: Option<ModelPreset>,
         workspace_id: Option<&str>,
         system_prompt: Option<&str>,
         capability_restrictions: Option<&crate::domains::cron::CapabilityRestrictions>,
@@ -107,12 +111,26 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
     ) -> Result<crate::domains::cron::AgentTurnResult, CronError> {
         // Resolve model and profile from the current compiled profile runtime.
         let current = self.profile_runtime.current();
-        let model = model.unwrap_or(&current.settings.server.default_model);
+        let mut routing_policy = ModelRoutingPolicy::from_settings(&current.settings)
+            .with_profile_name(current.profile_name());
+        if matches!(model_preset, Some(ModelPreset::LocalWhenPossible)) {
+            routing_policy = routing_policy.with_local(observe_local_model_availability().await);
+        }
+        let model_route = resolve_model_route(
+            model,
+            model_preset,
+            &routing_policy,
+            &routing_policy.default_model,
+        );
+        let selected_model = model_route
+            .selected_model
+            .clone()
+            .unwrap_or_else(|| routing_policy.default_model.clone());
         let session_plan = self
             .profile_runtime
             .plan_session(crate::domains::agent::runner::SessionPlanRequest {
                 requested_profile: None,
-                model: model.to_owned(),
+                model: selected_model.clone(),
                 source: Some("automation".into()),
                 entrypoint: None,
             })
@@ -139,7 +157,11 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
         let provider = {
             let mut attempt = 0u32;
             loop {
-                match self.provider_factory.create_for_model(model).await {
+                match self
+                    .provider_factory
+                    .create_for_model(&selected_model)
+                    .await
+                {
                     Ok(p) => break p,
                     Err(e) if attempt < 3 && e.is_retryable() => {
                         attempt += 1;
@@ -161,7 +183,7 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
         let title = format!("Cron: {}", prompt.chars().take(80).collect::<String>());
         let session_id = self
             .session_manager
-            .create_session(model, &workspace_path, Some(&title), None)
+            .create_session(&selected_model, &workspace_path, Some(&title), None)
             .map_err(|e| CronError::Execution(format!("create session: {e}")))?;
 
         let _ = self
@@ -177,7 +199,7 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
 
         // 3. Build agent config
         let agent_config = crate::domains::agent::runner::AgentConfig {
-            model: model.to_owned(),
+            model: selected_model,
             system_prompt: system_prompt.map(String::from).or_else(|| {
                 session_plan
                     .prompt
@@ -302,6 +324,7 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
             session_id,
             output,
             output_truncated,
+            model_routing: Some(model_route),
         })
     }
 }
@@ -517,6 +540,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 tokio_util::sync::CancellationToken::new(),
             )
             .await;
@@ -560,6 +584,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 tokio_util::sync::CancellationToken::new(),
             )
             .await;
@@ -595,6 +620,7 @@ mod tests {
             .execute(
                 "test prompt",
                 Some("mock-ledger"),
+                None,
                 None,
                 None,
                 None,

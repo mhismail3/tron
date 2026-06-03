@@ -630,6 +630,7 @@ impl CronScheduler {
                         exit_code: None,
                         attempt: 0,
                         session_id: None,
+                        model_routing: None,
                         delivery_status: None,
                     };
                     if let Err(e) = store::complete_run(&self.pool, &run) {

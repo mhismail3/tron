@@ -26,6 +26,26 @@ final class SubagentStateTests: XCTestCase {
         sut.trackSpawn(invocationId: invocationId, subagentSessionId: sessionId, task: task, model: model, blocking: blocking)
     }
 
+    private func reviewProfile() -> SubagentTaskProfilePresentation {
+        SubagentTaskProfilePresentation(id: "review", label: "Review")
+    }
+
+    private func hostedFallbackRoute() -> SubagentModelRoutingPresentation {
+        SubagentModelRoutingPresentation(
+            preset: "localWhenPossible",
+            presetLabel: "Local when possible",
+            selectionStatus: "selected",
+            localOptIn: true,
+            selectedModel: "claude-sonnet-4-6",
+            selectedModelLabel: "Claude Sonnet 4.6",
+            modelClass: "hosted",
+            fallbackUsed: true,
+            fallbackLabel: "Hosted fallback",
+            fallbackReason: "Local model is unavailable for this flow.",
+            policyProfile: "normal"
+        )
+    }
+
     // MARK: - 1A: Mutation + selectedSubagent Sync
 
     func testTrackSpawn_createsNewSubagent() {
@@ -46,6 +66,23 @@ final class SubagentStateTests: XCTestCase {
 
         spawnDefault(invocationId: "tc-2", sessionId: "sub-2", blocking: false)
         XCTAssertEqual(sut.subagents["sub-2"]?.blocking, false)
+    }
+
+    func testTrackSpawnStoresTaskProfileAndModelRouting() {
+        sut.trackSpawn(
+            invocationId: "tc-route",
+            subagentSessionId: "sub-route",
+            task: "Review the implementation",
+            model: "claude-sonnet-4-6",
+            taskProfile: reviewProfile(),
+            modelRouting: hostedFallbackRoute()
+        )
+
+        let data = sut.subagents["sub-route"]
+        XCTAssertEqual(data?.taskProfile?.label, "Review")
+        XCTAssertEqual(data?.modelRouting?.presetLabel, "Local when possible")
+        XCTAssertEqual(data?.modelRouting?.selectedModelLabel, "Claude Sonnet 4.6")
+        XCTAssertEqual(data?.routePreview, "Review / Claude Sonnet 4.6")
     }
 
     func testUpdateStatus_updatesSubagentData() {
@@ -108,6 +145,26 @@ final class SubagentStateTests: XCTestCase {
         spawnDefault(model: "old-model")
         sut.complete(subagentSessionId: "sub-1", resultSummary: "OK", fullOutput: nil, totalTurns: 1, duration: 100, tokenUsage: nil, model: "new-model")
         XCTAssertEqual(sut.subagents["sub-1"]?.model, "new-model")
+    }
+
+    func testCompleteUpdatesTaskProfileAndModelRouting() {
+        spawnDefault(model: "old-model")
+        sut.complete(
+            subagentSessionId: "sub-1",
+            resultSummary: "Reviewed successfully",
+            fullOutput: nil,
+            totalTurns: 1,
+            duration: 100,
+            tokenUsage: nil,
+            model: "claude-sonnet-4-6",
+            taskProfile: reviewProfile(),
+            modelRouting: hostedFallbackRoute()
+        )
+
+        let data = sut.subagents["sub-1"]
+        XCTAssertEqual(data?.taskProfile?.label, "Review")
+        XCTAssertEqual(data?.modelRouting?.fallbackLabel, "Hosted fallback")
+        XCTAssertEqual(data?.resultPreview, "Reviewed successfully")
     }
 
     func testComplete_preservesExistingModel_whenNotProvided() {

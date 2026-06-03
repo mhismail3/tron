@@ -72,6 +72,8 @@ extension ChatViewModel {
                 subagentSessionId: sessionId,
                 task: spawn.task,
                 model: completion?.model ?? spawn.model,
+                taskProfile: completion?.taskProfile ?? spawn.taskProfile,
+                modelRouting: completion?.modelRouting ?? spawn.modelRouting,
                 status: status,
                 currentTurn: completion?.totalTurns ?? 0,
                 resultSummary: completion?.resultSummary,

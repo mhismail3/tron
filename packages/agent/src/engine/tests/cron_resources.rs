@@ -35,6 +35,23 @@ fn shell_job(name: &str) -> Value {
     })
 }
 
+fn local_when_possible_agent_job(name: &str) -> Value {
+    json!({
+        "name": name,
+        "enabled": true,
+        "schedule": {"type": "every", "intervalSecs": 300},
+        "payload": {
+            "type": "agentTurn",
+            "prompt": "Summarize the local project state.",
+            "modelPreset": "localWhenPossible",
+            "workspaceId": "workspace-cron"
+        },
+        "delivery": [{"type": "silent"}],
+        "tags": ["resource-truth", "model-preset"],
+        "workspaceId": "workspace-cron"
+    })
+}
+
 fn cache_only_job() -> crate::domains::cron::CronJob {
     let now = Utc::now();
     crate::domains::cron::CronJob {
@@ -170,6 +187,47 @@ async fn cron_create_update_delete_are_decision_backed() {
 }
 
 #[tokio::test]
+async fn cron_agent_turn_model_preset_is_decision_backed_and_product_presented() {
+    let ctx = crate::shared::server::test_support::make_test_context_with_cron_scheduler();
+    let handle = ctx.engine_host.clone();
+
+    let created = handle
+        .invoke(host_invocation(
+            "cron::create",
+            json!({"job": local_when_possible_agent_job("Preset-backed cron")}),
+            cron_write_context("cron-model-preset-create"),
+        ))
+        .await;
+    assert_eq!(created.error, None);
+    let created_value = created.value.as_ref().unwrap();
+    let job_id = created_value["job"]["id"].as_str().unwrap();
+    let resource_id = crate::domains::cron::truth::schedule_decision_id(job_id);
+
+    let inspection = inspect_resource(&handle, &resource_id).await;
+    let payload = current_payload(&inspection);
+    assert_eq!(
+        payload["job"]["payload"]["modelPreset"],
+        "localWhenPossible"
+    );
+    assert_eq!(
+        payload["job"]["payload"]["modelRouting"]["presetLabel"],
+        "Local when possible"
+    );
+    assert_eq!(
+        payload["job"]["payload"]["modelRouting"]["selectionStatus"],
+        "pending"
+    );
+    assert_eq!(
+        payload["job"]["payload"]["modelRouting"]["localOptIn"],
+        true
+    );
+    assert!(
+        payload["job"]["payload"]["modelRouting"]["selectedModel"].is_null(),
+        "schedule truth should expose the selected model only after execution"
+    );
+}
+
+#[tokio::test]
 async fn cron_get_runs_reads_evidence_truth() {
     let ctx = crate::shared::server::test_support::make_test_context_with_cron_scheduler();
     let handle = ctx.engine_host.clone();
@@ -198,6 +256,7 @@ async fn cron_get_runs_reads_evidence_truth() {
         exit_code: Some(0),
         attempt: 0,
         session_id: None,
+        model_routing: None,
         delivery_status: None,
     };
     crate::domains::cron::truth::attach_run_evidence(&handle, &job, &run)

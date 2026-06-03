@@ -726,6 +726,8 @@ mod tests {
                 duration_ms: 5000,
                 status: "completed".into(),
                 turns_executed: 3,
+                task_profile: None,
+                model_routing: None,
             },
         );
         let jm = JobManager::new(pm, sm);
@@ -758,6 +760,8 @@ mod tests {
                 duration_ms: 3000,
                 status: "completed".into(),
                 turns_executed: 2,
+                task_profile: None,
+                model_routing: None,
             },
         );
         let jm = JobManager::new(pm, sm);

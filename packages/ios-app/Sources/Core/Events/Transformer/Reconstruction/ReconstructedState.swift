@@ -234,6 +234,8 @@ extension ReconstructedState {
         let invocationId: String?
         let blocking: Bool
         let spawnType: String?
+        let taskProfile: SubagentTaskProfilePresentation?
+        let modelRouting: SubagentModelRoutingPresentation?
     }
 
     /// Information extracted from subagent.completed events
@@ -245,6 +247,8 @@ extension ReconstructedState {
         let tokenUsage: TokenUsage?
         let fullOutput: String?
         let model: String?
+        let taskProfile: SubagentTaskProfilePresentation?
+        let modelRouting: SubagentModelRoutingPresentation?
     }
 
     /// Information extracted from subagent.failed events

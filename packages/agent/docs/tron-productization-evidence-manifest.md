@@ -2,7 +2,7 @@
 
 Created: **2026-06-03**
 Scorecard: [`tron-productization-scorecard.md`](tron-productization-scorecard.md)
-Current score: **58/100**
+Current score: **68/100**
 
 This manifest records the evidence used to award productization scorecard
 points. It is append-only within each coherent checkpoint: update the relevant
@@ -32,7 +32,7 @@ row, note command return codes, and keep open loops explicit.
 | TPROD-E | passed_after_fix | Local pack lifecycle product flow is server-owned, product-labeled, and covered by focused engine/iOS tests. Details below. |
 | TPROD-F | passed_after_fix | Server-owned plain trust presentation is evidence-backed and rendered by iOS without client-owned trust mapping. Details below. |
 | TPROD-G | passed_after_fix | Generated UI authoring product matrix is server-authored through fixed catalog components and covered by Rust/iOS source-guard evidence. Details below. |
-| TPROD-H | pending | Model preset, automation, and subagent routing product proof not yet complete. |
+| TPROD-H | passed_after_fix | Model presets, automation routing truth, subagent task/model routing, generated lineage UI, and iOS chip data are server-owned and covered by focused Rust/iOS evidence. Details below. |
 | TPROD-I | pending | Flagship Tron-maintains-Tron loop not yet run. |
 | TPROD-J | pending | Three polished local example packs not yet shipped. |
 | TPROD-K | pending | Product user/operator/release-note docs not yet complete. |
@@ -494,3 +494,100 @@ row, note command return codes, and keep open loops explicit.
 - Closed for TPROD-G. TPROD-H must add model preset, automation, and subagent
   routing proof with server-owned policy, selected-model disclosure, hosted
   fallback disclosure, subagent chips, and parent/child lineage.
+
+## TPROD-H Evidence
+
+### Files
+
+- [`packages/agent/src/domains/model/presets.rs`](../src/domains/model/presets.rs)
+- [`packages/agent/src/domains/model/mod.rs`](../src/domains/model/mod.rs)
+- [`packages/agent/src/domains/cron/implementation/domain/types.rs`](../src/domains/cron/implementation/domain/types.rs)
+- [`packages/agent/src/domains/cron/implementation/domain/truth.rs`](../src/domains/cron/implementation/domain/truth.rs)
+- [`packages/agent/src/domains/cron/implementation/execution/executor.rs`](../src/domains/cron/implementation/execution/executor.rs)
+- [`packages/agent/src/domains/cron/implementation/impls.rs`](../src/domains/cron/implementation/impls.rs)
+- [`packages/agent/src/domains/cron/operations/jobs.rs`](../src/domains/cron/operations/jobs.rs)
+- [`packages/agent/src/domains/agent/contract.rs`](../src/domains/agent/contract.rs)
+- [`packages/agent/src/domains/agent/operations/submissions.rs`](../src/domains/agent/operations/submissions.rs)
+- [`packages/agent/src/domains/agent/runner/orchestrator/subagent_manager.rs`](../src/domains/agent/runner/orchestrator/subagent_manager.rs)
+- [`packages/agent/src/domains/agent/runner/orchestrator/subagent_manager/execution.rs`](../src/domains/agent/runner/orchestrator/subagent_manager/execution.rs)
+- [`packages/agent/src/domains/agent/runner/orchestrator/subagent_manager/forwarding.rs`](../src/domains/agent/runner/orchestrator/subagent_manager/forwarding.rs)
+- [`packages/agent/src/domains/agent/runner/orchestrator/subagent_manager/tracking.rs`](../src/domains/agent/runner/orchestrator/subagent_manager/tracking.rs)
+- [`packages/agent/src/domains/capability_support/implementations/traits.rs`](../src/domains/capability_support/implementations/traits.rs)
+- [`packages/agent/src/shared/protocol/events/tron/catalog.rs`](../src/shared/protocol/events/tron/catalog.rs)
+- [`packages/agent/src/transport/runtime/streams/session/agent.rs`](../src/transport/runtime/streams/session/agent.rs)
+- [`packages/agent/src/engine/primitives/ui/authoring/subagent.rs`](../src/engine/primitives/ui/authoring/subagent.rs)
+- [`packages/agent/src/engine/tests/cron_resources.rs`](../src/engine/tests/cron_resources.rs)
+- [`packages/agent/src/engine/tests/subagent_lineage.rs`](../src/engine/tests/subagent_lineage.rs)
+- [`packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests.rs`](../src/domains/agent/runner/orchestrator/subagent_manager_tests.rs)
+- [`packages/agent/src/domains/agent/runner/orchestrator/subagent_manager_tests/routing_presentation.rs`](../src/domains/agent/runner/orchestrator/subagent_manager_tests/routing_presentation.rs)
+- [`packages/ios-app/Sources/Models/Messages/SubagentTypes.swift`](../../ios-app/Sources/Models/Messages/SubagentTypes.swift)
+- [`packages/ios-app/Sources/Core/Events/Plugins/Subagent/SubagentSpawnedPlugin.swift`](../../ios-app/Sources/Core/Events/Plugins/Subagent/SubagentSpawnedPlugin.swift)
+- [`packages/ios-app/Sources/Core/Events/Plugins/Subagent/SubagentCompletedPlugin.swift`](../../ios-app/Sources/Core/Events/Plugins/Subagent/SubagentCompletedPlugin.swift)
+- [`packages/ios-app/Sources/Core/Events/Plugins/Subagent/SubagentFailedPlugin.swift`](../../ios-app/Sources/Core/Events/Plugins/Subagent/SubagentFailedPlugin.swift)
+- [`packages/ios-app/Sources/ViewModels/State/SubagentState.swift`](../../ios-app/Sources/ViewModels/State/SubagentState.swift)
+- [`packages/ios-app/Sources/ViewModels/Chat/ChatViewModel+SubagentEvents.swift`](../../ios-app/Sources/ViewModels/Chat/ChatViewModel+SubagentEvents.swift)
+- [`packages/ios-app/Sources/ViewModels/Chat/ChatViewModel+Pagination.swift`](../../ios-app/Sources/ViewModels/Chat/ChatViewModel+Pagination.swift)
+- [`packages/ios-app/Sources/Models/UnifiedEventTransformer.swift`](../../ios-app/Sources/Models/UnifiedEventTransformer.swift)
+- [`packages/ios-app/Sources/Core/Events/Transformer/Reconstruction/ReconstructedState.swift`](../../ios-app/Sources/Core/Events/Transformer/Reconstruction/ReconstructedState.swift)
+- [`packages/ios-app/Sources/Views/Subagents/SubagentChip.swift`](../../ios-app/Sources/Views/Subagents/SubagentChip.swift)
+- [`packages/ios-app/Tests/ViewModels/SubagentStateTests.swift`](../../ios-app/Tests/ViewModels/SubagentStateTests.swift)
+- [`README.md`](../../../README.md)
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+- [`packages/agent/docs/tron-productization-scorecard.md`](tron-productization-scorecard.md)
+- [`packages/agent/docs/codebase-cleanup-scorecard.md`](codebase-cleanup-scorecard.md)
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml cron_agent_turn_model_preset_is_decision_backed_and_product_presented -- --nocapture` | 101 then 0 | Red/green proof: first failed because cron agent-turn payloads had no `modelPreset`/pending `modelRouting`; after implementation it proved schedule-time `Local when possible` presentation is persisted as pending route truth. |
+| `cargo test --manifest-path packages/agent/Cargo.toml generated_subagent_lineage_surface_uses_resource_truth_and_stored_actions -- --nocapture` | 101 then 0 | Red/green proof: first failed because generated subagent lineage UI ignored `taskProfile`/`modelRouting`; after implementation it proved Review, Local when possible, selected hosted model, hosted fallback label, and fallback reason render from resource truth with stored actions. |
+| `cargo test --manifest-path packages/agent/Cargo.toml spawn_persists_task_profile_and_model_routing_to_events_and_resource -- --nocapture` | 0 | Proved live subagent spawn resolves model route from policy, returns route/profile on the handle, persists them in parent spawn/completion events, and writes them to the final `agent_result` resource. |
+| `cargo test --manifest-path packages/agent/Cargo.toml subagent_manager::tests --lib -- --nocapture` | 0 | Proved the full subagent manager namespace after extracting child event forwarding and moving the route/profile persistence case into a focused child test module; 64 tests passed. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all` | 0 | Formatted Rust changes after model preset, cron, and subagent routing implementation. |
+| `cd packages/ios-app && xcodegen generate` | 0 | Regenerated `TronMobile.xcodeproj` after iOS route/profile model changes. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SubagentStateTests` | 65 then 0 | First failed because the scheme name was tried as `TronMobile`, then Swift plugin result initializers needed explicit route/profile fields; final run passed 53 selected tests and covered route/profile state plus chip preview data. |
+| `cargo test --manifest-path packages/agent/Cargo.toml cron_agent_turn_model_preset_is_decision_backed_and_product_presented -- --nocapture` | 0 | Final focused cron routing rerun after formatting. |
+| `cargo test --manifest-path packages/agent/Cargo.toml generated_subagent_lineage_surface_uses_resource_truth_and_stored_actions -- --nocapture` | 0 | Final focused generated UI subagent lineage rerun after formatting. |
+| `cargo test --manifest-path packages/agent/Cargo.toml spawn_persists_task_profile_and_model_routing_to_events_and_resource -- --nocapture` | 0 | Final focused live subagent route/resource rerun after formatting. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 101 then 0 | Closeout guard first caught production/test/catalog/static-gate large-file audit drift; final run passed after splitting subagent child forwarding/test routing presentation and syncing exact current LOC rows without widening existing budgets. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants codebase_cleanup_scorecard_stays_formalized -- --nocapture` | 0 | Confirmed the cleanup scorecard remained formalized after the large-file audit update. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test threat_model_invariants productization_scorecard_stays_formalized -- --nocapture` | 0 | Confirmed the productization scorecard/evidence manifest state is formalized at 68/100 with TPROD-H passed_after_fix and TPROD-I pending. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | 0 | Broad Rust compile check for the agent package. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Final Rust formatting check. |
+| `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SubagentStateTests` | 0 | Final focused iOS rerun after Rust cleanup/docs updates; 53 selected tests passed. |
+
+### Findings
+
+- The model domain now owns the product preset vocabulary and
+  `ModelRoutingPresentation`. `Local when possible` records explicit local
+  opt-in, selected model, local/hosted class, hosted fallback label, fallback
+  reason, and profile policy name. Pure route tests cover both local available
+  and hosted fallback cases.
+- Cron agent-turn payloads can carry `modelPreset`; schedule creation/update
+  stamps pending route presentation, while execution resolves the concrete
+  model at the boundary and uses that same model for profile planning,
+  provider creation, session creation, agent config, run output, and bounded
+  run truth.
+- `agent::spawn_subagent` accepts `modelPreset` and validated `taskProfile`.
+  Capability subagents no longer default through the retired hard-coded
+  `SUBAGENT_MODEL`; the manager resolves against active profile settings and
+  persists route/profile in parent lifecycle events, live stream payloads,
+  handle results, wait results, and resource-native `agent_result` metadata.
+- Child event forwarding now lives outside the subagent execution spine, and
+  the route/profile persistence scenario lives in a focused child test module.
+  The cleanup scorecard exact LOC audit was updated without widening existing
+  budgets.
+- Generated subagent lineage surfaces render task profile, preset, selected
+  model, hosted fallback label, and fallback reason from resource or invocation
+  truth. The layout still submits only stored action coordinates.
+- iOS remains a thin client for routing: it decodes server `taskProfile` and
+  `modelRouting`, stores them in `SubagentInvocationData`, reconstructs them
+  from persisted events, and renders compact chip previews for task/model/result
+  lineage without owning selection policy.
+
+### Open Loops
+
+- Closed for TPROD-H. TPROD-I must now run the flagship Tron-maintains-Tron
+  local work loop with generated UI, model/subagent routing evidence, docs, and
+  review-ready output, stopping before push, merge, release, or deploy.

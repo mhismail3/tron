@@ -10,6 +10,9 @@ use crate::shared::messages::TokenUsage;
 use async_trait::async_trait;
 use futures::stream;
 
+#[path = "subagent_manager_tests/routing_presentation.rs"]
+mod routing_presentation;
+
 struct MockProvider;
 #[async_trait]
 impl Provider for MockProvider {
@@ -154,6 +157,8 @@ fn make_config(task: &str) -> SubagentConfig {
         mode: SubagentMode::InProcess,
         blocking_timeout_ms: Some(300_000),
         model: None,
+        model_preset: None,
+        task_profile: None,
         parent_session_id: None,
         system_prompt: None,
         working_directory: "/tmp".into(),

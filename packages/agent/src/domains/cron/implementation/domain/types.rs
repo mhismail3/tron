@@ -9,6 +9,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::domains::model::presets::{ModelPreset, ModelRoutingPresentation};
+
 // ── Defaults for serde ──────────────────────────────────────────────
 
 fn default_true() -> bool {
@@ -77,6 +79,13 @@ pub enum Payload {
         /// Override model (uses default if None).
         #[serde(skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        /// Product preset for per-flow routing.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model_preset: Option<ModelPreset>,
+        /// Server-owned routing presentation. Schedules store a pending
+        /// presentation; run evidence stores the selected route.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model_routing: Option<ModelRoutingPresentation>,
         /// Workspace scope for the agent turn.
         #[serde(skip_serializing_if = "Option::is_none")]
         workspace_id: Option<String>,
@@ -136,6 +145,21 @@ impl Payload {
             Self::Webhook { .. } => "webhook",
             Self::SystemEvent { .. } => "systemEvent",
         }
+    }
+
+    /// Ensure product preset schedules carry a pending routing presentation.
+    #[must_use]
+    pub fn with_pending_model_routing(mut self) -> Self {
+        if let Self::AgentTurn {
+            model_preset: Some(preset),
+            model_routing,
+            ..
+        } = &mut self
+            && model_routing.is_none()
+        {
+            *model_routing = Some(ModelRoutingPresentation::pending(*preset));
+        }
+        self
     }
 }
 
@@ -435,6 +459,9 @@ pub struct CronRun {
     /// Associated session ID (agent turns only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Selected model route for agent turns.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_routing: Option<ModelRoutingPresentation>,
     /// Delivery outcome.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub delivery_status: Option<DeliveryOutcome>,
@@ -470,6 +497,8 @@ pub struct ExecutionOutput {
     pub timed_out: bool,
     /// Session ID (agent turns only).
     pub session_id: Option<String>,
+    /// Selected model route for agent turns.
+    pub model_routing: Option<ModelRoutingPresentation>,
 }
 
 #[cfg(test)]
@@ -514,6 +543,8 @@ mod tests {
         let p = Payload::AgentTurn {
             prompt: "Summarize work".into(),
             model: Some("claude-opus-4-6".into()),
+            model_preset: None,
+            model_routing: None,
             workspace_id: None,
             system_prompt: None,
         };

@@ -2,6 +2,8 @@
 //!
 //! Spawns child agents in-process, tracks their state, and forwards
 //! events from child sessions to the parent session's broadcast.
+//! `execution` owns child lifecycle and result completion, `forwarding` owns
+//! child-to-parent stream projection, and `tracking` owns live job state.
 //!
 //! INVARIANT: when a worktree coordinator is configured, child agents that
 //! fail to acquire isolation complete as failed before provider/model
@@ -14,7 +16,12 @@ use crate::domains::agent::runner::guardrails::GuardrailEngine;
 use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
 use crate::domains::capability_support::implementations::traits::{
-    SubagentConfig, SubagentHandle, SubagentMode, SubagentResult, SubagentSpawner, WaitMode,
+    SubagentConfig, SubagentHandle, SubagentMode, SubagentResult, SubagentSpawner,
+    SubagentTaskProfile, WaitMode,
+};
+use crate::domains::model::presets::{
+    ModelPreset, ModelRoutingPolicy, ModelRoutingPresentation, observe_local_model_availability,
+    resolve_model_route,
 };
 use crate::domains::model::providers::provider::ProviderFactory;
 use crate::domains::session::event_store::{EventStore, EventType};
@@ -31,6 +38,7 @@ use crate::domains::agent::runner::orchestrator::session_manager::SessionManager
 use crate::domains::agent::runner::types::ReasoningLevel;
 
 mod execution;
+mod forwarding;
 mod tracking;
 
 // =============================================================================
@@ -139,6 +147,8 @@ pub struct SubsessionOutput {
 struct TrackedSubagent {
     parent_session_id: String,
     task: String,
+    task_profile: SubagentTaskProfile,
+    model_routing: ModelRoutingPresentation,
     spawn_type: SpawnType,
     started_at: Instant,
     done: Notify,
@@ -338,6 +348,30 @@ impl SubagentManager {
         }
     }
 
+    async fn resolve_subagent_model_route(
+        &self,
+        exact_model: Option<&str>,
+        preset: Option<ModelPreset>,
+    ) -> (String, ModelRoutingPresentation) {
+        let current = self.profile_runtime.current();
+        let mut routing_policy = ModelRoutingPolicy::from_settings(&current.settings)
+            .with_profile_name(current.profile_name());
+        if matches!(preset, Some(ModelPreset::LocalWhenPossible)) {
+            routing_policy = routing_policy.with_local(observe_local_model_availability().await);
+        }
+        let route = resolve_model_route(
+            exact_model,
+            preset,
+            &routing_policy,
+            &routing_policy.subagent_model,
+        );
+        let model = route
+            .selected_model
+            .clone()
+            .unwrap_or_else(|| routing_policy.subagent_model.clone());
+        (model, route)
+    }
+
     /// Spawn a system subsession for programmatic tasks (hooks, compaction, memory).
     ///
     /// Unlike `spawn()` (capability-agent path), the caller provides the system prompt
@@ -353,10 +387,10 @@ impl SubagentManager {
         &self,
         config: SubsessionConfig,
     ) -> Result<SubsessionOutput, CapabilityExecutionError> {
-        let model = config
-            .model
-            .as_deref()
-            .unwrap_or(crate::domains::model::providers::model_ids::SUBAGENT_MODEL);
+        let (model, model_routing) = self
+            .resolve_subagent_model_route(config.model.as_deref(), None)
+            .await;
+        let task_profile = SubagentTaskProfile::general();
         let task = config.task.clone();
 
         // 1. Create child session
@@ -364,7 +398,7 @@ impl SubagentManager {
         let child_session_id = self
             .session_manager
             .create_session_for_subagent(
-                model,
+                &model,
                 &config.working_directory,
                 Some(&title),
                 &config.parent_session_id,
@@ -385,6 +419,8 @@ impl SubagentManager {
             child_session_id.clone(),
             config.parent_session_id.clone(),
             task.clone(),
+            task_profile.clone(),
+            model_routing.clone(),
             spawn_type,
         );
 
@@ -400,6 +436,8 @@ impl SubagentManager {
             blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
             spawn_type: Some(spawn_type.as_str().to_owned()),
+            task_profile: Some(task_profile.to_value()),
+            model_routing: Some(model_routing.to_value()),
         });
 
         let mut capability_execution_policy = process_plan.capability_execution_policy.clone();
@@ -425,7 +463,9 @@ impl SubagentManager {
             child_session_id: child_session_id.clone(),
             parent_session_id: config.parent_session_id.clone(),
             task,
+            task_profile,
             model: model.to_owned(),
+            model_routing,
             system_prompt: config.system_prompt.clone(),
             working_directory: config.working_directory.clone(),
             max_turns: config.max_turns,
@@ -504,10 +544,13 @@ impl SubagentSpawner for SubagentManager {
             &all_model_capability_ids,
         );
 
-        let model = config
-            .model
-            .as_deref()
-            .unwrap_or(crate::domains::model::providers::model_ids::SUBAGENT_MODEL);
+        let task_profile = config
+            .task_profile
+            .clone()
+            .unwrap_or_else(SubagentTaskProfile::general);
+        let (model, model_routing) = self
+            .resolve_subagent_model_route(config.model.as_deref(), config.model_preset)
+            .await;
         let task = config.task.clone();
         let parent_sid = config.parent_session_id.clone().unwrap_or_default();
 
@@ -517,7 +560,7 @@ impl SubagentSpawner for SubagentManager {
         let child_session_id = self
             .session_manager
             .create_session_for_subagent(
-                model,
+                &model,
                 workspace,
                 Some(&title),
                 if parent_sid.is_empty() {
@@ -536,6 +579,8 @@ impl SubagentSpawner for SubagentManager {
             child_session_id.clone(),
             parent_sid.clone(),
             task.clone(),
+            task_profile.clone(),
+            model_routing.clone(),
             SpawnType::CapabilityAgent,
         );
 
@@ -555,6 +600,8 @@ impl SubagentSpawner for SubagentManager {
             blocking_timeout_ms: config.blocking_timeout_ms,
             working_directory: Some(config.working_directory.clone()),
             spawn_type: Some(SpawnType::CapabilityAgent.as_str().to_owned()),
+            task_profile: Some(task_profile.to_value()),
+            model_routing: Some(model_routing.to_value()),
         };
 
         if parent_sid.is_empty() {
@@ -567,15 +614,17 @@ impl SubagentSpawner for SubagentManager {
                         session_id: &parent_sid,
                         event_type: EventType::SubagentSpawned,
                         payload: json!({
-                            "subagentSessionId": child_session_id,
-                            "task": task,
-                            "model": model,
+                            "subagentSessionId": child_session_id.clone(),
+                            "task": task.clone(),
+                            "model": model.clone(),
                             "maxTurns": config.max_turns,
                             "spawnDepth": config.current_depth,
-                            "invocationId": config.invocation_id,
+                            "invocationId": config.invocation_id.clone(),
                             "blockingTimeoutMs": config.blocking_timeout_ms,
-                            "workingDirectory": config.working_directory,
+                            "workingDirectory": config.working_directory.clone(),
                             "spawnType": SpawnType::CapabilityAgent.as_str(),
+                            "taskProfile": task_profile.to_value(),
+                            "modelRouting": model_routing.to_value(),
                         }),
                         parent_id: None,
                         sequence: None,
@@ -614,6 +663,8 @@ impl SubagentSpawner for SubagentManager {
             parent_session_id: parent_sid.clone(),
             task: task.clone(),
             model: model.to_owned(),
+            task_profile: task_profile.clone(),
+            model_routing: model_routing.clone(),
             system_prompt,
             working_directory: config.working_directory.clone(),
             max_turns: config.max_turns,
@@ -645,6 +696,8 @@ impl SubagentSpawner for SubagentManager {
                     token_usage: result.token_usage,
                     turns_executed: Some(result.turns_executed),
                     success: Some(success),
+                    task_profile: Some(task_profile),
+                    model_routing: Some(model_routing),
                 })
             } else {
                 Ok(SubagentHandle {
@@ -653,6 +706,8 @@ impl SubagentSpawner for SubagentManager {
                     token_usage: None,
                     turns_executed: None,
                     success: None,
+                    task_profile: Some(task_profile),
+                    model_routing: Some(model_routing),
                 })
             }
         } else {
@@ -662,6 +717,8 @@ impl SubagentSpawner for SubagentManager {
                 token_usage: None,
                 turns_executed: None,
                 success: None,
+                task_profile: Some(task_profile),
+                model_routing: Some(model_routing),
             })
         }
     }

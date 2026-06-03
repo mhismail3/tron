@@ -93,6 +93,28 @@ struct SubagentChip: View {
                     .clipShape(Capsule())
                     .accessibilityLabel(kindBadgeAccessibilityLabel)
 
+                Text(data.taskPreview)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                if let routePreview = data.routePreview {
+                    Text(routePreview)
+                        .font(TronTypography.codeSM)
+                        .foregroundStyle(data.status.color.opacity(0.75))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
+                if let resultPreview = data.resultPreview {
+                    Text(resultPreview)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
                 if let targetIdBadge {
                     Text("#\(targetIdBadge)")
                         .font(TronTypography.codeSM)

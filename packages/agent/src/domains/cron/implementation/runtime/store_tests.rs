@@ -131,6 +131,7 @@ fn insert_and_complete_run() {
         exit_code: Some(0),
         attempt: 0,
         session_id: None,
+        model_routing: None,
         delivery_status: None,
     };
     complete_run(&pool, &run).unwrap();
@@ -182,6 +183,7 @@ fn count_running_runs_test() {
         exit_code: None,
         attempt: 0,
         session_id: None,
+        model_routing: None,
         delivery_status: None,
     };
     complete_run(&pool, &run).unwrap();
@@ -340,6 +342,7 @@ fn complete_orphaned_runs_ignores_non_running() {
             exit_code: Some(0),
             attempt: 0,
             session_id: None,
+            model_routing: None,
             delivery_status: None,
         },
     )
@@ -362,6 +365,7 @@ fn complete_orphaned_runs_ignores_non_running() {
             exit_code: Some(1),
             attempt: 0,
             session_id: None,
+            model_routing: None,
             delivery_status: None,
         },
     )
@@ -722,6 +726,7 @@ fn complete_run_missing_run_returns_not_found() {
         exit_code: None,
         attempt: 0,
         session_id: None,
+        model_routing: None,
         delivery_status: None,
     };
     let result = complete_run(&pool, &run);
@@ -796,6 +801,7 @@ fn upsert_after_update_no_longer_silent() {
         exit_code: Some(0),
         attempt: 0,
         session_id: None,
+        model_routing: None,
         delivery_status: None,
     };
     complete_run(&pool, &run).unwrap();

@@ -148,7 +148,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
                 "streamTopics": STREAM_TOPICS,
                 "answerAuthority": "system"
             }))
-            .presentation_hints(json!({"icon": "subagent", "chipTitle": "Subagent", "summaryFields": ["task", "model", "skills"]}))
+            .presentation_hints(json!({"icon": "subagent", "chipTitle": "Subagent", "summaryFields": ["task", "taskProfile", "modelPreset", "model", "skills"]}))
             .tags(vec!["subagent", "delegate", "parallel", "background agent", "spawn worker"])
             .examples(vec![json!({
                 "summary": "Spawn a reviewer subagent and wait separately.",
@@ -391,6 +391,8 @@ fn subagent_spawn_request_schema() -> serde_json::Value {
             "workspaceId": {"type": "string"},
             "task": {"type": "string"},
             "model": {"type": "string"},
+            "modelPreset": {"type": "string", "enum": ["localWhenPossible", "balanced", "deep"]},
+            "taskProfile": {"type": "string", "enum": ["general", "implementation", "review", "research", "qa", "planning"]},
             "systemPrompt": {"type": "string"},
             "workingDirectory": {"type": "string"},
             "maxTurns": {"type": "integer", "minimum": 1, "maximum": 20},

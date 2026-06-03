@@ -2,7 +2,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::domains::capability_support::implementations::errors::CapabilityExecutionError;
-use crate::domains::capability_support::implementations::traits::{SubagentResult, WaitMode};
+use crate::domains::capability_support::implementations::traits::{
+    SubagentResult, SubagentTaskProfile, WaitMode,
+};
+use crate::domains::model::presets::ModelRoutingPresentation;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -17,12 +20,16 @@ impl SubagentManager {
         child_session_id: String,
         parent_session_id: String,
         task: String,
+        task_profile: SubagentTaskProfile,
+        model_routing: ModelRoutingPresentation,
         spawn_type: SpawnType,
     ) -> (Arc<TrackedSubagent>, CancellationToken) {
         let cancel = CancellationToken::new();
         let tracker = Arc::new(TrackedSubagent {
             parent_session_id,
             task,
+            task_profile,
+            model_routing,
             spawn_type,
             started_at: Instant::now(),
             done: Notify::new(),
@@ -222,5 +229,7 @@ fn tracker_result_or_unknown(tracker: &TrackedSubagent, session_id: &str) -> Sub
             duration_ms: 0,
             status: "unknown".into(),
             turns_executed: 0,
+            task_profile: Some(tracker.task_profile.clone()),
+            model_routing: Some(tracker.model_routing.clone()),
         })
 }

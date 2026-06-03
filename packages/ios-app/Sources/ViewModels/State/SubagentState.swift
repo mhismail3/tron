@@ -83,12 +83,23 @@ final class SubagentState {
     // MARK: - Subagent Lifecycle
 
     /// Track a newly spawned subagent
-    func trackSpawn(invocationId: String, subagentSessionId: String, task: String, model: String?, blocking: Bool = false, spawnType: SubagentSpawnType = .capabilityAgent) {
+    func trackSpawn(
+        invocationId: String,
+        subagentSessionId: String,
+        task: String,
+        model: String?,
+        blocking: Bool = false,
+        spawnType: SubagentSpawnType = .capabilityAgent,
+        taskProfile: SubagentTaskProfilePresentation? = nil,
+        modelRouting: SubagentModelRoutingPresentation? = nil
+    ) {
         var data = SubagentInvocationData(
             invocationId: invocationId,
             subagentSessionId: subagentSessionId,
             task: task,
             model: model,
+            taskProfile: taskProfile,
+            modelRouting: modelRouting,
             status: .running,
             currentTurn: 0,
             resultSummary: nil,
@@ -118,7 +129,9 @@ final class SubagentState {
         totalTurns: Int,
         duration: Int,
         tokenUsage: TokenUsage?,
-        model: String? = nil
+        model: String? = nil,
+        taskProfile: SubagentTaskProfilePresentation? = nil,
+        modelRouting: SubagentModelRoutingPresentation? = nil
     ) {
         updateAndSync(subagentSessionId) { data in
             data.status = .completed
@@ -130,15 +143,33 @@ final class SubagentState {
             if let model = model {
                 data.model = model
             }
+            if let taskProfile {
+                data.taskProfile = taskProfile
+            }
+            if let modelRouting {
+                data.modelRouting = modelRouting
+            }
         }
     }
 
     /// Mark subagent as failed
-    func fail(subagentSessionId: String, error: String, duration: Int) {
+    func fail(
+        subagentSessionId: String,
+        error: String,
+        duration: Int,
+        taskProfile: SubagentTaskProfilePresentation? = nil,
+        modelRouting: SubagentModelRoutingPresentation? = nil
+    ) {
         updateAndSync(subagentSessionId) { data in
             data.status = .failed
             data.error = error
             data.duration = duration
+            if let taskProfile {
+                data.taskProfile = taskProfile
+            }
+            if let modelRouting {
+                data.modelRouting = modelRouting
+            }
         }
     }
 
