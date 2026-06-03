@@ -42,7 +42,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
             && readme.contains(
                 "packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md"
             )
-            && readme.contains("fresh execution scorecard portfolio"),
+            && readme.contains("active execution scorecard portfolio"),
         "README living-doc map must link the hyper modular planning and execution scorecards"
     );
 
@@ -99,7 +99,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
 
     for required in [
         "# Hyper Modular Agent Harness Execution Scorecard Portfolio",
-        "Current score: **97/100**",
+        "Current score: **98/100**",
         "Status: **running**",
         "## Source-Derived Requirements",
         "The agent and the human use the same operation to extend the same system.",
@@ -454,6 +454,16 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "capability_self_modifying_lifecycle_explains_session_worker_evidence",
         "Open loops after HMH-G1/HMH-G2/HMH-G3/HMH-G4:",
         "Continue with HMH-G5: audit canonical docs",
+        "| HMH-G5 | Docs and README are canonical | 10 | passed_after_fix |",
+        "HMH-G5 evidence, 2026-06-03:",
+        "README scorecard index now calls this an active execution scorecard portfolio",
+        "Engine docs audited",
+        "iOS docs audited",
+        "Scorecard docs audited",
+        "module docs audited",
+        "rg -n \"hyper-modular|worker::protocol_guide|capability::execute|module::register_package|ui::surface_for_target|HMH-\" README.md packages/agent/src packages/agent/docs packages/ios-app/docs",
+        "Open loops after HMH-G1/HMH-G2/HMH-G3/HMH-G4/HMH-G5:",
+        "Continue with HMH-G6: perform diff hygiene",
         "| HMH-G7 | Ledger and final status are honest |",
         "## Adversarial Audit Of This Portfolio",
         "Modular in docs, not in the agent turn.",
@@ -537,6 +547,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "Current score: **93.5/100**",
         "Current score: **94.50/100**",
         "Current score: **95/100**",
+        "Current score: **97/100**",
         "Current score: **99/100**",
         "Current score: **100/100**",
         "Status: **completed**",
@@ -544,6 +555,7 @@ fn hyper_modular_architecture_plan_stays_formalized() {
         "| HMH-G2 | Absence gates are current | 15 | pending |",
         "| HMH-G3 | Transcript/session audit | 15 | pending |",
         "| HMH-G4 | Live recursive loop rerun | 20 | pending |",
+        "| HMH-G5 | Docs and README are canonical | 10 | pending |",
         "| HMH-D1 | Package registration is resource-backed | 10 | pending |",
         "| HMH-D2 | Source trust is explicit and revocable | 15 | pending |",
         "| HMH-D3 | Activation composes worker spawn | 15 | pending |",

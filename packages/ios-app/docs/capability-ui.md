@@ -1,6 +1,6 @@
 # Capability UI And Engine Console
 
-> Last verified: 2026-05-27
+> Last verified: 2026-06-03 (HMH-G5 canonical-doc audit for `capability::execute`, generated `ui_surface` actions, module projections, and server-owned policy boundaries)
 
 The iOS capability UI is a thin client over server-owned capability records. It
 does not maintain a local tool catalog and does not choose capability bindings

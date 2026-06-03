@@ -115,7 +115,7 @@ Current living entry points:
   completed planning scorecard for the iii-informed hyper modular agent harness
   north star and its successor execution scorecard portfolio.
 - `packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md`:
-  fresh execution scorecard portfolio for proving the recursive agent/human
+  active execution scorecard portfolio for proving the recursive agent/human
   plug-and-play harness loop from the current baseline.
 - `packages/agent/docs/token-accounting-hardening-scorecard.md`: completed
   server-authoritative token accounting, pricing, provider-cache, and

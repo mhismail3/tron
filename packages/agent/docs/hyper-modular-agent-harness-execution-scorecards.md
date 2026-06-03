@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **97/100**
+Current score: **98/100**
 
 Status: **running**
 
@@ -1555,7 +1555,7 @@ is pending, indirectly verified, or stale.
 | HMH-G2 | Absence gates are current | 15 | passed_after_fix | Static scans reject client policy/targets, prompt-expanded tool catalogs, discovery bypasses, global dynamic visibility, alternate spawn, generic module action, and stale scorecard states. | Tighten tests before closeout. |
 | HMH-G3 | Transcript/session audit | 15 | passed | Session audit searches prior failures and current campaign transcripts for repeated architecture drift, stale claims, or unfinished rows. | Add successor rows if patterns remain. |
 | HMH-G4 | Live recursive loop rerun | 20 | passed | End-to-end HMH-B/HMH-E scenario reruns from clean temp state after fixes and passes without harness pollution. | Do not use earlier partial run as final proof. |
-| HMH-G5 | Docs and README are canonical | 10 | pending | README, engine docs, iOS docs, scorecards, and module docs agree on current commands, surfaces, status, and residual risk. | Remove aspirational or stale claims. |
+| HMH-G5 | Docs and README are canonical | 10 | passed_after_fix | README, engine docs, iOS docs, scorecards, and module docs agree on current commands, surfaces, status, and residual risk. | Remove aspirational or stale claims. |
 | HMH-G6 | Diff hygiene and dead-code scan | 10 | pending | Diff scan removes unrelated churn, AI-ish comments, redundant defensive checks, type escapes, stale compatibility code, and metadata noise. | Fix before ledger/final. |
 | HMH-G7 | Ledger and final status are honest | 10 | pending | Ledger entry records completed work and remaining successor scope; no scorecard says 100/100 while Next Test implies active work. | Keep goal active if implementation is not fully proven. |
 
@@ -1716,6 +1716,52 @@ Open loops after HMH-G1/HMH-G2/HMH-G3/HMH-G4:
   module docs, iOS docs, and this scorecard describe only the verified
   current substrate.
 
+HMH-G5 evidence, 2026-06-03:
+
+- Red proof:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test hyper_modular_architecture_plan_invariants -- --nocapture`
+  initially failed because the README living-doc map still called this a
+  `fresh execution scorecard portfolio` instead of an active execution
+  portfolio.
+- Audit command:
+  `rg -n "hyper-modular|worker::protocol_guide|capability::execute|module::register_package|ui::surface_for_target|HMH-" README.md packages/agent/src packages/agent/docs packages/ios-app/docs`.
+- README scorecard index now calls this an active execution scorecard portfolio
+  and still links both the planning scorecard and this execution portfolio.
+- Engine docs audited:
+  `packages/agent/src/engine/mod.rs` documents the live revisioned catalog,
+  one production execution shape, local external-worker runtime,
+  restart-unhealthy durable worker hydration, generated `ui_surface` resources,
+  queues, leases, compensation, traces, and resource refs.
+- Capability docs audited:
+  `packages/agent/src/domains/capability/mod.rs` documents the tiny
+  model-facing `execute` surface, discovery/freshness/approval/correction
+  ownership, target idempotency, trigger-id repair, resource lifecycle CAS
+  fields, and model-visible observations.
+- Worker and module docs audited:
+  `packages/agent/src/engine/primitives/worker.rs` owns the
+  `worker::protocol_guide` contract, while
+  `packages/agent/src/engine/primitives/module.rs` documents resource-backed
+  package/config/activation wrappers, source trust, activation composition
+  through `worker::spawn`, evidence/decision resources, leases, compensation,
+  and no action multiplexer.
+- iOS docs audited:
+  `packages/ios-app/docs/architecture.md` already describes the Engine Console
+  generated UI, module package/config/activation/trust/health/evidence/action
+  projections, offline mutation guards, and fixed-dashboard removals.
+  `packages/ios-app/docs/capability-ui.md` now has a 2026-06-03 verification
+  header for `capability::execute`, generated `ui_surface` actions, module
+  projections, and server-owned policy boundaries.
+- Scorecard docs audited:
+  the planning scorecard remains a completed planning artifact that points to
+  this portfolio as successor execution work; this portfolio stays `Status:
+  **running**` with HMH-G6 and HMH-G7 still pending, so docs do not claim final
+  completion.
+
+Open loops after HMH-G1/HMH-G2/HMH-G3/HMH-G4/HMH-G5:
+
+- HMH-G5 is closed. Continue with HMH-G6: perform diff hygiene, dead-code scan,
+  and final static checks before ledger/final honesty.
+
 ## Adversarial Audit Of This Portfolio
 
 Strong findings:
@@ -1796,10 +1842,12 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, HMH-G2, HMH-G3, and HMH-G4
-are closed. Continue with HMH-G5: audit canonical docs and remove any stale or
-aspirational claims.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E, HMH-F, HMH-G1, HMH-G2, HMH-G3, HMH-G4, and
+HMH-G5 are closed. Continue with HMH-G6: perform diff hygiene, dead-code scan,
+and final static checks.
 
 ```bash
-rg -n "hyper-modular|worker::protocol_guide|capability::execute|module::register_package|ui::surface_for_target|HMH-" README.md packages/agent/src packages/agent/docs packages/ios-app/docs
+git diff --stat
+git diff --check
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
 ```
