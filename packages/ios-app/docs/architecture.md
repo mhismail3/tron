@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-02 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Harness Changes projection, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-02 (post-scorecard recent-gap campaign activated, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Harness Changes projection over registry plus live catalog snapshots, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -14,7 +14,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - A staged input composer where pending skills and attachments share one wrapping chip row before send; staged skill chips expose separate detail and remove accessibility actions while sent message skill chips stay compact
 - On iPad, hardware Tab in the prompt composer and Agent protected-branch field resigns input focus instead of inserting hidden draft text or submitting a setting; broader control-to-control keyboard traversal remains a separate visual QA concern
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
-- A top-level Engine Console mode for live capability registry search, program runs, substrate inspection, module package/config/activation/trust/health/evidence/action refs, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle; its search suggestions are projected from live registry/control/audit/program/primer state rather than fixed capability descriptors, and its section/suggestion chips are semantic buttons with hover highlighting and combined accessibility labels
+- A top-level Engine Console mode for live capability registry and catalog snapshot search, program runs, substrate inspection, module package/config/activation/trust/health/evidence/action refs, generated `ui_surface` refs, server-authored surface inspection/refresh/action submission, and operator readiness, with plugin, worker, binding, policy, index, trace, primer, and redacted audit details behind an explicit Advanced toggle; its search suggestions are projected from live registry/catalog/control/audit/program/primer state rather than fixed capability descriptors, and its section/suggestion chips are semantic buttons with hover highlighting and combined accessibility labels
 - No fixed Automations or Voice Notes dashboards; reusable cron and voice-note protocol pieces remain capability modules until generated/control surfaces replace them
 
 The server remains the source of truth for engine storage, observability, retention, and payload capture. iOS exposes those controls in Settings and sends sparse `settings::update` requests, but it does not own database cleanup, compression, trace reconstruction, or storage-policy decisions.
@@ -36,7 +36,7 @@ Sources/
 │   ├── Events/             # Event types and registry
 │   ├── Features/           # Feature-specific models
 │   ├── Messages/           # Message models
-│   └── EngineProtocol/     # /engine frame, invocation, stream, control, and generated UI codables
+│   └── EngineProtocol/     # /engine frame, invocation, stream, catalog, control, and generated UI codables
 ├── Services/               # Network, state management
 │   ├── Network/            # engine protocol, WebSocket (with Bearer auth), deep links
 │   ├── Events/             # Event store, sync
@@ -153,12 +153,13 @@ final class SubagentState {
 | `Services/Network/EngineConnection.swift` | WebSocket transport state machine, heartbeat, reconnect, request/response routing |
 | `Services/Network/EngineConnectionTypes.swift` | Connection state, connection errors, bearer-token resolver, one-shot continuation box |
 | `Services/Network/EngineConnectionProtocolFrames.swift` | `/engine` wire frames and WebSocket URLSession delegate |
-| `Services/Network/Clients/CapabilityClient.swift` | Capability admin, control, and generated UI primitive client for Engine Console |
+| `Services/Network/Clients/CapabilityClient.swift` | Capability admin, catalog watch, control, and generated UI primitive client for Engine Console |
+| `Models/EngineProtocol/EngineProtocolTypes+Catalog.swift` | Catalog watch snapshot DTOs for live worker/function/trigger projections |
 | `Services/Storage/EngineConsoleCache.swift` | Read-only disconnected Engine Console summary cache, including redacted generated UI refs |
 | `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state |
-| `ViewModels/State/EngineConsoleHarnessChangeProjection.swift` | Read-only session-created capability evidence projection over registry, generated surfaces, audit, and program runs |
+| `ViewModels/State/EngineConsoleHarnessChangeProjection.swift` | Read-only session-created capability evidence projection over registry/catalog snapshots, generated surfaces, audit, and program runs |
 | `ViewModels/State/EngineConsoleModuleProjection.swift` | Typed read-only projection over server-authored module package/config/activation/trust/health/action rows and package/activation generated-surface targets |
 | `Views/EngineConsole/EngineConsoleView.swift` | Top-level capability operator console |
 | `Views/EngineConsole/EngineConsoleSection.swift` | Engine Console section identity |
@@ -243,8 +244,8 @@ dashboard remains visible behind them; iPhone keeps the standard sheet detents.
 
 `NavigationMode.engine` is the native operator surface for the live capability
 architecture. It calls `capability::status`, `capability::registry_snapshot`,
-`capability::audit_query`, binding functions, plugin functions, conformance, and
-policy functions through `CapabilityClient`; it never reads a hardcoded tool
+`catalog::watch_snapshot`, `capability::audit_query`, binding functions, plugin
+functions, conformance, and policy functions through `CapabilityClient`; it never reads a hardcoded tool
 descriptor catalog. The default console surface is intentionally small:
 Overview, Capabilities, and Program Runs. Advanced sections expose plugins,
 workers, bindings, policies, audit, traces, and primer internals only after the
@@ -268,11 +269,12 @@ section so a connected, inspectable substrate does not appear globally broken.
 Capability search has its own loading/error/empty/results state, so a failed
 search does not replace the overview or cached registry state. Capability
 search suggestions are projected from live status, registry documents,
-control-advertised actions, module package resources, generated UI refs,
-audit traces, program runs, and primer state instead of a hardcoded tool list.
+catalog functions, control-advertised actions, module package resources,
+generated UI refs, audit traces, program runs, and primer state instead of a
+hardcoded tool list.
 Harness Changes rows project session-created capability provenance, conformance,
 generated UI, promotion scope, cleanup, and trace evidence from the same
-server-owned registry, control, audit, and program-run DTOs.
+server-owned registry, catalog, control, audit, and program-run DTOs.
 Generated capability and module operator surfaces render server-authored native
 controls from the stored `ui_surface`; submit sends only surface/version/action
 coordinates, user input, and idempotency key through

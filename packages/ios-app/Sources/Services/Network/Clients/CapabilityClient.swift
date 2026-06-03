@@ -28,6 +28,17 @@ final class CapabilityClient: EngineDomainClient {
         )
     }
 
+    func catalogWatchSnapshot(
+        _ request: CatalogWatchSnapshotRequestDTO = CatalogWatchSnapshotRequestDTO(limit: 100)
+    ) async throws -> CatalogWatchSnapshotDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeRead(
+            "catalog::watch_snapshot",
+            request,
+            context: catalogContext
+        )
+    }
+
     func controlSnapshot(limit: Int = 100) async throws -> ControlSnapshotDTO {
         _ = try requireTransport().requireConnection()
         return try await invokeRead(
@@ -472,6 +483,13 @@ final class CapabilityClient: EngineDomainClient {
             "capability.admin.read",
             "capability.audit.read",
             "capability.policy.read"
+        ])
+    }
+
+    private var catalogContext: EngineInvocationContext {
+        EngineInvocationContext(authorityScopes: [
+            "catalog.read",
+            "capability.admin.read"
         ])
     }
 

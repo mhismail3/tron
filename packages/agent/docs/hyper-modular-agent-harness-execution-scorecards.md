@@ -4,7 +4,7 @@ Created: 2026-06-02
 
 Initial score: **0/100**
 
-Current score: **84.75/100**
+Current score: **86.25/100**
 
 Status: **running**
 
@@ -696,8 +696,9 @@ Open loops after HMH-C1/HMH-C2/HMH-C3/HMH-C4/HMH-C5/HMH-C6:
 - HMH-C is closed: compact lifecycle knowledge, bounded context, repair
   guidance, versioned resource-backed harness docs, provider-visible
   hosted/local model-run answers, and the tiny provider prompt surface are now
-  proven. HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, and HMH-E5 are also closed;
-  continue with HMH-E6 to capture device visual proof.
+  proven. HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, HMH-E5, and HMH-E6 are also
+  closed; continue with HMH-E7 to prove disconnected cache submissions fail
+  closed.
 
 ## HMH-D Scorecard: Plug-And-Play Module/Package Lifecycle
 
@@ -956,8 +957,8 @@ HMH-D8 evidence, 2026-06-02:
 
 Open loops after HMH-D1/HMH-D2/HMH-D3/HMH-D4/HMH-D5/HMH-D6/HMH-D7/HMH-D8:
 
-- HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, and HMH-E5 are closed. Continue
-  with HMH-E6 to capture iPhone/iPad visual proof.
+- HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, HMH-E5, and HMH-E6 are closed.
+  Continue with HMH-E7 to prove disconnected cache submissions fail closed.
 
 ## HMH-E Scorecard: Human Harness And Generated UI
 
@@ -972,7 +973,7 @@ Out of scope: client-side target reconstruction or native-only feature forks.
 | HMH-E3 | Approval and consequence clarity | 15 | passed_after_fix | iOS approval UI shows server risk/effect/authority/idempotency/lease/compensation metadata and resolves only through `approval::resolve`. | Stop if local approval state becomes final truth. |
 | HMH-E4 | Module controls are native projections | 15 | passed_after_fix | iOS can inspect/configure/activate/disable/upgrade/rollback/quarantine module packages through canonical server functions with evidence drill-down. | Stop if module policy appears in Swift. |
 | HMH-E5 | Human can understand agent-created harness changes | 15 | passed_after_fix | Session-created capability, provenance, tests, generated UI, promotion status, cleanup, and trace are visible in an ergonomic iPhone/iPad flow. | Fix UX before declaring north-star proof. |
-| HMH-E6 | Visual proof covers iPhone and iPad | 10 | pending | Browser/Simulator/Computer Use proof includes device, UDID, bundle id, screenshots, action sequence, server rows, and return codes. | No screenshot-only proof without DB/event evidence. |
+| HMH-E6 | Visual proof covers iPhone and iPad | 10 | passed_after_fix | iPhone 17 Pro and iPad Pro 13-inch simulator proof shows live Engine Console Harness Changes for a session-created catalog function, with device UDIDs, bundle id, launch/screenshot return codes, screenshots, server rows, and cleanup rows. | No screenshot-only proof without DB/event evidence. |
 | HMH-E7 | Disconnected cache is read-only | 10 | pending | Offline Engine Console cache cannot submit generated actions, approvals, module changes, or policy edits. | Fix before live UI closeout. |
 
 Closeout commands:
@@ -1148,11 +1149,63 @@ HMH-E5 evidence, 2026-06-02:
 - Passing iOS proof:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests -only-testing:TronMobileTests/EngineConsoleAccessibilityTests`.
 
-Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5:
+HMH-E6 evidence, 2026-06-02/2026-06-03:
 
-- Continue with HMH-E6: capture visual proof for iPhone and iPad with device
-  identifiers, bundle id, launch/open return codes, screenshots, visible
-  Engine Console Harness Changes state, and server-row evidence.
+- Red path: the first live iOS client attempt could not call
+  `catalog::watch_snapshot` because catalog read primitives inherited agent
+  visibility and returned a policy error for actor `engine-client`. The fix
+  makes `catalog::list`, `catalog::inspect`, and `catalog::watch_snapshot`
+  system-visible while still requiring `catalog.read`; the regression test
+  `catalog_read_primitives_are_visible_to_engine_client` covers all three.
+- iOS now calls `catalog::watch_snapshot` through `CapabilityClient` with
+  `catalog.read`, and Harness Changes merges registry implementations with
+  live catalog functions so volatile session-created workers are visible before
+  registry persistence catches up. The Substrate layout puts Harness Changes
+  before the metric grid so the proof is first-viewport-visible on iPhone.
+- Live worker/server evidence used stamp `20260603T000331Z`, bundle id
+  `com.tron.mobile.beta`, worker `hmh-e6-worker-20260603T000331Z`, function
+  `hmh_e6_20260603T000331Z::visual_echo`, and system visibility. Server
+  evidence file:
+  `/tmp/tron-hmh-e6-evidence/hmh-e6-live-server-evidence-20260603T000331Z.json`.
+  It records `auditOk`, `catalogAllOk`, `catalogFunctionFound`,
+  `executeDirectOk`, `executeModelOk`, `surfaceOk`, one generated surface,
+  100 invocation rows, 8 audit rows, 3 registration catalog-change rows, and
+  the generated `ui_surface` resource id.
+- Simulator install/launch return-code evidence:
+  `/tmp/tron-hmh-e6-evidence/hmh-e6-simulator-install-launch-20260603T000331Z.json`.
+  It records return code 0 for bootstatus, install, terminate, and launch on
+  iPhone 17 Pro UDID `267F6468-09AE-471D-9157-29144173EB82` and iPad Pro
+  13-inch (M5) UDID `E2A39D89-9AF3-431E-A43B-0030C3716482`.
+- Computer Use action sequence: select iPhone Simulator, open Engine Console,
+  refresh to `Catalog 400`/`Implementations 307`, tap Substrate; then select
+  Window -> iPad Pro 13-inch (M5), open More -> Navigation -> Engine, refresh
+  to the same live catalog state, and tap Substrate. The visible screen on both
+  devices is Engine Console / Substrate / Harness Changes for
+  `hmh_e6_20260603T000331Z::visual_echo` with provenance
+  `session_generated`, tests `healthy`, generated UI `1 surface`, promotion
+  `system`, cleanup `Ready`, and trace `019e8acc-0c5f-...`.
+- Screenshot return-code evidence:
+  `/tmp/tron-hmh-e6-evidence/hmh-e6-screenshot-evidence-20260603T000331Z.json`.
+  Screenshots:
+  `/tmp/tron-hmh-e6-evidence/hmh-e6-iphone-harness-changes-20260603T000331Z.png`
+  and
+  `/tmp/tron-hmh-e6-evidence/hmh-e6-ipad-harness-changes-20260603T000331Z.png`.
+- Cleanup evidence:
+  `/tmp/tron-hmh-e6-evidence/hmh-e6-cleanup-evidence-20260603T000331Z.json`
+  records `FunctionUnregistered`, `TriggerUnregistered`, and
+  `WorkerUnregistered` rows for the same system-visible subjects after the
+  fixture was stopped.
+- Passing verification:
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`;
+  `cargo test --manifest-path packages/agent/Cargo.toml engine::tests::meta_primitives::catalog_read_primitives_are_visible_to_engine_client -- --exact`;
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests`;
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`;
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleAccessibilityTests`.
+
+Open loops after HMH-E1/HMH-E2/HMH-E3/HMH-E4/HMH-E5/HMH-E6:
+
+- Continue with HMH-E7: prove disconnected Engine Console cache cannot submit
+  generated actions, approvals, module changes, or policy edits.
 
 ## HMH-F Scorecard: Causality, Safety, Loops, And Rollback
 
@@ -1284,10 +1337,11 @@ The north-star objective is not complete until all of the following are true:
 
 ## Next Test
 
-HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, and HMH-E5 are
-closed. Continue with HMH-E6: capture iPhone/iPad visual proof for the Engine
-Console Harness Changes flow.
+HMH-A, HMH-B, HMH-C, HMH-D, HMH-E1, HMH-E2, HMH-E3, HMH-E4, HMH-E5, and
+HMH-E6 are closed. Continue with HMH-E7: prove disconnected Engine Console
+cache cannot submit generated actions, approvals, module changes, or policy
+edits.
 
 ```bash
-xcrun simctl list devices available
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineConsoleStateTests
 ```

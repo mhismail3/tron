@@ -171,6 +171,8 @@ struct EngineConsoleView: View {
 
     private var substrate: some View {
         VStack(alignment: .leading, spacing: 14) {
+            EngineConsoleHarnessChangeCard(projection: state.harnessChangeProjection)
+
             EngineConsoleMetricGrid(metrics: substrateMetrics)
 
             if let warnings = substrateSnapshot?.integrityWarnings, !warnings.isEmpty {
@@ -181,8 +183,6 @@ struct EngineConsoleView: View {
                     tint: .tronAmber
                 )
             }
-
-            EngineConsoleHarnessChangeCard(projection: state.harnessChangeProjection)
 
             EngineConsoleCard {
                 EngineConsoleCardHeader(

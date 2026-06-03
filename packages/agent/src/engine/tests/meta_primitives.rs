@@ -487,6 +487,63 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
 }
 
 #[tokio::test]
+async fn catalog_read_primitives_are_visible_to_engine_client() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let client_context = CausalContext::new(
+        actor("engine-client"),
+        ActorKind::Client,
+        grant("engine-transport"),
+        trace("catalog-client-read"),
+    )
+    .with_scope("catalog.read");
+
+    let list = handle
+        .invoke(host_invocation(
+            "catalog::list",
+            json!({"includeInternal": true}),
+            client_context.clone(),
+        ))
+        .await;
+    assert_eq!(list.error, None);
+    assert!(
+        list.value.as_ref().unwrap()["functions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|function| function["id"] == "catalog::watch_snapshot")
+    );
+
+    let inspect = handle
+        .invoke(host_invocation(
+            "catalog::inspect",
+            json!({"kind": "function", "id": "catalog::watch_snapshot"}),
+            client_context.clone(),
+        ))
+        .await;
+    assert_eq!(inspect.error, None);
+    assert_eq!(
+        inspect.value.as_ref().unwrap()["definition"]["id"],
+        "catalog::watch_snapshot"
+    );
+
+    let snapshot = handle
+        .invoke(host_invocation(
+            "catalog::watch_snapshot",
+            json!({"limit": 10}),
+            client_context,
+        ))
+        .await;
+    assert_eq!(snapshot.error, None);
+    assert!(
+        snapshot.value.as_ref().unwrap()["snapshot"]["functions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|function| function["id"] == "catalog::watch_snapshot")
+    );
+}
+
+#[tokio::test]
 async fn engine_watch_filters_catalog_changes_without_leaking_hidden_scopes() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()

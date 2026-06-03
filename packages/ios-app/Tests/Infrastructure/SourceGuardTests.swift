@@ -568,6 +568,10 @@ struct SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleState.swift"),
             encoding: .utf8
         )
+        let capabilityClient = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/CapabilityClient.swift"),
+            encoding: .utf8
+        )
         let harnessChangeProjection = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleHarnessChangeProjection.swift"),
             encoding: .utf8
@@ -593,6 +597,10 @@ struct SourceGuardTests {
         #expect(engineConsoleState.contains("var substrateSearchSuggestions: [EngineConsoleSearchSuggestion]"))
         #expect(engineConsoleState.contains("registry?.implementations"))
         #expect(engineConsoleState.contains("registry?.documents"))
+        #expect(engineConsoleState.contains("catalogWatchSnapshot("))
+        #expect(engineConsoleState.contains("catalogSnapshot?.snapshot?.functions"))
+        #expect(capabilityClient.contains(#""catalog::watch_snapshot""#))
+        #expect(capabilityClient.contains(#""catalog.read""#))
         #expect(engineConsoleState.contains("controlSnapshot?.availableActions"))
         #expect(engineConsoleState.contains("controlSnapshot?.modulePackages"))
         #expect(engineConsoleState.contains("controlSnapshot?.uiSurfaceRefs"))
@@ -601,12 +609,20 @@ struct SourceGuardTests {
         #expect(engineConsoleState.contains(#""capabilities.primer""#))
         #expect(engineConsoleState.contains(#""conformance \(implementation.implementationId)""#))
         #expect(engineConsole.contains("EngineConsoleHarnessChangeCard(projection: state.harnessChangeProjection)"))
+        #expect(
+            engineConsole.range(of: "EngineConsoleHarnessChangeCard(projection: state.harnessChangeProjection)")?.lowerBound
+                ?? engineConsole.endIndex
+                < (engineConsole.range(of: "EngineConsoleMetricGrid(metrics: substrateMetrics)")?.lowerBound
+                    ?? engineConsole.endIndex)
+        )
         #expect(engineConsoleState.contains("EngineConsoleHarnessChangeProjection.make("))
         #expect(harnessChangeProjection.contains("registry?.implementations"))
+        #expect(harnessChangeProjection.contains("catalogImplementations(from: catalogSnapshot)"))
+        #expect(harnessChangeProjection.contains("catalogSnapshot?.snapshot?.functions"))
         #expect(harnessChangeProjection.contains("controlSnapshot?.uiSurfaceRefs"))
         #expect(harnessChangeProjection.contains("audit?.events"))
         #expect(harnessChangeProjection.contains("programRuns?.programRuns"))
-        #expect(harnessChangeProjection.contains(#"implementation.visibility == "session""#))
+        #expect(harnessChangeProjection.contains(#"implementation.visibility?.lowercased() == "session""#))
         #expect(harnessChangeView.contains(#"title: "Harness Changes""#))
         #expect(harnessChangeView.contains(".accessibilityValue(change.accessibilityValue)"))
         #expect(!engineConsoleComponents.contains("private let suggestions"))

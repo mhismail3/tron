@@ -895,6 +895,13 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         documents: [],
         programRuns: []
     )
+    var catalogSnapshotResult = CatalogWatchSnapshotDTO(
+        changes: [],
+        snapshot: CatalogSnapshotDTO(functions: [], workers: [], triggers: [], triggerTypes: []),
+        currentRevision: 1,
+        nextRevision: nil,
+        hasMore: false
+    )
     var auditResult = CapabilityAuditQueryResultDTO(events: [], redacted: true)
     var programRunResult = CapabilityProgramRunQueryResultDTO(programRuns: [], redacted: true)
     var lastSearchQuery: String?
@@ -927,6 +934,10 @@ private final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityCl
         includeBindings: Bool
     ) async throws -> CapabilityRegistrySnapshotDTO {
         registrySnapshotDTO
+    }
+
+    func catalogWatchSnapshot(_ request: CatalogWatchSnapshotRequestDTO) async throws -> CatalogWatchSnapshotDTO {
+        catalogSnapshotResult
     }
 
     func controlSnapshot(limit: Int) async throws -> ControlSnapshotDTO {

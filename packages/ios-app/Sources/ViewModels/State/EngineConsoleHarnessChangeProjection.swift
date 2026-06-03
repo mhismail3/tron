@@ -9,11 +9,14 @@ struct EngineConsoleHarnessChangeProjection: Equatable {
 
     static func make(
         registry: CapabilityRegistrySnapshotDTO?,
+        catalogSnapshot: CatalogWatchSnapshotDTO?,
         controlSnapshot: ControlSnapshotDTO?,
         audit: CapabilityAuditQueryResultDTO?,
         programRuns: CapabilityProgramRunQueryResultDTO?
     ) -> EngineConsoleHarnessChangeProjection {
-        let sessionImplementations = (registry?.implementations ?? [])
+        let sessionImplementations = uniqueImplementations(
+            (registry?.implementations ?? []) + catalogImplementations(from: catalogSnapshot)
+        )
             .filter(isSessionCreated)
         let changes = sessionImplementations
             .compactMap { implementation in
@@ -28,10 +31,10 @@ struct EngineConsoleHarnessChangeProjection: Equatable {
     }
 
     private static func isSessionCreated(_ implementation: CapabilityImplementationDTO) -> Bool {
-        if implementation.visibility == "session" {
+        if implementation.visibility?.lowercased() == "session" {
             return true
         }
-        if implementation.trustTier?.contains("session") == true {
+        if implementation.trustTier?.lowercased().contains("session") == true {
             return true
         }
         if let provenance = implementation.provenance?.dictionaryValue,
@@ -39,6 +42,68 @@ struct EngineConsoleHarnessChangeProjection: Equatable {
             return true
         }
         return false
+    }
+
+    private static func catalogImplementations(
+        from catalogSnapshot: CatalogWatchSnapshotDTO?
+    ) -> [CapabilityImplementationDTO] {
+        (catalogSnapshot?.snapshot?.functions ?? []).compactMap { function in
+            guard let dictionary = function.dictionaryValue,
+                  let functionId = harnessString(dictionary, keys: ["id", "functionId", "function_id"]) else {
+                return nil
+            }
+            let metadata = harnessDictionary(dictionary, keys: ["metadata"])
+            let provenance = harnessDictionary(dictionary, keys: ["provenance"])
+            let workerId = harnessString(dictionary, keys: ["owner_worker", "ownerWorker", "workerId", "worker_id"])
+            let implementationId = harnessString(
+                metadata,
+                keys: ["implementationId", "implementation_id"]
+            ) ?? "catalog.\(workerId ?? "worker").\(functionId)"
+            let health = harnessString(dictionary, keys: ["health"])
+
+            return CapabilityImplementationDTO(
+                implementationId: implementationId,
+                contractId: harnessString(metadata, keys: ["contractId", "contract_id"])
+                    ?? harnessString(dictionary, keys: ["contractId", "contract_id"])
+                    ?? functionId,
+                pluginId: harnessString(metadata, keys: ["pluginId", "plugin_id"])
+                    ?? harnessString(dictionary, keys: ["pluginId", "plugin_id"]),
+                workerId: workerId,
+                functionId: functionId,
+                version: harnessUInt64(dictionary, keys: ["revision", "version"]),
+                health: health,
+                visibility: harnessString(dictionary, keys: ["visibility"]),
+                latencyClass: harnessString(metadata, keys: ["latencyClass", "latency_class"]),
+                costClass: harnessString(metadata, keys: ["costClass", "cost_class"]),
+                trustTier: harnessString(metadata, keys: ["trustTier", "trust_tier"]),
+                authorityRequirements: harnessAnyCodable(
+                    dictionary,
+                    keys: ["authorityRequirements", "authority_requirements"]
+                ),
+                runtimeRequirements: harnessAnyCodable(
+                    dictionary,
+                    keys: ["runtimeRequirements", "runtime_requirements"]
+                ),
+                schemaDigest: harnessString(metadata, keys: ["schemaDigest", "schema_digest"])
+                    ?? harnessString(dictionary, keys: ["schemaDigest", "schema_digest"]),
+                catalogRevision: catalogSnapshot?.currentRevision,
+                provenance: provenance.map(AnyCodable.init),
+                conformanceState: harnessString(metadata, keys: ["conformanceState", "conformance_state"]) ?? health,
+                signatureStatus: harnessString(metadata, keys: ["signatureStatus", "signature_status"]) ?? "catalog",
+                updatedAt: harnessString(dictionary, keys: ["updatedAt", "updated_at"])
+            )
+        }
+    }
+
+    private static func uniqueImplementations(
+        _ implementations: [CapabilityImplementationDTO]
+    ) -> [CapabilityImplementationDTO] {
+        var seen: Set<String> = []
+        var unique: [CapabilityImplementationDTO] = []
+        for implementation in implementations where seen.insert(implementation.implementationId).inserted {
+            unique.append(implementation)
+        }
+        return unique
     }
 }
 
@@ -292,6 +357,12 @@ struct EngineConsoleHarnessChangeSummary: Equatable, Identifiable {
 private func harnessString(_ dictionary: [String: Any]?, keys: [String]) -> String? {
     guard let dictionary else { return nil }
     for key in keys {
+        if let value = dictionary[key] as? AnyCodable {
+            return harnessStringValue(value.value)
+        }
+        if let uint = dictionary[key] as? UInt64 {
+            return String(uint)
+        }
         if let string = dictionary[key] as? String, !string.isEmpty {
             return string
         }
@@ -304,6 +375,76 @@ private func harnessString(_ dictionary: [String: Any]?, keys: [String]) -> Stri
         if let bool = dictionary[key] as? Bool {
             return bool ? "true" : "false"
         }
+    }
+    return nil
+}
+
+private func harnessStringValue(_ value: Any) -> String? {
+    switch value {
+    case let string as String where !string.isEmpty:
+        return string
+    case let uint as UInt64:
+        return String(uint)
+    case let int as Int:
+        return String(int)
+    case let double as Double:
+        return String(double)
+    case let bool as Bool:
+        return bool ? "true" : "false"
+    case let codable as AnyCodable:
+        return harnessStringValue(codable.value)
+    default:
+        return nil
+    }
+}
+
+private func harnessDictionary(_ dictionary: [String: Any], keys: [String]) -> [String: Any]? {
+    for key in keys {
+        if let nested = dictionary[key] as? [String: Any] {
+            return nested
+        }
+        if let codable = dictionary[key] as? AnyCodable,
+           let nested = codable.dictionaryValue {
+            return nested
+        }
+    }
+    return nil
+}
+
+private func harnessUInt64(_ dictionary: [String: Any], keys: [String]) -> UInt64? {
+    for key in keys {
+        switch dictionary[key] {
+        case let value as UInt64:
+            return value
+        case let value as Int where value >= 0:
+            return UInt64(value)
+        case let value as Double where value >= 0:
+            return UInt64(exactly: value.rounded(.towardZero))
+        case let value as AnyCodable:
+            if let int = AnyCodable(value).intValue, int >= 0 {
+                return UInt64(int)
+            }
+            if let double = AnyCodable(value).doubleValue, double >= 0 {
+                return UInt64(exactly: double.rounded(.towardZero))
+            }
+            if let string = AnyCodable(value).stringValue, let parsed = UInt64(string) {
+                return parsed
+            }
+        case let value as String:
+            if let parsed = UInt64(value) {
+                return parsed
+            }
+        default:
+            continue
+        }
+    }
+    return nil
+}
+
+private func harnessAnyCodable(_ dictionary: [String: Any], keys: [String]) -> AnyCodable? {
+    for key in keys {
+        guard let value = dictionary[key] else { continue }
+        return AnyCodable(value)
     }
     return nil
 }
