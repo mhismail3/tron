@@ -18,6 +18,7 @@ final class SettingsState {
     var rulesDiscoverStandaloneFiles: Bool = true
     var isolationMode: String = "always"
     var queueDrainMode: String = "sequential"
+    var autonomyApprovalPromptMode: String = "disabled"
 
     // MARK: - Hooks
 
@@ -214,6 +215,7 @@ final class SettingsState {
         rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
         isolationMode = settings.isolationMode
         queueDrainMode = settings.queueDrainMode
+        autonomyApprovalPromptMode = settings.agentApprovalPromptMode
         hooksLlmModel = settings.hooksLlmModel
         builtinHooks = settings.builtinHooks
         hooksErrorPolicy = settings.hooksErrorPolicy

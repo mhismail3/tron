@@ -64,6 +64,9 @@ async fn sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect(
 
 #[tokio::test]
 async fn missing_approval_resolve_primitive_leaves_pending_child_unexecuted() {
+    let _settings = set_agent_approval_prompt_mode(
+        crate::domains::settings::AutonomyApprovalPromptMode::Testing,
+    );
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("hmh-f7-danger", "hmh_f7_danger"), false)

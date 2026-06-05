@@ -263,6 +263,17 @@ pub struct EngineApprovalRequestOutcome {
     pub created: bool,
 }
 
+/// Result of an engine-owned auto-approval execution.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EngineAutoApprovalOutcome {
+    /// Final approval record after the child invocation completed.
+    pub record: EngineApprovalRecord,
+    /// Child invocation result.
+    pub child_result: InvocationResult,
+    /// Whether this path created a new approval audit record.
+    pub created: bool,
+}
+
 impl EngineApprovalRequestOutcome {
     fn created(record: EngineApprovalRecord) -> Self {
         Self {

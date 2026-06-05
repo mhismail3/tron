@@ -151,6 +151,7 @@ struct AgentContextSettingsPageTests {
     func agentSheetOrderKeepsQueueAndProtectedBranchesAtBottom() {
         #expect(AgentSettingsSection.allCases == [
             .quickSession,
+            .autonomy,
             .hooks,
             .promptLibrary,
             .messageQueue,

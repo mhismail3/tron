@@ -8,6 +8,7 @@ mod support;
 pub(in crate::engine::tests) use support::*;
 
 mod approval;
+mod approval_autonomy;
 mod catalog_discovery;
 mod cron_resources;
 mod domain_outputs;

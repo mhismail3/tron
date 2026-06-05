@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-03 (post-scorecard recent-gap campaign activated, HMH-F7 reconnect chaos proof, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, disconnected approval decision fail-closed guard, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Created by Agent projection over registry plus live catalog snapshots, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, Engine Console offline cache fail-closed mutation guards, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-05 (worker-first autonomy settings parity, post-scorecard recent-gap campaign activated, HMH-F7 reconnect chaos proof, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, disconnected approval decision fail-closed guard, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Created by Agent projection over registry plus live catalog snapshots, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, Engine Console offline cache fail-closed mutation guards, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -679,8 +679,8 @@ and Server across a two-column row, and places the persistent unavailable card
 where the second green row normally sits.
 Server-backed settings are grouped by behavior owner: Servers covers
 pairing/security/transcription/updates, Providers covers auth credentials, Agent
-covers execution lifecycle including hooks, prompt-history capture/retention,
-queued-message delivery, and protected branches, Context covers
+covers autonomy prompt mode, execution lifecycle including hooks,
+prompt-history capture/retention, queued-message delivery, and protected branches, Context covers
 compaction/memory/skills/rules, and Plugin Sources covers external capability sources. Low-level hook
 `add_context` budgeting stays an internal server fuse, not an end-user Agent
 setting. Source-control action sheets expose merge, push, branch, and upstream
@@ -703,10 +703,11 @@ diagnostics JSON, opens the native Mail composer with the tracked support
 recipient and attachment, and shows an alert when Mail is unavailable because
 iOS does not reliably attach files through a default-mail-app handoff.
 Settings is a projection of the active server snapshot. `SettingsState` stores
-the loaded `defaultModel` alongside the rest of `settings::get`; Agent model
-selection sends a sparse `settings::update`, reloads `settings::get`, and only
-then updates the app-wide active-server snapshot. A failed write rolls visible
-settings back to the last loaded server response. Model picker reasoning
+the loaded `defaultModel` and `agent.autonomy.approvalPromptMode` alongside the
+rest of `settings::get`; Agent model and autonomy selections send sparse
+`settings::update` requests, reload `settings::get`, and only then update the
+app-wide active-server snapshot. A failed write rolls visible settings back to
+the last loaded server response. Model picker reasoning
 controls are opt-in: chat/session flows pass a reasoning binding, while Settings
 model pickers hide the control because they do not own reasoning-level writes.
 Automation and subagent model presets are also server-owned: iOS renders the

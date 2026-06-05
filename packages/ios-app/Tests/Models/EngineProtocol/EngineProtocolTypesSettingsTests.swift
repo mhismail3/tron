@@ -23,6 +23,9 @@ struct ServerSettingsTests {
                 "isolation": { "mode": "never" },
                 "queueDrainMode": "parallel"
             },
+            "agent": {
+                "autonomy": { "approvalPromptMode": "testing" }
+            },
             "hooks": { "llmModel": "claude-opus-4-6", "builtinHooks": [{"id":"h1","enabled":true}] },
             "skills": { "compactionPolicy": "preserveAll", "showIndex": "never" },
             "memory": { "autoRetainInterval": 25, "retainModel": "claude-opus-4-6" },
@@ -56,6 +59,7 @@ struct ServerSettingsTests {
         #expect(settings.rules.discoverStandaloneFiles == false)
         #expect(settings.isolationMode == "never")
         #expect(settings.queueDrainMode == "parallel")
+        #expect(settings.agentApprovalPromptMode == "testing")
         #expect(settings.hooksLlmModel == "claude-opus-4-6")
         #expect(settings.builtinHooks.count == 1)
         #expect(settings.skillsCompactionPolicy == "preserveAll")
@@ -90,6 +94,7 @@ struct ServerSettingsTests {
         #expect(settings.rules.discoverStandaloneFiles == true)
         #expect(settings.isolationMode == "always")
         #expect(settings.queueDrainMode == "sequential")
+        #expect(settings.agentApprovalPromptMode == "disabled")
         #expect(settings.hooksLlmModel == "claude-haiku-4-5-20251001")
         #expect(settings.builtinHooks.isEmpty)
         #expect(settings.skillsCompactionPolicy == "clearAll")
@@ -116,6 +121,7 @@ struct ServerSettingsTests {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.isolationMode == "always") // session default
+        #expect(settings.agentApprovalPromptMode == "disabled")
     }
 
     @Test("missing git policy block is rejected")
@@ -132,6 +138,19 @@ struct ServerSettingsTests {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.queueDrainMode == "batched")
         #expect(settings.isolationMode == "always") // default
+    }
+
+    @Test("decode agent autonomy prompt mode from JSON")
+    func agentAutonomyPromptModeDecode() throws {
+        let json = #"{"agent":{"autonomy":{"approvalPromptMode":"testing"}}}"#
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
+        #expect(settings.agentApprovalPromptMode == "testing")
+    }
+
+    @Test("agent autonomy prompt mode defaults disabled when key missing")
+    func agentAutonomyPromptModeDefaults() throws {
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
+        #expect(settings.agentApprovalPromptMode == "disabled")
     }
 
     // MARK: - CompactionSettings Dual Init Consistency
@@ -203,6 +222,7 @@ struct ServerSettingsTests {
         var update = ServerSettingsUpdate()
         update.server = .init(defaultModel: "claude-opus-4-6")
         update.session = .init(queueDrainMode: .batched)
+        update.agent = .init(autonomy: .init(approvalPromptMode: .testing))
         update.observability = .init(payloadCapture: "debug")
         update.storage = .init(retentionEnabled: false)
 
@@ -214,6 +234,10 @@ struct ServerSettingsTests {
 
         let session = json["session"] as? [String: Any]
         #expect(session?["queueDrainMode"] as? String == "batched")
+
+        let agent = json["agent"] as? [String: Any]
+        let autonomy = agent?["autonomy"] as? [String: Any]
+        #expect(autonomy?["approvalPromptMode"] as? String == "testing")
 
         let observability = json["observability"] as? [String: Any]
         #expect(observability?["payloadCapture"] as? String == "debug")
@@ -231,6 +255,7 @@ struct ServerSettingsTests {
             isolation: .init(mode: .lazy),
             queueDrainMode: .sequential
         )
+        update.agent = .init(autonomy: .init(approvalPromptMode: .disabled))
         update.skills = .init(
             compactionPolicy: .userInteraction,
             showIndex: .whenNoActiveSkills
@@ -247,6 +272,10 @@ struct ServerSettingsTests {
         let isolation = session["isolation"] as! [String: Any]
         #expect(isolation["mode"] as? String == "lazy")
         #expect(session["queueDrainMode"] as? String == "sequential")
+
+        let agent = json["agent"] as! [String: Any]
+        let autonomy = agent["autonomy"] as! [String: Any]
+        #expect(autonomy["approvalPromptMode"] as? String == "disabled")
 
         let skills = json["skills"] as! [String: Any]
         #expect(skills["compactionPolicy"] as? String == "userInteraction")
@@ -267,6 +296,10 @@ struct ServerSettingsTests {
 
         #expect(QueueDrainMode.from("sequential") == .sequential)
         #expect(QueueDrainMode.from("batched") == .batched)
+
+        #expect(AutonomyApprovalPromptMode.from("disabled") == .disabled)
+        #expect(AutonomyApprovalPromptMode.from("testing") == .testing)
+        #expect(AutonomyApprovalPromptMode.from("garbage") == nil)
 
         #expect(SkillsCompactionPolicy.from("clearAll") == .clearAll)
         #expect(SkillsCompactionPolicy.from("autoRestore") == .autoRestore)

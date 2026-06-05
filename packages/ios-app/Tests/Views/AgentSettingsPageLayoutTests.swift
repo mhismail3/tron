@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+@testable import TronMobile
 
 /// Source-level guards for iPad-specific Settings page layouts.
 ///
@@ -48,6 +50,93 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             promptIndex,
             "Protected branch controls should stay high in the landscape right column"
         )
+    }
+
+    func testAgentSettingsAutonomyUsesWorkerFirstCopy() throws {
+        let content = try settingsPageSource(named: "AgentSettingsPage.swift")
+
+        XCTAssertTrue(
+            content.contains("label: \"Autonomy Mode\""),
+            "The default settings surface should present the worker-first autonomy model, not approval internals"
+        )
+        XCTAssertTrue(
+            content.contains("Tron runs independently on this Mac"),
+            "Independent mode copy must plainly state the default autonomous behavior"
+        )
+        XCTAssertTrue(
+            content.contains("Testing mode shows approval prompts for QA"),
+            "Interactive prompts should be framed as explicit QA/testing behavior"
+        )
+        XCTAssertFalse(
+            content.contains("label: \"Approval Prompts\""),
+            "Approval prompts are an implementation detail, not the primary settings label"
+        )
+    }
+
+    @MainActor
+    func testAgentSettingsAutonomyRendersForVisualQA() throws {
+        let settingsState = SettingsState()
+        settingsState.isLoaded = true
+        settingsState.quickSessionWorkspace = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("tron-visual-qa")
+            .path
+        settingsState.defaultModel = "gpt-5.5"
+        settingsState.queueDrainMode = "batched"
+        settingsState.autonomyApprovalPromptMode = "disabled"
+        settingsState.builtinHooks = [
+            BuiltinHookSetting(id: "builtin:title-gen", enabled: true),
+            BuiltinHookSetting(id: "builtin:branch-name-gen", enabled: true),
+            BuiltinHookSetting(id: "builtin:suggest-prompts", enabled: true),
+        ]
+        settingsState.promptHistoryEnabled = true
+        settingsState.promptHistoryMaxEntries = 10_000
+        settingsState.promptHistoryMaxAgeDays = 0
+        settingsState.promptHistoryAutoPrune = true
+
+        let content = AgentSettingsPage(
+            settingsState: settingsState,
+            selectedModelDisplayName: "GPT-5.5",
+            updateServerSetting: { _ in }
+        )
+        .environment(\.dependencies, DependencyContainer())
+        .frame(width: 430, height: 1_320)
+        .background(Color(uiColor: .systemBackground))
+
+        let windowScene = try XCTUnwrap(
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        )
+        let window = UIWindow(windowScene: windowScene)
+        window.frame = CGRect(x: 0, y: 0, width: 430, height: 1_320)
+        let controller = UIHostingController(rootView: content)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.frame = window.bounds
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 2
+        let image = UIGraphicsImageRenderer(bounds: controller.view.bounds, format: format).image { _ in
+            controller.view.drawHierarchy(in: controller.view.bounds, afterScreenUpdates: true)
+        }
+        XCTAssertGreaterThan(image.size.width, 400)
+        XCTAssertGreaterThan(image.size.height, 1_200)
+
+        let documentsURL = try XCTUnwrap(
+            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        )
+        let artifactRoot = ProcessInfo.processInfo.environment["TRON_VISUAL_ARTIFACT_DIR"]
+            .map(URL.init(fileURLWithPath:))
+            ?? documentsURL.appendingPathComponent("tron-visual-artifacts")
+        let outputURL = artifactRoot.appendingPathComponent("agent-settings-autonomy-render.png")
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try XCTUnwrap(image.pngData()).write(to: outputURL)
+        print("TRON_VISUAL_ARTIFACT_PATH=\(outputURL.path)")
+        add(XCTAttachment(contentsOfFile: outputURL))
     }
 
     func testConnectionSettingsUsesIPadLandscapeColumns() throws {

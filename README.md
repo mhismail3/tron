@@ -1177,7 +1177,10 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
   "agent": {
     "maxTurns": 250,
     "subagentMaxDepth": 3,
-    "subagentModel": "claude-haiku-4-5-20251001" // Default hosted route for subagent preset routing
+    "subagentModel": "claude-haiku-4-5-20251001", // Default hosted route for subagent preset routing
+    "autonomy": {
+      "approvalPromptMode": "disabled" // "disabled" runs independently with audited auto-decisions; "testing" restores QA prompts
+    }
   },
 
   "context": {

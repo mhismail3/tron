@@ -65,6 +65,24 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
+        CapabilityContract::new("agent::work_snapshot", "agent", EffectClass::PureRead, RiskLevel::Low, Some("agent.read"))
+            .description("Read the server-owned Work dashboard projection: autonomy, active work, workers, milestones, guardrails, and audit refs.")
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"},"limit":{"type":"integer"}},"type":"object"}))
+            .response_schema(json!({
+                "type": "object",
+                "required": ["autonomy", "activeWork", "workers", "recentMilestones", "guardrails", "auditRefs"],
+                "additionalProperties": true,
+                "properties": {
+                    "autonomy": {"type": "object"},
+                    "activeWork": {"type": "array"},
+                    "workers": {"type": "array"},
+                    "recentMilestones": {"type": "array"},
+                    "guardrails": {"type": "array"},
+                    "auditRefs": {"type": "array"}
+                }
+            }))
+            .tags(vec!["work", "workers", "autonomy", "guardrails", "audit", "dashboard"])
+            .build()?,
         CapabilityContract::new("agent::queue_prompt", "agent", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("agent.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"prompt":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))

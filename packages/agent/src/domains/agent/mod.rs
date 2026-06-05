@@ -31,6 +31,11 @@
 //!    requests are resolved against active profile settings, then the selected
 //!    route/profile is persisted in lifecycle events, result resources, stream
 //!    payloads, and generated lineage UI.
+//! 10. `agent::work_snapshot` projects autonomy, active work, workers, recent
+//!     milestones, guardrails, and audit refs from engine-owned settings,
+//!     catalog, invocation, and approval primitives. Clients render that
+//!     snapshot; they do not reconstruct Work dashboard truth from raw
+//!     registry/control/policy internals.
 //!
 //! ## Submodules
 //!

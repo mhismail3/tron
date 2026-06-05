@@ -13,6 +13,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
         XCTAssertEqual(state.queueDrainMode, "sequential")
+        XCTAssertEqual(state.autonomyApprovalPromptMode, "disabled")
         XCTAssertFalse(state.isLoaded)
         XCTAssertTrue(state.availableModels.isEmpty)
         XCTAssertFalse(state.isLoadingModels)
@@ -79,6 +80,23 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.observabilityMaxInlinePayloadBytes, 4096)
         XCTAssertFalse(state.storageRetentionEnabled)
         XCTAssertEqual(state.storageMaxDatabaseMb, 256)
+    }
+
+    func testApplyServerSettingsLoadsAgentAutonomyPromptMode() throws {
+        let state = SettingsState()
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
+        {
+          "agent": {
+            "autonomy": {
+              "approvalPromptMode": "testing"
+            }
+          }
+        }
+        """))
+
+        state.applyServerSettings(settings)
+
+        XCTAssertEqual(state.autonomyApprovalPromptMode, "testing")
     }
 
     // MARK: - Server Switching

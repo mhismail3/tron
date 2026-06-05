@@ -94,6 +94,9 @@ maxTurns = 250
 subagentMaxDepth = 3
 subagentModel = "claude-haiku-4-5-20251001"
 
+[settings.agent.autonomy]
+approvalPromptMode = "disabled"
+
 [settings.logging.moduleOverrides]
 ort = "error"
 

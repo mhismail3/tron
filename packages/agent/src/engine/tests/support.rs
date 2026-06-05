@@ -1,7 +1,7 @@
 //! Shared fixtures for engine test modules.
 
 pub(in crate::engine::tests) use std::sync::{
-    Arc,
+    Arc, MutexGuard,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -380,6 +380,28 @@ pub(in crate::engine::tests) fn host_invocation(
     context: CausalContext,
 ) -> Invocation {
     Invocation::new_sync(fid(function_id), payload, context)
+}
+
+pub(in crate::engine::tests) struct SettingsModeGuard {
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Drop for SettingsModeGuard {
+    fn drop(&mut self) {
+        crate::domains::settings::reset_settings();
+    }
+}
+
+pub(in crate::engine::tests) fn set_agent_approval_prompt_mode(
+    mode: crate::domains::settings::AutonomyApprovalPromptMode,
+) -> SettingsModeGuard {
+    let guard = crate::domains::settings::test_settings_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = crate::domains::settings::TronSettings::default();
+    settings.agent.autonomy.approval_prompt_mode = mode;
+    crate::domains::settings::init_settings(settings);
+    SettingsModeGuard { _guard: guard }
 }
 
 pub(in crate::engine::tests) fn valid_ui_surface(

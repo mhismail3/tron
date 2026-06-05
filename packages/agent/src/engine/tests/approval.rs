@@ -2,6 +2,9 @@ use super::*;
 
 #[tokio::test]
 async fn agent_high_risk_invocation_creates_pending_approval_and_stream_event() {
+    let _settings = set_agent_approval_prompt_mode(
+        crate::domains::settings::AutonomyApprovalPromptMode::Testing,
+    );
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("danger", "danger"), false)
@@ -510,6 +513,9 @@ async fn agent_approval_preflight_rejects_invalid_payload_before_request() {
 
 #[tokio::test]
 async fn approval_resolution_resumes_original_invocation_with_original_causality() {
+    let _settings = set_agent_approval_prompt_mode(
+        crate::domains::settings::AutonomyApprovalPromptMode::Testing,
+    );
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("danger", "danger"), false)
@@ -648,6 +654,9 @@ async fn approval_resolution_resumes_host_dispatched_primitives() {
 
 #[tokio::test]
 async fn engine_invoke_routes_approval_resolve_through_host_resume_path() {
+    let _settings = set_agent_approval_prompt_mode(
+        crate::domains::settings::AutonomyApprovalPromptMode::Testing,
+    );
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("danger", "danger"), false)

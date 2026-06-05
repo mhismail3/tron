@@ -49,6 +49,7 @@ struct ServerSettings: Decodable {
     let skillsCompactionPolicy: String
     let skillsShowIndex: String
     let queueDrainMode: String
+    let agentApprovalPromptMode: String
     let autoRetainInterval: Int
     let retainModel: String
 
@@ -89,7 +90,7 @@ struct ServerSettings: Decodable {
     let storageMaxDatabaseMb: UInt64
 
     private enum CodingKeys: String, CodingKey {
-        case server, context, session, hooks, skills, memory, git, promptLibrary, pluginSources
+        case server, context, session, agent, hooks, skills, memory, git, promptLibrary, pluginSources
         case observability, storage
     }
 
@@ -129,6 +130,14 @@ struct ServerSettings: Decodable {
 
     private enum SessionKeys: String, CodingKey {
         case isolation, queueDrainMode
+    }
+
+    private enum AgentKeys: String, CodingKey {
+        case autonomy
+    }
+
+    private enum AgentAutonomyKeys: String, CodingKey {
+        case approvalPromptMode
     }
 
     private enum IsolationKeys: String, CodingKey {
@@ -211,6 +220,14 @@ struct ServerSettings: Decodable {
         } else {
             isolationMode = "always"
             queueDrainMode = "sequential"
+        }
+
+        // agent.autonomy.approvalPromptMode
+        if let agentContainer = try? container.nestedContainer(keyedBy: AgentKeys.self, forKey: .agent),
+           let autonomyContainer = try? agentContainer.nestedContainer(keyedBy: AgentAutonomyKeys.self, forKey: .autonomy) {
+            agentApprovalPromptMode = (try? autonomyContainer.decodeIfPresent(String.self, forKey: .approvalPromptMode)) ?? "disabled"
+        } else {
+            agentApprovalPromptMode = "disabled"
         }
 
         // hooks.*
@@ -369,6 +386,14 @@ enum QueueDrainMode: String, Encodable {
     }
 }
 
+enum AutonomyApprovalPromptMode: String, Encodable, CaseIterable {
+    case disabled, testing
+
+    static func from(_ raw: String?) -> Self? {
+        raw.flatMap { Self(rawValue: $0) }
+    }
+}
+
 enum SkillsCompactionPolicy: String, Encodable {
     case clearAll, autoRestore, userInteraction
 
@@ -458,6 +483,7 @@ struct ServerSettingsUpdate: Encodable {
     var server: ServerUpdate?
     var context: ContextUpdate?
     var session: SessionUpdate?
+    var agent: AgentUpdate?
     var hooks: HooksUpdate?
 
     struct ServerUpdate: Encodable {
@@ -505,6 +531,14 @@ struct ServerSettingsUpdate: Encodable {
 
         struct IsolationUpdate: Encodable {
             var mode: IsolationMode?
+        }
+    }
+
+    struct AgentUpdate: Encodable {
+        var autonomy: AutonomyUpdate?
+
+        struct AutonomyUpdate: Encodable {
+            var approvalPromptMode: AutonomyApprovalPromptMode?
         }
     }
 

@@ -23,6 +23,8 @@ mod commands;
 pub(crate) use commands::*;
 mod lifecycle;
 use lifecycle::*;
+mod work_snapshot;
+pub(crate) use work_snapshot::*;
 mod submissions;
 pub(crate) use submissions::*;
 mod queue;

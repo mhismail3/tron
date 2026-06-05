@@ -1,7 +1,7 @@
 use super::support::*;
 
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, MutexGuard,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -18,8 +18,32 @@ use crate::engine::{
     WorkerDefinition, WorkerId, WorkerKind,
 };
 
+struct SettingsModeGuard {
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Drop for SettingsModeGuard {
+    fn drop(&mut self) {
+        crate::domains::settings::reset_settings();
+    }
+}
+
+fn set_approval_prompt_mode(
+    mode: crate::domains::settings::AutonomyApprovalPromptMode,
+) -> SettingsModeGuard {
+    let guard = crate::domains::settings::test_settings_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut settings = crate::domains::settings::TronSettings::default();
+    settings.agent.autonomy.approval_prompt_mode = mode;
+    crate::domains::settings::init_settings(settings);
+    SettingsModeGuard { _guard: guard }
+}
+
 #[tokio::test]
 async fn approval_required_execute_resumes_child_with_original_causal_context() {
+    let _settings =
+        set_approval_prompt_mode(crate::domains::settings::AutonomyApprovalPromptMode::Testing);
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let captured = Arc::new(Mutex::new(Vec::new()));
     let calls = Arc::new(AtomicUsize::new(0));

@@ -26,6 +26,9 @@ operation_bindings! {
         "status" => |invocation, deps| {
             status_value(Some(&invocation.payload), deps).await
         },
+        "work_snapshot" => |invocation, deps| {
+            work_snapshot_value(Some(&invocation.payload), invocation, deps).await
+        },
         "abort" => |invocation, deps| {
             abort_value(Some(&invocation.payload), deps).await
         },

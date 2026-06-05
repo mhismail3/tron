@@ -2,7 +2,7 @@
 
 Created: **2026-06-05**
 Scorecard: [`worker-first-product-scorecard.md`](worker-first-product-scorecard.md)
-Current score: **0/100**
+Current score: **22/100**
 
 This manifest records evidence for the active worker-first product scorecard.
 Update it at each checkpoint with commands, return codes, exact source refs,
@@ -27,13 +27,13 @@ screenshots, runtime ids, open loops, and the next test.
 |---|---|---|
 | JARVIS-0 | running | Scorecard, manifest, README links, and static guard added. Source baseline is recorded below. Visual baseline screenshots remain open. |
 | JARVIS-1 | pending | Not started. |
-| JARVIS-2 | pending | Not started. |
+| JARVIS-2 | passed_after_fix | Default no-prompt autonomy, audited auto-decisions, testing prompts, fail-closed preflight, and replay behavior are covered by Rust tests. |
 | JARVIS-3 | pending | Not started. |
-| JARVIS-4 | pending | Not started. |
+| JARVIS-4 | passed_after_fix | `agent::work_snapshot` is registered and covered by DTO tests for idle state, active work, worker health, milestones, guardrails, and audit refs. |
 | JARVIS-5 | pending | Not started. |
 | JARVIS-6 | pending | Not started. |
 | JARVIS-7 | pending | Not started. |
-| JARVIS-8 | pending | Not started. |
+| JARVIS-8 | running | Autonomy prompt setting parity, default copy, and simulator render proof are implemented and tested; Guardrails UX/action checks remain open. |
 | JARVIS-9 | pending | Not started. |
 | JARVIS-10 | pending | Not started. |
 | JARVIS-11 | pending | Not started. |
@@ -99,5 +99,84 @@ screenshots, runtime ids, open loops, and the next test.
 - Visual baseline screenshots remain open.
 - JARVIS-0 cannot receive points until current Engine Console, approval prompt,
   worker/capability-heavy UI, and source references are captured together.
-- The next implementation checkpoint should start with red server tests for the
-  autonomy setting and `agent::work_snapshot` DTO.
+- The next implementation checkpoint should collapse product vocabulary and
+  continue the iOS replacement work while preserving simulator screenshot proof.
+
+## JARVIS-2 / JARVIS-4 / JARVIS-8 Partial Evidence
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml agent_autonomy_settings_deserialize_testing_prompt_mode -- --nocapture` | 0 | Proved the server setting decodes explicit testing mode while defaulting to disabled elsewhere. |
+| `cargo test --manifest-path packages/agent/Cargo.toml agent_high_risk_invocation_auto_decides_by_default_without_pending_prompt -- --nocapture` | 0 | Proved default mode executes high-risk approval-required work through audited server auto-decision without an interactive pending prompt. |
+| `cargo test --manifest-path packages/agent/Cargo.toml agent_high_risk_auto_decision -- --nocapture` | 101 then 0 | Red/green proof for terminal auto-decision replay. Initial fixture omitted required high-risk compensation metadata; final run proved executed replay, denied replay, and failed replay without duplicate child effects. |
+| `cargo test --manifest-path packages/agent/Cargo.toml approval -- --nocapture` | 0 | Proved the existing approval suite still passed after the default-policy change. |
+| `cargo test --manifest-path packages/agent/Cargo.toml work_snapshot -- --nocapture` | 101 then 0 | Red/green proof. Initial failure exposed infrastructure workers in the default snapshot and missing literal active-work assertion; final run passed after filtering system workers and asserting active work. |
+| `cargo test --manifest-path packages/agent/Cargo.toml agent_high_risk -- --nocapture` | 0 | Proved default auto-decision, testing prompt preservation, guardrail block-before-audit, and idempotent replay behavior together. |
+| `cargo test --manifest-path packages/agent/Cargo.toml agent_autonomy_settings -- --nocapture` | 0 | Re-ran the settings serde filter after policy changes. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test large_file_budget_invariants -- --nocapture` | 101 then 0 | Red/green file-budget proof. Initial run caught the expanded approval test file over 1000 LOC; final run passed after moving default-autonomy approval tests into `approval_autonomy.rs` and correcting stale audit rows for `integration.rs` and `threat_model_invariants.rs`. |
+| `cd packages/ios-app && xcodegen generate` | 0 | Regenerated the project before simulator tests; no project-file churn remained. |
+| `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/ServerSettingsTests -only-testing:TronMobileTests/AgentContextSettingsPageTests` | 65 | Default DerivedData linked stale test objects with an old `CompactionPlugin.Result` initializer. Source inspection showed current tests already used the new initializer. |
+| `rm -rf /tmp/tron-xcode-autonomy-dd && xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-autonomy-dd -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/ServerSettingsTests -only-testing:TronMobileTests/AgentContextSettingsPageTests` | 0 | Fresh simulator test proof: 47 selected tests passed across settings state, server settings protocol, and Agent settings metadata. |
+| `xcrun simctl install booted /tmp/tron-xcode-autonomy-dd/Build/Products/Beta-iphonesimulator/TronMobile.app && xcrun simctl launch booted com.tron.mobile.beta && sleep 2 && xcrun simctl openurl booted tron://settings && sleep 2 && mkdir -p /tmp/tron-worker-first-screens && xcrun simctl io booted screenshot /tmp/tron-worker-first-screens/settings-deeplink-unpaired.png` | 0 | Real simulator launch/deep-link proof. Screenshot showed the Settings sheet and Agent tile; no simulator tap/computer-use tool was available to open the Agent detail page from this shell path. |
+| `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-autonomy-dd -only-testing:TronMobileTests/AgentSettingsPageLayoutTests/testAgentSettingsAutonomyRendersForVisualQA` | 65 then 0 | Red/green simulator-hosted render proof. Initial compile failed because the source-level layout test file lacked `@testable import TronMobile`; final hosted `UIHostingController` render passed and replaced an unusable `ImageRenderer` placeholder artifact. |
+| `rm -rf /tmp/tron-xcode-autonomy-dd && xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-autonomy-dd -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/ServerSettingsTests -only-testing:TronMobileTests/AgentContextSettingsPageTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests` | 65 then 0 | Fresh simulator proof after copy/render changes: 17 XCTest cases plus 36 Swift Testing cases passed. Red/green detail: initial rerun failed because the render test used unavailable iOS `homeDirectoryForCurrentUser`; final run passed after switching the seeded workspace path to `NSTemporaryDirectory()`. Final render artifact: `~/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/3D8FAB85-AA8B-4CD4-BE28-01DFF7A815CF/Documents/tron-visual-artifacts/agent-settings-autonomy-render.png`. |
+
+### Source Evidence
+
+- [`packages/agent/src/domains/settings/implementation/types/server.rs`](../src/domains/settings/implementation/types/server.rs):
+  adds `AgentAutonomySettings` and default `approvalPromptMode = disabled`.
+- [`packages/agent/defaults/profiles/default/profile.toml`](../defaults/profiles/default/profile.toml):
+  records the managed default autonomy mode.
+- [`packages/agent/src/engine/capabilities.rs`](../src/engine/capabilities.rs)
+  and [`packages/agent/src/engine/host/invocation_handle.rs`](../src/engine/host/invocation_handle.rs):
+  route high-risk approval-required agent invocations through testing prompts
+  only in testing mode; default mode creates audited auto-decision records,
+  executes the preserved child invocation, and avoids duplicate resolved events
+  for terminal replays.
+- [`packages/agent/src/domains/agent/contract.rs`](../src/domains/agent/contract.rs),
+  [`packages/agent/src/domains/agent/handlers.rs`](../src/domains/agent/handlers.rs),
+  and [`packages/agent/src/domains/agent/operations/work_snapshot.rs`](../src/domains/agent/operations/work_snapshot.rs):
+  register and implement `agent::work_snapshot` from server-owned settings,
+  catalog, invocation, approval, guardrail, and audit truth.
+- [`packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Settings.swift`](../../ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Settings.swift),
+  [`packages/ios-app/Sources/ViewModels/State/SettingsState.swift`](../../ios-app/Sources/ViewModels/State/SettingsState.swift),
+  and [`packages/ios-app/Sources/Views/Settings/Pages/AgentSettingsPage.swift`](../../ios-app/Sources/Views/Settings/Pages/AgentSettingsPage.swift):
+  decode, store, update, and expose the autonomy prompt mode in Agent settings
+  with worker-first Autonomy Mode copy.
+- [`packages/ios-app/Tests/Views/AgentSettingsPageLayoutTests.swift`](../../ios-app/Tests/Views/AgentSettingsPageLayoutTests.swift):
+  locks the Autonomy Mode label, independent-mode copy, QA prompt copy, and
+  produces a simulator-hosted visual artifact for the Agent settings page.
+
+### Findings
+
+- Default autonomy is now run-unless-blocked: interactive approval prompts are
+  disabled by default, but approval audit records remain durable and testing
+  mode preserves the old pending-prompt path for QA.
+- Guardrail/schema preflight still happens before auto-decision and creates no
+  approval audit record or child effect when it blocks.
+- Idempotent default-mode replay returns the original child result, creates one
+  approval audit record, performs one child effect, and publishes one resolved
+  approval event.
+- Terminal default-mode replay is fail-closed: `denied` approval records return
+  `APPROVAL_DENIED`, `failed` approval records return the stored child failure,
+  neither path retries the child handler, and neither path records a new child
+  invocation.
+- `agent::work_snapshot` deliberately filters system/infrastructure workers
+  from default worker cards so idle snapshots stay product-facing.
+- The final simulator render screenshot shows the Agent settings page, Autonomy
+  Mode set to Independent, and the copy "Tron runs independently on this Mac,
+  audits approval-required work, and only stops when guardrails block it."
+- The render fixture now uses a simulator-safe temporary workspace seed instead
+  of a macOS-only home-directory API.
+- The in-thread tool registry exposed no simulator tap/computer-use control.
+  `simctl` launch/openurl/screenshot proved the Settings sheet and Agent tile,
+  while the hosted render test proves the Agent detail content.
+
+### Open Loops
+
+- JARVIS-8 still needs plain Guardrails settings UX and paired-server simulator
+  action checks before receiving points.
+- JARVIS-5 still owns the default iOS Work dashboard replacement that consumes
+  `agent::work_snapshot`.

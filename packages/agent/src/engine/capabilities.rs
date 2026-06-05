@@ -14,6 +14,7 @@ use super::invocation::{CausalContext, Invocation, InvocationResult};
 use super::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 use super::types::{FunctionDefinition, RiskLevel};
 use super::{policy, schema};
+use crate::domains::settings::{AutonomyApprovalPromptMode, get_settings};
 
 /// Agent-facing engine capability client.
 #[derive(Clone)]
@@ -148,50 +149,63 @@ impl AgentCapabilityClient {
             if function.required_authority.approval_required
                 && function.risk_level >= RiskLevel::High
             {
-                let approval = self
-                    .handle
-                    .request_approval(EngineApprovalRequest {
-                        function_id: function_id.clone(),
-                        payload,
-                        causal_context: invocation.causal_context.clone(),
-                        delivery_mode: invocation.delivery_mode,
-                        target_metadata: Some(EngineApprovalTargetMetadata::from_function(
-                            &function,
-                        )),
-                    })
-                    .await;
-                let details = match approval {
-                    Ok(record) => serde_json::json!({
-                        "code": "APPROVAL_REQUIRED",
-                        "approvalId": record.approval_id,
-                        "status": record.status,
-                        "functionId": function_id.as_str(),
-                        "traceId": record.trace_id.as_str(),
-                    }),
-                    Err(error) => serde_json::json!({
-                        "code": "APPROVAL_REQUEST_FAILED",
-                        "functionId": function_id.as_str(),
-                        "error": error.to_string(),
-                    }),
+                let request = EngineApprovalRequest {
+                    function_id: function_id.clone(),
+                    payload,
+                    causal_context: invocation.causal_context.clone(),
+                    delivery_mode: invocation.delivery_mode,
+                    target_metadata: Some(EngineApprovalTargetMetadata::from_function(&function)),
                 };
-                let error = EngineError::DomainFailure {
-                    domain: "approval".to_owned(),
-                    code: "APPROVAL_REQUIRED".to_owned(),
-                    message: format!(
-                        "approval required before agent invocation of {}",
-                        invocation.function_id
-                    ),
-                    details: Some(details),
+                if get_settings().agent.autonomy.approval_prompt_mode
+                    == AutonomyApprovalPromptMode::Testing
+                {
+                    let approval = self.handle.request_approval(request).await;
+                    let details = match approval {
+                        Ok(record) => serde_json::json!({
+                            "code": "APPROVAL_REQUIRED",
+                            "approvalId": record.approval_id,
+                            "status": record.status,
+                            "functionId": function_id.as_str(),
+                            "traceId": record.trace_id.as_str(),
+                        }),
+                        Err(error) => serde_json::json!({
+                            "code": "APPROVAL_REQUEST_FAILED",
+                            "functionId": function_id.as_str(),
+                            "error": error.to_string(),
+                        }),
+                    };
+                    let error = EngineError::DomainFailure {
+                        domain: "approval".to_owned(),
+                        code: "APPROVAL_REQUIRED".to_owned(),
+                        message: format!(
+                            "approval required before agent invocation of {}",
+                            invocation.function_id
+                        ),
+                        details: Some(details),
+                    };
+                    return self
+                        .handle
+                        .record_policy_stopped_invocation(
+                            invocation,
+                            function.owner_worker,
+                            function.revision,
+                            error,
+                        )
+                        .await;
+                }
+                return match self.handle.auto_approve_and_invoke(request).await {
+                    Ok(outcome) => outcome.child_result,
+                    Err(error) => {
+                        self.handle
+                            .record_policy_stopped_invocation(
+                                invocation,
+                                function.owner_worker,
+                                function.revision,
+                                error,
+                            )
+                            .await
+                    }
                 };
-                return self
-                    .handle
-                    .record_policy_stopped_invocation(
-                        invocation,
-                        function.owner_worker,
-                        function.revision,
-                        error,
-                    )
-                    .await;
             }
         }
         self.handle.invoke(invocation).await

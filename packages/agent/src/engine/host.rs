@@ -24,6 +24,7 @@ use crate::shared::logging::{LogQueryOptions, LogStore};
 
 use super::approval::{
     ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
+    EngineApprovalTargetMetadata, EngineAutoApprovalOutcome,
 };
 use super::compensation::{EngineCompensationRecord, compensation_record};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};

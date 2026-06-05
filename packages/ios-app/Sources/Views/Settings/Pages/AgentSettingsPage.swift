@@ -68,6 +68,7 @@ struct AgentSettingsPage: View {
     private var stackedContent: some View {
         summaryCard
         quickSessionCard
+        autonomySection
         hooksSection
         promptLibrarySection
         messageQueueCard
@@ -81,6 +82,7 @@ struct AgentSettingsPage: View {
             HStack(alignment: .top, spacing: 16) {
                 VStack(spacing: 16) {
                     quickSessionCard
+                    autonomySection
                     hooksSection
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -122,6 +124,45 @@ struct AgentSettingsPage: View {
         BuiltinHookCatalog.all.filter { meta in
             settingsState.builtinHooks.first(where: { $0.id == meta.id })?.enabled ?? true
         }.count
+    }
+
+    // MARK: - Autonomy
+
+    private var autonomyCaption: String {
+        switch settingsState.autonomyApprovalPromptMode {
+        case "testing":
+            return "Testing mode shows approval prompts for QA while preserving server-side guardrails."
+        default:
+            return "Tron runs independently on this Mac, audits approval-required work, and only stops when guardrails block it."
+        }
+    }
+
+    private var autonomySection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: AgentSettingsSection.autonomy.rawValue)
+
+            SettingsCard {
+                SettingsRow(icon: "shield", label: "Autonomy Mode") {
+                    SettingsCycleToggle(
+                        options: [("disabled", "Independent"), ("testing", "Testing")],
+                        current: settingsState.autonomyApprovalPromptMode
+                    ) { newValue in
+                        settingsState.autonomyApprovalPromptMode = newValue
+                        updateServerSetting {
+                            ServerSettingsUpdate(
+                                agent: .init(
+                                    autonomy: .init(
+                                        approvalPromptMode: AutonomyApprovalPromptMode.from(newValue)
+                                    )
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            SettingsCaption(text: autonomyCaption)
+        }
     }
 
     // MARK: - Quick Session

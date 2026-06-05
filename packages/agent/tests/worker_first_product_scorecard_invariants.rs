@@ -36,22 +36,24 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
 
     for required in [
         "# Worker-First Tron Product Scorecard",
-        "Current score: **0/100**",
-        "Status: **active; JARVIS-0 baseline formalization in progress**",
+        "Current score: **22/100**",
+        "Status: **active; JARVIS-2 and JARVIS-4 server checkpoint passed; JARVIS-0 visual baseline and JARVIS-8 guardrail UX remain open**",
         "Evidence manifest: [`worker-first-product-evidence-manifest.md`](worker-first-product-evidence-manifest.md)",
         "| JARVIS-0 | Formalize scorecard and baseline | 5 | running |",
         "| JARVIS-1 | Primitive collapse | 8 | pending |",
-        "| JARVIS-2 | Default autonomy policy | 12 | pending |",
+        "| JARVIS-2 | Default autonomy policy | 12 | passed_after_fix |",
         "| JARVIS-3 | Worker-first orchestration | 10 | pending |",
-        "| JARVIS-4 | Work snapshot API | 10 | pending |",
+        "| JARVIS-4 | Work snapshot API | 10 | passed_after_fix |",
         "| JARVIS-5 | iOS Work dashboard | 12 | pending |",
         "| JARVIS-6 | Chat noise reduction | 8 | pending |",
         "| JARVIS-7 | Worker/detail sheets | 8 | pending |",
-        "| JARVIS-8 | Guardrails and settings UX | 7 | pending |",
+        "| JARVIS-8 | Guardrails and settings UX | 7 | running |",
         "| JARVIS-9 | Docs and examples | 6 | pending |",
         "| JARVIS-10 | Cleanup and static gates | 7 | pending |",
         "| JARVIS-11 | Soak, visual QA, and closeout | 7 | pending |",
         "Default autonomy means run-unless-blocked, not ask-first.",
+        "Approval-required metadata becomes audited auto-decision records",
+        "`agent::work_snapshot` contract/handler/projection",
         "Remote package discovery, push, merge, release, deploy, and production",
         "Visual baseline screenshots are still open and block JARVIS-0 points.",
     ] {
@@ -74,13 +76,24 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
     }
 
     assert!(
-        manifest.contains("Current score: **0/100**")
+        manifest.contains("Current score: **22/100**")
             && manifest.contains("| JARVIS-0 | running |")
+            && manifest.contains("| JARVIS-2 | passed_after_fix |")
+            && manifest.contains("| JARVIS-4 | passed_after_fix |")
+            && manifest.contains("| JARVIS-8 | running |")
             && manifest.contains("| JARVIS-11 | pending |")
             && manifest.contains("Visual baseline screenshots remain open.")
             && manifest
                 .contains("Current primary iOS source still includes `NavigationMode.engine`")
-            && manifest.contains("Console views."),
+            && manifest.contains("Console views.")
+            && manifest.contains("Fresh simulator test proof: 47 selected tests passed"),
+        "worker-first evidence manifest must track the active baseline and open visual proof"
+    );
+    assert!(
+        manifest.contains("Fresh simulator proof after copy/render changes: 17 XCTest cases plus 36 Swift Testing cases passed")
+            && manifest.contains("agent-settings-autonomy-render.png")
+            && manifest.contains("The in-thread tool registry exposed no simulator tap/computer-use control.")
+            && scorecard.contains("Remaining: add plain Guardrails UX and capture paired-server action checks before awarding points."),
         "worker-first evidence manifest must track the active baseline and open visual proof"
     );
 
