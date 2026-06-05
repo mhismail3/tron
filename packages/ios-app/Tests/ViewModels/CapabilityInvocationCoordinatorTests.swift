@@ -304,6 +304,52 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         }
     }
 
+    func testStreamedCapabilityStartProjectsWorkSummary() async throws {
+        let event = CapabilityInvocationStartedPlugin.Result(
+            modelPrimitiveName: "execute",
+            invocationId: "work_stream_123",
+            arguments: [
+                "target": AnyCodable("process::run"),
+                "intent": AnyCodable("Check repository state."),
+                "arguments": AnyCodable([
+                    "command": "git status --short",
+                    "executionMode": "read_only"
+                ]),
+                "reason": AnyCodable("User asked for current repository state.")
+            ],
+            formattedArguments: "{}",
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "execute",
+                contractId: "process::run",
+                implementationId: "first_party.process.v1.run",
+                functionId: "process::run",
+                pluginId: "first_party.process",
+                workerId: "process-worker",
+                trustTier: "first_party_signed"
+            )
+        )
+
+        coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
+
+        XCTAssertEqual(mockContext.messages.count, 1)
+        if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
+            XCTAssertEqual(invocation.display.primitiveTitle, "Work")
+            XCTAssertEqual(invocation.display.chipTitle, "Run Command")
+            XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Worker", value: "Process Worker")))
+            XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
+            let visibleProjection = [
+                invocation.display.primitiveTitle,
+                invocation.display.chipTitle,
+                invocation.display.commandText,
+                invocation.display.summaryText
+            ].joined(separator: " ")
+            XCTAssertFalse(visibleProjection.contains("execute"))
+            XCTAssertFalse(visibleProjection.contains("first_party"))
+        } else {
+            XCTFail("Expected capability invocation content")
+        }
+    }
+
     func testCapabilityInvocationStartFlushesStreamingTextFirst() async throws {
         // Given: A capability start event
         let event = CapabilityInvocationStartedPlugin.Result(

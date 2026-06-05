@@ -45,18 +45,18 @@ struct CapabilityDetailHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let plugin = CapabilityPresentation.pluginLabel(for: data.identity) {
-                CapabilityHeaderMetric(label: "Plugin", value: plugin, tint: tint)
+            if let worker = CapabilityPresentation.workerLabel(for: data.identity, targetId: display.targetId) {
+                CapabilityHeaderMetric(label: "Worker", value: worker, tint: tint)
             }
         }
         .padding(16)
         .background {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.clear)
-                .glassEffect(
-                    .regular.tint(accent.opacity(0.14)),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
+                .fill(Color.tronSurface.opacity(0.92))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(accent.opacity(0.20), lineWidth: 1)
+                }
         }
     }
 

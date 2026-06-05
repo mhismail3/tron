@@ -2,7 +2,7 @@
 
 Created: **2026-06-05**
 Scorecard: [`worker-first-product-scorecard.md`](worker-first-product-scorecard.md)
-Current score: **51/100**
+Current score: **59/100**
 
 This manifest records evidence for the active worker-first product scorecard.
 Update it at each checkpoint with commands, return codes, exact source refs,
@@ -31,7 +31,7 @@ screenshots, runtime ids, open loops, and the next test.
 | JARVIS-3 | passed_after_fix | Worker Guide and execute schema default non-trivial work to worker/subagent delegation, provider-context tests prove guide injection, Work snapshot projects subagent jobs as Workers, and integration proof fans out two session workers without approvals. |
 | JARVIS-4 | passed_after_fix | `agent::work_snapshot` is registered and covered by DTO tests for idle state, active work, worker health, milestones, guardrails, and audit refs. |
 | JARVIS-5 | passed_after_fix | Top-level iOS Work mode reads `agent::work_snapshot`, renders autonomy/active work/workers/results/guardrails/Audit, and has iPhone/iPad simulator screenshots. |
-| JARVIS-6 | pending | Not started. |
+| JARVIS-6 | passed_after_fix | Work chip/action detail projection replaces generic execute copy; default details show work summary while raw request/result/schema/trace/policy/approval state stays behind Audit Details. Streamed and reconstructed sessions plus hosted iPhone render are covered. |
 | JARVIS-7 | pending | Not started. |
 | JARVIS-8 | passed_after_fix | Agent settings expose Autonomy Mode and plain Guardrails rows; parity/layout tests and simulator render proof cover the worker-first copy. |
 | JARVIS-9 | pending | Not started. |
@@ -338,3 +338,92 @@ screenshots, runtime ids, open loops, and the next test.
   action/soak proof.
 - JARVIS-10 still owns deleting or renaming remaining audit-only Engine Console
   ownership and adding broad absence gates for primary UI jargon.
+
+## JARVIS-6 Evidence
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `xcodegen generate` | 0 | Regenerated the iOS project after adding the action-detail view test file, Work-row model extension, and focused reconstructed-session test file. |
+| `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-chat-work-red -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests -only-testing:TronMobileTests/CapabilityInvocationCoordinatorTests/testStreamedCapabilityStartProjectsWorkSummary -only-testing:TronMobileTests/UnifiedEventTransformerTests/testReconstructedCapabilityInvocationProjectsWorkSummary -only-testing:TronMobileTests/CapabilityInvocationDetailViewTests` | 65 | Red proof: new tests failed because `CapabilityInvocationDisplayModel` did not yet expose `workRows`. |
+| `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-chat-work-red -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests -only-testing:TronMobileTests/CapabilityInvocationCoordinatorTests/testStreamedCapabilityStartProjectsWorkSummary -only-testing:TronMobileTests/UnifiedEventTransformerWorkProjectionTests/testReconstructedCapabilityInvocationProjectsWorkSummary -only-testing:TronMobileTests/CapabilityInvocationDetailViewTests` | 0 | Green proof: 27 selected simulator tests passed after the Work projection, Audit Details changes, solid detail-surface guard, and large-file-budget split. |
+| `view_image .../capability-invocation-detail-work-render.png` | 0 | Visual inspection confirmed the iPhone detail sheet starts with Run Command, Worker, Work, What happened, Why, Worker, Status, Result, and compact Inputs without raw request/result/schema/trace/policy payloads in the default viewport or reflected text bleed inside the Work card. |
+
+### Simulator Evidence
+
+- Target simulator UDID: `7BDA4AF9-1C40-47E3-A925-0F88C191F263`.
+- Bundle under test: `TronMobile.app` from the `Tron` scheme, Beta
+  simulator configuration.
+- Hosted iPhone action-detail artifact:
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/BD080F62-AA68-458C-92BC-13406AE6F098/Documents/tron-visual-artifacts/capability-invocation-detail-work-render.png`.
+- The simulator app attempted to reconnect to the default local server
+  `ws://127.0.0.1:19847/engine`; the server was not running, so logs include
+  expected `NSURLErrorDomain Code=-1004` connection-refused warnings. The
+  hosted render and fixture tests still passed.
+- The in-thread tool registry exposed no simulator tap/computer-use control.
+  Proof used `xcodebuild`, hosted SwiftUI rendering, simulator app execution
+  through XCTest, emitted PNG artifacts, and manual visual inspection through
+  the local image viewer.
+
+### Source Evidence
+
+- [`packages/ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift`](../../ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift):
+  preserves raw request/result and approval state for Audit Details and removes
+  the unused `capabilityRows` branch.
+- [`packages/ios-app/Sources/Models/Messages/CapabilityInvocationWorkRows.swift`](../../ios-app/Sources/Models/Messages/CapabilityInvocationWorkRows.swift):
+  owns `workRows` for What happened / Why / Worker / Status / Result and
+  formats result previews into one primary-path line.
+- [`packages/ios-app/Sources/Models/Messages/CapabilityPresentation.swift`](../../ios-app/Sources/Models/Messages/CapabilityPresentation.swift):
+  presents generic `execute` as Work and derives a readable Worker label from
+  server-owned presentation hints, worker id, target namespace, or plugin id.
+- [`packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationViews.swift`](../../ios-app/Sources/Views/Capabilities/CapabilityInvocationViews.swift):
+  replaces default Request/Approval/Advanced sections with Work and Audit
+  Details, keeping raw request/result/approval payloads collapsed behind audit
+  disclosures.
+- [`packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationDetailComponents.swift`](../../ios-app/Sources/Views/Capabilities/CapabilityInvocationDetailComponents.swift):
+  changes the detail header metric from Plugin to Worker and uses a solid
+  readable surface for the header.
+- [`packages/ios-app/Sources/Views/Capabilities/Shared/CapabilityDetailSection.swift`](../../ios-app/Sources/Views/Capabilities/Shared/CapabilityDetailSection.swift):
+  uses a solid detail surface so nearby text does not reflect into the Work
+  summary card.
+- [`packages/ios-app/Tests/Models/CapabilityInvocationDisplayModelTests.swift`](../../ios-app/Tests/Models/CapabilityInvocationDisplayModelTests.swift):
+  locks Work language for generic/resolved execute calls and proves raw schema,
+  trace, binding, and implementation ids stay out of the default work rows.
+- [`packages/ios-app/Tests/ViewModels/CapabilityInvocationCoordinatorTests.swift`](../../ios-app/Tests/ViewModels/CapabilityInvocationCoordinatorTests.swift):
+  covers the streamed capability-start path projecting Work, Worker, and Why
+  without execute or implementation jargon in visible chip text.
+- [`packages/ios-app/Tests/Core/Events/UnifiedEventTransformerWorkProjectionTests.swift`](../../ios-app/Tests/Core/Events/UnifiedEventTransformerWorkProjectionTests.swift):
+  covers persisted-session reconstruction projecting the same Work rows from
+  interleaved assistant content plus capability lifecycle events.
+- [`packages/ios-app/Tests/Views/Capabilities/CapabilityInvocationDetailViewTests.swift`](../../ios-app/Tests/Views/Capabilities/CapabilityInvocationDetailViewTests.swift):
+  adds source gates for audit-only raw protocol sections, guards the solid
+  detail surface, and emits the hosted iPhone action-detail visual artifact.
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+  and [`README.md`](../../../README.md):
+  document Work chips/action details and the raw protocol boundary.
+
+### Findings
+
+- Default chat/action details now render one high-signal Work projection per
+  invocation. Generic unresolved `execute` appears as Work/Choosing worker
+  rather than as a user-facing primitive.
+- The default detail sheet shows What happened, Why, Worker, Status, Result,
+  and compact Inputs before the progress cards.
+- Detail surfaces are solid and readable in the hosted iPhone render; the Work
+  card no longer shows reflected text from adjacent content.
+- Raw request, raw result, schema, trace, binding, policy, and approval-state
+  data remain available, but only under the Audit Details disclosure.
+- The live coordinator already deduplicates generating/start events by
+  invocation id; the new streamed-path test proves the resulting visible
+  projection uses Work/Worker language.
+- The reconstructed-session test proves resumed sessions use the same Work
+  projection as live sessions.
+
+### Open Loops
+
+- JARVIS-6 is closed for chat/action detail projection.
+- JARVIS-7 still owns dedicated Worker detail sheets and state-matrix
+  screenshots across running, success, failure, and blocked guardrail states.
+- JARVIS-10 still owns broader primary-UI absence gates for remaining
+  audit-only Engine Console/jargon cleanup.

@@ -30,7 +30,7 @@ enum CapabilityPresentation {
             switch modelPrimitiveName {
             case "search": return "Search capabilities"
             case "inspect": return "Inspect capability"
-            case "execute": return "Resolve capability"
+            case "execute": return "Work"
             default: return humanizeCapabilityId(modelPrimitiveName)
             }
         }
@@ -145,6 +145,27 @@ enum CapabilityPresentation {
         return "\(display) (\(source))"
     }
 
+    static func workerLabel(for identity: CapabilityIdentity, targetId: String? = nil) -> String? {
+        if let workerName = presentationString("workerName", for: identity)
+            ?? presentationString("workerLabel", for: identity)
+            ?? presentationString("worker", for: identity) {
+            return workerName
+        }
+        if let workerId = identity.workerId?.nilIfEmpty {
+            return humanizeWorkerId(workerId)
+        }
+        if let namespace = targetId?.split(separator: "::").first.map(String.init)
+            ?? identity.functionId?.split(separator: "::").first.map(String.init)
+            ?? identity.contractId?.split(separator: "::").first.map(String.init),
+           let friendly = friendlyWorkerNames[namespace] {
+            return friendly
+        }
+        if let pluginId = identity.pluginId?.nilIfEmpty {
+            return pluginDisplayName(pluginId)
+        }
+        return nil
+    }
+
     static func color(for identity: CapabilityIdentity) -> Color {
         switch identity.riskLevel?.lowercased() {
         case "critical", "high":
@@ -189,7 +210,7 @@ enum CapabilityPresentation {
         "agent::submit_answers": "Submit Answers",
         "agent::subagent_result": "Subagent Result",
         "agent::subagent_status": "Subagent Status",
-        "capability::execute": "Execute",
+        "capability::execute": "Work",
         "capability::inspect": "Check capability",
         "capability::search": "Find capabilities",
         "catalog::list": "Check capabilities",
@@ -259,6 +280,38 @@ enum CapabilityPresentation {
         "sandbox": "Sandbox",
         "web": "Web"
     ]
+
+    private static let friendlyWorkerNames: [String: String] = [
+        "agent": "Agent",
+        "catalog": "Catalog",
+        "display": "Display",
+        "filesystem": "File System",
+        "job": "Jobs",
+        "notifications": "Notifications",
+        "process": "Process",
+        "sandbox": "Sandbox",
+        "self_extension": "Autonomy",
+        "web": "Web",
+        "worker": "Worker"
+    ]
+
+    private static func humanizeWorkerId(_ workerId: String) -> String {
+        let tail = workerId.split(separator: ":").last.map(String.init) ?? workerId
+        return tail
+            .replacingOccurrences(of: "first_party.", with: "")
+            .replacingOccurrences(of: "external_mcp.", with: "")
+            .replacingOccurrences(of: "external_openapi.", with: "")
+            .replacingOccurrences(of: "session_generated.", with: "")
+            .replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: ".", with: " ")
+            .split(separator: " ")
+            .map { word in
+                guard let first = word.first else { return "" }
+                return first.uppercased() + word.dropFirst()
+            }
+            .joined(separator: " ")
+    }
 
     private static func colorFromTheme(_ themeColor: String?) -> Color? {
         guard let themeColor = themeColor?.nilIfEmpty else { return nil }

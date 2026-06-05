@@ -36,8 +36,8 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
 
     for required in [
         "# Worker-First Tron Product Scorecard",
-        "Current score: **51/100**",
-        "Status: **active; JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, and JARVIS-8 passed; JARVIS-0 visual baseline, JARVIS-1 vocabulary/static gates, JARVIS-6 chat noise, JARVIS-7 worker detail state matrix, JARVIS-10 cleanup gates, and JARVIS-11 soak remain open**",
+        "Current score: **59/100**",
+        "Status: **active; JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, JARVIS-6, and JARVIS-8 passed; JARVIS-0 visual baseline, JARVIS-1 vocabulary/static gates, JARVIS-7 worker detail state matrix, JARVIS-10 cleanup gates, and JARVIS-11 soak remain open**",
         "Evidence manifest: [`worker-first-product-evidence-manifest.md`](worker-first-product-evidence-manifest.md)",
         "| JARVIS-0 | Formalize scorecard and baseline | 5 | running |",
         "| JARVIS-1 | Primitive collapse | 8 | running |",
@@ -45,7 +45,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "| JARVIS-3 | Worker-first orchestration | 10 | passed_after_fix |",
         "| JARVIS-4 | Work snapshot API | 10 | passed_after_fix |",
         "| JARVIS-5 | iOS Work dashboard | 12 | passed_after_fix |",
-        "| JARVIS-6 | Chat noise reduction | 8 | pending |",
+        "| JARVIS-6 | Chat noise reduction | 8 | passed_after_fix |",
         "| JARVIS-7 | Worker/detail sheets | 8 | pending |",
         "| JARVIS-8 | Guardrails and settings UX | 7 | passed_after_fix |",
         "| JARVIS-9 | Docs and examples | 6 | pending |",
@@ -59,6 +59,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "projects live subagent jobs as `workerType=agent` Worker cards",
         "Replaced top-level `NavigationMode.engine` with `NavigationMode.work`",
         "Fix during visual proof: wide section icons clipped on iPhone",
+        "replaced reflective detail-card glass with solid readable surfaces",
         "Agent settings expose Autonomy Mode with Independent/Testing prompt mode and plain Guardrails rows",
         "Remote package discovery, push, merge, release, deploy, and production",
         "Visual baseline screenshots are still open and block JARVIS-0 points.",
@@ -82,13 +83,14 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
     }
 
     assert!(
-        manifest.contains("Current score: **51/100**")
+        manifest.contains("Current score: **59/100**")
             && manifest.contains("| JARVIS-0 | running |")
             && manifest.contains("| JARVIS-1 | running |")
             && manifest.contains("| JARVIS-2 | passed_after_fix |")
             && manifest.contains("| JARVIS-3 | passed_after_fix |")
             && manifest.contains("| JARVIS-4 | passed_after_fix |")
             && manifest.contains("| JARVIS-5 | passed_after_fix |")
+            && manifest.contains("| JARVIS-6 | passed_after_fix |")
             && manifest.contains("| JARVIS-8 | passed_after_fix |")
             && manifest.contains("| JARVIS-11 | pending |")
             && manifest.contains("Visual baseline screenshots remain open.")
@@ -96,6 +98,14 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && manifest.contains("Console views.")
             && manifest.contains("Fresh simulator test proof: 47 selected tests passed"),
         "worker-first evidence manifest must track the active baseline and open visual proof"
+    );
+    assert!(
+        manifest.contains("Green proof: 27 selected simulator tests passed")
+            && manifest.contains("capability-invocation-detail-work-render.png")
+            && manifest.contains("solid detail-surface guard")
+            && manifest.contains("reflected text bleed inside the Work card")
+            && scorecard.contains("Closed for chat/action detail projection."),
+        "worker-first evidence manifest must record the JARVIS-6 chat/action checkpoint without closing worker details"
     );
     assert!(
         manifest.contains("Fresh simulator proof after copy/render changes: 17 XCTest cases plus 36 Swift Testing cases passed")

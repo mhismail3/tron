@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: - Capability Detail Section
 
-/// Glass container with section header outside, matching SkillDetailSheet pattern.
-/// Reusable across all capability detail sheets.
+/// Solid detail container with the section header outside.
+/// Reusable across capability detail sheets where payload readability matters.
 @available(iOS 26.0, *)
 struct CapabilityDetailSection<Trailing: View, Content: View>: View {
     let title: String
@@ -31,8 +31,11 @@ struct CapabilityDetailSection<Trailing: View, Content: View>: View {
             .padding(14)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.clear)
-                    .glassEffect(.regular.tint(accent.opacity(0.12)), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .fill(Color.tronSurface.opacity(0.86))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(accent.opacity(0.16), lineWidth: 1)
+                    }
             }
         }
     }

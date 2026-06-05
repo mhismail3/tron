@@ -70,7 +70,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(invocation.display.primitiveTitle, "Execute")
+        XCTAssertEqual(invocation.display.primitiveTitle, "Work")
         XCTAssertEqual(invocation.display.sheetTitle, "Run Command")
         XCTAssertEqual(invocation.display.chipTitle, "Run Command")
         XCTAssertEqual(invocation.display.targetId, "process::run")
@@ -98,12 +98,12 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(invocation.display.primitiveTitle, "Execute")
-        XCTAssertEqual(invocation.display.sheetTitle, "Execute")
-        XCTAssertEqual(invocation.display.chipTitle, "Execute")
+        XCTAssertEqual(invocation.display.primitiveTitle, "Work")
+        XCTAssertEqual(invocation.display.sheetTitle, "Work")
+        XCTAssertEqual(invocation.display.chipTitle, "Work")
         XCTAssertNil(invocation.display.targetId)
-        XCTAssertEqual(invocation.display.capabilityName, "Execute")
-        XCTAssertEqual(invocation.display.commandText, "Invocation")
+        XCTAssertEqual(invocation.display.capabilityName, "Work")
+        XCTAssertEqual(invocation.display.commandText, "Choosing worker")
         XCTAssertFalse(invocation.display.chipTitle.contains("first_party"))
         XCTAssertFalse(invocation.display.commandText.contains("first_party"))
     }
@@ -167,10 +167,76 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(invocation.display.primitiveTitle, "Execute")
+        XCTAssertEqual(invocation.display.primitiveTitle, "Work")
         XCTAssertEqual(invocation.display.targetId, "process::run")
         XCTAssertEqual(invocation.display.capabilityName, "Run Command")
         XCTAssertEqual(invocation.display.commandText, "pwd")
+    }
+
+    func testExecuteDefaultDetailsProjectWorkSummaryAndKeepAuditRaw() {
+        let invocation = testCapabilityInvocation(
+            status: .success,
+            arguments: #"{"target":"process::run","intent":"Check repository state.","arguments":{"command":"git status --short","executionMode":"read_only"},"reason":"User asked for current repository state."}"#,
+            result: #"{"exitCode":0,"stdout":"clean\n","stderr":"","timedOut":false,"outputTruncated":false}"#,
+            details: [
+                "status": "ok",
+                "bindingDecision": [
+                    "selectionPolicy": "first_party_healthy",
+                    "selectedImplementation": "first_party.process.v1.run"
+                ],
+                "orchestration": [
+                    "phaseDetails": [
+                        "resolveMode": "explicit_target",
+                        "selectedTarget": [
+                            "contractId": "process::run",
+                            "implementationId": "first_party.process.v1.run",
+                            "schemaDigest": "sha256:process"
+                        ]
+                    ]
+                ],
+                "output": [
+                    "exitCode": 0,
+                    "stdout": "clean\n",
+                    "timedOut": false,
+                    "outputTruncated": false
+                ]
+            ],
+            durationMs: 86,
+            identity: CapabilityIdentity(
+                modelPrimitiveName: "execute",
+                contractId: "process::run",
+                implementationId: "first_party.process.v1.run",
+                functionId: "process::run",
+                pluginId: "first_party.process",
+                workerId: "process-worker",
+                schemaDigest: "sha256:process",
+                trustTier: "first_party_signed",
+                riskLevel: "low",
+                effectClass: "read",
+                traceId: "trace-process",
+                bindingDecisionId: "binding-process"
+            )
+        )
+
+        XCTAssertEqual(
+            invocation.display.workRows.map(\.label),
+            ["What happened", "Why", "Worker", "Status", "Result"]
+        )
+        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "What happened", value: "Run Command")))
+        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
+        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Worker", value: "Process Worker")))
+        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Status", value: "Completed · 86ms")))
+        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Result", value: "clean")))
+
+        let defaultText = invocation.display.workRows.map(\.value).joined(separator: " ")
+        XCTAssertFalse(defaultText.contains("schema"))
+        XCTAssertFalse(defaultText.contains("trace-process"))
+        XCTAssertFalse(defaultText.contains("binding-process"))
+        XCTAssertFalse(defaultText.contains("first_party"))
+        XCTAssertTrue(invocation.display.technicalRows.contains(CapabilityDisplayRow(label: "Schema", value: "sha256:process", isTechnical: true)))
+        XCTAssertTrue(invocation.display.technicalRows.contains(CapabilityDisplayRow(label: "Trace", value: "trace-process", isTechnical: true)))
+        XCTAssertNotNil(invocation.display.prettyArguments)
+        XCTAssertNotNil(invocation.display.prettyResult)
     }
 
     func testExecuteDisplaysTargetArgumentsAndExecutionPath() {
@@ -549,10 +615,10 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(invocation.display.sheetTitle, "Execute")
+        XCTAssertEqual(invocation.display.sheetTitle, "Work")
         XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
         XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.current, .pending, .pending, .pending])
-        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Finding the right capability")
+        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Choosing the right worker")
     }
 
     func testSelfExtensionRepairChipsKeepCatalogAndWorkerIdsInInspectOnly() {

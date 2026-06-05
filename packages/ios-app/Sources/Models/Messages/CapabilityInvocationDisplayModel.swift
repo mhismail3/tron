@@ -26,7 +26,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
     let statusWithDuration: String
     let targetId: String?
     let payloadSummary: String?
-    let capabilityRows: [CapabilityDisplayRow]
+    let workRows: [CapabilityDisplayRow]
     let progressSteps: [CapabilityProgressStep]
     let requestRows: [CapabilityDisplayRow]
     let executionGroups: [CapabilityDisplayGroup]
@@ -35,6 +35,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
     let technicalRows: [CapabilityDisplayRow]
     let prettyArguments: String?
     let prettyResult: String?
+    let prettyApprovalState: String?
 
     init(data: CapabilityInvocationData) {
         let argumentObject = Self.argumentObject(from: data)
@@ -82,14 +83,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
             capabilityName: capabilityName,
             payloadSummary: payloadSummary
         )
-        self.capabilityRows = Self.capabilityRows(
-            primitive: primitive,
-            identity: data.identity,
-            target: target,
-            capabilityName: capabilityName,
-            status: data.status,
-            duration: data.formattedDuration
-        )
         self.progressSteps = Self.progressSteps(
             primitive: primitive,
             data: data,
@@ -113,26 +106,37 @@ struct CapabilityInvocationDisplayModel: Equatable {
             arguments: argumentObject,
             output: outputObject
         )
-        self.resultRows = Self.resultRows(
+        let resultRows = Self.resultRows(
             data: data,
             details: details,
             output: outputObject
         )
-        self.resultPreview = Self.resultPreview(
+        let resultPreview = Self.resultPreview(
             primitive: primitive,
             result: data.result,
             output: outputObject
         )
+        self.workRows = Self.workRows(
+            data: data,
+            arguments: argumentObject,
+            target: target,
+            capabilityName: capabilityName,
+            statusText: self.statusWithDuration,
+            resultPreview: resultPreview
+        )
+        self.resultRows = resultRows
+        self.resultPreview = resultPreview
         self.technicalRows = Self.technicalRows(data: data)
         self.prettyArguments = Self.prettyJSONString(data.arguments) ?? data.arguments.nilIfEmpty
         self.prettyResult = data.result.flatMap(Self.prettyJSONString) ?? data.result?.nilIfEmpty
+        self.prettyApprovalState = data.approvalState.flatMap(Self.prettyJSON)
     }
 
     private static func primitiveTitle(_ primitive: String) -> String {
         switch primitive {
         case "search": return "Search"
         case "inspect": return "Inspect"
-        default: return "Execute"
+        default: return "Work"
         }
     }
 
@@ -161,7 +165,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         guard primitive == "execute", target != nil else {
             return primitiveTitle(primitive)
         }
-        return chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? "Execute"
+        return chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? "Work"
     }
 
     private static func statusText(
@@ -226,7 +230,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
                 .truncated(to: 120)
         default:
             if primitive == "execute", target == nil {
-                return "Invocation"
+                return "Choosing worker"
             }
             if let payloadSummary {
                 return payloadSummary.truncated(to: 140)
@@ -260,7 +264,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return parts.joined(separator: " via ")
     }
 
-    private static func presentationString(_ keys: [String], for identity: CapabilityIdentity) -> String? {
+    static func presentationString(_ keys: [String], for identity: CapabilityIdentity) -> String? {
         for key in keys {
             if let value = CapabilityPresentation.presentationString(key, for: identity) {
                 return value
@@ -318,7 +322,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return nil
     }
 
-    private static func targetArguments(from object: [String: Any]) -> [String: Any]? {
+    static func targetArguments(from object: [String: Any]) -> [String: Any]? {
         if let arguments = object["arguments"] as? [String: Any] {
             return arguments
         }
@@ -425,28 +429,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
         "workerId",
         "workspaceId"
     ]
-
-    private static func capabilityRows(
-        primitive: String,
-        identity: CapabilityIdentity,
-        target: String?,
-        capabilityName: String,
-        status: CapabilityInvocationStatus,
-        duration: String?
-    ) -> [CapabilityDisplayRow] {
-        var rows: [CapabilityDisplayRow] = []
-        func append(_ label: String, _ value: String?, technical: Bool = false) {
-            guard let value = value?.nilIfEmpty else { return }
-            rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
-        }
-
-        append("Capability", target ?? identity.contractId ?? identity.functionId ?? primitive, technical: true)
-        append("Name", capabilityName)
-        append("Source", CapabilityPresentation.sourceLabel(for: identity))
-        append("Duration", duration)
-        append("Plugin", CapabilityPresentation.pluginLabel(for: identity))
-        return rows
-    }
 
     private static func requestRows(
         primitive: String,
@@ -777,7 +759,16 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return String(data: pretty, encoding: .utf8)
     }
 
-    private static func firstString(_ keys: [String], in object: [String: Any]) -> String? {
+    private static func prettyJSON(_ value: [String: AnyCodable]) -> String? {
+        let raw = value.mapValues(\.value)
+        guard JSONSerialization.isValidJSONObject(raw),
+              let data = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]),
+              let pretty = String(data: data, encoding: .utf8)
+        else { return nil }
+        return pretty
+    }
+
+    static func firstString(_ keys: [String], in object: [String: Any]) -> String? {
         for key in keys {
             if let value = object[key], let string = simpleDisplayValue(value)?.nilIfEmpty {
                 return string

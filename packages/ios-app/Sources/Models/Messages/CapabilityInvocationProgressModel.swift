@@ -63,13 +63,13 @@ extension CapabilityInvocationDisplayModel {
             || isTerminal
         let runLabel = data.progressMessage?.nilIfEmpty
             ?? targetLabel.map { "Running \($0)" }
-            ?? "Executing capability"
+            ?? "Running work"
         let resultState = terminalState(data.status)
 
         return [
             CapabilityProgressStep(
                 title: "Choose",
-                detail: hasResolution ? "\(targetLabel ?? capabilityName) selected" : "Finding the right capability",
+                detail: hasResolution ? "\(targetLabel ?? capabilityName) selected" : "Choosing the right worker",
                 iconName: "scope",
                 state: hasResolution ? .completed : (isTerminal ? .attention : .current)
             ),

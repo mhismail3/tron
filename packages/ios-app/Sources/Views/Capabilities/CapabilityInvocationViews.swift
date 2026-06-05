@@ -151,7 +151,7 @@ struct CapabilityInvocationDetailSheet: View {
     let data: CapabilityInvocationData
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isAdvancedExpanded = false
+    @State private var isAuditExpanded = false
 
     private var display: CapabilityInvocationDisplayModel { data.display }
     private var accent: Color {
@@ -175,20 +175,36 @@ struct CapabilityInvocationDetailSheet: View {
                     CapabilityDetailHeader(data: data)
                         .sheetSection()
 
+                    workSection
                     journeySection
                     progressSection
-                    requestSection
-                    approvalSection
                     resultSection
                     artifactsSection
                     logsSection
                     errorSection
-                    advancedSection
+                    auditDetailsSection
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 28)
             }
         }
+    }
+
+    @ViewBuilder
+    private var workSection: some View {
+        CapabilityDetailSection(title: "Work", accent: accent, tint: tint) {
+            VStack(alignment: .leading, spacing: 14) {
+                CapabilityReadableRows(rows: display.workRows, tint: tint)
+
+                if !workInputRows.isEmpty {
+                    Divider()
+                        .overlay(accent.opacity(0.16))
+                    detailSubheading("Inputs")
+                    CapabilityReadableRows(rows: workInputRows, tint: tint)
+                }
+            }
+        }
+        .sheetSection()
     }
 
     @ViewBuilder
@@ -227,28 +243,6 @@ struct CapabilityInvocationDetailSheet: View {
     }
 
     @ViewBuilder
-    private var requestSection: some View {
-        if !display.requestRows.isEmpty {
-            CapabilityDetailSection(title: "Request", accent: accent, tint: tint) {
-                VStack(alignment: .leading, spacing: 12) {
-                    CapabilityReadableRows(rows: display.requestRows, tint: tint)
-                }
-            }
-            .sheetSection()
-        }
-    }
-
-    @ViewBuilder
-    private var approvalSection: some View {
-        if let approvalState = data.approvalState, !approvalState.isEmpty {
-            CapabilityDetailSection(title: "Approval", accent: .tronAmber, tint: TintedColors(accent: .tronAmber, colorScheme: colorScheme)) {
-                CapabilityInvocationCodeBlock(text: prettyJSON(approvalState))
-            }
-            .sheetSection()
-        }
-    }
-
-    @ViewBuilder
     private var resultSection: some View {
         if display.resultPreview?.nilIfEmpty != nil || data.result?.nilIfEmpty != nil || !display.resultRows.isEmpty {
             CapabilityDetailSection(title: data.status == .error ? "Failure" : "Result", accent: accent, tint: tint) {
@@ -261,7 +255,7 @@ struct CapabilityInvocationDetailSheet: View {
                             CapabilityInvocationCodeBlock(text: preview)
                         } else if data.result?.nilIfEmpty != nil {
                             CapabilityResultNote(
-                                text: "Structured output is available in Metadata.",
+                                text: "Structured output is available in Audit Details.",
                                 tint: tint
                             )
                         }
@@ -317,19 +311,19 @@ struct CapabilityInvocationDetailSheet: View {
     }
 
     @ViewBuilder
-    private var advancedSection: some View {
-        if hasAdvancedContent {
-            CapabilityDetailSection(title: "Advanced", accent: .tronSlate, tint: tint) {
-                DisclosureGroup(isExpanded: $isAdvancedExpanded) {
+    private var auditDetailsSection: some View {
+        if hasAuditContent {
+            CapabilityDetailSection(title: "Audit Details", accent: .tronSlate, tint: tint) {
+                DisclosureGroup(isExpanded: $isAuditExpanded) {
                     VStack(alignment: .leading, spacing: 16) {
                         if !display.executionGroups.isEmpty {
-                            advancedSubheading("Execution path")
+                            detailSubheading("Execution path")
                             ForEach(display.executionGroups) { group in
                                 CapabilityExecutionGroupView(group: group, tint: tint)
                             }
                         }
                         if !display.technicalRows.isEmpty {
-                            advancedSubheading("Metadata")
+                            detailSubheading("Metadata")
                             CapabilityReadableRows(rows: display.technicalRows, tint: tint)
                         }
                         if let prettyArguments = display.prettyArguments {
@@ -338,10 +332,13 @@ struct CapabilityInvocationDetailSheet: View {
                         if let prettyResult = display.prettyResult {
                             CapabilityRawDisclosure(title: "Raw result", text: prettyResult, tint: tint)
                         }
+                        if let prettyApprovalState = display.prettyApprovalState {
+                            CapabilityRawDisclosure(title: "Approval state", text: prettyApprovalState, tint: tint)
+                        }
                     }
                     .padding(.top, 10)
                 } label: {
-                    Label("Execution path, policy, and raw payloads", systemImage: "slider.horizontal.3")
+                    Label("Execution path, guardrails, and raw payloads", systemImage: "slider.horizontal.3")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(tint.heading)
                 }
@@ -357,14 +354,23 @@ struct CapabilityInvocationDetailSheet: View {
             || data.progressPercent != nil
     }
 
-    private var hasAdvancedContent: Bool {
+    private var hasAuditContent: Bool {
         !display.executionGroups.isEmpty
             || !display.technicalRows.isEmpty
             || display.prettyArguments != nil
             || display.prettyResult != nil
+            || display.prettyApprovalState != nil
     }
 
-    private func advancedSubheading(_ title: String) -> some View {
+    private var workInputRows: [CapabilityDisplayRow] {
+        guard primitive == "execute" else { return [] }
+        return display.requestRows.filter { row in
+            !["Intent", "Reason", "Contract", "Implementation", "Function", "Plugin", "Risk ceiling", "Trust floor", "Namespace"]
+                .contains(row.label)
+        }
+    }
+
+    private func detailSubheading(_ title: String) -> some View {
         Text(title)
             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
             .foregroundStyle(tint.subtle)
@@ -400,15 +406,6 @@ struct CapabilityInvocationDetailSheet: View {
             rows.append(CapabilityDisplayRow(label: "Recoverable", value: recoverable ? "Yes" : "No"))
         }
         return rows
-    }
-
-    private func prettyJSON(_ value: [String: AnyCodable]) -> String {
-        let raw = value.mapValues(\.value)
-        guard JSONSerialization.isValidJSONObject(raw),
-              let data = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]),
-              let pretty = String(data: data, encoding: .utf8)
-        else { return "{}" }
-        return pretty
     }
 }
 

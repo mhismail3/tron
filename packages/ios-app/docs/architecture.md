@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-05 (worker-first Work dashboard over `agent::work_snapshot`, plain Guardrails settings UX, worker-first autonomy settings parity, post-scorecard recent-gap campaign activated, HMH-F7 reconnect chaos proof, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, disconnected approval decision fail-closed guard, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Created by Agent projection over registry plus live catalog snapshots, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, Engine Console offline cache fail-closed mutation guards, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-05 (worker-first Work dashboard over `agent::work_snapshot`, worker-first chat/action detail projection, plain Guardrails settings UX, worker-first autonomy settings parity, post-scorecard recent-gap campaign activated, HMH-F7 reconnect chaos proof, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, disconnected approval decision fail-closed guard, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Created by Agent projection over registry plus live catalog snapshots, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, Engine Console offline cache fail-closed mutation guards, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -10,7 +10,7 @@ The iOS app is a SwiftUI client that connects to the Tron agent server via WebSo
 - Event-sourced state reconstruction
 - Push notifications for background alerts
 - Voice transcription input
-- Capability-native invocation/result rendering for the single model-facing `execute` harness and server-owned generated UI actions
+- Worker-first invocation/result rendering for the single model-facing `execute` harness and server-owned generated UI actions
 - A staged input composer where pending skills and attachments share one wrapping chip row before send; staged skill chips expose separate detail and remove accessibility actions while sent message skill chips stay compact
 - On iPad, hardware Tab in the prompt composer and Agent protected-branch field resigns input focus instead of inserting hidden draft text or submitting a setting; broader control-to-control keyboard traversal remains a separate visual QA concern
 - A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
@@ -119,26 +119,25 @@ Audit:  /engine invoke(capability::*) → CapabilityClient → EngineConsoleStat
 ```
 
 Live/stored `capability.invocation.started`, `capability.invocation.progress`,
-and `capability.invocation.completed` names are capability lifecycle labels.
-Active chat, dashboard, detail sheets, and history reconstruction render
-capability invocations from `CapabilityIdentity`
-metadata (`contractId`, `implementationId`, `pluginId`, schema digest, catalog
-revision, trust/risk/effect, trace, and binding decision). Optional
-`presentationHints` such as `displayName`, `chipTitle`, `summary`, lifecycle
-status labels, `icon`, and `themeColor` are capability-owned server metadata
-that the app maps into native Tron components; they never replace identity,
-lineage, approval, or policy fields. Clean-slate local storage means
-unsupported or malformed events are treated as diagnostics rather than
-normalized through retired names.
+and `capability.invocation.completed` names are immutable server lifecycle
+labels. Active chat, dashboard, action details, and history reconstruction
+render those events as Work: the default projection shows a high-signal chip and
+detail rows for what happened, why it ran, the worker, status, result, and
+compact inputs. The projection is still built from server-owned
+`CapabilityIdentity` and `presentationHints`; iOS does not infer policy,
+lineage, approval, or routing truth from display strings. Raw request/result,
+schema digest, trace, binding, policy, and approval-state payloads remain behind
+Audit Details. Clean-slate local storage means unsupported or malformed events
+are treated as diagnostics rather than normalized through retired names.
 Assistant message metadata renders server `tokenRecord` truth directly: the
 up-arrow value is provider-reported raw input, the down-arrow value is raw
 output, and server cost is locally printed once as a dollar amount. The
 computed new-input delta remains server-owned context-accounting state rather
 than a visible substitute for provider input.
-Capability detail sheets lead with server-owned request, status, and identity
-as a horizontal Choose/Prepare/Run/Finish progression. Execution path,
-selection policy, schema digests, raw requests, and raw results are available
-behind Advanced so the default sheet explains the action before showing audit
+Action detail sheets lead with a Work summary and a horizontal
+Choose/Prepare/Run/Finish progression. Execution path, selection policy, schema
+digests, raw requests, raw results, and approval state are available behind
+Audit Details so the default sheet explains the work before showing audit
 metadata.
 The progression is a clipped horizontal viewport inside the Progress section;
 cards may scroll, but must not paint outside the section container.
@@ -196,10 +195,11 @@ policy from raw model ids.
 | `Views/EngineConsole/EngineConsoleModuleProjectionView.swift` | Native local pack projection card for pack/config/activation/trust/health/evidence/action rows and server-authored surface-open controls |
 | `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources, including session-generated capability surfaces; uses Tron typography/color tokens, restrained native row expansion, and submits only stored action coordinates |
 | `Models/Messages/CapabilityInvocationTypes.swift` | Capability invocation lifecycle DTOs, artifacts, results, and errors |
-| `Models/Messages/CapabilityInvocationDisplayModel.swift` | Server-authored capability invocation display projection |
-| `Models/Messages/CapabilityInvocationProgressModel.swift` | Choose/Prepare/Run/Finish progress projection for capability detail sheets |
+| `Models/Messages/CapabilityInvocationDisplayModel.swift` | Server-authored invocation display projection and audit metadata |
+| `Models/Messages/CapabilityInvocationWorkRows.swift` | What happened / Why / Worker / Status / Result rows for Work action details |
+| `Models/Messages/CapabilityInvocationProgressModel.swift` | Choose/Prepare/Run/Finish progress projection for action detail sheets |
 | `Models/Messages/CapabilityPresentation.swift` | Capability status color, icon, and label presentation helpers |
-| `Views/Capabilities/CapabilityInvocationViews.swift` | Capability invocation chip/detail/result shell |
+| `Views/Capabilities/CapabilityInvocationViews.swift` | Work chip, action detail, result, and Audit Details shell |
 | `Views/Capabilities/CapabilityInvocationDetailComponents.swift` | Detail sheet header, execution groups, readable rows, and raw disclosure components |
 | `Views/Capabilities/CapabilityResultRenderers.swift` | Capability result summary/rendering components |
 
