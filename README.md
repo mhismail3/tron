@@ -123,6 +123,12 @@ Current living entry points:
 - `packages/agent/docs/tron-productization-evidence-manifest.md`: companion
   command/source/UI/soak evidence manifest for the completed productization
   scorecard.
+- `packages/agent/docs/worker-first-product-scorecard.md`: active worker-first
+  product scorecard for Work, Workers, Worker Packs, Autonomy, Guardrails,
+  Audit, default no-prompt autonomy, and replacement of Engine Console as the
+  primary product surface.
+- `packages/agent/docs/worker-first-product-evidence-manifest.md`: companion
+  evidence manifest for the active worker-first product scorecard.
 - `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
   for chat-led self-extension, Created by Agent, Packs, generated UI, trust
   labels, and model presets.
