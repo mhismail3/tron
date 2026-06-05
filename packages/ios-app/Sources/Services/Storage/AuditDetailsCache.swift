@@ -1,6 +1,6 @@
 import Foundation
 
-struct EngineConsoleCacheSnapshot: Codable, Equatable, Sendable {
+struct AuditDetailsCacheSnapshot: Codable, Equatable, Sendable {
     var catalogRevision: UInt64?
     var registryRevision: UInt64?
     var pluginSummaries: [CapabilityPluginManifestDTO]
@@ -17,24 +17,24 @@ struct EngineConsoleCacheSnapshot: Codable, Equatable, Sendable {
     }
 }
 
-final class EngineConsoleCache {
+final class AuditDetailsCache {
     private let fileURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    init(fileURL: URL = EngineConsoleCache.defaultFileURL()) {
+    init(fileURL: URL = AuditDetailsCache.defaultFileURL()) {
         self.fileURL = fileURL
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         decoder.dateDecodingStrategy = .iso8601
     }
 
-    func load() -> EngineConsoleCacheSnapshot? {
+    func load() -> AuditDetailsCacheSnapshot? {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        return try? decoder.decode(EngineConsoleCacheSnapshot.self, from: data)
+        return try? decoder.decode(AuditDetailsCacheSnapshot.self, from: data)
     }
 
-    func save(_ snapshot: EngineConsoleCacheSnapshot) throws {
+    func save(_ snapshot: AuditDetailsCacheSnapshot) throws {
         let data = try encoder.encode(snapshot)
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),
@@ -54,12 +54,12 @@ final class EngineConsoleCache {
         controlSnapshot: ControlSnapshotDTO?,
         audit: CapabilityAuditQueryResultDTO?,
         programRuns: CapabilityProgramRunQueryResultDTO? = nil
-    ) -> EngineConsoleCacheSnapshot {
+    ) -> AuditDetailsCacheSnapshot {
         let workers = registry?.documents?.filter { $0.kind == "worker" } ?? []
         let traces = audit?.events.filter { event in
             event.traceId?.isEmpty == false
         } ?? []
-        return EngineConsoleCacheSnapshot(
+        return AuditDetailsCacheSnapshot(
             catalogRevision: status?.catalogRevision,
             registryRevision: status?.registryRevision,
             pluginSummaries: registry?.plugins ?? [],
@@ -78,6 +78,6 @@ final class EngineConsoleCache {
             .first ?? FileManager.default.temporaryDirectory
         return base
             .appendingPathComponent("TronMobile", isDirectory: true)
-            .appendingPathComponent("EngineConsoleCache.json")
+            .appendingPathComponent("AuditDetailsCache.json")
     }
 }

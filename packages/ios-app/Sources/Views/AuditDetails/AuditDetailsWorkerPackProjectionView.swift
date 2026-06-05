@@ -1,28 +1,28 @@
 import SwiftUI
 
-struct EngineConsoleModuleProjectionCard: View {
-    let projection: EngineConsoleModuleOperatorProjection
+struct AuditDetailsWorkerPackProjectionCard: View {
+    let projection: AuditDetailsWorkerPackOperatorProjection
     let mutatingDisabled: Bool
-    var canOpenSurface: (EngineConsoleModuleSurfaceTarget) -> Bool
-    var openSurface: (EngineConsoleModuleSurfaceTarget) -> Void
+    var canOpenSurface: (AuditDetailsWorkerPackSurfaceTarget) -> Bool
+    var openSurface: (AuditDetailsWorkerPackSurfaceTarget) -> Void
 
     var body: some View {
-        EngineConsoleCard {
-            EngineConsoleCardHeader(
+        AuditDetailsCard {
+            AuditDetailsCardHeader(
                 symbol: "shippingbox",
                 title: projection.cardTitle,
                 subtitle: projection.cardSubtitle
             )
 
             if projection.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "shippingbox",
                     title: projection.emptyTitle,
                     message: projection.emptyMessage
                 )
             } else {
                 VStack(alignment: .leading, spacing: 12) {
-                    EngineConsoleBadgeRow(values: [
+                    AuditDetailsBadgeRow(values: [
                         "\(projection.packages.count) packs",
                         "\(projection.configs.count) configs",
                         "\(projection.activations.count) activations",
@@ -50,7 +50,7 @@ struct EngineConsoleModuleProjectionCard: View {
                 Button {
                     openSurface(target)
                 } label: {
-                    EngineConsoleActionRow(
+                    AuditDetailsActionRow(
                         symbol: target.symbol,
                         title: target.title,
                         subtitle: target.subtitle,
@@ -68,19 +68,19 @@ struct EngineConsoleModuleProjectionCard: View {
         if !projection.packages.isEmpty || !projection.configs.isEmpty || !projection.activations.isEmpty {
             moduleSectionTitle("Pack Resources")
             ForEach(Array(projection.packages.prefix(4)), id: \.id) { package in
-                EngineConsoleKeyValueRow(
+                AuditDetailsKeyValueRow(
                     package.displayName,
                     [package.lifecycleLabel, package.versionId].compactMap { $0 }.joined(separator: " / ")
                 )
             }
             ForEach(Array(projection.configs.prefix(3)), id: \.id) { config in
-                EngineConsoleKeyValueRow(
+                AuditDetailsKeyValueRow(
                     config.displayName,
                     [config.lifecycleLabel, config.versionId].compactMap { $0 }.joined(separator: " / ")
                 )
             }
             ForEach(Array(projection.activations.prefix(3)), id: \.id) { activation in
-                EngineConsoleKeyValueRow(
+                AuditDetailsKeyValueRow(
                     activation.displayName,
                     [activation.lifecycleLabel, activation.versionId].compactMap { $0 }.joined(separator: " / ")
                 )
@@ -93,7 +93,7 @@ struct EngineConsoleModuleProjectionCard: View {
         if !projection.sourceTrust.isEmpty {
             moduleSectionTitle("Trust")
             ForEach(Array(projection.sourceTrust.prefix(4)), id: \.id) { trust in
-                EngineConsoleKeyValueRow(
+                AuditDetailsKeyValueRow(
                     trust.packageId ?? trust.packageResourceId,
                     [
                         trust.presentation.statusLabel,
@@ -107,7 +107,7 @@ struct EngineConsoleModuleProjectionCard: View {
                     .joined(separator: " / ")
                 )
                 if !trust.presentation.warningLabels.isEmpty {
-                    EngineConsoleBadgeRow(values: trust.presentation.warningLabels)
+                    AuditDetailsBadgeRow(values: trust.presentation.warningLabels)
                 }
             }
         }
@@ -118,7 +118,7 @@ struct EngineConsoleModuleProjectionCard: View {
         if !projection.health.isEmpty {
             moduleSectionTitle("Health")
             ForEach(Array(projection.health.prefix(4)), id: \.id) { health in
-                EngineConsoleKeyValueRow(
+                AuditDetailsKeyValueRow(
                     health.activationResourceId,
                     [
                         health.activationStatus,
@@ -137,7 +137,7 @@ struct EngineConsoleModuleProjectionCard: View {
         if !projection.actions.isEmpty {
             moduleSectionTitle("Pack Actions")
             ForEach(Array(projection.actions.prefix(12)), id: \.id) { action in
-                EngineConsoleKeyValueRow(
+                AuditDetailsKeyValueRow(
                     action.displayLabel,
                     action.detailText.isEmpty ? "available" : action.detailText
                 )

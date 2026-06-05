@@ -36,11 +36,11 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
 
     for required in [
         "# Worker-First Tron Product Scorecard",
-        "Current score: **73/100**",
-        "Status: **active; JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, JARVIS-6, JARVIS-7, JARVIS-8, and JARVIS-9 passed; JARVIS-0 visual baseline, JARVIS-1 primary UI vocabulary gates, JARVIS-10 cleanup gates, and JARVIS-11 soak remain open**",
+        "Current score: **88/100**",
+        "Status: **active; JARVIS-1, JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, JARVIS-6, JARVIS-7, JARVIS-8, JARVIS-9, and JARVIS-10 passed; JARVIS-0 visual baseline and JARVIS-11 soak remain open**",
         "Evidence manifest: [`worker-first-product-evidence-manifest.md`](worker-first-product-evidence-manifest.md)",
         "| JARVIS-0 | Formalize scorecard and baseline | 5 | running |",
-        "| JARVIS-1 | Primitive collapse | 8 | running |",
+        "| JARVIS-1 | Primitive collapse | 8 | passed_after_fix |",
         "| JARVIS-2 | Default autonomy policy | 12 | passed_after_fix |",
         "| JARVIS-3 | Worker-first orchestration | 10 | passed_after_fix |",
         "| JARVIS-4 | Work snapshot API | 10 | passed_after_fix |",
@@ -49,12 +49,12 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "| JARVIS-7 | Worker/detail sheets | 8 | passed_after_fix |",
         "| JARVIS-8 | Guardrails and settings UX | 7 | passed_after_fix |",
         "| JARVIS-9 | Docs and examples | 6 | passed_after_fix |",
-        "| JARVIS-10 | Cleanup and static gates | 7 | pending |",
+        "| JARVIS-10 | Cleanup and static gates | 7 | passed_after_fix |",
         "| JARVIS-11 | Soak, visual QA, and closeout | 7 | pending |",
         "Default autonomy means run-unless-blocked, not ask-first.",
         "Approval-required metadata becomes audited auto-decision records",
         "`agent::work_snapshot` contract/handler/projection",
-        "model-visible context now renders `# Worker Guide`",
+        "Model-visible context renders `# Worker Guide`",
         "a real integration test fans out two session workers",
         "projects live subagent jobs as `workerType=agent` Worker cards",
         "Replaced top-level `NavigationMode.engine` with `NavigationMode.work`",
@@ -64,6 +64,9 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "Agent settings expose Autonomy Mode with Independent/Testing prompt mode and plain Guardrails rows",
         "Rewrote the self-extending user, operator, troubleshooting, and product notes around worker-led autonomous work",
         "worker_first_docs_and_examples_center_workers_and_local_work_loops",
+        "Renamed the audit-only iOS ownership path from EngineConsole to AuditDetails",
+        "worker_first_product_static_gates",
+        "Closed for cleanup/static gates.",
         "Remote package discovery, push, merge, release, deploy, and production",
         "Visual baseline screenshots are still open and block JARVIS-0 points.",
     ] {
@@ -86,9 +89,9 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
     }
 
     assert!(
-        manifest.contains("Current score: **73/100**")
+        manifest.contains("Current score: **88/100**")
             && manifest.contains("| JARVIS-0 | running |")
-            && manifest.contains("| JARVIS-1 | running |")
+            && manifest.contains("| JARVIS-1 | passed_after_fix |")
             && manifest.contains("| JARVIS-2 | passed_after_fix |")
             && manifest.contains("| JARVIS-3 | passed_after_fix |")
             && manifest.contains("| JARVIS-4 | passed_after_fix |")
@@ -97,6 +100,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && manifest.contains("| JARVIS-7 | passed_after_fix |")
             && manifest.contains("| JARVIS-8 | passed_after_fix |")
             && manifest.contains("| JARVIS-9 | passed_after_fix |")
+            && manifest.contains("| JARVIS-10 | passed_after_fix |")
             && manifest.contains("| JARVIS-11 | pending |")
             && manifest.contains("Visual baseline screenshots remain open.")
             && manifest.contains("Baseline primary iOS source included `NavigationMode.engine`")
@@ -155,6 +159,18 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && manifest.contains("JARVIS-9 is closed for docs/examples.")
             && scorecard.contains("Closed for docs/examples."),
         "worker-first evidence manifest must record the JARVIS-9 docs/examples checkpoint"
+    );
+    assert!(
+        manifest.contains("JARVIS-10 / JARVIS-1 Closeout Evidence")
+            && manifest.contains("worker_first_product_static_gates")
+            && manifest.contains("13 XCTest cases and 36 Swift Testing cases passed")
+            && manifest.contains("Test-Tron-2026.06.05_15-40-13--0700.xcresult")
+            && manifest.contains("work-dashboard-iphone-render.png")
+            && manifest.contains("worker-detail-blocked-render.png")
+            && manifest.contains("JARVIS-1 is now closed")
+            && scorecard.contains("Closed for product vocabulary and primary UI gates.")
+            && scorecard.contains("Closed for cleanup/static gates."),
+        "worker-first evidence manifest must record the JARVIS-10 cleanup and JARVIS-1 closeout checkpoint"
     );
 
     assert!(

@@ -125,8 +125,8 @@ Current living entry points:
   scorecard.
 - `packages/agent/docs/worker-first-product-scorecard.md`: active worker-first
   product scorecard for Work, Workers, Worker Packs, Autonomy, Guardrails,
-  Audit, default no-prompt autonomy, and replacement of Engine Console as the
-  primary product surface.
+  Audit, default no-prompt autonomy, and replacement of the old technical
+  console as the primary product surface.
 - `packages/agent/docs/worker-first-product-evidence-manifest.md`: companion
   evidence manifest for the active worker-first product scorecard.
 - `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
@@ -385,7 +385,7 @@ capability primitive registered by the `domains::capability` worker:
 | `execute` | Resolve an intent or target hint, prepare the selected capability, pause for freshness/approval when needed, run through the engine ledger, and observe child invocation/resource results. |
 
 `capability::search` and `capability::inspect` remain canonical
-operator/internal catalog functions for Engine Console, diagnostics, and program
+operator/internal catalog functions for Audit Details, diagnostics, and program
 composition. Provider models do not receive them as separate tools.
 
 Filesystem, code search, shell/process, web, plugin source, iOS/app interaction, display,
@@ -595,7 +595,7 @@ constraints live in `capabilityExecutionPolicies.*`, search behavior lives in
 `capabilityContextPrimerPolicies.*`. See
 [`packages/agent/docs/profile-control-plane.md`](packages/agent/docs/profile-control-plane.md)
 for the profile v3 control-plane schema and invariants.
-Engine Console/admin status refreshes synchronously update registry metadata,
+Audit status refreshes synchronously update registry metadata,
 then warm the persistent vector index on a detached path. Agent search skips
 metadata resync when the durable registry already matches the live catalog
 revision; meaningful catalog/plugin/schema changes update metadata once and
@@ -610,9 +610,9 @@ rows carry text hashes and vector rows are refreshed only when a document is new
 or changed. Warm searches embed the query once, read the persistent
 `sqlite-vec` rows, fuse lexical/vector hits, and return. Operator search still
 accepts a bounded `queries` array for related lookups against one registry
-snapshot, and operator inspection accepts bounded `targets` so the Engine
-Console can compare candidate capabilities without serial round trips.
-Engine Console mutations such as plugin state changes, conformance runs,
+snapshot, and operator inspection accepts bounded `targets` so Audit Details
+can compare candidate capabilities without serial round trips.
+Audit mutations such as plugin state changes, conformance runs,
 binding edits, and policy updates are system-idempotent operator actions. They
 do not require a chat session id, but they still go through normal capability
 schema validation, approval, audit, trace, and compensation records.
@@ -665,7 +665,7 @@ materialization capabilities.
 Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Read-only worktree and git inspection should use `worktree::get_status`, `worktree::get_diff_summary`, `worktree::get_diff`, `worktree::is_git_repo`, and `git::list_local_branches` before shell-style checks are considered. `worktree::get_diff_summary` is the lightweight card/list path for branch-level file/addition/deletion counts; `worktree::get_diff` remains the bounded full unified-diff path for drill-down file review. iOS treats server-reported git checkouts as actionable source-control surfaces whether the session owns an isolated worktree (`worktree.isolated=true`) or runs directly on the selected branch (`worktree.isolated=false`): commits, diffs, repo metadata, and direct-branch push controls use server truth in both cases. Isolated-only workflows such as merge-to-base, rebase-on-main, finalize, sibling session branch coordination, and conflict automation remain gated to server-owned session worktrees. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may still run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe and stays inside the active session worktree. Mutating or publishing git commands still require execute preparation/freshness and approval, and write-like process commands must run in sandbox materialization mode with declared relative outputs that materialize through resource refs and bounded `materializedOutputs` summaries.
 
 The same capability worker also registers operator/admin functions for native
-clients and the Engine Console. These are normal engine catalog functions, not
+clients and the Audit Details. These are normal engine catalog functions, not
 provider-facing primitives:
 
 | Function family | Functions |
@@ -864,7 +864,7 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 `agent::prompt`, or `settings::get`. Mutating calls must include an explicit
 idempotency key. Message ids are correlation ids only.
 
-When Engine Console or test clients invoke `capability::execute` directly, the
+When Audit Details or test clients invoke `capability::execute` directly, the
 transport dispatches it as the profile-backed agent actor, then the server
 derives capability execution scopes and capability runtime metadata from the
 active profile. Clients may pass session, workspace, trace, and ordinary target
@@ -1454,7 +1454,7 @@ packages/ios-app/Sources/
 +                         push notifications, local diagnostics,
 +                         feedback composer, Audit Details cache, Keychain tokens
 +-- ViewModels/           Chat view models, handlers, managers, @Observable state,
-+                         OnboardingState, WorkDashboardState, EngineConsoleState
++                         OnboardingState, WorkDashboardState, AuditDetailsState
 +-- Views/                SwiftUI views (chat, Work, Audit Details, capability views, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
@@ -1475,7 +1475,7 @@ packages/ios-app/Sources/
 - **Worker-first chat action UI**: active work renders as one high-signal Work chip/action detail per server invocation. The default detail path shows what happened, why it ran, the worker, status, result, and compact inputs; raw request/result/schema/trace/policy payloads stay behind Audit Details. Retired capability descriptors, old built-in names, and plugin source-specific capability sheets are not active UI routes.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
 - **Work dashboard mode**: A top-level `NavigationMode.work` surface reads `agent::work_snapshot` through `AgentClient` and renders autonomy, active work, workers, recent results, guardrails, and a single Audit Details entry point. Worker detail sheets show server-supplied health, trust, generated controls, selected-worker guardrails, abilities, recent work, and audit refs. The iOS app does not stitch product truth from registry/catalog/approval/policy internals.
-- **Audit Details**: The former Engine Console now sits behind the Work dashboard's Audit Details entry point. It uses `CapabilityClient` and `EngineConsoleState` to inspect live registry/catalog/control/audit/program/primer state, generated `ui_surface` refs, local pack/action resources, plugin/binding/policy details, and read-only disconnected cache snapshots. Generated UI surface writes and action submissions remain leased under the server's `ui_surface` lifecycle contract, and disconnected approval decisions remain pending until server truth advances.
+- **Audit Details**: The audit-only operator surface sits behind the Work dashboard's Audit Details entry point. It uses `CapabilityClient` and `AuditDetailsState` to inspect live registry/catalog/control/audit/program/primer state, generated `ui_surface` refs, local pack/action resources, plugin/binding/policy details, and read-only disconnected cache snapshots. Generated UI surface writes and action submissions remain leased under the server's `ui_surface` lifecycle contract, and disconnected approval decisions remain pending until server truth advances.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.
@@ -1489,7 +1489,7 @@ packages/ios-app/Sources/
 Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
 Work:    /engine read(agent::work_snapshot) -> AgentClient -> WorkDashboardState -> WorkDashboardView
-Audit:   /engine invoke(capability::*) -> CapabilityClient -> EngineConsoleState -> EngineConsoleView
+Audit:   /engine invoke(capability::*) -> CapabilityClient -> AuditDetailsState -> AuditDetailsView
 ```
 
 ### Build Configurations

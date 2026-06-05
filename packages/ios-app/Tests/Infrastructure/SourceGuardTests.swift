@@ -473,7 +473,7 @@ struct SourceGuardTests {
             encoding: .utf8
         )
         let generatedRenderer = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/GeneratedUISurfaceView.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/AuditDetails/GeneratedUISurfaceView.swift"),
             encoding: .utf8
         )
 
@@ -588,22 +588,22 @@ struct SourceGuardTests {
         #expect(types.contains("idempotencyKey"))
     }
 
-    @Test("Engine Console overview and inspection sheet stay native and scoped")
-    func testEngineConsoleOverviewAndInspectionBoundary() throws {
+    @Test("Audit Details overview and inspection sheet stay native and scoped")
+    func testAuditDetailsOverviewAndInspectionBoundary() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let engineConsole = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleView.swift"),
+        let auditDetails = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/AuditDetails/AuditDetailsView.swift"),
             encoding: .utf8
         )
-        let engineConsoleComponents = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleComponents.swift"),
+        let auditDetailsComponents = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/AuditDetails/AuditDetailsComponents.swift"),
             encoding: .utf8
         )
-        let engineConsoleState = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleState.swift"),
+        let auditDetailsState = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/AuditDetailsState.swift"),
             encoding: .utf8
         )
         let capabilityClient = try String(
@@ -611,40 +611,40 @@ struct SourceGuardTests {
             encoding: .utf8
         )
         let moduleProjection = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/EngineConsoleModuleProjection.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/AuditDetailsWorkerPackProjection.swift"),
             encoding: .utf8
         )
         let moduleProjectionView = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineConsole/EngineConsoleModuleProjectionView.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/Views/AuditDetails/AuditDetailsWorkerPackProjectionView.swift"),
             encoding: .utf8
         )
-        let engineConsoleSurface = engineConsole + "\n" + engineConsoleComponents
+        let auditDetailsSurface = auditDetails + "\n" + auditDetailsComponents
 
-        #expect(!engineConsole.contains(#".navigationTitle("Engine")"#))
-        #expect(engineConsole.contains("DashboardToolbarContent("))
-        #expect(engineConsole.contains(#"title: "Engine","#))
-        #expect(engineConsole.contains("EngineConsoleSuggestionChips(suggestions: state.substrateSearchSuggestions)"))
-        #expect(engineConsoleState.contains("var substrateSearchSuggestions: [EngineConsoleSearchSuggestion]"))
-        #expect(engineConsoleState.contains("registry?.implementations"))
-        #expect(engineConsoleState.contains("registry?.documents"))
-        #expect(engineConsoleState.contains("catalogWatchSnapshot("))
-        #expect(engineConsoleState.contains("catalogSnapshot?.snapshot?.functions"))
+        #expect(!auditDetails.contains(#".navigationTitle("Engine")"#))
+        #expect(auditDetails.contains("DashboardToolbarContent("))
+        #expect(auditDetails.contains(#"title: "Audit Details","#))
+        #expect(auditDetails.contains("AuditDetailsSuggestionChips(suggestions: state.substrateSearchSuggestions)"))
+        #expect(auditDetailsState.contains("var substrateSearchSuggestions: [AuditDetailsSearchSuggestion]"))
+        #expect(auditDetailsState.contains("registry?.implementations"))
+        #expect(auditDetailsState.contains("registry?.documents"))
+        #expect(auditDetailsState.contains("catalogWatchSnapshot("))
+        #expect(auditDetailsState.contains("catalogSnapshot?.snapshot?.functions"))
         #expect(capabilityClient.contains(#""catalog::watch_snapshot""#))
         #expect(capabilityClient.contains(#""catalog.read""#))
-        #expect(engineConsoleState.contains("controlSnapshot?.availableActions"))
-        #expect(engineConsoleState.contains("controlSnapshot?.modulePackages"))
-        #expect(engineConsoleState.contains("controlSnapshot?.uiSurfaceRefs"))
-        #expect(engineConsoleState.contains("readOnlyMutationReason"))
-        #expect(engineConsoleState.contains("Offline Engine Console cache is read-only"))
-        #expect(engineConsoleState.contains("failMutationIfReadOnly(surface: true)"))
-        #expect(engineConsoleState.contains("failMutationIfReadOnly(program: true)"))
-        #expect(engineConsoleState.contains("failMutationIfReadOnly()"))
-        #expect(engineConsole.contains("isOfflineCached: state.isMutatingDisabled"))
-        #expect(engineConsoleState.contains("audit?.events"))
-        #expect(engineConsoleState.contains("programRuns?.programRuns"))
-        #expect(engineConsoleState.contains(#""capabilities.primer""#))
-        #expect(engineConsoleState.contains(#""conformance \(implementation.implementationId)""#))
-        #expect(!engineConsoleComponents.contains("private let suggestions"))
+        #expect(auditDetailsState.contains("controlSnapshot?.availableActions"))
+        #expect(auditDetailsState.contains("controlSnapshot?.modulePackages"))
+        #expect(auditDetailsState.contains("controlSnapshot?.uiSurfaceRefs"))
+        #expect(auditDetailsState.contains("readOnlyMutationReason"))
+        #expect(auditDetailsState.contains("Offline Audit Details cache is read-only"))
+        #expect(auditDetailsState.contains("failMutationIfReadOnly(surface: true)"))
+        #expect(auditDetailsState.contains("failMutationIfReadOnly(program: true)"))
+        #expect(auditDetailsState.contains("failMutationIfReadOnly()"))
+        #expect(auditDetails.contains("isOfflineCached: state.isMutatingDisabled"))
+        #expect(auditDetailsState.contains("audit?.events"))
+        #expect(auditDetailsState.contains("programRuns?.programRuns"))
+        #expect(auditDetailsState.contains(#""capabilities.primer""#))
+        #expect(auditDetailsState.contains(#""conformance \(implementation.implementationId)""#))
+        #expect(!auditDetailsComponents.contains("private let suggestions"))
         for fixedCatalogSuggestion in [
             "Read files",
             "Run command",
@@ -656,17 +656,17 @@ struct SourceGuardTests {
             "search the web",
             "ask the user a question"
         ] {
-            #expect(!engineConsoleComponents.contains(fixedCatalogSuggestion))
+            #expect(!auditDetailsComponents.contains(fixedCatalogSuggestion))
         }
-        #expect(engineConsole.contains("EngineConsoleModuleProjectionCard("))
-        #expect(engineConsole.contains("projection: state.moduleOperatorProjection"))
-        #expect(engineConsole.contains(#"state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: target.targetType)"#))
-        #expect(engineConsole.contains("state.authorSurface(targetType: target.targetType, targetId: target.targetId)"))
-        #expect(engineConsoleState.contains("EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)"))
+        #expect(auditDetails.contains("AuditDetailsWorkerPackProjectionCard("))
+        #expect(auditDetails.contains("projection: state.moduleOperatorProjection"))
+        #expect(auditDetails.contains(#"state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: target.targetType)"#))
+        #expect(auditDetails.contains("state.authorSurface(targetType: target.targetType, targetId: target.targetId)"))
+        #expect(auditDetailsState.contains("AuditDetailsWorkerPackOperatorProjection.make(from: controlSnapshot)"))
         #expect(moduleProjection.contains("snapshot.moduleHealth"))
         #expect(moduleProjection.contains("snapshot.moduleSourceTrust"))
         #expect(moduleProjection.contains(#".filter { $0.functionId.hasPrefix("module::") }"#))
-        #expect(moduleProjection.contains("var surfaceTargets: [EngineConsoleModuleSurfaceTarget]"))
+        #expect(moduleProjection.contains("var surfaceTargets: [AuditDetailsWorkerPackSurfaceTarget]"))
         #expect(moduleProjectionView.contains("projection.evidenceRefCount"))
         #expect(moduleProjectionView.contains("projection.surfaceTargets"))
         #expect(moduleProjectionView.contains("openSurface(target)"))
@@ -714,20 +714,20 @@ struct SourceGuardTests {
                 )
             }
         }
-        #expect(engineConsoleSurface.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
-        #expect(engineConsoleSurface.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
-        #expect(engineConsoleSurface.contains("SheetDismissButton(color: tint)"))
-        #expect(engineConsoleSurface.contains("EngineConsoleCard(tint: tint)"))
-        #expect(engineConsoleSurface.contains("private var secondaryTitle: String?"))
-        #expect(engineConsoleSurface.contains("candidate != primaryTitle"))
+        #expect(auditDetailsSurface.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
+        #expect(auditDetailsSurface.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
+        #expect(auditDetailsSurface.contains("SheetDismissButton(color: tint)"))
+        #expect(auditDetailsSurface.contains("AuditDetailsCard(tint: tint)"))
+        #expect(auditDetailsSurface.contains("private var secondaryTitle: String?"))
+        #expect(auditDetailsSurface.contains("candidate != primaryTitle"))
 
-        let readinessStart = try #require(engineConsole.range(of: "private var readinessIssues"))
-        let readinessEnd = try #require(engineConsole.range(of: "private var mutationIssue"))
-        let readinessBlock = String(engineConsole[readinessStart.lowerBound..<readinessEnd.lowerBound])
+        let readinessStart = try #require(auditDetails.range(of: "private var readinessIssues"))
+        let readinessEnd = try #require(auditDetails.range(of: "private var mutationIssue"))
+        let readinessBlock = String(auditDetails[readinessStart.lowerBound..<readinessEnd.lowerBound])
         #expect(!readinessBlock.contains("Program runtime unavailable"))
         #expect(!readinessBlock.contains("programRuntimeReady"))
-        #expect(engineConsole.contains("private var programRuntimeReady: Bool"))
-        #expect(engineConsole.contains("Program execution stays disabled until the first-party worker reports healthy conformance."))
+        #expect(auditDetails.contains("private var programRuntimeReady: Bool"))
+        #expect(auditDetails.contains("Program execution stays disabled until the first-party worker reports healthy conformance."))
     }
 
     @Test("feedback recipient has tracked non-placeholder default")

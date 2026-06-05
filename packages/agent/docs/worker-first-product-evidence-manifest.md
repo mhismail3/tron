@@ -2,7 +2,7 @@
 
 Created: **2026-06-05**
 Scorecard: [`worker-first-product-scorecard.md`](worker-first-product-scorecard.md)
-Current score: **73/100**
+Current score: **88/100**
 
 This manifest records evidence for the active worker-first product scorecard.
 Update it at each checkpoint with commands, return codes, exact source refs,
@@ -26,7 +26,7 @@ screenshots, runtime ids, open loops, and the next test.
 | Row | Status | Evidence |
 |---|---|---|
 | JARVIS-0 | running | Scorecard, manifest, README links, and static guard added. Source baseline is recorded below. Visual baseline screenshots remain open. |
-| JARVIS-1 | running | Partial: provider-visible Worker Guide vocabulary replaced the old Capability Primer/harness wording; README context/worker-loop docs plus user/operator/example docs describe worker abilities, Worker Packs, Generated Controls, and Audit. Primary UI static gates remain open. |
+| JARVIS-1 | passed_after_fix | Provider-visible Worker Guide vocabulary replaced the old Capability Primer/harness wording; README context/worker-loop docs plus user/operator/example docs describe worker abilities, Worker Packs, Generated Controls, and Audit; `worker_first_product_static_gates` now blocks `Substrate`, `Primer`, `Bindings`, and `Engine Console` in the primary Work dashboard. |
 | JARVIS-2 | passed_after_fix | Default no-prompt autonomy, audited auto-decisions, testing prompts, fail-closed preflight, and replay behavior are covered by Rust tests. |
 | JARVIS-3 | passed_after_fix | Worker Guide and execute schema default non-trivial work to worker/subagent delegation, provider-context tests prove guide injection, Work snapshot projects subagent jobs as Workers, and integration proof fans out two session workers without approvals. |
 | JARVIS-4 | passed_after_fix | `agent::work_snapshot` is registered and covered by DTO tests for idle state, active work, worker health, milestones, guardrails, and audit refs. |
@@ -35,7 +35,7 @@ screenshots, runtime ids, open loops, and the next test.
 | JARVIS-7 | passed_after_fix | Worker detail sheets consume server-owned trust/generated controls, filter selected-worker guardrails, and have simulator-hosted screenshots for running, success, failure, and blocked states. |
 | JARVIS-8 | passed_after_fix | Agent settings expose Autonomy Mode and plain Guardrails rows; parity/layout tests and simulator render proof cover the worker-first copy. |
 | JARVIS-9 | passed_after_fix | User/operator/product notes, local example pack docs, and the managed self-extend skill now describe worker-led autonomous work, Worker Packs, Generated Controls, run-unless-blocked autonomy, and Audit Details. Static docs invariant rejects retired capability-led product wording and remote/release paths. |
-| JARVIS-10 | pending | Not started. |
+| JARVIS-10 | passed_after_fix | Audit-only iOS code was renamed from EngineConsole to AuditDetails ownership, Created-by-Agent projections were renamed to Worker Artifacts, broad absence gates were added, and focused Rust plus simulator tests passed. |
 | JARVIS-11 | pending | Not started. |
 
 ## JARVIS-0 Evidence
@@ -593,7 +593,84 @@ screenshots, runtime ids, open loops, and the next test.
 ### Open Loops
 
 - JARVIS-9 is closed for docs/examples.
-- JARVIS-1 remains open only for broad primary UI vocabulary gates.
-- JARVIS-10 owns deleting or renaming remaining audit-only Engine Console
-  ownership and the static threat-model gates.
+- JARVIS-1 and JARVIS-10 are closed by the cleanup/static-gate checkpoint
+  below.
 - JARVIS-11 owns paired-server soak/action proof and final visual closeout.
+
+## JARVIS-10 / JARVIS-1 Closeout Evidence
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml --test worker_first_product_static_gates -- --nocapture` | 101 | Red proof: the new cleanup gate failed while the old `packages/ios-app/Sources/Views/EngineConsole` ownership path still existed. |
+| `git mv packages/ios-app/Sources/Views/EngineConsole/... packages/ios-app/Sources/Views/AuditDetails/...` plus matching `git mv` operations for state, cache, projection, and test files | 0 | Renamed the audit-only iOS ownership path from EngineConsole to AuditDetails and renamed Created-by-Agent projections to Worker Artifacts. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test worker_first_product_static_gates -- --nocapture` | 0 | Green proof: the new Rust cleanup gate passed after the audit-only rename, primary Work vocabulary gate, and default no-prompt assertion. |
+| `rg -n 'engineConsole\|EngineConsole\|Engine Console\|Created by Agent\|CreatedByAgent\|createdByAgent\|ConsoleSection\|consoleHeader\|title: "Engine"\|NavigationMode\\.engine' packages/ios-app/Sources packages/ios-app/Tests README.md packages/ios-app/docs/architecture.md packages/agent/tests/threat_model_invariants.rs packages/agent/tests/worker_first_product_static_gates.rs` | 0 | Confirmed old names only remain as intentional retired-string assertions in Rust static guards. |
+| `cd packages/ios-app && xcodegen generate && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-audit-details-rename -only-testing:TronMobileTests/WorkDashboardViewTests -only-testing:TronMobileTests/AuditDetailsStateTests -only-testing:TronMobileTests/AuditDetailsWorkerPackProjectionTests -only-testing:TronMobileTests/AuditDetailsWorkerArtifactProjectionTests -only-testing:TronMobileTests/AuditDetailsCacheTests -only-testing:TronMobileTests/AuditDetailsAccessibilityTests -only-testing:TronMobileTests/AuditDetailsWorkerArtifactSourceGuardTests -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/IPadSheetPresentationTests` | 0 | Simulator proof: 13 XCTest cases and 36 Swift Testing cases passed after the rename and source guard updates. |
+| `view_image .../work-dashboard-iphone-render.png`, `view_image .../work-dashboard-ipad-render.png`, `view_image .../worker-detail-blocked-render.png` | 0 | Visual inspection confirmed the fresh Work dashboard and blocked-worker detail artifacts were nonblank, readable, and free of visible overlap. |
+
+### Simulator Evidence
+
+- Target simulator UDID: `7BDA4AF9-1C40-47E3-A925-0F88C191F263`.
+- Result bundle:
+  `/tmp/tron-xcode-audit-details-rename/Logs/Test/Test-Tron-2026.06.05_15-40-13--0700.xcresult`.
+- Fresh hosted artifacts from the JARVIS-10 simulator run:
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/43A1C55E-3ADC-4B7F-B1D5-ABF089197F88/Documents/tron-visual-artifacts/work-dashboard-iphone-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/43A1C55E-3ADC-4B7F-B1D5-ABF089197F88/Documents/tron-visual-artifacts/work-dashboard-ipad-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/43A1C55E-3ADC-4B7F-B1D5-ABF089197F88/Documents/tron-visual-artifacts/worker-detail-running-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/43A1C55E-3ADC-4B7F-B1D5-ABF089197F88/Documents/tron-visual-artifacts/worker-detail-success-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/43A1C55E-3ADC-4B7F-B1D5-ABF089197F88/Documents/tron-visual-artifacts/worker-detail-failure-render.png`, and
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/43A1C55E-3ADC-4B7F-B1D5-ABF089197F88/Documents/tron-visual-artifacts/worker-detail-blocked-render.png`.
+- The simulator app attempted to reconnect to
+  `ws://127.0.0.1:19847/engine`; the server was not running, so logs include
+  expected `NSURLErrorDomain Code=-1004` connection-refused warnings. The
+  selected tests passed.
+- The in-thread tool registry exposed no simulator tap/computer-use control.
+  Proof used `xcodebuild`, hosted SwiftUI rendering in the simulator process,
+  emitted PNG artifacts, and local image inspection.
+
+### Source Evidence
+
+- [`packages/agent/tests/worker_first_product_static_gates.rs`](../tests/worker_first_product_static_gates.rs):
+  enforces the retired EngineConsole path absence, required AuditDetails path
+  presence, primary Work vocabulary gate for `Substrate`, `Primer`,
+  `Bindings`, and `Engine Console`, no Work/Agent client ownership of
+  `CapabilityClient`, `ApprovalClient`, registry/policy/primer/approval
+  internals, and default `approvalPromptMode = "disabled"`.
+- [`packages/ios-app/Sources/Views/AuditDetails/AuditDetailsView.swift`](../../ios-app/Sources/Views/AuditDetails/AuditDetailsView.swift),
+  [`packages/ios-app/Sources/ViewModels/State/AuditDetailsState.swift`](../../ios-app/Sources/ViewModels/State/AuditDetailsState.swift),
+  and [`packages/ios-app/Sources/Services/Storage/AuditDetailsCache.swift`](../../ios-app/Sources/Services/Storage/AuditDetailsCache.swift):
+  own the audit-only capability/operator inspection path under Audit Details.
+- [`packages/ios-app/Sources/ViewModels/State/AuditDetailsWorkerArtifactProjection.swift`](../../ios-app/Sources/ViewModels/State/AuditDetailsWorkerArtifactProjection.swift)
+  and [`packages/ios-app/Sources/Views/AuditDetails/AuditDetailsWorkerArtifactView.swift`](../../ios-app/Sources/Views/AuditDetails/AuditDetailsWorkerArtifactView.swift):
+  replace the retired Created-by-Agent product label with Worker Artifacts.
+- [`packages/ios-app/Sources/Views/Work/WorkDashboardView.swift`](../../ios-app/Sources/Views/Work/WorkDashboardView.swift):
+  continues to expose a single Audit Details entry point and does not depend
+  on the audit registry/policy/primer client stack.
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+  and [`README.md`](../../../README.md): describe Audit Details as an
+  audit-only/operator surface behind the Work dashboard rather than a primary
+  Engine Console route.
+
+### Findings
+
+- No production iOS source path or identifier still owns the active product
+  surface as EngineConsole.
+- Primary Work UI rejects low-level `Substrate`, `Primer`, `Bindings`, and
+  `Engine Console` vocabulary. Audit Details keeps those technical concepts
+  behind the secondary audit entry point.
+- The Work dashboard, Work state, and Agent client remain thin on
+  `agent::work_snapshot`; they do not import capability/admin/policy/approval
+  clients or function names.
+- The Xcode project was regenerated after the file moves so simulator builds
+  compile the AuditDetails sources directly.
+- JARVIS-1 is now closed because the remaining primary UI vocabulary gate was
+  implemented and passed as part of the JARVIS-10 cleanup.
+
+### Open Loops
+
+- JARVIS-10 is closed for cleanup/static gates.
+- JARVIS-1 is closed for product vocabulary and primary UI gates.
+- JARVIS-0 remains open for final combined visual baseline documentation.
+- JARVIS-11 owns the paired-server soak/action proof and final closeout.

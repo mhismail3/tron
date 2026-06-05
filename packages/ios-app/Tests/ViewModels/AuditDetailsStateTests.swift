@@ -3,11 +3,11 @@ import Testing
 @testable import TronMobile
 
 @MainActor
-@Suite("EngineConsoleState")
-struct EngineConsoleStateTests {
+@Suite("AuditDetailsState")
+struct AuditDetailsStateTests {
     @Test("search success records results and degraded index status")
     func searchSuccessRecordsDegradedStatus() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.searchResponse = CapabilitySearchResponseDTO(
             query: "read file",
             catalogRevision: 303,
@@ -49,7 +49,7 @@ struct EngineConsoleStateTests {
                 updatedAt: nil
             )
         )
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
         state.searchText = "read file"
 
         await state.search()
@@ -62,8 +62,8 @@ struct EngineConsoleStateTests {
 
     @Test("empty search clears local search state")
     func emptySearchClearsResults() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let client = FakeAuditDetailsCapabilityClient()
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
         state.searchText = "   "
 
         await state.search()
@@ -75,9 +75,9 @@ struct EngineConsoleStateTests {
 
     @Test("search failure is local to capabilities section")
     func searchFailureDoesNotReplaceConsoleLoadState() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.searchError = EngineConnectionError.invalidResponse
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
         state.searchText = "read file"
 
         await state.search()
@@ -95,7 +95,7 @@ struct EngineConsoleStateTests {
     func offlineCachedStateDisablesMutations() async throws {
         let cache = ephemeralCache()
         try cache.save(
-            EngineConsoleCacheSnapshot(
+            AuditDetailsCacheSnapshot(
                 catalogRevision: 1,
                 registryRevision: 1,
                 pluginSummaries: [],
@@ -108,9 +108,9 @@ struct EngineConsoleStateTests {
                 fetchedAt: Date(timeIntervalSince1970: 0)
             )
         )
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.statusError = EngineConnectionError.notConnected
-        let state = EngineConsoleState(
+        let state = AuditDetailsState(
             capabilityClient: client,
             connectionState: { .disconnected },
             cache: cache
@@ -122,11 +122,11 @@ struct EngineConsoleStateTests {
         #expect(state.loadState == .offlineCached)
     }
 
-    @Test("offline cached state refuses every Engine Console mutation path")
+    @Test("offline cached state refuses every Audit Details mutation path")
     func offlineCachedStateRefusesEveryMutationPath() async throws {
         let cache = ephemeralCache()
         try cache.save(
-            EngineConsoleCacheSnapshot(
+            AuditDetailsCacheSnapshot(
                 catalogRevision: 1,
                 registryRevision: 1,
                 pluginSummaries: [],
@@ -189,14 +189,14 @@ struct EngineConsoleStateTests {
                 fetchedAt: Date(timeIntervalSince1970: 0)
             )
         )
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.statusError = EngineConnectionError.notConnected
-        let state = EngineConsoleState(
+        let state = AuditDetailsState(
             capabilityClient: client,
             connectionState: { .disconnected },
             cache: cache
         )
-        let readOnlyReason = "Offline Engine Console cache is read-only; reconnect before submitting actions."
+        let readOnlyReason = "Offline Audit Details cache is read-only; reconnect before submitting actions."
 
         await state.refresh()
         await state.authorSurface(targetType: "package", targetId: "worker-package:offline")
@@ -243,8 +243,8 @@ struct EngineConsoleStateTests {
 
     @Test("plugin mutation records local action state without failing console")
     func pluginMutationUsesLocalMutationState() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let client = FakeAuditDetailsCapabilityClient()
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
 
         await state.setPluginState(pluginId: "session.generated", state: "quarantined")
 
@@ -254,8 +254,8 @@ struct EngineConsoleStateTests {
 
     @Test("binding mutation keeps capability policy details out of the main load state")
     func bindingMutationUsesLocalMutationState() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let client = FakeAuditDetailsCapabilityClient()
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
         let binding = CapabilityBindingDTO(
             contractId: "filesystem::read_file",
             scopeKind: "system",
@@ -276,7 +276,7 @@ struct EngineConsoleStateTests {
 
     @Test("refresh loads read-only control snapshot")
     func refreshLoadsControlSnapshot() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.controlSnapshot = ControlSnapshotDTO(
             catalogRevision: 7,
             workers: [AnyCodable(["id": "resource"])],
@@ -295,7 +295,7 @@ struct EngineConsoleStateTests {
             integrityWarnings: [],
             availableActions: [AnyCodable(["functionId": "worker::disconnect"])]
         )
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
 
         await state.refresh()
 
@@ -308,7 +308,7 @@ struct EngineConsoleStateTests {
 
     @Test("server advertised actions gate generated surface authoring")
     func serverAdvertisedActionsGateGeneratedSurfaceAuthoring() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.controlSnapshot = ControlSnapshotDTO(
             catalogRevision: 7,
             workers: [AnyCodable(["id": "resource"])],
@@ -324,7 +324,7 @@ struct EngineConsoleStateTests {
             integrityWarnings: [],
             availableActions: []
         )
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
 
         await state.refresh()
         #expect(!state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: "worker"))
@@ -345,7 +345,7 @@ struct EngineConsoleStateTests {
 
     @Test("search suggestions project live substrate instead of fixed tool catalog")
     func searchSuggestionsProjectLiveSubstrate() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.statusDTO = CapabilityStatusDTO(
             catalogRevision: 22,
             registryRevision: 7,
@@ -487,7 +487,7 @@ struct EngineConsoleStateTests {
             ],
             redacted: true
         )
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
 
         await state.refresh()
 
@@ -518,7 +518,7 @@ struct EngineConsoleStateTests {
 
     @Test("module operator projection keeps server actions and evidence")
     func moduleOperatorProjectionKeepsServerActionsAndEvidence() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.controlSnapshot = ControlSnapshotDTO(
             catalogRevision: 9,
             workers: [],
@@ -619,7 +619,7 @@ struct EngineConsoleStateTests {
                 AnyCodable(["functionId": "worker::disconnect", "targetType": "worker"])
             ]
         )
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
 
         await state.refresh()
 
@@ -670,10 +670,10 @@ struct EngineConsoleStateTests {
         #expect(client.lastSurfaceRequest?.purpose == "Manage pack demo")
     }
 
-    @Test("engine console loads validates and refreshes generated surfaces through ui primitives")
+    @Test("audit details loads validates and refreshes generated surfaces through ui primitives")
     func generatedSurfaceFlowUsesServerPrimitives() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let client = FakeAuditDetailsCapabilityClient()
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
         let ref = UiSurfaceRefDTO(
             resourceId: "res-ui",
             versionId: "ver-ui",
@@ -711,11 +711,11 @@ struct EngineConsoleStateTests {
         #expect(state.surfaceActionResult?.childInvocationId == "child")
     }
 
-    private func ephemeralCache() -> EngineConsoleCache {
+    private func ephemeralCache() -> AuditDetailsCache {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("EngineConsoleCache.json")
-        return EngineConsoleCache(fileURL: url)
+            .appendingPathComponent("AuditDetailsCache.json")
+        return AuditDetailsCache(fileURL: url)
     }
 
     private func moduleAction(
@@ -738,7 +738,7 @@ struct EngineConsoleStateTests {
 }
 
 @MainActor
-final class FakeEngineConsoleCapabilityClient: EngineConsoleCapabilityClient {
+final class FakeAuditDetailsCapabilityClient: AuditDetailsCapabilityClient {
     var searchResponse = CapabilitySearchResponseDTO(
         query: nil,
         catalogRevision: nil,

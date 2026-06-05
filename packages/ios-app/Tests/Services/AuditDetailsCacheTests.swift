@@ -2,15 +2,15 @@ import Foundation
 import Testing
 @testable import TronMobile
 
-@Suite("EngineConsoleCache")
-struct EngineConsoleCacheTests {
+@Suite("AuditDetailsCache")
+struct AuditDetailsCacheTests {
     @Test("round trips redacted cache snapshot")
     func roundTripsSnapshot() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let url = directory.appendingPathComponent("EngineConsoleCache.json")
-        let cache = EngineConsoleCache(fileURL: url)
-        let snapshot = EngineConsoleCacheSnapshot(
+        let url = directory.appendingPathComponent("AuditDetailsCache.json")
+        let cache = AuditDetailsCache(fileURL: url)
+        let snapshot = AuditDetailsCacheSnapshot(
             catalogRevision: 7,
             registryRevision: nil,
             pluginSummaries: [

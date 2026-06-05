@@ -22,7 +22,7 @@ final class WorkDashboardViewTests: XCTestCase {
         XCTAssertTrue(content.contains("Guardrails"))
         XCTAssertTrue(content.contains("WorkGuardrailsPanel"))
         XCTAssertTrue(content.contains("Audit Details"))
-        XCTAssertFalse(content.contains("EngineConsoleMetricGrid"))
+        XCTAssertFalse(content.contains("AuditDetailsMetricGrid"))
         XCTAssertFalse(content.contains("Substrate"))
         XCTAssertFalse(content.contains("Primer"))
         XCTAssertFalse(content.contains("Bindings"))

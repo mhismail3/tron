@@ -1,9 +1,9 @@
 import Foundation
 
-struct EngineConsoleCreatedByAgentProjection: Equatable {
-    var changes: [EngineConsoleCreatedByAgentSummary]
+struct AuditDetailsWorkerArtifactProjection: Equatable {
+    var changes: [AuditDetailsWorkerArtifactSummary]
 
-    static let empty = EngineConsoleCreatedByAgentProjection(changes: [])
+    static let empty = AuditDetailsWorkerArtifactProjection(changes: [])
 
     var isEmpty: Bool { changes.isEmpty }
 
@@ -13,21 +13,21 @@ struct EngineConsoleCreatedByAgentProjection: Equatable {
         controlSnapshot: ControlSnapshotDTO?,
         audit: CapabilityAuditQueryResultDTO?,
         programRuns: CapabilityProgramRunQueryResultDTO?
-    ) -> EngineConsoleCreatedByAgentProjection {
+    ) -> AuditDetailsWorkerArtifactProjection {
         let sessionImplementations = uniqueImplementations(
             (registry?.implementations ?? []) + catalogImplementations(from: catalogSnapshot)
         )
             .filter(isSessionCreated)
         let changes = sessionImplementations
             .compactMap { implementation in
-                EngineConsoleCreatedByAgentSummary(
+                AuditDetailsWorkerArtifactSummary(
                     implementation: implementation,
                     controlSnapshot: controlSnapshot,
                     audit: audit,
                     programRuns: programRuns
                 )
             }
-        return EngineConsoleCreatedByAgentProjection(changes: changes)
+        return AuditDetailsWorkerArtifactProjection(changes: changes)
     }
 
     private static func isSessionCreated(_ implementation: CapabilityImplementationDTO) -> Bool {
@@ -38,7 +38,7 @@ struct EngineConsoleCreatedByAgentProjection: Equatable {
             return true
         }
         if let provenance = implementation.provenance?.dictionaryValue,
-           createdByAgentString(provenance, keys: ["sessionId", "session_id"]) != nil {
+           workerArtifactsString(provenance, keys: ["sessionId", "session_id"]) != nil {
             return true
         }
         return false
@@ -49,48 +49,48 @@ struct EngineConsoleCreatedByAgentProjection: Equatable {
     ) -> [CapabilityImplementationDTO] {
         (catalogSnapshot?.snapshot?.functions ?? []).compactMap { function in
             guard let dictionary = function.dictionaryValue,
-                  let functionId = createdByAgentString(dictionary, keys: ["id", "functionId", "function_id"]) else {
+                  let functionId = workerArtifactsString(dictionary, keys: ["id", "functionId", "function_id"]) else {
                 return nil
             }
-            let metadata = createdByAgentDictionary(dictionary, keys: ["metadata"])
-            let provenance = createdByAgentDictionary(dictionary, keys: ["provenance"])
-            let workerId = createdByAgentString(dictionary, keys: ["owner_worker", "ownerWorker", "workerId", "worker_id"])
-            let implementationId = createdByAgentString(
+            let metadata = workerArtifactsDictionary(dictionary, keys: ["metadata"])
+            let provenance = workerArtifactsDictionary(dictionary, keys: ["provenance"])
+            let workerId = workerArtifactsString(dictionary, keys: ["owner_worker", "ownerWorker", "workerId", "worker_id"])
+            let implementationId = workerArtifactsString(
                 metadata,
                 keys: ["implementationId", "implementation_id"]
             ) ?? "catalog.\(workerId ?? "worker").\(functionId)"
-            let health = createdByAgentString(dictionary, keys: ["health"])
+            let health = workerArtifactsString(dictionary, keys: ["health"])
 
             return CapabilityImplementationDTO(
                 implementationId: implementationId,
-                contractId: createdByAgentString(metadata, keys: ["contractId", "contract_id"])
-                    ?? createdByAgentString(dictionary, keys: ["contractId", "contract_id"])
+                contractId: workerArtifactsString(metadata, keys: ["contractId", "contract_id"])
+                    ?? workerArtifactsString(dictionary, keys: ["contractId", "contract_id"])
                     ?? functionId,
-                pluginId: createdByAgentString(metadata, keys: ["pluginId", "plugin_id"])
-                    ?? createdByAgentString(dictionary, keys: ["pluginId", "plugin_id"]),
+                pluginId: workerArtifactsString(metadata, keys: ["pluginId", "plugin_id"])
+                    ?? workerArtifactsString(dictionary, keys: ["pluginId", "plugin_id"]),
                 workerId: workerId,
                 functionId: functionId,
-                version: createdByAgentUInt64(dictionary, keys: ["revision", "version"]),
+                version: workerArtifactsUInt64(dictionary, keys: ["revision", "version"]),
                 health: health,
-                visibility: createdByAgentString(dictionary, keys: ["visibility"]),
-                latencyClass: createdByAgentString(metadata, keys: ["latencyClass", "latency_class"]),
-                costClass: createdByAgentString(metadata, keys: ["costClass", "cost_class"]),
-                trustTier: createdByAgentString(metadata, keys: ["trustTier", "trust_tier"]),
-                authorityRequirements: createdByAgentAnyCodable(
+                visibility: workerArtifactsString(dictionary, keys: ["visibility"]),
+                latencyClass: workerArtifactsString(metadata, keys: ["latencyClass", "latency_class"]),
+                costClass: workerArtifactsString(metadata, keys: ["costClass", "cost_class"]),
+                trustTier: workerArtifactsString(metadata, keys: ["trustTier", "trust_tier"]),
+                authorityRequirements: workerArtifactsAnyCodable(
                     dictionary,
                     keys: ["authorityRequirements", "authority_requirements"]
                 ),
-                runtimeRequirements: createdByAgentAnyCodable(
+                runtimeRequirements: workerArtifactsAnyCodable(
                     dictionary,
                     keys: ["runtimeRequirements", "runtime_requirements"]
                 ),
-                schemaDigest: createdByAgentString(metadata, keys: ["schemaDigest", "schema_digest"])
-                    ?? createdByAgentString(dictionary, keys: ["schemaDigest", "schema_digest"]),
+                schemaDigest: workerArtifactsString(metadata, keys: ["schemaDigest", "schema_digest"])
+                    ?? workerArtifactsString(dictionary, keys: ["schemaDigest", "schema_digest"]),
                 catalogRevision: catalogSnapshot?.currentRevision,
                 provenance: provenance.map(AnyCodable.init),
-                conformanceState: createdByAgentString(metadata, keys: ["conformanceState", "conformance_state"]) ?? health,
-                signatureStatus: createdByAgentString(metadata, keys: ["signatureStatus", "signature_status"]) ?? "catalog",
-                updatedAt: createdByAgentString(dictionary, keys: ["updatedAt", "updated_at"])
+                conformanceState: workerArtifactsString(metadata, keys: ["conformanceState", "conformance_state"]) ?? health,
+                signatureStatus: workerArtifactsString(metadata, keys: ["signatureStatus", "signature_status"]) ?? "catalog",
+                updatedAt: workerArtifactsString(dictionary, keys: ["updatedAt", "updated_at"])
             )
         }
     }
@@ -107,7 +107,7 @@ struct EngineConsoleCreatedByAgentProjection: Equatable {
     }
 }
 
-struct EngineConsoleCreatedByAgentSummary: Equatable, Identifiable {
+struct AuditDetailsWorkerArtifactSummary: Equatable, Identifiable {
     var implementationId: String
     var functionId: String
     var contractId: String?
@@ -227,13 +227,13 @@ struct EngineConsoleCreatedByAgentSummary: Equatable, Identifiable {
 
     private static func provenanceText(for implementation: CapabilityImplementationDTO) -> String {
         if let provenance = implementation.provenance?.dictionaryValue {
-            if let sessionId = createdByAgentString(provenance, keys: ["sessionId", "session_id"]) {
+            if let sessionId = workerArtifactsString(provenance, keys: ["sessionId", "session_id"]) {
                 return "session \(sessionId)"
             }
-            if let workspaceId = createdByAgentString(provenance, keys: ["workspaceId", "workspace_id"]) {
+            if let workspaceId = workerArtifactsString(provenance, keys: ["workspaceId", "workspace_id"]) {
                 return "workspace \(workspaceId)"
             }
-            if let source = createdByAgentString(provenance, keys: ["source", "createdBy", "actor"]) {
+            if let source = workerArtifactsString(provenance, keys: ["source", "createdBy", "actor"]) {
                 return source
             }
         }
@@ -245,7 +245,7 @@ struct EngineConsoleCreatedByAgentSummary: Equatable, Identifiable {
         functionId: String
     ) -> String {
         if let provenance = implementation.provenance?.dictionaryValue,
-           let title = createdByAgentString(provenance, keys: ["displayName", "display_name", "title", "name"]) {
+           let title = workerArtifactsString(provenance, keys: ["displayName", "display_name", "title", "name"]) {
             return humanizedCapabilityLabel(title)
         }
         if let contractId = implementation.contractId,
@@ -258,7 +258,7 @@ struct EngineConsoleCreatedByAgentSummary: Equatable, Identifiable {
 
     private static func shelfSubtitle(for implementation: CapabilityImplementationDTO) -> String {
         if let provenance = implementation.provenance?.dictionaryValue {
-            let source = createdByAgentString(provenance, keys: ["createdBy", "created_by", "actor", "source"])?
+            let source = workerArtifactsString(provenance, keys: ["createdBy", "created_by", "actor", "source"])?
                 .lowercased()
             if source?.contains("agent") == true {
                 return "Created by agent"
@@ -424,10 +424,10 @@ struct EngineConsoleCreatedByAgentSummary: Equatable, Identifiable {
         if let workerId = implementation.workerId,
            let worker = (controlSnapshot?.workers ?? []).first(where: { worker in
                guard let dictionary = worker.dictionaryValue else { return false }
-               return createdByAgentString(dictionary, keys: ["workerId", "id"]) == workerId
+               return workerArtifactsString(dictionary, keys: ["workerId", "id"]) == workerId
            }),
            let dictionary = worker.dictionaryValue {
-            return createdByAgentString(dictionary, keys: ["lifecycle", "status", "health"]) ?? "active"
+            return workerArtifactsString(dictionary, keys: ["lifecycle", "status", "health"]) ?? "active"
         }
         return "not recorded"
     }
@@ -524,11 +524,11 @@ struct EngineConsoleCreatedByAgentSummary: Equatable, Identifiable {
     }
 }
 
-private func createdByAgentString(_ dictionary: [String: Any]?, keys: [String]) -> String? {
+private func workerArtifactsString(_ dictionary: [String: Any]?, keys: [String]) -> String? {
     guard let dictionary else { return nil }
     for key in keys {
         if let value = dictionary[key] as? AnyCodable {
-            return createdByAgentStringValue(value.value)
+            return workerArtifactsStringValue(value.value)
         }
         if let uint = dictionary[key] as? UInt64 {
             return String(uint)
@@ -549,7 +549,7 @@ private func createdByAgentString(_ dictionary: [String: Any]?, keys: [String]) 
     return nil
 }
 
-private func createdByAgentStringValue(_ value: Any) -> String? {
+private func workerArtifactsStringValue(_ value: Any) -> String? {
     switch value {
     case let string as String where !string.isEmpty:
         return string
@@ -562,13 +562,13 @@ private func createdByAgentStringValue(_ value: Any) -> String? {
     case let bool as Bool:
         return bool ? "true" : "false"
     case let codable as AnyCodable:
-        return createdByAgentStringValue(codable.value)
+        return workerArtifactsStringValue(codable.value)
     default:
         return nil
     }
 }
 
-private func createdByAgentDictionary(_ dictionary: [String: Any], keys: [String]) -> [String: Any]? {
+private func workerArtifactsDictionary(_ dictionary: [String: Any], keys: [String]) -> [String: Any]? {
     for key in keys {
         if let nested = dictionary[key] as? [String: Any] {
             return nested
@@ -581,7 +581,7 @@ private func createdByAgentDictionary(_ dictionary: [String: Any], keys: [String
     return nil
 }
 
-private func createdByAgentUInt64(_ dictionary: [String: Any], keys: [String]) -> UInt64? {
+private func workerArtifactsUInt64(_ dictionary: [String: Any], keys: [String]) -> UInt64? {
     for key in keys {
         switch dictionary[key] {
         case let value as UInt64:
@@ -611,7 +611,7 @@ private func createdByAgentUInt64(_ dictionary: [String: Any], keys: [String]) -
     return nil
 }
 
-private func createdByAgentAnyCodable(_ dictionary: [String: Any], keys: [String]) -> AnyCodable? {
+private func workerArtifactsAnyCodable(_ dictionary: [String: Any], keys: [String]) -> AnyCodable? {
     for key in keys {
         guard let raw = dictionary[key] else { continue }
         if let codable = raw as? AnyCodable {

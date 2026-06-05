@@ -1,8 +1,8 @@
 import SwiftUI
 
 @available(iOS 26.0, *)
-extension EngineConsoleView {
-    enum ConsoleSection: String, CaseIterable {
+extension AuditDetailsView {
+    enum AuditSection: String, CaseIterable {
         case overview = "Overview"
         case substrate = "Substrate"
         case capabilities = "Capabilities"

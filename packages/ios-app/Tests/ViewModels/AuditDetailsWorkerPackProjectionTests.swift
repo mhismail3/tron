@@ -3,11 +3,11 @@ import Testing
 @testable import TronMobile
 
 @MainActor
-@Suite("Engine Console Pack Projection")
-struct EngineConsolePackProjectionTests {
+@Suite("Audit Details Pack Projection")
+struct AuditDetailsPackProjectionTests {
     @Test("local pack lifecycle uses product labels from server-owned action summaries")
     func localPackLifecycleUsesProductLabels() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.controlSnapshot = ControlSnapshotDTO(
             catalogRevision: 44,
             workers: [],
@@ -61,7 +61,7 @@ struct EngineConsolePackProjectionTests {
                 AnyCodable(["functionId": "worker::disconnect", "label": "Disconnect worker", "targetType": "worker"])
             ]
         )
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
 
         await state.refresh()
 
@@ -122,10 +122,10 @@ struct EngineConsolePackProjectionTests {
         ])
     }
 
-    private func ephemeralCache() -> EngineConsoleCache {
+    private func ephemeralCache() -> AuditDetailsCache {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("EngineConsoleCache.json")
-        return EngineConsoleCache(fileURL: url)
+            .appendingPathComponent("AuditDetailsCache.json")
+        return AuditDetailsCache(fileURL: url)
     }
 }

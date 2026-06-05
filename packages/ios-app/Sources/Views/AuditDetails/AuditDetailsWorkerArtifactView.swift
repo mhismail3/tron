@@ -1,21 +1,21 @@
 import SwiftUI
 
-struct EngineConsoleCreatedByAgentCard: View {
-    let projection: EngineConsoleCreatedByAgentProjection
+struct AuditDetailsWorkerArtifactCard: View {
+    let projection: AuditDetailsWorkerArtifactProjection
 
     var body: some View {
         if !projection.isEmpty {
-            EngineConsoleCard {
-                EngineConsoleCardHeader(
+            AuditDetailsCard {
+                AuditDetailsCardHeader(
                     symbol: "wand.and.sparkles",
-                    title: "Created by Agent",
-                    subtitle: "Capability history and evidence."
+                    title: "Worker Artifacts",
+                    subtitle: "Worker history and evidence."
                 )
 
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(projection.changes.prefix(6)), id: \.id) { change in
                         VStack(alignment: .leading, spacing: 8) {
-                            EngineConsoleActionRow(
+                            AuditDetailsActionRow(
                                 symbol: "sparkle.magnifyingglass",
                                 title: change.shelfTitle,
                                 subtitle: change.shelfSubtitle,
@@ -33,7 +33,7 @@ struct EngineConsoleCreatedByAgentCard: View {
         }
     }
 
-    private func historyStrip(for change: EngineConsoleCreatedByAgentSummary) -> some View {
+    private func historyStrip(for change: AuditDetailsWorkerArtifactSummary) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(change.historyLabels, id: \.self) { label in
@@ -48,11 +48,11 @@ struct EngineConsoleCreatedByAgentCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityLabel("Capability history")
+        .accessibilityLabel("Worker history")
         .accessibilityValue(change.historyLabels.joined(separator: ", "))
     }
 
-    private func evidenceGrid(for change: EngineConsoleCreatedByAgentSummary) -> some View {
+    private func evidenceGrid(for change: AuditDetailsWorkerArtifactSummary) -> some View {
         LazyVGrid(
             columns: [
                 GridItem(.adaptive(minimum: 150), spacing: 8)
@@ -92,7 +92,7 @@ struct EngineConsoleCreatedByAgentCard: View {
         }
     }
 
-    private func generatedSurfaceText(for change: EngineConsoleCreatedByAgentSummary) -> String {
+    private func generatedSurfaceText(for change: AuditDetailsWorkerArtifactSummary) -> String {
         let count = change.generatedSurfaceIds.count
         if count == 0 {
             return "none"

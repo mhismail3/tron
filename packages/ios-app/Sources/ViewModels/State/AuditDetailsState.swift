@@ -1,7 +1,7 @@
 import Foundation
 
 @MainActor
-protocol EngineConsoleCapabilityClient: AnyObject {
+protocol AuditDetailsCapabilityClient: AnyObject {
     func status(includeSnapshot: Bool) async throws -> CapabilityStatusDTO
     func registrySnapshot(includeDocuments: Bool, includeBindings: Bool) async throws -> CapabilityRegistrySnapshotDTO
     func catalogWatchSnapshot(_ request: CatalogWatchSnapshotRequestDTO) async throws -> CatalogWatchSnapshotDTO
@@ -82,9 +82,9 @@ protocol EngineConsoleCapabilityClient: AnyObject {
     ) async throws -> AnyCodable
 }
 
-extension CapabilityClient: EngineConsoleCapabilityClient {}
+extension CapabilityClient: AuditDetailsCapabilityClient {}
 
-struct EngineConsoleSearchSuggestion: Equatable, Identifiable {
+struct AuditDetailsSearchSuggestion: Equatable, Identifiable {
     var title: String
     var query: String
     var symbol: String
@@ -98,15 +98,15 @@ struct EngineConsoleSearchSuggestion: Equatable, Identifiable {
         controlSnapshot: ControlSnapshotDTO?,
         audit: CapabilityAuditQueryResultDTO?,
         programRuns: CapabilityProgramRunQueryResultDTO?
-    ) -> [EngineConsoleSearchSuggestion] {
-        var suggestions: [EngineConsoleSearchSuggestion] = []
+    ) -> [AuditDetailsSearchSuggestion] {
+        var suggestions: [AuditDetailsSearchSuggestion] = []
         var seen: Set<String> = []
 
         func add(_ title: String, query: String, symbol: String) {
             let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmedQuery.isEmpty, seen.insert(trimmedQuery).inserted else { return }
             suggestions.append(
-                EngineConsoleSearchSuggestion(
+                AuditDetailsSearchSuggestion(
                     title: shortened(title, limit: 34),
                     query: trimmedQuery,
                     symbol: symbol
@@ -229,7 +229,7 @@ struct EngineConsoleSearchSuggestion: Equatable, Identifiable {
 
 @MainActor
 @Observable
-final class EngineConsoleState {
+final class AuditDetailsState {
     enum LoadState: Equatable {
         case idle
         case loading
@@ -253,9 +253,9 @@ final class EngineConsoleState {
         case failed(String)
     }
 
-    private let capabilityClient: EngineConsoleCapabilityClient
+    private let capabilityClient: AuditDetailsCapabilityClient
     private let connectionState: () -> ConnectionState
-    private let cache: EngineConsoleCache
+    private let cache: AuditDetailsCache
 
     private(set) var loadState: LoadState = .idle
     private(set) var status: CapabilityStatusDTO?
@@ -265,7 +265,7 @@ final class EngineConsoleState {
     private(set) var audit: CapabilityAuditQueryResultDTO?
     private(set) var programRuns: CapabilityProgramRunQueryResultDTO?
     private(set) var policies: CapabilityPolicyGetDTO?
-    private(set) var cachedSnapshot: EngineConsoleCacheSnapshot?
+    private(set) var cachedSnapshot: AuditDetailsCacheSnapshot?
     var selectedInspection: CapabilityInspectionDTO?
     private(set) var programInspection: CapabilityInspectionDTO?
     private(set) var programResult: CapabilityProgramExecutionDTO?
@@ -291,20 +291,20 @@ final class EngineConsoleState {
     private var readOnlyMutationReason: String? {
         switch loadState {
         case .offlineCached:
-            return "Offline Engine Console cache is read-only; reconnect before submitting actions."
+            return "Offline Audit Details cache is read-only; reconnect before submitting actions."
         default:
             return connectionState().isConnected
                 ? nil
-                : "Engine Console is read-only while disconnected; reconnect before submitting actions."
+                : "Audit Details is read-only while disconnected; reconnect before submitting actions."
         }
     }
 
-    var moduleOperatorProjection: EngineConsoleModuleOperatorProjection {
-        EngineConsoleModuleOperatorProjection.make(from: controlSnapshot)
+    var moduleOperatorProjection: AuditDetailsWorkerPackOperatorProjection {
+        AuditDetailsWorkerPackOperatorProjection.make(from: controlSnapshot)
     }
 
-    var createdByAgentProjection: EngineConsoleCreatedByAgentProjection {
-        EngineConsoleCreatedByAgentProjection.make(
+    var workerArtifactProjection: AuditDetailsWorkerArtifactProjection {
+        AuditDetailsWorkerArtifactProjection.make(
             registry: registry,
             catalogSnapshot: catalogSnapshot,
             controlSnapshot: controlSnapshot,
@@ -313,8 +313,8 @@ final class EngineConsoleState {
         )
     }
 
-    var substrateSearchSuggestions: [EngineConsoleSearchSuggestion] {
-        EngineConsoleSearchSuggestion.make(
+    var substrateSearchSuggestions: [AuditDetailsSearchSuggestion] {
+        AuditDetailsSearchSuggestion.make(
             status: status,
             registry: registry,
             catalogSnapshot: catalogSnapshot,
@@ -336,7 +336,7 @@ final class EngineConsoleState {
 
     init(
         engineClient: EngineClient,
-        cache: EngineConsoleCache = EngineConsoleCache()
+        cache: AuditDetailsCache = AuditDetailsCache()
     ) {
         self.capabilityClient = engineClient.capability
         self.connectionState = { engineClient.connectionState }
@@ -345,9 +345,9 @@ final class EngineConsoleState {
     }
 
     init(
-        capabilityClient: EngineConsoleCapabilityClient,
+        capabilityClient: AuditDetailsCapabilityClient,
         connectionState: @escaping () -> ConnectionState = { .connected },
-        cache: EngineConsoleCache = EngineConsoleCache()
+        cache: AuditDetailsCache = AuditDetailsCache()
     ) {
         self.capabilityClient = capabilityClient
         self.connectionState = connectionState
@@ -396,7 +396,7 @@ final class EngineConsoleState {
                 self.programInspection = nil
                 programError = "Catalog changed; inspect the program runtime again before running."
             }
-            let snapshot = EngineConsoleCache.makeSnapshot(
+            let snapshot = AuditDetailsCache.makeSnapshot(
                 status: status,
                 registry: registry,
                 controlSnapshot: controlSnapshot,
@@ -737,13 +737,13 @@ final class EngineConsoleState {
         let data = Data(trimmed.utf8)
         let value = try JSONSerialization.jsonObject(with: data)
         guard let object = value as? [String: Any] else {
-            throw EngineConsoleStateError.invalidProgramArgs
+            throw AuditDetailsStateError.invalidProgramArgs
         }
         return object.mapValues(AnyCodable.init)
     }
 }
 
-private enum EngineConsoleStateError: LocalizedError {
+private enum AuditDetailsStateError: LocalizedError {
     case invalidProgramArgs
 
     var errorDescription: String? {

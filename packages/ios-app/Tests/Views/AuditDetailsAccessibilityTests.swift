@@ -1,20 +1,20 @@
 import Foundation
 import Testing
 
-@Suite("Engine Console Accessibility")
-struct EngineConsoleAccessibilityTests {
-    @Test("Engine Console chip controls use semantic hoverable buttons")
+@Suite("Audit Details Accessibility")
+struct AuditDetailsAccessibilityTests {
+    @Test("Audit Details chip controls use semantic hoverable buttons")
     func testChipControlsUseSemanticHoverableButtons() throws {
-        let source = try Self.source("Sources/Views/EngineConsole/EngineConsoleComponents.swift")
+        let source = try Self.source("Sources/Views/AuditDetails/AuditDetailsComponents.swift")
         let sectionChips = try Self.block(
             in: source,
-            from: "struct EngineConsoleSectionChips",
-            to: "struct EngineConsoleMetric"
+            from: "struct AuditDetailsSectionChips",
+            to: "struct AuditDetailsMetric"
         )
         let suggestionChips = try Self.block(
             in: source,
-            from: "struct EngineConsoleSuggestionChips",
-            to: "struct EngineConsoleMetricGrid"
+            from: "struct AuditDetailsSuggestionChips",
+            to: "struct AuditDetailsMetricGrid"
         )
 
         Self.expectHoverableChipButtons(sectionChips, minimumOccurrences: 2)
@@ -35,13 +35,13 @@ struct EngineConsoleAccessibilityTests {
         #expect(notificationBell.contains(".hoverEffect(.highlight)"))
     }
 
-    @Test("created-by-agent evidence card keeps history and evidence lanes accessible")
-    func testCreatedByAgentEvidenceCardStaysAccessible() throws {
-        let source = try Self.source("Sources/Views/EngineConsole/EngineConsoleCreatedByAgentView.swift")
+    @Test("worker-artifacts evidence card keeps history and evidence lanes accessible")
+    func testWorkerArtifactEvidenceCardStaysAccessible() throws {
+        let source = try Self.source("Sources/Views/AuditDetails/AuditDetailsWorkerArtifactView.swift")
 
         for required in [
-            "Created by Agent",
-            "Capability history",
+            "Worker Artifacts",
+            "Worker history",
             "historyLabels",
             "Provenance",
             "Tests",

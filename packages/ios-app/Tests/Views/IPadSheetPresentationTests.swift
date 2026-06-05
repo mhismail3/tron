@@ -138,7 +138,7 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             ),
             (
-                ["Sources", "Views", "EngineConsole", "EngineConsoleComponents.swift"],
+                ["Sources", "Views", "AuditDetails", "AuditDetailsComponents.swift"],
                 "struct CapabilityInspectionSheet: View",
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             ),

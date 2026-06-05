@@ -1,12 +1,12 @@
 import SwiftUI
 
 @available(iOS 26.0, *)
-struct EngineConsoleView: View {
+struct AuditDetailsView: View {
     let engineClient: EngineClient
     let actions: DashboardToolbarActions
     let eventDatabaseStorageMode: EventDatabaseStorageMode
-    @State private var state: EngineConsoleState
-    @State private var section: ConsoleSection = .overview
+    @State private var state: AuditDetailsState
+    @State private var section: AuditSection = .overview
     @State private var showAdvancedSections = false
 
     init(
@@ -17,19 +17,19 @@ struct EngineConsoleView: View {
         self.engineClient = engineClient
         self.actions = actions
         self.eventDatabaseStorageMode = eventDatabaseStorageMode
-        _state = State(initialValue: EngineConsoleState(engineClient: engineClient))
+        _state = State(initialValue: AuditDetailsState(engineClient: engineClient))
     }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 16) {
-                consoleHeader
+                auditHeader
 
                 if staleBannerVisible {
                     staleBanner
                 }
 
-                EngineConsoleSectionChips(
+                AuditDetailsSectionChips(
                     selection: $section,
                     showAdvancedSections: $showAdvancedSections
                 )
@@ -44,7 +44,7 @@ struct EngineConsoleView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             DashboardToolbarContent(
-                title: "Engine",
+                title: "Audit Details",
                 accent: .tronEmerald,
                 actions: actions
             )
@@ -90,7 +90,7 @@ struct EngineConsoleView: View {
         }
     }
 
-    private var consoleHeader: some View {
+    private var auditHeader: some View {
         SettingsInfoCard(
             icon: section.symbol,
             title: section.rawValue,
@@ -128,12 +128,12 @@ struct EngineConsoleView: View {
 
     private var overview: some View {
         VStack(alignment: .leading, spacing: 14) {
-            EngineConsoleMetricGrid(metrics: overviewMetrics)
+            AuditDetailsMetricGrid(metrics: overviewMetrics)
 
             readinessCard
 
             if eventDatabaseStorageMode.isTemporaryCache {
-                EngineConsoleBanner(
+                AuditDetailsBanner(
                     symbol: "externaldrive.badge.exclamationmark",
                     title: "Temporary local event cache",
                     message: "Documents storage was unavailable at launch. This device is using a temporary projection cache; server substrate truth remains authoritative and local cache rows may be lost.",
@@ -142,7 +142,7 @@ struct EngineConsoleView: View {
             }
 
             if let warning = indexWarning {
-                EngineConsoleBanner(
+                AuditDetailsBanner(
                     symbol: "exclamationmark.triangle",
                     title: "Capability search index",
                     message: warning,
@@ -151,7 +151,7 @@ struct EngineConsoleView: View {
             }
 
             if case .loading = state.loadState {
-                EngineConsoleBanner(
+                AuditDetailsBanner(
                     symbol: "arrow.triangle.2.circlepath",
                     title: "Refreshing",
                     message: "Loading status, registry, audit, policies, and program runs.",
@@ -159,7 +159,7 @@ struct EngineConsoleView: View {
                     showsProgress: true
                 )
             } else if case .failed(let message) = state.loadState {
-                EngineConsoleBanner(
+                AuditDetailsBanner(
                     symbol: "xmark.octagon",
                     title: "Refresh failed",
                     message: message,
@@ -171,12 +171,12 @@ struct EngineConsoleView: View {
 
     private var substrate: some View {
         VStack(alignment: .leading, spacing: 14) {
-            EngineConsoleCreatedByAgentCard(projection: state.createdByAgentProjection)
+            AuditDetailsWorkerArtifactCard(projection: state.workerArtifactProjection)
 
-            EngineConsoleMetricGrid(metrics: substrateMetrics)
+            AuditDetailsMetricGrid(metrics: substrateMetrics)
 
             if let warnings = substrateSnapshot?.integrityWarnings, !warnings.isEmpty {
-                EngineConsoleBanner(
+                AuditDetailsBanner(
                     symbol: "exclamationmark.triangle",
                     title: "Integrity warnings",
                     message: "\(warnings.count) substrate warning\(warnings.count == 1 ? "" : "s") need inspection.",
@@ -184,15 +184,15 @@ struct EngineConsoleView: View {
                 )
             }
 
-            EngineConsoleCard {
-                EngineConsoleCardHeader(
+            AuditDetailsCard {
+                AuditDetailsCardHeader(
                     symbol: "target",
                     title: "Active Goals",
                     subtitle: "Goal resources projected from the resource store."
                 )
                 let goals = substrateSnapshot?.activeGoals ?? []
                 if goals.isEmpty {
-                    EngineConsoleEmptyState(
+                    AuditDetailsEmptyState(
                         symbol: "checkmark.circle",
                         title: "No active goals",
                         message: "Open goal resources will appear here as the coordinator creates them."
@@ -200,7 +200,7 @@ struct EngineConsoleView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(goals.prefix(8).enumerated()), id: \.offset) { _, goal in
-                            EngineConsoleKeyValueRow(
+                            AuditDetailsKeyValueRow(
                                 substrateField(
                                     goal,
                                     keys: ["resourceId", "id"],
@@ -217,7 +217,7 @@ struct EngineConsoleView: View {
                 }
             }
 
-            EngineConsoleModuleProjectionCard(
+            AuditDetailsWorkerPackProjectionCard(
                 projection: state.moduleOperatorProjection,
                 mutatingDisabled: state.isMutatingDisabled,
                 canOpenSurface: { target in
@@ -228,15 +228,15 @@ struct EngineConsoleView: View {
                 }
             )
 
-            EngineConsoleCard {
-                EngineConsoleCardHeader(
+            AuditDetailsCard {
+                AuditDetailsCardHeader(
                     symbol: "rectangle.3.group",
                     title: "Generated Surfaces",
                     subtitle: "Validated ui_surface resources linked from the substrate projection."
                 )
                 let surfaces = substrateSnapshot?.uiSurfaceRefs ?? []
                 if surfaces.isEmpty {
-                    EngineConsoleEmptyState(
+                    AuditDetailsEmptyState(
                         symbol: "rectangle.dashed",
                         title: "No surfaces",
                         message: "Generated UI resources will appear here after workers create them."
@@ -259,7 +259,7 @@ struct EngineConsoleView: View {
                             Button {
                                 Task { await state.inspectSurface(surface) }
                             } label: {
-                                EngineConsoleKeyValueRow(
+                                AuditDetailsKeyValueRow(
                                     surface.title ?? surface.surfaceId ?? surface.resourceId,
                                     surface.lifecycle ?? surface.catalog?.id ?? "ui_surface"
                                 )
@@ -272,15 +272,15 @@ struct EngineConsoleView: View {
 
             generatedSurfaceDetail
 
-            EngineConsoleCard {
-                EngineConsoleCardHeader(
+            AuditDetailsCard {
+                AuditDetailsCardHeader(
                     symbol: "arrow.triangle.branch",
                     title: "Available Actions",
                     subtitle: "Actions are templates for canonical capabilities; stale submissions fail at the target."
                 )
                 let actions = substrateSnapshot?.availableActions ?? []
                 if actions.isEmpty {
-                    EngineConsoleEmptyState(
+                    AuditDetailsEmptyState(
                         symbol: "lock.shield",
                         title: "No actions",
                         message: "The control projection did not advertise substrate actions."
@@ -288,7 +288,7 @@ struct EngineConsoleView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(Array(actions.prefix(10).enumerated()), id: \.offset) { _, action in
-                            EngineConsoleKeyValueRow(
+                            AuditDetailsKeyValueRow(
                                 substrateField(
                                     action,
                                     keys: ["functionId"],
@@ -308,8 +308,8 @@ struct EngineConsoleView: View {
     }
 
     private var readinessCard: some View {
-        EngineConsoleCard(tint: readinessTint) {
-            EngineConsoleCardHeader(
+        AuditDetailsCard(tint: readinessTint) {
+            AuditDetailsCardHeader(
                 symbol: readinessIssues.isEmpty ? "checkmark.seal" : "wrench.and.screwdriver",
                 title: readinessIssues.isEmpty ? "Ready for Manual Testing" : "Needs Attention",
                 subtitle: readinessIssues.isEmpty
@@ -317,10 +317,10 @@ struct EngineConsoleView: View {
                     : "These items are visible so testing can proceed deliberately."
             )
             if readinessIssues.isEmpty {
-                EngineConsoleKeyValueRow("Next", "Search a capability, inspect it, then run a small program.")
+                AuditDetailsKeyValueRow("Next", "Search a capability, inspect it, then run a small program.")
             } else {
                 ForEach(readinessIssues) { item in
-                    EngineConsoleStatusLine(symbol: item.symbol, title: item.title, message: item.message, tint: item.tint)
+                    AuditDetailsStatusLine(symbol: item.symbol, title: item.title, message: item.message, tint: item.tint)
                 }
             }
         }
@@ -328,22 +328,22 @@ struct EngineConsoleView: View {
 
     private var capabilities: some View {
         VStack(alignment: .leading, spacing: 14) {
-            EngineConsoleCard {
+            AuditDetailsCard {
                 VStack(alignment: .leading, spacing: 12) {
-                    EngineConsoleCardHeader(
+                    AuditDetailsCardHeader(
                         symbol: "sparkle.magnifyingglass",
                         title: "Search Capabilities",
                         subtitle: "Find contracts, implementations, plugins, workers, docs, and examples."
                     )
 
-                    EngineConsoleSearchBar(
+                    AuditDetailsSearchBar(
                         text: $state.searchText,
                         placeholder: "read file, run command, web search...",
                         disabled: !engineClient.connectionState.isConnected,
                         action: { Task { await state.search() } }
                     )
 
-                    EngineConsoleSuggestionChips(suggestions: state.substrateSearchSuggestions) { suggestion in
+                    AuditDetailsSuggestionChips(suggestions: state.substrateSearchSuggestions) { suggestion in
                         state.searchText = suggestion.query
                         Task { await state.search() }
                     }
@@ -353,7 +353,7 @@ struct EngineConsoleView: View {
             }
 
             if state.searchResults.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "magnifyingglass",
                     title: "No search results yet",
                     message: "Search by natural language or identifier. Results inspect through live capability metadata."
@@ -379,7 +379,7 @@ struct EngineConsoleView: View {
         case .idle:
             EmptyView()
         case .loading:
-            EngineConsoleBanner(
+            AuditDetailsBanner(
                 symbol: "magnifyingglass",
                 title: "Searching",
                 message: "Querying the live capability registry.",
@@ -387,21 +387,21 @@ struct EngineConsoleView: View {
                 showsProgress: true
             )
         case .results(let count, let degradedReason):
-            EngineConsoleBanner(
+            AuditDetailsBanner(
                 symbol: degradedReason == nil ? "checkmark.circle" : "exclamationmark.triangle",
                 title: "\(count) result\(count == 1 ? "" : "s")",
                 message: searchModeMessage(degradedReason),
                 tint: degradedReason == nil ? .tronSuccess : .tronAmber
             )
         case .empty(let degradedReason):
-            EngineConsoleBanner(
+            AuditDetailsBanner(
                 symbol: "tray",
                 title: "No matches",
                 message: searchModeMessage(degradedReason),
                 tint: degradedReason == nil ? .tronTextMuted : .tronAmber
             )
         case .failed(let message):
-            EngineConsoleBanner(
+            AuditDetailsBanner(
                 symbol: "xmark.octagon",
                 title: "Search failed",
                 message: message,
@@ -414,7 +414,7 @@ struct EngineConsoleView: View {
         let plugins = state.registry?.plugins ?? state.cachedSnapshot?.pluginSummaries ?? []
         return LazyVStack(spacing: 10) {
             if plugins.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "puzzlepiece.extension",
                     title: "No plugin manifests",
                     message: "Plugin manifests appear here after the registry snapshot loads."
@@ -440,13 +440,13 @@ struct EngineConsoleView: View {
             ?? []
         return LazyVStack(spacing: 10) {
             if workers.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "server.rack",
                     title: "No workers",
                     message: "Worker documents appear here once the capability registry snapshot loads."
                 )
             } else {
-                ForEach(workers, id: \.engineConsoleStableId) { worker in
+                ForEach(workers, id: \.auditDetailsStableId) { worker in
                     WorkerCard(worker: worker)
                 }
             }
@@ -457,7 +457,7 @@ struct EngineConsoleView: View {
         let bindings = state.registry?.bindings ?? []
         return LazyVStack(spacing: 10) {
             if bindings.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "point.3.connected.trianglepath.dotted",
                     title: "No explicit bindings",
                     message: "Default resolver choices still occur at execution time and are recorded in binding decisions."
@@ -480,7 +480,7 @@ struct EngineConsoleView: View {
         let policies = state.policies?.capabilityExecutionPolicies ?? [:]
         return LazyVStack(spacing: 10) {
             if policies.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "checkmark.shield",
                     title: "No policies loaded",
                     message: "Refresh the live console to inspect profile execution policies."
@@ -499,7 +499,7 @@ struct EngineConsoleView: View {
         let events = state.audit?.events ?? state.cachedSnapshot?.recentAuditRows ?? []
         return LazyVStack(spacing: 10) {
             if events.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "list.bullet.rectangle",
                     title: "No audit rows",
                     message: "Capability search, inspect, execute, policy, plugin, and program events appear here redacted by default."
@@ -518,7 +518,7 @@ struct EngineConsoleView: View {
             ?? []
         return LazyVStack(spacing: 10) {
             if events.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "waterfall",
                     title: "No traces",
                     message: "Trace-linked capability events appear after executions, approvals, plugin actions, and program runs."
@@ -533,30 +533,30 @@ struct EngineConsoleView: View {
 
     private var primer: some View {
         VStack(alignment: .leading, spacing: 14) {
-            EngineConsoleCard {
-                EngineConsoleCardHeader(
+            AuditDetailsCard {
+                AuditDetailsCardHeader(
                     symbol: "text.book.closed",
                     title: "Primer Policy",
                     subtitle: state.status?.serverProfile?.profileName ?? "Unknown profile"
                 )
-                EngineConsoleKeyValueRow("Profile hash", state.status?.serverProfile?.profileHash ?? "unknown")
-                EngineConsoleKeyValueRow("Index", state.status?.indexStatus?.state ?? cachedIndexState)
-                EngineConsoleKeyValueRow("Embedding", state.status?.indexStatus?.embeddingModel ?? "unavailable")
-                EngineConsoleKeyValueRow("Vector store", state.status?.indexStatus?.vectorStore ?? "unknown")
+                AuditDetailsKeyValueRow("Profile hash", state.status?.serverProfile?.profileHash ?? "unknown")
+                AuditDetailsKeyValueRow("Index", state.status?.indexStatus?.state ?? cachedIndexState)
+                AuditDetailsKeyValueRow("Embedding", state.status?.indexStatus?.embeddingModel ?? "unavailable")
+                AuditDetailsKeyValueRow("Vector store", state.status?.indexStatus?.vectorStore ?? "unknown")
             }
 
             let core = state.registry?.implementations?.filter { implementation in
                 implementation.trustTier == "first_party_signed"
                     && implementation.conformanceState == "healthy"
             } ?? []
-            EngineConsoleCard {
-                EngineConsoleCardHeader(
+            AuditDetailsCard {
+                AuditDetailsCardHeader(
                     symbol: "checklist",
                     title: "Core First-Party Inputs",
                     subtitle: "\(core.count) healthy signed implementations"
                 )
                 ForEach(core.prefix(80), id: \.implementationId) { implementation in
-                    EngineConsoleKeyValueRow(
+                    AuditDetailsKeyValueRow(
                         implementation.contractId ?? implementation.implementationId,
                         implementation.functionId ?? "unknown"
                     )
@@ -568,7 +568,7 @@ struct EngineConsoleView: View {
     private var programRuns: some View {
         VStack(alignment: .leading, spacing: 14) {
             if state.registry != nil, !programRuntimeReady {
-                EngineConsoleBanner(
+                AuditDetailsBanner(
                     symbol: "curlybraces.square",
                     title: "Program runtime unavailable",
                     message: "Program execution stays disabled until the first-party worker reports healthy conformance.",
@@ -580,7 +580,7 @@ struct EngineConsoleView: View {
 
             let runs = state.programRuns?.programRuns ?? state.cachedSnapshot?.recentProgramRuns ?? []
             if runs.isEmpty {
-                EngineConsoleEmptyState(
+                AuditDetailsEmptyState(
                     symbol: "curlybraces.square",
                     title: "No program runs",
                     message: "Bounded JavaScript program runs appear here with redacted logs, hashes, trace links, and child invocations."
@@ -596,9 +596,9 @@ struct EngineConsoleView: View {
     }
 
     private var programRunForm: some View {
-        EngineConsoleCard {
+        AuditDetailsCard {
             VStack(alignment: .leading, spacing: 12) {
-                EngineConsoleCardHeader(
+                AuditDetailsCardHeader(
                     symbol: "curlybraces.square",
                     title: "Program Executor",
                     subtitle: "Inspect the runtime, then run JavaScript through the capability runtime."
@@ -607,7 +607,7 @@ struct EngineConsoleView: View {
                 Button {
                     Task { await state.inspectProgramRuntime() }
                 } label: {
-                    EngineConsoleActionRow(
+                    AuditDetailsActionRow(
                         symbol: "doc.text.magnifyingglass",
                         title: "Inspect Program Runtime",
                         subtitle: programInspectionSubtitle,
@@ -627,19 +627,19 @@ struct EngineConsoleView: View {
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
 
-                EngineConsoleTextField(
+                AuditDetailsTextField(
                     title: "Args JSON object",
                     text: $state.programArgsJSON,
                     prompt: "{}",
                     monospace: true
                 )
-                EngineConsoleTextField(
+                AuditDetailsTextField(
                     title: "Allowed contracts",
                     text: $state.programAllowedContractsText,
                     prompt: "filesystem::read_file, web::search",
                     monospace: false
                 )
-                EngineConsoleTextField(
+                AuditDetailsTextField(
                     title: "Allowed implementations",
                     text: $state.programAllowedImplementationsText,
                     prompt: "first_party.filesystem.v1.read_file",
@@ -647,7 +647,7 @@ struct EngineConsoleView: View {
                 )
 
                 if let programError = state.programError {
-                    EngineConsoleBanner(
+                    AuditDetailsBanner(
                         symbol: "xmark.octagon",
                         title: "Program error",
                         message: programError,
@@ -656,7 +656,7 @@ struct EngineConsoleView: View {
                 }
 
                 if let result = state.programResult {
-                    EngineConsoleBanner(
+                    AuditDetailsBanner(
                         symbol: result.status == "ok" ? "checkmark.circle" : "exclamationmark.triangle",
                         title: result.status ?? "Program result",
                         message: [result.programRunId, result.traceId].compactMap { $0 }.joined(separator: " · "),
@@ -667,7 +667,7 @@ struct EngineConsoleView: View {
                 Button {
                     Task { await state.executeProgramFromInspection() }
                 } label: {
-                    EngineConsoleActionRow(
+                    AuditDetailsActionRow(
                         symbol: "play.fill",
                         title: "Run Program",
                         subtitle: state.programInspection == nil
@@ -693,18 +693,18 @@ struct EngineConsoleView: View {
         return "\(revision) · \(schema)"
     }
 
-    private var overviewMetrics: [EngineConsoleMetric] {
+    private var overviewMetrics: [AuditDetailsMetric] {
         [
-            EngineConsoleMetric("Connection", engineClient.connectionState.displayText, .tronEmerald),
-            EngineConsoleMetric("Catalog", state.status?.catalogRevision.map(String.init) ?? cachedCatalog, .tronTeal),
-            EngineConsoleMetric("Registry", state.status?.registryRevision.map(String.init) ?? "unknown", .tronTeal),
-            EngineConsoleMetric("Index", state.status?.indexStatus?.state ?? cachedIndexState, indexWarning == nil ? .tronSuccess : .tronAmber),
-            EngineConsoleMetric("Embedding", state.status?.indexStatus?.embeddingModel ?? "unavailable", state.status?.indexStatus?.embeddingModel == nil ? .tronAmber : .tronEmerald),
-            EngineConsoleMetric("Plugins", countText(state.status?.plugins, cached: state.cachedSnapshot?.pluginSummaries.count), .tronPurple),
-            EngineConsoleMetric("Implementations", countText(state.status?.implementations, cached: nil), .tronPurple),
-            EngineConsoleMetric("Bindings", countText(state.status?.bindings, cached: nil), .tronCyan),
-            EngineConsoleMetric("Audit Rows", countText(state.status?.auditEvents, cached: state.cachedSnapshot?.recentAuditRows.count), .tronSlate),
-            EngineConsoleMetric("Program Runs", countText(state.status?.programRuns, cached: state.cachedSnapshot?.recentProgramRuns.count), .tronRose)
+            AuditDetailsMetric("Connection", engineClient.connectionState.displayText, .tronEmerald),
+            AuditDetailsMetric("Catalog", state.status?.catalogRevision.map(String.init) ?? cachedCatalog, .tronTeal),
+            AuditDetailsMetric("Registry", state.status?.registryRevision.map(String.init) ?? "unknown", .tronTeal),
+            AuditDetailsMetric("Index", state.status?.indexStatus?.state ?? cachedIndexState, indexWarning == nil ? .tronSuccess : .tronAmber),
+            AuditDetailsMetric("Embedding", state.status?.indexStatus?.embeddingModel ?? "unavailable", state.status?.indexStatus?.embeddingModel == nil ? .tronAmber : .tronEmerald),
+            AuditDetailsMetric("Plugins", countText(state.status?.plugins, cached: state.cachedSnapshot?.pluginSummaries.count), .tronPurple),
+            AuditDetailsMetric("Implementations", countText(state.status?.implementations, cached: nil), .tronPurple),
+            AuditDetailsMetric("Bindings", countText(state.status?.bindings, cached: nil), .tronCyan),
+            AuditDetailsMetric("Audit Rows", countText(state.status?.auditEvents, cached: state.cachedSnapshot?.recentAuditRows.count), .tronSlate),
+            AuditDetailsMetric("Program Runs", countText(state.status?.programRuns, cached: state.cachedSnapshot?.recentProgramRuns.count), .tronRose)
         ]
     }
 
@@ -712,20 +712,20 @@ struct EngineConsoleView: View {
         state.controlSnapshot ?? state.cachedSnapshot?.controlSnapshot
     }
 
-    private var substrateMetrics: [EngineConsoleMetric] {
+    private var substrateMetrics: [AuditDetailsMetric] {
         let snapshot = substrateSnapshot
         return [
-            EngineConsoleMetric("Workers", countText(snapshot?.workers?.count, cached: nil), .tronEmerald),
-            EngineConsoleMetric("Capabilities", countText(snapshot?.capabilities?.count, cached: nil), .tronTeal),
-            EngineConsoleMetric("Resource Kinds", countText(snapshot?.resourceTypes?.count, cached: nil), .tronCyan),
-            EngineConsoleMetric("Active Goals", countText(snapshot?.activeGoals?.count, cached: nil), .tronAmber),
-            EngineConsoleMetric("Packages", countText(snapshot?.modulePackages?.count, cached: nil), .tronPurple),
-            EngineConsoleMetric("Activations", countText(snapshot?.activationRecords?.count, cached: nil), .tronRose),
-            EngineConsoleMetric("UI Surfaces", countText(snapshot?.uiSurfaceRefs?.count, cached: nil), .tronEmerald),
-            EngineConsoleMetric("Invocations", countText(snapshot?.invocations?.count, cached: nil), .tronPurple),
-            EngineConsoleMetric("Grants", countText(snapshot?.grants?.count, cached: nil), .tronSlate),
-            EngineConsoleMetric("Queues", countText(snapshot?.queues?.count, cached: nil), .tronRose),
-            EngineConsoleMetric("Approvals", countText(snapshot?.approvals?.count, cached: nil), .tronAmber)
+            AuditDetailsMetric("Workers", countText(snapshot?.workers?.count, cached: nil), .tronEmerald),
+            AuditDetailsMetric("Capabilities", countText(snapshot?.capabilities?.count, cached: nil), .tronTeal),
+            AuditDetailsMetric("Resource Kinds", countText(snapshot?.resourceTypes?.count, cached: nil), .tronCyan),
+            AuditDetailsMetric("Active Goals", countText(snapshot?.activeGoals?.count, cached: nil), .tronAmber),
+            AuditDetailsMetric("Packages", countText(snapshot?.modulePackages?.count, cached: nil), .tronPurple),
+            AuditDetailsMetric("Activations", countText(snapshot?.activationRecords?.count, cached: nil), .tronRose),
+            AuditDetailsMetric("UI Surfaces", countText(snapshot?.uiSurfaceRefs?.count, cached: nil), .tronEmerald),
+            AuditDetailsMetric("Invocations", countText(snapshot?.invocations?.count, cached: nil), .tronPurple),
+            AuditDetailsMetric("Grants", countText(snapshot?.grants?.count, cached: nil), .tronSlate),
+            AuditDetailsMetric("Queues", countText(snapshot?.queues?.count, cached: nil), .tronRose),
+            AuditDetailsMetric("Approvals", countText(snapshot?.approvals?.count, cached: nil), .tronAmber)
         ]
     }
 
@@ -733,8 +733,8 @@ struct EngineConsoleView: View {
     private var generatedSurfaceDetail: some View {
         if let inspected = state.selectedSurface,
            let surface = inspected.surface {
-            EngineConsoleCard {
-                EngineConsoleCardHeader(
+            AuditDetailsCard {
+                AuditDetailsCardHeader(
                     symbol: "rectangle.3.group.bubble.left",
                     title: surface.title,
                     subtitle: "Validation: \(inspected.validationState)"
@@ -770,14 +770,14 @@ struct EngineConsoleView: View {
                 }
 
                 if let result = state.surfaceActionResult {
-                    EngineConsoleKeyValueRow(
+                    AuditDetailsKeyValueRow(
                         result.targetFunctionId ?? "surface action",
                         result.childInvocationId ?? result.actionId ?? "submitted"
                     )
                 }
 
                 if let error = state.surfaceError {
-                    EngineConsoleBanner(
+                    AuditDetailsBanner(
                         symbol: "exclamationmark.triangle",
                         title: "Surface state",
                         message: error,
@@ -820,11 +820,11 @@ struct EngineConsoleView: View {
         } ?? false
     }
 
-    private var readinessIssues: [EngineConsoleReadinessItem] {
-        var items: [EngineConsoleReadinessItem] = []
+    private var readinessIssues: [AuditDetailsReadinessItem] {
+        var items: [AuditDetailsReadinessItem] = []
         if !engineClient.connectionState.isConnected {
             items.append(
-                EngineConsoleReadinessItem(
+                AuditDetailsReadinessItem(
                     symbol: "wifi.slash",
                     title: "Server disconnected",
                     message: "Console is read-only until the engine reconnects.",
@@ -836,7 +836,7 @@ struct EngineConsoleView: View {
            index.state != nil,
            index.state != "ready" {
             items.append(
-                EngineConsoleReadinessItem(
+                AuditDetailsReadinessItem(
                     symbol: "magnifyingglass",
                     title: "Semantic index not ready",
                     message: index.degradedReason ?? "Search can run lexical while local vectors finish building.",
@@ -850,26 +850,26 @@ struct EngineConsoleView: View {
         return items
     }
 
-    private var mutationIssue: EngineConsoleReadinessItem? {
+    private var mutationIssue: AuditDetailsReadinessItem? {
         switch state.mutationState {
         case .idle:
             nil
         case .running(let message):
-            EngineConsoleReadinessItem(
+            AuditDetailsReadinessItem(
                 symbol: "arrow.triangle.2.circlepath",
                 title: "Action running",
                 message: message,
                 tint: .tronEmerald
             )
         case .succeeded(let message):
-            EngineConsoleReadinessItem(
+            AuditDetailsReadinessItem(
                 symbol: "checkmark.circle",
                 title: "Action completed",
                 message: message,
                 tint: .tronSuccess
             )
         case .failed(let message):
-            EngineConsoleReadinessItem(
+            AuditDetailsReadinessItem(
                 symbol: "xmark.octagon",
                 title: "Action failed",
                 message: message,
@@ -918,7 +918,7 @@ struct EngineConsoleView: View {
     }
 
     private var staleBanner: some View {
-        EngineConsoleBanner(
+        AuditDetailsBanner(
             symbol: "wifi.slash",
             title: "Offline snapshot",
             message: "Read only. Mutations are disabled until the live server reconnects.",

@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-05 (worker-first Work dashboard and worker detail sheets over `agent::work_snapshot`, worker-first chat/action detail projection, plain Guardrails settings UX, worker-first autonomy settings parity, post-scorecard recent-gap campaign activated, HMH-F7 reconnect chaos proof, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, disconnected approval decision fail-closed guard, engine thin-client boundary, Engine Console semantic section/suggestion chip controls, live substrate-derived Engine Console search suggestions, Engine Console Created by Agent projection over registry plus live catalog snapshots, Engine Console workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, Engine Console offline cache fail-closed mutation guards, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
+> Last verified: 2026-06-05 (worker-first Work dashboard and worker detail sheets over `agent::work_snapshot`, worker-first chat/action detail projection, plain Guardrails settings UX, worker-first autonomy settings parity, post-scorecard recent-gap campaign activated, HMH-F7 reconnect chaos proof, Agent Control local-first card summaries, Agent Control semantic card buttons, lightweight source-control diff summary loading, canonical content-aware iPad liquid-glass sheet sizing, iPad prompt Tab no-draft behavior, Agent protected-branch Tab no-submit behavior, dashboard session-card worktree metadata projection, iPhone relaunch preload, persisted processing state, capability-native chat/event rendering, server-owned approval resolving/read-only state and consequence metadata, disconnected approval decision fail-closed guard, engine thin-client boundary, Audit Details semantic section/suggestion chip controls, live substrate-derived Audit Details search suggestions, Audit Details Worker Artifacts projection over registry plus live catalog snapshots, Audit Details workers/policies/traces/primer/program-runs/substrate sections, module package/config/activation/trust/health/evidence/action projections, server-authored module package/activation generated surfaces, server-authored generated `ui_surface` inspection/refresh/action flow, session-generated capability generated UI submit-coordinate proof, strict restrained-motion generated UI renderer for `ui_surface` refs, Audit Details offline cache fail-closed mutation guards, server-owned storage/observability settings, fail-visible local EventDatabase temporary-cache mode, live session and approval stream subscription before prompt send, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings/model projection, strict source-control git policy/event-origin projection, direct-branch Source Control affordances for passthrough git checkouts, provider status cards, Agent Control sheet entrance animation, deferred settings-to-onboarding handoff, explicit onboarding Back/Next controls, foreground connection recovery, simulator-safe audio capture, retired direct integration removal, and fixed Automations/Voice Notes dashboards removed)
 
 ## Overview
 
@@ -48,16 +48,16 @@ Sources/
 │   ├── Onboarding/         # Pairing validator/probe/persistor
 │   ├── PairingURLParser.swift  # tron://pair?host&port&token&label parser + builder
 │   ├── Settings/           # PairedServerStore (local server list + active id)
-│   └── Storage/            # KeychainItem, PairedServerTokenStore, EngineConsoleCache
+│   └── Storage/            # KeychainItem, PairedServerTokenStore, AuditDetailsCache
 ├── ViewModels/             # View state management
 │   ├── Chat/               # ChatViewModel and extensions
 │   ├── Handlers/           # Event handling coordinators
 │   ├── Managers/           # Specialized state managers
-│   └── State/              # @Observable state objects, including WorkDashboardState and audit console state
+│   └── State/              # @Observable state objects, including WorkDashboardState and AuditDetailsState
 └── Views/                  # SwiftUI views
     ├── Chat/               # Core chat interface
     ├── Work/               # Worker-first Work dashboard and worker details
-    ├── EngineConsole/      # Capability registry/plugin/binding/audit console
+    ├── AuditDetails/       # Audit-only capability, plugin, binding, and policy inspection
     ├── Capabilities/       # Generic capability invocation chips, detail sheets, and result rendering
     ├── Components/         # Reusable UI components
     └── ...                 # Feature-specific views
@@ -115,7 +115,7 @@ Two systems handle events:
 Live:   WebSocket → EventRegistry → Plugin → EventDispatchCoordinator → ChatViewModel
 Stored: EventDatabase → Transformer → ChatMessage array
 Work:   /engine read(agent::work_snapshot) → AgentClient → WorkDashboardState → WorkDashboardView
-Audit:  /engine invoke(capability::*) → CapabilityClient → EngineConsoleState → EngineConsoleView
+Audit:  /engine invoke(capability::*) → CapabilityClient → AuditDetailsState → AuditDetailsView
 ```
 
 Live/stored `capability.invocation.started`, `capability.invocation.progress`,
@@ -180,20 +180,20 @@ policy from raw model ids.
 | `Services/Network/Clients/AgentClient.swift` | Agent prompt, queue, subagent, and server-owned Work snapshot client |
 | `Services/Network/Clients/CapabilityClient.swift` | Capability admin, catalog watch, control, and generated UI primitive client for Audit Details |
 | `Models/EngineProtocol/EngineProtocolTypes+Catalog.swift` | Catalog watch snapshot DTOs for live worker/function/trigger projections |
-| `Services/Storage/EngineConsoleCache.swift` | Read-only disconnected Engine Console summary cache, including redacted generated UI refs |
+| `Services/Storage/AuditDetailsCache.swift` | Read-only disconnected Audit Details summary cache, including redacted generated UI refs |
 | `Services/Network/Clients/ApprovalClient.swift` | Thin client for canonical `approval::resolve` decisions |
 | `Services/Events/EventStoreManager.swift` | Local event persistence |
 | `ViewModels/State/WorkDashboardState.swift` | Thin state object for `agent::work_snapshot`, refresh, blocked-work status, and worker detail filtering |
-| `ViewModels/State/EngineConsoleState.swift` | Live capability status/snapshot/search/audit state behind Audit Details |
-| `ViewModels/State/EngineConsoleCreatedByAgentProjection.swift` | Read-only Created by Agent shelf projection over session-created capability lineage from registry/catalog snapshots, generated surfaces, audit, and program runs |
-| `ViewModels/State/EngineConsoleModuleProjection.swift` | Typed read-only projection over server-authored local pack/config/activation/trust/health/action rows and pack/activation generated-surface targets |
+| `ViewModels/State/AuditDetailsState.swift` | Live capability status/snapshot/search/audit state behind Audit Details |
+| `ViewModels/State/AuditDetailsWorkerArtifactProjection.swift` | Read-only Worker Artifacts shelf projection over session-created capability lineage from registry/catalog snapshots, generated surfaces, audit, and program runs |
+| `ViewModels/State/AuditDetailsWorkerPackProjection.swift` | Typed read-only projection over server-authored local pack/config/activation/trust/health/action rows and pack/activation generated-surface targets |
 | `Views/Work/WorkDashboardView.swift` | Top-level Work surface for autonomy, active work, workers, results, guardrails, and Audit Details |
-| `Views/EngineConsole/EngineConsoleView.swift` | Audit Details capability operator console |
-| `Views/EngineConsole/EngineConsoleSection.swift` | Engine Console section identity |
-| `Views/EngineConsole/EngineConsoleComponents.swift` | Console-specific section chips, metrics, cards, rows, and inspection sheet components |
-| `Views/EngineConsole/EngineConsoleCreatedByAgentView.swift` | Native Created by Agent shelf for session-created capability history, provenance, tests, surfaces, promotion, cleanup, and trace evidence |
-| `Views/EngineConsole/EngineConsoleModuleProjectionView.swift` | Native local pack projection card for pack/config/activation/trust/health/evidence/action rows and server-authored surface-open controls |
-| `Views/EngineConsole/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources, including session-generated capability surfaces; uses Tron typography/color tokens, restrained native row expansion, and submits only stored action coordinates |
+| `Views/AuditDetails/AuditDetailsView.swift` | Audit-only capability operator surface |
+| `Views/AuditDetails/AuditDetailsSection.swift` | Audit Details section identity |
+| `Views/AuditDetails/AuditDetailsComponents.swift` | Audit-specific section chips, metrics, cards, rows, and inspection sheet components |
+| `Views/AuditDetails/AuditDetailsWorkerArtifactView.swift` | Native Worker Artifacts shelf for session-created capability history, provenance, tests, surfaces, promotion, cleanup, and trace evidence |
+| `Views/AuditDetails/AuditDetailsWorkerPackProjectionView.swift` | Native local pack projection card for pack/config/activation/trust/health/evidence/action rows and server-authored surface-open controls |
+| `Views/AuditDetails/GeneratedUISurfaceView.swift` | Strict SwiftUI renderer for fixed-catalog server-authored generated UI resources, including session-generated capability surfaces; uses Tron typography/color tokens, restrained native row expansion, and submits only stored action coordinates |
 | `Models/Messages/CapabilityInvocationTypes.swift` | Capability invocation lifecycle DTOs, artifacts, results, and errors |
 | `Models/Messages/CapabilityInvocationDisplayModel.swift` | Server-authored invocation display projection and audit metadata |
 | `Models/Messages/CapabilityInvocationWorkRows.swift` | What happened / Why / Worker / Status / Result rows for Work action details |
@@ -235,7 +235,7 @@ sheet so stale local UI cannot remain actionable after server truth advances.
 ACKs are coalesced to the latest cursor per subscription so bursts do not turn
 into one engine request per event.
 Large client files are split by client-owned concern only: transport state
-types and wire frames stay beside `EngineConnection`, Engine Console components
+types and wire frames stay beside `EngineConnection`, Audit Details components
 stay beside the console view, and capability invocation display/presentation
 helpers stay beside the message models and invocation views. Those splits must
 not introduce capability policy, routing, approval truth, generated-UI
@@ -243,7 +243,7 @@ semantics, or server-owned product state into Swift.
 The local `EventDatabase` is a projection/cache. If Documents storage is
 unavailable at launch, the app uses `temporaryCache` mode rather than
 crashing, logs that mode, includes it in diagnostics bundles, and shows it in
-Engine Console. The temporary cache is never server truth: it cannot construct
+Audit Details. The temporary cache is never server truth: it cannot construct
 grants, generated UI action targets/templates, resource lineage, or capability
 policy.
 Each visible `ChatView` starts and stops only its own `ChatViewModel` live-event
@@ -287,14 +287,14 @@ presentation, such as recent milestones and guardrails for a selected worker,
 but it does not infer approval policy, worker routing, capability binding,
 generated action targets, source trust, or guardrail truth.
 
-Audit Details opens `EngineConsoleView`, which remains the native operator
+Audit Details opens `AuditDetailsView`, which remains the native operator
 surface for the live capability architecture. It calls `capability::status`,
 `capability::registry_snapshot`, `catalog::watch_snapshot`,
 `capability::audit_query`, binding functions, plugin functions, conformance,
 and policy functions through `CapabilityClient`; it never reads a hardcoded
 tool descriptor catalog. The audit console exposes plugin, worker, binding,
 policy, index, trace, primer, generated UI, local pack, activation, trust,
-health, evidence, and action refs for inspection. `EngineConsoleState` owns
+health, evidence, and action refs for inspection. `AuditDetailsState` owns
 refresh, search, inspect, local mutation state, mutation gating, and
 disconnected read-only cache snapshots. The server remains the source of truth
 for policy, authority, approval, audit redaction, plugin lifecycle, local
@@ -315,7 +315,7 @@ registry state. Capability search suggestions are projected from live status,
 registry documents, catalog functions, control-advertised actions, module
 package resources, generated UI refs, audit traces, program runs, and primer
 state instead of a hardcoded tool list.
-Created by Agent rows project session-created capability lineage from the same
+Worker Artifacts rows project session-created capability lineage from the same
 server-owned registry, catalog, control, audit, and program-run DTOs. The row
 title/subtitle stays product-facing, the history strip names created, updated,
 auto-repaired, tested, failed, promoted, revoked, discarded, and reused states,
@@ -343,7 +343,7 @@ search result status and is not applied to model turns.
 
 The console cache is intentionally read-only. On disconnect, the UI shows stale
 catalog/registry/index/module summaries and disables mutations; direct
-`EngineConsoleState` mutation calls for generated surface authoring, refresh,
+`AuditDetailsState` mutation calls for generated surface authoring, refresh,
 action submission, program execution, implementation/plugin state,
 conformance, promotion, and binding updates also fail closed with a read-only
 error before reaching `CapabilityClient`. Cached generated UI views return
@@ -630,7 +630,7 @@ message to the session transcript.
 | State object | `ViewModels/State/` |
 | Coordinator | `ViewModels/Handlers/` |
 | Work surface | `Views/Work/` |
-| Audit Details surface | `Views/EngineConsole/` |
+| Audit Details surface | `Views/AuditDetails/` |
 | Capability chip+sheet | `Views/Capabilities/` |
 | Reusable component | `Views/Components/` |
 

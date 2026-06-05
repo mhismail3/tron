@@ -3,11 +3,11 @@ import Testing
 @testable import TronMobile
 
 @MainActor
-@Suite("EngineConsoleCreatedByAgentProjection")
-struct EngineConsoleCreatedByAgentProjectionTests {
-    @Test("created-by-agent projection explains session-created capability evidence")
+@Suite("AuditDetailsWorkerArtifactProjection")
+struct AuditDetailsWorkerArtifactProjectionTests {
+    @Test("worker-artifacts projection explains session-created capability evidence")
     func explainsSessionCreatedCapabilityEvidence() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.registrySnapshotDTO = CapabilityRegistrySnapshotDTO(
             plugins: [],
             implementations: [
@@ -28,7 +28,7 @@ struct EngineConsoleCreatedByAgentProjectionTests {
                     schemaDigest: "sha256:summary",
                     catalogRevision: 41,
                     provenance: AnyCodable([
-                        "sessionId": "session-created-by-agent",
+                        "sessionId": "session-worker-artifacts",
                         "createdBy": "agent"
                     ]),
                     conformanceState: "passed",
@@ -213,14 +213,14 @@ struct EngineConsoleCreatedByAgentProjectionTests {
             ],
             redacted: true
         )
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
 
         await state.refresh()
 
-        let projection = state.createdByAgentProjection
+        let projection = state.workerArtifactProjection
         let change = try #require(projection.changes.first)
         #expect(change.functionId == "session_summary::summarize")
-        #expect(change.provenanceText == "session session-created-by-agent")
+        #expect(change.provenanceText == "session session-worker-artifacts")
         #expect(change.testText == "passed")
         #expect(change.generatedSurfaceIds == ["surface-session-summary"])
         #expect(change.promotionText == "session")
@@ -247,9 +247,9 @@ struct EngineConsoleCreatedByAgentProjectionTests {
         #expect(!change.shelfSubtitle.contains("worker-session-summary"))
     }
 
-    @Test("created-by-agent projection includes live catalog session functions")
+    @Test("worker-artifacts projection includes live catalog session functions")
     func includesLiveCatalogSessionFunctions() async throws {
-        let client = FakeEngineConsoleCapabilityClient()
+        let client = FakeAuditDetailsCapabilityClient()
         client.registrySnapshotDTO = CapabilityRegistrySnapshotDTO(
             plugins: [],
             implementations: [],
@@ -325,12 +325,12 @@ struct EngineConsoleCreatedByAgentProjectionTests {
             availableActions: [],
             uiSurfaceRefs: [
                 UiSurfaceRefDTO(
-                    resourceId: "ui-surface-created-by-agent-visual",
-                    versionId: "ui-surface-version-created-by-agent-visual",
+                    resourceId: "ui-surface-worker-artifacts-visual",
+                    versionId: "ui-surface-version-worker-artifacts-visual",
                     kind: "ui_surface",
                     lifecycle: "active",
-                    surfaceId: "surface-created-by-agent-visual",
-                    title: "Created by Agent Visual Surface",
+                    surfaceId: "surface-worker-artifacts-visual",
+                    title: "Worker Artifacts Visual Surface",
                     purpose: "Inspect created_by_agent::visual_echo",
                     catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
                     expiresAt: nil,
@@ -339,7 +339,7 @@ struct EngineConsoleCreatedByAgentProjectionTests {
                             targetType: "capability",
                             targetId: "created_by_agent::visual_echo",
                             role: "primary",
-                            label: "Created by Agent visual"
+                            label: "Worker Artifacts visual"
                         )
                     ],
                     actions: []
@@ -351,7 +351,7 @@ struct EngineConsoleCreatedByAgentProjectionTests {
                 CapabilityAuditEventDTO(
                     id: "audit-visual",
                     eventType: "capability.execute",
-                    traceId: "trace-created-by-agent-visual",
+                    traceId: "trace-worker-artifacts-visual",
                     payload: nil,
                     payloadSummary: AnyCodable(["functionId": "created_by_agent::visual_echo"]),
                     createdAt: nil,
@@ -360,24 +360,24 @@ struct EngineConsoleCreatedByAgentProjectionTests {
             ],
             redacted: true
         )
-        let state = EngineConsoleState(capabilityClient: client, cache: ephemeralCache())
+        let state = AuditDetailsState(capabilityClient: client, cache: ephemeralCache())
 
         await state.refresh()
 
-        let change = try #require(state.createdByAgentProjection.changes.first)
+        let change = try #require(state.workerArtifactProjection.changes.first)
         #expect(change.functionId == "created_by_agent::visual_echo")
         #expect(change.implementationId == "session_generated.created_by_agent.visual_echo")
         #expect(change.workerId == "worker-visual")
         #expect(change.provenanceText == "session session-visual")
         #expect(change.testText == "healthy")
-        #expect(change.generatedSurfaceIds == ["surface-created-by-agent-visual"])
-        #expect(change.traceIds == ["trace-created-by-agent-visual"])
+        #expect(change.generatedSurfaceIds == ["surface-worker-artifacts-visual"])
+        #expect(change.traceIds == ["trace-worker-artifacts-visual"])
     }
 
-    private func ephemeralCache() -> EngineConsoleCache {
+    private func ephemeralCache() -> AuditDetailsCache {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("EngineConsoleCache.json")
-        return EngineConsoleCache(fileURL: url)
+            .appendingPathComponent("AuditDetailsCache.json")
+        return AuditDetailsCache(fileURL: url)
     }
 }

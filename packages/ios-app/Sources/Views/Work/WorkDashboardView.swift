@@ -48,7 +48,7 @@ struct WorkDashboardView: View {
         }
         .sheet(isPresented: $showAuditDetails) {
             NavigationStack {
-                EngineConsoleView(
+                AuditDetailsView(
                     engineClient: engineClient,
                     actions: actions,
                     eventDatabaseStorageMode: .primaryDocuments

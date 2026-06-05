@@ -1,12 +1,12 @@
 import Foundation
 
-struct EngineConsoleModuleOperatorProjection: Equatable {
-    var packages: [EngineConsoleModuleResourceSummary]
-    var configs: [EngineConsoleModuleResourceSummary]
-    var activations: [EngineConsoleModuleResourceSummary]
-    var health: [EngineConsoleModuleHealthSummary]
-    var sourceTrust: [EngineConsoleModuleSourceTrustSummary]
-    var actions: [EngineConsoleModuleActionSummary]
+struct AuditDetailsWorkerPackOperatorProjection: Equatable {
+    var packages: [AuditDetailsWorkerPackResourceSummary]
+    var configs: [AuditDetailsWorkerPackResourceSummary]
+    var activations: [AuditDetailsWorkerPackResourceSummary]
+    var health: [AuditDetailsWorkerPackHealthSummary]
+    var sourceTrust: [AuditDetailsWorkerPackSourceTrustSummary]
+    var actions: [AuditDetailsWorkerPackActionSummary]
 
     var cardTitle: String { "Packs" }
     var cardSubtitle: String {
@@ -17,7 +17,7 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
         "Registered packs and activation records will appear here after local pack capabilities run."
     }
 
-    static let empty = EngineConsoleModuleOperatorProjection(
+    static let empty = AuditDetailsWorkerPackOperatorProjection(
         packages: [],
         configs: [],
         activations: [],
@@ -42,9 +42,9 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
         return Array(Set(refs)).count
     }
 
-    var surfaceTargets: [EngineConsoleModuleSurfaceTarget] {
+    var surfaceTargets: [AuditDetailsWorkerPackSurfaceTarget] {
         packages.map {
-            EngineConsoleModuleSurfaceTarget(
+            AuditDetailsWorkerPackSurfaceTarget(
                 targetType: "package",
                 targetId: $0.resourceId,
                 title: "Pack Controls",
@@ -52,7 +52,7 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
                 symbol: "shippingbox"
             )
         } + activations.map {
-            EngineConsoleModuleSurfaceTarget(
+            AuditDetailsWorkerPackSurfaceTarget(
                 targetType: "activation",
                 targetId: $0.resourceId,
                 title: "Activation Controls",
@@ -62,28 +62,28 @@ struct EngineConsoleModuleOperatorProjection: Equatable {
         }
     }
 
-    static func make(from snapshot: ControlSnapshotDTO?) -> EngineConsoleModuleOperatorProjection {
+    static func make(from snapshot: ControlSnapshotDTO?) -> AuditDetailsWorkerPackOperatorProjection {
         guard let snapshot else { return .empty }
-        return EngineConsoleModuleOperatorProjection(
+        return AuditDetailsWorkerPackOperatorProjection(
             packages: (snapshot.modulePackages ?? []).compactMap {
-                EngineConsoleModuleResourceSummary($0, defaultKind: "worker_package")
+                AuditDetailsWorkerPackResourceSummary($0, defaultKind: "worker_package")
             },
             configs: (snapshot.moduleConfigs ?? []).compactMap {
-                EngineConsoleModuleResourceSummary($0, defaultKind: "module_config")
+                AuditDetailsWorkerPackResourceSummary($0, defaultKind: "module_config")
             },
             activations: (snapshot.activationRecords ?? []).compactMap {
-                EngineConsoleModuleResourceSummary($0, defaultKind: "activation_record")
+                AuditDetailsWorkerPackResourceSummary($0, defaultKind: "activation_record")
             },
-            health: (snapshot.moduleHealth ?? []).compactMap(EngineConsoleModuleHealthSummary.init),
-            sourceTrust: (snapshot.moduleSourceTrust ?? []).compactMap(EngineConsoleModuleSourceTrustSummary.init),
+            health: (snapshot.moduleHealth ?? []).compactMap(AuditDetailsWorkerPackHealthSummary.init),
+            sourceTrust: (snapshot.moduleSourceTrust ?? []).compactMap(AuditDetailsWorkerPackSourceTrustSummary.init),
             actions: (snapshot.availableActions ?? [])
-                .compactMap(EngineConsoleModuleActionSummary.init)
+                .compactMap(AuditDetailsWorkerPackActionSummary.init)
                 .filter { $0.functionId.hasPrefix("module::") }
         )
     }
 }
 
-struct EngineConsoleModuleSurfaceTarget: Equatable, Identifiable {
+struct AuditDetailsWorkerPackSurfaceTarget: Equatable, Identifiable {
     var targetType: String
     var targetId: String
     var title: String
@@ -93,7 +93,7 @@ struct EngineConsoleModuleSurfaceTarget: Equatable, Identifiable {
     var id: String { "\(targetType):\(targetId)" }
 }
 
-struct EngineConsoleModuleResourceSummary: Equatable, Identifiable {
+struct AuditDetailsWorkerPackResourceSummary: Equatable, Identifiable {
     var resourceId: String
     var versionId: String?
     var kind: String
@@ -146,7 +146,7 @@ struct EngineConsoleModuleResourceSummary: Equatable, Identifiable {
     }
 }
 
-struct EngineConsoleModuleHealthSummary: Equatable, Identifiable {
+struct AuditDetailsWorkerPackHealthSummary: Equatable, Identifiable {
     var activationResourceId: String
     var activationVersionId: String?
     var activationStatus: String?
@@ -175,11 +175,11 @@ struct EngineConsoleModuleHealthSummary: Equatable, Identifiable {
     }
 }
 
-struct EngineConsoleModuleSourceTrustSummary: Equatable, Identifiable {
+struct AuditDetailsWorkerPackSourceTrustSummary: Equatable, Identifiable {
     var packageResourceId: String
     var packageVersionId: String?
     var packageId: String?
-    var presentation: EngineConsoleModuleTrustPresentation
+    var presentation: AuditDetailsWorkerPackTrustPresentation
     var sourceTrustStatus: String?
     var effectiveTrustTier: String?
     var signatureStatus: String?
@@ -207,7 +207,7 @@ struct EngineConsoleModuleSourceTrustSummary: Equatable, Identifiable {
         guard let packageResourceId = moduleString(dictionary, keys: ["packageResourceId", "resourceId"]) else {
             return nil
         }
-        guard let presentation = EngineConsoleModuleTrustPresentation(dictionary["trustPresentation"]) else {
+        guard let presentation = AuditDetailsWorkerPackTrustPresentation(dictionary["trustPresentation"]) else {
             return nil
         }
         self.packageResourceId = packageResourceId
@@ -230,7 +230,7 @@ struct EngineConsoleModuleSourceTrustSummary: Equatable, Identifiable {
     }
 }
 
-struct EngineConsoleModuleTrustPresentation: Equatable {
+struct AuditDetailsWorkerPackTrustPresentation: Equatable {
     var statusLabel: String
     var statusTone: String
     var summary: String
@@ -274,7 +274,7 @@ struct EngineConsoleModuleTrustPresentation: Equatable {
     }
 }
 
-struct EngineConsoleModuleActionSummary: Equatable, Identifiable {
+struct AuditDetailsWorkerPackActionSummary: Equatable, Identifiable {
     var functionId: String
     var label: String?
     var targetType: String?

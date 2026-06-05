@@ -1,12 +1,12 @@
 import SwiftUI
 
 @available(iOS 26.0, *)
-struct EngineConsoleSectionChips: View {
-    @Binding var selection: EngineConsoleView.ConsoleSection
+struct AuditDetailsSectionChips: View {
+    @Binding var selection: AuditDetailsView.AuditSection
     @Binding var showAdvancedSections: Bool
 
-    private var visibleSections: [EngineConsoleView.ConsoleSection] {
-        EngineConsoleView.ConsoleSection.allCases.filter { section in
+    private var visibleSections: [AuditDetailsView.AuditSection] {
+        AuditDetailsView.AuditSection.allCases.filter { section in
             showAdvancedSections || !section.isAdvanced
         }
     }
@@ -63,7 +63,7 @@ struct EngineConsoleSectionChips: View {
     }
 }
 
-struct EngineConsoleMetric: Identifiable {
+struct AuditDetailsMetric: Identifiable {
     let id = UUID()
     let title: String
     let value: String
@@ -76,7 +76,7 @@ struct EngineConsoleMetric: Identifiable {
     }
 }
 
-struct EngineConsoleReadinessItem: Identifiable {
+struct AuditDetailsReadinessItem: Identifiable {
     let id = UUID()
     let symbol: String
     let title: String
@@ -85,9 +85,9 @@ struct EngineConsoleReadinessItem: Identifiable {
 }
 
 @available(iOS 26.0, *)
-struct EngineConsoleSuggestionChips: View {
-    let suggestions: [EngineConsoleSearchSuggestion]
-    let select: (EngineConsoleSearchSuggestion) -> Void
+struct AuditDetailsSuggestionChips: View {
+    let suggestions: [AuditDetailsSearchSuggestion]
+    let select: (AuditDetailsSearchSuggestion) -> Void
 
     var body: some View {
         if !suggestions.isEmpty {
@@ -114,8 +114,8 @@ struct EngineConsoleSuggestionChips: View {
 }
 
 @available(iOS 26.0, *)
-struct EngineConsoleMetricGrid: View {
-    let metrics: [EngineConsoleMetric]
+struct AuditDetailsMetricGrid: View {
+    let metrics: [AuditDetailsMetric]
     private let columns = [
         GridItem(.flexible(), spacing: 10),
         GridItem(.flexible(), spacing: 10)
@@ -124,7 +124,7 @@ struct EngineConsoleMetricGrid: View {
     var body: some View {
         LazyVGrid(columns: columns, spacing: 10) {
             ForEach(metrics) { metric in
-                EngineConsoleCard(tint: metric.tint) {
+                AuditDetailsCard(tint: metric.tint) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(metric.title)
                             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
@@ -143,7 +143,7 @@ struct EngineConsoleMetricGrid: View {
     }
 }
 
-struct EngineConsoleStatusLine: View {
+struct AuditDetailsStatusLine: View {
     let symbol: String
     let title: String
     let message: String
@@ -171,7 +171,7 @@ struct EngineConsoleStatusLine: View {
 }
 
 @available(iOS 26.0, *)
-struct EngineConsoleCard<Content: View>: View {
+struct AuditDetailsCard<Content: View>: View {
     var tint: Color = .tronEmerald
     @ViewBuilder var content: Content
 
@@ -185,7 +185,7 @@ struct EngineConsoleCard<Content: View>: View {
     }
 }
 
-struct EngineConsoleCardHeader: View {
+struct AuditDetailsCardHeader: View {
     let symbol: String
     let title: String
     let subtitle: String
@@ -213,7 +213,7 @@ struct EngineConsoleCardHeader: View {
 }
 
 @available(iOS 26.0, *)
-struct EngineConsoleSearchBar: View {
+struct AuditDetailsSearchBar: View {
     @Binding var text: String
     let placeholder: String
     let disabled: Bool
@@ -253,7 +253,7 @@ struct EngineConsoleSearchBar: View {
     }
 }
 
-struct EngineConsoleBanner: View {
+struct AuditDetailsBanner: View {
     let symbol: String
     let title: String
     let message: String
@@ -289,7 +289,7 @@ struct EngineConsoleBanner: View {
     }
 }
 
-struct EngineConsoleEmptyState: View {
+struct AuditDetailsEmptyState: View {
     let symbol: String
     let title: String
     let message: String
@@ -313,7 +313,7 @@ struct EngineConsoleEmptyState: View {
     }
 }
 
-struct EngineConsoleKeyValueRow: View {
+struct AuditDetailsKeyValueRow: View {
     let title: String
     let value: String
 
@@ -340,7 +340,7 @@ struct EngineConsoleKeyValueRow: View {
     }
 }
 
-struct EngineConsoleActionRow: View {
+struct AuditDetailsActionRow: View {
     let symbol: String
     let title: String
     let subtitle: String
@@ -370,7 +370,7 @@ struct EngineConsoleActionRow: View {
     }
 }
 
-struct EngineConsoleTextField: View {
+struct AuditDetailsTextField: View {
     let title: String
     @Binding var text: String
     let prompt: String
@@ -399,7 +399,7 @@ struct CapabilityHitCard: View {
     let hit: CapabilityIndexHitDTO
 
     var body: some View {
-        EngineConsoleCard(tint: tint) {
+        AuditDetailsCard(tint: tint) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: CapabilityPresentation.symbol(for: identity))
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
@@ -422,7 +422,7 @@ struct CapabilityHitCard: View {
                             .foregroundStyle(.tronTextSecondary)
                             .lineLimit(3)
                     }
-                    EngineConsoleBadgeRow(values: [
+                    AuditDetailsBadgeRow(values: [
                         hit.kind,
                         hit.trustTier,
                         hit.health,
@@ -471,7 +471,7 @@ struct CapabilityHitCard: View {
     }
 }
 
-struct EngineConsoleBadgeRow: View {
+struct AuditDetailsBadgeRow: View {
     let values: [String?]
 
     var body: some View {
@@ -565,18 +565,18 @@ struct PluginCard: View {
     let disable: () -> Void
 
     var body: some View {
-        EngineConsoleCard(tint: .tronPurple) {
-            EngineConsoleCardHeader(
+        AuditDetailsCard(tint: .tronPurple) {
+            AuditDetailsCardHeader(
                 symbol: "puzzlepiece.extension",
                 title: plugin.name ?? plugin.id,
                 subtitle: plugin.id
             )
-            EngineConsoleKeyValueRow("Trust", plugin.trustTier ?? "unknown")
-            EngineConsoleKeyValueRow("Signature", plugin.signatureStatus ?? "unknown")
-            EngineConsoleKeyValueRow("Conformance", plugin.conformanceState ?? "unknown")
-            EngineConsoleKeyValueRow("Namespaces", plugin.namespaceClaims?.joined(separator: ", ") ?? "none")
+            AuditDetailsKeyValueRow("Trust", plugin.trustTier ?? "unknown")
+            AuditDetailsKeyValueRow("Signature", plugin.signatureStatus ?? "unknown")
+            AuditDetailsKeyValueRow("Conformance", plugin.conformanceState ?? "unknown")
+            AuditDetailsKeyValueRow("Namespaces", plugin.namespaceClaims?.joined(separator: ", ") ?? "none")
             if !mutatingDisabled {
-                EngineConsoleBadgeRow(values: [
+                AuditDetailsBadgeRow(values: [
                     plugin.runtime,
                     plugin.visibilityCeiling,
                     "\(plugin.providedContracts?.count ?? 0) contracts"
@@ -600,7 +600,7 @@ struct PluginCard: View {
 }
 
 extension CapabilityIndexDocumentDTO {
-    var engineConsoleStableId: String {
+    var auditDetailsStableId: String {
         [
             kind,
             capabilityId,
@@ -623,16 +623,16 @@ struct WorkerCard: View {
     let worker: CapabilityIndexDocumentDTO
 
     var body: some View {
-        EngineConsoleCard(tint: worker.health == "healthy" || worker.health == "ready" ? .tronSuccess : .tronAmber) {
-            EngineConsoleCardHeader(
+        AuditDetailsCard(tint: worker.health == "healthy" || worker.health == "ready" ? .tronSuccess : .tronAmber) {
+            AuditDetailsCardHeader(
                 symbol: "server.rack",
                 title: worker.capabilityId ?? worker.workerId ?? "worker",
                 subtitle: worker.pluginId ?? "unknown plugin"
             )
-            EngineConsoleKeyValueRow("Worker", worker.workerId ?? "unknown")
-            EngineConsoleKeyValueRow("Health", worker.health ?? "unknown")
-            EngineConsoleKeyValueRow("Visibility", worker.visibility ?? "unknown")
-            EngineConsoleKeyValueRow("Catalog", worker.catalogRevision.map(String.init) ?? "unknown")
+            AuditDetailsKeyValueRow("Worker", worker.workerId ?? "unknown")
+            AuditDetailsKeyValueRow("Health", worker.health ?? "unknown")
+            AuditDetailsKeyValueRow("Visibility", worker.visibility ?? "unknown")
+            AuditDetailsKeyValueRow("Catalog", worker.catalogRevision.map(String.init) ?? "unknown")
         }
     }
 }
@@ -644,16 +644,16 @@ struct BindingCard: View {
     let setEnabled: (Bool) -> Void
 
     var body: some View {
-        EngineConsoleCard(tint: .tronCyan) {
-            EngineConsoleCardHeader(
+        AuditDetailsCard(tint: .tronCyan) {
+            AuditDetailsCardHeader(
                 symbol: "point.3.connected.trianglepath.dotted",
                 title: binding.contractId,
                 subtitle: binding.selectionPolicy ?? "resolver policy"
             )
-            EngineConsoleKeyValueRow("Implementation", binding.selectedImplementation)
-            EngineConsoleKeyValueRow("Scope", [binding.scopeKind, binding.scopeValue].compactMap { $0 }.joined(separator: ":"))
-            EngineConsoleKeyValueRow("Enabled", (binding.enabled ?? false) ? "yes" : "no")
-            EngineConsoleKeyValueRow("Secondary", binding.secondaryImplementations?.joined(separator: ", ") ?? "none")
+            AuditDetailsKeyValueRow("Implementation", binding.selectedImplementation)
+            AuditDetailsKeyValueRow("Scope", [binding.scopeKind, binding.scopeValue].compactMap { $0 }.joined(separator: ":"))
+            AuditDetailsKeyValueRow("Enabled", (binding.enabled ?? false) ? "yes" : "no")
+            AuditDetailsKeyValueRow("Secondary", binding.secondaryImplementations?.joined(separator: ", ") ?? "none")
             if !mutatingDisabled {
                 Button((binding.enabled ?? false) ? "Disable Binding" : "Enable Binding") {
                     setEnabled(!(binding.enabled ?? false))
@@ -673,20 +673,20 @@ struct PolicyCard: View {
     let policy: CapabilityExecutionPolicyDTO
 
     var body: some View {
-        EngineConsoleCard(tint: .tronSlate) {
-            EngineConsoleCardHeader(
+        AuditDetailsCard(tint: .tronSlate) {
+            AuditDetailsCardHeader(
                 symbol: "checkmark.shield",
                 title: id,
                 subtitle: "Profile execution policy"
             )
-            EngineConsoleKeyValueRow("Search", policy.searchPolicy ?? "default")
-            EngineConsoleKeyValueRow("Primer", policy.contextPrimerPolicy ?? "default")
-            EngineConsoleKeyValueRow("Allowed actions", (policy.allowedContracts ?? []).joined(separator: ", "))
-            EngineConsoleKeyValueRow("Denied actions", (policy.deniedContracts ?? []).joined(separator: ", "))
-            EngineConsoleKeyValueRow("Allowed plugins", (policy.allowedPlugins ?? []).joined(separator: ", "))
-            EngineConsoleKeyValueRow("Denied plugins", (policy.deniedPlugins ?? []).joined(separator: ", "))
-            EngineConsoleKeyValueRow("Max risk", policy.maxRisk ?? "profile default")
-            EngineConsoleKeyValueRow("Trust level", policy.minimumTrustTier ?? "profile default")
+            AuditDetailsKeyValueRow("Search", policy.searchPolicy ?? "default")
+            AuditDetailsKeyValueRow("Primer", policy.contextPrimerPolicy ?? "default")
+            AuditDetailsKeyValueRow("Allowed actions", (policy.allowedContracts ?? []).joined(separator: ", "))
+            AuditDetailsKeyValueRow("Denied actions", (policy.deniedContracts ?? []).joined(separator: ", "))
+            AuditDetailsKeyValueRow("Allowed plugins", (policy.allowedPlugins ?? []).joined(separator: ", "))
+            AuditDetailsKeyValueRow("Denied plugins", (policy.deniedPlugins ?? []).joined(separator: ", "))
+            AuditDetailsKeyValueRow("Max risk", policy.maxRisk ?? "profile default")
+            AuditDetailsKeyValueRow("Trust level", policy.minimumTrustTier ?? "profile default")
         }
     }
 }
@@ -696,17 +696,17 @@ struct AuditCard: View {
     let event: CapabilityAuditEventDTO
 
     var body: some View {
-        EngineConsoleCard(tint: .tronSlate) {
-            EngineConsoleCardHeader(
+        AuditDetailsCard(tint: .tronSlate) {
+            AuditDetailsCardHeader(
                 symbol: "list.bullet.rectangle",
                 title: event.eventType ?? event.id ?? "audit",
                 subtitle: event.createdAt ?? "unknown time"
             )
-            EngineConsoleKeyValueRow("Trace", event.traceId ?? "none")
-            EngineConsoleKeyValueRow("Redacted", (event.redacted ?? true) ? "yes" : "no")
+            AuditDetailsKeyValueRow("Trace", event.traceId ?? "none")
+            AuditDetailsKeyValueRow("Redacted", (event.redacted ?? true) ? "yes" : "no")
             if let summary = event.payloadSummary?.dictionaryValue {
                 ForEach(summary.keys.sorted(), id: \.self) { key in
-                    EngineConsoleKeyValueRow(key, String(describing: summary[key] ?? ""))
+                    AuditDetailsKeyValueRow(key, String(describing: summary[key] ?? ""))
                 }
             }
         }
@@ -718,14 +718,14 @@ struct TraceCard: View {
     let event: CapabilityAuditEventDTO
 
     var body: some View {
-        EngineConsoleCard(tint: .tronTeal) {
-            EngineConsoleCardHeader(
+        AuditDetailsCard(tint: .tronTeal) {
+            AuditDetailsCardHeader(
                 symbol: "waterfall",
                 title: event.traceId ?? "trace",
                 subtitle: event.eventType ?? "audit event"
             )
-            EngineConsoleKeyValueRow("Created", event.createdAt ?? "unknown")
-            EngineConsoleKeyValueRow("Redacted", (event.redacted ?? true) ? "yes" : "no")
+            AuditDetailsKeyValueRow("Created", event.createdAt ?? "unknown")
+            AuditDetailsKeyValueRow("Redacted", (event.redacted ?? true) ? "yes" : "no")
         }
     }
 }
@@ -735,23 +735,23 @@ struct ProgramRunCard: View {
     let run: CapabilityProgramRunDTO
 
     var body: some View {
-        EngineConsoleCard(tint: statusTint) {
-            EngineConsoleCardHeader(
+        AuditDetailsCard(tint: statusTint) {
+            AuditDetailsCardHeader(
                 symbol: "curlybraces.square",
                 title: run.programRunId ?? "program run",
                 subtitle: run.status ?? "unknown status"
             )
-            EngineConsoleKeyValueRow("Trace", run.traceId ?? "unknown")
-            EngineConsoleKeyValueRow("Root", run.rootInvocationId ?? "unknown")
-            EngineConsoleKeyValueRow("Binding", run.bindingDecisionId ?? "none")
-            EngineConsoleKeyValueRow("Code", run.codeHash ?? "unknown")
-            EngineConsoleKeyValueRow("Args", run.argsHash ?? "unknown")
-            EngineConsoleKeyValueRow("Children", String(run.childInvocations?.count ?? 0))
-            EngineConsoleKeyValueRow("Selected", (run.selectedImplementations ?? []).joined(separator: ", "))
-            EngineConsoleKeyValueRow("Redacted", (run.redacted ?? true) ? "yes" : "no")
+            AuditDetailsKeyValueRow("Trace", run.traceId ?? "unknown")
+            AuditDetailsKeyValueRow("Root", run.rootInvocationId ?? "unknown")
+            AuditDetailsKeyValueRow("Binding", run.bindingDecisionId ?? "none")
+            AuditDetailsKeyValueRow("Code", run.codeHash ?? "unknown")
+            AuditDetailsKeyValueRow("Args", run.argsHash ?? "unknown")
+            AuditDetailsKeyValueRow("Children", String(run.childInvocations?.count ?? 0))
+            AuditDetailsKeyValueRow("Selected", (run.selectedImplementations ?? []).joined(separator: ", "))
+            AuditDetailsKeyValueRow("Redacted", (run.redacted ?? true) ? "yes" : "no")
             if let summary = run.payloadSummary?.dictionaryValue {
                 ForEach(summary.keys.sorted(), id: \.self) { key in
-                    EngineConsoleKeyValueRow(key, String(describing: summary[key] ?? ""))
+                    AuditDetailsKeyValueRow(key, String(describing: summary[key] ?? ""))
                 }
             }
         }
@@ -774,42 +774,42 @@ struct CapabilityInspectionSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    EngineConsoleCard(tint: tint) {
-                        EngineConsoleCardHeader(
+                    AuditDetailsCard(tint: tint) {
+                        AuditDetailsCardHeader(
                             symbol: "doc.text.magnifyingglass",
                             title: inspection.contract?.displayName ?? inspection.contract?.contractId ?? "Inspection",
                             subtitle: inspection.implementation?.implementationId ?? "No implementation selected",
                             tint: tint
                         )
-                        EngineConsoleKeyValueRow("Contract", inspection.contract?.contractId ?? "unknown")
-                        EngineConsoleKeyValueRow("Effect", inspection.contract?.effectClass ?? "unknown")
-                        EngineConsoleKeyValueRow("Risk", inspection.contract?.riskLevel ?? "unknown")
+                        AuditDetailsKeyValueRow("Contract", inspection.contract?.contractId ?? "unknown")
+                        AuditDetailsKeyValueRow("Effect", inspection.contract?.effectClass ?? "unknown")
+                        AuditDetailsKeyValueRow("Risk", inspection.contract?.riskLevel ?? "unknown")
                     }
 
-                    EngineConsoleCard(tint: tint) {
-                        EngineConsoleCardHeader(
+                    AuditDetailsCard(tint: tint) {
+                        AuditDetailsCardHeader(
                             symbol: "shippingbox",
                             title: "Implementation",
                             subtitle: inspection.implementation?.functionId ?? "unknown function",
                             tint: tint
                         )
-                        EngineConsoleKeyValueRow("ID", inspection.implementation?.implementationId ?? "unknown")
-                        EngineConsoleKeyValueRow("Plugin", inspection.implementation?.pluginId ?? "unknown")
-                        EngineConsoleKeyValueRow("Health", inspection.implementation?.health ?? "unknown")
-                        EngineConsoleKeyValueRow("Conformance", inspection.implementation?.conformanceState ?? "unknown")
-                        EngineConsoleKeyValueRow("Schema", inspection.implementation?.schemaDigest ?? "unknown")
+                        AuditDetailsKeyValueRow("ID", inspection.implementation?.implementationId ?? "unknown")
+                        AuditDetailsKeyValueRow("Plugin", inspection.implementation?.pluginId ?? "unknown")
+                        AuditDetailsKeyValueRow("Health", inspection.implementation?.health ?? "unknown")
+                        AuditDetailsKeyValueRow("Conformance", inspection.implementation?.conformanceState ?? "unknown")
+                        AuditDetailsKeyValueRow("Schema", inspection.implementation?.schemaDigest ?? "unknown")
                     }
 
-                    EngineConsoleCard(tint: tint) {
-                        EngineConsoleCardHeader(
+                    AuditDetailsCard(tint: tint) {
+                        AuditDetailsCardHeader(
                             symbol: "key",
                             title: "Execution Handle",
                             subtitle: "Fresh handles are required for mutating or elevated-risk execution.",
                             tint: tint
                         )
-                        EngineConsoleKeyValueRow("Handle", inspection.inspectionHandle?.handle ?? "missing")
-                        EngineConsoleKeyValueRow("Revision", inspection.inspectionHandle?.functionRevision.map(String.init) ?? "missing")
-                        EngineConsoleKeyValueRow("Catalog", inspection.inspectionHandle?.catalogRevision.map(String.init) ?? "missing")
+                        AuditDetailsKeyValueRow("Handle", inspection.inspectionHandle?.handle ?? "missing")
+                        AuditDetailsKeyValueRow("Revision", inspection.inspectionHandle?.functionRevision.map(String.init) ?? "missing")
+                        AuditDetailsKeyValueRow("Catalog", inspection.inspectionHandle?.catalogRevision.map(String.init) ?? "missing")
                     }
                 }
                 .padding(20)

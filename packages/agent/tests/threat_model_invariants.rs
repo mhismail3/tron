@@ -1392,9 +1392,9 @@ fn ios_thin_client_boundaries_stay_split() {
     };
 
     for relative in [
-        "packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift",
-        "packages/ios-app/Sources/Views/EngineConsole/EngineConsoleComponents.swift",
-        "packages/ios-app/Sources/Views/EngineConsole/EngineConsoleSection.swift",
+        "packages/ios-app/Sources/Views/AuditDetails/AuditDetailsView.swift",
+        "packages/ios-app/Sources/Views/AuditDetails/AuditDetailsComponents.swift",
+        "packages/ios-app/Sources/Views/AuditDetails/AuditDetailsSection.swift",
         "packages/ios-app/Sources/Models/Messages/CapabilityInvocationTypes.swift",
         "packages/ios-app/Sources/Models/Messages/CapabilityInvocationDisplayModel.swift",
         "packages/ios-app/Sources/Models/Messages/CapabilityInvocationProgressModel.swift",
@@ -1420,8 +1420,8 @@ fn ios_thin_client_boundaries_stay_split() {
         );
     }
 
-    let engine_console =
-        read("packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift");
+    let audit_details_view =
+        read("packages/ios-app/Sources/Views/AuditDetails/AuditDetailsView.swift");
     let capability_types =
         read("packages/ios-app/Sources/Models/Messages/CapabilityInvocationTypes.swift");
     let engine_connection =
@@ -1433,10 +1433,10 @@ fn ios_thin_client_boundaries_stay_split() {
         "packages/ios-app/Sources/Views/Capabilities/CapabilityInvocationDetailComponents.swift",
     );
     assert!(
-        !engine_console.contains("struct EngineConsoleSectionChips")
-            && !engine_console.contains("struct PluginCard")
-            && !engine_console.contains("struct CapabilityInspectionSheet")
-            && !engine_console.contains("enum ConsoleSection")
+        !audit_details_view.contains("struct AuditDetailsSectionChips")
+            && !audit_details_view.contains("struct PluginCard")
+            && !audit_details_view.contains("struct CapabilityInspectionSheet")
+            && !audit_details_view.contains("enum ConsoleSection")
             && !capability_types.contains("struct CapabilityInvocationDisplayModel")
             && !capability_types.contains("enum CapabilityPresentation")
             && !engine_connection.contains("enum ConnectionState")
@@ -4576,7 +4576,7 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
         .join("ios-app")
         .join("Sources")
         .join("Views")
-        .join("EngineConsole")
+        .join("AuditDetails")
         .join("GeneratedUISurfaceView.swift");
     let renderer = std::fs::read_to_string(&renderer_path)
         .unwrap_or_else(|e| panic!("failed to read {renderer_path:?}: {e}"));
@@ -4710,7 +4710,7 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
         .join("Sources")
         .join("ViewModels")
         .join("State")
-        .join("EngineConsoleState.swift");
+        .join("AuditDetailsState.swift");
     let engine_console_state = std::fs::read_to_string(&engine_console_state_path)
         .unwrap_or_else(|e| panic!("failed to read {engine_console_state_path:?}: {e}"));
     let engine_console_view_path = repo_root
@@ -4718,8 +4718,8 @@ fn generated_ui_resource_and_renderer_gates_stay_on() {
         .join("ios-app")
         .join("Sources")
         .join("Views")
-        .join("EngineConsole")
-        .join("EngineConsoleView.swift");
+        .join("AuditDetails")
+        .join("AuditDetailsView.swift");
     let engine_console_view = std::fs::read_to_string(&engine_console_view_path)
         .unwrap_or_else(|e| panic!("failed to read {engine_console_view_path:?}: {e}"));
     assert!(
