@@ -12,8 +12,9 @@ use crate::domains::agent::Deps;
 use crate::domains::capability_support::implementations::traits::{JobInfo, JobState};
 use crate::domains::settings::{AutonomyApprovalPromptMode, get_settings};
 use crate::engine::{
-    ActorContext, ApprovalStatus, EngineApprovalRecord, EngineError, FunctionDefinition,
-    FunctionHealth, FunctionQuery, Invocation, InvocationRecord, WorkerDefinition, WorkerKind,
+    ActorContext, ApprovalStatus, EffectClass, EngineApprovalRecord, EngineError,
+    FunctionDefinition, FunctionHealth, FunctionQuery, Invocation, InvocationRecord, RiskLevel,
+    WorkerDefinition, WorkerKind,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -149,10 +150,13 @@ async fn worker_projection(
         } else {
             None
         };
-        if !worker.as_ref().is_some_and(dashboard_worker_visible) {
+        let Some(worker) = worker else {
+            continue;
+        };
+        if !dashboard_worker_visible(&worker) {
             continue;
         }
-        workers.push(worker_value(worker.as_ref(), &worker_id, &abilities));
+        workers.push(worker_value(&worker, &worker_id, &abilities));
     }
     workers
 }
@@ -165,21 +169,18 @@ fn dashboard_worker_visible(worker: &WorkerDefinition) -> bool {
 }
 
 fn worker_value(
-    worker: Option<&WorkerDefinition>,
+    worker: &WorkerDefinition,
     worker_id: &str,
     abilities: &[&FunctionDefinition],
 ) -> Value {
     let health = aggregate_health(abilities);
-    let namespaces = worker
-        .map(|worker| worker.namespace_claims.clone())
-        .unwrap_or_default();
+    let namespaces = worker.namespace_claims.clone();
     json!({
         "workerId": worker_id,
         "label": worker_label(worker, worker_id),
-        "status": worker
-            .map(|worker| format!("{:?}", worker.lifecycle))
-            .unwrap_or_else(|| "Unknown".to_owned()),
+        "status": format!("{:?}", worker.lifecycle),
         "health": health,
+        "trust": worker_trust(worker),
         "abilityCount": abilities.len(),
         "abilities": abilities.iter().take(6).map(|function| {
             json!({
@@ -190,6 +191,7 @@ fn worker_value(
                 "health": format!("{:?}", function.health),
             })
         }).collect::<Vec<_>>(),
+        "generatedControls": generated_controls(abilities),
         "namespaceClaims": namespaces,
     })
 }
@@ -204,6 +206,7 @@ fn subagent_worker_value(job: &JobInfo) -> Value {
         },
         "status": format!("{:?}", job.state),
         "health": subagent_job_health(&job.state),
+        "trust": "Session worker",
         "abilityCount": 1,
         "abilities": [{
             "functionId": "agent::spawn_subagent",
@@ -211,6 +214,14 @@ fn subagent_worker_value(job: &JobInfo) -> Value {
             "risk": "Medium",
             "effect": "ExternalSideEffect",
             "health": subagent_ability_health(&job.state),
+        }],
+        "generatedControls": [{
+            "controlId": format!("work-control:subagent:{}", job.id),
+            "label": "View worker result",
+            "kind": "Detail",
+            "functionId": "agent::subagent_result",
+            "status": subagent_ability_health(&job.state),
+            "auditRef": audit_ref("subagent", &job.id, None),
         }],
         "namespaceClaims": ["agent"],
         "workerType": "agent",
@@ -257,9 +268,57 @@ fn aggregate_health(abilities: &[&FunctionDefinition]) -> &'static str {
     }
 }
 
-fn worker_label(worker: Option<&WorkerDefinition>, worker_id: &str) -> String {
+fn worker_trust(worker: &WorkerDefinition) -> &'static str {
+    match &worker.kind {
+        WorkerKind::External | WorkerKind::Mcp => "Workspace trusted",
+        WorkerKind::Sandbox => "Sandboxed",
+        WorkerKind::Agent => "Session worker",
+        WorkerKind::InProcess
+        | WorkerKind::Client
+        | WorkerKind::System
+        | WorkerKind::Queue
+        | WorkerKind::Stream
+        | WorkerKind::Cron
+        | WorkerKind::State => "System worker",
+    }
+}
+
+fn generated_controls(abilities: &[&FunctionDefinition]) -> Vec<Value> {
+    abilities
+        .iter()
+        .take(6)
+        .map(|function| {
+            json!({
+                "controlId": format!("work-control:{}", function.id.as_str()),
+                "label": ability_label(function),
+                "kind": control_kind(function),
+                "functionId": function.id.as_str(),
+                "status": format!("{:?}", function.health),
+            })
+        })
+        .collect()
+}
+
+fn control_kind(function: &FunctionDefinition) -> &'static str {
+    if function.required_authority.approval_required || function.risk_level >= RiskLevel::High {
+        return "Guarded Run";
+    }
+
+    match function.effect_class {
+        EffectClass::PureRead | EffectClass::DeterministicCompute => "Read",
+        EffectClass::DelegatedInvocation => "Delegate",
+        EffectClass::AppendOnlyEvent => "Record",
+        EffectClass::IdempotentWrite => "Update",
+        EffectClass::ReversibleSideEffect | EffectClass::ExternalSideEffect => "Run",
+        EffectClass::IrreversibleSideEffect => "Guarded Run",
+    }
+}
+
+fn worker_label(worker: &WorkerDefinition, worker_id: &str) -> String {
     worker
-        .and_then(|worker| worker.namespace_claims.first().cloned())
+        .namespace_claims
+        .first()
+        .cloned()
         .unwrap_or_else(|| worker_id.to_owned())
 }
 
@@ -507,8 +566,17 @@ mod tests {
         assert_eq!(snapshot["autonomy"]["approvalPromptMode"], "testing");
         assert_eq!(snapshot["autonomy"]["interactiveApprovalPrompts"], true);
         assert_eq!(snapshot["workers"][0]["workerId"], "worker-demo");
+        assert_eq!(snapshot["workers"][0]["trust"], "Workspace trusted");
         assert_eq!(snapshot["workers"][0]["abilityCount"], 2);
         assert_eq!(snapshot["workers"][0]["health"], "healthy");
+        assert_eq!(
+            snapshot["workers"][0]["generatedControls"][0]["functionId"],
+            "demo::echo"
+        );
+        assert_eq!(
+            snapshot["workers"][0]["generatedControls"][1]["kind"],
+            "Guarded Run"
+        );
         assert_eq!(snapshot["activeWork"][0]["approvalId"], pending.approval_id);
         assert_eq!(snapshot["activeWork"][0]["status"], "waiting");
         assert_eq!(snapshot["recentMilestones"][0]["functionId"], "demo::echo");
@@ -551,6 +619,7 @@ mod tests {
         );
         assert_eq!(snapshot["workers"][0]["label"], "Review worker guide");
         assert_eq!(snapshot["workers"][0]["workerType"], "agent");
+        assert_eq!(snapshot["workers"][0]["trust"], "Session worker");
         assert_eq!(snapshot["workers"][0]["status"], "Running");
         assert_eq!(snapshot["workers"][0]["health"], "healthy");
         assert_eq!(snapshot["workers"][0]["abilityCount"], 1);
@@ -561,6 +630,10 @@ mod tests {
         assert_eq!(
             snapshot["workers"][0]["abilities"][0]["label"],
             "Delegated agent work"
+        );
+        assert_eq!(
+            snapshot["workers"][0]["generatedControls"][0]["label"],
+            "View worker result"
         );
         assert_eq!(snapshot["workers"][0]["auditRef"]["kind"], "subagent");
     }

@@ -158,8 +158,10 @@ struct WorkWorkerDTO: Decodable, Equatable, Identifiable {
     let label: String
     let status: String
     let health: String
+    let trust: String
     let abilityCount: Int
     let abilities: [WorkAbilityDTO]
+    let generatedControls: [WorkGeneratedControlDTO]
     let namespaceClaims: [String]
     let workerType: String?
     let runId: String?
@@ -177,6 +179,17 @@ struct WorkAbilityDTO: Decodable, Equatable, Identifiable {
     let health: String
 
     var id: String { functionId }
+}
+
+struct WorkGeneratedControlDTO: Decodable, Equatable, Identifiable {
+    let controlId: String
+    let label: String
+    let kind: String
+    let functionId: String?
+    let status: String
+    let auditRef: WorkAuditRefDTO?
+
+    var id: String { controlId }
 }
 
 struct WorkMilestoneDTO: Decodable, Equatable, Identifiable {

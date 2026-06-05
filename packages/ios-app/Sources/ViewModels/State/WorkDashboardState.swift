@@ -56,4 +56,11 @@ final class WorkDashboardState {
             milestone.workerId == worker.workerId || milestone.workerId == worker.runId
         } ?? []
     }
+
+    func guardrailsForWorker(_ worker: WorkWorkerDTO) -> [WorkGuardrailDTO] {
+        let functionIds = Set(worker.abilities.map(\.functionId))
+        return snapshot?.guardrails.filter { guardrail in
+            guardrail.functionId.map(functionIds.contains) ?? false
+        } ?? []
+    }
 }

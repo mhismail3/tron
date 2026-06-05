@@ -42,7 +42,8 @@ struct WorkDashboardView: View {
         .sheet(item: $selectedWorker) { worker in
             WorkWorkerDetailSheet(
                 worker: worker,
-                milestones: state.recentMilestonesForWorker(worker)
+                milestones: state.recentMilestonesForWorker(worker),
+                guardrails: state.guardrailsForWorker(worker)
             )
         }
         .sheet(isPresented: $showAuditDetails) {
@@ -295,9 +296,10 @@ private struct WorkAuditPanel: View {
 }
 
 @available(iOS 26.0, *)
-private struct WorkWorkerDetailSheet: View {
+struct WorkWorkerDetailSheet: View {
     let worker: WorkWorkerDTO
     let milestones: [WorkMilestoneDTO]
+    let guardrails: [WorkGuardrailDTO]
 
     var body: some View {
         NavigationStack {
@@ -314,6 +316,65 @@ private struct WorkWorkerDetailSheet: View {
                                 Text(worker.status)
                                     .font(TronTypography.sans(size: TronTypography.sizeBody))
                                     .foregroundStyle(.tronTextSecondary)
+                            }
+                        }
+                    }
+
+                    WorkSection(title: "Health", systemImage: "heart.text.square") {
+                        VStack(spacing: 8) {
+                            WorkStatusRow(
+                                title: worker.health.capitalized,
+                                subtitle: healthSubtitle,
+                                tint: worker.health.workTint,
+                                systemImage: healthSystemImage
+                            )
+                        }
+                    }
+
+                    WorkSection(title: "Trust", systemImage: "checkmark.seal") {
+                        WorkStatusRow(
+                            title: worker.trust,
+                            subtitle: trustSubtitle,
+                            tint: worker.health.workTint,
+                            systemImage: "checkmark.seal"
+                        )
+                    }
+
+                    WorkSection(title: "Generated Controls", systemImage: "slider.horizontal.3") {
+                        if worker.generatedControls.isEmpty {
+                            WorkEmptyLine(text: "No controls for this worker")
+                        } else {
+                            VStack(spacing: 8) {
+                                ForEach(worker.generatedControls) { control in
+                                    WorkStatusRow(
+                                        title: control.label,
+                                        subtitle: controlSubtitle(control),
+                                        tint: control.status.workTint,
+                                        systemImage: controlSystemImage(control)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    WorkSection(title: "Guardrails", systemImage: "shield") {
+                        if guardrails.isEmpty {
+                            WorkStatusRow(
+                                title: "Clear",
+                                subtitle: "No guardrail is blocking this worker.",
+                                tint: .tronEmerald,
+                                systemImage: "checkmark.circle"
+                            )
+                        } else {
+                            VStack(spacing: 8) {
+                                ForEach(guardrails) { guardrail in
+                                    WorkStatusRow(
+                                        title: guardrail.risk.map { "\($0) guardrail" } ?? "Guardrail",
+                                        subtitle: guardrail.summary ?? guardrail.status.capitalized,
+                                        tint: .tronAmber,
+                                        systemImage: "exclamationmark.shield"
+                                    )
+                                }
                             }
                         }
                     }
@@ -365,6 +426,65 @@ private struct WorkWorkerDetailSheet: View {
             .navigationTitle("Worker")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    private var healthSubtitle: String {
+        if let elapsedMs = worker.elapsedMs {
+            return "\(worker.status) - \(formatElapsed(elapsedMs))"
+        }
+        return worker.status
+    }
+
+    private var healthSystemImage: String {
+        switch worker.health.lowercased() {
+        case "healthy":
+            return "checkmark.circle"
+        case "degraded", "unknown":
+            return "exclamationmark.triangle"
+        case "unhealthy", "failed":
+            return "xmark.octagon"
+        default:
+            return "circle"
+        }
+    }
+
+    private var trustSubtitle: String {
+        if worker.namespaceClaims.isEmpty {
+            return "No namespace claims"
+        }
+        return worker.namespaceClaims.joined(separator: ", ")
+    }
+
+    private func controlSubtitle(_ control: WorkGeneratedControlDTO) -> String {
+        [control.kind, control.status, control.functionId]
+            .compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: " - ")
+    }
+
+    private func controlSystemImage(_ control: WorkGeneratedControlDTO) -> String {
+        switch control.kind.lowercased() {
+        case "read":
+            return "doc.text.magnifyingglass"
+        case "detail":
+            return "sidebar.right"
+        case "guarded run":
+            return "exclamationmark.shield"
+        case "record":
+            return "list.bullet.rectangle"
+        default:
+            return "play.circle"
+        }
+    }
+
+    private func formatElapsed(_ elapsedMs: UInt64) -> String {
+        if elapsedMs < 1000 {
+            return "\(elapsedMs) ms"
+        }
+        let seconds = Double(elapsedMs) / 1000.0
+        return "\(String(format: "%.1f", seconds)) s"
     }
 }
 

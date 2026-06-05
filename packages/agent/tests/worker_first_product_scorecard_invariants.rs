@@ -36,8 +36,8 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
 
     for required in [
         "# Worker-First Tron Product Scorecard",
-        "Current score: **59/100**",
-        "Status: **active; JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, JARVIS-6, and JARVIS-8 passed; JARVIS-0 visual baseline, JARVIS-1 vocabulary/static gates, JARVIS-7 worker detail state matrix, JARVIS-10 cleanup gates, and JARVIS-11 soak remain open**",
+        "Current score: **67/100**",
+        "Status: **active; JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, JARVIS-6, JARVIS-7, and JARVIS-8 passed; JARVIS-0 visual baseline, JARVIS-1 vocabulary/static gates, JARVIS-9 docs/examples, JARVIS-10 cleanup gates, and JARVIS-11 soak remain open**",
         "Evidence manifest: [`worker-first-product-evidence-manifest.md`](worker-first-product-evidence-manifest.md)",
         "| JARVIS-0 | Formalize scorecard and baseline | 5 | running |",
         "| JARVIS-1 | Primitive collapse | 8 | running |",
@@ -46,7 +46,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "| JARVIS-4 | Work snapshot API | 10 | passed_after_fix |",
         "| JARVIS-5 | iOS Work dashboard | 12 | passed_after_fix |",
         "| JARVIS-6 | Chat noise reduction | 8 | passed_after_fix |",
-        "| JARVIS-7 | Worker/detail sheets | 8 | pending |",
+        "| JARVIS-7 | Worker/detail sheets | 8 | passed_after_fix |",
         "| JARVIS-8 | Guardrails and settings UX | 7 | passed_after_fix |",
         "| JARVIS-9 | Docs and examples | 6 | pending |",
         "| JARVIS-10 | Cleanup and static gates | 7 | pending |",
@@ -60,6 +60,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "Replaced top-level `NavigationMode.engine` with `NavigationMode.work`",
         "Fix during visual proof: wide section icons clipped on iPhone",
         "replaced reflective detail-card glass with solid readable surfaces",
+        "Extended `agent::work_snapshot` workers with server-owned `trust` and `generatedControls`",
         "Agent settings expose Autonomy Mode with Independent/Testing prompt mode and plain Guardrails rows",
         "Remote package discovery, push, merge, release, deploy, and production",
         "Visual baseline screenshots are still open and block JARVIS-0 points.",
@@ -83,7 +84,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
     }
 
     assert!(
-        manifest.contains("Current score: **59/100**")
+        manifest.contains("Current score: **67/100**")
             && manifest.contains("| JARVIS-0 | running |")
             && manifest.contains("| JARVIS-1 | running |")
             && manifest.contains("| JARVIS-2 | passed_after_fix |")
@@ -91,6 +92,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && manifest.contains("| JARVIS-4 | passed_after_fix |")
             && manifest.contains("| JARVIS-5 | passed_after_fix |")
             && manifest.contains("| JARVIS-6 | passed_after_fix |")
+            && manifest.contains("| JARVIS-7 | passed_after_fix |")
             && manifest.contains("| JARVIS-8 | passed_after_fix |")
             && manifest.contains("| JARVIS-11 | pending |")
             && manifest.contains("Visual baseline screenshots remain open.")
@@ -121,8 +123,20 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && manifest.contains("Target simulator UDID: `7BDA4AF9-1C40-47E3-A925-0F88C191F263`")
             && manifest.contains("The primary iOS route is now `NavigationMode.work`, not")
             && manifest.contains("raw catalog/plugin/implementation/binding count grids")
-            && scorecard.contains("JARVIS-7 owns worker detail state-matrix screenshots"),
+            && scorecard.contains("JARVIS-7 later closed worker detail state-matrix screenshots"),
         "worker-first evidence manifest must record the JARVIS-5/JARVIS-8 checkpoint without closing later rows"
+    );
+    assert!(
+        manifest.contains("Worker detail sheets consume server-owned trust/generated controls")
+            && manifest.contains("WorkGeneratedControlDTO")
+            && manifest.contains("WorkDashboardState.guardrailsForWorker")
+            && manifest.contains("worker-detail-running-render.png")
+            && manifest.contains("worker-detail-success-render.png")
+            && manifest.contains("worker-detail-failure-render.png")
+            && manifest.contains("worker-detail-blocked-render.png")
+            && manifest.contains("JARVIS-7 is closed for worker/detail sheets.")
+            && scorecard.contains("Closed for worker/detail sheets."),
+        "worker-first evidence manifest must record the JARVIS-7 worker detail checkpoint"
     );
     assert!(
         manifest.contains("worker_first_orchestration_fans_out_session_workers_without_approvals")

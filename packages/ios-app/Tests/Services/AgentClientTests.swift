@@ -241,6 +241,7 @@ struct AgentClientTests {
                   "label": "Review worker",
                   "status": "Running",
                   "health": "healthy",
+                  "trust": "Session worker",
                   "abilityCount": 1,
                   "abilities": [
                     {
@@ -249,6 +250,15 @@ struct AgentClientTests {
                       "risk": "Medium",
                       "effect": "ExternalSideEffect",
                       "health": "Healthy"
+                    }
+                  ],
+                  "generatedControls": [
+                    {
+                      "controlId": "agent-worker:review-1",
+                      "label": "View worker result",
+                      "kind": "Detail",
+                      "functionId": "agent::subagent_result",
+                      "status": "Healthy"
                     }
                   ],
                   "namespaceClaims": ["agent"],
@@ -282,6 +292,8 @@ struct AgentClientTests {
         _ = try await client.abortCapabilityInvocation(invocationId: "capability-1", idempotencyKey: .userAction("agent.abortCapabilityInvocation.test"))
         let snapshot = try await client.workSnapshot(sessionId: sessionId, limit: 12)
         #expect(snapshot.workers.first?.label == "Review worker")
+        #expect(snapshot.workers.first?.trust == "Session worker")
+        #expect(snapshot.workers.first?.generatedControls.first?.label == "View worker result")
         #expect(snapshot.auditRefs.first?.catalogRevision == 42)
         #expect(transport.ensureSessionEventSubscriptionCallCount == 5)
         #expect(transport.operationOrder.prefix(2) == [

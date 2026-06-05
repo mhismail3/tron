@@ -43,10 +43,17 @@ struct WorkDashboardStateTests {
     @Test("guardrail prompts become visible blocked work")
     func guardrailPromptsBecomeBlockedWork() async throws {
         let client = FakeWorkSnapshotClient()
+        let worker = Self.worker(
+            workerId: "worker-demo",
+            label: "Demo worker",
+            health: "degraded",
+            functionId: "demo::write"
+        )
         client.snapshot = Self.snapshot(
             activeWork: [
                 WorkActiveItemDTO(kind: "approval_wait", status: "waiting", functionId: "demo::write", approvalId: "approval-1", traceId: "trace-approval"),
             ],
+            workers: [worker],
             guardrails: [
                 WorkGuardrailDTO(
                     kind: "approval_prompt",
@@ -66,6 +73,7 @@ struct WorkDashboardStateTests {
 
         #expect(state.hasBlockedWork)
         #expect(state.snapshot?.guardrails.first?.summary == "Testing-mode approval prompt is waiting for a decision.")
+        #expect(state.guardrailsForWorker(worker).first?.approvalId == "approval-1")
     }
 
     @Test("refresh failure stays explicit")
@@ -107,20 +115,36 @@ struct WorkDashboardStateTests {
         )
     }
 
-    private static func worker(workerId: String, label: String, health: String) -> WorkWorkerDTO {
+    private static func worker(
+        workerId: String,
+        label: String,
+        health: String,
+        functionId: String = "agent::spawn_subagent"
+    ) -> WorkWorkerDTO {
         WorkWorkerDTO(
             workerId: workerId,
             label: label,
             status: "Running",
             health: health,
+            trust: "Session worker",
             abilityCount: 1,
             abilities: [
                 WorkAbilityDTO(
-                    functionId: "agent::spawn_subagent",
+                    functionId: functionId,
                     label: "Delegated agent work",
                     risk: "Medium",
                     effect: "ExternalSideEffect",
                     health: "Healthy"
+                ),
+            ],
+            generatedControls: [
+                WorkGeneratedControlDTO(
+                    controlId: "control-\(functionId)",
+                    label: "Run delegated work",
+                    kind: "Guarded Run",
+                    functionId: functionId,
+                    status: "Healthy",
+                    auditRef: nil
                 ),
             ],
             namespaceClaims: ["agent"],

@@ -66,7 +66,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
         CapabilityContract::new("agent::work_snapshot", "agent", EffectClass::PureRead, RiskLevel::Low, Some("agent.read"))
-            .description("Read the server-owned Work dashboard projection: autonomy, active work, workers, milestones, guardrails, and audit refs.")
+            .description("Read the server-owned Work dashboard projection: autonomy, active work, workers, trust, generated controls, milestones, guardrails, and audit refs.")
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"},"limit":{"type":"integer"}},"type":"object"}))
             .response_schema(json!({
                 "type": "object",

@@ -2,7 +2,7 @@
 
 Created: **2026-06-05**
 Scorecard: [`worker-first-product-scorecard.md`](worker-first-product-scorecard.md)
-Current score: **59/100**
+Current score: **67/100**
 
 This manifest records evidence for the active worker-first product scorecard.
 Update it at each checkpoint with commands, return codes, exact source refs,
@@ -32,7 +32,7 @@ screenshots, runtime ids, open loops, and the next test.
 | JARVIS-4 | passed_after_fix | `agent::work_snapshot` is registered and covered by DTO tests for idle state, active work, worker health, milestones, guardrails, and audit refs. |
 | JARVIS-5 | passed_after_fix | Top-level iOS Work mode reads `agent::work_snapshot`, renders autonomy/active work/workers/results/guardrails/Audit, and has iPhone/iPad simulator screenshots. |
 | JARVIS-6 | passed_after_fix | Work chip/action detail projection replaces generic execute copy; default details show work summary while raw request/result/schema/trace/policy/approval state stays behind Audit Details. Streamed and reconstructed sessions plus hosted iPhone render are covered. |
-| JARVIS-7 | pending | Not started. |
+| JARVIS-7 | passed_after_fix | Worker detail sheets consume server-owned trust/generated controls, filter selected-worker guardrails, and have simulator-hosted screenshots for running, success, failure, and blocked states. |
 | JARVIS-8 | passed_after_fix | Agent settings expose Autonomy Mode and plain Guardrails rows; parity/layout tests and simulator render proof cover the worker-first copy. |
 | JARVIS-9 | pending | Not started. |
 | JARVIS-10 | pending | Not started. |
@@ -332,7 +332,7 @@ screenshots, runtime ids, open loops, and the next test.
 
 ### Open Loops
 
-- JARVIS-5 is closed for the default dashboard, but JARVIS-7 still needs worker
+- JARVIS-5 is closed for the default dashboard. JARVIS-7 below closes worker
   detail screenshots across running, success, failure, and blocked states.
 - JARVIS-8 is closed for settings UX, but JARVIS-11 owns final paired-server
   action/soak proof.
@@ -423,7 +423,90 @@ screenshots, runtime ids, open loops, and the next test.
 ### Open Loops
 
 - JARVIS-6 is closed for chat/action detail projection.
-- JARVIS-7 still owns dedicated Worker detail sheets and state-matrix
+- JARVIS-7 below closes dedicated Worker detail sheets and state-matrix
   screenshots across running, success, failure, and blocked guardrail states.
 - JARVIS-10 still owns broader primary-UI absence gates for remaining
   audit-only Engine Console/jargon cleanup.
+
+## JARVIS-7 Evidence
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml work_snapshot -- --nocapture` | 101 | Red proof: worker and subagent snapshots did not expose `trust` or `generatedControls`; both new assertions failed with `Null`. |
+| `cd packages/ios-app && xcodegen generate && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-worker-detail-red -only-testing:TronMobileTests/WorkDashboardStateTests -only-testing:TronMobileTests/WorkDashboardViewTests -only-testing:TronMobileTests/AgentClientTests` | 65 | Red proof: Swift failed to compile because `WorkWorkerDTO.trust`, `WorkWorkerDTO.generatedControls`, `WorkGeneratedControlDTO`, `WorkDashboardState.guardrailsForWorker`, and the test-visible worker detail sheet did not exist. |
+| `cargo test --manifest-path packages/agent/Cargo.toml work_snapshot -- --nocapture` | 101 then 0 | Green proof after the production patch. The first rerun caught a Rust ownership issue in `worker_trust`; the final run passed all 3 selected `work_snapshot` tests and 5884 filtered library tests. |
+| `cd packages/ios-app && xcodegen generate && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-worker-detail-final -only-testing:TronMobileTests/WorkDashboardStateTests -only-testing:TronMobileTests/WorkDashboardViewTests -only-testing:TronMobileTests/AgentClientTests` | 0 | Final simulator proof: 3 XCTest hosted-render/source tests and 14 Swift Testing client/state tests passed. |
+| `view_image .../worker-detail-running-render.png` | 0 | Visual inspection confirmed the running worker detail render is nonblank and shows header, Health, Trust, Generated Controls, Guardrails, and Abilities without visible overlap. |
+| `view_image .../worker-detail-success-render.png` | 0 | Visual inspection confirmed the success-state render is nonblank and readable. |
+| `view_image .../worker-detail-failure-render.png` | 0 | Visual inspection confirmed the failure-state render is nonblank, uses failure health/tints, and remains readable. |
+| `view_image .../worker-detail-blocked-render.png` | 0 | Visual inspection confirmed the blocked-state render shows degraded health, guardrail-blocked trust, generated controls, and the blocking guardrail in the first viewport. |
+
+### Simulator Evidence
+
+- Target simulator UDID: `7BDA4AF9-1C40-47E3-A925-0F88C191F263`.
+- Bundle under test: `TronMobile.app` from the `Tron` scheme, Beta simulator
+  configuration.
+- Hosted Work dashboard artifacts:
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/8B4A3505-E46D-4BFD-BEE8-D9F5F97488DA/Documents/tron-visual-artifacts/work-dashboard-iphone-render.png`
+  and
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/8B4A3505-E46D-4BFD-BEE8-D9F5F97488DA/Documents/tron-visual-artifacts/work-dashboard-ipad-render.png`.
+- Hosted worker detail artifacts:
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/8B4A3505-E46D-4BFD-BEE8-D9F5F97488DA/Documents/tron-visual-artifacts/worker-detail-running-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/8B4A3505-E46D-4BFD-BEE8-D9F5F97488DA/Documents/tron-visual-artifacts/worker-detail-success-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/8B4A3505-E46D-4BFD-BEE8-D9F5F97488DA/Documents/tron-visual-artifacts/worker-detail-failure-render.png`, and
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/8B4A3505-E46D-4BFD-BEE8-D9F5F97488DA/Documents/tron-visual-artifacts/worker-detail-blocked-render.png`.
+- The simulator app attempted to reconnect to the default local server
+  `ws://127.0.0.1:19847/engine`; the server was not running, so logs include
+  expected `NSURLErrorDomain Code=-1004` connection-refused warnings. The
+  hosted render and fixture tests still passed.
+- The in-thread tool registry exposed no simulator tap/computer-use control.
+  Proof used `xcodebuild`, hosted SwiftUI rendering in the simulator process,
+  emitted PNG artifacts, and manual visual inspection through the local image
+  viewer.
+
+### Source Evidence
+
+- [`packages/agent/src/domains/agent/operations/work_snapshot.rs`](../src/domains/agent/operations/work_snapshot.rs):
+  projects server-owned `trust` and `generatedControls` for visible catalog
+  workers and live subagent workers.
+- [`packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift`](../../ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift):
+  decodes worker trust and generated controls without client-side fallback
+  reconstruction.
+- [`packages/ios-app/Sources/ViewModels/State/WorkDashboardState.swift`](../../ios-app/Sources/ViewModels/State/WorkDashboardState.swift):
+  filters existing server guardrails to the selected worker by server-supplied
+  ability function ids.
+- [`packages/ios-app/Sources/Views/Work/WorkDashboardView.swift`](../../ios-app/Sources/Views/Work/WorkDashboardView.swift):
+  passes selected-worker guardrails into `WorkWorkerDetailSheet` and renders
+  Health, Trust, Generated Controls, Guardrails, Abilities, Recent Work, and
+  Audit History.
+- [`packages/ios-app/Tests/Views/WorkDashboardViewTests.swift`](../../ios-app/Tests/Views/WorkDashboardViewTests.swift):
+  locks the worker detail vocabulary and emits hosted iPhone screenshots for
+  running, success, failure, and blocked guardrail states.
+- [`packages/ios-app/Tests/ViewModels/WorkDashboardStateTests.swift`](../../ios-app/Tests/ViewModels/WorkDashboardStateTests.swift)
+  and [`packages/ios-app/Tests/Services/AgentClientTests.swift`](../../ios-app/Tests/Services/AgentClientTests.swift):
+  cover selected-worker guardrail filtering and decode of trust/generated
+  controls from `agent::work_snapshot`.
+
+### Findings
+
+- Worker detail truth remains server-owned. iOS decodes `trust`,
+  `generatedControls`, abilities, milestones, guardrails, and audit refs from
+  `agent::work_snapshot`; it only filters the snapshot for the selected worker.
+- Generated controls are derived from server function metadata: pure reads
+  render as Read, high-risk or approval-required abilities render as Guarded
+  Run, and subagent workers render a Detail control backed by the subagent
+  audit ref.
+- The default worker detail sheet now exposes the expected operator state in
+  the first viewport before raw audit history.
+- Existing chat/action capability details remain audit-backed Work action
+  details; they are not the primary worker mental model.
+
+### Open Loops
+
+- JARVIS-7 is closed for worker/detail sheets.
+- JARVIS-9 owns the docs/examples rewrite around workers and autonomous loops.
+- JARVIS-10 owns broad static cleanup gates for remaining primary UI jargon and
+  audit-only Engine Console ownership.
+- JARVIS-11 owns paired-server soak/action proof and final visual closeout.
