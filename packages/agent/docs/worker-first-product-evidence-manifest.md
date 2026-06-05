@@ -2,7 +2,7 @@
 
 Created: **2026-06-05**
 Scorecard: [`worker-first-product-scorecard.md`](worker-first-product-scorecard.md)
-Current score: **22/100**
+Current score: **32/100**
 
 This manifest records evidence for the active worker-first product scorecard.
 Update it at each checkpoint with commands, return codes, exact source refs,
@@ -28,7 +28,7 @@ screenshots, runtime ids, open loops, and the next test.
 | JARVIS-0 | running | Scorecard, manifest, README links, and static guard added. Source baseline is recorded below. Visual baseline screenshots remain open. |
 | JARVIS-1 | running | Partial: provider-visible Worker Guide vocabulary replaced the old Capability Primer/harness wording; README context/worker-loop docs describe worker abilities and Audit. Primary UI static gates remain open. |
 | JARVIS-2 | passed_after_fix | Default no-prompt autonomy, audited auto-decisions, testing prompts, fail-closed preflight, and replay behavior are covered by Rust tests. |
-| JARVIS-3 | running | Partial: Worker Guide and execute schema default non-trivial work to worker/subagent delegation, provider-context tests prove guide injection, and integration proof fans out two session workers without approvals. Subagent Worker projection remains open. |
+| JARVIS-3 | passed_after_fix | Worker Guide and execute schema default non-trivial work to worker/subagent delegation, provider-context tests prove guide injection, Work snapshot projects subagent jobs as Workers, and integration proof fans out two session workers without approvals. |
 | JARVIS-4 | passed_after_fix | `agent::work_snapshot` is registered and covered by DTO tests for idle state, active work, worker health, milestones, guardrails, and audit refs. |
 | JARVIS-5 | pending | Not started. |
 | JARVIS-6 | pending | Not started. |
@@ -195,6 +195,7 @@ screenshots, runtime ids, open loops, and the next test.
 | `cargo test --manifest-path packages/agent/Cargo.toml capability_primer_follows_dynamic_rules_before_skills -- --nocapture` | 0 | Proved the provider context block ordering still places the generated guide after active rules and before skills. |
 | `cargo test --manifest-path packages/agent/Cargo.toml model_run_proves_worker_guide_reaches_provider_context -- --nocapture` | 0 | Proved hosted and local provider routes receive the Worker Guide/resource pointer while local policy strips heavier context. |
 | `cargo test --manifest-path packages/agent/Cargo.toml worker_first_orchestration_fans_out_session_workers_without_approvals -- --nocapture` | 0 | Real server/WebSocket proof: spawned two session workers, invoked both through `execute`, verified `agent::work_snapshot` projected both workers, and `approval::list` stayed empty before and after execution. |
+| `cargo test --manifest-path packages/agent/Cargo.toml work_snapshot -- --nocapture` | 0 | Proved `agent::work_snapshot` covers idle/default, active work/guardrail/audit refs, and live subagent jobs projected as Worker cards. |
 
 ### Source Evidence
 
@@ -216,6 +217,9 @@ screenshots, runtime ids, open loops, and the next test.
 - [`packages/agent/tests/integration/tests.rs`](../tests/integration/tests.rs):
   adds the fan-out worker proof against a real local server and worker
   processes.
+- [`packages/agent/src/domains/agent/operations/work_snapshot.rs`](../src/domains/agent/operations/work_snapshot.rs):
+  projects `SubagentManager` jobs as `workerType=agent` Worker cards while
+  preserving `agent::spawn_subagent` as the underlying server primitive.
 - [`README.md`](../../../README.md) and
   [`packages/agent/docs/context-architecture.md`](context-architecture.md):
   document the generated Worker Guide and internal `capabilities.primer` block
@@ -234,10 +238,12 @@ screenshots, runtime ids, open loops, and the next test.
   JARVIS-2 no-prompt policy composes with JARVIS-3 worker orchestration.
 - `agent::work_snapshot` projects spawned helper workers as product Worker
   cards for the tested session.
+- `agent::work_snapshot` projects live subagent jobs as product Worker cards
+  with delegated-work ability, run id, elapsed time, health, and Audit ref.
 
 ### Open Loops
 
 - JARVIS-1 still needs primary UI vocabulary gates after Work dashboard/chat
   replacement removes the Engine Console path.
-- JARVIS-3 still needs live subagent instances projected as product Workers in
-  the Work snapshot/detail model before points can be awarded.
+- JARVIS-3 is closed for server orchestration/projection. JARVIS-5 and
+  JARVIS-7 own iOS presentation and detail sheets for the Worker cards.

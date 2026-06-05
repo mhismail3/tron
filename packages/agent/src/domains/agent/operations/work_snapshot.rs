@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 
 use crate::domains::agent::Deps;
+use crate::domains::capability_support::implementations::traits::{JobInfo, JobState};
 use crate::domains::settings::{AutonomyApprovalPromptMode, get_settings};
 use crate::engine::{
     ActorContext, ApprovalStatus, EngineApprovalRecord, EngineError, FunctionDefinition,
@@ -28,6 +29,7 @@ pub(crate) async fn work_snapshot_value(
         .or_else(|| invocation.causal_context.session_id.clone());
     let workspace_id = optional_string(params, "workspaceId")
         .or_else(|| invocation.causal_context.workspace_id.clone());
+    let subagent_jobs = scoped_subagent_jobs(deps, session_id.as_deref());
     let limit = optional_usize(params, "limit")
         .unwrap_or(DEFAULT_LIMIT)
         .clamp(1, MAX_LIMIT);
@@ -37,6 +39,7 @@ pub(crate) async fn work_snapshot_value(
         session_id,
         workspace_id,
         limit,
+        subagent_jobs,
     )
     .await
     .map_err(engine_error)
@@ -48,6 +51,7 @@ async fn build_work_snapshot(
     session_id: Option<String>,
     workspace_id: Option<String>,
     limit: usize,
+    subagent_jobs: Vec<JobInfo>,
 ) -> crate::engine::Result<Value> {
     let settings = get_settings();
     let approval_prompt_mode = settings.agent.autonomy.approval_prompt_mode;
@@ -57,7 +61,8 @@ async fn build_work_snapshot(
             ..FunctionQuery::default()
         })
         .await;
-    let workers = worker_projection(handle, &functions).await;
+    let mut workers = worker_projection(handle, &functions).await;
+    workers.extend(subagent_jobs.iter().map(subagent_worker_value));
     let invocations = scoped_invocations(
         handle.invocation_records().await,
         session_id.as_deref(),
@@ -94,6 +99,16 @@ async fn build_work_snapshot(
             "workspaceId": workspace_id,
         }
     }))
+}
+
+fn scoped_subagent_jobs(deps: &Deps, session_id: Option<&str>) -> Vec<JobInfo> {
+    let Some(session_id) = session_id else {
+        return Vec::new();
+    };
+    deps.subagent_manager
+        .as_ref()
+        .map(|manager| manager.list_active_jobs(session_id))
+        .unwrap_or_default()
 }
 
 fn autonomy_projection(mode: AutonomyApprovalPromptMode) -> Value {
@@ -177,6 +192,48 @@ fn worker_value(
         }).collect::<Vec<_>>(),
         "namespaceClaims": namespaces,
     })
+}
+
+fn subagent_worker_value(job: &JobInfo) -> Value {
+    json!({
+        "workerId": format!("subagent:{}", job.id),
+        "label": if job.label.trim().is_empty() {
+            "Agent worker".to_owned()
+        } else {
+            job.label.clone()
+        },
+        "status": format!("{:?}", job.state),
+        "health": subagent_job_health(&job.state),
+        "abilityCount": 1,
+        "abilities": [{
+            "functionId": "agent::spawn_subagent",
+            "label": "Delegated agent work",
+            "risk": "Medium",
+            "effect": "ExternalSideEffect",
+            "health": subagent_ability_health(&job.state),
+        }],
+        "namespaceClaims": ["agent"],
+        "workerType": "agent",
+        "runId": job.id,
+        "elapsedMs": job.elapsed_ms,
+        "auditRef": audit_ref("subagent", &job.id, None),
+    })
+}
+
+fn subagent_job_health(state: &JobState) -> &'static str {
+    match state {
+        JobState::Running | JobState::Completed => "healthy",
+        JobState::Failed => "unhealthy",
+        JobState::Cancelled => "degraded",
+    }
+}
+
+fn subagent_ability_health(state: &JobState) -> &'static str {
+    match state {
+        JobState::Running | JobState::Completed => "Healthy",
+        JobState::Failed => "Unhealthy",
+        JobState::Cancelled => "Degraded",
+    }
 }
 
 fn aggregate_health(abilities: &[&FunctionDefinition]) -> &'static str {
@@ -366,6 +423,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::domains::capability_support::implementations::traits::{JobInfo, JobKind};
     use crate::engine::{
         ActorId, AuthorityGrantId, CausalContext, CompensationContract, CompensationKind,
         DeliveryMode, EffectClass, FunctionId, IdempotencyContract, InProcessFunctionHandler,
@@ -441,6 +499,7 @@ mod tests {
             Some("session-work".to_owned()),
             Some("workspace-work".to_owned()),
             10,
+            Vec::new(),
         )
         .await
         .unwrap();
@@ -465,12 +524,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn work_snapshot_projects_subagents_as_workers() {
+        let _settings = settings_mode(AutonomyApprovalPromptMode::Disabled);
+        let handle = crate::engine::EngineHostHandle::new_in_memory().unwrap();
+        let snapshot = build_work_snapshot(
+            &handle,
+            actor_for_snapshot(),
+            Some("session-work".to_owned()),
+            Some("workspace-work".to_owned()),
+            10,
+            vec![JobInfo {
+                id: "subagent-session-1".to_owned(),
+                kind: JobKind::Agent,
+                label: "Review worker guide".to_owned(),
+                state: JobState::Running,
+                elapsed_ms: 1200,
+                session_id: "session-work".to_owned(),
+            }],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            snapshot["workers"][0]["workerId"],
+            "subagent:subagent-session-1"
+        );
+        assert_eq!(snapshot["workers"][0]["label"], "Review worker guide");
+        assert_eq!(snapshot["workers"][0]["workerType"], "agent");
+        assert_eq!(snapshot["workers"][0]["status"], "Running");
+        assert_eq!(snapshot["workers"][0]["health"], "healthy");
+        assert_eq!(snapshot["workers"][0]["abilityCount"], 1);
+        assert_eq!(
+            snapshot["workers"][0]["abilities"][0]["functionId"],
+            "agent::spawn_subagent"
+        );
+        assert_eq!(
+            snapshot["workers"][0]["abilities"][0]["label"],
+            "Delegated agent work"
+        );
+        assert_eq!(snapshot["workers"][0]["auditRef"]["kind"], "subagent");
+    }
+
+    #[tokio::test]
     async fn work_snapshot_idle_state_uses_disabled_autonomy_defaults() {
         let _settings = settings_mode(AutonomyApprovalPromptMode::Disabled);
         let handle = crate::engine::EngineHostHandle::new_in_memory().unwrap();
-        let snapshot = build_work_snapshot(&handle, actor_for_snapshot(), None, None, 10)
-            .await
-            .unwrap();
+        let snapshot =
+            build_work_snapshot(&handle, actor_for_snapshot(), None, None, 10, Vec::new())
+                .await
+                .unwrap();
 
         assert_eq!(snapshot["autonomy"]["approvalPromptMode"], "disabled");
         assert_eq!(snapshot["autonomy"]["mode"], "independent");
