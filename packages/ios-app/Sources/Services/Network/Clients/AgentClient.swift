@@ -169,4 +169,21 @@ final class AgentClient: EngineDomainClient {
         return result.aborted
     }
 
+    func workSnapshot(
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        limit: Int = 12
+    ) async throws -> WorkSnapshotDTO {
+        _ = try requireTransport().requireConnection()
+        return try await invokeRead(
+            "agent::work_snapshot",
+            AgentWorkSnapshotParams(
+                sessionId: sessionId,
+                workspaceId: workspaceId,
+                limit: limit
+            ),
+            context: optionalSessionInvocationContext(sessionId)
+        )
+    }
+
 }

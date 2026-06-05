@@ -73,6 +73,28 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         )
     }
 
+    func testAgentSettingsExposePlainGuardrails() throws {
+        let content = try settingsPageSource(named: "AgentSettingsPage.swift")
+
+        XCTAssertTrue(
+            content.contains("SettingsSectionHeader(title: AgentSettingsSection.guardrails.rawValue)"),
+            "Agent settings should expose Guardrails as a first-class plain section"
+        )
+        XCTAssertTrue(
+            content.contains("label: \"Run Unless Blocked\""),
+            "Guardrails copy should reinforce the default autonomous run-unless-blocked behavior"
+        )
+        XCTAssertTrue(
+            content.contains("Approval-required work is audited automatically unless Testing mode is enabled."),
+            "Guardrails should explain audit behavior without making prompts the default"
+        )
+        XCTAssertLessThan(
+            try XCTUnwrap(content.range(of: "autonomySection")?.lowerBound),
+            try XCTUnwrap(content.range(of: "guardrailsSection")?.lowerBound),
+            "Guardrails should stay adjacent to the Autonomy section"
+        )
+    }
+
     @MainActor
     func testAgentSettingsAutonomyRendersForVisualQA() throws {
         let settingsState = SettingsState()

@@ -248,6 +248,7 @@ enum BuiltinHookCatalog {
 enum AgentSettingsSection: String, CaseIterable, Sendable {
     case quickSession = "Quick Session"
     case autonomy = "Autonomy"
+    case guardrails = "Guardrails"
     case hooks = "Hooks"
     case promptLibrary = "Prompt Library"
     case messageQueue = "Message Queue"

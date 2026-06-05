@@ -69,6 +69,7 @@ struct AgentSettingsPage: View {
         summaryCard
         quickSessionCard
         autonomySection
+        guardrailsSection
         hooksSection
         promptLibrarySection
         messageQueueCard
@@ -83,6 +84,7 @@ struct AgentSettingsPage: View {
                 VStack(spacing: 16) {
                     quickSessionCard
                     autonomySection
+                    guardrailsSection
                     hooksSection
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
@@ -162,6 +164,30 @@ struct AgentSettingsPage: View {
             }
 
             SettingsCaption(text: autonomyCaption)
+        }
+    }
+
+    private var guardrailsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: AgentSettingsSection.guardrails.rawValue)
+
+            SettingsCard {
+                SettingsRow(icon: "checkmark.shield", label: "Run Unless Blocked") {
+                    Text("On")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
+
+                SettingsRowDivider()
+
+                SettingsRow(icon: "list.bullet.rectangle", label: "Audit Trail") {
+                    Text("Always")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
+            }
+
+            SettingsCaption(text: "Server guardrails stop unsafe work before it runs. Approval-required work is audited automatically unless Testing mode is enabled.")
         }
     }
 

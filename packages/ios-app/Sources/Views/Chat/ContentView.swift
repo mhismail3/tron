@@ -60,7 +60,7 @@ struct ContentView: View {
     // Voice notes recording
     @State private var showVoiceNotesRecording = false
 
-    // Navigation mode (chat harness vs engine console)
+    // Navigation mode (sessions vs worker-first Work dashboard)
     @State private var navigationMode: NavigationMode = .agents
 
     // Scroll target for deep link navigation (passed to ChatView)
@@ -183,8 +183,8 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if navigationMode == .engine {
-            engineConsoleMode
+        if navigationMode == .work {
+            workMode
         } else {
             splitViewContent
         }
@@ -214,12 +214,12 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var engineConsoleMode: some View {
+    private var workMode: some View {
         NavigationStack {
-            EngineConsoleView(
+            WorkDashboardView(
                 engineClient: engineClient,
                 actions: dashboardActions,
-                eventDatabaseStorageMode: dependencies.eventDatabaseStorageMode
+                selectedSessionId: selectedSessionId
             )
         }
     }

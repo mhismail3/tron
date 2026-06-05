@@ -18,6 +18,8 @@ protocol AgentClientProtocol {
     func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult
     func deactivateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillDeactivateResult
     func activeSkills() async throws -> SkillActiveResult
+
+    func workSnapshot(sessionId: String?, workspaceId: String?, limit: Int) async throws -> WorkSnapshotDTO
 }
 
 // MARK: - Default Parameter Extensions

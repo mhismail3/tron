@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, capability execution, grants, typed resources, and event-sourced session persistence. A native iOS app provides a thin chat and Engine Console harness over the server-owned substrate.
+Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, autonomous work orchestration, capability execution, grants, typed resources, and event-sourced session persistence. A native iOS app provides thin chat plus a Work dashboard over the server-owned worker/autonomy/audit projection; low-level engine inspection remains behind Audit Details.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -1451,10 +1451,10 @@ packages/ios-app/Sources/
 +-- Protocols/            Coordinator and view model protocols
 +-- Services/             Network (engine client, WebSocket, deep links), paired servers, audio,
 +                         push notifications, local diagnostics,
-+                         feedback composer, Engine Console cache, Keychain tokens
++                         feedback composer, Audit Details cache, Keychain tokens
 +-- ViewModels/           Chat view models, handlers, managers, @Observable state,
-+                         OnboardingState, EngineConsoleState
-+-- Views/                SwiftUI views (chat, Engine Console, capability views, settings, Onboarding/, ...)
++                         OnboardingState, WorkDashboardState, EngineConsoleState
++-- Views/                SwiftUI views (chat, Work, Audit Details, capability views, settings, Onboarding/, ...)
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
 +-- Extensions/           Type extensions
@@ -1473,7 +1473,8 @@ packages/ios-app/Sources/
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Capability-native chat UI**: active work is rendered as `capabilityInvocation` / `capabilityResult` content from capability identity and schema/result metadata. Retired capability descriptors, old built-in names, and plugin source-specific capability sheets are not active UI routes.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Engine Console mode**: A top-level `NavigationMode.engine` surface uses `CapabilityClient` and `EngineConsoleState` to inspect the live capability registry, catalog watch snapshot, vector index state, program runs, substrate workers/resources/grants/module packages, module trust/health/evidence/action projections, and generated `ui_surface` refs through a simplified Overview/Capabilities/Program Runs/Substrate flow. Advanced sections expose plugin manifests, workers, bindings, policies, redacted audit rows, trace summaries, and primer inputs behind an explicit toggle. Search suggestions and Created by Agent shelf rows are derived from live registry/catalog/control/audit/program/primer state, and the Console invokes capability admin functions rather than hardcoded capability descriptors. The Created by Agent shelf summarizes session-created capability lineage with product-facing titles plus created, updated, auto-repaired, tested, failed, promoted, revoked, discarded, and reused history labels; deeper evidence still comes from server DTOs for provenance, generated UI, promotion scope, cleanup, traces, and program-run child invocations, including volatile live catalog functions that may not yet appear in the registry snapshot. Local pack and activation rows can open server-authored generated surfaces; configure/activate/remove/disable/upgrade/rollback/quarantine remain stored module actions submitted through `ui::submit_action`. Generated UI surface writes and action submissions are leased under the server's `ui_surface` lifecycle contract and record compensation status alongside the canonical child invocation. `EngineConsoleCache` stores read-only summaries and redacted generated-UI refs for disconnected browsing; surface authoring, refresh, validation, module actions, generated-UI actions, and program runs stay server-authoritative and fail closed with read-only errors while offline. Disconnected approval decisions remain pending and cannot move chips into resolving state until the app reconnects.
+- **Work dashboard mode**: A top-level `NavigationMode.work` surface reads `agent::work_snapshot` through `AgentClient` and renders autonomy, active work, workers, recent results, guardrails, and a single Audit Details entry point. The iOS app does not stitch product truth from registry/catalog/approval/policy internals.
+- **Audit Details**: The former Engine Console now sits behind the Work dashboard's Audit Details entry point. It uses `CapabilityClient` and `EngineConsoleState` to inspect live registry/catalog/control/audit/program/primer state, generated `ui_surface` refs, local pack/action resources, plugin/binding/policy details, and read-only disconnected cache snapshots. Generated UI surface writes and action submissions remain leased under the server's `ui_surface` lifecycle contract, and disconnected approval decisions remain pending until server truth advances.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.
@@ -1486,7 +1487,8 @@ packages/ios-app/Sources/
 ```
 Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
-Console: /engine invoke(capability::*) -> CapabilityClient -> EngineConsoleState -> EngineConsoleView
+Work:    /engine read(agent::work_snapshot) -> AgentClient -> WorkDashboardState -> WorkDashboardView
+Audit:   /engine invoke(capability::*) -> CapabilityClient -> EngineConsoleState -> EngineConsoleView
 ```
 
 ### Build Configurations
@@ -1504,7 +1506,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `architecture.md` — App architecture, patterns, file placement
 - `development.md` — Xcode setup, builds, testing
 - `events.md` — Event plugin system
-- `capability-ui.md` — Engine Console, capability DTOs, schema forms, offline cache, and admin client boundaries
+- `capability-ui.md` — Audit Details, capability DTOs, schema forms, offline cache, and admin client boundaries
 - `apns.md` — Push notification setup
 - `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
 

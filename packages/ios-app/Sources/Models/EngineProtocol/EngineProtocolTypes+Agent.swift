@@ -115,6 +115,111 @@ struct AgentAbortInvocationResult: Decodable {
     let aborted: Bool
 }
 
+// MARK: - Work Snapshot
+
+struct AgentWorkSnapshotParams: Encodable {
+    let sessionId: String?
+    let workspaceId: String?
+    let limit: Int
+}
+
+struct WorkSnapshotDTO: Decodable, Equatable {
+    let autonomy: WorkAutonomyDTO
+    let activeWork: [WorkActiveItemDTO]
+    let workers: [WorkWorkerDTO]
+    let recentMilestones: [WorkMilestoneDTO]
+    let guardrails: [WorkGuardrailDTO]
+    let auditRefs: [WorkAuditRefDTO]
+    let scope: WorkScopeDTO?
+}
+
+struct WorkAutonomyDTO: Decodable, Equatable {
+    let mode: String
+    let approvalPromptMode: String
+    let interactiveApprovalPrompts: Bool
+    let statusLabel: String
+    let summary: String
+}
+
+struct WorkActiveItemDTO: Decodable, Equatable, Identifiable {
+    let kind: String
+    let status: String
+    let functionId: String?
+    let approvalId: String?
+    let traceId: String?
+
+    var id: String {
+        approvalId ?? traceId ?? [kind, status, functionId].compactMap { $0 }.joined(separator: ":")
+    }
+}
+
+struct WorkWorkerDTO: Decodable, Equatable, Identifiable {
+    let workerId: String
+    let label: String
+    let status: String
+    let health: String
+    let abilityCount: Int
+    let abilities: [WorkAbilityDTO]
+    let namespaceClaims: [String]
+    let workerType: String?
+    let runId: String?
+    let elapsedMs: UInt64?
+    let auditRef: WorkAuditRefDTO?
+
+    var id: String { workerId }
+}
+
+struct WorkAbilityDTO: Decodable, Equatable, Identifiable {
+    let functionId: String
+    let label: String
+    let risk: String
+    let effect: String
+    let health: String
+
+    var id: String { functionId }
+}
+
+struct WorkMilestoneDTO: Decodable, Equatable, Identifiable {
+    let kind: String
+    let status: String
+    let functionId: String?
+    let workerId: String?
+    let invocationId: String?
+    let traceId: String?
+    let auditRef: WorkAuditRefDTO?
+
+    var id: String {
+        invocationId ?? traceId ?? [kind, status, functionId, workerId].compactMap { $0 }.joined(separator: ":")
+    }
+}
+
+struct WorkGuardrailDTO: Decodable, Equatable, Identifiable {
+    let kind: String
+    let status: String
+    let functionId: String?
+    let approvalId: String?
+    let traceId: String?
+    let risk: String?
+    let summary: String?
+    let auditRef: WorkAuditRefDTO?
+
+    var id: String {
+        approvalId ?? traceId ?? [kind, status, functionId].compactMap { $0 }.joined(separator: ":")
+    }
+}
+
+struct WorkAuditRefDTO: Decodable, Equatable {
+    let kind: String
+    let id: String?
+    let traceId: String?
+    let catalogRevision: UInt64?
+}
+
+struct WorkScopeDTO: Decodable, Equatable {
+    let sessionId: String?
+    let workspaceId: String?
+}
+
 // MARK: - Prompt Queue engine protocols
 
 struct QueuePromptParams: Encodable {

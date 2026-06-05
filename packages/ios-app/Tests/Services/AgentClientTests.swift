@@ -33,6 +33,7 @@ struct AgentClientTests {
         var deactivateSkillCallCount = 0
         var lastDeactivatedSkill: String?
         var activeSkillsCallCount = 0
+        var workSnapshotCallCount = 0
 
         func sendPrompt(
             _ prompt: String,
@@ -78,6 +79,28 @@ struct AgentClientTests {
             {"skills": []}
             """
             return try! JSONDecoder().decode(SkillActiveResult.self, from: json.data(using: .utf8)!)
+        }
+
+        func workSnapshot(sessionId: String?, workspaceId: String?, limit: Int) async throws -> WorkSnapshotDTO {
+            workSnapshotCallCount += 1
+            let json = """
+            {
+              "autonomy": {
+                "mode": "independent",
+                "approvalPromptMode": "disabled",
+                "interactiveApprovalPrompts": false,
+                "statusLabel": "Runs independently",
+                "summary": "Approval-required autonomous work is audited and auto-decided unless a guardrail blocks it."
+              },
+              "activeWork": [],
+              "workers": [],
+              "recentMilestones": [],
+              "guardrails": [],
+              "auditRefs": [{"kind": "catalog", "catalogRevision": 9}],
+              "scope": {"sessionId": null, "workspaceId": null}
+            }
+            """
+            return try! JSONDecoder().decode(WorkSnapshotDTO.self, from: Data(json.utf8))
         }
 
         enum TestError: Error {
@@ -195,6 +218,53 @@ struct AgentClientTests {
                 throw EngineConnectionError.invalidResponse
             }
         }
+        transport.readHandler = { functionId, payload, options in
+            #expect(functionId.rawValue == "agent::work_snapshot")
+            #expect(options.context?.sessionId == sessionId)
+            let params = try #require(payload as? AgentWorkSnapshotParams)
+            #expect(params.sessionId == sessionId)
+            #expect(params.workspaceId == nil)
+            #expect(params.limit == 12)
+            return try Self.decode(WorkSnapshotDTO.self, """
+            {
+              "autonomy": {
+                "mode": "independent",
+                "approvalPromptMode": "disabled",
+                "interactiveApprovalPrompts": false,
+                "statusLabel": "Runs independently",
+                "summary": "Approval-required autonomous work is audited and auto-decided unless a guardrail blocks it."
+              },
+              "activeWork": [],
+              "workers": [
+                {
+                  "workerId": "subagent:review-1",
+                  "label": "Review worker",
+                  "status": "Running",
+                  "health": "healthy",
+                  "abilityCount": 1,
+                  "abilities": [
+                    {
+                      "functionId": "agent::spawn_subagent",
+                      "label": "Delegated agent work",
+                      "risk": "Medium",
+                      "effect": "ExternalSideEffect",
+                      "health": "Healthy"
+                    }
+                  ],
+                  "namespaceClaims": ["agent"],
+                  "workerType": "agent",
+                  "runId": "review-1",
+                  "elapsedMs": 1200,
+                  "auditRef": {"kind": "subagent", "id": "review-1", "traceId": null}
+                }
+              ],
+              "recentMilestones": [],
+              "guardrails": [],
+              "auditRefs": [{"kind": "catalog", "catalogRevision": 42}],
+              "scope": {"sessionId": "\(sessionId)", "workspaceId": null}
+            }
+            """)
+        }
 
         try await client.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
         _ = try await client.activateSkill("browser", idempotencyKey: .userAction("skills.activate.test"))
@@ -210,6 +280,9 @@ struct AgentClientTests {
         )
         try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
         _ = try await client.abortCapabilityInvocation(invocationId: "capability-1", idempotencyKey: .userAction("agent.abortCapabilityInvocation.test"))
+        let snapshot = try await client.workSnapshot(sessionId: sessionId, limit: 12)
+        #expect(snapshot.workers.first?.label == "Review worker")
+        #expect(snapshot.auditRefs.first?.catalogRevision == 42)
         #expect(transport.ensureSessionEventSubscriptionCallCount == 5)
         #expect(transport.operationOrder.prefix(2) == [
             "subscribe:\(sessionId)",
@@ -226,6 +299,7 @@ struct AgentClientTests {
             "agent::abort",
             "agent::abort_invocation"
         ])
+        #expect(transport.lastReadFunctionId?.rawValue == "agent::work_snapshot")
     }
 
     @Test("Prompt does not invoke agent when live session stream cannot subscribe")
@@ -278,6 +352,17 @@ struct AgentClientTests {
 
         #expect(mock.activeSkillsCallCount == 1)
         #expect(result.skills.isEmpty)
+    }
+
+    @Test("Work snapshot returns server-owned worker projection")
+    func testWorkSnapshot_returns() async throws {
+        let mock = MockAgentClient()
+
+        let result = try await mock.workSnapshot(sessionId: nil, workspaceId: nil, limit: 12)
+
+        #expect(mock.workSnapshotCallCount == 1)
+        #expect(result.autonomy.mode == "independent")
+        #expect(result.auditRefs.first?.kind == "catalog")
     }
 
     // MARK: - Abort Tests

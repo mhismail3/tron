@@ -2,7 +2,7 @@
 
 Created: **2026-06-05**
 Scorecard: [`worker-first-product-scorecard.md`](worker-first-product-scorecard.md)
-Current score: **32/100**
+Current score: **51/100**
 
 This manifest records evidence for the active worker-first product scorecard.
 Update it at each checkpoint with commands, return codes, exact source refs,
@@ -30,10 +30,10 @@ screenshots, runtime ids, open loops, and the next test.
 | JARVIS-2 | passed_after_fix | Default no-prompt autonomy, audited auto-decisions, testing prompts, fail-closed preflight, and replay behavior are covered by Rust tests. |
 | JARVIS-3 | passed_after_fix | Worker Guide and execute schema default non-trivial work to worker/subagent delegation, provider-context tests prove guide injection, Work snapshot projects subagent jobs as Workers, and integration proof fans out two session workers without approvals. |
 | JARVIS-4 | passed_after_fix | `agent::work_snapshot` is registered and covered by DTO tests for idle state, active work, worker health, milestones, guardrails, and audit refs. |
-| JARVIS-5 | pending | Not started. |
+| JARVIS-5 | passed_after_fix | Top-level iOS Work mode reads `agent::work_snapshot`, renders autonomy/active work/workers/results/guardrails/Audit, and has iPhone/iPad simulator screenshots. |
 | JARVIS-6 | pending | Not started. |
 | JARVIS-7 | pending | Not started. |
-| JARVIS-8 | running | Autonomy prompt setting parity, default copy, and simulator render proof are implemented and tested; Guardrails UX/action checks remain open. |
+| JARVIS-8 | passed_after_fix | Agent settings expose Autonomy Mode and plain Guardrails rows; parity/layout tests and simulator render proof cover the worker-first copy. |
 | JARVIS-9 | pending | Not started. |
 | JARVIS-10 | pending | Not started. |
 | JARVIS-11 | pending | Not started. |
@@ -60,11 +60,11 @@ screenshots, runtime ids, open loops, and the next test.
 
 ### Source Evidence
 
-- [`README.md`](../../../README.md): current root product wording still says
-  the iOS app provides a chat and Engine Console harness over server-owned
-  substrate.
+- [`README.md`](../../../README.md): baseline root product wording said the
+  iOS app provided a chat and Engine Console harness over server-owned
+  substrate; JARVIS-5 changed the current wording to Work plus Audit Details.
 - [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md):
-  current iOS architecture lists `NavigationMode.engine`, Engine Console
+  baseline iOS architecture listed `NavigationMode.engine`, Engine Console
   projections, live substrate search suggestions, workers/policies/traces/
   primer/program-runs/substrate sections, and server-owned approval resolving.
 - [`packages/ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift`](../../ios-app/Sources/Views/EngineConsole/EngineConsoleView.swift):
@@ -83,7 +83,7 @@ screenshots, runtime ids, open loops, and the next test.
 
 ### Findings
 
-- Current primary iOS source still includes `NavigationMode.engine` and Engine
+- Baseline primary iOS source included `NavigationMode.engine` and Engine
   Console views.
 - Current docs still present Engine Console as a top-level mode and mention
   substrate, primer, bindings, traces, policies, and raw registry details in
@@ -176,10 +176,10 @@ screenshots, runtime ids, open loops, and the next test.
 
 ### Open Loops
 
-- JARVIS-8 still needs plain Guardrails settings UX and paired-server simulator
-  action checks before receiving points.
-- JARVIS-5 still owns the default iOS Work dashboard replacement that consumes
-  `agent::work_snapshot`.
+- JARVIS-8 settings UX is closed by the Work dashboard/settings checkpoint
+  below; JARVIS-11 owns final paired-server soak/action proof.
+- JARVIS-5 is closed for the default iOS Work dashboard replacement that
+  consumes `agent::work_snapshot`.
 
 ## JARVIS-1 / JARVIS-3 Partial Evidence
 
@@ -247,3 +247,94 @@ screenshots, runtime ids, open loops, and the next test.
   replacement removes the Engine Console path.
 - JARVIS-3 is closed for server orchestration/projection. JARVIS-5 and
   JARVIS-7 own iOS presentation and detail sheets for the Worker cards.
+
+## JARVIS-5 / JARVIS-8 Evidence
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cd packages/ios-app && xcodegen generate && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineNavigationTests -only-testing:TronMobileTests/AgentClientTests -only-testing:TronMobileTests/WorkDashboardStateTests` | 65 | Red proof: the navigation/client/state tests referenced the Work route and DTOs before implementation. |
+| `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-work-green1 -only-testing:TronMobileTests/EngineNavigationTests -only-testing:TronMobileTests/AgentClientTests -only-testing:TronMobileTests/WorkDashboardStateTests` | 0 | Green proof: 15 selected simulator tests passed for Work navigation, `agent::work_snapshot` read behavior, and `WorkDashboardState` load/error/blocked paths. |
+| `TRON_VISUAL_ARTIFACT_DIR=/tmp/tron-visual-artifacts xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-work-visual -only-testing:TronMobileTests/WorkDashboardViewTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests/testAgentSettingsExposePlainGuardrails -only-testing:TronMobileTests/AgentSettingsPageLayoutTests/testAgentSettingsAutonomyUsesWorkerFirstCopy -only-testing:TronMobileTests/AgentSettingsPageLayoutTests/testAgentSettingsAutonomyRendersForVisualQA` | 0 | Simulator proof: Work dashboard source gate plus Agent settings Guardrails/Autonomy layout tests passed. |
+| `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-work-checkpoint -only-testing:TronMobileTests/EngineNavigationTests -only-testing:TronMobileTests/AgentClientTests -only-testing:TronMobileTests/WorkDashboardStateTests -only-testing:TronMobileTests/WorkDashboardViewTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests/testAgentSettingsExposePlainGuardrails -only-testing:TronMobileTests/AgentSettingsPageLayoutTests/testAgentSettingsAutonomyUsesWorkerFirstCopy -only-testing:TronMobileTests/AgentSettingsPageLayoutTests/testAgentSettingsAutonomyRendersForVisualQA` | 0 | Final focused simulator proof after replacing clipped section symbols: 5 XCTest render/layout tests and 15 Swift Testing client/navigation/state tests passed in a fresh DerivedData path. |
+| `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-work-settings-check -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/ServerSettingsTests -only-testing:TronMobileTests/AgentContextSettingsPageTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests` | 65 then 0 | Broader settings red/green proof. Initial run caught `AgentSettingsSection.allCases` still expecting the pre-Guardrails order; final run passed 18 XCTest cases plus 36 Swift Testing cases after adding `.guardrails` after `.autonomy`. |
+| `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-work-checkpoint -only-testing:TronMobileTests/AgentClientTests -only-testing:TronMobileTests/WorkDashboardStateTests -only-testing:TronMobileTests/WorkDashboardViewTests` | 0 | Cleanup proof after removing unused `WorkAuditRefDTO.stableId`: 2 XCTest Work dashboard tests and 14 Swift Testing client/state tests passed. |
+| `view_image .../work-dashboard-iphone-render.png` | 0 | Visual inspection of the iPhone 17 Pro screenshot confirmed readable Work/Workers/Guardrails/Results/Audit layout with no overlap or clipped section icons. |
+| `view_image .../work-dashboard-ipad-render.png` | 0 | Visual inspection of the iPad screenshot confirmed the same content remains legible with centered max-width layout and no overlap. |
+
+### Simulator Evidence
+
+- Target simulator UDID: `7BDA4AF9-1C40-47E3-A925-0F88C191F263`.
+- Bundle under test: `TronMobile.app` from the `Tron` scheme, Beta
+  simulator configuration.
+- Final Work dashboard iPhone artifact:
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/7F21D653-1081-4241-A0C4-B476D89BFD9F/Documents/tron-visual-artifacts/work-dashboard-iphone-render.png`.
+- Final Work dashboard iPad artifact:
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/7F21D653-1081-4241-A0C4-B476D89BFD9F/Documents/tron-visual-artifacts/work-dashboard-ipad-render.png`.
+- Final Agent settings Autonomy/Guardrails render artifact:
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/167B2E85-478E-4469-9F1D-3162F36BE5A2/Documents/tron-visual-artifacts/agent-settings-autonomy-render.png`.
+- The simulator app attempted to reconnect to the default local server
+  `ws://127.0.0.1:19847/engine`; the server was not running, so logs include
+  expected `NSURLErrorDomain Code=-1004` connection-refused warnings. The
+  hosted render and client tests use deterministic fixtures and still passed.
+- The in-thread tool registry still exposed no simulator tap/computer-use
+  control. Simulator proof therefore uses `xcodebuild`, hosted SwiftUI
+  rendering, `simctl`-backed app execution through XCTest, emitted PNG
+  artifacts, and manual visual inspection through the local image viewer.
+
+### Source Evidence
+
+- [`packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift`](../../ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift):
+  adds typed Work snapshot DTOs for autonomy, active work, workers, abilities,
+  milestones, guardrails, audit refs, and scope.
+- [`packages/ios-app/Sources/Services/Network/Clients/AgentClient.swift`](../../ios-app/Sources/Services/Network/Clients/AgentClient.swift):
+  adds the read-only `agent::work_snapshot` call with optional session/workspace
+  context and limit params.
+- [`packages/ios-app/Sources/ViewModels/State/WorkDashboardState.swift`](../../ios-app/Sources/ViewModels/State/WorkDashboardState.swift):
+  keeps iOS state thin: refresh/load/error state, blocked-work summary, and
+  worker milestone filtering only.
+- [`packages/ios-app/Sources/Views/Chat/SessionSidebar.swift`](../../ios-app/Sources/Views/Chat/SessionSidebar.swift)
+  and [`packages/ios-app/Sources/Views/Chat/ContentView.swift`](../../ios-app/Sources/Views/Chat/ContentView.swift):
+  replace the top-level Engine route with Work.
+- [`packages/ios-app/Sources/Views/Work/WorkDashboardView.swift`](../../ios-app/Sources/Views/Work/WorkDashboardView.swift):
+  renders the minimal Work surface and keeps the old technical console behind
+  one Audit Details sheet.
+- [`packages/ios-app/Sources/Views/Settings/Pages/AgentSettingsPage.swift`](../../ios-app/Sources/Views/Settings/Pages/AgentSettingsPage.swift)
+  and [`packages/ios-app/Sources/Views/Settings/SettingsSupport.swift`](../../ios-app/Sources/Views/Settings/SettingsSupport.swift):
+  add plain Guardrails settings copy next to Autonomy Mode.
+- [`packages/ios-app/Tests/Views/WorkDashboardViewTests.swift`](../../ios-app/Tests/Views/WorkDashboardViewTests.swift):
+  locks Work vocabulary, blocks raw Engine Console metric-grid/jargon strings
+  in the Work view, and emits iPhone/iPad screenshots.
+- [`packages/ios-app/Tests/ViewModels/WorkDashboardStateTests.swift`](../../ios-app/Tests/ViewModels/WorkDashboardStateTests.swift)
+  and [`packages/ios-app/Tests/Services/AgentClientTests.swift`](../../ios-app/Tests/Services/AgentClientTests.swift):
+  prove the snapshot client/state path without iOS-owned policy joins.
+- [`packages/ios-app/docs/architecture.md`](../../ios-app/docs/architecture.md)
+  and [`README.md`](../../../README.md):
+  document Work as the top-level surface and Engine Console as Audit Details.
+
+### Findings
+
+- The primary iOS route is now `NavigationMode.work`, not
+  `NavigationMode.engine`.
+- The default dashboard is powered by one server-owned `agent::work_snapshot`
+  read. iOS no longer needs to combine capability registry, catalog, approval,
+  policy, and audit clients to build the main product screen.
+- The default Work path shows autonomy status, active work, workers, guardrail
+  alerts, recent results, and a single Audit Details entry point; it does not
+  show raw catalog/plugin/implementation/binding count grids.
+- Guardrails settings are plain and non-technical: Run Unless Blocked is On,
+  Audit Trail is Always, and the copy states that server guardrails stop unsafe
+  work before it runs.
+- The first visual pass caught section-header icon clipping on iPhone. The fix
+  replaced wide symbols with stable section icons and the final simulator
+  screenshots verified no clipping or text overlap.
+
+### Open Loops
+
+- JARVIS-5 is closed for the default dashboard, but JARVIS-7 still needs worker
+  detail screenshots across running, success, failure, and blocked states.
+- JARVIS-8 is closed for settings UX, but JARVIS-11 owns final paired-server
+  action/soak proof.
+- JARVIS-10 still owns deleting or renaming remaining audit-only Engine Console
+  ownership and adding broad absence gates for primary UI jargon.

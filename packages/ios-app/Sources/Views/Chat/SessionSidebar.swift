@@ -5,12 +5,12 @@ import SwiftUI
 /// Navigation mode for the main view
 enum NavigationMode: String, CaseIterable {
     case agents = "Sessions"
-    case engine = "Engine"
+    case work = "Work"
 
     var icon: String {
         switch self {
         case .agents: "cpu"
-        case .engine: "server.rack"
+        case .work: "briefcase"
         }
     }
 }

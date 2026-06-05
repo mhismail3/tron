@@ -152,6 +152,7 @@ struct AgentContextSettingsPageTests {
         #expect(AgentSettingsSection.allCases == [
             .quickSession,
             .autonomy,
+            .guardrails,
             .hooks,
             .promptLibrary,
             .messageQueue,
