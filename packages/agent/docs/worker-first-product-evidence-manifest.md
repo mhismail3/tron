@@ -26,9 +26,9 @@ screenshots, runtime ids, open loops, and the next test.
 | Row | Status | Evidence |
 |---|---|---|
 | JARVIS-0 | running | Scorecard, manifest, README links, and static guard added. Source baseline is recorded below. Visual baseline screenshots remain open. |
-| JARVIS-1 | pending | Not started. |
+| JARVIS-1 | running | Partial: provider-visible Worker Guide vocabulary replaced the old Capability Primer/harness wording; README context/worker-loop docs describe worker abilities and Audit. Primary UI static gates remain open. |
 | JARVIS-2 | passed_after_fix | Default no-prompt autonomy, audited auto-decisions, testing prompts, fail-closed preflight, and replay behavior are covered by Rust tests. |
-| JARVIS-3 | pending | Not started. |
+| JARVIS-3 | running | Partial: Worker Guide and execute schema default non-trivial work to worker/subagent delegation, provider-context tests prove guide injection, and integration proof fans out two session workers without approvals. Subagent Worker projection remains open. |
 | JARVIS-4 | passed_after_fix | `agent::work_snapshot` is registered and covered by DTO tests for idle state, active work, worker health, milestones, guardrails, and audit refs. |
 | JARVIS-5 | pending | Not started. |
 | JARVIS-6 | pending | Not started. |
@@ -180,3 +180,64 @@ screenshots, runtime ids, open loops, and the next test.
   action checks before receiving points.
 - JARVIS-5 still owns the default iOS Work dashboard replacement that consumes
   `agent::work_snapshot`.
+
+## JARVIS-1 / JARVIS-3 Partial Evidence
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml primer_uses_worker_first_orchestration_language -- --nocapture` | 101 then 0 | Red/green proof that the generated guide no longer renders `# Capability Primer` or harness wording and now teaches Work router, worker abilities, fan-out, non-trivial delegation, and Audit-only raw ids. |
+| `cargo test --manifest-path packages/agent/Cargo.toml worker_guide_docs_are_versioned_resources -- --nocapture` | 101 then 0 | Red/green proof that rendered guide resources use the `Worker guide resource:` pointer, `worker-guide` doc id, `Worker guide` title, and current body. |
+| `cargo test --manifest-path packages/agent/Cargo.toml capability_primer_context_stays_within_budget -- --nocapture` | 101 then 0 | Red/green proof that the longer Worker Guide still stays within the profile budget and truncates with worker-ability wording. |
+| `cargo test --manifest-path packages/agent/Cargo.toml primer_teaches_self_modifying_worker_lifecycle -- --nocapture` | 0 | Proved the self-extension recipe still covers grant, spawn, inspect, conformance/test, generated UI, promotion, cleanup, chat status, and Audit boundaries. |
+| `cargo test --manifest-path packages/agent/Cargo.toml execute_description_teaches_self_modifying_worker_lifecycle -- --nocapture` | 0 | Proved the provider-visible `execute` schema description matches the worker-first self-extension and Audit guidance. |
+| `cargo test --manifest-path packages/agent/Cargo.toml capability_primer_follows_dynamic_rules_before_skills -- --nocapture` | 0 | Proved the provider context block ordering still places the generated guide after active rules and before skills. |
+| `cargo test --manifest-path packages/agent/Cargo.toml model_run_proves_worker_guide_reaches_provider_context -- --nocapture` | 0 | Proved hosted and local provider routes receive the Worker Guide/resource pointer while local policy strips heavier context. |
+| `cargo test --manifest-path packages/agent/Cargo.toml worker_first_orchestration_fans_out_session_workers_without_approvals -- --nocapture` | 0 | Real server/WebSocket proof: spawned two session workers, invoked both through `execute`, verified `agent::work_snapshot` projected both workers, and `approval::list` stayed empty before and after execution. |
+
+### Source Evidence
+
+- [`packages/agent/src/domains/capability/registry/primer.rs`](../src/domains/capability/registry/primer.rs):
+  renders `# Worker Guide`, teaches non-trivial delegation/fan-out, and keeps
+  raw grants, traces, resource refs, child invocation ids, function ids, and
+  raw schemas in Audit.
+- [`packages/agent/src/domains/capability/contract.rs`](../src/domains/capability/contract.rs):
+  updates the model-visible `execute` schema description to the Work router and
+  autonomous Worker extension vocabulary.
+- [`packages/agent/src/domains/capability/operations/mod.rs`](../src/domains/capability/operations/mod.rs):
+  stores generated guide docs as `worker-guide` with the `Worker guide
+  resource:` pointer while preserving the underlying typed `harness_doc`
+  resource kind.
+- [`packages/agent/src/domains/model/providers/shared/context_composition.rs`](../src/domains/model/providers/shared/context_composition.rs):
+  labels the provider context block `Worker Guide`.
+- [`packages/agent/src/domains/agent/runner/agent/tron_agent_tests.rs`](../src/domains/agent/runner/agent/tron_agent_tests.rs):
+  proves generated guide context reaches hosted and local providers.
+- [`packages/agent/tests/integration/tests.rs`](../tests/integration/tests.rs):
+  adds the fan-out worker proof against a real local server and worker
+  processes.
+- [`README.md`](../../../README.md) and
+  [`packages/agent/docs/context-architecture.md`](context-architecture.md):
+  document the generated Worker Guide and internal `capabilities.primer` block
+  id without presenting primer vocabulary as product language.
+
+### Findings
+
+- The model-visible guide is worker-first: non-trivial work is orchestrated by
+  delegating focused slices to workers/subagents, spawning fan-out workers
+  before gathering results, and reporting Work status/outcomes/cleanup in chat.
+- The old `# Capability Primer`, harness customization, `Harness docs
+  resource:`, and `agent-capability-primer` runtime grant naming were removed
+  from active source/test surfaces except negative assertions that prevent
+  reintroduction.
+- The fan-out integration proof created no approval prompts. This proves the
+  JARVIS-2 no-prompt policy composes with JARVIS-3 worker orchestration.
+- `agent::work_snapshot` projects spawned helper workers as product Worker
+  cards for the tested session.
+
+### Open Loops
+
+- JARVIS-1 still needs primary UI vocabulary gates after Work dashboard/chat
+  replacement removes the Engine Console path.
+- JARVIS-3 still needs live subagent instances projected as product Workers in
+  the Work snapshot/detail model before points can be awarded.

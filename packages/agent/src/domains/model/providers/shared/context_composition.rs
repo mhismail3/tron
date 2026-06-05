@@ -22,7 +22,7 @@ use crate::shared::messages::Context;
 /// 2. `rules_content` (with `"# Project Rules\n\n"` header)
 /// 3. `memory_content`
 /// 4. `dynamic_rules_context` (with `"# Active Rules\n\n"` header)
-/// 5. `capability_primer_context` (generated compact live capability catalog)
+/// 5. `capability_primer_context` (generated compact worker orchestration guide)
 /// 6. `skill_index_context` (lightweight index of all available skills)
 /// 7. `skill_context` (full content of explicitly invoked skills)
 /// 8. `skill_removal_context` (one-turn deactivation notice)
@@ -100,7 +100,7 @@ pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {
     {
         blocks.push(context_block_for_text(
             "capabilities.primer",
-            "Capability Primer",
+            "Worker Guide",
             TronHome::Profiles,
             capabilities.clone(),
             ContextCacheClass::Turn,
@@ -351,7 +351,7 @@ mod tests {
     fn capability_primer_follows_dynamic_rules_before_skills() {
         let ctx = Context {
             dynamic_rules_context: Some("Rule: inspect before writes".into()),
-            capability_primer_context: Some("# Capability Primer".into()),
+            capability_primer_context: Some("# Worker Guide".into()),
             skill_index_context: Some("# Available Skills".into()),
             skill_context: Some("<skills>active</skills>".into()),
             ..Default::default()
@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(parts.len(), 4);
         assert!(parts[0].starts_with("# Active Rules"));
         assert!(parts[0].contains("inspect before writes"));
-        assert_eq!(parts[1], "# Capability Primer");
+        assert_eq!(parts[1], "# Worker Guide");
         assert_eq!(parts[2], "# Available Skills");
         assert_eq!(parts[3], "<skills>active</skills>");
     }

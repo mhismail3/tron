@@ -1317,6 +1317,143 @@ async fn capability_self_modifying_lifecycle_invokes_session_worker_through_exec
 
 #[cfg(unix)]
 #[tokio::test]
+async fn worker_first_orchestration_fans_out_session_workers_without_approvals() {
+    let port = reserve_loopback_port();
+    let config = ServerConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        ..ServerConfig::default()
+    };
+    let (url, server) =
+        boot_server_without_deps_with_config(config, format!("127.0.0.1:{port}")).await;
+    let mut ws = connect(&url).await;
+    let session_id = "hmh-b-fanout-session".to_owned();
+    let left = spawn_hmh_session_worker_through_execute_for_session(
+        &mut ws,
+        port,
+        "fanoutleft",
+        3291,
+        session_id.clone(),
+    )
+    .await;
+    let right = spawn_hmh_session_worker_through_execute_for_session(
+        &mut ws,
+        port,
+        "fanoutright",
+        3301,
+        session_id.clone(),
+    )
+    .await;
+
+    let approvals_before = direct_engine_invoke_with_session(
+        &server,
+        "approval::list",
+        json!({"sessionId": session_id, "limit": 20}),
+        "hmh-b-fanout-approval-list-before",
+        &["approval.read"],
+        &session_id,
+    )
+    .await;
+    assert_eq!(
+        approvals_before["approvals"].as_array().unwrap().len(),
+        0,
+        "fan-out worker setup should not create approval prompts: {approvals_before}"
+    );
+
+    for (fixture, side, nonce, rpc_id) in [(&left, "left", 1, 3311), (&right, "right", 2, 3312)] {
+        let payload = json!({
+            "message": format!("fan-out {side}"),
+            "nonce": nonce
+        });
+        let response = rpc_call(
+            &mut ws,
+            rpc_id,
+            "capability::execute",
+            Some(json!({
+                "sessionId": session_id,
+                "target": fixture.function_id,
+                "arguments": payload,
+                "idempotencyKey": format!("hmh-b-fanout-{side}-invoke"),
+                "reason": format!("worker-first fan-out {side} proof")
+            })),
+        )
+        .await;
+        assert_eq!(
+            response["success"], true,
+            "fan-out execute failed: {response}"
+        );
+        let result = &response["result"];
+        assert!(
+            result.get("isError").is_none(),
+            "fan-out execute should not return an error result: {result}"
+        );
+        assert_eq!(result["details"]["functionId"], fixture.function_id);
+        assert_eq!(result["details"]["output"]["echo"], payload);
+        assert_eq!(result["details"]["output"]["workerId"], fixture.worker_id);
+        assert!(
+            result["details"]["childInvocations"]
+                .as_array()
+                .is_some_and(|ids| ids.len() == 1),
+            "fan-out execute should record one worker child invocation: {result}"
+        );
+    }
+
+    let snapshot = direct_engine_invoke_with_session(
+        &server,
+        "agent::work_snapshot",
+        json!({"sessionId": session_id, "limit": 20}),
+        "hmh-b-fanout-work-snapshot",
+        &["agent.read"],
+        &session_id,
+    )
+    .await;
+    let worker_ids = snapshot["workers"]
+        .as_array()
+        .expect("work snapshot workers")
+        .iter()
+        .map(|worker| worker["workerId"].as_str().unwrap_or_default())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(
+        worker_ids.contains(left.worker_id.as_str())
+            && worker_ids.contains(right.worker_id.as_str()),
+        "Work snapshot should project both fan-out workers: {snapshot}"
+    );
+    let completed_milestones = snapshot["recentMilestones"]
+        .as_array()
+        .expect("work snapshot milestones")
+        .iter()
+        .filter(|milestone| milestone["status"] == "completed")
+        .count();
+    assert!(
+        completed_milestones >= 2,
+        "Work snapshot should include completed fan-out work: {snapshot}"
+    );
+
+    let approvals_after = direct_engine_invoke_with_session(
+        &server,
+        "approval::list",
+        json!({"sessionId": session_id, "limit": 20}),
+        "hmh-b-fanout-approval-list-after",
+        &["approval.read"],
+        &session_id,
+    )
+    .await;
+    assert_eq!(
+        approvals_after["approvals"].as_array().unwrap().len(),
+        0,
+        "fan-out worker execution should not create approval prompts: {approvals_after}"
+    );
+
+    let stopped_left = stop_hmh_session_worker(&server, &left, "hmh-b-fanout-stop-left").await;
+    assert_eq!(stopped_left["stopped"], true);
+    let stopped_right = stop_hmh_session_worker(&server, &right, "hmh-b-fanout-stop-right").await;
+    assert_eq!(stopped_right["stopped"], true);
+
+    server.shutdown().shutdown();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn capability_self_modifying_lifecycle_governs_session_worker_promotion() {
     let port = reserve_loopback_port();
     let config = ServerConfig {

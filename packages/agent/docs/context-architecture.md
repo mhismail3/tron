@@ -173,7 +173,7 @@ gravity.
 | Memory root | `packages/agent/src/domains/agent/runner/memory/registry.rs`; `~/.tron/memory/MEMORY.md` | Non-local model turns | Session | Provider instructions | Session | `memory` bucket | memory capabilities and file contents |
 | Memory detail listing | `~/.tron/memory/rules/*.md` listing only | Non-local model turns, as part of memory content | Session | Provider instructions | Session | `memory` bucket | File presence/frontmatter |
 | Worktree isolation note | `agent_prompt_service.rs` plus `git-workflow` prompt | Sessions with acquired worktree | Session | Provider instructions through memory | Session | `memory` bucket | Worktree/session isolation settings |
-| Capability primer | `capability::registry` snapshot rendered by `turn_runner` | Enabled through `capabilityExecutionPolicies.*.contextPrimerPolicy`; default is core first-party capabilities | Turn | Provider instructions | Turn | included in context blocks | `capabilityContextPrimerPolicies.*` |
+| Worker Guide | `capability::registry` snapshot rendered by `turn_runner` | Enabled through `capabilityExecutionPolicies.*.contextPrimerPolicy`; default is core first-party worker abilities | Turn | Provider instructions | Turn | included in context blocks | `capabilityContextPrimerPolicies.*` |
 | Skill index | `skills/injector.rs`; `settings.skills.showIndex` | Cloud models according to show-index policy | Session | Provider instructions | Session | `skillIndex` bucket | Skill registry and `showIndex` |
 | Skill activation directive | `prompt_runtime` skill context reconstruction | Active or newly invoked skills | Turn/session | Provider instructions | Turn | `skillContext` volatile estimate | `@skill`, skill events |
 | Active skill XML | `SKILL.md` resolved by `SkillRegistry` and injector | Explicitly active skills | Turn/session | Provider instructions | Turn | `skillContext` volatile estimate | Skill files, `@skill`, skill events |
@@ -199,7 +199,7 @@ prompt blocks in precedence order:
 | 20 | `project.rules` | `workspace` | Instructions | Session |
 | 30 | `memory.root` | `memory` | Instructions | Session |
 | 40 | `dynamic.rules` | `profiles` | Instructions | Turn |
-| 45 | `capabilities.primer` | `profiles` | Instructions | Turn |
+| 45 | `capabilities.primer` (Worker Guide) | `profiles` | Instructions | Turn |
 | 50 | `skills.index` | `skills` | Instructions | Session |
 | 60 | `skills.activation` | `skills` | Instructions | Turn |
 | 70 | `skills.active` | `skills` | Instructions | Turn |
@@ -374,7 +374,7 @@ Current behavior:
 | Prompt orchestration | `packages/agent/src/domains/agent/runtime/service/` | `execute_prompt_run`, prompt bootstrap, skill/hook setup |
 | Agent construction | `packages/agent/src/domains/agent/runner/orchestrator/agent_factory.rs`, `packages/agent/src/domains/agent/runner/agent/tron_agent.rs` | `AgentConfig`, capability filtering, `TronAgent::run` |
 | Single-turn execution | `packages/agent/src/domains/agent/runner/agent/turn_runner.rs` | `execute_turn`, `build_turn_context`, audit writes, stream/capability phases |
-| Capability primer/search | `packages/agent/src/domains/capability/registry.rs` | registry projection, hybrid local index, binding decisions, primer rendering |
+| Worker Guide/search | `packages/agent/src/domains/capability/registry.rs` | registry projection, hybrid local index, binding decisions, guide rendering |
 | Context state | `packages/agent/src/domains/agent/runner/context/context_manager.rs` | base context, snapshots, compaction triggers, volatile token generation |
 | Context composition | `packages/agent/src/domains/model/providers/shared/context_composition.rs` | canonical block order and audit-only blocks |
 | Provider payloads | `packages/agent/src/domains/model/providers/{anthropic,openai,google,kimi,minimax,ollama}` | provider-specific prompt/request adaptation and `audit_payload` |

@@ -99,6 +99,59 @@ fn primer_guides_approval_gated_write_commands_to_process_run() {
 }
 
 #[test]
+fn primer_uses_worker_first_orchestration_language() {
+    let snapshot = CapabilityRegistrySnapshot::new(
+        vec![
+            test_function("capability::execute"),
+            test_function("agent::spawn_subagent"),
+            test_function("agent::subagent_status"),
+            test_function("agent::subagent_result"),
+            test_function("self_extension::grant_workspace_autonomy"),
+            test_function("worker::protocol_guide"),
+            test_function("worker::spawn"),
+        ],
+        42,
+    );
+    let text = render_capability_primer(
+        &snapshot,
+        &CapabilityContextPrimerPolicy {
+            max_tokens: 1700,
+            include_compact_schemas: true,
+            include_examples: false,
+            ..Default::default()
+        },
+    )
+    .expect("worker guide");
+
+    assert!(text.starts_with("# Worker Guide\n\n"), "{text}");
+    for required in [
+        "Work router",
+        "worker abilities",
+        "For non-trivial work",
+        "delegate focused investigation, implementation, or verification slices to workers",
+        "`agent::spawn_subagent`",
+        "spawn fan-out workers before collecting results",
+        "Report Work status, outcomes, blockers, and cleanup state in chat",
+        "Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, function ids, and raw schemas in Audit",
+    ] {
+        assert!(
+            text.contains(required),
+            "worker-first guide missing marker `{required}`:\n{text}"
+        );
+    }
+    for forbidden in [
+        "# Capability Primer",
+        "customize the harness",
+        "Report trace id",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "worker-first guide must not expose stale wording `{forbidden}`:\n{text}"
+        );
+    }
+}
+
+#[test]
 fn primer_teaches_self_modifying_worker_lifecycle() {
     let snapshot = CapabilityRegistrySnapshot::new(
         vec![
@@ -128,7 +181,7 @@ fn primer_teaches_self_modifying_worker_lifecycle() {
     .expect("primer");
 
     for required in [
-        "customize the harness",
+        "extend autonomous Work",
         "`self_extension::grant_workspace_autonomy`",
         "omit workspaceId for the current workspace",
         "Workspace-visible helper work",
@@ -157,8 +210,8 @@ fn primer_teaches_self_modifying_worker_lifecycle() {
         "`sandbox::stop_spawned_worker`",
         "`worktree::discard_files`",
         "repository-relative paths only",
-        "plain status in chat",
-        "Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, and function ids in Inspect",
+        "Report Work status, outcomes, blockers, and cleanup state in chat",
+        "Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, function ids, and raw schemas in Audit",
     ] {
         assert!(
             text.contains(required),
@@ -213,7 +266,9 @@ fn capability_primer_context_stays_within_budget() {
         "primer snapshot must identify the live catalog revision:\n{text}"
     );
     assert!(
-        text.contains("Additional capabilities are available through the same `execute` primitive"),
+        text.contains(
+            "Additional worker abilities are available through the same `execute` Work router"
+        ),
         "noisy core snapshot should truncate entries with execute guidance instead of expanding the catalog:\n{text}"
     );
     for required in [
@@ -246,8 +301,8 @@ fn capability_primer_context_stays_within_budget() {
         "`sandbox::stop_spawned_worker`",
         "`worktree::discard_files`",
         "repository-relative paths only",
-        "plain status in chat",
-        "Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, and function ids in Inspect",
+        "Report Work status, outcomes, blockers, and cleanup state in chat",
+        "Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, function ids, and raw schemas in Audit",
         "cleanup state",
     ] {
         assert!(

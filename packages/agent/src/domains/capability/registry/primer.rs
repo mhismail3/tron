@@ -1,8 +1,8 @@
-//! Context-primer rendering for capability discovery.
+//! Context-guide rendering for worker orchestration.
 //!
-//! Primer policy and rendering live here so catalog persistence and search
+//! Guide policy and rendering live here so catalog persistence and search
 //! indexing do not own model-facing documentation text. The fixed header stays
-//! compact so tight budgets still include actual capability entries; longer
+//! compact so tight budgets still include actual worker ability entries; longer
 //! product recipes are appended only when they fit.
 
 use serde::{Deserialize, Serialize};
@@ -10,14 +10,13 @@ use serde::{Deserialize, Serialize};
 use super::index::trust_rank;
 use super::{AgentCapabilityRecipeDisplay, CapabilityRegistryEntry, CapabilityRegistrySnapshot};
 
-const TRUNCATION_NOTICE: &str = "- Additional capabilities are available through the same `execute` primitive; provide intent or a target hint and the engine resolves the catalog entry.\n";
+const TRUNCATION_NOTICE: &str = "- Additional worker abilities are available through the same `execute` Work router; provide intent or a target hint and the engine resolves the catalog entry.\n";
 
-const COMPACT_EXECUTE_ROUTING_GUIDANCE: &str =
-    "Use `execute`; target the real work capability, not approval::request.\n\n";
+const COMPACT_EXECUTE_ROUTING_GUIDANCE: &str = "Use `execute` as the Work router for worker abilities; target the real worker ability, not approval::request. Delegate non-trivial work to workers and gather results.\n\n";
 
-const EXECUTE_ROUTING_GUIDANCE: &str = "The model-facing primitive is `execute`. Use known targets directly; for unknown work start with intent. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with {\"executionMode\":\"sandbox_materialized\",\"expectedOutputs\":[{\"path\":\"result.txt\"}]}, not filesystem::write_file. Each path must be relative and the command must write the same declared sandbox path. Worktree discard uses worktree::discard_files with repo-relative paths only and pauses for user approval. Freshness and approval happen inside execute.\n\n";
+const EXECUTE_ROUTING_GUIDANCE: &str = "Use `execute` as the Work router for worker abilities. Use known worker ability targets directly; for unknown work start with intent. For non-trivial work, act as the orchestrator: delegate focused investigation, implementation, or verification slices to workers with `agent::spawn_subagent` or spawned helper abilities, spawn fan-out workers before collecting results, then gather with `agent::subagent_status`, `agent::subagent_result`, or the helper's returned artifacts. Canonical shape is target plus arguments; execute can correct flattened target args. Prefer filesystem for repo/code evidence. Target the real work capability; do not target approval::request directly. Approval-gated write commands use process::run with {\"executionMode\":\"sandbox_materialized\",\"expectedOutputs\":[{\"path\":\"result.txt\"}]}, not filesystem::write_file. Each path must be relative and the command must write the same declared sandbox path. Worktree discard uses worktree::discard_files with repo-relative paths only and pauses for user approval. Freshness and approval happen inside execute.\n\n";
 
-const SELF_EXTENSION_GUIDANCE: &str = "To customize the harness: target `self_extension::grant_workspace_autonomy` with absolute workspacePath; omit workspaceId for the current workspace unless a prior result gave the exact id. Approval returns `Safe in this workspace`. Workspace-visible helper work passes `workspaceAutonomyGrantId` and the returned workspaceId to `worker::spawn`; if resourceSelectors is omitted, spawn uses `workspace:<workspaceId>`. Use that returned workspaceId as execute's top-level workspaceId for `catalog::watch_snapshot`, `capability::inspect`, and helper calls. Then call `worker::protocol_guide`, author the worker, `worker::spawn`, prove catalog visibility, run conformance or test evidence, and invoke through `execute`. For packs: `module::register_package` over worker_package, inspect, source trust, configure, `module::activate`, `module::run_conformance`, upgrade, rollback, disable, revoke, or remove. Use generated `ui_surface`: `ui::surface_for_target`, `ui::inspect_surface`, `ui::submit_action` with stored surface/version/action ids. Use `engine::promote` for governed promotion; clean sandbox-spawned helpers with `sandbox::stop_spawned_worker`; use `worker::disconnect` only for raw volatile protocol cleanup; discard helper files with `worktree::discard_files` and repository-relative paths only. Report plain status in chat. Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, and function ids in Inspect; mention cleanup state.\n\n";
+const SELF_EXTENSION_GUIDANCE: &str = "To extend autonomous Work: target `self_extension::grant_workspace_autonomy` with absolute workspacePath; omit workspaceId for the current workspace unless a prior result gave the exact id. Approval returns `Safe in this workspace`. Workspace-visible helper work passes `workspaceAutonomyGrantId` and the returned workspaceId to `worker::spawn`; if resourceSelectors is omitted, spawn uses `workspace:<workspaceId>`. Use that returned workspaceId as execute's top-level workspaceId for `catalog::watch_snapshot`, `capability::inspect`, and helper calls. Then call `worker::protocol_guide`, author the worker, `worker::spawn`, prove catalog visibility, run conformance or test evidence, and invoke through `execute`. For Worker Packs: `module::register_package` over worker_package, inspect, source trust, configure, `module::activate`, `module::run_conformance`, upgrade, rollback, disable, revoke, or remove. Use generated `ui_surface` as a worker artifact: `ui::surface_for_target`, `ui::inspect_surface`, `ui::submit_action` with stored surface/version/action ids. Use `engine::promote` for governed promotion; clean sandbox-spawned helpers with `sandbox::stop_spawned_worker`; use `worker::disconnect` only for raw volatile protocol cleanup; discard helper files with `worktree::discard_files` and repository-relative paths only. Report Work status, outcomes, blockers, and cleanup state in chat. Keep grant ids, trace ids, resource refs, catalog revision, child invocation ids, function ids, and raw schemas in Audit.\n\n";
 
 const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
     "capability::execute",
@@ -50,7 +49,7 @@ const CORE_CONTEXT_CAPABILITIES: &[&str] = &[
     "worker::protocol_guide",
 ];
 
-/// Profile-controlled context primer policy.
+/// Profile-controlled Worker Guide policy.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub(crate) struct CapabilityContextPrimerPolicy {
@@ -113,7 +112,7 @@ pub(crate) fn render_capability_primer(
     if entries.is_empty() {
         return None;
     }
-    let mut out = String::from("# Capability Primer\n\n");
+    let mut out = String::from("# Worker Guide\n\n");
     out.push_str(&format!(
         "Catalog revision: {}.\n\n",
         snapshot.catalog_revision

@@ -9,13 +9,13 @@
 //! | Submodule | Ownership |
 //! |---|---|
 //! | `index` | Document identity, lexical ranking, local vector ranking, degraded-index status, and hybrid fusion |
-//! | `primer` | Context-primer policy, visible-primer entry selection, and model-facing primer rendering |
+//! | `primer` | Worker Guide policy, visible guide entry selection, and model-facing guide rendering |
 //! | `recipes` | Capability recipe authoring for resolve/prepare guidance |
 //! | `search_policy` | Profile-controlled search flags and document filters |
 //! | `store` | In-memory and SQLite registry persistence, schema, redaction, and vector storage |
 //!
 //! The root module owns catalog projection records and selection semantics.
-//! Concrete persistence stays in `store`; ranking and primer text stay outside
+//! Concrete persistence stays in `store`; ranking and guide text stay outside
 //! that boundary so durable storage cannot grow model-guidance policy by
 //! accident.
 

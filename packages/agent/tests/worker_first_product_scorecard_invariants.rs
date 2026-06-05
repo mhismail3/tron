@@ -37,12 +37,12 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
     for required in [
         "# Worker-First Tron Product Scorecard",
         "Current score: **22/100**",
-        "Status: **active; JARVIS-2 and JARVIS-4 server checkpoint passed; JARVIS-0 visual baseline and JARVIS-8 guardrail UX remain open**",
+        "Status: **active; JARVIS-2 and JARVIS-4 passed; JARVIS-1/JARVIS-3 vocabulary and fan-out proof are running; JARVIS-0 visual baseline and JARVIS-8 guardrail UX remain open**",
         "Evidence manifest: [`worker-first-product-evidence-manifest.md`](worker-first-product-evidence-manifest.md)",
         "| JARVIS-0 | Formalize scorecard and baseline | 5 | running |",
-        "| JARVIS-1 | Primitive collapse | 8 | pending |",
+        "| JARVIS-1 | Primitive collapse | 8 | running |",
         "| JARVIS-2 | Default autonomy policy | 12 | passed_after_fix |",
-        "| JARVIS-3 | Worker-first orchestration | 10 | pending |",
+        "| JARVIS-3 | Worker-first orchestration | 10 | running |",
         "| JARVIS-4 | Work snapshot API | 10 | passed_after_fix |",
         "| JARVIS-5 | iOS Work dashboard | 12 | pending |",
         "| JARVIS-6 | Chat noise reduction | 8 | pending |",
@@ -54,6 +54,8 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "Default autonomy means run-unless-blocked, not ask-first.",
         "Approval-required metadata becomes audited auto-decision records",
         "`agent::work_snapshot` contract/handler/projection",
+        "model-visible context now renders `# Worker Guide`",
+        "a real integration test fans out two session workers",
         "Remote package discovery, push, merge, release, deploy, and production",
         "Visual baseline screenshots are still open and block JARVIS-0 points.",
     ] {
@@ -78,7 +80,9 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
     assert!(
         manifest.contains("Current score: **22/100**")
             && manifest.contains("| JARVIS-0 | running |")
+            && manifest.contains("| JARVIS-1 | running |")
             && manifest.contains("| JARVIS-2 | passed_after_fix |")
+            && manifest.contains("| JARVIS-3 | running |")
             && manifest.contains("| JARVIS-4 | passed_after_fix |")
             && manifest.contains("| JARVIS-8 | running |")
             && manifest.contains("| JARVIS-11 | pending |")
@@ -95,6 +99,12 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && manifest.contains("The in-thread tool registry exposed no simulator tap/computer-use control.")
             && scorecard.contains("Remaining: add plain Guardrails UX and capture paired-server action checks before awarding points."),
         "worker-first evidence manifest must track the active baseline and open visual proof"
+    );
+    assert!(
+        manifest.contains("worker_first_orchestration_fans_out_session_workers_without_approvals")
+            && manifest.contains("Subagent Worker projection remains open.")
+            && scorecard.contains("Remaining: project live subagent instances as product Workers"),
+        "worker-first evidence manifest must record the partial JARVIS-1/JARVIS-3 checkpoint without awarding points"
     );
 
     assert!(

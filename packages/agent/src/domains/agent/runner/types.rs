@@ -259,7 +259,7 @@ pub struct RunContext {
     /// Dynamic rules context from path-scoped files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dynamic_rules_context: Option<String>,
-    /// Generated compact capability catalog primer for this turn.
+    /// Generated compact Worker Guide for this turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability_primer_context: Option<String>,
     /// Hook-injected context, kept separate for audit/context policy.

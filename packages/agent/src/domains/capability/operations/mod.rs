@@ -7,7 +7,7 @@
 //! single `execute` surface. Target-specific argument affordances are isolated in
 //! `target_arguments`, deterministic route and argument-fit heuristics live in
 //! `target_resolution`, target payload guidance lives in `schema_validation`,
-//! model-visible summaries live in `presentation`, harness-primer resource
+//! model-visible summaries live in `presentation`, worker-guide resource
 //! materialization stays in this operations boundary, and profile policy
 //! persistence plus admin primitives live in `policy_profile` and `admin`, so
 //! the shared execute flow does not grow new per-capability branches unnoticed.
@@ -48,7 +48,7 @@ use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
 
 static IN_FLIGHT_VECTOR_WARMUP_SIGNATURE: AtomicU64 = AtomicU64::new(0);
-const HARNESS_DOC_POINTER_TOKEN_RESERVE: usize = 96;
+const WORKER_GUIDE_POINTER_TOKEN_RESERVE: usize = 96;
 
 mod admin;
 mod audit;
@@ -123,10 +123,8 @@ pub(crate) async fn render_capability_primer(
             }
         })?,
         ActorKind::Agent,
-        AuthorityGrantId::new("agent-capability-primer").map_err(|error| {
-            CapabilityError::Internal {
-                message: error.to_string(),
-            }
+        AuthorityGrantId::new("agent-worker-guide").map_err(|error| CapabilityError::Internal {
+            message: error.to_string(),
         })?,
     )
     .with_scope("capability.search")
@@ -147,13 +145,13 @@ pub(crate) async fn render_capability_primer(
     let triggers = engine_host.visible_triggers(&actor).await;
     let snapshot = CapabilityRegistrySnapshot::with_triggers(functions, triggers, revision.0);
     let mut render_policy = policy.clone();
-    if render_policy.max_tokens > HARNESS_DOC_POINTER_TOKEN_RESERVE {
-        render_policy.max_tokens -= HARNESS_DOC_POINTER_TOKEN_RESERVE;
+    if render_policy.max_tokens > WORKER_GUIDE_POINTER_TOKEN_RESERVE {
+        render_policy.max_tokens -= WORKER_GUIDE_POINTER_TOKEN_RESERVE;
     }
     let Some(primer) = render_primer_from_snapshot(&snapshot, &render_policy) else {
         return Ok(None);
     };
-    let doc_ref = materialize_harness_doc_resource(
+    let doc_ref = materialize_worker_guide_resource(
         engine_host,
         session_id,
         workspace_id,
@@ -163,24 +161,24 @@ pub(crate) async fn render_capability_primer(
     )
     .await?;
     Ok(Some(format!(
-        "{primer}\nHarness docs resource: resourceId={} versionId={} kind={} catalogRevision={} inspectTarget=resource::inspect.\n",
+        "{primer}\nWorker guide resource: resourceId={} versionId={} kind={} catalogRevision={} inspectTarget=resource::inspect.\n",
         doc_ref.resource_id, doc_ref.version_id, HARNESS_DOC_KIND, snapshot.catalog_revision
     )))
 }
 
-struct HarnessDocResourceRef {
+struct WorkerGuideResourceRef {
     resource_id: String,
     version_id: String,
 }
 
-async fn materialize_harness_doc_resource(
+async fn materialize_worker_guide_resource(
     engine_host: &crate::engine::EngineHostHandle,
     session_id: &str,
     workspace_id: Option<&str>,
     snapshot: &CapabilityRegistrySnapshot,
     policy: &CapabilityContextPrimerPolicy,
     body: &str,
-) -> Result<HarnessDocResourceRef, CapabilityError> {
+) -> Result<WorkerGuideResourceRef, CapabilityError> {
     let policy_value = serde_json::to_value(policy).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
     })?;
@@ -191,7 +189,7 @@ async fn materialize_harness_doc_resource(
     let policy_digest = sha256_hex_128(&policy_bytes);
     let content_hash = sha256_hex_128(body.as_bytes());
     let resource_id = format!(
-        "harness_doc:capability-primer:{policy_digest}:catalog-{}:{content_hash}",
+        "harness_doc:worker-guide:{policy_digest}:catalog-{}:{content_hash}",
         snapshot.catalog_revision
     );
     let payload = json!({
@@ -205,14 +203,14 @@ async fn materialize_harness_doc_resource(
             "retention": "catalog_revision"
         },
         "payload": {
-            "docId": "capability-primer",
-            "title": "Capability primer",
+            "docId": "worker-guide",
+            "title": "Worker guide",
             "format": "text/markdown",
             "body": body,
             "catalogRevision": snapshot.catalog_revision,
             "policy": policy_value,
             "contentHash": content_hash,
-            "source": "capability.primer",
+            "source": "worker.guide",
             "metadata": {
                 "sessionId": session_id,
                 "workspaceId": workspace_id,
@@ -226,14 +224,14 @@ async fn materialize_harness_doc_resource(
         ActorKind::System,
         AuthorityGrantId::new("engine-system").map_err(capability_engine_error)?,
         TraceId::new(format!(
-            "trace:harness-doc:{}:{}",
+            "trace:worker-guide:{}:{}",
             snapshot.catalog_revision, content_hash
         ))
         .map_err(capability_engine_error)?,
     )
     .with_scope("resource.write")
     .with_session_id(session_id.to_owned())
-    .with_idempotency_key(format!("harness-doc:v1:{resource_id}"));
+    .with_idempotency_key(format!("worker-guide:v1:{resource_id}"));
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
     }
@@ -247,30 +245,30 @@ async fn materialize_harness_doc_resource(
         return Err(engine_error_to_capability_error(error));
     }
     let value = result.value.ok_or_else(|| CapabilityError::Internal {
-        message: "resource::create returned no value for harness doc".to_owned(),
+        message: "resource::create returned no value for worker guide".to_owned(),
     })?;
     let reference = value
         .get("resourceRefs")
         .and_then(Value::as_array)
         .and_then(|refs| refs.first())
         .ok_or_else(|| CapabilityError::Internal {
-            message: "resource::create returned no harness doc resource ref".to_owned(),
+            message: "resource::create returned no worker guide resource ref".to_owned(),
         })?;
     let resource_id = reference
         .get("resourceId")
         .and_then(Value::as_str)
         .ok_or_else(|| CapabilityError::Internal {
-            message: "harness doc resource ref omitted resourceId".to_owned(),
+            message: "worker guide resource ref omitted resourceId".to_owned(),
         })?
         .to_owned();
     let version_id = reference
         .get("versionId")
         .and_then(Value::as_str)
         .ok_or_else(|| CapabilityError::Internal {
-            message: "harness doc resource ref omitted versionId".to_owned(),
+            message: "worker guide resource ref omitted versionId".to_owned(),
         })?
         .to_owned();
-    Ok(HarnessDocResourceRef {
+    Ok(WorkerGuideResourceRef {
         resource_id,
         version_id,
     })

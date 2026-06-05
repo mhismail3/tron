@@ -68,7 +68,7 @@ pub struct ProfileDocument {
     pub capability_execution_policies: HashMap<String, CapabilityExecutionPolicySpec>,
     /// Capability search policies.
     pub capability_search_policies: HashMap<String, CapabilitySearchPolicySpec>,
-    /// Capability context-primer policies.
+    /// Worker Guide policies.
     pub capability_context_primer_policies: HashMap<String, CapabilityContextPrimerPolicySpec>,
     /// Permission and inheritance policies.
     pub permission_policies: HashMap<String, PermissionPolicySpec>,
@@ -278,7 +278,7 @@ pub struct PrimitiveSurfacePolicySpec {
 pub struct CapabilityExecutionPolicySpec {
     /// Search policy used by capability::search.
     pub search_policy: Option<String>,
-    /// Context primer policy used for generated capability context.
+    /// Worker Guide policy used for generated provider context.
     pub context_primer_policy: Option<String>,
     /// Strict allowlist of contract ids.
     pub allowed_contracts: Option<Vec<String>>,
@@ -331,11 +331,11 @@ impl Default for CapabilitySearchPolicySpec {
     }
 }
 
-/// Generated capability context-primer policy.
+/// Generated Worker Guide policy.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct CapabilityContextPrimerPolicySpec {
-    /// Whether the primer block is rendered.
+    /// Whether the Worker Guide block is rendered.
     pub enabled: bool,
     /// `coreFirstParty` or `allVisibleCompact`.
     pub mode: String,
@@ -566,7 +566,7 @@ impl AgentExecutionSpec {
         self.document.capability_search_policies.get(name)
     }
 
-    /// Capability context-primer policy by id.
+    /// Worker Guide policy by id.
     #[must_use]
     pub fn capability_context_primer_policy(
         &self,
@@ -575,7 +575,7 @@ impl AgentExecutionSpec {
         self.document.capability_context_primer_policies.get(name)
     }
 
-    /// Context-primer policy by id.
+    /// Worker Guide policy by id.
     #[must_use]
     pub fn context_primer_policy(&self, name: &str) -> Option<&CapabilityContextPrimerPolicySpec> {
         self.document.capability_context_primer_policies.get(name)

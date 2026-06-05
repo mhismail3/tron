@@ -85,7 +85,7 @@ impl Provider for TokenUsageProvider {
 }
 
 #[derive(Clone, Debug)]
-struct HarnessAnswerObservation {
+struct WorkerGuideAnswerObservation {
     provider: ProviderKind,
     model: String,
     answer: String,
@@ -96,14 +96,14 @@ struct HarnessAnswerObservation {
     job_results_present: bool,
 }
 
-struct HarnessQuestionProvider {
+struct WorkerGuideQuestionProvider {
     provider: ProviderKind,
     model: &'static str,
-    observations: Arc<Mutex<Vec<HarnessAnswerObservation>>>,
+    observations: Arc<Mutex<Vec<WorkerGuideAnswerObservation>>>,
 }
 
 #[async_trait]
-impl Provider for HarnessQuestionProvider {
+impl Provider for WorkerGuideQuestionProvider {
     fn provider_type(&self) -> ProviderKind {
         self.provider
     }
@@ -117,7 +117,7 @@ impl Provider for HarnessQuestionProvider {
         context: &Context,
         _options: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
-        assert_harness_question_context(self.provider, context);
+        assert_worker_guide_question_context(self.provider, context);
         let primer = context
             .capability_primer_context
             .clone()
@@ -125,9 +125,9 @@ impl Provider for HarnessQuestionProvider {
         let resource_id = primer_field(&primer, "resourceId").expect("resource id");
         let version_id = primer_field(&primer, "versionId").expect("version id");
         let answer = format!(
-            "Customize the harness through execute: inspect the versioned harness_doc with resource::inspect resourceId={resource_id} versionId={version_id}, run worker::protocol_guide, author the worker, spawn it with worker::spawn, inspect the live catalog, run conformance/test evidence, expose generated ui_surface controls, promote only through engine::promote when evidence passes, then clean up with worker::disconnect or sandbox::stop_spawned_worker."
+            "Extend autonomous Work through execute: inspect the versioned worker guide with resource::inspect resourceId={resource_id} versionId={version_id}, run worker::protocol_guide, author the worker, spawn it with worker::spawn, inspect the live catalog, run conformance/test evidence, expose generated ui_surface controls, promote only through engine::promote when evidence passes, then clean up with worker::disconnect or sandbox::stop_spawned_worker."
         );
-        self.observations.lock().push(HarnessAnswerObservation {
+        self.observations.lock().push(WorkerGuideAnswerObservation {
             provider: self.provider,
             model: self.model.to_owned(),
             answer: answer.clone(),
@@ -200,7 +200,7 @@ fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
     }
 }
 
-fn harness_context_manager(provider: ProviderKind, model: &str) -> ContextManager {
+fn worker_guide_context_manager(provider: ProviderKind, model: &str) -> ContextManager {
     let spec = crate::shared::profile::bundled_default_execution_spec();
     ContextManager::new(ContextManagerConfig {
         model: model.to_owned(),
@@ -212,13 +212,13 @@ fn harness_context_manager(provider: ProviderKind, model: &str) -> ContextManage
             ),
         working_directory: Some("/tmp".into()),
         capabilities: vec![],
-        rules_content: Some("Use execute for harness customization.".into()),
+        rules_content: Some("Use execute for autonomous worker extension.".into()),
         compaction: crate::domains::agent::runner::context::types::CompactionConfig::default(),
     })
 }
 
-fn make_harness_deps(
-    provider: HarnessQuestionProvider,
+fn make_worker_guide_deps(
+    provider: WorkerGuideQuestionProvider,
     engine_host: crate::engine::EngineHostHandle,
 ) -> AgentDeps {
     let spec = crate::shared::profile::bundled_default_execution_spec();
@@ -231,7 +231,7 @@ fn make_harness_deps(
         capability_execution_policy: spec.capability_execution_policies["default"].clone(),
         guardrails: None,
         hooks: None,
-        context_manager: harness_context_manager(provider_kind, &model),
+        context_manager: worker_guide_context_manager(provider_kind, &model),
         subagent_manager: None,
         compaction_trigger_config:
             crate::domains::agent::runner::context::types::CompactionTriggerConfig::default(),
@@ -242,7 +242,7 @@ fn make_harness_deps(
     }
 }
 
-fn seeded_harness_engine_host() -> crate::engine::EngineHostHandle {
+fn seeded_worker_guide_engine_host() -> crate::engine::EngineHostHandle {
     let host = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
     let worker = crate::engine::WorkerDefinition::new(
         crate::engine::WorkerId::new("capability").expect("worker id"),
@@ -290,10 +290,10 @@ fn resolved_normal_profile() -> Arc<crate::shared::profile::ResolvedProfile> {
     Arc::new(profile)
 }
 
-fn assert_harness_question_context(provider: ProviderKind, context: &Context) {
+fn assert_worker_guide_question_context(provider: ProviderKind, context: &Context) {
     let user_messages = serde_json::to_string(&context.messages).expect("serialize messages");
     assert!(
-        user_messages.contains("how can you customize your harness?"),
+        user_messages.contains("how do you extend autonomous Work with workers?"),
         "{user_messages}"
     );
     let capability_names = context
@@ -309,15 +309,17 @@ fn assert_harness_question_context(provider: ProviderKind, context: &Context) {
         .as_ref()
         .expect("provider-visible primer");
     for required in [
-        "To customize the harness",
+        "To extend autonomous Work",
+        "For non-trivial work",
         "worker::protocol_guide",
         "worker::spawn",
+        "agent::spawn_subagent",
         "capability::inspect",
         "module::run_conformance",
         "ui_surface",
         "engine::promote",
         "worker::disconnect",
-        "Harness docs resource:",
+        "Worker guide resource:",
         "kind=harness_doc",
         "inspectTarget=resource::inspect",
     ] {
@@ -331,7 +333,7 @@ fn assert_harness_question_context(provider: ProviderKind, context: &Context) {
 fn primer_field(text: &str, field: &str) -> Option<String> {
     let prefix = format!("{field}=");
     text.lines()
-        .find(|line| line.contains("Harness docs resource:"))
+        .find(|line| line.contains("Worker guide resource:"))
         .and_then(|line| {
             line.split_whitespace()
                 .find_map(|part| part.strip_prefix(&prefix))
@@ -380,7 +382,7 @@ async fn text_only_run_succeeds_without_frozen_capabilities() {
 }
 
 #[tokio::test]
-async fn model_run_proves_harness_customization_across_providers() {
+async fn model_run_proves_worker_guide_reaches_provider_context() {
     let profile = resolved_normal_profile();
     let cases = [
         (ProviderKind::OpenAi, "gpt-5.3"),
@@ -389,12 +391,12 @@ async fn model_run_proves_harness_customization_across_providers() {
 
     for (provider_kind, model) in cases {
         let observations = Arc::new(Mutex::new(Vec::new()));
-        let provider = HarnessQuestionProvider {
+        let provider = WorkerGuideQuestionProvider {
             provider: provider_kind,
             model,
             observations: observations.clone(),
         };
-        let engine_host = seeded_harness_engine_host();
+        let engine_host = seeded_worker_guide_engine_host();
         let mut agent = TronAgent::new(
             AgentConfig {
                 provider_type: Some(provider_kind),
@@ -403,7 +405,7 @@ async fn model_run_proves_harness_customization_across_providers() {
                 workspace_id: Some(format!("workspace-hmh-c5-{}", provider_kind.as_str())),
                 ..AgentConfig::default()
             },
-            make_harness_deps(provider, engine_host),
+            make_worker_guide_deps(provider, engine_host),
             format!("session-hmh-c5-{}", provider_kind.as_str()),
         );
         agent
@@ -411,7 +413,7 @@ async fn model_run_proves_harness_customization_across_providers() {
             .set_memory_content(Some("memory must be stripped for local".into()));
         let result = agent
             .run(
-                "how can you customize your harness?",
+                "how do you extend autonomous Work with workers?",
                 crate::domains::agent::runner::types::RunContext {
                     profile_name: Some(profile.name.clone()),
                     resolved_profile: Some(profile.clone()),

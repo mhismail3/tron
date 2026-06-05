@@ -1,7 +1,7 @@
 use super::support::*;
 
 #[tokio::test]
-async fn harness_docs_are_versioned_resources() {
+async fn worker_guide_docs_are_versioned_resources() {
     let engine_host = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
     let session_id = "session-hmh-c4";
     let workspace_id = "workspace-hmh-c4";
@@ -19,7 +19,7 @@ async fn harness_docs_are_versioned_resources() {
         .expect("render primer")
         .expect("primer");
 
-    assert!(primer.contains("Harness docs resource:"), "{primer}");
+    assert!(primer.contains("Worker guide resource:"), "{primer}");
     assert!(primer.contains("resource::inspect"), "{primer}");
     let resource_id = primer_field(&primer, "resourceId").expect("resource id");
     let version_id = primer_field(&primer, "versionId").expect("version id");
@@ -58,7 +58,8 @@ async fn harness_docs_are_versioned_resources() {
         .find(|version| version["versionId"] == json!(version_id))
         .expect("current version");
     let payload = &current_version["payload"];
-    assert_eq!(payload["docId"], json!("capability-primer"));
+    assert_eq!(payload["docId"], json!("worker-guide"));
+    assert_eq!(payload["title"], json!("Worker guide"));
     assert_eq!(payload["catalogRevision"], json!(catalog_revision));
     assert_eq!(payload["policy"]["mode"], json!("coreFirstParty"));
     assert_eq!(payload["metadata"]["sessionId"], json!(session_id));
@@ -67,7 +68,7 @@ async fn harness_docs_are_versioned_resources() {
         payload["body"]
             .as_str()
             .expect("body")
-            .contains("To customize the harness"),
+            .contains("To extend autonomous Work"),
         "{payload}"
     );
     assert!(
@@ -82,7 +83,7 @@ async fn harness_docs_are_versioned_resources() {
 fn primer_field(text: &str, field: &str) -> Option<String> {
     let prefix = format!("{field}=");
     text.lines()
-        .find(|line| line.contains("Harness docs resource:"))
+        .find(|line| line.contains("Worker guide resource:"))
         .and_then(|line| {
             line.split_whitespace()
                 .find_map(|part| part.strip_prefix(&prefix))

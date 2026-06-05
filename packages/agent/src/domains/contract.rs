@@ -3,7 +3,7 @@
 //! Domain contracts are the first-party plugin manifest for in-process workers:
 //! they declare the canonical function id, schema, authority, risk/effect, and
 //! capability metadata that the registry projects into contracts,
-//! implementations, search documents, and the generated capability primer.
+//! implementations, search documents, and the generated Worker Guide.
 //!
 //! Domain `contract.rs` files own their function inventory, schemas, risk,
 //! authority, idempotency, lease, compensation, and stream metadata. This

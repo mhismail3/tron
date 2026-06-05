@@ -390,28 +390,29 @@ composition. Provider models do not receive them as separate tools.
 Filesystem, code search, shell/process, web, plugin source, iOS/app interaction, display,
 notifications, subagents, and sandbox workers are not provider-facing built-ins.
 They are worker-owned capabilities discovered and invoked through the single
-`execute` orchestrator. Provider integrations do not expose their implementation
+`execute` Work router. Provider integrations do not expose their implementation
 names directly. Hosted and local model profiles receive the same provider-facing
-contract: one `execute` primitive plus the compact live primer/resource pointer;
-local profiles strip heavier context blocks without dropping the harness recipe.
+contract: one `execute` primitive plus the compact Worker Guide/resource
+pointer; local profiles strip heavier context blocks without dropping the
+autonomous worker-extension recipe.
 Workspace-local self-extension starts with the approval-required
 `self_extension::grant_workspace_autonomy` capability. That capability derives a
 bounded grant through `grant::derive`, returns product text such as
 `Safe in this workspace`, returns the workspace id to reuse as execute context
-for workspace-visible helper work, and keeps grant ids, traces, and raw
-authority fields available for Inspect instead of putting them in the chat copy.
+for workspace-visible helper work, and keeps grant ids, traces, raw schemas, and
+authority fields available for Audit instead of putting them in the chat copy.
 
-The default `coreFirstParty` primer is generated from registry metadata and
-includes the high-use first-party capabilities the agent should know without a
-separate discovery turn. The same registry projection also generates
+The default `coreFirstParty` Worker Guide is generated from registry metadata
+and includes the high-use first-party worker abilities the agent should know
+without a separate discovery turn. The same registry projection also generates
 `AgentCapabilityRecipe` records for operator search/inspect and execute
-resolution, so capability discovery returns copyable `execute` templates,
+resolution, so ability discovery returns copyable `execute` templates,
 required argument fields, approval behavior, lifecycle notes, and result
-expectations instead of bare ids. Each rendered primer is also materialized as a
-versioned `harness_doc` resource keyed by primer policy, catalog revision, and
-content hash; the primer includes the resource id/version and `resource::inspect`
-target so the agent can retrieve the full guide through the live substrate
-instead of depending on repo prose.
+expectations instead of bare ids. Each rendered guide is also materialized as a
+versioned `harness_doc` resource keyed by guide policy, catalog revision, and
+content hash; the guide includes the resource id/version and `resource::inspect`
+target so the agent can retrieve the full worker guide through server-owned
+Audit evidence instead of depending on repo prose.
 The model-facing contract is intent-first: use `intent` alone for unfamiliar
 tasks or capability matching, add `target` only when the user supplied an exact
 id, a prior `execute` result selected it, or a primed recipe makes it
@@ -933,9 +934,9 @@ input controls and stored invoke action from the server-side schema. Stop
 sandbox-created helpers with `sandbox::stop_spawned_worker` when finished;
 reserve `worker::disconnect` for raw volatile worker protocol cleanup. Operator
 catalog search/inspect views remain available for debugging, but they are not
-separate model tools. The model-facing `execute` schema and generated
-`capabilities.primer` both name this loop so ordinary provider turns do not
-need README-only knowledge to modify the harness.
+separate model tools. The model-facing `execute` schema and generated Worker
+Guide both name this loop so ordinary provider turns do not need README-only
+knowledge to extend autonomous Work with workers.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, `trigger::*`, `resource::*`, `grant::*`, and `approval::*` preserve
@@ -1317,7 +1318,7 @@ See [`packages/agent/src/app/onboarding/mod.rs`](packages/agent/src/app/onboardi
 
 ## Context and Compaction
 
-The context system manages the LLM's input window. Each turn assembles: system prompt + rules + generated capability primer + skills + conversation history + capability results.
+The context system manages the LLM's input window. Each turn assembles: system prompt + rules + generated Worker Guide + skills + conversation history + worker results.
 
 `context::get_snapshot` and `context::get_detailed_snapshot` report the
 server-owned context total. Before a provider call this is the chars/4 local
@@ -1354,20 +1355,21 @@ Compaction is observable via the canonical `context::should_compact`, `context::
 ```
 System prompt    (stable, per-model)
   + Rules        (path-scoped from .claude/rules/, project-relative AGENTS.md / CLAUDE.md)
-  + Capabilities (generated from the live registry; core first-party by default)
+  + Worker Guide (generated from the live registry; core first-party by default)
   + Skills       (@skill references from prompt + always-on skills)
   + History      (messages reconstructed from the latest committed compaction boundary)
   + Pending      (current user prompt + capability results)
 ```
 
-`capabilities.primer` is rendered after active rules and before skill context.
-The default `coreFirstParty` policy includes compact recipe-style schemas and
-examples for trusted first-party core capabilities, using `contractId` execute
-templates. `allVisibleCompact` is available as an opt-in profile policy for
-every visible worker/plugin/plugin source/OpenAPI/session capability under a
-strict budget. The renderer reserves space for a compact `harness_doc` resource
-pointer; the full primer body is stored as a session-scoped versioned resource
-tied to the live catalog revision.
+The internal `capabilities.primer` block id renders the Worker Guide after
+active rules and before skill context. The default `coreFirstParty` policy
+includes compact recipe-style schemas and examples for trusted first-party
+worker abilities, using `contractId` execute templates. `allVisibleCompact` is
+available as an opt-in profile policy for every visible
+worker/plugin/plugin source/OpenAPI/session ability under a strict budget. The
+renderer reserves space for a compact `harness_doc` resource pointer; the full
+guide body is stored as a session-scoped versioned resource tied to the live
+catalog revision.
 
 ### Skills
 

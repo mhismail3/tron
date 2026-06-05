@@ -3514,7 +3514,7 @@ fn capability_registry_ownership_stays_split() {
         "mod primer;",
         "mod recipes;",
         "| `index` | Document identity, lexical ranking",
-        "| `primer` | Context-primer policy",
+        "| `primer` | Worker Guide policy",
         "| `recipes` | Capability recipe authoring",
     ] {
         assert!(
