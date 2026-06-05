@@ -36,8 +36,8 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
 
     for required in [
         "# Worker-First Tron Product Scorecard",
-        "Current score: **67/100**",
-        "Status: **active; JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, JARVIS-6, JARVIS-7, and JARVIS-8 passed; JARVIS-0 visual baseline, JARVIS-1 vocabulary/static gates, JARVIS-9 docs/examples, JARVIS-10 cleanup gates, and JARVIS-11 soak remain open**",
+        "Current score: **73/100**",
+        "Status: **active; JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, JARVIS-6, JARVIS-7, JARVIS-8, and JARVIS-9 passed; JARVIS-0 visual baseline, JARVIS-1 primary UI vocabulary gates, JARVIS-10 cleanup gates, and JARVIS-11 soak remain open**",
         "Evidence manifest: [`worker-first-product-evidence-manifest.md`](worker-first-product-evidence-manifest.md)",
         "| JARVIS-0 | Formalize scorecard and baseline | 5 | running |",
         "| JARVIS-1 | Primitive collapse | 8 | running |",
@@ -48,7 +48,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "| JARVIS-6 | Chat noise reduction | 8 | passed_after_fix |",
         "| JARVIS-7 | Worker/detail sheets | 8 | passed_after_fix |",
         "| JARVIS-8 | Guardrails and settings UX | 7 | passed_after_fix |",
-        "| JARVIS-9 | Docs and examples | 6 | pending |",
+        "| JARVIS-9 | Docs and examples | 6 | passed_after_fix |",
         "| JARVIS-10 | Cleanup and static gates | 7 | pending |",
         "| JARVIS-11 | Soak, visual QA, and closeout | 7 | pending |",
         "Default autonomy means run-unless-blocked, not ask-first.",
@@ -62,6 +62,8 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "replaced reflective detail-card glass with solid readable surfaces",
         "Extended `agent::work_snapshot` workers with server-owned `trust` and `generatedControls`",
         "Agent settings expose Autonomy Mode with Independent/Testing prompt mode and plain Guardrails rows",
+        "Rewrote the self-extending user, operator, troubleshooting, and product notes around worker-led autonomous work",
+        "worker_first_docs_and_examples_center_workers_and_local_work_loops",
         "Remote package discovery, push, merge, release, deploy, and production",
         "Visual baseline screenshots are still open and block JARVIS-0 points.",
     ] {
@@ -84,7 +86,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
     }
 
     assert!(
-        manifest.contains("Current score: **67/100**")
+        manifest.contains("Current score: **73/100**")
             && manifest.contains("| JARVIS-0 | running |")
             && manifest.contains("| JARVIS-1 | running |")
             && manifest.contains("| JARVIS-2 | passed_after_fix |")
@@ -94,6 +96,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && manifest.contains("| JARVIS-6 | passed_after_fix |")
             && manifest.contains("| JARVIS-7 | passed_after_fix |")
             && manifest.contains("| JARVIS-8 | passed_after_fix |")
+            && manifest.contains("| JARVIS-9 | passed_after_fix |")
             && manifest.contains("| JARVIS-11 | pending |")
             && manifest.contains("Visual baseline screenshots remain open.")
             && manifest.contains("Baseline primary iOS source included `NavigationMode.engine`")
@@ -145,6 +148,14 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && scorecard.contains("Closed for server orchestration/projection."),
         "worker-first evidence manifest must record the JARVIS-3 checkpoint without overclaiming other rows"
     );
+    assert!(
+        manifest.contains("User/operator/product notes, local example pack docs, and the managed self-extend skill")
+            && manifest.contains("Synced the managed `self-extend` skill")
+            && manifest.contains("worker_first_docs_and_examples_center_workers_and_local_work_loops")
+            && manifest.contains("JARVIS-9 is closed for docs/examples.")
+            && scorecard.contains("Closed for docs/examples."),
+        "worker-first evidence manifest must record the JARVIS-9 docs/examples checkpoint"
+    );
 
     assert!(
         readme.contains("packages/agent/docs/worker-first-product-scorecard.md")
@@ -152,4 +163,66 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && readme.contains("packages/agent/docs/worker-first-product-evidence-manifest.md"),
         "README living-doc map must link the active worker-first scorecard and evidence manifest"
     );
+}
+
+#[test]
+fn worker_first_docs_and_examples_center_workers_and_local_work_loops() {
+    let product_paths = [
+        "packages/agent/docs/self-extending-local-product-user-guide.md",
+        "packages/agent/docs/self-extending-local-product-operator-guide.md",
+        "packages/agent/docs/self-extending-local-product-troubleshooting.md",
+        "packages/agent/docs/self-extending-local-product-release-notes.md",
+        "packages/agent/examples/local-packs/README.md",
+        "packages/agent/examples/local-packs/tron-maintainer/README.md",
+        "packages/agent/examples/local-packs/everyday-organizer/README.md",
+        "packages/agent/examples/local-packs/creative-knowledge/README.md",
+        "packages/agent/skills/self-extend/SKILL.md",
+    ];
+    let docs = product_paths
+        .iter()
+        .map(|path| format!("\n--- {path} ---\n{}", read_repo_file(path)))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for required in [
+        "worker-led autonomous work",
+        "orchestrator plus workers",
+        "Work dashboard",
+        "Worker Packs",
+        "Audit Details",
+        "Generated Controls",
+        "run-unless-blocked",
+        "Tron Maintainer Worker Pack",
+        "Everyday Organizer Worker Pack",
+        "Creative Knowledge Worker Pack",
+        "No remote package discovery",
+    ] {
+        assert!(
+            docs.contains(required),
+            "worker-first docs/examples missing required product wording: {required}"
+        );
+    }
+
+    for retired in [
+        "capability chips",
+        "Capabilities are local tools",
+        "capability bundles",
+        "capability packs",
+        "capability surfaces",
+        "capability ready",
+        "Created by Agent",
+        "Engine Console",
+        "Inspect shows",
+        "chat-led self-extension",
+        "main vocabulary is capabilities and packs",
+        "Provider-facing agents see `capability::execute` as the single model-facing",
+        "remote marketplace install",
+        "git push",
+        "tron deploy",
+    ] {
+        assert!(
+            !docs.contains(retired),
+            "worker-first docs/examples still expose retired product wording or remote/release path: {retired}"
+        );
+    }
 }

@@ -2,7 +2,7 @@
 
 Created: **2026-06-05**
 Scorecard: [`worker-first-product-scorecard.md`](worker-first-product-scorecard.md)
-Current score: **67/100**
+Current score: **73/100**
 
 This manifest records evidence for the active worker-first product scorecard.
 Update it at each checkpoint with commands, return codes, exact source refs,
@@ -26,7 +26,7 @@ screenshots, runtime ids, open loops, and the next test.
 | Row | Status | Evidence |
 |---|---|---|
 | JARVIS-0 | running | Scorecard, manifest, README links, and static guard added. Source baseline is recorded below. Visual baseline screenshots remain open. |
-| JARVIS-1 | running | Partial: provider-visible Worker Guide vocabulary replaced the old Capability Primer/harness wording; README context/worker-loop docs describe worker abilities and Audit. Primary UI static gates remain open. |
+| JARVIS-1 | running | Partial: provider-visible Worker Guide vocabulary replaced the old Capability Primer/harness wording; README context/worker-loop docs plus user/operator/example docs describe worker abilities, Worker Packs, Generated Controls, and Audit. Primary UI static gates remain open. |
 | JARVIS-2 | passed_after_fix | Default no-prompt autonomy, audited auto-decisions, testing prompts, fail-closed preflight, and replay behavior are covered by Rust tests. |
 | JARVIS-3 | passed_after_fix | Worker Guide and execute schema default non-trivial work to worker/subagent delegation, provider-context tests prove guide injection, Work snapshot projects subagent jobs as Workers, and integration proof fans out two session workers without approvals. |
 | JARVIS-4 | passed_after_fix | `agent::work_snapshot` is registered and covered by DTO tests for idle state, active work, worker health, milestones, guardrails, and audit refs. |
@@ -34,7 +34,7 @@ screenshots, runtime ids, open loops, and the next test.
 | JARVIS-6 | passed_after_fix | Work chip/action detail projection replaces generic execute copy; default details show work summary while raw request/result/schema/trace/policy/approval state stays behind Audit Details. Streamed and reconstructed sessions plus hosted iPhone render are covered. |
 | JARVIS-7 | passed_after_fix | Worker detail sheets consume server-owned trust/generated controls, filter selected-worker guardrails, and have simulator-hosted screenshots for running, success, failure, and blocked states. |
 | JARVIS-8 | passed_after_fix | Agent settings expose Autonomy Mode and plain Guardrails rows; parity/layout tests and simulator render proof cover the worker-first copy. |
-| JARVIS-9 | pending | Not started. |
+| JARVIS-9 | passed_after_fix | User/operator/product notes, local example pack docs, and the managed self-extend skill now describe worker-led autonomous work, Worker Packs, Generated Controls, run-unless-blocked autonomy, and Audit Details. Static docs invariant rejects retired capability-led product wording and remote/release paths. |
 | JARVIS-10 | pending | Not started. |
 | JARVIS-11 | pending | Not started. |
 
@@ -506,7 +506,94 @@ screenshots, runtime ids, open loops, and the next test.
 ### Open Loops
 
 - JARVIS-7 is closed for worker/detail sheets.
-- JARVIS-9 owns the docs/examples rewrite around workers and autonomous loops.
+- JARVIS-9 below closes the docs/examples rewrite around workers and autonomous
+  loops.
 - JARVIS-10 owns broad static cleanup gates for remaining primary UI jargon and
   audit-only Engine Console ownership.
+- JARVIS-11 owns paired-server soak/action proof and final visual closeout.
+
+## JARVIS-9 Evidence
+
+### Commands
+
+| Command | Result | Purpose |
+|---|---:|---|
+| `cargo test --manifest-path packages/agent/Cargo.toml --test worker_first_product_scorecard_invariants -- --nocapture` | 101 | Red proof: the new docs/examples invariant failed because the product docs still did not contain `worker-led autonomous work` or the worker-first required wording. |
+| `rsync -a --delete --exclude=node_modules --exclude=.DS_Store packages/agent/skills/self-extend/ ~/.tron/skills/self-extend/` | 0 | Synced the managed `self-extend` skill after rewriting the repo-owned source copy. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test worker_first_product_scorecard_invariants -- --nocapture` | 0 | Green proof: 2 static scorecard/docs invariant tests passed after the docs, examples, README map, and managed skill rewrite. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | 0 | Verified Rust formatting after updating the scorecard invariant. |
+| `git diff --check` | 0 | Verified the docs/test diff has no whitespace errors. |
+| `diff -u packages/agent/skills/self-extend/SKILL.md ~/.tron/skills/self-extend/SKILL.md` | 0 | Verified the installed managed skill copy matches the repo source exactly. |
+| `cd packages/ios-app && xcodegen generate && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-docs-worker-first -only-testing:TronMobileTests/WorkDashboardViewTests` | 0 | Simulator proof after docs/example changes: 3 Work dashboard XCTest cases passed and emitted fresh iPhone/iPad dashboard plus worker-detail state-matrix artifacts. |
+| `view_image .../work-dashboard-iphone-render.png`, `view_image .../work-dashboard-ipad-render.png`, `view_image .../worker-detail-blocked-render.png` | 0 | Visual inspection confirmed the fresh dashboard artifacts are readable/nonblank and the blocked-worker detail has no visible overlap. |
+
+### Simulator Evidence
+
+- Target simulator UDID: `7BDA4AF9-1C40-47E3-A925-0F88C191F263`.
+- Bundle under test: `TronMobile.app` from the `Tron` scheme, Beta simulator
+  configuration.
+- Fresh hosted artifacts from the JARVIS-9 simulator run:
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/E4B63DFD-BD9B-462E-A6DE-53900B00FFED/Documents/tron-visual-artifacts/work-dashboard-iphone-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/E4B63DFD-BD9B-462E-A6DE-53900B00FFED/Documents/tron-visual-artifacts/work-dashboard-ipad-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/E4B63DFD-BD9B-462E-A6DE-53900B00FFED/Documents/tron-visual-artifacts/worker-detail-running-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/E4B63DFD-BD9B-462E-A6DE-53900B00FFED/Documents/tron-visual-artifacts/worker-detail-success-render.png`,
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/E4B63DFD-BD9B-462E-A6DE-53900B00FFED/Documents/tron-visual-artifacts/worker-detail-failure-render.png`, and
+  `/Users/moose/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/E4B63DFD-BD9B-462E-A6DE-53900B00FFED/Documents/tron-visual-artifacts/worker-detail-blocked-render.png`.
+- The simulator app attempted to reconnect to the default local server
+  `ws://127.0.0.1:19847/engine`; the server was not running, so logs include
+  expected `NSURLErrorDomain Code=-1004` connection-refused warnings. The
+  hosted render and source tests still passed.
+- The in-thread tool registry exposed no simulator tap/computer-use control.
+  Proof used `xcodebuild`, hosted SwiftUI rendering in the simulator process,
+  emitted PNG artifacts, and local image inspection.
+
+### Source Evidence
+
+- [`README.md`](../../../README.md): living-doc map now describes the
+  self-extending guides and local examples through worker-led autonomous work,
+  the Work dashboard, Worker Packs, Generated Controls, and Audit Details.
+- [`packages/agent/docs/self-extending-local-product-user-guide.md`](self-extending-local-product-user-guide.md):
+  defines the user model as one orchestrator plus workers, with the Work
+  dashboard as the main surface and raw protocol evidence in Audit Details.
+- [`packages/agent/docs/self-extending-local-product-operator-guide.md`](self-extending-local-product-operator-guide.md):
+  keeps `capability::execute` as the technical Work router while making
+  worker creation, Worker Pack lifecycle, Generated Controls, and evidence refs
+  the operator flow.
+- [`packages/agent/docs/self-extending-local-product-troubleshooting.md`](self-extending-local-product-troubleshooting.md):
+  troubleshoots workspace autonomy, worker registration, Worker Pack
+  activation, Generated Controls, trust labels, and worker routing.
+- [`packages/agent/docs/self-extending-local-product-release-notes.md`](self-extending-local-product-release-notes.md):
+  recasts the completed productization notes in the worker-first vocabulary.
+- [`packages/agent/examples/local-packs/README.md`](../examples/local-packs/README.md)
+  plus the three example README files: presents the Tron Maintainer, Everyday
+  Organizer, and Creative Knowledge examples as local Worker Packs.
+- [`packages/agent/skills/self-extend/SKILL.md`](../skills/self-extend/SKILL.md):
+  managed skill now asks agents to create local workers and Worker Packs,
+  fetch live Worker Guide evidence, keep default autonomy run-unless-blocked,
+  and report evidence in product terms.
+- [`packages/agent/tests/worker_first_product_scorecard_invariants.rs`](../tests/worker_first_product_scorecard_invariants.rs):
+  adds `worker_first_docs_and_examples_center_workers_and_local_work_loops`,
+  requiring the new Worker Pack/Work dashboard/Audit Details vocabulary and
+  rejecting retired capability-led docs or `git push`/`tron deploy` product
+  paths.
+
+### Findings
+
+- Productization docs no longer sell capability chips, Created by Agent, or
+  generic capability packs as the main user model. They define Work, Workers,
+  Worker Packs, Autonomy, Guardrails, Generated Controls, and Audit Details.
+- Technical capability names remain where they are actual server function
+  names or operator evidence paths, but the product narrative is worker-first.
+- No remote package discovery, publishing, production rollout, or deployment
+  path was added to the local Worker Pack examples or managed self-extension
+  guidance.
+- The installed managed skill copy under `~/.tron/skills/self-extend/` was
+  synchronized from the repo source after the edit.
+
+### Open Loops
+
+- JARVIS-9 is closed for docs/examples.
+- JARVIS-1 remains open only for broad primary UI vocabulary gates.
+- JARVIS-10 owns deleting or renaming remaining audit-only Engine Console
+  ownership and the static threat-model gates.
 - JARVIS-11 owns paired-server soak/action proof and final visual closeout.

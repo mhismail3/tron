@@ -130,17 +130,18 @@ Current living entry points:
 - `packages/agent/docs/worker-first-product-evidence-manifest.md`: companion
   evidence manifest for the active worker-first product scorecard.
 - `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
-  for chat-led self-extension, Created by Agent, Packs, generated UI, trust
-  labels, and model presets.
+  for worker-led autonomous work, the Work dashboard, Worker Packs, Generated
+  Controls, Audit Details, trust labels, and model presets.
 - `packages/agent/docs/self-extending-local-product-operator-guide.md`:
-  operator guide for local helper creation, pack lifecycle, source trust,
-  generated UI actions, and evidence refs.
+  operator guide for local worker creation, Worker Pack lifecycle, source
+  trust, Generated Controls, and evidence refs.
 - `packages/agent/docs/self-extending-local-product-release-notes.md`:
-  release-note-style product notes for the completed self-extending local
-  product campaign, without release/deploy steps.
+  product notes for the completed self-extending local product campaign,
+  expressed through the worker-first vocabulary and without rollout steps.
 - `packages/agent/docs/self-extending-local-product-troubleshooting.md`:
-  troubleshooting guide for workspace autonomy, worker/catalog registration,
-  source/conformance evidence, generated UI, trust labels, and model routing.
+  troubleshooting guide for workspace autonomy, worker registration,
+  source/conformance evidence, Generated Controls, trust labels, and worker
+  routing.
 - `packages/agent/docs/token-accounting-hardening-scorecard.md`: completed
   server-authoritative token accounting, pricing, provider-cache, and
   iPhone-only UI hardening scorecard with final evidence caveats.
@@ -726,11 +727,11 @@ matching config resources discarded with removal reason/timestamp fields, and
 prevents later configure/activate calls until the pack is registered again.
 There is no generic `module::act` or package mutation multiplexer; operator
 controls are server-advertised summaries over canonical `module::*` functions.
-Product example packs live under `packages/agent/examples/local-packs/`: Tron
-maintainer, everyday organizer, and creative/knowledge. They are local-process
-templates with `local_digest_pinned` manifests, executable worker entrypoints,
-and generated package UI coverage; they do not implement remote package
-discovery.
+Product example Worker Packs live under `packages/agent/examples/local-packs/`:
+Tron Maintainer, Everyday Organizer, and Creative Knowledge. They are
+local-process templates with `local_digest_pinned` manifests, executable worker
+entrypoints, and Generated Controls coverage; they do not implement remote
+package discovery.
 
 Package source trust is explicit. `module::verify_source` verifies unsigned
 digest-pinned package provenance, materialized file refs/hashes, and redaction,
