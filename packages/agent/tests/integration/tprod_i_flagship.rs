@@ -1,6 +1,6 @@
 use super::*;
 
-use tron::engine::ApprovalStatus;
+mod tprod_i_flagship_closeout;
 
 #[cfg(unix)]
 struct TprodIFlagshipProvider {
@@ -424,19 +424,12 @@ async fn tprod_i_flagship_chat_loop_reaches_review_ready_impl() {
     )
     .await;
     assert_eq!(prompt["success"], true, "agent prompt failed: {prompt}");
-    let conformance_approval =
-        approve_pending_tprod_i_conformance(&server, &session_id, &workspace_id).await;
-    assert_eq!(conformance_approval["approval"]["status"], "executed");
-    assert_eq!(conformance_approval["child"]["error"], Value::Null);
     events.extend(collect_events_until_type(&mut ws, "agent.ready", PROMPT_EVENT_TIMEOUT).await);
-    let event_types = tprod_i_event_types(&events);
-    assert!(
-        event_types
-            .iter()
-            .any(|event_type| event_type == "agent.ready"),
-        "TPROD-I prompt did not emit agent.ready: {event_types:?}"
-    );
+    tprod_i_flagship_closeout::assert_agent_ready(&provider, &events, &server, &session_id).await;
     wait_until_run_cleared(&server, &session_id).await;
+    tprod_i_flagship_closeout::assert_no_waiting_approvals(&server, &session_id).await;
+    tprod_i_flagship_closeout::assert_no_manual_approval_resolve_invocation(&server, &session_id)
+        .await;
 
     let final_answer = provider
         .final_answer()
@@ -496,6 +489,48 @@ async fn tprod_i_flagship_chat_loop_reaches_review_ready_impl() {
         );
     }
 
+    let work_snapshot = direct_engine_invoke_with_session(
+        &server,
+        "agent::work_snapshot",
+        json!({"sessionId": session_id, "workspaceId": workspace_id, "limit": 50}),
+        "jarvis-11-work-snapshot-before-cleanup",
+        &["agent.read"],
+        &session_id,
+    )
+    .await;
+    assert_eq!(work_snapshot["autonomy"]["approvalPromptMode"], "disabled");
+    assert_eq!(work_snapshot["activeWork"].as_array().unwrap().len(), 0);
+    assert_eq!(work_snapshot["guardrails"].as_array().unwrap().len(), 0);
+    assert!(
+        work_snapshot["workers"]
+            .as_array()
+            .expect("work snapshot workers")
+            .iter()
+            .any(|worker| worker["workerId"] == worker_id),
+        "Work snapshot must project the generated helper worker before cleanup: {work_snapshot}"
+    );
+    assert!(
+        work_snapshot["recentMilestones"]
+            .as_array()
+            .expect("work snapshot milestones")
+            .iter()
+            .any(|milestone| milestone["functionId"] == function_id
+                && milestone["status"] == "completed"),
+        "Work snapshot must include the successful helper invocation milestone: {work_snapshot}"
+    );
+    let audit_refs = work_snapshot["auditRefs"]
+        .as_array()
+        .expect("work snapshot audit refs");
+    assert!(
+        audit_refs
+            .iter()
+            .any(|reference| reference["kind"] == "approval")
+            && audit_refs
+                .iter()
+                .any(|reference| reference["kind"] == "invocation"),
+        "Work snapshot must include approval and invocation audit refs: {work_snapshot}"
+    );
+
     let stopped = direct_engine_invoke_with_session(
         &server,
         "sandbox::stop_spawned_worker",
@@ -511,70 +546,10 @@ async fn tprod_i_flagship_chat_loop_reaches_review_ready_impl() {
     )
     .await;
     assert_eq!(stopped["stopped"], true);
+    tprod_i_flagship_closeout::assert_clean_state(&server, &session_id, &workspace_id, &worker_id)
+        .await;
 
     server.shutdown().shutdown();
-}
-
-#[cfg(unix)]
-fn tprod_i_event_types(events: &[Value]) -> Vec<String> {
-    events
-        .iter()
-        .filter_map(|event| event.get("type").and_then(Value::as_str).map(str::to_owned))
-        .collect()
-}
-
-#[cfg(unix)]
-async fn approve_pending_tprod_i_conformance(
-    server: &Arc<TronServer>,
-    session_id: &str,
-    workspace_id: &str,
-) -> Value {
-    let deadline = tokio::time::Instant::now() + PROMPT_EVENT_TIMEOUT;
-    loop {
-        let approvals = server
-            .runtime_context()
-            .engine_host
-            .list_approvals(Some(ApprovalStatus::Pending), Some(session_id), 20)
-            .await
-            .expect("approval list succeeds");
-        if let Some(approval) = approvals
-            .into_iter()
-            .find(|approval| approval.function_id.as_str() == "capability::conformance_run")
-        {
-            let result = server
-                .runtime_context()
-                .engine_host
-                .invoke(Invocation::new_sync(
-                    FunctionId::new("approval::resolve").expect("valid approval resolve id"),
-                    json!({
-                        "approvalId": approval.approval_id,
-                        "decision": "approve",
-                        "sessionId": session_id,
-                        "workspaceId": workspace_id,
-                    }),
-                    CausalContext::new(
-                        ActorId::new("user:tprod-i-approval").expect("valid approval user actor"),
-                        ActorKind::User,
-                        AuthorityGrantId::new("engine-system").expect("valid approval grant id"),
-                        TraceId::generate(),
-                    )
-                    .with_session_id(session_id.to_owned())
-                    .with_workspace_id(workspace_id.to_owned())
-                    .with_scope("approval.resolve")
-                    .with_idempotency_key("tprod-i-conformance-approval".to_owned()),
-                ))
-                .await;
-            if let Some(error) = result.error {
-                panic!("approval::resolve failed: {error}");
-            }
-            return result.value.unwrap_or(Value::Null);
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "timed out waiting for TPROD-I conformance approval"
-        );
-        tokio::time::sleep(PROMPT_STATE_POLL).await;
-    }
 }
 
 #[cfg(unix)]

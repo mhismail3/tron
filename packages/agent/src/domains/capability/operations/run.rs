@@ -13,6 +13,7 @@ use super::{
 use crate::domains::capability::Deps;
 use crate::domains::capability::registry::{string_field, u64_field};
 use crate::domains::capability::types::CapabilityExecutionRecord;
+use crate::domains::settings::{AutonomyApprovalPromptMode, get_settings};
 use crate::engine::{
     ApprovalStatus, CausalContext, DeliveryMode, EngineApprovalRecord, EngineApprovalRequest,
     FunctionDefinition, FunctionRevision, Invocation, InvocationRecord,
@@ -173,18 +174,39 @@ pub(super) async fn execute_invoke_value(
         child = child.expecting_revision(FunctionRevision(expected));
     }
     if execution_requires_approval(&function, &payload) {
-        let approval = deps
+        let request = EngineApprovalRequest {
+            function_id: function.id.clone(),
+            payload: child.payload.clone(),
+            causal_context: child.causal_context.clone(),
+            delivery_mode: DeliveryMode::Sync,
+            target_metadata: None,
+        };
+        if get_settings().agent.autonomy.approval_prompt_mode == AutonomyApprovalPromptMode::Testing
+        {
+            let approval = deps
+                .engine_host
+                .request_approval(request)
+                .await
+                .map_err(engine_error_to_capability_error)?;
+            return await_approval_result(invocation, deps, &function, &target, approval).await;
+        }
+        let outcome = deps
             .engine_host
-            .request_approval(EngineApprovalRequest {
-                function_id: function.id.clone(),
-                payload: child.payload.clone(),
-                causal_context: child.causal_context.clone(),
-                delivery_mode: DeliveryMode::Sync,
-                target_metadata: None,
-            })
+            .auto_approve_and_invoke(request)
             .await
             .map_err(engine_error_to_capability_error)?;
-        return await_approval_result(invocation, deps, &function, &target, approval).await;
+        if outcome.child_result.error.is_some() {
+            return approval_failure_result(&function, &target, &outcome.record);
+        }
+        let output = outcome.child_result.value.clone().unwrap_or(Value::Null);
+        return approved_execution_result(
+            invocation,
+            &function,
+            &target,
+            &outcome.record,
+            output,
+            vec![outcome.child_result.invocation_id.as_str().to_owned()],
+        );
     }
     let result = deps.engine_host.invoke(child).await;
     if let Some(error) = result.error.clone() {
@@ -561,21 +583,7 @@ async fn await_approval_result(
                 );
             }
             ApprovalStatus::Failed => {
-                let message = latest
-                    .error
-                    .as_ref()
-                    .map(|error| error.message.clone())
-                    .unwrap_or_else(|| {
-                        format!("Approved invocation of {} failed.", function.id.as_str())
-                    });
-                return capability_result_value(CapabilityResult {
-                    content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
-                        message,
-                    )]),
-                    details: Some(approval_details(function, target, &latest, "failed")),
-                    is_error: Some(true),
-                    stop_turn: None,
-                });
+                return approval_failure_result(function, target, &latest);
             }
             ApprovalStatus::Denied => {
                 return capability_result_value(CapabilityResult {
@@ -615,6 +623,24 @@ async fn await_approval_result(
             }
         }
     }
+}
+
+fn approval_failure_result(
+    function: &FunctionDefinition,
+    target: &ResolvedCapabilityTarget,
+    approval: &EngineApprovalRecord,
+) -> Result<Value, CapabilityError> {
+    let message = approval
+        .error
+        .as_ref()
+        .map(|error| error.message.clone())
+        .unwrap_or_else(|| format!("Approved invocation of {} failed.", function.id.as_str()));
+    capability_result_value(CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(message)]),
+        details: Some(approval_details(function, target, approval, "failed")),
+        is_error: Some(true),
+        stop_turn: None,
+    })
 }
 
 pub(super) fn approved_execution_result(

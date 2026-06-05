@@ -41,6 +41,147 @@ fn set_approval_prompt_mode(
 }
 
 #[tokio::test]
+async fn approval_required_execute_auto_decides_without_prompt_in_product_mode() {
+    let _settings =
+        set_approval_prompt_mode(crate::domains::settings::AutonomyApprovalPromptMode::Disabled);
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let expected_implementation = "first_party.danger.v1.write";
+    handle
+        .register_worker_for_setup(
+            WorkerDefinition::new(
+                WorkerId::new("danger").unwrap(),
+                WorkerKind::InProcess,
+                ActorId::new("owner").unwrap(),
+                AuthorityGrantId::new("grant").unwrap(),
+            )
+            .with_namespace_claim("danger"),
+            false,
+        )
+        .unwrap();
+    handle
+        .register_function_for_setup(
+            approval_gated_function(),
+            Some(Arc::new(CausalCaptureHandler {
+                calls: Arc::clone(&calls),
+                invocations: Arc::clone(&captured),
+            })),
+            false,
+        )
+        .unwrap();
+
+    let deps = test_deps(handle.clone());
+    let execute_invocation = Invocation::new_sync(
+        FunctionId::new("capability::execute").unwrap(),
+        json!({
+            "target": "danger::write",
+            "operation": "run",
+            "arguments": {"value": 9},
+            "idempotencyKey": "auto-child-key"
+        }),
+        CausalContext::new(
+            ActorId::new("agent-auto").unwrap(),
+            ActorKind::Agent,
+            AuthorityGrantId::new("grant").unwrap(),
+            TraceId::new("trace-auto-execute").unwrap(),
+        )
+        .with_session_id("session-auto")
+        .with_workspace_id("workspace-auto")
+        .with_scope("capability.execute")
+        .with_scope("danger.write")
+        .with_scope("contract.allow:*")
+        .with_scope("contract.allow:danger::write")
+        .with_scope("implementation.allow:*")
+        .with_scope(format!("implementation.allow:{expected_implementation}"))
+        .with_scope("plugin.allow:*")
+        .with_scope("plugin.allow:first_party.danger"),
+    );
+    let execute_invocation_id = execute_invocation.id.clone();
+    let execute_trace = execute_invocation.causal_context.trace_id.clone();
+
+    let execute_value = timeout(
+        Duration::from_secs(5),
+        execute_value(&execute_invocation, &deps),
+    )
+    .await
+    .expect("auto-decided execute should not wait for an approval prompt")
+    .expect("execute should return a capability result");
+    let result: CapabilityResult = serde_json::from_value(execute_value).unwrap();
+    let details = result.details.unwrap();
+    assert_eq!(details["status"], "ok");
+    assert_eq!(details["traceId"], execute_trace.as_str());
+    assert_eq!(details["rootInvocationId"], execute_invocation_id.as_str());
+    assert_eq!(details["approvalRequired"], true);
+    assert_eq!(details["approvalCreated"], true);
+    assert_eq!(details["approvalExecuted"], true);
+    assert_eq!(details["approvalState"]["status"], "executed");
+    assert_eq!(details["approvalState"]["traceId"], execute_trace.as_str());
+    assert_eq!(details["approvalState"]["idempotencyKey"], "auto-child-key");
+    assert_eq!(details["childInvocationCreated"], true);
+
+    let approvals = handle
+        .list_approvals(None, Some("session-auto"), 10)
+        .await
+        .unwrap();
+    assert_eq!(approvals.len(), 1);
+    let approval = &approvals[0];
+    assert_eq!(approval.status, ApprovalStatus::Executed);
+    assert_eq!(
+        approval
+            .decision_actor_id
+            .as_ref()
+            .map(|actor| actor.as_str()),
+        Some("system")
+    );
+    assert_eq!(
+        handle
+            .list_approvals(Some(ApprovalStatus::Pending), Some("session-auto"), 10)
+            .await
+            .unwrap(),
+        Vec::<EngineApprovalRecord>::new()
+    );
+
+    let invocation_records = handle.invocation_records().await;
+    assert!(
+        invocation_records
+            .iter()
+            .all(|record| record.function_id.as_str() != "approval::resolve"),
+        "product-mode auto decision must not route through manual approval resolution: {invocation_records:?}"
+    );
+
+    let captured_invocations = captured.lock().unwrap();
+    assert_eq!(captured_invocations.len(), 1);
+    let child = &captured_invocations[0];
+    assert_eq!(child.function_id, FunctionId::new("danger::write").unwrap());
+    assert_eq!(child.causal_context.trace_id, execute_trace);
+    assert_eq!(
+        child.causal_context.parent_invocation_id.as_ref(),
+        Some(&execute_invocation_id)
+    );
+    assert_eq!(
+        child.causal_context.session_id.as_deref(),
+        Some("session-auto")
+    );
+    assert_eq!(
+        child.causal_context.workspace_id.as_deref(),
+        Some("workspace-auto")
+    );
+    assert_eq!(
+        child.causal_context.idempotency_key.as_deref(),
+        Some("auto-child-key")
+    );
+    assert!(
+        child
+            .causal_context
+            .authority_scopes
+            .iter()
+            .any(|scope| scope == "approval.auto_decision")
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn approval_required_execute_resumes_child_with_original_causal_context() {
     let _settings =
         set_approval_prompt_mode(crate::domains::settings::AutonomyApprovalPromptMode::Testing);

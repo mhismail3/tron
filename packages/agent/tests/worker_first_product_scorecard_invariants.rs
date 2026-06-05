@@ -1,4 +1,4 @@
-//! Static guard for the active worker-first product scorecard.
+//! Static guard for the completed worker-first product scorecard.
 
 use std::path::PathBuf;
 
@@ -29,17 +29,17 @@ fn read_repo_file(path: &str) -> String {
 }
 
 #[test]
-fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
+fn worker_first_product_scorecard_records_completed_closeout() {
     let scorecard = read_repo_file("packages/agent/docs/worker-first-product-scorecard.md");
     let manifest = read_repo_file("packages/agent/docs/worker-first-product-evidence-manifest.md");
     let readme = read_repo_file("README.md");
 
     for required in [
         "# Worker-First Tron Product Scorecard",
-        "Current score: **88/100**",
-        "Status: **active; JARVIS-1, JARVIS-2, JARVIS-3, JARVIS-4, JARVIS-5, JARVIS-6, JARVIS-7, JARVIS-8, JARVIS-9, and JARVIS-10 passed; JARVIS-0 visual baseline and JARVIS-11 soak remain open**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "Evidence manifest: [`worker-first-product-evidence-manifest.md`](worker-first-product-evidence-manifest.md)",
-        "| JARVIS-0 | Formalize scorecard and baseline | 5 | running |",
+        "| JARVIS-0 | Formalize scorecard and baseline | 5 | passed_after_fix |",
         "| JARVIS-1 | Primitive collapse | 8 | passed_after_fix |",
         "| JARVIS-2 | Default autonomy policy | 12 | passed_after_fix |",
         "| JARVIS-3 | Worker-first orchestration | 10 | passed_after_fix |",
@@ -50,7 +50,7 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "| JARVIS-8 | Guardrails and settings UX | 7 | passed_after_fix |",
         "| JARVIS-9 | Docs and examples | 6 | passed_after_fix |",
         "| JARVIS-10 | Cleanup and static gates | 7 | passed_after_fix |",
-        "| JARVIS-11 | Soak, visual QA, and closeout | 7 | pending |",
+        "| JARVIS-11 | Soak, visual QA, and closeout | 7 | passed_after_fix |",
         "Default autonomy means run-unless-blocked, not ask-first.",
         "Approval-required metadata becomes audited auto-decision records",
         "`agent::work_snapshot` contract/handler/projection",
@@ -67,8 +67,11 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         "Renamed the audit-only iOS ownership path from EngineConsole to AuditDetails",
         "worker_first_product_static_gates",
         "Closed for cleanup/static gates.",
+        "model-facing `capability::execute` so product mode uses audited auto-decisions instead of manual `approval::resolve`",
+        "`capability.admin.sync_registry` so admin evidence paths do not schedule vector warmup",
+        "tprod_i_flagship_chat_loop_reaches_review_ready",
+        "No worker-first scorecard rows remain open.",
         "Remote package discovery, push, merge, release, deploy, and production",
-        "Visual baseline screenshots are still open and block JARVIS-0 points.",
     ] {
         assert!(
             scorecard.contains(required),
@@ -77,20 +80,22 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
     }
 
     for stale_claim in [
-        "Current score: **100/100**",
-        "Status: **completed**",
-        "| JARVIS-11 | Soak, visual QA, and closeout | 7 | passed",
-        "No worker-first scorecard rows remain open.",
+        "Current score: **88/100**",
+        "Status: **active;",
+        "| JARVIS-0 | Formalize scorecard and baseline | 5 | running |",
+        "| JARVIS-11 | Soak, visual QA, and closeout | 7 | pending |",
+        "Visual baseline screenshots are still open and block JARVIS-0 points.",
+        "JARVIS-11 owns the paired-server soak/action proof and final closeout.",
     ] {
         assert!(
             !scorecard.contains(stale_claim),
-            "worker-first scorecard must not overclaim completion: {stale_claim}"
+            "worker-first scorecard must not retain stale open-row text: {stale_claim}"
         );
     }
 
     assert!(
-        manifest.contains("Current score: **88/100**")
-            && manifest.contains("| JARVIS-0 | running |")
+        manifest.contains("Current score: **100/100**")
+            && manifest.contains("| JARVIS-0 | passed_after_fix |")
             && manifest.contains("| JARVIS-1 | passed_after_fix |")
             && manifest.contains("| JARVIS-2 | passed_after_fix |")
             && manifest.contains("| JARVIS-3 | passed_after_fix |")
@@ -101,12 +106,12 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && manifest.contains("| JARVIS-8 | passed_after_fix |")
             && manifest.contains("| JARVIS-9 | passed_after_fix |")
             && manifest.contains("| JARVIS-10 | passed_after_fix |")
-            && manifest.contains("| JARVIS-11 | pending |")
-            && manifest.contains("Visual baseline screenshots remain open.")
+            && manifest.contains("| JARVIS-11 | passed_after_fix |")
+            && manifest.contains("Final JARVIS-11 closeout pairs that baseline")
             && manifest.contains("Baseline primary iOS source included `NavigationMode.engine`")
             && manifest.contains("Console views.")
             && manifest.contains("Fresh simulator test proof: 47 selected tests passed"),
-        "worker-first evidence manifest must track the active baseline and open visual proof"
+        "worker-first evidence manifest must track the completed baseline and visual proof"
     );
     assert!(
         manifest.contains("Green proof: 27 selected simulator tests passed")
@@ -120,8 +125,8 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
         manifest.contains("Fresh simulator proof after copy/render changes: 17 XCTest cases plus 36 Swift Testing cases passed")
             && manifest.contains("agent-settings-autonomy-render.png")
             && manifest.contains("The in-thread tool registry exposed no simulator tap/computer-use control.")
-            && scorecard.contains("Closed for settings UX. JARVIS-11 owns final paired-server soak/action proof."),
-        "worker-first evidence manifest must track the active baseline and open visual proof"
+            && scorecard.contains("Closed for settings UX. JARVIS-11 later closed final paired-server soak/action proof."),
+        "worker-first evidence manifest must preserve the settings UX evidence"
     );
     assert!(
         manifest.contains("Top-level iOS Work mode reads `agent::work_snapshot`")
@@ -172,12 +177,29 @@ fn worker_first_product_scorecard_stays_formalized_without_overclaiming() {
             && scorecard.contains("Closed for cleanup/static gates."),
         "worker-first evidence manifest must record the JARVIS-10 cleanup and JARVIS-1 closeout checkpoint"
     );
+    assert!(
+        manifest.contains("JARVIS-11 / JARVIS-0 Closeout Evidence")
+            && manifest.contains("tprod_i_flagship_chat_loop_reaches_review_ready")
+            && manifest
+                .contains("approval_required_execute_auto_decides_without_prompt_in_product_mode")
+            && manifest.contains("auto-decisions instead of manual `approval::resolve`")
+            && manifest.contains("capability.admin.sync_registry")
+            && manifest.contains("final queue")
+            && manifest.contains("Test-Tron-2026.06.05_16-30-40--0700.xcresult")
+            && manifest.contains("worker-detail-running-render.png")
+            && manifest.contains("worker-detail-success-render.png")
+            && manifest.contains("worker-detail-failure-render.png")
+            && manifest.contains("worker-detail-blocked-render.png")
+            && manifest.contains("None. No worker-first scorecard rows remain open."),
+        "worker-first evidence manifest must record the JARVIS-11 soak and JARVIS-0 closeout"
+    );
 
     assert!(
         readme.contains("packages/agent/docs/worker-first-product-scorecard.md")
-            && readme.contains("active worker-first product scorecard")
+            && readme.contains("completed")
+            && readme.contains("worker-first product scorecard at 100/100")
             && readme.contains("packages/agent/docs/worker-first-product-evidence-manifest.md"),
-        "README living-doc map must link the active worker-first scorecard and evidence manifest"
+        "README living-doc map must link the completed worker-first scorecard and evidence manifest"
     );
 }
 

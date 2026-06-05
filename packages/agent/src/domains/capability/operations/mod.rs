@@ -675,7 +675,6 @@ async fn sync_registry_for_admin(
         .await;
     let snapshot = registry_snapshot_for_functions(deps, &actor, functions).await;
     let catalog_revision = snapshot.catalog_revision;
-    let warmup_snapshot = snapshot.clone();
     let store = deps.registry_store.clone();
     let embedding_provider = deps.embedding_provider.clone();
     run_blocking_task("capability.admin.sync_registry", move || {
@@ -692,7 +691,6 @@ async fn sync_registry_for_admin(
         Ok(())
     })
     .await?;
-    schedule_vector_warmup(warmup_snapshot, deps);
     Ok(catalog_revision)
 }
 

@@ -123,12 +123,12 @@ Current living entry points:
 - `packages/agent/docs/tron-productization-evidence-manifest.md`: companion
   command/source/UI/soak evidence manifest for the completed productization
   scorecard.
-- `packages/agent/docs/worker-first-product-scorecard.md`: active worker-first
-  product scorecard for Work, Workers, Worker Packs, Autonomy, Guardrails,
-  Audit, default no-prompt autonomy, and replacement of the old technical
-  console as the primary product surface.
+- `packages/agent/docs/worker-first-product-scorecard.md`: completed
+  worker-first product scorecard at 100/100 for Work, Workers, Worker Packs,
+  Autonomy, Guardrails, Audit, default no-prompt autonomy, and replacement of
+  the old technical console as the primary product surface.
 - `packages/agent/docs/worker-first-product-evidence-manifest.md`: companion
-  evidence manifest for the active worker-first product scorecard.
+  evidence manifest for the completed worker-first product scorecard.
 - `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
   for worker-led autonomous work, the Work dashboard, Worker Packs, Generated
   Controls, Audit Details, trust labels, and model presets.

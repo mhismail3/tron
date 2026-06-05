@@ -53,12 +53,15 @@
 //! authority/availability problems or unexpected child execution failures, not
 //! for normal target contract rejections that the model must report back to the
 //! operator.
-//! Approval-required executions resume through `approval::resolve`, but the
-//! original `capability::execute` result must still project the executed
-//! approval state, the `execute` engine invocation id, and resumed child
-//! invocation ids. The model should not need to query approval internals or the
-//! DB to answer whether approval happened or which target invocation produced
-//! the output. The agent turn runner also projects the
+//! Approval-required executions create audited approval records in all modes.
+//! The default product mode auto-decides and executes the preserved child
+//! invocation without a manual prompt; explicit testing mode pauses through
+//! `approval::resolve` for QA. In both cases the original
+//! `capability::execute` result must still project the executed approval
+//! state, the `execute` engine invocation id, and child invocation ids. The
+//! model should not need to query approval internals or the DB to answer
+//! whether approval happened or which target invocation produced the output.
+//! The agent turn runner also projects the
 //! bounded execute observation metadata into the model-visible tool result
 //! text, because provider APIs only feed the LLM result content, not the
 //! engine-only `details` object used by UI and audit surfaces. That projection
@@ -134,8 +137,11 @@
 //! handling must not re-embed the whole catalog: registry documents carry text
 //! hashes, unchanged catalog revisions skip metadata resync, changed documents
 //! are warmed incrementally, and a search request embeds only the query text
-//! before fusing lexical and vector hits. Bounded batch search/inspect requests
-//! share one registry snapshot for operator clients; provider models use the
+//! before fusing lexical and vector hits. Admin sync is metadata-only; search
+//! and intent-resolution paths own vector warmup so status, inspect, and
+//! conformance evidence paths do not block behind local indexing. Bounded batch
+//! search/inspect requests share one registry snapshot for operator clients;
+//! provider models use the
 //! single `execute` orchestrator, which performs resolve/prepare internally.
 
 pub(crate) mod contract;
