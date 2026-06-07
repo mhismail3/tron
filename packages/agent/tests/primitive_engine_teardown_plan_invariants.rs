@@ -1171,6 +1171,60 @@ fn prompt_media_uses_unified_attachment_primitive() {
 }
 
 #[test]
+fn ios_shell_has_no_fixed_session_tree_projection() {
+    for (path, label) in [
+        (
+            "packages/ios-app/Sources/Views/SessionTree",
+            "fixed iOS session-tree view root",
+        ),
+        (
+            "packages/ios-app/Sources/Database/Repositories/TreeRepository.swift",
+            "fixed local event-tree repository",
+        ),
+        (
+            "packages/ios-app/Sources/Services/Events/EventTreeBuilder.swift",
+            "fixed local event-tree projection builder",
+        ),
+        (
+            "packages/ios-app/Tests/Infrastructure/TreeRepositoryTests.swift",
+            "fixed local event-tree repository tests",
+        ),
+        (
+            "packages/ios-app/Tests/Views/ForkButtonTests.swift",
+            "fixed fork-row tests",
+        ),
+        (
+            "packages/ios-app/Tests/Views/EventIconProviderTests.swift",
+            "fixed session-tree icon provider tests",
+        ),
+    ] {
+        assert_repo_path_absent(path, label);
+    }
+
+    let retained_ios = read_repo_source_trees(&[
+        "packages/ios-app/Sources",
+        "packages/ios-app/Tests",
+        "packages/ios-app/project.yml",
+    ]);
+    assert_absent(
+        &retained_ios,
+        &[
+            "EventTreeNode",
+            "EventTreeBuilder",
+            "TreeRepository",
+            "ForkPointIndicator",
+            "ForkButtonState",
+            "EventIconProvider",
+            "getTreeVisualization",
+            "database.tree",
+            "eventDB.tree",
+            "isBranchPoint",
+        ],
+        "retained iOS session-tree projection surface",
+    );
+}
+
+#[test]
 fn approval_and_observability_planes_are_not_engine_primitives() {
     for (path, label) in [
         (

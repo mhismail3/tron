@@ -131,19 +131,3 @@ struct SyncState: Codable, Sendable {
     var lastSyncTimestamp: String?
     var pendingEventIds: [String]
 }
-
-// MARK: - Tree Node
-
-/// Node for tree visualization
-struct EventTreeNode: Identifiable, Sendable {
-    let id: String
-    let parentId: String?
-    let type: String
-    let timestamp: String
-    let summary: String
-    let hasChildren: Bool
-    let childCount: Int
-    let depth: Int
-    let isBranchPoint: Bool
-    let isHead: Bool
-}

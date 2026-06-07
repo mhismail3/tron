@@ -38,8 +38,6 @@ final class EventDatabase: DatabaseTransport {
     @ObservationIgnored
     lazy var thinking: ThinkingRepository = ThinkingRepository(transport: self, eventRepository: events)
     @ObservationIgnored
-    lazy var tree: TreeRepository = TreeRepository(eventRepository: events, sessionRepository: sessions)
-    @ObservationIgnored
     lazy var drafts: DraftRepository = DraftRepository(transport: self)
 
     // MARK: - Initialization

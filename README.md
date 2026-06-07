@@ -807,7 +807,8 @@ packages/ios-app/Sources/
 +-- ViewModels/           Chat view models, handlers, managers,
 +                         settings/onboarding state
 +-- Views/                SwiftUI shell: chat, input bar, message bubbles,
-+                         session tree, settings, onboarding, dynamic surfaces
++                         session navigation, settings, onboarding,
++                         dynamic surfaces
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
 +-- Extensions/           Type extensions
@@ -824,7 +825,7 @@ packages/ios-app/Sources/
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
-- **Primitive chat shell**: the app keeps connection/onboarding/settings, session navigation, prompt input, message rendering, local reconstruction, diagnostics, and generic runtime surfaces. Fixed Work, Audit Details, Source Control, Prompt Library, Voice Notes, Skills, Subagents, Agent Control, Plugin Sources, audio transcription, memory-retain, and rules product modes are removed from the primary source tree.
+- **Primitive chat shell**: the app keeps connection/onboarding/settings, session navigation, prompt input, message rendering, local reconstruction, diagnostics, and generic runtime surfaces. Fixed Work, Audit Details, Source Control, Prompt Library, Voice Notes, Skills, Subagents, Agent Control, Plugin Sources, audio transcription, memory-retain, rules, and SessionTree projection product modes are removed from the primary source tree.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
 - **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.

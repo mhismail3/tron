@@ -51,9 +51,9 @@ and PET-11 re-audit targets.
 
 PET-11's interim hosted-tool/computer-use checkpoint further removed the
 OpenAI hosted search/computer-call DTO and stream variants, stale iOS capability
-catalog DTO/rendering support, and Mac Screen Recording/Accessibility onboarding
-gates. Remaining PET-11 successor rows below still need final retain/delete
-proof before closeout.
+catalog DTO/rendering support, the fixed iOS SessionTree projection, and Mac
+Screen Recording/Accessibility onboarding gates. Remaining PET-11 successor rows
+below still need final retain/delete proof before closeout.
 
 | Domain | Class | Teardown decision |
 |--------|-------|-------------------|
@@ -249,7 +249,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `Process` | delete | PET-11 deleted the fixed iOS process dashboard, live `process.*` plugins, `ProcessState`, process sheet, and process-specific result viewer. The retained `process_run` primitive renders through generic capability evidence and trace records. |
 | `PromptLibrary` | delete | Product prompt library UI. |
 | `Session` | retain | Keep session list/create/resume/delete. Delete clone/worktree/session analytics/product cards. |
-| `SessionTree` | successor | Keep only plain session navigation/history reconstruction if needed. Product tree projections, fork visualizations, and analytics belong to deletion unless PET-11 proves they are shell infrastructure. |
+| `SessionTree` | delete | PET-11 deleted the fixed iOS session-tree view root, local `TreeRepository`, `EventTreeBuilder`, fork-row visualization, icon catalog, and tests. Session navigation and fork lineage remain only as session/event truth reconstructed through generic session repositories and event queries. |
 | `Settings` | retain | Keep connection/provider/server settings plus quick-session, prompt queue, and compaction controls. Agent autonomy, guardrails, hooks, skills, plugin sources, memory/rules, prompt-library, protected branch, and capability settings are deleted. |
 | `Skills` | delete | Skill management UI. |
 | `SourceChanges` | delete | Source-control product UI. |
@@ -295,10 +295,12 @@ server settings shape and iOS controls together.
 ## Open Loops After PET-10
 
 - PET-11 proved retained iOS `Attachments` are prompt-input infrastructure and
-  deleted the legacy image-only prompt DTO/request path. PET-11 must still
-  audit retained iOS `Capabilities` and `SessionTree` source from first
-  principles. The hard-coded `UserInteraction` prompt/answer plane and fixed
-  process dashboard were deleted during PET-11.
+  deleted the legacy image-only prompt DTO/request path. PET-11 also deleted
+  the fixed iOS `SessionTree` projection; session fork lineage remains only as
+  generic session/event truth. PET-11 must still audit retained iOS
+  `Capabilities` source from first principles. The hard-coded
+  `UserInteraction` prompt/answer plane and fixed process dashboard were
+  deleted during PET-11.
 - PET-11 decided that `session_drafts.skills_json` was stale product DTO
   residue and deleted it from fresh iOS draft storage. PET-11 also deleted
   `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after

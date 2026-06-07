@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-07 (PET-11 unified prompt attachment cleanup).
+> Last verified: 2026-06-07 (PET-11 SessionTree projection cleanup).
 
 ## Overview
 
@@ -64,7 +64,7 @@ Sources/
 +-- Services/             Engine transport, domain clients, pairing,
 |                         diagnostics, notifications, storage
 +-- ViewModels/           Chat state, event handlers, settings/onboarding state
-+-- Views/                Chat, input bar, message bubbles, session tree,
++-- Views/                Chat, input bar, message bubbles, session navigation,
 |                         settings, onboarding, dynamic surfaces, diagnostics
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
@@ -76,6 +76,11 @@ as generic chat evidence. They are not a capability catalog, admin console, or
 operator policy surface. Capability identity is limited to the model-visible
 primitive name, optional operation name, trace/root invocation ids, theme
 color, and runtime-supplied presentation hints.
+
+The deleted `Views/SessionTree` projection is not a shell primitive. Fork
+lineage remains in session metadata and stored events; iOS reconstructs history
+through generic session/event repositories without a parallel tree-only DTO,
+builder, icon catalog, or fork-row state model.
 
 ## Data Flow
 

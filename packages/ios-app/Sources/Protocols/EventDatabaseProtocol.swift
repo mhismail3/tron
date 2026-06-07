@@ -11,7 +11,6 @@ protocol EventDatabaseProtocol: AnyObject {
     var sessions: SessionRepository { get }
     var sync: SyncRepository { get }
     var thinking: ThinkingRepository { get }
-    var tree: TreeRepository { get }
 
     // MARK: - Initialization
     func initialize() async throws

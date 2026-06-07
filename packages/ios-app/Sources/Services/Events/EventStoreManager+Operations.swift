@@ -313,11 +313,6 @@ extension EventStoreManager {
         try await eventDB.events.getBySession(sessionId)
     }
 
-    /// Get tree visualization for a session
-    func getTreeVisualization(_ sessionId: String) async throws -> [EventTreeNode] {
-        try await eventDB.tree.build(sessionId)
-    }
-
     // MARK: - Lifecycle
 
     /// Initialize on app launch

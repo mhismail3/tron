@@ -1367,6 +1367,59 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Primitive shell has no fixed session-tree projection")
+    func testPrimitiveShellHasNoFixedSessionTreeProjection() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let deletedPaths = [
+            "Sources/Views/SessionTree",
+            "Sources/Database/Repositories/TreeRepository.swift",
+            "Sources/Services/Events/EventTreeBuilder.swift",
+            "Tests/Infrastructure/TreeRepositoryTests.swift",
+            "Tests/Views/ForkButtonTests.swift",
+            "Tests/Views/EventIconProviderTests.swift",
+        ]
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("Event" + "Tree" + "Node", "fixed event-tree projection DTO"),
+            ("Event" + "Tree" + "Builder", "fixed event-tree projection builder"),
+            ("Tree" + "Repository", "fixed event-tree repository"),
+            ("Fork" + "Point" + "Indicator", "fixed fork visualization"),
+            ("Fork" + "Button" + "State", "fixed fork-row state"),
+            ("Event" + "Icon" + "Provider", "fixed session-tree icon catalog"),
+            ("get" + "Tree" + "Visualization", "fixed tree query entry point"),
+            ("database" + "." + "tree", "fixed tree repository access"),
+            ("eventDB" + "." + "tree", "fixed tree repository access"),
+            ("is" + "Branch" + "Point", "fixed branch projection field"),
+        ]
+
+        for relativePath in deletedPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) is a deleted fixed session-tree projection"
+            )
+        }
+
+        for root in sourceRoots {
+            for url in try swiftFiles(in: root) {
+                if url.path == #filePath { continue }
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbiddenNeedles {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains \(reason): `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
+
     private func swiftFiles(in root: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: root,

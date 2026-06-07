@@ -478,66 +478,6 @@ final class EventDatabaseTests: XCTestCase {
         XCTAssertEqual(state.currentTurn, 1)
     }
 
-    // MARK: - Tree Visualization
-
-    func testBuildTreeVisualization() async throws {
-        let events = [
-            SessionEvent(id: "root", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
-            SessionEvent(id: "msg1", parentId: "root", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: ["content": AnyCodable("Hello")]),
-            SessionEvent(id: "msg2", parentId: "msg1", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: ["content": AnyCodable([["type": "text", "text": "Hi"] as [String: Any]])])
-        ]
-
-        try await database.events.insertBatch(events)
-        try await database.sessions.insert(CachedSession(
-            id: "s1", workspaceId: "/test", rootEventId: "root", headEventId: "msg2",
-            title: "Test", latestModel: "claude-sonnet-4",
-            workingDirectory: "/test",
-            createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 3, messageCount: 2, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
-        ))
-
-        let tree = try await database.tree.build("s1")
-        XCTAssertEqual(tree.count, 3)
-
-        // Check root
-        let root = tree.first { $0.id == "root" }
-        XCTAssertNotNil(root)
-        XCTAssertEqual(root?.depth, 0)
-        XCTAssertNil(root?.parentId)
-
-        // Check head
-        let head = tree.first { $0.id == "msg2" }
-        XCTAssertNotNil(head)
-        XCTAssertTrue(head?.isHead ?? false)
-        XCTAssertEqual(head?.depth, 2)
-    }
-
-    func testBranchPointDetection() async throws {
-        // Create a branching structure
-        let events = [
-            SessionEvent(id: "root", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "session.start", timestamp: "2024-01-01T00:00:00Z", sequence: 1, payload: [:]),
-            SessionEvent(id: "fork-point", parentId: "root", sessionId: "s1", workspaceId: "/test", type: "message.user", timestamp: "2024-01-01T00:01:00Z", sequence: 2, payload: [:]),
-            SessionEvent(id: "branch-a", parentId: "fork-point", sessionId: "s1", workspaceId: "/test", type: "message.assistant", timestamp: "2024-01-01T00:02:00Z", sequence: 3, payload: [:]),
-            SessionEvent(id: "branch-b", parentId: "fork-point", sessionId: "s1", workspaceId: "/test", type: "session.fork", timestamp: "2024-01-01T00:02:00Z", sequence: 4, payload: [:])
-        ]
-
-        try await database.events.insertBatch(events)
-        try await database.sessions.insert(CachedSession(
-            id: "s1", workspaceId: "/test", rootEventId: "root", headEventId: "branch-a",
-            title: "Test", latestModel: "claude-sonnet-4",
-            workingDirectory: "/test",
-            createdAt: "2024-01-01", lastActivityAt: "2024-01-01",
-            eventCount: 4, messageCount: 1, inputTokens: 0, outputTokens: 0, lastTurnInputTokens: 0, cost: 0.0
-        ))
-
-        let tree = try await database.tree.build("s1")
-
-        let forkPoint = tree.first { $0.id == "fork-point" }
-        XCTAssertNotNil(forkPoint)
-        XCTAssertTrue(forkPoint?.isBranchPoint ?? false)
-        XCTAssertEqual(forkPoint?.childCount, 2)
-    }
-
     // MARK: - Sync State
 
     func testSyncState() async throws {
