@@ -1,9 +1,8 @@
 //! Primitive execute domain worker.
 //!
 //! This module owns the only model-facing tool on the primitive branch:
-//! `capability::execute`. It intentionally does not expose a capability catalog,
-//! registry, recipe, plugin, conformance, policy-profile, search, or inspection
-//! plane. Concrete host actions happen through direct primitive operations.
+//! `capability::execute`. Concrete host actions happen through direct primitive
+//! operations.
 //!
 //! ## Submodules
 //!
@@ -11,14 +10,14 @@
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
 //! | `deps` | Narrow dependency bundle containing the engine host handle |
-//! | `handlers` | Declarative binding for `execute` |
+//! | `handlers` | Operation wiring for `execute` |
 //! | `operations` | Direct primitive operation implementations |
 //!
 //! # INVARIANT: the model-facing surface is tiny
 //!
 //! Provider integrations must expose exactly this one tool. Additional behavior
 //! can only appear later as agent-owned state or generated helper substrate, not
-//! as checked-in catalog functions.
+//! as checked-in target functions.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

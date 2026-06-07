@@ -94,7 +94,7 @@ Current living entry points:
   primitive and provider export.
 - `packages/agent/docs/primitive-engine-teardown-scorecard.md`: active
   clean-break primitive engine teardown scorecard for stripping hard-coded
-  capabilities, policies, skills, rules, worker packs, and fixed iOS product
+  capabilities, policies, skills, rules, helper launch products, and fixed iOS product
   surfaces down to the smallest provider loop, single `execute` primitive,
   agent-owned state workspace, event/ledger truth, and dynamic client shell.
 - `packages/agent/docs/primitive-engine-teardown-evidence-manifest.md`:
@@ -180,7 +180,7 @@ main_runtime.rs Server startup/runtime wiring
 | `app` | Startup/bootstrap + HTTP shell | `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
-| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness and registry/index projection | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `capability::registry::CapabilityRegistrySnapshot`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
+| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor/product-protocol integrations | APNS senders, updater scheduler |
 | `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
@@ -357,12 +357,11 @@ surface is intentionally collapsed to one provider-visible function:
 |---------------|-----------------|---------|
 | `execute` | `capability::execute` | Run one primitive host operation and return a bounded observation/result to the turn loop. |
 
-`capability::execute` is not a catalog router. It does not search worker packs,
-inspect capability recipes, select plugins, apply binding policies, request
-approval, or forward to retired first-party tool namespaces. Its request schema
-requires an `operation` field and accepts only operation-specific primitive
-fields such as `input`, `scope`, `namespace`, `key`, `value`, `path`, `content`,
-`command`, `timeoutMs`, `maxOutputBytes`, `idempotencyKey`, and `reason`.
+`capability::execute` is a direct primitive operation endpoint. Its request
+schema requires an `operation` field and accepts only operation-specific
+primitive fields such as `input`, `scope`, `namespace`, `key`, `value`, `path`,
+`content`, `command`, `timeoutMs`, `maxOutputBytes`, `idempotencyKey`, and
+`reason`.
 
 Current primitive operations:
 
@@ -470,36 +469,13 @@ connect/register/disconnect/heartbeat-timeout events are stored on
 `worker.lifecycle` through the stream primitive and are visible in
 `observability::trace_get`.
 
-Agents do not need to inspect Tron source to create a local worker.
-`worker::protocol_guide` is a canonical read-only worker primitive that returns
-the current `/engine/workers` message flow, required environment variables, JSON
-field casing, enum values, and a standard-library Python worker template. It
-accepts common JavaScript/TypeScript language aliases as a request affordance,
-but still returns the current Python template so the agent receives executable
-guidance instead of searching source after a schema rejection.
-`worker::spawn` injects `TRON_ENGINE_WORKER_ENDPOINT` as a complete
-`ws://` or `wss://` URL ending in `/engine/workers`, so generated workers do not
-derive socket paths from client URLs. The intended loop is: use `execute` with
-intent or target `worker::protocol_guide`, write the worker script from that
-template, use `execute` with target `worker::spawn` plus expected function ids
-and a stable idempotency key, then invoke the new `namespace::function` through
-`execute`. Workspace-visible helper work uses the approved workspace autonomy
-grant id and the returned workspace id; when `resourceSelectors` are omitted,
-`worker::spawn` derives a child selector of `workspace:<workspaceId>` instead of
-asking the model to repair an overbroad `*` selector. Human/operator controls
-for the new capability remain server-owned:
-author or inspect generated `ui_surface` resources through
-`ui::surface_for_target` and `ui::inspect_surface`, and submit stored actions
-through `ui::submit_action` using surface/version/action ids rather than
-reconstructing targets in the client. For session-created functions with
-renderable required request fields, `ui::surface_for_target` authors the native
-input controls and stored invoke action from the server-side schema. Stop
-sandbox-created helpers with `sandbox::stop_spawned_worker` when finished;
-reserve `worker::disconnect` for raw volatile worker protocol cleanup. Operator
-catalog search/inspect views remain available for debugging, but they are not
-separate model tools. The model-facing `execute` schema and generated Worker
-Guide both name this loop so ordinary provider turns do not need README-only
-knowledge to extend autonomous Work with workers.
+Agents do not receive a server-authored helper-launch loop. The retained
+`/engine/workers` protocol is host infrastructure for already-running external
+workers to register functions and triggers; it is not exported as a provider
+tool. Model-created helper behavior must start as ordinary `execute` output,
+agent-owned state, workspace files, or generic resources. If a future helper
+needs to become a live worker, it must be introduced through explicit host
+infrastructure rather than a checked-in product lifecycle.
 
 Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
 `queue::*`, `trigger::*`, `resource::*`, `grant::*`, and `approval::*` preserve
@@ -535,40 +511,6 @@ without owning primitive response contracts.
 Subagent routes are not registered on the primitive teardown branch. Any future
 parallel helper behavior must be created by the agent through `execute` and
 recorded as agent-owned state or generic runtime artifacts.
-
-Sandbox-created capabilities enter through the high-risk `worker::spawn`
-capability. It requires explicit idempotency, `worker.write` authority, a
-worker resource lease, compensation notes, and the sandbox autonomy contract
-recorded on the capability. Before launch it derives
-a child worker grant from either the caller's parent grant or an explicitly
-supplied `workspaceAutonomyGrantId` from
-`self_extension::grant_workspace_autonomy`; the child grant is limited by
-expected function ids, namespaces, resource selectors, file roots, network
-policy, risk, budget, and delegation=false. Workspace autonomy grants are
-validated for source, actor, workspace selector, and file root before they can
-be used as child-grant parents. For approved workspace autonomy spawns,
-omitting `resourceSelectors` defaults the child grant to the validated
-`workspace:<workspaceId>` selector; ordinary non-workspace spawns keep the
-existing explicit-or-default grant bounds. It starts a local worker process
-with scoped `/engine/workers` environment plus a worker token carrying
-`authorityGrantId`, parent grant id, grant revision/hash, and resource
-selectors, waits for the expected registration, and returns the worker id,
-derived grant id, parent grant id, registered functions, catalog revision,
-visibility, and process metadata without a separate approval prompt. Session
-visibility is the default; workspace helpers use the approved workspace autonomy
-grant, and system promotion is still only governed by `engine::promote`, with
-revision/idempotency guards and catalog-watch evidence. The contract also
-carries product `presentationHints` so chat surfaces render helper creation as
-local capability work with scope-aware summaries such as `Safe in this chat` or
-`Safe in this workspace`; raw worker ids, grants, traces, and schemas remain
-metadata. `sandbox::list_spawned_workers`,
-`sandbox::get_spawned_worker`, and `sandbox::stop_spawned_worker` expose the
-local process lifecycle; stop kills the process, unregisters volatile
-registrations through `worker::disconnect`, leaves durable disconnect/health
-transitions to the external worker manager, and publishes `sandbox.lifecycle`.
-Discarding helper files from the repository worktree is a separate
-approval-gated `worktree::discard_files` action and accepts repository-relative
-paths only.
 
 ---
 
@@ -894,7 +836,7 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 
-The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)`; most other access patterns are intentionally allowed to scan/filter at our volumes. Session views are reconstructed from the canonical event log. Fresh storage contains no branches, push-token tables, cron tables, constitution audit tables, session profiles, worktree overrides, prompt queue events, config mutation events, rules/skills/hooks events, or product capability-registry tables.
+The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)`; most other access patterns are intentionally allowed to scan/filter at our volumes. Session views are reconstructed from the canonical event log. Fresh storage contains no branches, push-token tables, cron tables, constitution audit tables, session profiles, worktree overrides, prompt queue events, config mutation events, rules/skills/hooks events, or retired product catalog tables.
 
 ---
 
@@ -1144,7 +1086,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- vault/                     Skill-owned local fast secret storage
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
-    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, approvals, leases, compensation, workers, capability registry/index/audit
+    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, approvals, leases, compensation, workers
     |   +-- tron.sqlite.lock       OS-level flock sidecar; one Tron process owns it while running
     |   +-- archive/               One-way archive of retired or incompatible storage generations
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output

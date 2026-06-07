@@ -16,22 +16,10 @@
 //! UI as `ui_surface` resources, authors deterministic target surfaces from
 //! substrate projections, validates/refreshes/expires generated versions, and
 //! routes submitted actions back through canonical capability invocations.
-//! Stored-surface/action
-//! validation is owned by the UI primitive's validation submodule so authoring
-//! and execution checks do not blur together. Operator action summaries and
-//! consequence projections are shaped by the local `action_summary` helper so
-//! control, module, trust-audit, and generated UI surfaces do not drift.
-//! `module::*` registers,
-//! configures, activates, disables, upgrades, rolls back, and quarantines
-//! worker packages as typed resources under derived grants, with trust-root
-//! renewal, key-rotation evidence, expiry, explicit revocation enforcement,
-//! trust-change simulation, trust-review evidence, and scheduled trust audits
-//! represented as decision/evidence resources. Trust-audit status, retention
-//! review, and activation runtime cleanup diagnostics stay projection/evidence
-//! only. The module primitive keeps source-trust, health/integrity,
-//! activation-runtime, trust-review, and scheduled-audit ownership in focused
-//! submodules so the parent registration surface does not become another policy
-//! plane.
+//! Stored-surface/action validation is owned by the UI primitive's validation
+//! submodule so authoring and execution checks do not blur together. Operator
+//! action summaries and consequence projections are shaped by the local
+//! `action_summary` helper so control and generated UI surfaces do not drift.
 //! `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
@@ -85,7 +73,6 @@ pub(crate) mod approval;
 pub(crate) mod catalog;
 pub(crate) mod control;
 pub(crate) mod grant;
-pub(crate) mod module;
 pub(crate) mod observability;
 pub(crate) mod queue;
 pub(crate) mod resource;
@@ -110,7 +97,6 @@ pub(crate) const WORKER_WORKER_ID: &str = "worker";
 pub(crate) const OBSERVABILITY_WORKER_ID: &str = "observability";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
 pub(crate) const UI_WORKER_ID: &str = "ui";
-pub(crate) const MODULE_WORKER_ID: &str = "module";
 const ENGINE_OWNER_ACTOR: &str = "system";
 const ENGINE_AUTHORITY_GRANT: &str = "engine-system";
 
@@ -759,9 +745,6 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         .with_namespace_claim("claim")
         .with_namespace_claim("evidence")
         .with_namespace_claim("decision")
-        .with_namespace_claim("worker_package")
-        .with_namespace_claim("module_config")
-        .with_namespace_claim("activation_record")
         .with_namespace_claim("harness_doc")
         .with_namespace_claim("materialized_file")
         .with_namespace_claim("patch");
@@ -776,7 +759,6 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CONTROL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(UI_WORKER_ID, WorkerKind::System)?,
-        primitive_worker(MODULE_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(OBSERVABILITY_WORKER_ID, WorkerKind::System)?,
         primitive_worker(STORAGE_WORKER_ID, WorkerKind::System)?,
@@ -797,7 +779,6 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(catalog::registrations()?);
     registrations.extend(control::registrations()?);
     registrations.extend(ui::registrations()?);
-    registrations.extend(module::registrations(stores)?);
     registrations.extend(worker::registrations()?);
     registrations.extend(observability::registrations()?);
     registrations.extend(storage::registrations()?);

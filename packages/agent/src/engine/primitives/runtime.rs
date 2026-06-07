@@ -29,8 +29,6 @@ use crate::engine::types::{
 use crate::shared::logging::{LogLevel, LogQueryOptions, SortOrder};
 
 mod trace_projection;
-mod worker_protocol;
-
 pub(in crate::engine::primitives) use trace_projection::trace_summary;
 use trace_projection::{
     catalog_change_belongs_to_trace, queue_item_log_value, resource_event_log_value,
@@ -131,7 +129,6 @@ pub(in crate::engine) fn dispatch(
         worker::GET_FUNCTION => worker_get(host, invocation),
         worker::HEALTH_FUNCTION => worker_health(host, invocation),
         worker::DISCONNECT_FUNCTION => worker_disconnect(host, invocation),
-        worker::PROTOCOL_GUIDE_FUNCTION => worker_protocol::guide(invocation),
         control::SNAPSHOT_FUNCTION | control::INSPECT_FUNCTION => {
             control::dispatch(host, invocation)
         }

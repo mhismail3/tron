@@ -6,16 +6,15 @@
 //! host code that cannot be replaced by ordinary workers.
 //!
 //! Submodules keep host responsibilities split by surface: handle constructors,
-//! catalog operations, module maintenance queues, invocation orchestration,
-//! substrate-store methods, shared invocation helpers, meta-function helpers,
-//! and the primitive runtime host.
+//! catalog operations, invocation orchestration, substrate-store methods,
+//! shared invocation helpers, meta-function helpers, and the primitive runtime
+//! host.
 
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
@@ -30,8 +29,7 @@ use super::compensation::{EngineCompensationRecord, compensation_record};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
 use super::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
-    WorkerId,
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TriggerId, TriggerTypeId, WorkerId,
 };
 use super::invocation::{CausalContext, InProcessFunctionHandler, Invocation, InvocationResult};
 use super::leases::{AcquireResourceLease, EngineResourceLease};
@@ -66,7 +64,6 @@ mod handle;
 mod invocation_handle;
 mod invocation_support;
 mod meta;
-mod module_jobs;
 mod runtime_host;
 mod substrate_handle;
 

@@ -18,7 +18,6 @@ mod ids_types;
 mod ledger_idempotency;
 mod memory_retain_resources;
 mod meta_primitives;
-mod module_activation;
 mod notification_resources;
 mod productization_closeout;
 mod prompt_library_resources;

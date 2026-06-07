@@ -2,9 +2,7 @@
 //!
 //! This worker is the model-facing harness collapse point: providers see one
 //! `execute` primitive that can observe, touch agent-owned state, read/write the
-//! workspace, and run bounded local commands. The primitive branch deliberately
-//! does not retain catalog search, target routing, plugin promotion, worker-pack
-//! recipes, or administrative compatibility functions here.
+//! workspace, and run bounded local commands.
 
 use serde_json::json;
 
@@ -49,7 +47,6 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                 "description": concat!(
                     "Primitive host operation for the bare Tron loop. ",
                     "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, and run a bounded local command. ",
-                    "There is no built-in capability catalog, no search/inspect side tool, no worker-pack recipe layer, and no target namespace routing. ",
                     "Choose one operation per call. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
@@ -102,8 +99,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(ids, [EXECUTE_FUNCTION_ID]);
         assert!(!model_metadata(EXECUTE_FUNCTION_ID).is_null());
-        assert!(model_metadata("capability::search").is_null());
-        assert!(model_metadata("capability::inspect").is_null());
+        assert!(model_metadata("not_execute").is_null());
     }
 
     #[test]
@@ -113,17 +109,14 @@ mod tests {
             .as_str()
             .expect("execute description");
         assert!(description.contains("Primitive host operation"));
-        assert!(description.contains("There is no built-in capability catalog"));
-        assert!(!description.contains("capability::inspect"));
-        assert!(!description.contains("worker::spawn"));
-        assert!(!description.contains("self_extension::grant_workspace_autonomy"));
+        assert!(description.contains("Choose one operation per call"));
 
         let schema = execute_model_request_schema();
         assert_eq!(schema["required"], json!(["operation"]));
         assert_eq!(
             schema["additionalProperties"],
             json!(false),
-            "primitive execute should not accept target-catalog wrapper fields"
+            "primitive execute should accept only its direct request shape"
         );
         assert_eq!(schema["properties"]["operation"]["type"], json!("string"));
         assert!(schema["properties"].get("target").is_none());

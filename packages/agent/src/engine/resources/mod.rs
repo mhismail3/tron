@@ -1,8 +1,7 @@
 //! Generic engine resource kernel.
 //!
-//! Resources are the collapsed durable object model for the modular engine.
-//! Artifacts, goals, claims, evidence, decisions, UI surfaces, worker packages,
-//! harness docs, and materialized files all become typed resources with
+//! Resources are the durable object model for the primitive engine. Artifacts,
+//! goals, claims, evidence, decisions, UI surfaces, harness docs, and files become typed resources with
 //! versioned payloads, links, lifecycle state, policy, provenance, and
 //! auditable events. Streams, indexes, and control-plane summaries are
 //! projections over this store.

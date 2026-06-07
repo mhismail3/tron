@@ -11,9 +11,22 @@ fn repo_root() -> PathBuf {
 }
 
 fn read_repo_file(path: &str) -> String {
-    let full_path = repo_root().join(path);
+    let full_path = repo_path(path);
     std::fs::read_to_string(&full_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
+}
+
+fn repo_path(path: &str) -> PathBuf {
+    repo_root().join(path)
+}
+
+fn assert_repo_path_absent(path: &str, label: &str) {
+    let full_path = repo_path(path);
+    assert!(
+        !full_path.exists(),
+        "{label} must be physically deleted from the primitive branch: {}",
+        full_path.display()
+    );
 }
 
 fn assert_absent(haystack: &str, banned: &[&str], label: &str) {
@@ -616,6 +629,170 @@ fn engine_registration_policy_has_no_approval_metadata_exceptions() {
             "requires explicit approval metadata",
         ],
         "engine effect helpers",
+    );
+}
+
+#[test]
+fn self_authored_worker_pack_primitives_are_not_registered_or_left_on_disk() {
+    let primitives = read_repo_file("packages/agent/src/engine/primitives/mod.rs");
+    assert_absent(
+        &primitives,
+        &[
+            "MODULE_WORKER_ID",
+            "module::registrations",
+            "primitive_worker(MODULE_WORKER_ID",
+            ".with_namespace_claim(\"worker_package\")",
+            ".with_namespace_claim(\"module_config\")",
+            ".with_namespace_claim(\"activation_record\")",
+        ],
+        "engine primitive registration",
+    );
+
+    let runtime = read_repo_file("packages/agent/src/engine/primitives/runtime.rs");
+    assert_absent(
+        &runtime,
+        &[
+            "mod worker_protocol",
+            "worker::PROTOCOL_GUIDE_FUNCTION",
+            "worker_protocol::guide",
+        ],
+        "host-dispatched primitive runtime",
+    );
+
+    let worker = read_repo_file("packages/agent/src/engine/primitives/worker.rs");
+    assert_absent(
+        &worker,
+        &[
+            "PROTOCOL_GUIDE_FUNCTION",
+            "worker::protocol_guide",
+            "worker::spawn",
+            "sandbox-created",
+            "pythonTemplate",
+            "spawnWorkerPayloadExample",
+            "worker pack",
+        ],
+        "worker primitive contracts",
+    );
+
+    for path in [
+        "packages/agent/src/engine/primitives/module.rs",
+        "packages/agent/src/engine/primitives/module",
+        "packages/agent/src/engine/primitives/runtime/worker_protocol.rs",
+        "packages/agent/src/engine/primitives/runtime/worker_protocol_template.py",
+        "packages/agent/src/engine/host/module_jobs.rs",
+        "packages/agent/src/engine/tests/module_activation.rs",
+        "packages/agent/src/engine/tests/module_activation",
+    ] {
+        assert_repo_path_absent(path, "self-authored worker-pack substrate");
+    }
+
+    for (label, path) in [
+        (
+            "control action projection",
+            "packages/agent/src/engine/primitives/control/actions.rs",
+        ),
+        (
+            "action summary projection",
+            "packages/agent/src/engine/primitives/action_summary.rs",
+        ),
+        (
+            "generated UI authoring actions",
+            "packages/agent/src/engine/primitives/ui/authoring/actions.rs",
+        ),
+        ("README", "README.md"),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "module::",
+                "worker::spawn",
+                "worker::protocol_guide",
+                "worker pack",
+                "worker packs",
+                "sandbox-created",
+            ],
+            label,
+        );
+    }
+}
+
+#[test]
+fn capability_registry_recipe_and_conformance_scaffolding_is_deleted() {
+    for path in [
+        "packages/agent/src/domains/capability/registry",
+        "packages/agent/src/domains/capability/embeddings.rs",
+        "packages/agent/src/domains/capability/types.rs",
+        "packages/agent/src/domains/capability/operations/admin.rs",
+        "packages/agent/src/domains/capability/operations/audit.rs",
+        "packages/agent/src/domains/capability/operations/execute.rs",
+        "packages/agent/src/domains/capability/operations/inspect.rs",
+        "packages/agent/src/domains/capability/operations/policy_profile.rs",
+        "packages/agent/src/domains/capability/operations/presentation.rs",
+        "packages/agent/src/domains/capability/operations/run.rs",
+        "packages/agent/src/domains/capability/operations/schema_validation.rs",
+        "packages/agent/src/domains/capability/operations/search.rs",
+        "packages/agent/src/domains/capability/operations/target_arguments.rs",
+        "packages/agent/src/domains/capability/operations/target_resolution.rs",
+        "packages/agent/src/domains/capability/operations/tests",
+    ] {
+        assert_repo_path_absent(path, "capability catalog scaffold");
+    }
+
+    for (label, path) in [
+        (
+            "capability module docs",
+            "packages/agent/src/domains/capability/mod.rs",
+        ),
+        (
+            "capability contract",
+            "packages/agent/src/domains/capability/contract.rs",
+        ),
+        (
+            "primitive execute implementation",
+            "packages/agent/src/domains/capability/operations/mod.rs",
+        ),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "capability registry",
+                "registry",
+                "recipe",
+                "recipes",
+                "plugin",
+                "plugins",
+                "binding",
+                "bindings",
+                "conformance",
+                "vector search",
+                "policy profile",
+                "policy-profile",
+                "capability::search",
+                "capability::inspect",
+            ],
+            label,
+        );
+    }
+
+    let readme = read_repo_file("README.md");
+    assert_absent(
+        &readme,
+        &[
+            "capability registry",
+            "capability-registry",
+            "registry/index projection",
+            "capability::registry",
+            "CapabilityRegistrySnapshot",
+            "capability recipes",
+            "capability::search",
+            "capability::inspect",
+            "vector search",
+            "policy profile",
+            "policy-profile",
+        ],
+        "README capability substrate references",
     );
 }
 

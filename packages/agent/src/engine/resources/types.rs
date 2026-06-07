@@ -15,18 +15,6 @@ pub const UI_SURFACE_SCHEMA_ID: &str = "tron.resource.ui_surface.v1";
 pub const UI_CATALOG_ID: &str = "tron.ui.catalog.core.v1";
 /// Fixed first-party generated UI component catalog revision.
 pub const UI_CATALOG_REVISION: u64 = 1;
-/// Built-in module package resource kind.
-pub const WORKER_PACKAGE_KIND: &str = "worker_package";
-/// Built-in module package schema id.
-pub const WORKER_PACKAGE_SCHEMA_ID: &str = "tron.resource.worker_package.v1";
-/// Built-in module configuration resource kind.
-pub const MODULE_CONFIG_KIND: &str = "module_config";
-/// Built-in module configuration schema id.
-pub const MODULE_CONFIG_SCHEMA_ID: &str = "tron.resource.module_config.v1";
-/// Built-in module activation record resource kind.
-pub const ACTIVATION_RECORD_KIND: &str = "activation_record";
-/// Built-in module activation record schema id.
-pub const ACTIVATION_RECORD_SCHEMA_ID: &str = "tron.resource.activation_record.v1";
 /// Built-in harness documentation resource kind.
 pub const HARNESS_DOC_KIND: &str = "harness_doc";
 /// Built-in harness documentation schema id.

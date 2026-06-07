@@ -14,7 +14,6 @@ pub(crate) const LIST_FUNCTION: &str = "worker::list";
 pub(crate) const GET_FUNCTION: &str = "worker::get";
 pub(crate) const DISCONNECT_FUNCTION: &str = "worker::disconnect";
 pub(crate) const HEALTH_FUNCTION: &str = "worker::health";
-pub(crate) const PROTOCOL_GUIDE_FUNCTION: &str = "worker::protocol_guide";
 
 pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
     Ok(vec![
@@ -89,70 +88,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 }
             })),
         ),
-        host_dispatched_registration(worker_protocol_guide_function()),
     ])
-}
-
-fn worker_protocol_guide_function() -> crate::engine::FunctionDefinition {
-    let mut definition = primitive_function(
-        PROTOCOL_GUIDE_FUNCTION,
-        WORKER_WORKER_ID,
-        "return the model-readable /engine/workers authoring and registration guide",
-        EffectClass::PureRead,
-        "worker.read",
-    )
-    .with_request_schema(protocol_guide_schema())
-    .with_response_schema(json!({
-        "type": "object",
-        "required": [
-            "protocolVersion",
-            "endpoint",
-            "environment",
-            "messageFlow",
-            "functionDefinitionShape",
-            "pythonTemplate",
-            "spawnWorkerPayloadExample",
-            "rules"
-        ],
-        "additionalProperties": false,
-        "properties": {
-            "protocolVersion": {"type": "integer"},
-            "endpoint": {"type": "string"},
-            "environment": {"type": "object"},
-            "messageFlow": {"type": "array"},
-            "functionDefinitionShape": {"type": "object"},
-            "pythonTemplate": {"type": "string"},
-            "spawnWorkerPayloadExample": {"type": "object"},
-            "rules": {"type": "array", "items": {"type": "string"}}
-        }
-    }))
-    .with_tags(vec![
-        "worker".to_owned(),
-        "workers".to_owned(),
-        "protocol".to_owned(),
-        "register".to_owned(),
-        "registration".to_owned(),
-        "capability".to_owned(),
-        "capabilities".to_owned(),
-        "sandbox".to_owned(),
-        "spawn".to_owned(),
-    ]);
-    definition.metadata = json!({
-        "agentGuidance": [
-            "Use worker::protocol_guide before authoring a sandbox-created worker.",
-            "Write a local worker script from the returned template, then invoke worker::spawn with command, args, workerId, expectedFunctionIds, visibility, and idempotencyKey.",
-            "Do not search Tron source or probe HTTP paths to learn the worker protocol."
-        ],
-        "relatedCapabilities": [
-            "worker::spawn",
-            "sandbox::list_spawned_workers",
-            "sandbox::stop_spawned_worker",
-            "catalog::list",
-            "catalog::watch_snapshot",
-            "observability::trace_get"
-        ]
-    });
-    definition
 }
 
 fn list_schema() -> Value {
@@ -183,28 +119,6 @@ fn disconnect_schema() -> Value {
         "properties": {
             "workerId": {"type": "string"},
             "reason": {"type": "string"}
-        }
-    })
-}
-
-fn protocol_guide_schema() -> Value {
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-            "language": {
-                "type": "string",
-                "enum": ["python", "Python", "python3", "node", "Node", "nodejs", "node.js", "javascript", "JavaScript", "typescript", "TypeScript", "js", "ts"],
-                "description": "Requested template language. The current executable worker template is Python; JavaScript/TypeScript aliases are accepted so agents receive the current template instead of source-searching after a schema rejection."
-            },
-            "functionId": {
-                "type": "string",
-                "description": "Optional function id to include in examples, for example demo::echo."
-            },
-            "workerId": {
-                "type": "string",
-                "description": "Optional worker id to include in examples."
-            }
         }
     })
 }

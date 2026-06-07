@@ -2,11 +2,9 @@
 //!
 //! The control worker is a projection surface over existing substrate truth.
 //! It owns no durable state and exposes no mutation multiplexer. Action summary
-//! catalogs and module trust presentation projection live in focused submodules
-//! so the snapshot coordinator stays small.
+//! catalogs live in a focused submodule so the snapshot coordinator stays small.
 
 mod actions;
-mod trust_projection;
 
 use serde_json::{Value, json};
 
@@ -21,12 +19,10 @@ use super::{
 use crate::engine::discovery::FunctionQuery;
 use crate::engine::grants::{EngineGrantLifecycle, ListGrants};
 use crate::engine::resources::{
-    ACTIVATION_RECORD_KIND, EngineResource, EngineResourceInspection, ListResources,
-    MODULE_CONFIG_KIND, UI_SURFACE_KIND, WORKER_PACKAGE_KIND,
+    EngineResource, EngineResourceInspection, ListResources, UI_SURFACE_KIND,
 };
 use crate::engine::{EffectClass, EngineError, Invocation, Result, VisibilityScope, WorkerId};
 use actions::{actions_for_target, substrate_actions};
-use trust_projection::module_source_trust_summary;
 
 pub(crate) const SNAPSHOT_FUNCTION: &str = "control::snapshot";
 pub(crate) const INSPECT_FUNCTION: &str = "control::inspect";
@@ -39,7 +35,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             snapshot_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "modulePackages", "moduleConfigs", "activationRecords", "moduleHealth", "moduleSourceTrust", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
+                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
                 "additionalProperties": false,
                 "properties": {
                     "catalogRevision": {"type": "integer"},
@@ -47,11 +43,6 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                     "capabilities": {"type": "array"},
                     "resourceTypes": {"type": "array"},
                     "activeGoals": {"type": "array"},
-                    "modulePackages": {"type": "array"},
-                    "moduleConfigs": {"type": "array"},
-                    "activationRecords": {"type": "array"},
-                    "moduleHealth": {"type": "array"},
-                    "moduleSourceTrust": {"type": "array"},
                     "invocations": {"type": "array"},
                     "grants": {"type": "array"},
                     "queues": {"type": "array"},
@@ -123,7 +114,7 @@ fn inspect_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "grant", "goal", "package", "module_config", "activation", "resource", "invocation", "trace", "approval", "queue", "lease", "storage", "integrity"]
+                "enum": ["worker", "capability", "grant", "goal", "resource", "invocation", "trace", "approval", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "includeFullPayloads": {"type": "boolean"}
@@ -164,32 +155,6 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         .into_iter()
         .filter(|resource| !matches!(resource.lifecycle.as_str(), "completed" | "archived"))
         .collect::<Vec<_>>();
-    let module_packages = host.list_resources(ListResources {
-        kind: Some(WORKER_PACKAGE_KIND.to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit,
-    })?;
-    let module_configs = host.list_resources(ListResources {
-        kind: Some(MODULE_CONFIG_KIND.to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit,
-    })?;
-    let activation_records = host.list_resources(ListResources {
-        kind: Some(ACTIVATION_RECORD_KIND.to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit,
-    })?;
-    let module_health = activation_records
-        .iter()
-        .filter_map(|resource| activation_health_summary(host, resource).transpose())
-        .collect::<Result<Vec<_>>>()?;
-    let module_source_trust = module_packages
-        .iter()
-        .filter_map(|resource| module_source_trust_summary(host, resource).transpose())
-        .collect::<Result<Vec<_>>>()?;
     let invocations = latest_invocations(host.invocations(), limit)
         .iter()
         .map(|record| invocation_record_value(record, false))
@@ -209,11 +174,6 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "capabilities": capabilities,
         "resourceTypes": host.resource_type_definitions()?,
         "activeGoals": active_goals,
-        "modulePackages": module_packages,
-        "moduleConfigs": module_configs,
-        "activationRecords": activation_records,
-        "moduleHealth": module_health,
-        "moduleSourceTrust": module_source_trust,
         "invocations": invocations,
         "grants": grants,
         "queues": queues,
@@ -224,38 +184,6 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "availableActions": substrate_actions(),
         "uiSurfaceRefs": ui_surface_refs(host, limit)?,
     }))
-}
-
-fn activation_health_summary(
-    host: &dyn PrimitiveRuntimeHost,
-    resource: &EngineResource,
-) -> Result<Option<Value>> {
-    let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-        return Ok(None);
-    };
-    let Some(payload) = current_payload(&inspection) else {
-        return Ok(None);
-    };
-    Ok(Some(json!({
-        "activationResourceId": resource.resource_id,
-        "activationVersionId": resource.current_version_id,
-        "activationStatus": payload.get("activationStatus").cloned().unwrap_or(Value::Null),
-        "healthResult": payload.get("healthResult").cloned().unwrap_or(Value::Null),
-        "healthEvidenceRef": payload.get("healthEvidenceRef").cloned().unwrap_or(Value::Null),
-        "integrityDiagnostics": payload.get("integrityDiagnostics").cloned().unwrap_or(Value::Null),
-        "recovery": payload.get("recovery").cloned().unwrap_or(Value::Null),
-        "workerId": payload.get("workerId").cloned().unwrap_or(Value::Null),
-        "derivedGrantId": payload.get("derivedGrantId").cloned().unwrap_or(Value::Null),
-    })))
-}
-
-fn current_payload(inspection: &EngineResourceInspection) -> Option<&Value> {
-    let current = inspection.resource.current_version_id.as_ref()?;
-    inspection
-        .versions
-        .iter()
-        .find(|version| &version.version_id == current)
-        .map(|version| &version.payload)
 }
 
 fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
@@ -298,25 +226,6 @@ fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> 
         }
         "goal" | "resource" => {
             json!({ "resource": host.inspect_resource(target_id)? })
-        }
-        "package" => {
-            let resource_id = if target_id.starts_with("worker-package:") {
-                target_id.to_owned()
-            } else {
-                format!("worker-package:{target_id}")
-            };
-            json!({ "package": host.inspect_resource(&resource_id)? })
-        }
-        "module_config" => {
-            json!({ "moduleConfig": host.inspect_resource(target_id)? })
-        }
-        "activation" => {
-            let resource_id = if target_id.starts_with("activation:") {
-                target_id.to_owned()
-            } else {
-                format!("activation:{target_id}")
-            };
-            json!({ "activation": host.inspect_resource(&resource_id)? })
         }
         "invocation" => {
             let invocation = host

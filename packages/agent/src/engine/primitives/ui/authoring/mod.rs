@@ -1,5 +1,5 @@
-//! Server-owned generated UI authoring for resource, lineage, and module
-//! operator surfaces.
+//! Server-owned generated UI authoring for resource, lineage, and operator
+//! surfaces.
 
 use super::*;
 
@@ -323,63 +323,6 @@ pub(in crate::engine::primitives::ui) fn target_projection(
         RESOURCE_COLLECTION_TARGET => resource_collection_projection(host, request),
         SOURCE_CONTROL_TARGET => source_control_projection(host, request),
         AGENT_CONTROL_TARGET => agent_control_projection(host, invocation, request),
-        "package" => {
-            let resource_id = if request.target_id.starts_with("worker-package:") {
-                request.target_id.clone()
-            } else {
-                format!("worker-package:{}", request.target_id)
-            };
-            let inspection =
-                host.inspect_resource(&resource_id)?
-                    .ok_or_else(|| EngineError::NotFound {
-                        kind: "resource",
-                        id: resource_id.clone(),
-                    })?;
-            if inspection.resource.kind != "worker_package" {
-                return Err(EngineError::PolicyViolation(format!(
-                    "resource {resource_id} is {}, expected worker_package",
-                    inspection.resource.kind
-                )));
-            }
-            Ok(TargetProjection {
-                title: format!(
-                    "Pack {}",
-                    request
-                        .target_id
-                        .strip_prefix("worker-package:")
-                        .unwrap_or(&request.target_id)
-                ),
-                summary: format!(
-                    "{} / {}",
-                    inspection.resource.kind, inspection.resource.lifecycle
-                ),
-                revision: host.catalog_revision().0,
-                graph: bounded_json(json!({"package": inspection}), request.max_preview_bytes),
-            })
-        }
-        "module_config" => {
-            let inspection = host.inspect_resource(&request.target_id)?.ok_or_else(|| {
-                EngineError::NotFound {
-                    kind: "resource",
-                    id: request.target_id.clone(),
-                }
-            })?;
-            if inspection.resource.kind != "module_config" {
-                return Err(EngineError::PolicyViolation(format!(
-                    "resource {} is {}, expected module_config",
-                    request.target_id, inspection.resource.kind
-                )));
-            }
-            Ok(TargetProjection {
-                title: format!("Module Config {}", request.target_id),
-                summary: inspection.resource.lifecycle.clone(),
-                revision: host.catalog_revision().0,
-                graph: bounded_json(
-                    json!({"moduleConfig": inspection}),
-                    request.max_preview_bytes,
-                ),
-            })
-        }
         "decision" => {
             let inspection = host.inspect_resource(&request.target_id)?.ok_or_else(|| {
                 EngineError::NotFound {
@@ -398,31 +341,6 @@ pub(in crate::engine::primitives::ui) fn target_projection(
                 summary: inspection.resource.lifecycle.clone(),
                 revision: host.catalog_revision().0,
                 graph: bounded_json(json!({"decision": inspection}), request.max_preview_bytes),
-            })
-        }
-        "activation" => {
-            let resource_id = if request.target_id.starts_with("activation:") {
-                request.target_id.clone()
-            } else {
-                format!("activation:{}", request.target_id)
-            };
-            let inspection =
-                host.inspect_resource(&resource_id)?
-                    .ok_or_else(|| EngineError::NotFound {
-                        kind: "resource",
-                        id: resource_id.clone(),
-                    })?;
-            if inspection.resource.kind != "activation_record" {
-                return Err(EngineError::PolicyViolation(format!(
-                    "resource {resource_id} is {}, expected activation_record",
-                    inspection.resource.kind
-                )));
-            }
-            Ok(TargetProjection {
-                title: format!("Activation {}", request.target_id),
-                summary: inspection.resource.lifecycle.clone(),
-                revision: host.catalog_revision().0,
-                graph: bounded_json(json!({"activation": inspection}), request.max_preview_bytes),
             })
         }
         "invocation" => {
@@ -743,10 +661,7 @@ fn layout_for_projection(
     if request.target_type == "capability" {
         return capability_layout(projection, actions);
     }
-    if matches!(
-        request.target_type.as_str(),
-        "package" | "activation" | "decision" | "module_config"
-    ) {
+    if request.target_type == "decision" {
         return operator_action_layout(projection, actions);
     }
     json!({

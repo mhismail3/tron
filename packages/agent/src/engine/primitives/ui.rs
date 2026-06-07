@@ -749,26 +749,6 @@ fn risk_label(risk: &RiskLevel) -> &'static str {
     }
 }
 
-fn trust_review_operation_input_schema(with_operator_notes: bool) -> Value {
-    let mut required = vec!["operation"];
-    let mut properties = json!({
-        "operation": {
-            "type": "string",
-            "enum": super::module::TRUST_REVIEW_OPERATIONS
-        }
-    });
-    if with_operator_notes {
-        required.push("operatorNotes");
-        properties["operatorNotes"] = json!({"type": "string"});
-    }
-    json!({
-        "type": "object",
-        "required": required,
-        "additionalProperties": false,
-        "properties": properties
-    })
-}
-
 fn optional_u64(value: Option<&Value>) -> Result<Option<u64>> {
     match value {
         None | Some(Value::Null) => Ok(None),
@@ -795,10 +775,7 @@ fn ensure_supported_target_type(target_type: &str) -> Result<()> {
             | RESOURCE_COLLECTION_TARGET
             | SOURCE_CONTROL_TARGET
             | AGENT_CONTROL_TARGET
-            | "package"
-            | "module_config"
             | "decision"
-            | "activation"
             | "resource"
             | "invocation"
             | "grant"
