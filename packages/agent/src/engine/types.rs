@@ -843,8 +843,6 @@ pub struct TriggerDefinition {
     pub trigger_type: TriggerTypeId,
     /// Target function.
     pub target_function: FunctionId,
-    /// Required target revision, if pinned.
-    pub target_revision: Option<FunctionRevision>,
     /// Trigger config.
     pub config: Value,
     /// Delivery mode.
@@ -877,7 +875,6 @@ impl TriggerDefinition {
             owner_worker,
             trigger_type,
             target_function,
-            target_revision: None,
             config: Value::Null,
             delivery_mode: DeliveryMode::Sync,
             authority_grant,

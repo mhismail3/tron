@@ -114,7 +114,6 @@ fn sqlite_queue_blobs_large_payload_but_claim_returns_original_payload() {
         .enqueue(super::queue::EnqueueInvocation {
             queue: "agent".to_owned(),
             function_id: fid("agent::run_turn"),
-            target_revision: Some(FunctionRevision(1)),
             payload: large.clone(),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,

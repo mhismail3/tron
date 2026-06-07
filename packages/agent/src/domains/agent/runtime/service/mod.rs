@@ -11,7 +11,7 @@ use crate::domains::agent::runner::orchestrator::agent_runner::run_agent;
 use crate::domains::agent::runner::orchestrator::orchestrator::StartedRun;
 use crate::domains::agent::runner::types::{AgentConfig, RunContext};
 
-use crate::engine::{CausalContext, FunctionId, FunctionRevision, InvocationId};
+use crate::engine::{CausalContext, FunctionId, InvocationId};
 use crate::shared::server::context::AgentDeps;
 
 use super::cleanup::{PromptRunCleanup, ShutdownCancelForwarder};

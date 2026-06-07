@@ -1,4 +1,4 @@
-use super::{CausalContext, FunctionId, FunctionRevision, InvocationId};
+use super::{CausalContext, FunctionId, InvocationId};
 use crate::engine::Invocation;
 use std::sync::Arc;
 
@@ -20,7 +20,6 @@ pub struct PromptEngineCausality {
     pub(super) parent_invocation_id: Option<InvocationId>,
     pub(super) invocation_id: InvocationId,
     pub(super) function_id: FunctionId,
-    pub(super) expected_function_revision: Option<FunctionRevision>,
     pub(super) idempotency_key: Option<String>,
 }
 
@@ -32,7 +31,6 @@ impl PromptEngineCausality {
             parent_invocation_id: Some(invocation.id.clone()),
             invocation_id: invocation.id.clone(),
             function_id: invocation.function_id.clone(),
-            expected_function_revision: invocation.expected_function_revision,
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
         }
     }

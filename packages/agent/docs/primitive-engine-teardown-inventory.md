@@ -54,7 +54,10 @@ OpenAI hosted search/computer-call DTO and stream variants, stale iOS capability
 catalog DTO/rendering support, the fixed iOS SessionTree projection, and Mac
 Screen Recording/Accessibility onboarding gates. It also collapsed the
 top-level `capability_support` domain into the agent runner's primitive surface
-resolver. Remaining PET-11 successor rows below still need final retain/delete
+resolver. The queue/trigger/prompt envelope checkpoint then removed
+pre-execution target revision, expected function revision, target function id,
+and catalog revision state from retained queue, trigger, and prompt handoff
+surfaces. Remaining PET-11 successor rows below still need final retain/delete
 proof before closeout.
 
 | Domain | Class | Teardown decision |
@@ -106,9 +109,9 @@ PET-3/PET-5/PET-7 must collapse them to loop infrastructure.
 |--------|-------|-------------------|
 | `stream` | retain | Event stream truth for transport subscriptions and evidence. |
 | `state` | retain | Candidate substrate for the agent-owned state workspace. |
-| `queue` | retain | Crash-safe turn and trigger progress. Delete product queue affordances. |
+| `queue` | retain | Crash-safe turn and trigger progress. PET-11 removed pre-execution target revision pins from queue items and enqueue requests; queued work now carries authority, trace, session/workspace, trigger, idempotency, metadata, target id, and payload only. Delete product queue affordances. |
 | `resource` | retain | Durable refs/versions for state, evidence, assistant outputs, and generated surfaces. |
-| `trigger` | retain | Keep only transport/queue trigger infrastructure required by the loop. Delete cron/product trigger registrations. |
+| `trigger` | retain | Keep only transport/queue trigger infrastructure required by the loop. PET-11 removed trigger target-revision pins and target/catalog identity from dispatch responses. Delete cron/product trigger registrations. |
 | `grant` | retain | Keep minimal host integrity and scoped authority records. Delete product trust-tier and worker-pack policy assumptions. |
 | `approval` | delete | Approval prompts and policy workflow are product-coded. Keep no approval prompt plane unless reduced to a hard infrastructure block for irreversible host risk. |
 | `catalog` | retain | Keep internal registry mechanics only if needed by host dispatch; do not expose model-facing catalog discovery. |

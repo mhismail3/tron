@@ -353,7 +353,6 @@ async fn queue_failure_event_records_updated_retry_state() {
         .enqueue_invocation(crate::engine::EnqueueInvocation {
             queue: "default".to_owned(),
             function_id: fid("alpha::flaky"),
-            target_revision: None,
             payload: json!({"message": "fail once"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,
@@ -467,7 +466,6 @@ async fn queue_cancel_during_claim_preserves_terminal_cancelled_state() {
         .enqueue_invocation(crate::engine::EnqueueInvocation {
             queue: "default".to_owned(),
             function_id: fid("alpha::blocked"),
-            target_revision: None,
             payload: json!({"message": "block"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,
@@ -588,7 +586,6 @@ async fn queue_terminal_failure_publishes_dead_letter_lifecycle_event() {
         .enqueue_invocation(crate::engine::EnqueueInvocation {
             queue: "default".to_owned(),
             function_id: fid("alpha::always_fail"),
-            target_revision: None,
             payload: json!({"message": "fail"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,
@@ -703,7 +700,6 @@ async fn queue_inspection_records_replay_lease_and_compensation_refs() {
         .enqueue_invocation(crate::engine::EnqueueInvocation {
             queue: "default".to_owned(),
             function_id: fid("alpha::compensated_write"),
-            target_revision: None,
             payload: json!({"sessionId": "session-a", "message": "first"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,
@@ -767,7 +763,6 @@ async fn queue_inspection_records_replay_lease_and_compensation_refs() {
         .enqueue_invocation(crate::engine::EnqueueInvocation {
             queue: "default".to_owned(),
             function_id: fid("alpha::compensated_write"),
-            target_revision: None,
             payload: json!({"sessionId": "session-a", "message": "first"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,

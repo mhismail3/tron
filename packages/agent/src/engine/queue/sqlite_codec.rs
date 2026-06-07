@@ -36,9 +36,6 @@ pub(super) fn item_params(
         SqlValue::Text(item.receipt_id.clone()),
         SqlValue::Text(item.queue.clone()),
         SqlValue::Text(item.function_id.to_string()),
-        item.target_revision
-            .map(|revision| SqlValue::Integer(revision.0 as i64))
-            .unwrap_or(SqlValue::Null),
         SqlValue::Text(payload),
         SqlValue::Text(item.actor_id.to_string()),
         SqlValue::Text(format!("{:?}", item.actor_kind)),
@@ -92,46 +89,44 @@ pub(super) fn row_to_queue_item(
     conn: &Connection,
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<EngineQueueItem> {
-    let payload_json: String = row.get(4)?;
+    let payload_json: String = row.get(3)?;
     let payload = crate::shared::storage::resolve_stored_json_value(conn, &payload_json)
         .map_err(storage_to_sql_err)?;
-    let scopes_json: String = row.get(8)?;
-    let runtime_metadata_json: String = row.get(22)?;
-    let attempt_records_json: String = row.get(23)?;
-    let target_revision: Option<i64> = row.get(3)?;
-    let parent_invocation_id: Option<String> = row.get(10)?;
-    let trigger_id: Option<String> = row.get(11)?;
+    let scopes_json: String = row.get(7)?;
+    let runtime_metadata_json: String = row.get(21)?;
+    let attempt_records_json: String = row.get(22)?;
+    let parent_invocation_id: Option<String> = row.get(9)?;
+    let trigger_id: Option<String> = row.get(10)?;
     Ok(EngineQueueItem {
         receipt_id: row.get(0)?,
         queue: row.get(1)?,
         function_id: FunctionId::new(row.get::<_, String>(2)?)
             .expect("stored queue function id should be valid"),
-        target_revision: target_revision.map(|value| FunctionRevision(value as u64)),
         payload,
-        actor_id: ActorId::new(row.get::<_, String>(5)?)
+        actor_id: ActorId::new(row.get::<_, String>(4)?)
             .expect("stored queue actor id should be valid"),
-        actor_kind: actor_kind_from_str(&row.get::<_, String>(6)?),
-        authority_grant_id: AuthorityGrantId::new(row.get::<_, String>(7)?)
+        actor_kind: actor_kind_from_str(&row.get::<_, String>(5)?),
+        authority_grant_id: AuthorityGrantId::new(row.get::<_, String>(6)?)
             .expect("stored queue authority id should be valid"),
         authority_scopes: serde_json::from_str(&scopes_json).unwrap_or_default(),
         runtime_metadata: serde_json::from_str(&runtime_metadata_json).unwrap_or_default(),
-        trace_id: TraceId::new(row.get::<_, String>(9)?)
+        trace_id: TraceId::new(row.get::<_, String>(8)?)
             .expect("stored queue trace id should be valid"),
         parent_invocation_id: parent_invocation_id.and_then(|id| InvocationId::new(id).ok()),
         trigger_id: trigger_id.and_then(|id| TriggerId::new(id).ok()),
-        session_id: row.get(12)?,
-        workspace_id: row.get(13)?,
-        idempotency_key: row.get(14)?,
-        status: status_from_str(&row.get::<_, String>(15)?),
-        attempts: row.get::<_, i64>(16)? as u32,
+        session_id: row.get(11)?,
+        workspace_id: row.get(12)?,
+        idempotency_key: row.get(13)?,
+        status: status_from_str(&row.get::<_, String>(14)?),
+        attempts: row.get::<_, i64>(15)? as u32,
         attempt_records: serde_json::from_str(&attempt_records_json).unwrap_or_default(),
-        lease_owner: row.get(17)?,
+        lease_owner: row.get(16)?,
         lease_expires_at: row
-            .get::<_, Option<String>>(18)?
+            .get::<_, Option<String>>(17)?
             .and_then(|value| parse_time(&value)),
-        not_before: parse_time(&row.get::<_, String>(19)?).unwrap_or_else(Utc::now),
-        created_at: parse_time(&row.get::<_, String>(20)?).unwrap_or_else(Utc::now),
-        updated_at: parse_time(&row.get::<_, String>(21)?).unwrap_or_else(Utc::now),
+        not_before: parse_time(&row.get::<_, String>(18)?).unwrap_or_else(Utc::now),
+        created_at: parse_time(&row.get::<_, String>(19)?).unwrap_or_else(Utc::now),
+        updated_at: parse_time(&row.get::<_, String>(20)?).unwrap_or_else(Utc::now),
     })
 }
 

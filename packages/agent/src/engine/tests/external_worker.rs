@@ -554,7 +554,6 @@ async fn queued_external_worker_disconnect_records_queue_retry_not_failed_target
         .enqueue_invocation(EnqueueInvocation {
             queue: "default".to_owned(),
             function_id: fid("local_queue::echo"),
-            target_revision: None,
             payload: json!({"message": "retry"}),
             actor_id: actor("agent"),
             actor_kind: ActorKind::Agent,

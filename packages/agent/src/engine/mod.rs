@@ -40,13 +40,10 @@
 //!   evidence, decisions, generated UI surfaces, trace records, and
 //!   materialized files are modeled as versioned resources with links and
 //!   events instead of separate persistence planes;
-//! - generated UI surfaces are fixed-catalog `ui_surface` resources; the engine
-//!   can author deterministic target surfaces from substrate projections,
-//!   validate/refresh/expire generated versions, and clients render the
-//!   declared component tree while submitting stored action ids through
-//!   `ui::submit_action` so the engine leases the generated-action surface,
-//!   reconstructs and authorizes the target capability invocation, and records
-//!   the submit/child lineage;
+//! - runtime UI surfaces are schema-versioned `ui_surface` resources; the
+//!   engine stores and validates the declared component tree while
+//!   `ui::submit_action` records generic action submissions without
+//!   server-authored target routing;
 //! - durable-output capabilities declare output contracts and finish validation
 //!   requires canonical resource refs for every resource-backed path;
 //! - the trigger runtime records trigger metadata, transport/domain authority

@@ -125,15 +125,6 @@ pub fn validate_trigger_registration(
             function.id
         )));
     }
-    if let Some(target_revision) = trigger.target_revision {
-        if target_revision != function.revision {
-            return Err(EngineError::StaleFunctionRevision {
-                function_id: function.id.to_string(),
-                expected: target_revision.0,
-                actual: function.revision.0,
-            });
-        }
-    }
     Ok(())
 }
 

@@ -29,7 +29,6 @@ use serde_json::Value;
 use super::discovery::ActorKind;
 use super::errors::{EngineError, Result};
 use super::ids::{ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId};
-use super::types::FunctionRevision;
 
 mod runtime;
 mod sqlite_codec;
@@ -116,8 +115,6 @@ pub struct EngineQueueItem {
     pub queue: String,
     /// Target function id.
     pub function_id: FunctionId,
-    /// Target revision captured by the trigger, if any.
-    pub target_revision: Option<FunctionRevision>,
     /// Payload to invoke.
     pub payload: Value,
     /// Actor id.
@@ -167,8 +164,6 @@ pub struct EnqueueInvocation {
     pub queue: String,
     /// Target function id.
     pub function_id: FunctionId,
-    /// Target revision.
-    pub target_revision: Option<FunctionRevision>,
     /// Payload.
     pub payload: Value,
     /// Actor id.
@@ -216,7 +211,6 @@ impl InMemoryEngineQueueStore {
             receipt_id: InvocationId::generate().to_string(),
             queue: request.queue,
             function_id: request.function_id,
-            target_revision: request.target_revision,
             payload: request.payload,
             actor_id: request.actor_id,
             actor_kind: request.actor_kind,
@@ -467,7 +461,6 @@ CREATE TABLE IF NOT EXISTS engine_queue_items (
   receipt_id TEXT PRIMARY KEY,
   queue TEXT NOT NULL,
   function_id TEXT NOT NULL,
-  target_revision INTEGER,
   payload_json TEXT NOT NULL,
   actor_id TEXT NOT NULL,
   actor_kind TEXT NOT NULL,
@@ -561,7 +554,6 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
             receipt_id: InvocationId::generate().to_string(),
             queue: request.queue,
             function_id: request.function_id,
-            target_revision: request.target_revision,
             payload: request.payload,
             actor_id: request.actor_id,
             actor_kind: request.actor_kind,
@@ -818,14 +810,14 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
         self.conn
             .execute(
                 "INSERT INTO engine_queue_items (
-                   receipt_id, queue, function_id, target_revision, payload_json,
+                   receipt_id, queue, function_id, payload_json,
                    actor_id, actor_kind, authority_grant_id, authority_scopes_json,
                    trace_id, parent_invocation_id, trigger_id, session_id, workspace_id,
                    idempotency_key, status, attempts, lease_owner, lease_expires_at,
                    not_before, created_at, updated_at, runtime_metadata_json,
                    attempt_records_json
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                           ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                           ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
                 item_params(&self.conn, item)?,
             )
             .map_err(|err| sqlite_err("queue.insert", err.to_string()))?;
@@ -838,27 +830,26 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
                 "UPDATE engine_queue_items SET
                    queue = ?2,
                    function_id = ?3,
-                   target_revision = ?4,
-                   payload_json = ?5,
-                   actor_id = ?6,
-                   actor_kind = ?7,
-                   authority_grant_id = ?8,
-                   authority_scopes_json = ?9,
-                   trace_id = ?10,
-                   parent_invocation_id = ?11,
-                   trigger_id = ?12,
-                   session_id = ?13,
-                   workspace_id = ?14,
-                   idempotency_key = ?15,
-                   status = ?16,
-                   attempts = ?17,
-                   lease_owner = ?18,
-                   lease_expires_at = ?19,
-                   not_before = ?20,
-                   created_at = ?21,
-                   updated_at = ?22,
-                   runtime_metadata_json = ?23,
-                   attempt_records_json = ?24
+                   payload_json = ?4,
+                   actor_id = ?5,
+                   actor_kind = ?6,
+                   authority_grant_id = ?7,
+                   authority_scopes_json = ?8,
+                   trace_id = ?9,
+                   parent_invocation_id = ?10,
+                   trigger_id = ?11,
+                   session_id = ?12,
+                   workspace_id = ?13,
+                   idempotency_key = ?14,
+                   status = ?15,
+                   attempts = ?16,
+                   lease_owner = ?17,
+                   lease_expires_at = ?18,
+                   not_before = ?19,
+                   created_at = ?20,
+                   updated_at = ?21,
+                   runtime_metadata_json = ?22,
+                   attempt_records_json = ?23
                  WHERE receipt_id = ?1",
                 item_params(&self.conn, item)?,
             )

@@ -30,18 +30,6 @@ pub(crate) async fn publish_prompt_runtime_stream(
             serde_json::json!(causality.function_id.as_str()),
         );
         object.insert(
-            "catalogRevision".to_owned(),
-            serde_json::json!(causality.context.catalog_revision.0),
-        );
-        object.insert(
-            "expectedFunctionRevision".to_owned(),
-            serde_json::json!(
-                causality
-                    .expected_function_revision
-                    .map(|revision| revision.0)
-            ),
-        );
-        object.insert(
             "idempotencyKey".to_owned(),
             serde_json::json!(causality.idempotency_key.clone()),
         );

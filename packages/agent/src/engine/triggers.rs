@@ -102,7 +102,6 @@ impl EngineTriggerRuntime {
                 let enqueue = EnqueueInvocation {
                     queue,
                     function_id: invocation.function_id.clone(),
-                    target_revision: invocation.expected_function_revision,
                     payload: invocation.payload.clone(),
                     actor_id: invocation.causal_context.actor_id.clone(),
                     actor_kind: invocation.causal_context.actor_kind.clone(),
@@ -257,15 +256,12 @@ impl EngineTriggerRuntime {
             context = context.with_idempotency_key(key.clone());
         }
 
-        let mut invocation = Invocation::new_sync(
+        let invocation = Invocation::new_sync(
             trigger.target_function.clone(),
             request.payload.clone(),
             context,
         )
         .with_delivery_mode(trigger.delivery_mode);
-        if let Some(revision) = trigger.target_revision {
-            invocation = invocation.expecting_revision(revision);
-        }
         Ok(PreparedTriggerInvocation {
             trigger,
             invocation,

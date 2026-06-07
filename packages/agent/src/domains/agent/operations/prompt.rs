@@ -4,7 +4,7 @@ use super::{
 };
 use crate::domains::agent::Deps;
 use crate::domains::agent::runtime::service::spawn_prompt_run;
-use crate::engine::{ActorContext, FunctionId, FunctionRevision, Invocation};
+use crate::engine::{FunctionId, Invocation};
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::opt_array;
 use crate::shared::server::params::opt_string;
@@ -105,7 +105,6 @@ pub(crate) async fn run_turn_value(
             "runId": run_id,
             "model": session.latest_model,
             "provider": "unknown",
-            "catalogRevision": invocation.causal_context.catalog_revision.0,
         }),
     )
     .await;
@@ -212,9 +211,7 @@ pub(crate) async fn invoke_agent_function_sync(
     context.authority_scopes = authority_scopes;
     context.idempotency_key = Some(format!("{idempotency_prefix}:{}", invocation.id));
     context.delivery_mode = crate::engine::DeliveryMode::Sync;
-    let mut child = Invocation::new_sync(function_id.clone(), payload, context);
-    child.expected_function_revision =
-        target_revision_for_enqueue(&deps.engine_host, &function_id, invocation).await?;
+    let child = Invocation::new_sync(function_id.clone(), payload, context);
     publish_prompt_stream(
         invocation,
         deps,
@@ -261,31 +258,4 @@ pub(crate) async fn publish_prompt_stream(
     crate::domains::agent::stream::AgentStreamPublisher::new(&deps.engine_host)
         .prompt(invocation, session_id, action, payload)
         .await;
-}
-
-async fn target_revision_for_enqueue(
-    engine_host: &crate::engine::EngineHostHandle,
-    function_id: &FunctionId,
-    invocation: &Invocation,
-) -> Result<Option<FunctionRevision>, CapabilityError> {
-    let mut actor = ActorContext::new(
-        invocation.causal_context.actor_id.clone(),
-        invocation.causal_context.actor_kind.clone(),
-        invocation.causal_context.authority_grant_id.clone(),
-    );
-    actor.authority_scopes = invocation.causal_context.authority_scopes.clone();
-    add_scope_once(&mut actor.authority_scopes, ENGINE_INTERNAL_INVOKE_SCOPE);
-    actor.session_id = invocation.causal_context.session_id.clone();
-    actor.workspace_id = invocation.causal_context.workspace_id.clone();
-    let function = engine_host
-        .inspect_function(function_id, Some(&actor))
-        .await
-        .map_err(crate::shared::server::error_mapping::engine_error_to_capability_error)?;
-    Ok(Some(function.revision))
-}
-
-fn add_scope_once(scopes: &mut Vec<String>, scope: &str) {
-    if !scopes.iter().any(|existing| existing == scope) {
-        scopes.push(scope.to_owned());
-    }
 }

@@ -11,8 +11,7 @@ use super::{
 };
 use crate::engine::queue::{queue_failure_event_type, queue_lifecycle_stream_event};
 use crate::engine::{
-    EffectClass, EngineError, FunctionRevision, IdempotencyContract, InProcessFunctionHandler,
-    Invocation, Result,
+    EffectClass, EngineError, IdempotencyContract, InProcessFunctionHandler, Invocation, Result,
 };
 
 pub(super) fn registrations(
@@ -160,8 +159,6 @@ impl InProcessFunctionHandler for QueuePrimitiveHandler {
                 let item = store.enqueue(crate::engine::EnqueueInvocation {
                     queue,
                     function_id,
-                    target_revision: optional_u64(invocation.payload.get("targetRevision"))?
-                        .map(FunctionRevision),
                     payload,
                     actor_id: invocation.causal_context.actor_id.clone(),
                     actor_kind: invocation.causal_context.actor_kind.clone(),
@@ -253,7 +250,6 @@ fn queue_enqueue_schema() -> Value {
         "properties": {
             "queue": {"type": "string"},
             "functionId": {"type": "string"},
-            "targetRevision": {"type": "integer"},
             "payload": {}
         }
     })

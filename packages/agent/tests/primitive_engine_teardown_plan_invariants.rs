@@ -1982,6 +1982,39 @@ fn dynamic_runtime_surfaces_are_schema_rendering_not_target_authoring() {
 }
 
 #[test]
+fn queue_trigger_and_prompt_envelopes_do_not_pin_preexecution_catalog_state() {
+    let retained_envelope = [
+        read_repo_file("packages/agent/src/engine/queue.rs"),
+        read_repo_file("packages/agent/src/engine/queue/runtime.rs"),
+        read_repo_file("packages/agent/src/engine/queue/sqlite_codec.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/queue.rs"),
+        read_repo_file("packages/agent/src/engine/triggers.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/trigger.rs"),
+        read_repo_file("packages/agent/src/engine/types.rs"),
+        read_repo_file("packages/agent/src/engine/policy.rs"),
+        read_repo_file("packages/agent/src/domains/agent/operations/prompt.rs"),
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/deps.rs"),
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/events.rs"),
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/execute.rs"),
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/queue.rs"),
+        read_repo_file("packages/agent/src/domains/agent/stream.rs"),
+    ]
+    .join("\n");
+    assert_absent(
+        &retained_envelope,
+        &[
+            "targetRevision",
+            "target_revision",
+            "expectedFunctionRevision",
+            "expected_function_revision",
+            "targetFunctionId",
+            "catalogRevision",
+        ],
+        "retained queue/trigger/prompt runtime envelope",
+    );
+}
+
+#[test]
 fn user_interaction_pause_plane_is_deleted_from_retained_sources() {
     let retained_sources = read_repo_source_trees(&[
         "packages/agent/src",

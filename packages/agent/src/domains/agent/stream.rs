@@ -39,7 +39,6 @@ impl<'a> AgentStreamPublisher<'a> {
                         .parent_invocation_id
                         .as_ref()
                         .map(|id| id.as_str()),
-                    "catalogRevision": invocation.causal_context.catalog_revision.0,
                     "idempotencyKey": invocation.causal_context.idempotency_key.clone(),
                     "payload": payload,
                 }),

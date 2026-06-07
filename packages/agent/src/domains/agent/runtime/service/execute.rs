@@ -135,10 +135,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
                         .map(|id| id.as_str())
                 ),
             );
-            object.insert(
-                "catalogRevision".to_owned(),
-                serde_json::json!(causality.context.catalog_revision.0),
-            );
         }
     }
     if let Err(error) =

@@ -30,23 +30,6 @@ fn trigger_registration_validates_owner_type_target_and_delivery() {
     let rev = catalog.register_trigger(trigger, true).unwrap();
     assert_eq!(rev.0, 1);
 
-    let mut stale_target = TriggerDefinition::new(
-        TriggerId::new("t-stale").unwrap(),
-        wid("w1"),
-        TriggerTypeId::new("cron").unwrap(),
-        fid("alpha::read"),
-        grant("grant"),
-    );
-    stale_target.target_revision = Some(FunctionRevision(99));
-    assert!(matches!(
-        catalog.register_trigger(stale_target, true),
-        Err(EngineError::StaleFunctionRevision {
-            expected: 99,
-            actual: 1,
-            ..
-        })
-    ));
-
     let unsupported = TriggerDefinition::new(
         TriggerId::new("t2").unwrap(),
         wid("w1"),
@@ -604,7 +587,7 @@ async fn trigger_runtime_target_failures_keep_trigger_metadata_in_ledger() {
 }
 
 #[tokio::test]
-async fn trigger_runtime_stale_target_revision_records_attempt() {
+async fn trigger_runtime_records_current_target_revision_after_promotion() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
         .register_worker_for_setup(worker("alpha", "alpha"), false)
@@ -626,14 +609,13 @@ async fn trigger_runtime_stale_target_revision_records_attempt() {
         .register_function_for_setup(target, Some(handler()), false)
         .unwrap();
     let trigger_id = TriggerId::new("manual:alpha.echo").unwrap();
-    let mut trigger = TriggerDefinition::new(
+    let trigger = TriggerDefinition::new(
         trigger_id.clone(),
         wid("alpha"),
         TriggerTypeId::new("manual").unwrap(),
         fid("alpha::echo"),
         grant("manual-grant"),
     );
-    trigger.target_revision = Some(revision);
     handle.register_trigger_for_setup(trigger, false).unwrap();
     handle
         .promote_function_visibility(
@@ -653,10 +635,7 @@ async fn trigger_runtime_stale_target_revision_records_attempt() {
     );
     request.workspace_id = Some("workspace-a".to_owned());
     let result = EngineTriggerRuntime::dispatch(&handle, request).await;
-    assert!(matches!(
-        result.error,
-        Some(EngineError::StaleFunctionRevision { .. })
-    ));
+    assert_eq!(result.error, None);
 
     let host = handle.lock().await;
     let record = host.catalog().invocations().last().unwrap();
@@ -664,12 +643,9 @@ async fn trigger_runtime_stale_target_revision_records_attempt() {
     assert_eq!(record.trigger_id, Some(trigger_id));
     assert!(
         record.function_revision > revision,
-        "ledger should record the actual target revision that caused the stale-target failure"
+        "ledger should record the current target revision at execution time"
     );
-    assert!(matches!(
-        record.error.as_ref(),
-        Some(EngineError::StaleFunctionRevision { .. })
-    ));
+    assert_eq!(record.error, None);
 }
 
 #[tokio::test]

@@ -79,9 +79,8 @@ impl EngineQueueRuntime {
             context = context.with_idempotency_key(attempt_key);
         }
         context.delivery_mode = DeliveryMode::Sync;
-        let mut invocation =
+        let invocation =
             Invocation::new_sync(item.function_id.clone(), item.payload.clone(), context);
-        invocation.expected_function_revision = item.target_revision;
         let target = handle.invoke_queue_target(invocation).await;
         let attempt = queue_attempt_record(&item, &target);
         let recorded_invocation = target.recorded_invocation;

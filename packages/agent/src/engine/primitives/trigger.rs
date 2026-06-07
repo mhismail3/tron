@@ -88,9 +88,7 @@ impl TriggerPrimitiveHandler {
         let mut response = json!({
             "dispatched": true,
             "triggerId": trigger_id.as_str(),
-            "targetFunctionId": result.function_id.as_str(),
-            "targetInvocationId": result.invocation_id.as_str(),
-            "catalogRevision": result.catalog_revision.0,
+            "invocationId": result.invocation_id.as_str(),
             "traceId": result.trace_id.as_str(),
             "result": target_result,
         });
@@ -155,14 +153,12 @@ fn trigger_dispatch_schema() -> Value {
 fn trigger_dispatch_response_schema() -> Value {
     json!({
         "type": "object",
-        "required": ["dispatched", "triggerId", "targetFunctionId", "targetInvocationId", "catalogRevision", "traceId", "queued", "result"],
+        "required": ["dispatched", "triggerId", "invocationId", "traceId", "queued", "result"],
         "additionalProperties": false,
         "properties": {
             "dispatched": {"type": "boolean"},
             "triggerId": {"type": "string"},
-            "targetFunctionId": {"type": "string"},
-            "targetInvocationId": {"type": "string"},
-            "catalogRevision": {"type": "integer"},
+            "invocationId": {"type": "string"},
             "traceId": {"type": "string"},
             "deliveryMode": {"type": "string"},
             "queued": {"type": "boolean"},
