@@ -129,6 +129,14 @@ Current living entry points:
   the old technical console as the primary product surface.
 - `packages/agent/docs/worker-first-product-evidence-manifest.md`: companion
   evidence manifest for the completed worker-first product scorecard.
+- `packages/agent/docs/primitive-engine-teardown-scorecard.md`: active
+  clean-break primitive engine teardown scorecard for stripping hard-coded
+  capabilities, policies, skills, rules, worker packs, and fixed iOS product
+  surfaces down to the smallest provider loop, single `execute` primitive,
+  agent-owned state workspace, event/ledger truth, and dynamic client shell.
+- `packages/agent/docs/primitive-engine-teardown-evidence-manifest.md`:
+  companion evidence manifest for the active primitive engine teardown
+  scorecard.
 - `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
   for worker-led autonomous work, the Work dashboard, Worker Packs, Generated
   Controls, Audit Details, trust labels, and model presets.

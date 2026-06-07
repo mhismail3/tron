@@ -1,0 +1,268 @@
+# Primitive Engine Teardown Scorecard
+
+Created: 2026-06-06
+
+Initial score: **0/100**
+
+Current score: **5/100**
+
+Status: **active planning artifact**
+
+Branch: `codex/primitive-engine-teardown`
+
+Evidence manifest:
+[`primitive-engine-teardown-evidence-manifest.md`](primitive-engine-teardown-evidence-manifest.md)
+
+Scope:
+- Strip Tron to the smallest useful primitive agent harness: process
+  bootstrap, provider/auth configuration, durable session state, event/ledger
+  truth, one model-facing `execute` tool, a minimal agent-owned state
+  workspace, and the iOS shell needed to send prompts and render dynamic
+  runtime output.
+- Remove hard-coded first-party capabilities, capability recipes, policies,
+  worker packs, skills, rules, product dashboards, and typed UI modes unless a
+  row proves they are true loop infrastructure that the agent cannot bootstrap
+  itself.
+- Keep hardened engine lessons where they are primitives: idempotent
+  invocation records, traceable events, resource/version truth, provider
+  accounting, crash recovery, and simulator-verified UI behavior.
+- Treat this as a clean-break branch. There are no users and no compatibility
+  obligations.
+
+There are no users and no compatibility obligations.
+
+Out of scope:
+- Designing the full self-adapting agent after the teardown. This scorecard
+  stops when the branch cannot delete more hard-coded harness surface without
+  breaking the primitive loop.
+- Production migration, old database compatibility, release packaging, app
+  store behavior, or preserving old capability names.
+- Rebuilding every removed feature as agent-authored runtime state. A successor
+  scorecard owns the self-construction phase after this branch proves the bare
+  harness.
+
+## Summary
+
+This campaign turns the current worker-first product branch into a bare-metal
+agent-engine experiment. The durable truth owner remains the Rust server and its
+engine/session/event stores. The iOS app becomes a transport and rendering shell.
+Everything else must justify itself against the primitive model below. If a
+feature is a product capability, a policy opinion, a fixed workflow, a typed
+dashboard, a hard-coded skill, a capability recipe, a compatibility bridge, or a
+shortcut around the loop, it is deleted or moved behind the agent-owned state
+workspace.
+
+## Non-Negotiable Direction
+
+- No backward compatibility: no aliases for retired capabilities, no old DTO
+  adapters, no migrations for old product surfaces, no soft-deprecated paths,
+  and no compatibility fallbacks.
+- No prompt-expanded toolbox: the model receives one initial tool, `execute`.
+- No hard-coded product skills or rules: the only static instruction is the
+  agent soul.
+- No fixed iOS product modes: iOS keeps connection, prompt input, session
+  navigation, settings needed to reach the server/provider, and generic dynamic
+  rendering.
+- No hidden policy plane: safety, trust, and access constraints are either
+  hard infrastructure invariants or agent-owned state. Middle-layer product
+  policies are deletion candidates.
+- No "planned" pass credit: every point requires code, docs, tests, and
+  evidence.
+
+## Primitive And Plane Budget
+
+Retain a component only when it fits one of these primitive classes:
+
+| Class | Retention test | Current likely examples |
+|-------|----------------|-------------------------|
+| Boot infrastructure | Required before the first agent turn can run. | `main_runtime`, health endpoint, profile/home resolution, provider/auth loading, database open/migration for the retained stores. |
+| Provider loop | Required to call a model and feed back tool results. | Provider clients, model routing, token usage/cost capture, streaming assembly, turn retry/recovery. |
+| Session truth | Required to preserve user prompts, assistant output, state reconstruction, and crash-safe turn progress. | Session event store, message/event DTOs needed by the loop, queue entries for in-flight turns. |
+| Execution primitive | Required to let the agent act and later create its own capabilities. | One `execute` host primitive with trace, idempotency, resource refs, output capture, and bounded host access. |
+| Agent-owned state workspace | Required so the agent can store its soul, memory, learned rules, generated capabilities, and UI descriptions as data. | A minimal resource/file state root plus typed refs in events. |
+| Observability | Required to prove what happened and debug the loop. | Invocation ledger, trace ids, compact logs, failure records, simulator screenshots. |
+| Client shell | Required for the user to talk to the loop and inspect generic runtime output. | iOS WebSocket client, prompt composer, message list, generic surface renderer, minimal settings/onboarding. |
+
+Delete or prove primitive status for these current planes:
+
+| Plane | Default action | Why |
+|-------|----------------|-----|
+| Domain capability catalog (`filesystem`, `git`, `worktree`, `browser`, `display`, `notifications`, `plan`, `process`, `program`, `prompt_library`, `cron`, `voice_notes`, `transcription`, `mcp`, `sandbox`, `self_extension`, `module`, and similar) | Delete as registered first-party capabilities. | They are product/tool opinions. The agent should build or install equivalents as state/capabilities after bootstrap. |
+| Capability registry, recipes, bindings, conformance, vector search, policy profiles | Delete or collapse into minimal execute observation. | This is a hard-coded harness for a catalog that should no longer exist upfront. |
+| Rules, skills, hooks, guardrails, core rules, worker guide, prompt library | Delete as built-in context planes. | The soul plus agent-owned state should produce future behavior. |
+| Approval prompts, trust tiers, worker pack policy, source trust workflows | Delete unless reduced to host integrity invariants. | There are no users and no compatibility obligations; policy should not be product-coded. |
+| iOS Work, Audit Details, Source Control, Prompt Library, Voice Notes, Skills, Agent Control, typed capability clients | Delete from primary branch UI unless converted into generic dynamic rendering. | Fixed product surfaces encode hard-coded capabilities. |
+| README/product docs for removed features | Rewrite or delete. | Documentation must describe only runnable branch behavior. |
+
+Infrastructure invariants that may remain hard-coded:
+
+- transport authentication and local profile secrets handling;
+- database/event/ledger integrity;
+- provider API framing and token/cost accounting;
+- process lifecycle cleanup and crash recovery;
+- resource version/idempotency semantics;
+- iOS connection safety, pairing, local cache integrity, and accessibility
+  basics.
+
+These are not product rules. They protect the loop itself.
+
+## Target Bare Loop
+
+1. User sends a prompt through iOS or another `/engine` client.
+2. Server appends the user event and reconstructs minimal context.
+3. Context contains the agent soul, current session history, compact
+   agent-owned state summary, and nothing else unless the agent created it.
+4. Provider receives one tool: `execute`.
+5. The model calls `execute` to act, inspect/write its own state, create or run
+   self-authored helpers, and record outputs.
+6. The engine records invocation, trace, resources, state updates, logs, and
+   assistant-visible observations.
+7. The loop repeats until terminal assistant output or explicit blocked state.
+8. iOS renders chat plus generic dynamic surfaces emitted as runtime data.
+
+## Agent Soul Seed
+
+This scorecard does not design the whole self-adapting agent, but it must leave
+one seed instruction in place. The seed should be short enough to audit and
+stable enough to act as activation energy:
+
+- learn from the environment;
+- preserve useful memory as agent-owned state;
+- improve your own tools and rules when doing so helps the user's objective;
+- prefer small tested changes;
+- keep evidence for what you changed and why;
+- recover from failure by inspecting state and revising the approach;
+- ask the user only when blocked by missing intent, unavailable authority, or
+  irreversible risk that the bare infrastructure cannot classify.
+
+The soul is not a toolbox, recipe pack, policy profile, or product guide. Rows
+PET-4 and PET-6 must fail if it grows into those shapes.
+
+## Operating Loop
+
+1. Pick the highest-value pending row.
+2. Audit the current code paths and mark every touched subsystem as retain,
+   delete, or successor.
+3. Write or strengthen the smallest covering absence/behavior test first.
+4. Delete hard-coded planes aggressively.
+5. Restore the primitive loop using the fewest retained abstractions.
+6. Remove fallback, compatibility, legacy, and dead code around the edit.
+7. Run focused tests, then simulator UI proof for every iOS-facing row.
+8. Update this scorecard and the evidence manifest with exact commands, return
+   codes, artifacts, open loops, and the next row.
+9. Commit each coherent checkpoint.
+10. Stop only when all rows are passed and an adversarial final audit finds no
+    removable non-primitive plane.
+
+## Scenario Ledger
+
+| ID | Area | Weight | Status | Owner | Evidence contract | Residual risk | Checkpoint |
+|----|------|--------|--------|-------|-------------------|---------------|------------|
+| PET-0 | Branch, baseline, and plan formalization | 5 | passed_after_fix | docs_or_scorecard | New branch exists from the worker-first checkpoint; scorecard, evidence manifest, README link, static plan gate, and current branch status are recorded. | None for planning. PET-1 owns the first source inventory before behavior deletion. | this checkpoint |
+| PET-1 | Primitive taxonomy and deletion inventory | 8 | pending | engine_architecture | Source audit lists every Rust domain, primitive worker, runner context plane, first-party skill, managed doc, iOS top-level mode/client/view, and settings surface as retain/delete/successor with grep-backed evidence. | Classification mistakes can preserve product code; final audit must revisit. | pending |
+| PET-2 | Server domain registration teardown | 12 | pending | engine_architecture | `domains::registration` stops registering product/tool domain workers by default. Tests prove removed namespaces are absent from startup catalog and no old capability names are routable. Retained domains are documented as boot/provider/session infrastructure. | Some retained session/model code may still mention old capability events until PET-5/PET-10. | pending |
+| PET-3 | Single execute primitive | 12 | pending | engine_architecture | Provider tool export exposes exactly one model-facing tool. `execute` no longer depends on registry recipes, policy profiles, vector search, plugin/binding/conformance tables, or target-specific route heuristics. Integration proof shows a prompt can call `execute`, receive an observation, and continue the loop. | The bootstrap host access shape may need one user decision before implementation. | pending |
+| PET-4 | Soul and agent-owned state workspace | 10 | pending | agent_runtime | Context assembly contains soul plus session/state summaries, not rules/skills/worker guides. Tests prove agent-owned state persists across turns and can be inspected/updated through `execute`. The soul file/resource is short and static-gated against toolbox creep. | Self-adapting behavior beyond state persistence is successor work. | pending |
+| PET-5 | Session, event, ledger, and resource collapse | 8 | pending | storage | Retained stores are minimal and loop-owned. Removed product tables/resources/events are gone from fresh DB migrations and README schema docs. Reconstruction still works for new bare sessions. | Old local databases are disposable on this branch. | pending |
+| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | pending | agent_runtime | Built-in skills/rules/hooks/core guardrails/approval product policy are removed from context and startup. Static gates reject prompt-expanded skill/rule/guardrail planes. The loop still records failures and blocked states as infrastructure evidence. | Host-level irreversible-risk handling may remain only if classified as infrastructure. | pending |
+| PET-7 | Self-authored worker/capability substrate | 8 | pending | engine_architecture | Any retained external-worker or generated-helper path is generic substrate, not a first-party pack lifecycle. Tests prove the agent can create a minimal helper/state artifact through `execute` without hard-coded `module::*`, `worker pack`, or conformance workflows. | Full autonomous capability marketplace is successor work. | pending |
+| PET-8 | iOS primitive shell | 10 | pending | ios | iOS removes fixed Work/Audit Details/Source Control/Prompt Library/Voice Notes/Skills/Agent Control product surfaces from the primary branch UI. It keeps prompt input, sessions, connection/onboarding/settings, message rendering, and generic dynamic surface rendering. Simulator screenshots on iPhone and iPad prove the shell is simple, readable, and non-overlapping. | Dynamic UI sophistication after the shell is successor work. | pending |
+| PET-9 | Documentation and managed asset rewrite | 5 | pending | docs_or_scorecard | README, iOS docs, Mac docs if affected, first-party skill docs, examples, and scorecards stop documenting removed features as runnable behavior. Retired docs/assets are deleted rather than marked legacy. | Historical scorecards may remain only as evidence, not active guidance. | pending |
+| PET-10 | Absence gates and dead-code cleanup | 6 | pending | test_harness | Static gates reject removed namespaces, old UI modes, skills/rules/hooks, capability registry recipes, old policy surfaces, compatibility/fallback wording, and large-file budget drift. `rg` scans and compiler warnings are clean for touched areas. | Gates must avoid brittle prose matching that blocks future simplification. | pending |
+| PET-11 | End-to-end closeout and "cannot remove more" audit | 8 | pending | test_harness | Fresh server run, provider-loop fixture, DB/event/ledger inspection, iOS simulator tests, iPhone/iPad screenshots, `cargo fmt`, focused Rust tests, focused xcodebuild tests, `git diff --check`, and adversarial source audit prove the bare loop works and no non-primitive planes remain. | Successor scorecard starts only after this row passes. | pending |
+
+Total weight: **100**
+
+## Required Checkpoints
+
+1. PET-0: commit the plan on `codex/primitive-engine-teardown`. **Closed in
+   this checkpoint.**
+2. PET-1: commit the inventory and deletion map before deleting code.
+3. PET-2/PET-3: commit the first backend slice where startup catalog and the
+   single-tool provider loop agree.
+4. PET-4/PET-6: commit the context/soul/state slice only after rules, skills,
+   hooks, and guardrails are actually absent from the model context.
+5. PET-5/PET-7: commit storage and self-authored substrate only after fresh DB
+   proof and no old product migration requirements remain.
+6. PET-8: commit the iOS shell only after simulator screenshots and action-time
+   checks on iPhone and iPad.
+7. PET-9/PET-10/PET-11: commit final docs, static gates, and closeout evidence
+   after the adversarial "what else can be removed" audit.
+
+## Evidence Requirements
+
+Every passed row must update
+`primitive-engine-teardown-evidence-manifest.md` with:
+
+- exact command and exit code;
+- branch, commit hash, and diff summary;
+- server mode, database path, port, PID, and cleanup behavior where relevant;
+- test names and result summaries;
+- catalog/tool export before/after when capabilities are removed;
+- DB schema/table/resource/event evidence for storage rows;
+- iOS simulator name, UDID, bundle id, launch/openurl return code, and
+  screenshot paths for UI rows;
+- failure owner and root cause for every red step;
+- exact rerun proof after the fix;
+- residual risk and successor owner.
+
+## Static Gates To Add During Execution
+
+- `primitive_engine_teardown_plan_stays_formalized`: this plan and README link
+  stay present until closeout.
+- `provider_surface_exports_only_execute`: model-facing tool export has exactly
+  one function.
+- `deleted_first_party_capabilities_are_absent`: retired namespaces are not
+  registered or routable.
+- `context_has_soul_not_rules_or_skills`: context assembly excludes hard-coded
+  rules, skills, hooks, guardrails, and worker guides.
+- `ios_primary_shell_has_no_fixed_product_modes`: iOS primary navigation has no
+  fixed Work/Audit Details/Source Control/Prompt Library/Voice Notes/Skills
+  product modes.
+- `no_legacy_fallback_compatibility_paths`: touched Rust/Swift/docs contain no
+  compatibility shims for removed branch behavior.
+- `primitive_loop_end_to_end`: fresh bare session can call a model fixture,
+  execute, persist state, reconstruct, and render on iOS.
+
+## Open Decisions For Execution
+
+These are execution decisions, not blockers for this plan:
+
+- Whether bootstrap `execute` should expose raw process/filesystem primitives
+  directly, or only a constrained program-worker API that can write and run
+  agent-authored helpers.
+- Whether the soul is stored as a checked-in seed file, a seeded resource in the
+  agent workspace, or both with one canonical source of truth.
+- Whether the first iOS dynamic renderer should consume the existing
+  `ui_surface` resource schema after deleting hard-coded target surfaces, or a
+  smaller branch-local schema owned by the bare loop.
+
+## Closeout Criteria
+
+The score is 100/100 only when:
+
+- every row is `passed` or `passed_after_fix`;
+- the current score is 100/100 and status is completed;
+- no row has pending, blocked, or stale active text;
+- the evidence manifest names all final commands, return codes, screenshots,
+  DB evidence, and commits;
+- README and area docs describe only the bare branch behavior;
+- fresh DB startup creates no removed product tables or capability registry
+  truth;
+- provider tool export contains only `execute`;
+- iOS simulator proof shows a minimal shell on iPhone and iPad;
+- an adversarial source audit finds no hard-coded product capability, policy,
+  rule, skill, worker pack, fixed UI mode, fallback, or compatibility layer
+  that can be deleted without breaking the primitive loop.
+
+## Successor Scorecard
+
+After PET-11 passes, create a separate self-adapting-agent scorecard for:
+
+- agent-authored capability creation and promotion;
+- learned rule/memory systems;
+- generated workers;
+- generated UI sophistication;
+- long-running autonomous improvement loops;
+- optional human review surfaces that are generated by the agent rather than
+  hard-coded by the harness.
