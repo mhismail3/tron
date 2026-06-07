@@ -71,16 +71,19 @@ func application(_ application: UIApplication,
 }
 ```
 
-After pairing, the iOS app checks the local notification permission. If the
-status is `notDetermined`, it asks for permission and then registers with APNs.
-The App settings page exposes the same control for manual repair: App → Push
-Notifications shows `Allow`, `Register`, `Enabled`, or `Settings` based on the
-local OS state. After APNs returns a token, the thin client sends one canonical
-`device::register` engine invocation with the token, bundle ID, and APNs
-environment. The server stores that routing metadata in `device_tokens` and all
-later delivery is engine-owned. Concurrent APNs callbacks and reconnect-triggered
-permission checks are deduplicated in-flight on the client; durable identity and
-idempotent upsert semantics still live on the server.
+After an active server is paired, the iOS app checks the local notification
+permission. A clean shell launch without an active paired server returns before
+requesting OS notification authorization, so first-run/empty-shell screenshots
+do not show a product prompt over the primitive UI. If the status is
+`notDetermined` after pairing, iOS asks for permission and then registers with
+APNs. The App settings page exposes the same control for manual repair: App ->
+Push Notifications shows `Allow`, `Register`, `Enabled`, or `Settings` based on
+the local OS state. After APNs returns a token, the thin client sends one
+canonical `device::register` engine invocation with the token, bundle ID, and
+APNs environment. The server stores that routing metadata in `device_tokens` and
+all later delivery is engine-owned. Concurrent APNs callbacks and
+reconnect-triggered permission checks are deduplicated in-flight on the client;
+durable identity and idempotent upsert semantics still live on the server.
 
 Notification handling:
 

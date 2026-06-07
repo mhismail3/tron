@@ -25,14 +25,6 @@ extension ChatViewModel: MessagingContext {
         try await engineClient.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
     }
 
-    func activateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {
-        _ = try await engineClient.agent.activateSkill(skillName, idempotencyKey: idempotencyKey)
-    }
-
-    func deactivateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {
-        _ = try await engineClient.agent.deactivateSkill(skillName, idempotencyKey: idempotencyKey)
-    }
-
     func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
         try await engineClient.agent.abort(idempotencyKey: idempotencyKey)
     }
@@ -69,82 +61,19 @@ extension ChatViewModel: MessagingContext {
         }
     }
 
-    /// Dismiss any pending or queued subagent results.
-    /// Called when user sends a different message (not via the "Send" button).
-    func dismissPendingSubagentResults() {
-        let pendingIds = subagentState.allSubagentsSorted
-            .filter { $0.resultDeliveryStatus == .pending }
-            .map { $0.subagentSessionId }
-
-        for sessionId in pendingIds {
-            subagentState.markResultsDismissed(subagentSessionId: sessionId)
-        }
-
-        if !pendingIds.isEmpty {
-            let pendingSet = Set(pendingIds)
-            removeFromMessages { msg in
-                if case .systemEvent(.subagentResultAvailable(let sid, _, _)) = msg.content {
-                    return pendingSet.contains(sid)
-                }
-                return false
-            }
-            logger.info("Dismissed \(pendingIds.count) pending subagent result(s) - user sent different message", category: .chat)
-        }
-    }
 }
 
 // MARK: - Message Sending & Image Handling
 
 extension ChatViewModel {
 
-    /// Execute pending source changes prompt (deferred from sheet dismiss).
-    /// Called from ChatSheetModifier.onDismiss AFTER sheet dismiss animation completes.
-    func executePendingSourceChangesSubmission() {
-        guard let prompt = pendingSourceChangesPrompt else { return }
-        pendingSourceChangesPrompt = nil
-        inputText = prompt
-        sendMessage()
-    }
-
-    /// Send a message to the agent
-    func sendMessage(reasoningLevel: String? = nil, skills: [Skill]? = nil) {
+    /// Send a message to the agent.
+    func sendMessage(reasoningLevel: String? = nil) {
         Task {
             await messagingCoordinator.sendMessage(
                 reasoningLevel: reasoningLevel,
-                skills: skills,
                 context: self
             )
-        }
-    }
-
-    /// Activate staged skills server-side, then send the prompt.
-    ///
-    /// Fire-and-forget wrapper for use by SwiftUI button handlers. If
-    /// activation fails, the coordinator surfaces an error via `showError`
-    /// and does NOT send — see `MessagingCoordinator.activateAndSend`.
-    func activateSkillsAndSend(reasoningLevel: String? = nil, skills: [Skill]) {
-        Task {
-            await messagingCoordinator.activateAndSend(
-                reasoningLevel: reasoningLevel,
-                skills: skills,
-                context: self
-            )
-        }
-    }
-
-    /// Activate a single skill server-side with user-visible error handling.
-    ///
-    /// Used by chip re-activation (e.g. the skills-cleared "re-activate?" picker).
-    /// Unlike `activateSkillsAndSend`, this is not tied to a send — it's a
-    /// one-shot user gesture. On failure, surfaces an error via `showError`.
-    func reactivateSkillWithUserErrorHandling(_ skillName: String) {
-        Task {
-            do {
-                try await activateSkillOnServer(skillName, idempotencyKey: .userAction("skills.activate"))
-            } catch {
-                logError("Failed to re-activate skill '\(skillName)': \(error.localizedDescription)")
-                showError("Could not re-activate skill: \(error.localizedDescription)")
-            }
         }
     }
 
@@ -340,17 +269,4 @@ extension ChatViewModel {
         messagingCoordinator.removeAttachment(attachment, context: self)
     }
 
-    // MARK: - Draft Skill Management
-
-    /// Stage a skill chip on the input bar. Local-only; server activation is
-    /// deferred to the send path.
-    func addSkillToDraft(_ skill: Skill) {
-        messagingCoordinator.addSkillToDraft(skill, context: self)
-    }
-
-    /// Unstage a skill chip from the input bar. Local-only; does not
-    /// deactivate the skill on the server.
-    func removeSkillFromDraft(_ skill: Skill) {
-        messagingCoordinator.removeSkillFromDraft(skill, context: self)
-    }
 }

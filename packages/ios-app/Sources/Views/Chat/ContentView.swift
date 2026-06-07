@@ -40,7 +40,6 @@ struct ContentView: View {
     // Convenience accessors
     private var engineClient: EngineClient { dependencies.engineClient }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
-    private var skillStore: SkillStore { dependencies.skillStore }
     private var defaultModel: String { dependencies.defaultModel }
     private var quickSessionWorkspace: String { dependencies.quickSessionWorkspace }
     private var notificationStore: NotificationStore { dependencies.notificationStore }
@@ -56,12 +55,6 @@ struct ContentView: View {
     @State private var showNewSessionSheet = false
     @State private var showSettings = false
     @State private var deferredServerOnboardingLaunch = DeferredServerOnboardingLaunch()
-
-    // Voice notes recording
-    @State private var showVoiceNotesRecording = false
-
-    // Navigation mode (sessions vs worker-first Work dashboard)
-    @State private var navigationMode: NavigationMode = .agents
 
     // Scroll target for deep link navigation (passed to ChatView)
     @State private var currentScrollTarget: ScrollTarget?
@@ -95,9 +88,6 @@ struct ContentView: View {
                     showSettings = false
                 }
                     .environment(\.dependencies, dependencies)
-            }
-            .sheet(isPresented: $showVoiceNotesRecording) {
-                voiceNotesRecordingSheet
             }
             .onAppear {
                 // Initialize coordinator on first appear
@@ -143,12 +133,6 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .serverSettingsDidChange)) { _ in
                 coordinator?.handleServerSettingsChanged()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .navigationModeAction)) { notification in
-                // Handle navigation mode change from ChatView toolbar (iPad) or deep links
-                if let mode = notification.object as? NavigationMode {
-                    navigationMode = mode
-                }
-            }
             .onReceive(NotificationCenter.default.publisher(for: .showSettingsAction)) { _ in
                 showSettings = true
             }
@@ -183,17 +167,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if navigationMode == .work {
-            workMode
-        } else {
-            splitViewContent
-        }
+        splitViewContent
     }
 
     private var dashboardActions: DashboardToolbarActions {
         DashboardToolbarActions(
             onSettings: { showSettings = true },
-            onNavigationModeChange: { mode in navigationMode = mode },
             notificationUnreadCount: notificationStore.unreadCount,
             onNotificationBell: { showNotificationSheet = true }
         )
@@ -209,19 +188,7 @@ struct ContentView: View {
 
     private func openNotificationSession(_ sessionId: String) {
         showNotificationSheet = false
-        navigationMode = .agents
         selectedSessionId = sessionId
-    }
-
-    @ViewBuilder
-    private var workMode: some View {
-        NavigationStack {
-            WorkDashboardView(
-                engineClient: engineClient,
-                actions: dashboardActions,
-                selectedSessionId: selectedSessionId
-            )
-        }
     }
 
     /// Whether the sidebar is currently visible (for hiding duplicate controls in detail view)
@@ -271,11 +238,9 @@ struct ContentView: View {
         SessionSidebar(
             selectedSessionId: $selectedSessionId,
             onNewSession: { showNewSessionSheet = true },
-            onNewSessionLongPress: { createQuickSession() },
             onDeleteSession: { sessionId in
                 deleteSession(sessionId)
             },
-            onVoiceNote: { showVoiceNotesRecording = true },
             actions: dashboardActions
         )
         // Remove default gray sidebar toggle - we'll add a custom emerald one to detail views
@@ -292,8 +257,6 @@ struct ContentView: View {
                 isSidebarVisible: isSidebarVisible,
                 onToggleSidebar: toggleSidebar,
                 onNewSession: { showNewSessionSheet = true },
-                onNewSessionLongPress: { createQuickSession() },
-                onVoiceNote: { showVoiceNotesRecording = true },
                 actions: dashboardActions
             )
         } else {
@@ -308,7 +271,6 @@ struct ContentView: View {
             engineClient: engineClient,
             defaultModel: defaultModel,
             eventStoreManager: eventStoreManager,
-            selectedSessionId: selectedSessionId,
             onSessionCreated: { created in
                 Task {
                     do {
@@ -326,18 +288,6 @@ struct ContentView: View {
                 }
                 selectedSessionId = created.sessionId
                 showNewSessionSheet = false
-            }
-        )
-    }
-
-    private var voiceNotesRecordingSheet: some View {
-        VoiceNotesRecordingSheet(
-            engineClient: engineClient,
-            onComplete: { _ in
-                showVoiceNotesRecording = false
-            },
-            onCancel: {
-                showVoiceNotesRecording = false
             }
         )
     }
@@ -364,11 +314,10 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -60)
 
-                // Floating buttons - mic and plus (hide when sidebar is visible to avoid duplicates)
+                // Floating button hidden when the sidebar is visible to avoid duplicates.
                 if !isSidebarVisible {
                     HStack(spacing: 12) {
-                        FloatingVoiceNotesButton(action: { showVoiceNotesRecording = true })
-                        FloatingNewSessionButton(action: { showNewSessionSheet = true }, onLongPress: { createQuickSession() })
+                        FloatingNewSessionButton(action: { showNewSessionSheet = true })
                     }
                     .padding(.trailing, 20)
                     .padding(.bottom, 8)
@@ -406,7 +355,6 @@ struct ContentView: View {
                 engineClient: engineClient,
                 sessionId: sessionId,
                 audioRecorder: dependencies.audioRecorder,
-                skillStore: skillStore,
                 workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget,
                 onToggleSidebar: toggleSidebar
@@ -417,7 +365,6 @@ struct ContentView: View {
                 engineClient: engineClient,
                 sessionId: sessionId,
                 audioRecorder: dependencies.audioRecorder,
-                skillStore: skillStore,
                 workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget
             )
@@ -513,13 +460,11 @@ func resolveQuickSessionWorkspace(
 
 @available(iOS 26.0, *)
 struct WelcomePage: View {
-    /// When true, sidebar is visible so we hide duplicate floating buttons (new session, voice note)
+    /// When true, sidebar is visible so we hide the duplicate floating button.
     var isSidebarVisible: Bool = false
     /// Toggle sidebar visibility (used on iPad)
     var onToggleSidebar: (() -> Void)?
     let onNewSession: () -> Void
-    var onNewSessionLongPress: (() -> Void)? = nil
-    let onVoiceNote: () -> Void
     let actions: DashboardToolbarActions
 
     var body: some View {
@@ -541,11 +486,10 @@ struct WelcomePage: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -60)
 
-                // Floating buttons - mic and plus (hide when sidebar is visible to avoid duplicates)
+                // Floating button hidden when the sidebar is visible to avoid duplicates.
                 if !isSidebarVisible {
                     HStack(spacing: 12) {
-                        FloatingVoiceNotesButton(action: onVoiceNote)
-                        FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress)
+                        FloatingNewSessionButton(action: onNewSession)
                     }
                     .padding(.trailing, 20)
                     .padding(.bottom, 8)

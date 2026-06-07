@@ -51,7 +51,7 @@ struct RepoGetDivergenceParams: Encodable {
     let sessionId: String
 }
 
-/// Divergence chips for the Source Control sheet header.
+/// Divergence counts for generic repo metadata rows.
 ///
 /// - `*Main`  — session branch vs local `main`. `nil` if `main` itself
 ///   doesn't resolve (fresh empty repo, renamed default, detached HEAD).

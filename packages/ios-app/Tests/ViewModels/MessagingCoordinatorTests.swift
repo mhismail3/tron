@@ -211,21 +211,7 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.lastDashboardPrompt, "Test prompt")
     }
 
-    // MARK: - Skills and Reasoning Tests
-
-    func testSendMessageDisplaysSkillsAsChips() async {
-        // Given: Input with skills (already activated server-side)
-        mockContext.inputText = "Test"
-        let skills = [Skill(name: "test-skill", displayName: "Test Skill", description: "Test", source: .global, tags: nil)]
-
-        // When: Sending message with skills for display
-        await coordinator.sendMessage(skills: skills, context: mockContext)
-
-        // Then: Skills should appear as chips on the user message
-        let userMessage = mockContext.appendedMessages.first
-        XCTAssertEqual(userMessage?.skills?.count, 1)
-        XCTAssertEqual(userMessage?.skills?.first?.name, "test-skill")
-    }
+    // MARK: - Reasoning Tests
 
     func testSendMessagePassesReasoningLevelToServer() async {
         // Given: Input with reasoning level
@@ -430,182 +416,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.attachments.first?.id, attachment2.id)
     }
 
-    // MARK: - Draft Skill Management Tests
-    //
-    // Invariant: chip add/remove in the input bar is purely LOCAL draft state.
-    // It must never trigger skills::activate / skills::deactivate engine protocols.
-    //
-    // Regression guard: eagerly activating a skill on chip-add (e.g. via the
-    // "Draft a Plan" menu item) caused a subsequent chip-removal to emit a
-    // real skills::deactivated event, which surfaced in the chat transcript as
-    // a misleading "plan deactivated from context" pill even though no turn
-    // ever ran with the skill. Server activation must happen only at send time.
-
-    func testAddSkillToDraftAppendsToSelectedSkills() {
-        // Given: No selected skills
-        XCTAssertTrue(mockContext.selectedSkills.isEmpty)
-
-        // When: Adding a skill to the draft
-        coordinator.addSkillToDraft(createTestSkill(name: "plan"), context: mockContext)
-
-        // Then: Skill should be in selectedSkills
-        XCTAssertEqual(mockContext.selectedSkills.count, 1)
-        XCTAssertEqual(mockContext.selectedSkills.first?.name, "plan")
-    }
-
-    func testAddSkillToDraftDoesNotActivateOnServer() async {
-        // When: Adding a skill to the draft
-        coordinator.addSkillToDraft(createTestSkill(name: "plan"), context: mockContext)
-
-        // Then: Server-side activation must NOT be called — activation happens
-        // only at send time in MessagingCoordinator.sendMessage / ChatView.onSend.
-        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 0)
-    }
-
-    func testAddSkillToDraftIsIdempotent() {
-        // Given: A skill already in the draft
-        let skill = createTestSkill(name: "plan")
-        coordinator.addSkillToDraft(skill, context: mockContext)
-
-        // When: Adding the same skill again
-        coordinator.addSkillToDraft(skill, context: mockContext)
-
-        // Then: No duplicate entry
-        XCTAssertEqual(mockContext.selectedSkills.count, 1)
-        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 0)
-    }
-
-    func testRemoveSkillFromDraftRemovesMatchingSkill() {
-        // Given: A skill in the draft
-        let skill = createTestSkill(name: "plan")
-        mockContext.selectedSkills = [skill]
-
-        // When: Removing the skill from the draft
-        coordinator.removeSkillFromDraft(skill, context: mockContext)
-
-        // Then: Skill should be gone
-        XCTAssertTrue(mockContext.selectedSkills.isEmpty)
-    }
-
-    func testRemoveSkillFromDraftDoesNotDeactivateOnServer() async {
-        // Given: A skill in the draft
-        let skill = createTestSkill(name: "plan")
-        mockContext.selectedSkills = [skill]
-
-        // When: Removing the skill from the draft
-        coordinator.removeSkillFromDraft(skill, context: mockContext)
-
-        // Then: Server-side deactivation must NOT be called — chip removal is a
-        // draft-state edit, not a "remove from context" action. An explicit
-        // remove-from-context gesture (e.g. on SkillDetailSheet) would deactivate,
-        // not chip X-tap.
-        XCTAssertEqual(mockContext.deactivateSkillOnServerCallCount, 0)
-    }
-
-    func testRemoveSkillFromDraftMissingSkillIsNoop() {
-        // Given: Empty draft
-        XCTAssertTrue(mockContext.selectedSkills.isEmpty)
-
-        // When: Removing a skill that isn't there
-        coordinator.removeSkillFromDraft(createTestSkill(name: "plan"), context: mockContext)
-
-        // Then: No crash, no server call, state still empty
-        XCTAssertTrue(mockContext.selectedSkills.isEmpty)
-        XCTAssertEqual(mockContext.deactivateSkillOnServerCallCount, 0)
-    }
-
-    // MARK: - Activate-and-Send (pre-audit #2)
-
-    // Activation of staged skills happens at send time. The three call sites
-    // in `ChatView.swift` (share-payload, send-button tap, re-activate chip)
-    // previously used `try? await activateSkillOnServer(...)` and ignored
-    // failures entirely — the prompt was sent anyway, silently omitting the
-    // skill, which is the opposite of user intent. These tests pin the new
-    // coordinator-owned behavior: on activation failure, show an error and
-    // DO NOT send.
-
-    func testActivateAndSendActivatesAllSkillsInOrderBeforeSending() async {
-        // Given: Valid text and two staged skills
-        mockContext.inputText = "Do the thing"
-        let skills = [createTestSkill(name: "plan"), createTestSkill(name: "review")]
-
-        // When: Activating and sending
-        await coordinator.activateAndSend(
-            reasoningLevel: nil,
-            skills: skills,
-            context: mockContext
-        )
-
-        // Then: Both skills activated before the prompt was sent
-        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 2)
-        XCTAssertEqual(mockContext.activateSkillOnServerNames, ["plan", "review"])
-        XCTAssertTrue(mockContext.sendPromptCalled)
-        XCTAssertEqual(mockContext.lastSentText, "Do the thing")
-        XCTAssertFalse(mockContext.showErrorCalled)
-    }
-
-    func testActivateAndSendWithNoSkillsSendsImmediately() async {
-        // Given: Valid text and no skills
-        mockContext.inputText = "No skills needed"
-
-        // When: Activating and sending with empty skills array
-        await coordinator.activateAndSend(
-            reasoningLevel: nil,
-            skills: [],
-            context: mockContext
-        )
-
-        // Then: No activation calls, prompt was sent
-        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 0)
-        XCTAssertTrue(mockContext.sendPromptCalled)
-    }
-
-    func testActivateAndSendActivationFailureSurfacesErrorAndDoesNotSend() async {
-        // Given: Valid text, one skill, server-side activation fails
-        mockContext.inputText = "Plan this"
-        mockContext.activateSkillShouldFail = true
-        let skills = [createTestSkill(name: "plan")]
-
-        // When: Activating and sending
-        await coordinator.activateAndSend(
-            reasoningLevel: nil,
-            skills: skills,
-            context: mockContext
-        )
-
-        // Then: Error surfaced to user; prompt NOT sent (user intent included
-        // the skill — silently sending without it would defeat their choice).
-        XCTAssertTrue(mockContext.showErrorCalled)
-        XCTAssertFalse(mockContext.sendPromptCalled)
-        // Staged skills are preserved so the user can retry or edit before
-        // re-sending. Wiping the draft on failure would lose their selection.
-        XCTAssertFalse(mockContext.inputText.isEmpty)
-    }
-
-    func testActivateAndSendFailureHaltsAtFirstError() async {
-        // Given: Three skills, activation fails on the second
-        mockContext.inputText = "Do the thing"
-        mockContext.activateSkillShouldFailOnName = "review"
-        let skills = [
-            createTestSkill(name: "plan"),
-            createTestSkill(name: "review"),
-            createTestSkill(name: "test"),
-        ]
-
-        // When: Activating and sending
-        await coordinator.activateAndSend(
-            reasoningLevel: nil,
-            skills: skills,
-            context: mockContext
-        )
-
-        // Then: First succeeded, second failed; third never attempted
-        XCTAssertEqual(mockContext.activateSkillOnServerCallCount, 2)
-        XCTAssertEqual(mockContext.activateSkillOnServerNames, ["plan", "review"])
-        XCTAssertTrue(mockContext.showErrorCalled)
-        XCTAssertFalse(mockContext.sendPromptCalled)
-    }
-
     // MARK: - Helpers
 
     private func createTestAttachment() -> Attachment {
@@ -618,16 +428,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         )
     }
 
-    private func createTestSkill(name: String) -> Skill {
-        return Skill(
-            name: name,
-            displayName: name,
-            description: "\(name) skill",
-            source: .global,
-            tags: nil,
-            scopeDir: nil
-        )
-    }
 }
 
 // MARK: - Mock Context
@@ -639,7 +439,6 @@ final class MockMessagingContext: MessagingContext {
     var inputText: String = ""
     var attachments: [Attachment] = []
     var selectedImages: [PhotosPickerItem] = []
-    var selectedSkills: [Skill] = []
     var agentPhase: AgentPhase = .idle
     var draftStore: DraftStore?
     var currentTurn: Int = 0
@@ -699,23 +498,6 @@ final class MockMessagingContext: MessagingContext {
         }
     }
 
-    var activateSkillOnServerCallCount = 0
-    var activateSkillOnServerNames: [String] = []
-    var activateSkillShouldFail = false
-    var activateSkillShouldFailOnName: String?
-    var deactivateSkillOnServerCallCount = 0
-
-    func activateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {
-        activateSkillOnServerCallCount += 1
-        activateSkillOnServerNames.append(skillName)
-        if activateSkillShouldFail || activateSkillShouldFailOnName == skillName {
-            throw MessagingTestError.serverError
-        }
-    }
-    func deactivateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws {
-        deactivateSkillOnServerCallCount += 1
-    }
-
     func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
         abortAgentCalled = true
         if abortShouldFail {
@@ -737,10 +519,6 @@ final class MockMessagingContext: MessagingContext {
 
     func markPendingConfirmationsAsSuperseded() {
         markPendingConfirmationsAsSupersededCalled = true
-    }
-
-    func dismissPendingSubagentResults() {
-        // No-op for tests
     }
 
     func finalizeThinkingMessage() {

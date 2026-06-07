@@ -219,13 +219,13 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
                 "invocationId": "019e25cb-1234-7000-a000-000000000001",
                 "modelPrimitiveName": "execute",
                 "contractId": "filesystem::list_dir",
-                "implementationId": "first_party.filesystem.v1.list_dir",
+                "implementationId": "runtime.filesystem.v1.list_dir",
                 "functionId": "filesystem::list_dir",
-                "pluginId": "first_party.filesystem",
+                "pluginId": "runtime.filesystem",
                 "workerId": "filesystem",
                 "schemaDigest": "a8fe337ce28191708a15186227c6614c65da77c8771a9c6a8666bd097e462139",
                 "catalogRevision": 303,
-                "trustTier": "first_party_signed",
+                "trustTier": "runtime",
                 "riskLevel": "low",
                 "effectClass": "pure_read",
                 "traceId": "019e25cb-0ebe-79d1-b20c-3070e3256a15",
@@ -238,13 +238,13 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
                     "icon": "folder",
                     "themeColor": "#10B981"
                 },
-                "content": "Listed session worktree.",
+                "content": "Listed runtime directory.",
                 "isError": false,
                 "duration": 69,
                 "details": {
                     "status": "ok",
                     "output": {
-                        "path": "/Users/moose/Downloads/projects/testspace/.worktrees/session/sess_019e25c9-8f30-7ed1-ae79-1646d50e1fe7",
+                        "path": "/Users/moose/Downloads/projects/testspace/runtime/current",
                         "entries": []
                     }
                 }
@@ -257,7 +257,7 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
 
         XCTAssertEqual(result?.invocationId, "019e25cb-1234-7000-a000-000000000001")
         XCTAssertEqual(result?.success, true)
-        XCTAssertEqual(result?.displayResult, "Listed session worktree.")
+        XCTAssertEqual(result?.displayResult, "Listed runtime directory.")
         XCTAssertEqual(result?.duration, 69)
         XCTAssertEqual(result?.identity.contractId, "filesystem::list_dir")
         XCTAssertEqual(result?.identity.themeColor, "#10B981")

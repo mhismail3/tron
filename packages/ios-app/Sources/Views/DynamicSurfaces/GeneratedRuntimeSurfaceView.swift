@@ -217,7 +217,7 @@ private extension ButtonStyle where Self == GeneratedUIActionButtonStyle {
     }
 }
 
-struct GeneratedUISurfaceView: View {
+struct GeneratedRuntimeSurfaceView: View {
     let surface: UiSurfaceDTO
     var resourceRef: UiSurfaceRefDTO?
     var observedVersionId: String?
@@ -346,7 +346,7 @@ struct GeneratedUISurfaceView: View {
         case "GrantRef":
             return AnyView(referenceRow("Grant", value: component.props?.string("grantId")))
         case "WorkerRef":
-            return AnyView(referenceRow("Worker", value: component.props?.string("workerId")))
+            return AnyView(referenceRow("Executor", value: component.props?.string("workerId")))
         case "Metric":
             return AnyView(HStack {
                 Text(component.props?.string("label") ?? "Metric")

@@ -58,18 +58,17 @@ extension CapabilityInvocationDisplayModel {
         let hasResolution = targetLabel != nil
         let isTerminal = terminalState(data.status) != nil
         let hasPrepared = preparedRequest != nil
-            || data.approvalState?.isEmpty == false
             || !childInvocations.isEmpty
             || isTerminal
         let runLabel = data.progressMessage?.nilIfEmpty
             ?? targetLabel.map { "Running \($0)" }
-            ?? "Running work"
+            ?? "Running action"
         let resultState = terminalState(data.status)
 
         return [
             CapabilityProgressStep(
                 title: "Choose",
-                detail: hasResolution ? "\(targetLabel ?? capabilityName) selected" : "Choosing the right worker",
+                detail: hasResolution ? "\(targetLabel ?? capabilityName) selected" : "Selecting runtime target",
                 iconName: "scope",
                 state: hasResolution ? .completed : (isTerminal ? .attention : .current)
             ),
@@ -110,9 +109,6 @@ extension CapabilityInvocationDisplayModel {
         targetLabel: String?,
         payloadSummary: String?
     ) -> String {
-        if data.status == .approvalRequired {
-            return "Waiting for approval"
-        }
         if data.status == .paused {
             return "Paused before execution"
         }
@@ -138,7 +134,7 @@ extension CapabilityInvocationDisplayModel {
             return .attention
         case .running:
             return .current
-        case .approvalRequired, .paused, .generating:
+        case .paused, .generating:
             return hasChild ? .current : .pending
         }
     }
@@ -153,7 +149,7 @@ extension CapabilityInvocationDisplayModel {
             return ("Needs attention", "exclamationmark.triangle", .attention)
         case .unavailable:
             return ("Unavailable", "exclamationmark.triangle", .attention)
-        case .generating, .running, .paused, .approvalRequired:
+        case .generating, .running, .paused:
             return nil
         }
     }

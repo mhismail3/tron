@@ -23,7 +23,6 @@ struct GeneratedUIDTOTests {
             "idempotencyKeyTemplate": "${submission.idempotencyKey}",
             "requiredGrant": "grant",
             "requiredRisk": "low",
-            "approvalPolicy": {"required": false},
             "targetRevision": 1,
             "expiresAt": "2100-01-01T00:00:00Z",
             "presentation": {"tone": "neutral", "buttonRole": "neutral", "icon": "arrow.clockwise"}

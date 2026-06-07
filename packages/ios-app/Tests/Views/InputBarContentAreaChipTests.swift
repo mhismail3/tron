@@ -4,16 +4,6 @@ import XCTest
 
 @MainActor
 final class InputBarContentAreaChipTests: XCTestCase {
-    private func makeSkill(name: String) -> Skill {
-        Skill(
-            name: name,
-            displayName: name,
-            description: "test skill",
-            source: .global,
-            tags: nil
-        )
-    }
-
     private func makeAttachment(
         id: UUID = UUID(),
         type: AttachmentType = .document,
@@ -50,59 +40,25 @@ final class InputBarContentAreaChipTests: XCTestCase {
         return host.sizeThatFits(in: CGSize(width: 1_000, height: 1_000)).width
     }
 
-    func testContentAreaChipItemsKeepsSkillsAndAttachmentsInOneSequence() {
+    func testContentAreaChipItemsKeepsAttachmentsInInputOrder() {
         let attachmentId = UUID()
-        let items = ContentAreaChipItem.items(
-            selectedSkills: [
-                makeSkill(name: "browse-the-web"),
-                makeSkill(name: "explore")
-            ],
-            attachments: [
-                makeAttachment(id: attachmentId)
-            ]
-        )
+        let items = ContentAreaChipItem.items(attachments: [makeAttachment(id: attachmentId)])
 
         XCTAssertEqual(items.map(\.id), [
-            "skill:browse-the-web",
-            "skill:explore",
             "attachment:\(attachmentId.uuidString)"
         ])
     }
 
-    func testContentAreaChipItemsKeepsAttachmentsAfterAllSkillsWithoutLineBreakSentinel() {
+    func testContentAreaChipItemsWrapAttachments() {
         let attachment = makeAttachment(fileName: "notes.txt")
-        let items = ContentAreaChipItem.items(
-            selectedSkills: [makeSkill(name: "find-skill")],
-            attachments: [attachment]
-        )
+        let items = ContentAreaChipItem.items(attachments: [attachment])
 
-        XCTAssertEqual(items.count, 2)
-        guard case .skill(let skill) = items[0] else {
-            XCTFail("Expected first chip to be a skill")
+        XCTAssertEqual(items.count, 1)
+        guard case .attachment(let stagedAttachment) = items[0] else {
+            XCTFail("Expected attachment chip")
             return
         }
-        guard case .attachment(let stagedAttachment) = items[1] else {
-            XCTFail("Expected second chip to be an attachment")
-            return
-        }
-        XCTAssertEqual(skill.name, "find-skill")
         XCTAssertEqual(stagedAttachment.fileName, "notes.txt")
-    }
-
-    func testRemovableSkillChipUsesSeparateAccessibleLabels() {
-        let skill = makeSkill(name: "browse-the-web")
-
-        XCTAssertEqual(SkillChipAccessibility.skillLabel(skill.name), "Skill, browse-the-web")
-        XCTAssertEqual(SkillChipAccessibility.removeLabel(skill.name), "Remove skill, browse-the-web")
-
-        render(
-            SkillChip(
-                skill: skill,
-                showRemoveButton: true,
-                onRemove: {},
-                onTap: {}
-            )
-        )
     }
 
     func testAttachmentBubbleConstructsForDocumentChip() {

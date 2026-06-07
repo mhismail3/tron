@@ -110,7 +110,6 @@ struct CapabilityContractDTO: Codable, Equatable, Sendable {
     var effectClass: String?
     var riskLevel: String?
     var idempotencyContract: AnyCodable?
-    var approvalContract: AnyCodable?
     var leaseContract: AnyCodable?
     var compensationContract: AnyCodable?
     var examples: [AnyCodable]?
@@ -279,7 +278,6 @@ struct AgentCapabilityRecipeDTO: Codable, Equatable, Sendable {
     var examples: [AnyCodable]?
     var directExecution: String?
     var inspectRequired: Bool?
-    var approvalBehavior: String?
     var lifecycleKind: String?
     var resultSummary: String?
     var aliases: [String]?
@@ -318,7 +316,6 @@ struct CapabilityExecutionDTO: Codable, Equatable, Sendable {
     var catalogRevision: UInt64?
     var functionRevision: UInt64?
     var output: AnyCodable?
-    var approvalState: AnyCodable?
     var pluginVersions: [String]?
     var bindingDecision: CapabilityBindingDecisionDTO?
     var schemaDigest: String?
@@ -337,7 +334,6 @@ struct CapabilityProgramExecutionDTO: Codable, Equatable, Sendable {
     var argsHash: String?
     var childInvocations: [String]?
     var selectedImplementations: [String]?
-    var approvalState: AnyCodable?
     var artifacts: [AnyCodable]?
     var logs: [String]?
     var compensationAttempts: [AnyCodable]?
@@ -358,7 +354,6 @@ struct CapabilityProgramRunDTO: Codable, Equatable, Sendable, Identifiable {
     var allowedImplementations: [String]?
     var childInvocations: [String]?
     var selectedImplementations: [String]?
-    var approvalState: AnyCodable?
     var artifacts: AnyCodable?
     var logs: AnyCodable?
     var error: AnyCodable?

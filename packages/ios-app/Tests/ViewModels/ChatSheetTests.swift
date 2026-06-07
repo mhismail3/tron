@@ -16,36 +16,6 @@ struct ChatSheetTests {
         #expect(sheet.id == "settings")
     }
 
-    @Test("Agent control sheet has consistent id")
-    func testAgentControlSheetId() {
-        let sheet = ChatSheet.agentControl
-
-        #expect(sheet.id == "agentControl")
-    }
-
-    @Test("Skill detail sheets with different skills have different ids")
-    func testSkillDetailDifferentSkillsHaveDifferentIds() {
-        let skill1 = Skill(
-            name: "skill1",
-            displayName: "Skill 1",
-            description: "Test",
-            source: .global,
-            tags: nil
-        )
-        let skill2 = Skill(
-            name: "skill2",
-            displayName: "Skill 2",
-            description: "Test",
-            source: .global,
-            tags: nil
-        )
-
-        let sheet1 = ChatSheet.skillDetail(skill1)
-        let sheet2 = ChatSheet.skillDetail(skill2)
-
-        #expect(sheet1.id != sheet2.id)
-    }
-
     @Test("Compaction detail has consistent id")
     func testCompactionDetailId() {
         let data1 = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
@@ -64,13 +34,6 @@ struct ChatSheetTests {
         let sheet = ChatSheet.userInteraction
 
         #expect(sheet.id == "userInteraction")
-    }
-
-    @Test("Subagent detail sheet has consistent id")
-    func testSubagentDetailId() {
-        let sheet = ChatSheet.subagentDetail
-
-        #expect(sheet.id == "subagent")
     }
 
     @Test("Notification delivery sheets with different data have different ids")
@@ -107,13 +70,6 @@ struct ChatSheetTests {
 
     @Test("All sheet cases have unique base ids")
     func testAllCasesHaveUniqueBaseIds() {
-        let skill = Skill(
-            name: "test",
-            displayName: "Test",
-            description: "Test",
-            source: .global,
-            tags: nil
-        )
         let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
         let notifyData = NotificationDeliveryData(
             invocationId: "capability",
@@ -136,11 +92,8 @@ struct ChatSheetTests {
 
         let sheets: [ChatSheet] = [
             .settings,
-            .agentControl,
-            .skillDetail(skill),
             .compactionDetail(compactionData),
             .userInteraction,
-            .subagentDetail,
             .notificationDelivery(notifyData),
             .thinkingDetail("content"),
             .capabilityInvocationDetail(capabilityData),
@@ -255,9 +208,9 @@ struct SheetCoordinatorTests {
         let coordinator = SheetCoordinator()
 
         coordinator.present(.settings)
-        coordinator.present(.agentControl)
+        coordinator.present(.userInteraction)
 
-        #expect(coordinator.activeSheet == .agentControl)
+        #expect(coordinator.activeSheet == .userInteraction)
     }
 
     @Test("Present replaces onDismiss callback")
@@ -267,7 +220,7 @@ struct SheetCoordinatorTests {
         var secondCalled = false
 
         coordinator.present(.settings) { firstCalled = true }
-        coordinator.present(.agentControl) { secondCalled = true }
+        coordinator.present(.userInteraction) { secondCalled = true }
 
         coordinator.onDismiss?()
 
@@ -299,9 +252,9 @@ struct SheetCoordinatorTests {
     @Test("Dismiss if active clears matching sheet")
     func testDismissIfActiveClearsMatchingSheet() {
         let coordinator = SheetCoordinator()
-        coordinator.showEngineApproval()
+        coordinator.showUserInteraction()
 
-        coordinator.dismissIfActive(.engineApproval)
+        coordinator.dismissIfActive(.userInteraction)
 
         #expect(coordinator.activeSheet == nil)
     }
@@ -311,7 +264,7 @@ struct SheetCoordinatorTests {
         let coordinator = SheetCoordinator()
         coordinator.showSettings()
 
-        coordinator.dismissIfActive(.engineApproval)
+        coordinator.dismissIfActive(.userInteraction)
 
         #expect(coordinator.activeSheet == .settings)
     }
@@ -338,35 +291,6 @@ struct SheetCoordinatorTests {
         coordinator.showSettings()
 
         #expect(coordinator.activeSheet == .settings)
-    }
-
-    @Test("showAgentControl creates agent control sheet")
-    func testShowAgentControlCreatesAgentControlSheet() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showAgentControl()
-
-        #expect(coordinator.activeSheet == .agentControl)
-    }
-
-    @Test("showSkillDetail creates skill detail sheet with correct data")
-    func testShowSkillDetailCreatesCorrectSheet() {
-        let coordinator = SheetCoordinator()
-        let skill = Skill(
-            name: "test",
-            displayName: "Test",
-            description: "Test",
-            source: .global,
-            tags: nil
-        )
-
-        coordinator.showSkillDetail(skill)
-
-        if case .skillDetail(let sheetSkill) = coordinator.activeSheet {
-            #expect(sheetSkill.name == "test")
-        } else {
-            Issue.record("Expected skillDetail sheet")
-        }
     }
 
     @Test("showCompactionDetail creates compaction sheet with data")
@@ -397,15 +321,6 @@ struct SheetCoordinatorTests {
         coordinator.showUserInteraction()
 
         #expect(coordinator.activeSheet == .userInteraction)
-    }
-
-    @Test("showSubagentDetail creates subagent detail sheet")
-    func testShowSubagentDetailCreatesSheet() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showSubagentDetail()
-
-        #expect(coordinator.activeSheet == .subagentDetail)
     }
 
     @Test("showNotificationDelivery creates notification delivery sheet with data")

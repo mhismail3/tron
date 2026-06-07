@@ -14,9 +14,6 @@ struct SettingsView: View {
     @State private var showLogViewer = false
     @State private var showArchiveAllConfirmation = false
     @State private var isArchivingAll = false
-    @State private var showClearPromptHistoryConfirmation = false
-    @State private var isClearingPromptHistory = false
-    @State private var clearPromptHistoryResultMessage: String?
     @State private var activePage: SettingsPage?
     @State private var cardsVisible = false
     @State private var feedbackMailDraft: FeedbackMailDraft?
@@ -165,21 +162,6 @@ struct SettingsView: View {
                 Button("Archive All", role: .destructive) { archiveAllSessions() }
             } message: {
                 Text(archiveAllSessionsMessage)
-            }
-            .alert("Clear Prompt History?", isPresented: $showClearPromptHistoryConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Clear", role: .destructive) { clearPromptHistory() }
-            } message: {
-                Text("This permanently removes every prompt-history entry on the active server.")
-            }
-            .alert(
-                clearPromptHistoryResultMessage ?? "",
-                isPresented: Binding(
-                    get: { clearPromptHistoryResultMessage != nil },
-                    set: { if !$0 { clearPromptHistoryResultMessage = nil } }
-                )
-            ) {
-                Button("OK", role: .cancel) { clearPromptHistoryResultMessage = nil }
             }
             .alert(
                 feedbackResultMessage ?? "",
@@ -473,8 +455,6 @@ struct SettingsView: View {
 
     private func isDangerActionInProgress(_ action: SettingsDangerZoneAction) -> Bool {
         switch action {
-        case .clearPromptHistory:
-            return isClearingPromptHistory
         case .archiveAllSessions:
             return isArchivingAll
         case .resetAllSettings:
@@ -484,8 +464,6 @@ struct SettingsView: View {
 
     private func performDangerAction(_ action: SettingsDangerZoneAction) {
         switch action {
-        case .clearPromptHistory:
-            showClearPromptHistoryConfirmation = true
         case .archiveAllSessions:
             showArchiveAllConfirmation = true
         case .resetAllSettings:
@@ -647,45 +625,6 @@ struct SettingsView: View {
         Task {
             await eventStoreManager.archiveAllSessions()
             isArchivingAll = false
-        }
-    }
-
-    private func clearPromptHistory() {
-        guard serverSettingsReady else {
-            clearPromptHistoryResultMessage = "Connect to the active server before clearing prompt history."
-            return
-        }
-
-        isClearingPromptHistory = true
-        let client = engineClient
-        let activeServerId = dependencies.pairedServerStore.activeServer?.id
-        Task {
-            do {
-                let result = try await client.promptLibrary.clearHistory(
-                    idempotencyKey: .userAction("promptLibrary.historyClear")
-                )
-                await MainActor.run {
-                    guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.engineClient === client
-                    else {
-                        isClearingPromptHistory = false
-                        return
-                    }
-                    clearPromptHistoryResultMessage = "Cleared \(result.deletedCount) entr\(result.deletedCount == 1 ? "y" : "ies")."
-                    isClearingPromptHistory = false
-                }
-            } catch {
-                await MainActor.run {
-                    guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.engineClient === client
-                    else {
-                        isClearingPromptHistory = false
-                        return
-                    }
-                    clearPromptHistoryResultMessage = "Failed to clear prompt history: \(error.localizedDescription)"
-                    isClearingPromptHistory = false
-                }
-            }
         }
     }
 

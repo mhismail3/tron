@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for job engine capabilities.
-/// Unified interface for managing background processes and subagents.
+/// Unified interface for managing background jobs.
 final class JobClient: EngineDomainClient {
 
     /// Promote a blocking job to background.

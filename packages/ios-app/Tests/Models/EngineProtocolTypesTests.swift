@@ -136,13 +136,7 @@ final class SessionTypesTests: XCTestCase {
             "newSessionId": "sess_new",
             "forkedFromEventId": "evt_123",
             "forkedFromSessionId": "sess_old",
-            "rootEventId": "evt_root",
-            "worktree": {
-                "isolated": true,
-                "branch": "session/fork-123",
-                "baseCommit": "abc123",
-                "path": "/path/to/worktree"
-            }
+            "rootEventId": "evt_root"
         }
         """.data(using: .utf8)!
 
@@ -150,8 +144,6 @@ final class SessionTypesTests: XCTestCase {
 
         XCTAssertEqual(result.newSessionId, "sess_new")
         XCTAssertEqual(result.forkedFromEventId, "evt_123")
-        XCTAssertEqual(result.worktree?.isolated, true)
-        XCTAssertEqual(result.worktree?.branch, "session/fork-123")
     }
 
     // MARK: - HistoryMessage Tests
@@ -225,46 +217,6 @@ final class TokenTypesTests: XCTestCase {
     }
 
     // testAgentStateTokenUsage removed — AgentStateTokenUsage deleted in Phase 5
-}
-
-// MARK: - Worktree Types Tests
-
-@MainActor
-final class WorktreeTypesTests: XCTestCase {
-
-    func testWorktreeInfoDecoding() throws {
-        let json = """
-        {
-            "isolated": true,
-            "branch": "session/test-branch",
-            "baseCommit": "abc123def456",
-            "path": "/path/to/worktree",
-            "hasUncommittedChanges": true,
-            "commitCount": 3
-        }
-        """.data(using: .utf8)!
-
-        let info = try JSONDecoder().decode(WorktreeInfo.self, from: json)
-
-        XCTAssertTrue(info.isolated)
-        XCTAssertEqual(info.branch, "session/test-branch")
-        XCTAssertEqual(info.shortBranch, "test-branch")
-        XCTAssertEqual(info.hasUncommittedChanges, true)
-    }
-
-    func testWorktreeInfoShortBranchWithoutPrefix() throws {
-        let json = """
-        {
-            "isolated": false,
-            "branch": "main",
-            "baseCommit": "abc123",
-            "path": "/path"
-        }
-        """.data(using: .utf8)!
-
-        let info = try JSONDecoder().decode(WorktreeInfo.self, from: json)
-        XCTAssertEqual(info.shortBranch, "main")
-    }
 }
 
 // MARK: - Event Types Tests
@@ -441,48 +393,6 @@ final class AttachmentTypesTests: XCTestCase {
 
         XCTAssertEqual(decoded["mimeType"] as? String, "application/pdf")
         XCTAssertEqual(decoded["fileName"] as? String, "test.pdf")
-    }
-}
-
-// MARK: - VoiceNotes Types Tests
-
-@MainActor
-final class VoiceNotesTypesTests: XCTestCase {
-
-    func testVoiceNoteMetadataDecoding() throws {
-        let json = """
-        {
-            "filename": "note_123.m4a",
-            "filepath": "/path/to/note_123.m4a",
-            "createdAt": "2026-01-26T00:00:00.000Z",
-            "durationSeconds": 125.5,
-            "language": "en",
-            "preview": "This is a preview...",
-            "transcript": "This is the full transcript of the voice note."
-        }
-        """.data(using: .utf8)!
-
-        let metadata = try JSONDecoder().decode(VoiceNoteMetadata.self, from: json)
-
-        XCTAssertEqual(metadata.id, "note_123.m4a")
-        XCTAssertEqual(metadata.durationSeconds, 125.5)
-        XCTAssertEqual(metadata.formattedDuration, "2:05")
-    }
-
-    func testVoiceNoteMetadataDurationFormatting() throws {
-        // Test minutes and seconds
-        let json1 = """
-        {"filename": "t1", "filepath": "/t1", "createdAt": "2026-01-26T00:00:00Z", "durationSeconds": 90.0, "preview": "p", "transcript": "t"}
-        """.data(using: .utf8)!
-        let m1 = try JSONDecoder().decode(VoiceNoteMetadata.self, from: json1)
-        XCTAssertEqual(m1.formattedDuration, "1:30")
-
-        // Test nil duration
-        let json2 = """
-        {"filename": "t2", "filepath": "/t2", "createdAt": "2026-01-26T00:00:00Z", "preview": "p", "transcript": "t"}
-        """.data(using: .utf8)!
-        let m2 = try JSONDecoder().decode(VoiceNoteMetadata.self, from: json2)
-        XCTAssertEqual(m2.formattedDuration, "--:--")
     }
 }
 

@@ -42,36 +42,6 @@ final class AgentClient: EngineDomainClient {
         }
     }
 
-    // MARK: - Session-Scoped Skill Methods
-
-    func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult {
-        let (_, sessionId) = try requireTransport().requireSession()
-        let params = SkillActivateParams(sessionId: sessionId, skillName: skillName)
-        return try await invokeWrite(
-            "skills::activate",
-            params,
-            idempotencyKey: idempotencyKey,
-            context: sessionInvocationContext(sessionId)
-        )
-    }
-
-    func deactivateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillDeactivateResult {
-        let (_, sessionId) = try requireTransport().requireSession()
-        let params = SkillDeactivateParams(sessionId: sessionId, skillName: skillName)
-        return try await invokeWrite(
-            "skills::deactivate",
-            params,
-            idempotencyKey: idempotencyKey,
-            context: sessionInvocationContext(sessionId)
-        )
-    }
-
-    func activeSkills() async throws -> SkillActiveResult {
-        let (_, sessionId) = try requireTransport().requireSession()
-        let params = SkillActiveParams(sessionId: sessionId)
-        return try await invokeRead("skills::active", params)
-    }
-
     // MARK: - Prompt Queue Methods
 
     /// Queue a prompt for later delivery when the agent becomes ready.
@@ -167,23 +137,6 @@ final class AgentClient: EngineDomainClient {
             category: .chat
         )
         return result.aborted
-    }
-
-    func workSnapshot(
-        sessionId: String? = nil,
-        workspaceId: String? = nil,
-        limit: Int = 12
-    ) async throws -> WorkSnapshotDTO {
-        _ = try requireTransport().requireConnection()
-        return try await invokeRead(
-            "agent::work_snapshot",
-            AgentWorkSnapshotParams(
-                sessionId: sessionId,
-                workspaceId: workspaceId,
-                limit: limit
-            ),
-            context: optionalSessionInvocationContext(sessionId)
-        )
     }
 
 }

@@ -19,7 +19,7 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
                 },
                 "answerAuthority": "user_client",
                 "contractId": "agent::ask_user",
-                "implementationId": "first_party.agent.v1.ask_user",
+                "implementationId": "runtime.agent.v1.ask_user",
                 "functionId": "agent::ask_user",
                 "modelPrimitiveName": "execute",
                 "presentationHints": {
@@ -56,15 +56,15 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
                 "streamTopic": "agent.runtime",
                 "childInvocations": ["child-1"],
                 "details": { "task": "inspect" },
-                "contractId": "agent::spawn_subagent",
-                "implementationId": "first_party.agent.v1.spawn_subagent",
-                "functionId": "agent::spawn_subagent",
+                "contractId": "filesystem::list_dir",
+                "implementationId": "runtime.filesystem.v1.list_dir",
+                "functionId": "filesystem::list_dir",
                 "modelPrimitiveName": "execute",
                 "presentationHints": {
-                    "displayName": "Spawn Subagent",
-                    "chipTitle": "Subagent",
-                    "icon": "subagent",
-                    "themeColor": "#8B5CF6"
+                    "displayName": "List Directory",
+                    "chipTitle": "List",
+                    "icon": "folder",
+                    "themeColor": "#10B981"
                 }
             }
         }
@@ -76,8 +76,8 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
         XCTAssertEqual(result?.runId, "run-1")
         XCTAssertEqual(result?.status, "running")
         XCTAssertEqual(result?.childInvocations, ["child-1"])
-        XCTAssertEqual(result?.identity.contractId, "agent::spawn_subagent")
-        XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "Spawn Subagent")
-        XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "Subagent")
+        XCTAssertEqual(result?.identity.contractId, "filesystem::list_dir")
+        XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "List Directory")
+        XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "List")
     }
 }

@@ -20,8 +20,7 @@ enum ServerSettingsFixture {
             "autoSetUpstream": true,
             "crashRecoveryAbortTimeoutMs": 1_800_000,
             "opTimeoutNetworkMs": 60_000,
-            "opTimeoutLocalMs": 30_000,
-            "subagentConflictResolutionEnabled": true
+            "opTimeoutLocalMs": 30_000
         ]
     }
 

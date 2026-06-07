@@ -8,23 +8,22 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         {
             "kind": "capability",
             "modelPrimitiveName": "execute",
-            "contractId": "worker::spawn",
-            "implementationId": "first_party.worker.v1.spawn",
-            "functionId": "worker::spawn",
-            "pluginId": "first_party.worker",
-            "workerId": "worker",
+            "contractId": "runtime::make_surface",
+            "implementationId": "runtime.surface.v1.make",
+            "functionId": "runtime::make_surface",
+            "pluginId": "runtime.surface",
+            "workerId": "runtime",
             "catalogRevision": 42,
-            "trustTier": "first_party_signed",
+            "trustTier": "runtime",
             "riskLevel": "High",
             "effectClass": "ExternalSideEffect",
             "presentationHints": {
-                "displayName": "Local capability",
-                "summary": "Safe in this workspace",
+                "displayName": "Runtime surface",
+                "summary": "Generated panel",
                 "icon": "puzzlepiece.extension"
             },
             "capabilityArgs": {
-                "visibility": "workspace",
-                "expectedFunctionIds": ["disposable::hello"]
+                "resourceId": "surface/demo"
             },
             "durationMs": 150,
             "isError": false
@@ -33,31 +32,30 @@ final class DashboardCapabilityStreamTests: XCTestCase {
 
         let line = try JSONDecoder().decode(ServerActivityLine.self, from: data).toActivityLine()
 
-        XCTAssertEqual(line.displayName, "Local capability")
-        XCTAssertEqual(line.summary, "Safe in this workspace")
+        XCTAssertEqual(line.displayName, "Runtime surface")
+        XCTAssertEqual(line.summary, "Generated panel")
         XCTAssertEqual(line.icon, "puzzlepiece.extension")
         XCTAssertEqual(line.duration, "150ms")
         XCTAssertFalse(line.summary?.contains("{") ?? false)
-        XCTAssertEqual(line.capabilityIdentity?.contractId, "worker::spawn")
+        XCTAssertEqual(line.capabilityIdentity?.contractId, "runtime::make_surface")
     }
 
-    func testWorkspaceAutonomyServerActivityLineUsesPlainCurrentWorkspaceSummary() throws {
+    func testRuntimePathServerActivityLineUsesCompactPathSummary() throws {
         let data = """
         {
             "kind": "capability",
             "modelPrimitiveName": "execute",
-            "contractId": "self_extension::grant_workspace_autonomy",
-            "implementationId": "first_party.self_extension.v1.grant_workspace_autonomy",
-            "functionId": "self_extension::grant_workspace_autonomy",
-            "pluginId": "first_party.capability",
-            "workerId": "capability",
+            "contractId": "runtime::state_write",
+            "implementationId": "runtime.state.v1.write",
+            "functionId": "runtime::state_write",
+            "pluginId": "runtime.state",
+            "workerId": "runtime",
             "catalogRevision": 42,
-            "trustTier": "first_party_signed",
+            "trustTier": "runtime",
             "riskLevel": "Medium",
             "effectClass": "DelegatedInvocation",
             "capabilityArgs": {
-                "workspacePath": "/Users/moose/Downloads/projects/tron",
-                "reason": "Approve workspace-local disposable helper capability work only"
+                "path": "/Users/moose/Downloads/projects/tron"
             },
             "durationMs": 60600,
             "isError": true
@@ -66,25 +64,23 @@ final class DashboardCapabilityStreamTests: XCTestCase {
 
         let line = try JSONDecoder().decode(ServerActivityLine.self, from: data).toActivityLine()
 
-        XCTAssertEqual(line.displayName, "Allow local capability work")
-        XCTAssertEqual(line.summary, "Current workspace")
+        XCTAssertEqual(line.displayName, "State Write")
+        XCTAssertEqual(line.summary, "tron")
         XCTAssertFalse(line.summary?.contains("/Users") ?? false)
-        XCTAssertFalse(line.summary?.contains("reason") ?? false)
-        XCTAssertFalse(line.displayName?.contains("Grant") ?? false)
     }
 
-    func testSandboxHelperDashboardLinesDoNotExposeSpawnedWorkerVocabulary() throws {
+    func testRuntimeDashboardLinesUseGenericNames() throws {
         let data = """
         {
             "kind": "capability",
             "modelPrimitiveName": "execute",
-            "contractId": "sandbox::list_spawned_workers",
-            "implementationId": "first_party.sandbox.v1.list_spawned_workers",
-            "functionId": "sandbox::list_spawned_workers",
-            "pluginId": "first_party.sandbox",
-            "workerId": "sandbox",
+            "contractId": "runtime::list_state",
+            "implementationId": "runtime.state.v1.list",
+            "functionId": "runtime::list_state",
+            "pluginId": "runtime.state",
+            "workerId": "runtime",
             "catalogRevision": 42,
-            "trustTier": "first_party_signed",
+            "trustTier": "runtime",
             "riskLevel": "Low",
             "effectClass": "PureRead",
             "durationMs": 147,
@@ -94,8 +90,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
 
         let line = try JSONDecoder().decode(ServerActivityLine.self, from: data).toActivityLine()
 
-        XCTAssertEqual(line.displayName, "Check helper capabilities")
-        XCTAssertFalse(line.displayName?.contains("Spawned") ?? false)
+        XCTAssertEqual(line.displayName, "List State")
         XCTAssertFalse(line.displayName?.contains("Worker") ?? false)
     }
 
@@ -103,9 +98,9 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         var buffer = SessionStreamBuffer()
         let identity = testCapabilityIdentity(
             modelPrimitiveName: "execute",
-            contractId: "filesystem::read_file",
-            implementationId: "first_party.filesystem.v1.read_file",
-            functionId: "filesystem::read_file"
+            contractId: "runtime::read_state",
+            implementationId: "runtime.state.v1.read",
+            functionId: "runtime::read_state"
         )
 
         buffer.addCapabilityStart(
@@ -115,9 +110,9 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         )
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].modelPrimitiveName, "filesystem::read_file")
-        XCTAssertEqual(buffer.lines[0].displayName, "Read File")
-        XCTAssertEqual(buffer.lines[0].icon, "doc.text.magnifyingglass")
+        XCTAssertEqual(buffer.lines[0].modelPrimitiveName, "runtime::read_state")
+        XCTAssertEqual(buffer.lines[0].displayName, "Read State")
+        XCTAssertEqual(buffer.lines[0].icon, "play.circle")
         XCTAssertEqual(buffer.lines[0].capabilityIdentity, identity)
     }
 
@@ -125,9 +120,9 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         var buffer = SessionStreamBuffer()
         let identity = testCapabilityIdentity(
             modelPrimitiveName: "execute",
-            contractId: "process::run",
-            implementationId: "first_party.process.v1.run",
-            functionId: "process::run"
+            contractId: "runtime::run",
+            implementationId: "runtime.action.v1.run",
+            functionId: "runtime::run"
         )
 
         buffer.addCapabilityStart(
@@ -140,7 +135,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         )
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].displayName, "Run Command")
+        XCTAssertEqual(buffer.lines[0].displayName, "Run")
         XCTAssertEqual(buffer.lines[0].summary, "git status --short --branch")
         XCTAssertFalse(buffer.lines[0].summary?.contains("{") ?? false)
     }
@@ -149,16 +144,16 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         var buffer = SessionStreamBuffer()
         let identity = testCapabilityIdentity(
             modelPrimitiveName: "execute",
-            contractId: "process::run",
-            implementationId: "first_party.process.v1.run",
-            functionId: "process::run"
+            contractId: "runtime::run",
+            implementationId: "runtime.action.v1.run",
+            functionId: "runtime::run"
         )
 
         buffer.addCapabilityEnd(identity: identity, success: false, durationMs: 250)
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].displayName, "Run Command")
-        XCTAssertEqual(buffer.lines[0].icon, "terminal")
+        XCTAssertEqual(buffer.lines[0].displayName, "Run")
+        XCTAssertEqual(buffer.lines[0].icon, "play.circle")
         XCTAssertEqual(buffer.lines[0].iconColor, .tronInfo)
         XCTAssertEqual(buffer.lines[0].duration, "250ms")
         XCTAssertEqual(buffer.lines[0].capabilityIdentity, identity)

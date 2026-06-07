@@ -13,25 +13,19 @@ struct SharedContent: Codable {
 /// Payload passed from ContentView to ChatView via notification.
 struct ShareMessagePayload {
     let prompt: String
-    let skillName: String?
 }
 
 extension SharedContent {
-    static let urlShareSkillName = "knowledge"
-
-    /// Build the prompt text and determine whether to auto-attach a skill.
-    ///
-    /// URL shares: "Save this to knowledge\n\n{url}" (+ optional text), attaches knowledge skill.
-    /// Text-only shares: raw text, no skill attachment.
+    /// Build the prompt text for a pending share.
     func buildSharePrompt() -> ShareMessagePayload? {
         if let url, !url.isEmpty {
             var prompt = "Save this to your knowledge base\n\n\(url)"
             if let text, !text.isEmpty {
                 prompt += "\n\n\(text)"
             }
-            return ShareMessagePayload(prompt: prompt, skillName: Self.urlShareSkillName)
+            return ShareMessagePayload(prompt: prompt)
         } else if let text, !text.isEmpty {
-            return ShareMessagePayload(prompt: text, skillName: nil)
+            return ShareMessagePayload(prompt: text)
         }
         return nil
     }

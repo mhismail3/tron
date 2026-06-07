@@ -10,7 +10,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "search",
                 contractId: "capability::search",
-                implementationId: "first_party.capability.v1.search",
+                implementationId: "runtime.capability.v1.search",
                 functionId: "capability::search"
             )
         )
@@ -28,7 +28,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "inspect",
                 contractId: "capability::inspect",
-                implementationId: "first_party.capability.v1.inspect",
+                implementationId: "runtime.capability.v1.inspect",
                 functionId: "capability::inspect"
             )
         )
@@ -36,8 +36,8 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(invocation.display.primitiveTitle, "Inspect")
         XCTAssertEqual(invocation.display.sheetTitle, "Inspect")
         XCTAssertEqual(invocation.display.chipTitle, "Inspect")
-        XCTAssertEqual(invocation.display.capabilityName, "Run Command")
-        XCTAssertEqual(invocation.display.commandText, "Run Command")
+        XCTAssertEqual(invocation.display.capabilityName, "Run")
+        XCTAssertEqual(invocation.display.commandText, "Run")
         XCTAssertEqual(invocation.display.targetId, "process::run")
     }
 
@@ -48,7 +48,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "inspect",
                 contractId: "filesystem::read_file",
-                implementationId: "first_party.filesystem.v1.read_file",
+                implementationId: "runtime.filesystem.v1.read_file",
                 functionId: "filesystem::read_file"
             )
         )
@@ -65,23 +65,23 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "capability::execute",
-                implementationId: "first_party.capability.v1.execute",
+                implementationId: "runtime.capability.v1.execute",
                 functionId: "capability::execute"
             )
         )
 
-        XCTAssertEqual(invocation.display.primitiveTitle, "Work")
-        XCTAssertEqual(invocation.display.sheetTitle, "Run Command")
-        XCTAssertEqual(invocation.display.chipTitle, "Run Command")
+        XCTAssertEqual(invocation.display.primitiveTitle, "Action")
+        XCTAssertEqual(invocation.display.sheetTitle, "Run")
+        XCTAssertEqual(invocation.display.chipTitle, "Run")
         XCTAssertEqual(invocation.display.targetId, "process::run")
         XCTAssertEqual(invocation.display.payloadSummary, "date +%s")
-        XCTAssertEqual(invocation.display.capabilityName, "Run Command")
+        XCTAssertEqual(invocation.display.capabilityName, "Run")
         XCTAssertEqual(invocation.display.commandText, "date +%s")
         XCTAssertEqual(invocation.display.requestRows.first?.label, "Command")
         XCTAssertEqual(invocation.display.requestRows.first?.value, "date +%s")
         XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
         XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.completed, .completed, .attention, .attention])
-        XCTAssertFalse(invocation.display.commandText.contains("first_party.capability.v1.execute"))
+        XCTAssertFalse(invocation.display.commandText.contains("runtime.capability.v1.execute"))
     }
 
     func testIntentOnlyExecuteDoesNotExposeWrapperImplementationAsTarget() {
@@ -91,37 +91,36 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "capability::execute",
-                implementationId: "first_party.capability.v1.execute",
+                implementationId: "runtime.capability.v1.execute",
                 functionId: "capability::execute",
-                pluginId: "first_party.capability",
-                trustTier: "first_party_signed"
+                pluginId: "runtime.capability",
+                trustTier: "runtime"
             )
         )
 
-        XCTAssertEqual(invocation.display.primitiveTitle, "Work")
-        XCTAssertEqual(invocation.display.sheetTitle, "Work")
-        XCTAssertEqual(invocation.display.chipTitle, "Work")
+        XCTAssertEqual(invocation.display.primitiveTitle, "Action")
+        XCTAssertEqual(invocation.display.sheetTitle, "Action")
+        XCTAssertEqual(invocation.display.chipTitle, "Action")
         XCTAssertNil(invocation.display.targetId)
-        XCTAssertEqual(invocation.display.capabilityName, "Work")
-        XCTAssertEqual(invocation.display.commandText, "Choosing worker")
+        XCTAssertEqual(invocation.display.capabilityName, "Action")
+        XCTAssertEqual(invocation.display.commandText, "Preparing action")
         XCTAssertFalse(invocation.display.chipTitle.contains("first_party"))
         XCTAssertFalse(invocation.display.commandText.contains("first_party"))
     }
 
-    func testExecuteChipSuppressesSessionWorktreeIdsForPathPayloads() {
+    func testExecuteChipDisplaysGenericPathPayloads() {
         let invocation = testCapabilityInvocation(
             status: .success,
-            arguments: #"{"contractId":"filesystem::list_dir","payload":{"path":"/Users/moose/Downloads/projects/testspace/.worktrees/session/sess_019e245a-408e-7331-9644-b46ade73be0d","showHidden":false},"mode":"invoke","reason":"Smoke-test list_dir."}"#,
+            arguments: #"{"contractId":"filesystem::list_dir","payload":{"path":"/Users/moose/Downloads/projects/testspace/runtime/current","showHidden":false},"mode":"invoke","reason":"Smoke-test list_dir."}"#,
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "capability::execute",
-                implementationId: "first_party.capability.v1.execute",
+                implementationId: "runtime.capability.v1.execute",
                 functionId: "capability::execute"
             )
         )
 
-        XCTAssertEqual(invocation.display.commandText, "session worktree")
-        XCTAssertFalse(invocation.display.commandText.contains("019e245a"))
+        XCTAssertEqual(invocation.display.commandText, "current")
         XCTAssertEqual(invocation.display.requestRows.map(\.label), ["Path", "Reason"])
     }
 
@@ -141,10 +140,10 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "filesystem::find",
-                implementationId: "first_party.filesystem.v1.find",
+                implementationId: "runtime.filesystem.v1.find",
                 functionId: "filesystem::find",
-                pluginId: "first_party.filesystem",
-                trustTier: "first_party_signed"
+                pluginId: "runtime.filesystem",
+                trustTier: "runtime"
             )
         )
 
@@ -160,20 +159,20 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "process::run",
-                implementationId: "first_party.process.v1.run",
+                implementationId: "runtime.process.v1.run",
                 functionId: "process::run",
-                pluginId: "first_party.process",
+                pluginId: "runtime.process",
                 workerId: "process"
             )
         )
 
-        XCTAssertEqual(invocation.display.primitiveTitle, "Work")
+        XCTAssertEqual(invocation.display.primitiveTitle, "Action")
         XCTAssertEqual(invocation.display.targetId, "process::run")
-        XCTAssertEqual(invocation.display.capabilityName, "Run Command")
+        XCTAssertEqual(invocation.display.capabilityName, "Run")
         XCTAssertEqual(invocation.display.commandText, "pwd")
     }
 
-    func testExecuteDefaultDetailsProjectWorkSummaryAndKeepAuditRaw() {
+    func testExecuteDefaultDetailsProjectsActionSummaryAndKeepRuntimeRaw() {
         let invocation = testCapabilityInvocation(
             status: .success,
             arguments: #"{"target":"process::run","intent":"Check repository state.","arguments":{"command":"git status --short","executionMode":"read_only"},"reason":"User asked for current repository state."}"#,
@@ -181,15 +180,15 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             details: [
                 "status": "ok",
                 "bindingDecision": [
-                    "selectionPolicy": "first_party_healthy",
-                    "selectedImplementation": "first_party.process.v1.run"
+                    "selectionPolicy": "runtime_ready",
+                    "selectedImplementation": "runtime.process.v1.run"
                 ],
                 "orchestration": [
                     "phaseDetails": [
                         "resolveMode": "explicit_target",
                         "selectedTarget": [
                             "contractId": "process::run",
-                            "implementationId": "first_party.process.v1.run",
+                            "implementationId": "runtime.process.v1.run",
                             "schemaDigest": "sha256:process"
                         ]
                     ]
@@ -205,12 +204,12 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "process::run",
-                implementationId: "first_party.process.v1.run",
+                implementationId: "runtime.process.v1.run",
                 functionId: "process::run",
-                pluginId: "first_party.process",
+                pluginId: "runtime.process",
                 workerId: "process-worker",
                 schemaDigest: "sha256:process",
-                trustTier: "first_party_signed",
+                trustTier: "runtime",
                 riskLevel: "low",
                 effectClass: "read",
                 traceId: "trace-process",
@@ -219,16 +218,16 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            invocation.display.workRows.map(\.label),
-            ["What happened", "Why", "Worker", "Status", "Result"]
+            invocation.display.actionRows.map(\.label),
+            ["What happened", "Why", "Executor", "Status", "Result"]
         )
-        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "What happened", value: "Run Command")))
-        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
-        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Worker", value: "Process Worker")))
-        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Status", value: "Completed · 86ms")))
-        XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Result", value: "clean")))
+        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "What happened", value: "Run")))
+        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
+        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Executor", value: "Process Worker")))
+        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Status", value: "Completed · 86ms")))
+        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Result", value: "clean")))
 
-        let defaultText = invocation.display.workRows.map(\.value).joined(separator: " ")
+        let defaultText = invocation.display.actionRows.map(\.value).joined(separator: " ")
         XCTAssertFalse(defaultText.contains("schema"))
         XCTAssertFalse(defaultText.contains("trace-process"))
         XCTAssertFalse(defaultText.contains("binding-process"))
@@ -243,14 +242,14 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         let invocation = testCapabilityInvocation(
             status: .success,
             arguments: #"{"target":"process::run","intent":"Run a safe read-only process command.","arguments":{"command":"pwd && sed -n '1,3p' README.md","executionMode":"read_only"},"reason":"User requested an exact read-only process command."}"#,
-            result: #"{"durationMs":10,"exitCode":0,"outputTruncated":false,"stderr":"","stdout":"/tmp/worktree\nREADME\n","timedOut":false}"#,
+            result: #"{"durationMs":10,"exitCode":0,"outputTruncated":false,"stderr":"","stdout":"/tmp/project\nREADME\n","timedOut":false}"#,
             details: [
                 "status": "ok",
                 "catalogRevision": 389,
                 "childInvocations": ["019e4be0-28d5-71a1-a8c9-c70640ecd6b4"],
                 "bindingDecision": [
-                    "selectionPolicy": "first_party_healthy",
-                    "selectedImplementation": "first_party.process.v1.run"
+                    "selectionPolicy": "runtime_ready",
+                    "selectedImplementation": "runtime.process.v1.run"
                 ],
                 "correctedRequest": [
                     "target": ["capabilityId": "process::run"],
@@ -273,7 +272,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
                             "contractId": "process::run",
                             "effectClass": "ExternalSideEffect",
                             "functionId": "process::run",
-                            "implementationId": "first_party.process.v1.run",
+                            "implementationId": "runtime.process.v1.run",
                             "riskLevel": "High",
                             "schemaDigest": "sha256:process-schema"
                         ]
@@ -284,7 +283,7 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
                     "exitCode": 0,
                     "outputTruncated": false,
                     "stderr": "",
-                    "stdout": "/tmp/worktree\nREADME\n",
+                    "stdout": "/tmp/project\nREADME\n",
                     "timedOut": false
                 ]
             ],
@@ -292,13 +291,13 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "process::run",
-                implementationId: "first_party.process.v1.run",
+                implementationId: "runtime.process.v1.run",
                 functionId: "process::run",
-                pluginId: "first_party.process",
+                pluginId: "runtime.process",
                 workerId: "process",
                 schemaDigest: "sha256:process-schema",
                 catalogRevision: 389,
-                trustTier: "first_party_signed",
+                trustTier: "runtime",
                 riskLevel: "High",
                 effectClass: "ExternalSideEffect",
                 traceId: "trace-process",
@@ -308,10 +307,10 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         )
 
         XCTAssertEqual(invocation.display.commandText, "pwd && sed -n '1,3p' README.md")
-        XCTAssertEqual(invocation.display.sheetTitle, "Run Command")
+        XCTAssertEqual(invocation.display.sheetTitle, "Run")
         XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
         XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.completed, .completed, .completed, .completed])
-        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Run Command selected")
+        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Run selected")
         XCTAssertEqual(
             invocation.display.requestRows.map(\.label),
             ["Command", "Execution mode", "Intent", "Reason"]
@@ -320,49 +319,17 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(invocation.display.executionGroups.map(\.title), ["Resolution", "Preparation", "Run"])
         XCTAssertTrue(invocation.display.executionGroups[0].rows.contains(CapabilityDisplayRow(label: "Mode", value: "Explicit Target")))
         XCTAssertTrue(invocation.display.executionGroups[0].rows.contains(CapabilityDisplayRow(label: "Target", value: "process::run", isTechnical: true)))
-        XCTAssertTrue(invocation.display.executionGroups[0].rows.contains(CapabilityDisplayRow(label: "Selection", value: "First Party Healthy")))
+        XCTAssertTrue(invocation.display.executionGroups[0].rows.contains(CapabilityDisplayRow(label: "Selection", value: "Runtime Ready")))
         XCTAssertTrue(invocation.display.executionGroups[1].rows.contains(CapabilityDisplayRow(label: "Capability risk", value: "High")))
         XCTAssertTrue(invocation.display.executionGroups[1].rows.contains(CapabilityDisplayRow(label: "Effect class", value: "External Side Effect")))
-        XCTAssertTrue(invocation.display.executionGroups[1].rows.contains(CapabilityDisplayRow(label: "Approval", value: "Not required")))
         XCTAssertTrue(invocation.display.executionGroups[1].rows.contains(CapabilityDisplayRow(label: "Corrections", value: "None")))
+        XCTAssertFalse(invocation.display.executionGroups[1].rows.contains { $0.label == "Approval" })
         XCTAssertTrue(invocation.display.executionGroups[2].rows.contains(CapabilityDisplayRow(label: "Status", value: "Completed")))
         XCTAssertFalse(invocation.display.executionGroups[2].rows.contains { $0.label == "Exit code" })
         XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Exit code", value: "0")))
         XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Timed out", value: "No")))
         XCTAssertTrue(invocation.display.resultRows.contains(CapabilityDisplayRow(label: "Output truncated", value: "No")))
-        XCTAssertEqual(invocation.display.resultPreview, "/tmp/worktree\nREADME")
-    }
-
-    func testExecuteDisplaysApprovalReplayAsProvenanceNotFreshApproval() {
-        let invocation = testCapabilityInvocation(
-            status: .success,
-            arguments: #"{"target":"process::run","intent":"Replay a materialized process command.","arguments":{"command":"printf hi > replay.txt","executionMode":"sandbox_materialized","expectedOutputs":[{"path":"replay.txt"}]},"idempotencyKey":"manual-replay"}"#,
-            details: [
-                "approvalRequired": false,
-                "approvalCreated": false,
-                "approvalExecuted": false,
-                "approvalReplayed": true,
-                "approvalReplay": [
-                    "approvalId": "approval-original",
-                    "status": "executed",
-                    "functionId": "process::run",
-                    "childInvocationIds": ["child-original"]
-                ],
-                "childInvocationCreated": false,
-                "childInvocations": ["child-original"]
-            ],
-            identity: CapabilityIdentity(
-                modelPrimitiveName: "execute",
-                contractId: "process::run",
-                implementationId: "first_party.process.v1.run",
-                functionId: "process::run"
-            )
-        )
-
-        let preparation = invocation.display.executionGroups.first { $0.title == "Preparation" }
-        XCTAssertTrue(
-            preparation?.rows.contains(CapabilityDisplayRow(label: "Approval", value: "Replayed previous approval")) == true
-        )
+        XCTAssertEqual(invocation.display.resultPreview, "/tmp/project\nREADME")
     }
 
     func testDurationPrefersObservedInvocationSpanWhenLongerThanServerDuration() {
@@ -377,10 +344,10 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "process::run",
-                implementationId: "first_party.process.v1.run",
+                implementationId: "runtime.process.v1.run",
                 functionId: "process::run",
-                pluginId: "first_party.process",
-                trustTier: "first_party_signed"
+                pluginId: "runtime.process",
+                trustTier: "runtime"
             )
         )
 
@@ -406,17 +373,17 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
 
         XCTAssertEqual(invocation.display.capabilityName, "Do The Thing")
         XCTAssertEqual(invocation.display.commandText, "alpha")
-        XCTAssertEqual(CapabilityPresentation.sourceLabel(for: invocation.identity), "OpenAPI")
+        XCTAssertEqual(CapabilityPresentation.sourceLabel(for: invocation.identity), "Acme")
     }
 
-    func testPresentationClassifiesCapabilitySourceLabels() {
+    func testPresentationUsesGenericRuntimeSourceLabels() {
         let firstParty = CapabilityIdentity(
             modelPrimitiveName: "execute",
             contractId: "process::run",
-            implementationId: "first_party.process.v1.run",
+            implementationId: "runtime.process.v1.run",
             functionId: "process::run",
-            pluginId: "first_party.process",
-            trustTier: "first_party_signed"
+            pluginId: "runtime.process",
+            trustTier: "runtime"
         )
         let mcp = CapabilityIdentity(
             modelPrimitiveName: "execute",
@@ -427,24 +394,24 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             trustTier: "external_mcp"
         )
 
-        XCTAssertEqual(CapabilityPresentation.sourceLabel(for: firstParty), "First-party")
-        XCTAssertEqual(CapabilityPresentation.sourceLabel(for: mcp), "MCP")
-        XCTAssertEqual(CapabilityPresentation.pluginLabel(for: firstParty), "Process (First-party)")
-        XCTAssertEqual(CapabilityPresentation.pluginLabel(for: mcp), "GitHub (MCP)")
+        XCTAssertEqual(CapabilityPresentation.sourceLabel(for: firstParty), "Process")
+        XCTAssertEqual(CapabilityPresentation.sourceLabel(for: mcp), "Github")
+        XCTAssertEqual(CapabilityPresentation.pluginLabel(for: firstParty), "Process")
+        XCTAssertEqual(CapabilityPresentation.pluginLabel(for: mcp), "Github")
     }
 
     func testPresentationUsesCapabilityThemeColorWhenProvided() {
         let identity = CapabilityIdentity(
             modelPrimitiveName: "execute",
-            contractId: "notifications::send",
-            implementationId: "first_party.notifications.v1.send",
-            functionId: "notifications::send",
-            pluginId: "first_party.notifications",
-            trustTier: "first_party_signed",
+            contractId: "alerts::send",
+            implementationId: "runtime.alerts.v1.send",
+            functionId: "alerts::send",
+            pluginId: "runtime.alerts",
+            trustTier: "runtime",
             themeColor: "#EC4899"
         )
 
-        XCTAssertEqual(CapabilityPresentation.pluginLabel(for: identity), "Notifications (First-party)")
+        XCTAssertEqual(CapabilityPresentation.pluginLabel(for: identity), "Alerts")
         XCTAssertEqual(identity.themeColor, "#EC4899")
     }
 
@@ -452,10 +419,10 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         let identity = CapabilityIdentity(
             modelPrimitiveName: "execute",
             contractId: "process::run",
-            implementationId: "first_party.process.v1.run",
+            implementationId: "runtime.process.v1.run",
             functionId: "process::run",
-            pluginId: "first_party.process",
-            trustTier: "first_party_signed",
+            pluginId: "runtime.process",
+            trustTier: "runtime",
             presentationHints: [
                 "displayName": "Shell Command",
                 "chipTitle": "Shell",
@@ -476,131 +443,6 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
         XCTAssertEqual(CapabilityPresentation.themeColorHex(for: identity), "#38BDF8")
     }
 
-    func testSelfExtensionPresentationHintsKeepChatProjectionPlain() {
-        let identity = CapabilityIdentity(
-            modelPrimitiveName: "execute",
-            contractId: "worker::spawn",
-            implementationId: "first_party.worker.v1.spawn",
-            functionId: "worker::spawn",
-            pluginId: "first_party.worker",
-            workerId: "worker-control",
-            trustTier: "session_generated",
-            presentationHints: [
-                "displayName": "Create helper capability",
-                "chipTitle": "Creating helper capability",
-                "summary": "Safe in this workspace",
-                "runningLabel": "Creating helper capability",
-                "successLabel": "Capability added",
-                "failureLabel": "Repair needed"
-            ]
-        )
-        let arguments = #"""
-        {
-            "target": "worker::spawn",
-            "arguments": {
-                "workerId": "tron-maintainer-helper",
-                "visibility": "workspace",
-                "expectedFunctionIds": ["tron_maintainer::scorecard_summary"]
-            },
-            "intent": "Create a local helper capability for Tron maintenance."
-        }
-        """#
-        let details: [String: AnyCodable] = [
-            "orchestration": [
-                "phaseDetails": [
-                    "selectedTarget": [
-                        "functionId": "worker::spawn",
-                        "implementationId": "first_party.worker.v1.spawn"
-                    ]
-                ]
-            ]
-        ]
-        let running = CapabilityInvocationData(
-            id: "cap-self-extend-running",
-            status: .running,
-            arguments: arguments,
-            details: details,
-            identity: identity
-        )
-
-        XCTAssertEqual(running.display.chipTitle, "Creating helper capability")
-        XCTAssertEqual(running.display.commandText, "Safe in this workspace")
-        XCTAssertEqual(running.display.summaryText, "Safe in this workspace")
-        XCTAssertEqual(running.display.statusText, "Creating helper capability")
-        XCTAssertEqual(running.display.statusWithDuration, "Creating helper capability")
-        XCTAssertEqual(running.display.progressSteps.map(\.state), [.completed, .current, .current, .pending])
-        XCTAssertTrue(
-            running.display.executionGroups
-                .first { $0.title == "Run" }?
-                .rows
-                .contains(CapabilityDisplayRow(label: "Status", value: "Creating helper capability")) == true
-        )
-
-        let visibleChatText = [
-            running.display.chipTitle,
-            running.display.commandText,
-            running.display.summaryText,
-            running.display.statusText,
-            running.display.statusWithDuration
-        ].joined(separator: " ")
-        XCTAssertFalse(visibleChatText.contains("worker::spawn"))
-        XCTAssertFalse(visibleChatText.contains("first_party"))
-
-        let completed = CapabilityInvocationData(
-            id: "cap-self-extend-complete",
-            status: .success,
-            arguments: arguments,
-            details: details,
-            identity: identity
-        )
-        XCTAssertEqual(completed.display.statusText, "Capability added")
-
-        let failed = CapabilityInvocationData(
-            id: "cap-self-extend-repair",
-            status: .error,
-            arguments: arguments,
-            details: details,
-            identity: identity
-        )
-        XCTAssertEqual(failed.display.statusText, "Repair needed")
-    }
-
-    func testWorkspaceAutonomyExecuteStartKeepsChatProjectionPlainBeforeResolution() {
-        let identity = CapabilityIdentity(
-            modelPrimitiveName: "execute",
-            contractId: "capability::execute",
-            implementationId: "first_party.capability.v1.execute",
-            functionId: "capability::execute",
-            pluginId: "first_party.capability",
-            trustTier: "first_party_signed"
-        )
-        let invocation = CapabilityInvocationData(
-            id: "cap-workspace-autonomy-start",
-            status: .running,
-            arguments: #"""
-            {
-                "target": "self_extension::grant_workspace_autonomy",
-                "arguments": {
-                    "workspacePath": "/Users/moose/Downloads/projects/tron",
-                    "reason": "Approve workspace-local disposable helper capability work only."
-                },
-                "reason": "Request approval before local capability work."
-            }
-            """#,
-            identity: identity
-        )
-
-        XCTAssertEqual(invocation.display.chipTitle, "Allow local capability work")
-        XCTAssertEqual(invocation.display.commandText, "Current workspace")
-        XCTAssertEqual(invocation.display.summaryText, "Current workspace")
-        XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
-        XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.completed, .current, .current, .pending])
-        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Allow local capability work selected")
-        XCTAssertFalse(invocation.display.chipTitle.contains("Grant"))
-        XCTAssertFalse(invocation.display.commandText.contains("reason="))
-        XCTAssertFalse(invocation.display.summaryText.contains("self_extension"))
-    }
-
     func testExecuteWithoutTargetShowsResolutionAsCurrentProgressStep() {
         let invocation = testCapabilityInvocation(
             status: .running,
@@ -608,163 +450,16 @@ final class CapabilityInvocationDisplayModelTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "capability::execute",
-                implementationId: "first_party.capability.v1.execute",
+                implementationId: "runtime.capability.v1.execute",
                 functionId: "capability::execute",
-                pluginId: "first_party.capability",
-                trustTier: "first_party_signed"
+                pluginId: "runtime.capability",
+                trustTier: "runtime"
             )
         )
 
-        XCTAssertEqual(invocation.display.sheetTitle, "Work")
+        XCTAssertEqual(invocation.display.sheetTitle, "Action")
         XCTAssertEqual(invocation.display.progressSteps.map(\.title), ["Choose", "Prepare", "Run", "Finish"])
         XCTAssertEqual(invocation.display.progressSteps.map(\.state), [.current, .pending, .pending, .pending])
-        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Choosing the right worker")
-    }
-
-    func testSelfExtensionRepairChipsKeepCatalogAndWorkerIdsInInspectOnly() {
-        let identity = CapabilityIdentity(
-            modelPrimitiveName: "execute",
-            contractId: "capability::execute",
-            implementationId: "first_party.capability.v1.execute",
-            functionId: "capability::execute",
-            pluginId: "first_party.capability",
-            trustTier: "first_party_signed"
-        )
-        let inspect = CapabilityInvocationData(
-            id: "cap-inspect-helper",
-            status: .error,
-            arguments: #"""
-            {
-                "target": "capability::inspect",
-                "arguments": {
-                    "functionId": "disposable::tiny_ping",
-                    "includeDocs": true,
-                    "includeExamples": true
-                },
-                "reason": "Check whether the disposable helper registered."
-            }
-            """#,
-            identity: identity
-        )
-        let catalog = CapabilityInvocationData(
-            id: "cap-watch-helper",
-            status: .error,
-            arguments: #"""
-            {
-                "target": "catalog::watch_snapshot",
-                "arguments": {
-                    "namespacePrefix": "disposable",
-                    "limit": 20
-                },
-                "reason": "Check the live catalog for the helper."
-            }
-            """#,
-            identity: identity
-        )
-        let health = CapabilityInvocationData(
-            id: "cap-health-helper",
-            status: .success,
-            arguments: #"""
-            {
-                "target": "worker::health",
-                "arguments": {
-                    "workerId": "disposable-helper-worker-2"
-                },
-                "reason": "Check helper health."
-            }
-            """#,
-            identity: identity
-        )
-        let stop = CapabilityInvocationData(
-            id: "cap-stop-helper",
-            status: .approvalRequired,
-            arguments: #"""
-            {
-                "target": "sandbox::stop_spawned_worker",
-                "arguments": {
-                    "workerId": "disposable-helper-worker-2",
-                    "reason": "Cleanup after repair."
-                },
-                "reason": "Stop the disposable helper."
-            }
-            """#,
-            identity: identity
-        )
-
-        XCTAssertEqual(inspect.display.chipTitle, "Check capability")
-        XCTAssertEqual(inspect.display.commandText, "Capability details")
-        XCTAssertEqual(catalog.display.chipTitle, "Check capabilities")
-        XCTAssertEqual(catalog.display.commandText, "Capability catalog")
-        XCTAssertEqual(health.display.chipTitle, "Check helper capability")
-        XCTAssertEqual(health.display.commandText, "Helper capability status")
-        XCTAssertEqual(stop.display.chipTitle, "Stop helper capability")
-        XCTAssertEqual(stop.display.commandText, "Local helper capability")
-
-        let visibleChatText = [inspect, catalog, health, stop]
-            .flatMap { invocation in
-                [
-                    invocation.display.chipTitle,
-                    invocation.display.commandText,
-                    invocation.display.summaryText,
-                    invocation.display.statusText,
-                    invocation.display.statusWithDuration
-                ]
-            }
-            .joined(separator: " ")
-        for forbidden in [
-            "functionId",
-            "namespacePrefix",
-            "workerId",
-            "disposable::tiny_ping",
-            "disposable-helper-worker"
-        ] {
-            XCTAssertFalse(visibleChatText.contains(forbidden), "visible chat text leaked \(forbidden): \(visibleChatText)")
-        }
-    }
-
-    func testPresentationDerivesThemeColorFromResolvedCapabilityWhenEventOmitsHint() {
-        let process = CapabilityIdentity(
-            modelPrimitiveName: "execute",
-            contractId: "process::run",
-            implementationId: "first_party.process.v1.run",
-            functionId: "process::run",
-            pluginId: "first_party.process",
-            trustTier: "first_party_signed"
-        )
-        let notification = CapabilityIdentity(
-            modelPrimitiveName: "execute",
-            contractId: "notifications::send",
-            implementationId: "first_party.notifications.v1.send",
-            functionId: "notifications::send",
-            pluginId: "first_party.notifications",
-            trustTier: "first_party_signed"
-        )
-
-        XCTAssertEqual(CapabilityPresentation.themeColorHex(for: process), "#38BDF8")
-        XCTAssertEqual(CapabilityPresentation.themeColorHex(for: notification), "#EC4899")
-    }
-
-    func testPresentationDerivesRunningExecuteThemeColorFromRequestedTarget() {
-        let identity = CapabilityIdentity(
-            modelPrimitiveName: "execute",
-            contractId: "capability::execute",
-            implementationId: "first_party.capability.v1.execute",
-            functionId: "capability::execute",
-            pluginId: "first_party.capability",
-            trustTier: "first_party_signed"
-        )
-
-        XCTAssertEqual(
-            CapabilityPresentation.themeColorHex(for: identity, targetId: "process::run"),
-            "#38BDF8"
-        )
-        XCTAssertEqual(
-            CapabilityPresentation.symbol(for: identity, targetId: "process::run"),
-            "terminal"
-        )
-        XCTAssertEqual(
-            CapabilityPresentation.themeColorHex(for: identity, targetId: "notifications::send"),
-            "#EC4899"
-        )
+        XCTAssertEqual(invocation.display.progressSteps[0].detail, "Selecting runtime target")
     }
 }

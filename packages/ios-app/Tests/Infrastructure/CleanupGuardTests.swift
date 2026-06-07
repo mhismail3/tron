@@ -20,16 +20,6 @@ struct CleanupGuardTests {
         try String(contentsOf: repoRoot.appendingPathComponent(relativePath), encoding: .utf8)
     }
 
-    @Test("Clone destination requires server home truth or an explicit locked path")
-    func cloneRepoSheetDoesNotInventHomeDirectory() throws {
-        let source = try read("packages/ios-app/Sources/Views/Session/CloneRepoSheet.swift")
-
-        #expect(!source.contains("/" + "Users"))
-        #expect(!source.contains("is" + "Loading" + "Home"))
-        #expect(source.contains("Could not load home directory"))
-        #expect(source.contains("destinationPath = lockedDestinationPath ?? \"\""))
-    }
-
     @Test("Font settings no longer carries retired casual-axis storage")
     func fontSettingsDoesNotRetainRetiredCasualAxisMigration() throws {
         let source = try read("packages/ios-app/Sources/Theme/FontSettings.swift")

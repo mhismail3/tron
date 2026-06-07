@@ -132,7 +132,7 @@ final class TurnLifecycleCoordinator {
             for i in startIndex..<context.messages.count {
                 if context.messages[i].role == .assistant {
                     switch context.messages[i].content {
-                    case .text, .capabilityInvocation, .userInteraction, .engineApproval:
+                    case .text, .capabilityInvocation, .userInteraction:
                         targetIndex = i
                     default:
                         break

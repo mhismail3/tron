@@ -92,9 +92,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// `connectionManager`.
     private(set) var interactionPolicy: InteractionPolicy
 
-    /// Skill store - updated when engine client changes
-    private(set) var skillStore: SkillStore
-
     /// Event store manager - updated when engine client changes
     private(set) var eventStoreManager: EventStoreManager
 
@@ -198,10 +195,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         connectionManager = manager
         interactionPolicy = InteractionPolicy(connection: manager)
 
-        // Initialize skill store
-        let store = SkillStore()
-        skillStore = store
-
         // Initialize event store manager
         eventStoreManager = EventStoreManager(eventDB: db, engineClient: client)
 
@@ -212,9 +205,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         modelRepository = DefaultModelRepository(modelClient: client.model)
         sessionRepository = DefaultSessionRepository(sessionClient: client.session)
         agentRepository = DefaultAgentRepository(agentClient: client.agent)
-
-        // Configure skill store with engine client (after all properties initialized)
-        store.configure(engineClient: client)
 
         // Wire draft store into event store manager for cleanup on session delete
         eventStoreManager.draftStore = draftStore
@@ -398,7 +388,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         connectionManager = newManager
         interactionPolicy = InteractionPolicy(connection: newManager)
 
-        skillStore.configure(engineClient: newClient)
         eventStoreManager.updateEngineClient(newClient)
         eventStoreManager.attachConnectionManager(newManager)
         notificationStore = NotificationStore(engineClient: newClient)

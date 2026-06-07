@@ -144,14 +144,6 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertNil(router.pendingIntent)
     }
 
-    func testHandleURLVoiceNotesIsRetired() {
-        let router = DeepLinkRouter()
-        let url = URL(string: "tron://voice-notes")!
-
-        XCTAssertFalse(router.handle(url: url))
-        XCTAssertNil(router.pendingIntent)
-    }
-
     func testHandleURLWithMissingSessionId() {
         let router = DeepLinkRouter()
         let url = URL(string: "tron://session")!

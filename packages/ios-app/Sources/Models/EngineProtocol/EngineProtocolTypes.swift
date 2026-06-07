@@ -186,7 +186,6 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case capabilityNotFound = "CAPABILITY_NOT_FOUND"
     case invalidFunctionId = "INVALID_FUNCTION_ID"
     case unauthorized = "UNAUTHORIZED"
-    case approvalRequired = "APPROVAL_REQUIRED"
     case idempotencyConflict = "IDEMPOTENCY_CONFLICT"
     case internalError = "INTERNAL_ERROR"
 
@@ -196,7 +195,6 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case nonFastForward = "NON_FAST_FORWARD"
     case gitAuthFailed = "GIT_AUTH_FAILED"
     case gitNetworkError = "GIT_NETWORK_ERROR"
-    case worktreeNotFound = "WORKTREE_NOT_FOUND"
     case dirtyWorkingTree = "DIRTY_WORKING_TREE"
     case missingBaseBranch = "MISSING_BASE_BRANCH"
     case refNotFound = "REF_NOT_FOUND"

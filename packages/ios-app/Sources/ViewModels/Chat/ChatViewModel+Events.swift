@@ -125,7 +125,7 @@ extension ChatViewModel {
             ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
 
         if case .capabilityInvocation(var invocation) = messages[index].content {
-            invocation.status = result.kind == "approval" ? .approvalRequired : .paused
+            invocation.status = .paused
             invocation.progressMessage = lifecycleStatusMessage(kind: result.kind, status: result.status)
             invocation.details = mergeCapabilityDetails(
                 invocation.details,
@@ -292,7 +292,6 @@ extension ChatViewModel {
         isRetaining = false
         memoryRetainInProgressMessageId = nil
         userInteractionState.clearAll()
-        engineApprovalState.clearAll()
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
         pullUpPanelState.awaitingSuggestions = false
@@ -303,7 +302,6 @@ extension ChatViewModel {
     private func lifecycleStatusMessage(kind: String, status: String) -> String {
         switch kind {
         case "user_input": return "Waiting for your response"
-        case "approval": return "Waiting for approval"
         default: return "\(kind.replacingOccurrences(of: "_", with: " ")) \(status)"
         }
     }
@@ -314,7 +312,7 @@ extension ChatViewModel {
     ) -> CapabilityInvocationStatus {
         switch status {
         case "pending", "running": return .running
-        case "paused_for_approval", "paused": return .paused
+        case "paused": return .paused
         case "completed", "ok": return .success
         case "cancelled", "timeout", "failed", "worker_disconnected", "policy_denied": return .error
         default: return current
@@ -389,24 +387,6 @@ extension ChatViewModel {
         appendToMessages(deletedMessage)
     }
 
-    func handleSkillActivated(_ pluginResult: SkillActivatedPlugin.Result) {
-        logger.info("Skill activated: \(pluginResult.skillName) (\(pluginResult.source))", category: .events)
-
-        // Refresh context from server - skill activation changes context size
-        launchBackground { [weak self] in
-            await self?.refreshContextFromServer()
-        }
-    }
-
-    func handleSkillDeactivated(_ pluginResult: SkillDeactivatedPlugin.Result) {
-        logger.info("Skill deactivated: \(pluginResult.skillName)", category: .events)
-
-        // Refresh context from server - skill deactivation changes context size
-        launchBackground { [weak self] in
-            await self?.refreshContextFromServer()
-        }
-    }
-
     func handleRulesActivated(_ pluginResult: RulesActivatedPlugin.Result) {
         let dirs = pluginResult.rules.map(\.scopeDir).joined(separator: ", ")
         logger.info("Rules activated for: \(dirs)", category: .events)
@@ -436,7 +416,6 @@ extension ChatViewModel {
         isRetaining = false
         memoryRetainInProgressMessageId = nil
         userInteractionState.clearAll()
-        engineApprovalState.clearAll()
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

@@ -223,10 +223,6 @@ private struct CapabilityInspectionResultSummary: View {
                 CapabilityInfoPill(icon: "lock.shield", label: "Fresh inspection required", color: .tronAmber)
             }
 
-            if let approval = approvalRequirement(requirements: requirements, contract: contract) {
-                CapabilityInfoPill(icon: "checkmark.shield", label: approval, color: .tronAmber)
-            }
-
             if let examples = contract?.array("examples"), !examples.isEmpty {
                 CapabilityRawDisclosure(title: "Examples", text: prettyJSONArray(examples), tint: tint)
             }
@@ -251,7 +247,7 @@ private struct CapabilityInspectionResultSummary: View {
         append("Implementation", implementation?.string("implementationId"), technical: true)
         append("Function", implementation?.string("functionId"), technical: true)
         append("Plugin", implementation?.string("pluginId") ?? provenance?.string("pluginId"), technical: true)
-        append("Worker", implementation?.string("workerId"), technical: true)
+        append("Executor", implementation?.string("workerId"), technical: true)
         append("Trust", implementation?.string("trustTier"))
         append("Health", implementation?.string("health"))
         append("Risk", contract?.string("riskLevel"))
@@ -262,20 +258,6 @@ private struct CapabilityInspectionResultSummary: View {
         append("Schema digest", requirements?.string("expectedSchemaDigest"), technical: true)
         append("Inspection handle", requirements?.string("inspectionHandle"), technical: true)
         return rows
-    }
-
-    private func approvalRequirement(
-        requirements: [String: AnyCodable]?,
-        contract: [String: AnyCodable]?
-    ) -> String? {
-        if requirements?.bool("approvalRequired") == true {
-            return "Approval required before execution"
-        }
-        if let approval = contract?.anyCodableDict("approvalContract"),
-           approval.bool("required") == true {
-            return "Approval required by contract"
-        }
-        return nil
     }
 
     private func prettyJSONArray(_ value: [Any]) -> String {

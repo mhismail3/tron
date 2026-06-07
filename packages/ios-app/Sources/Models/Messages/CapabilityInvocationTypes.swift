@@ -17,7 +17,6 @@ struct CapabilityInvocationData: Equatable, Identifiable {
     var startedAt: Date?
     var completedAt: Date?
     var identity: CapabilityIdentity
-    var approvalState: [String: AnyCodable]?
     var artifacts: [CapabilityArtifactData]
     var logs: [String]
     var errorClassification: CapabilityErrorClassification?
@@ -36,7 +35,6 @@ struct CapabilityInvocationData: Equatable, Identifiable {
         startedAt: Date? = nil,
         completedAt: Date? = nil,
         identity: CapabilityIdentity,
-        approvalState: [String: AnyCodable]? = nil,
         artifacts: [CapabilityArtifactData] = [],
         logs: [String] = [],
         errorClassification: CapabilityErrorClassification? = nil
@@ -54,7 +52,6 @@ struct CapabilityInvocationData: Equatable, Identifiable {
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.identity = identity
-        self.approvalState = approvalState
         self.artifacts = artifacts
         self.logs = logs
         self.errorClassification = errorClassification
@@ -125,7 +122,6 @@ enum CapabilityInvocationStatus: Equatable, Sendable {
     case generating
     case running
     case paused
-    case approvalRequired
     case success
     case error
     case unavailable
@@ -136,8 +132,6 @@ enum CapabilityInvocationStatus: Equatable, Sendable {
             return "arrow.triangle.2.circlepath"
         case .paused:
             return "pause.circle.fill"
-        case .approvalRequired:
-            return "hand.raised.fill"
         case .success:
             return "checkmark.circle.fill"
         case .error:

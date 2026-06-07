@@ -72,7 +72,6 @@ final class DispatchableEventPluginTests: XCTestCase {
         let _: any CapabilityInvocationEventHandler = context
         let _: any TurnLifecycleEventHandler = context
         let _: any ContextEventHandler = context
-        let _: any SubagentEventHandler = context
         let _: any EventDispatchLogger = context
 
         // And as the composed target

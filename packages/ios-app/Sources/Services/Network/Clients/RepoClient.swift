@@ -2,8 +2,7 @@ import Foundation
 
 /// Client for repo-scoped queries spanning sibling sessions.
 ///
-/// Drives the Source Control sheet's Repo Sessions sub-sheet and the
-/// divergence chips in the status header.
+/// Drives generic repo metadata rows for sibling sessions and branch divergence.
 final class RepoClient: EngineDomainClient {
 
     /// List all active sessions sharing this session's repo root.

@@ -8,14 +8,13 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
     func testCapabilityInvocationDetailSourceKeepsRawProtocolDataAuditOnly() throws {
         let source = try source(pathComponents: ["Sources", "Views", "Capabilities", "CapabilityInvocationViews.swift"])
 
-        XCTAssertTrue(source.contains(#"CapabilityDetailSection(title: "Work""#))
-        XCTAssertTrue(source.contains(#"CapabilityDetailSection(title: "Audit Details""#))
+        XCTAssertTrue(source.contains(#"CapabilityDetailSection(title: "Action""#))
+        XCTAssertTrue(source.contains(#"CapabilityDetailSection(title: "Runtime Details""#))
         XCTAssertTrue(source.contains(#"CapabilityRawDisclosure(title: "Raw request""#))
         XCTAssertTrue(source.contains(#"CapabilityRawDisclosure(title: "Raw result""#))
-        XCTAssertTrue(source.contains(#"CapabilityRawDisclosure(title: "Approval state""#))
         XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Request""#))
         XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Advanced""#))
-        XCTAssertFalse(source.contains("CapabilityInvocationCodeBlock(text: prettyJSON(approvalState))"))
+        XCTAssertFalse(source.contains("Approval state"))
     }
 
     func testCapabilityDetailSectionUsesSolidSurfaceForPayloadReadability() throws {
@@ -26,7 +25,7 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
         XCTAssertFalse(source.contains(".glassEffect("))
     }
 
-    func testCapabilityInvocationDetailRendersWorkFirstSummaryForVisualQA() throws {
+    func testCapabilityInvocationDetailRendersActionFirstSummaryForVisualQA() throws {
         let size = CGSize(width: 430, height: 932)
         let view = CapabilityInvocationDetailSheet(data: Self.fixtureInvocation)
             .frame(width: size.width, height: size.height)
@@ -54,7 +53,7 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
         XCTAssertEqual(image.size.width, size.width)
         XCTAssertEqual(image.size.height, size.height)
 
-        let outputURL = try visualArtifactURL(outputName: "capability-invocation-detail-work-render.png")
+        let outputURL = try visualArtifactURL(outputName: "capability-invocation-detail-action-render.png")
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -83,8 +82,8 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
             details: [
                 "status": "ok",
                 "bindingDecision": [
-                    "selectionPolicy": "first_party_healthy",
-                    "selectedImplementation": "first_party.process.v1.run"
+                    "selectionPolicy": "runtime_ready",
+                    "selectedImplementation": "runtime.process.v1.run"
                 ],
                 "orchestration": [
                     "phaseDetails": [
@@ -95,7 +94,7 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
                         ],
                         "selectedTarget": [
                             "contractId": "process::run",
-                            "implementationId": "first_party.process.v1.run",
+                            "implementationId": "runtime.process.v1.run",
                             "schemaDigest": "sha256:process"
                         ]
                     ]
@@ -112,22 +111,17 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "process::run",
-                implementationId: "first_party.process.v1.run",
+                implementationId: "runtime.process.v1.run",
                 functionId: "process::run",
-                pluginId: "first_party.process",
+                pluginId: "runtime.process",
                 workerId: "process-worker",
                 schemaDigest: "sha256:process",
-                trustTier: "first_party_signed",
+                trustTier: "runtime",
                 riskLevel: "low",
                 effectClass: "read",
                 traceId: "trace-process",
                 bindingDecisionId: "binding-process"
-            ),
-            approvalState: [
-                "approvalId": "approval-1",
-                "traceId": "trace-process",
-                "decision": "auto-approved"
-            ]
+            )
         )
     }
 

@@ -147,37 +147,6 @@ extension SessionEvent {
         case .contextCleared:
             return "Context cleared"
 
-        case .skillActivated:
-            let name = payload.string("name") ?? payload.string("skillName") ?? ""
-            if !name.isEmpty {
-                return "Skill: \(name)"
-            }
-            return "Skill activated"
-
-        case .skillDeactivated:
-            let name = payload.string("name") ?? payload.string("skillName") ?? ""
-            if !name.isEmpty {
-                return "Skill deactivated: \(name)"
-            }
-            return "Skill deactivated"
-
-        case .skillsCleared:
-            // `mode` is required by the wire contract
-            // (`events/types/payloads/skill.rs` — `SkillsClearedPayload`).
-            // Missing or unknown modes fall through to a generic summary so
-            // the list view stays renderable, but the transformer in
-            // `Core/Events/Payloads/ExtendedPayloads.swift` will drop the
-            // event entirely rather than produce an interactive picker.
-            let count = payload.stringArray("clearedSkills")?.count ?? 0
-            switch payload.string("mode") {
-            case "userInteraction":
-                return "Skills cleared — re-activate? (\(count))"
-            case "clearAll":
-                return "Skills cleared (\(count))"
-            default:
-                return "Skills cleared (\(count))"
-            }
-
         case .sessionBranch:
             return "Branch created"
 
@@ -228,28 +197,6 @@ extension SessionEvent {
         case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
             return "Streaming..."
 
-        case .worktreeAcquired:
-            let branch = payload.string("branch") ?? ""
-            return branch.isEmpty ? "Branch created" : "Branch: \(branch)"
-
-        case .worktreeCommit:
-            let message = payload.string("message") ?? ""
-            if !message.isEmpty {
-                return "Commit: \(String(message.prefix(35)))"
-            }
-            return "Worktree commit"
-
-        case .worktreeReleased:
-            let deleted = payload.bool("deleted") ?? false
-            return deleted ? "Branch deleted" : "Branch released"
-
-        case .worktreeMerged:
-            return "Branch merged"
-
-        case .worktreeRenamed:
-            let newBranch = payload.string("newBranch") ?? ""
-            return newBranch.isEmpty ? "Branch renamed" : "Branch: \(newBranch)"
-
         case .notificationProcessResult:
             let label = payload.string("label") ?? ""
             if !label.isEmpty {
@@ -268,19 +215,6 @@ extension SessionEvent {
                 return success ? "Hook: \(hookName)" : "Hook failed: \(hookName)"
             }
             return success ? "Hook completed" : "Hook failed"
-
-        case .subagentSpawned:
-            return "Subagent spawned"
-
-        case .subagentCompleted:
-            return "Subagent completed"
-
-        case .subagentFailed:
-            let error = payload.string("error") ?? ""
-            if !error.isEmpty {
-                return "Subagent failed: \(String(error.prefix(30)))"
-            }
-            return "Subagent failed"
 
         case .turnFailed:
             let error = payload.string("error") ?? ""

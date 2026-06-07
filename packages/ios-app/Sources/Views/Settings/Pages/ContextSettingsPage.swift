@@ -40,8 +40,6 @@ struct ContextSettingsPage: View {
             isLoaded: settingsState.isLoaded,
             triggerTokenThreshold: settingsState.triggerTokenThreshold,
             preserveRecentCount: settingsState.preserveRecentCount,
-            skillsCompactionPolicy: settingsState.skillsCompactionPolicy,
-            skillsShowIndex: settingsState.skillsShowIndex,
             autoRetainInterval: settingsState.autoRetainInterval,
             retainModelDisplayName: retainModelDisplayName,
             rulesDiscoverStandaloneFiles: settingsState.rulesDiscoverStandaloneFiles
@@ -56,17 +54,6 @@ struct ContextSettingsPage: View {
     }
 
     // MARK: - Compaction
-
-    private var skillsCompactionCaption: String {
-        switch settingsState.skillsCompactionPolicy {
-        case "autoRestore":
-            return "Active skills are automatically re-injected after compaction."
-        case "userInteraction":
-            return "Active skills are cleared on compaction and you'll be prompted to re-activate."
-        default:
-            return "All active skills are cleared when context is compacted."
-        }
-    }
 
     private var compactionSection: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -129,39 +116,6 @@ struct ContextSettingsPage: View {
                     }
                 }
 
-                compactionSettingBlock(.activeSkills, description: skillsCompactionCaption) {
-                    SettingsCard {
-                        HStack {
-                            Image(systemName: "wand.and.stars")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                .foregroundStyle(.tronEmerald)
-                                .frame(width: 18)
-                            Text(ContextCompactionSetting.activeSkills.title)
-                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            Spacer()
-                            skillsCompactionToggle
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 14)
-                    }
-                }
-
-                compactionSettingBlock(.skillIndex, description: skillsShowIndexCaption) {
-                    SettingsCard {
-                        HStack {
-                            Image(systemName: "list.bullet.rectangle")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                .foregroundStyle(.tronEmerald)
-                                .frame(width: 18)
-                            Text(ContextCompactionSetting.skillIndex.title)
-                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            Spacer()
-                            skillsShowIndexToggle
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 14)
-                    }
-                }
             }
         }
     }
@@ -175,49 +129,6 @@ struct ContextSettingsPage: View {
         VStack(alignment: .leading, spacing: 0) {
             content()
             SettingsCaption(text: description ?? setting.description)
-        }
-    }
-
-    private var skillsShowIndexCaption: String {
-        switch settingsState.skillsShowIndex {
-        case "never":
-            return "Skill index is omitted from the system prompt — the agent must remember which skills exist."
-        case "whenNoActiveSkills":
-            return "Index is included only when no skills are currently active."
-        default:
-            return "Always include the lightweight skill index in the system prompt so the agent can discover skills on demand."
-        }
-    }
-
-    private var skillsShowIndexToggle: some View {
-        SettingsCycleToggle(
-            options: [
-                ("always", "Always"),
-                ("whenNoActiveSkills", "When Idle"),
-                ("never", "Never"),
-            ],
-            current: settingsState.skillsShowIndex
-        ) { newValue in
-            settingsState.skillsShowIndex = newValue
-            updateServerSetting {
-                ServerSettingsUpdate(skills: .init(showIndex: SkillsShowIndex.from(newValue)))
-            }
-        }
-    }
-
-    private var skillsCompactionToggle: some View {
-        SettingsCycleToggle(
-            options: [
-                ("clearAll", "Clear All"),
-                ("autoRestore", "Auto-Restore"),
-                ("userInteraction", "Ask User"),
-            ],
-            current: settingsState.skillsCompactionPolicy
-        ) { newValue in
-            settingsState.skillsCompactionPolicy = newValue
-            updateServerSetting {
-                ServerSettingsUpdate(skills: .init(compactionPolicy: SkillsCompactionPolicy.from(newValue)))
-            }
         }
     }
 

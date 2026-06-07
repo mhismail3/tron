@@ -130,9 +130,8 @@ The completed recent-gap campaign lives at
 use `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md` for the
 closed split-view/sidebar, popover, pointer/keyboard, and wider-viewport
 coverage instead of reopening the closed iPhone/mac scorecard. Remaining
-confirmation-gated iPad archive, approval, generated UI, source-control, fork,
-Voice Note, pointer, and keyboard action flows are owned by
-`packages/agent/docs/ipad-action-time-followup-scorecard.md`.
+confirmation-gated iPad generated UI, fork, pointer, and keyboard action flows
+are owned by `packages/agent/docs/ipad-action-time-followup-scorecard.md`.
 The app registers `tron` and `tron-mobile` URL schemes, and
 `DeepLinkRouter` handles session routes in the form
 `tron://session/<session_id>`.
@@ -175,8 +174,8 @@ Record the session id, run log, screenshot path, dev-server PID or health
 snapshot, and the matching database evidence together. A screenshot captured
 right after `simctl openurl` is navigation evidence only. For chat parity
 evidence, reopen the same deep link and capture a final screenshot after the DB
-has no pending approvals, no later `stream.turn_start` after the selected
-terminal event, and stable invocation/resource/queue/stream rows. Later
+has no later `stream.turn_start` after the selected terminal event and stable
+invocation/resource/queue/stream rows. Later
 non-turn hook rows such as `hook.llm_result` should not keep a terminal session
 open by themselves. If iOS shows the system "Open in Tron?" confirmation
 instead of immediately navigating, capture that screenshot but do not treat it
@@ -186,28 +185,27 @@ reconstruction for the same session id.
 Use deep-link screenshots as a parity check, not just a navigation shortcut.
 For each harnessed session, compare the visible chat against the engine DB:
 the submitted `message.user` prompt should appear in the transcript, the latest
-assistant content should match the latest completed or paused engine turn,
-approval sheets should reflect the current `engine_approvals.status`, and any
-sheet for an approval or generated action should either disappear or become a
-clearly non-actionable approved/denied historical marker once the engine has
-resolved it or moved past it. If the chat omits the user prompt, starts at
-agent content, leaves a stale actionable confirmation/action sheet mounted, or
-otherwise disagrees with events/invocations/approvals/resources, record that as
-chat parity drift while keeping DB evidence canonical for the scenario result.
+assistant content should match the latest completed, paused, or blocked engine
+turn, and any generated action sheet should either disappear or become a
+clearly non-actionable historical marker once the engine has resolved it or
+moved past it. If the chat omits the user prompt, starts at agent content,
+leaves a stale actionable confirmation/action sheet mounted, or otherwise
+disagrees with events/invocations/resources, record that as chat parity drift
+while keeping DB evidence canonical for the scenario result.
 
 Harnesses should not classify a session immediately after the first
 `stream.turn_end`. A `stream.turn_end` with `stopReason = "tool_use"` is not
 terminal; it only means the provider yielded for engine tool execution and the
 assistant turn may continue after the tool result. Before collecting final
 evidence, wait for `stopReason = "end_turn"`, then verify the session family has
-no pending approvals, no later `stream.turn_start` exists after the terminal
-event being used, and the DB rows for invocations, approvals, resources, queues,
-resource versions, streams, events, and logs are stable. Use
+no later `stream.turn_start` after the terminal event being used and that the
+DB rows for invocations, resources, queues, resource versions, streams, events,
+and logs are stable. Use
 `packages/agent/tests/fixtures/session_terminal_guard.py` for simulator or
 live-worker harnesses that need a repeatable DB-backed terminal-state gate.
-This prevents approval pause/resume tests and multi-tool worker tests from
-being marked complete while the engine is still waiting for approval or
-continuing into the next turn.
+This prevents blocked-state tests and multi-step runtime tests from being
+marked complete while the engine is still recording a block or continuing into
+the next turn.
 
 ### Xcode
 

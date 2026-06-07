@@ -147,7 +147,7 @@ struct GlassMicButton: View {
         .onChange(of: isTranscribing) { _, _ in
             updateMicPulse(shouldPulse: shouldPulseMicTint)
         }
-        .accessibilityLabel(isRecording ? "Stop recording" : isTranscribing ? "Transcribing" : "Record voice note")
+        .accessibilityLabel(isRecording ? "Stop recording" : isTranscribing ? "Transcribing" : "Record audio")
     }
 
     private func updateMicPulse(shouldPulse: Bool) {
@@ -204,18 +204,13 @@ struct GlassCircleButtonStyle: ButtonStyle {
 @available(iOS 26.0, *)
 struct GlassAttachmentButton: View {
     let isProcessing: Bool
-    let hasSkillsAvailable: Bool
     let buttonSize: CGFloat
-    let skillStore: SkillStore?
     let attachmentCapability: AttachmentCapability
 
     // Sheet bindings passed from parent
     @Binding var showCamera: Bool
     @Binding var showingImagePicker: Bool
     @Binding var showFilePicker: Bool
-    @Binding var showSkillMentionPopup: Bool
-    @Binding var skillMentionQuery: String
-    @Binding var showPromptLibrary: Bool
 
     // Keyboard observer to prevent Menu opening during keyboard animation
     private let keyboardObserver = KeyboardObserver.shared
@@ -252,25 +247,6 @@ struct GlassAttachmentButton: View {
                         Label("Choose File", systemImage: "folder")
                     }
 
-                    Divider()
-
-                    if skillStore != nil {
-                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "skills") } label: {
-                            Label("Add Skill", systemImage: "sparkles")
-                        }
-                    }
-
-                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "promptLibrary") } label: {
-                        Label("Prompt Library", systemImage: "text.book.closed")
-                    }
-
-                    if skillStore != nil {
-                        Divider()
-
-                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "draftPlan") } label: {
-                            Label("Draft a Plan", systemImage: "list.clipboard")
-                        }
-                    }
                 } label: {
                     Color.clear
                         .frame(width: buttonSize, height: buttonSize)
@@ -284,16 +260,6 @@ struct GlassAttachmentButton: View {
             case "camera": showCamera = true
             case "photos": showingImagePicker = true
             case "files": showFilePicker = true
-            case "skills":
-                withAnimation(.tronStandard) {
-                    showSkillMentionPopup = true
-                    skillMentionQuery = ""
-                }
-            case "draftPlan":
-                // Post notification for ChatView to handle plan skill selection
-                NotificationCenter.default.post(name: .draftPlanRequested, object: nil)
-            case "promptLibrary":
-                showPromptLibrary = true
             default: break
             }
         }

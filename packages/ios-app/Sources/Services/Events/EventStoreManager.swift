@@ -66,17 +66,6 @@ final class EventStoreManager {
         isConnected: { [weak self] in self?.engineClient.connectionState.isConnected ?? false }
     )
 
-    /// Per-session worktree status, shared by the chat toolbar and the sidebar.
-    /// The sidebar preloads its current session list after the engine is
-    /// connected, and worktree events stay live through `handleGlobalEventV2`.
-    @ObservationIgnored
-    private(set) lazy var worktreeStatusCache: WorktreeStatusCache = {
-        WorktreeStatusCache(fetch: { [weak self] id in
-            guard let self else { throw CancellationError() }
-            return try await self.engineClient.worktree.getStatus(sessionId: id)
-        })
-    }()
-
     // MARK: - Processing State
 
     var processingSessionIds: Set<String> = [] {
@@ -190,7 +179,6 @@ final class EventStoreManager {
         case CapabilityInvocationStartedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? CapabilityInvocationStartedPlugin.Result {
-                guard result.identity.contractId != "agent::spawn_subagent" else { break }
                 dashboardStreamManager.handleEvent(
                     .capabilityInvocationStarted(identity: result.identity, invocationId: result.invocationId, arguments: result.arguments),
                     sessionId: sessionId)
@@ -199,33 +187,8 @@ final class EventStoreManager {
         case CapabilityInvocationCompletedPlugin.eventType:
             if let sessionId = event.sessionId,
                let result = event.getResult() as? CapabilityInvocationCompletedPlugin.Result {
-                guard result.identity.contractId != "agent::spawn_subagent" else { break }
                 dashboardStreamManager.handleEvent(
                     .capabilityInvocationCompleted(identity: result.identity, invocationId: result.invocationId, success: result.success, durationMs: result.duration),
-                    sessionId: sessionId)
-            }
-
-        case SubagentSpawnedPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? SubagentSpawnedPlugin.Result {
-                dashboardStreamManager.handleEvent(
-                    .subagentSpawned(task: result.task, invocationId: result.invocationId, subagentSessionId: result.subagentSessionId, spawnType: result.spawnType),
-                    sessionId: sessionId)
-            }
-
-        case SubagentCompletedPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? SubagentCompletedPlugin.Result {
-                dashboardStreamManager.handleEvent(
-                    .subagentCompleted(turns: result.totalTurns, durationMs: result.duration, subagentSessionId: result.subagentSessionId, spawnType: nil),
-                    sessionId: sessionId)
-            }
-
-        case SubagentFailedPlugin.eventType:
-            if let sessionId = event.sessionId,
-               let result = event.getResult() as? SubagentFailedPlugin.Result {
-                dashboardStreamManager.handleEvent(
-                    .subagentFailed(error: result.error, subagentSessionId: result.subagentSessionId, spawnType: nil),
                     sessionId: sessionId)
             }
 
@@ -263,7 +226,7 @@ final class EventStoreManager {
             }
 
         default:
-            worktreeStatusCache.apply(event)
+            break
         }
     }
 
@@ -369,7 +332,6 @@ final class EventStoreManager {
         // Remove from in-memory list and clear stream buffer
         sessions.removeAll { $0.id == sessionId }
         dashboardStreamManager.clearBuffer(for: sessionId)
-        worktreeStatusCache.invalidate(sessionId: sessionId)
 
         // Remove from local DB
         Task {
@@ -398,7 +360,6 @@ final class EventStoreManager {
 
         sessions.removeAll { $0.id == sessionId }
         dashboardStreamManager.clearBuffer(for: sessionId)
-        worktreeStatusCache.invalidate(sessionId: sessionId)
         Task {
             do {
                 try await self.eventDB.events.deleteBySession(sessionId)

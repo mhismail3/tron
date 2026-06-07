@@ -56,11 +56,6 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssert(Self.sharedContainer.eventDatabase is EventDatabase)
     }
 
-    func test_container_providesSkillStore() async throws {
-        XCTAssertNotNil(Self.sharedContainer.skillStore)
-        XCTAssert(Self.sharedContainer.skillStore is SkillStore)
-    }
-
     func test_container_providesEventStoreManager() async throws {
         XCTAssertNotNil(Self.sharedContainer.eventStoreManager)
         XCTAssert(Self.sharedContainer.eventStoreManager is EventStoreManager)
@@ -95,13 +90,6 @@ final class DependencyContainerTests: XCTestCase {
         let db2 = Self.sharedContainer.eventDatabase
 
         XCTAssert(db1 === db2, "EventDatabase should return same instance")
-    }
-
-    func test_skillStore_returnsSameInstance() async throws {
-        let store1 = Self.sharedContainer.skillStore
-        let store2 = Self.sharedContainer.skillStore
-
-        XCTAssert(store1 === store2, "SkillStore should return same instance")
     }
 
     func test_eventStoreManager_returnsSameInstance() async throws {

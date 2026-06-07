@@ -286,112 +286,6 @@ final class EventDispatchCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.handleMessageDeletedCalledWith?.targetEventId, "event_123")
     }
 
-    // MARK: - Subagent Event Tests
-
-    func testDispatch_subagentSpawned_callsHandleSubagentSpawned() {
-        // Given: A subagent spawned result
-        let result = SubagentSpawnedPlugin.Result(
-            subagentSessionId: "agent_123",
-            task: "Search for files",
-            model: nil,
-            workingDirectory: nil,
-            invocationId: nil,
-            blocking: false,
-            spawnType: nil
-        )
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: SubagentSpawnedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleSubagentSpawnedCalledWith?.subagentSessionId, "agent_123")
-    }
-
-    func testDispatch_subagentStatus_callsHandleSubagentStatus() {
-        // Given: A subagent status result
-        let result = SubagentStatusPlugin.Result(
-            subagentSessionId: "agent_123",
-            status: "running",
-            currentTurn: 1
-        )
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: SubagentStatusPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleSubagentStatusCalledWith?.subagentSessionId, "agent_123")
-    }
-
-    func testDispatch_subagentCompleted_callsHandleSubagentCompleted() {
-        // Given: A subagent completed result
-        let result = SubagentCompletedPlugin.Result(
-            subagentSessionId: "agent_123",
-            resultSummary: "Task completed successfully",
-            fullOutput: nil,
-            totalTurns: 3,
-            duration: 5000,
-            tokenUsage: nil,
-            model: nil
-        )
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: SubagentCompletedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleSubagentCompletedCalledWith?.subagentSessionId, "agent_123")
-    }
-
-    func testDispatch_subagentFailed_callsHandleSubagentFailed() {
-        // Given: A subagent failed result
-        let result = SubagentFailedPlugin.Result(
-            subagentSessionId: "agent_123",
-            error: "Out of memory",
-            duration: 1000
-        )
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: SubagentFailedPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleSubagentFailedCalledWith?.subagentSessionId, "agent_123")
-    }
-
-    func testDispatch_subagentEvent_callsHandleSubagentEvent() {
-        // Given: A subagent event result
-        let result = SubagentEventPlugin.Result(
-            subagentSessionId: "agent_123",
-            innerEventType: "text_delta",
-            innerEventData: AnyCodable(["delta": "Some text"]),
-            innerEventTimestamp: "2024-01-01T00:00:00Z"
-        )
-
-        // When: Dispatching
-        coordinator.dispatch(
-            type: SubagentEventPlugin.eventType,
-            transform: { result },
-            context: mockContext
-        )
-
-        // Then: Handler should be called
-        XCTAssertEqual(mockContext.handleSubagentEventCalledWith?.subagentSessionId, "agent_123")
-    }
-
     // MARK: - Edge Case Tests
 
     func testDispatch_transformFailure_logsWarning() {
@@ -473,17 +367,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleContextClearedCalledWith: ContextClearedPlugin.Result?
     var handleMessageDeletedCalledWith: MessageDeletedPlugin.Result?
     var handleRulesActivatedCalledWith: RulesActivatedPlugin.Result?
-
-    // MARK: - Subagents
-    var handleSubagentSpawnedCalledWith: SubagentSpawnedPlugin.Result?
-    var handleSubagentStatusCalledWith: SubagentStatusPlugin.Result?
-    var handleSubagentCompletedCalledWith: SubagentCompletedPlugin.Result?
-    var handleSubagentFailedCalledWith: SubagentFailedPlugin.Result?
-    var handleSubagentEventCalledWith: SubagentEventPlugin.Result?
-
-    // MARK: - Approvals
-    var handleApprovalPendingCalledWith: ApprovalPendingPlugin.Result?
-    var handleApprovalResolvedCalledWith: ApprovalResolvedPlugin.Result?
 
     // MARK: - Logging
     var logWarningCalled = false
@@ -572,35 +455,8 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleMessageDeletedCalledWith = result
     }
 
-    func handleSkillActivated(_ result: SkillActivatedPlugin.Result) {}
-    func handleSkillDeactivated(_ result: SkillDeactivatedPlugin.Result) {}
-
     func handleRulesActivated(_ result: RulesActivatedPlugin.Result) {
         handleRulesActivatedCalledWith = result
-    }
-
-    func handleSubagentSpawned(_ result: SubagentSpawnedPlugin.Result) {
-        handleSubagentSpawnedCalledWith = result
-    }
-
-    func handleSubagentStatus(_ result: SubagentStatusPlugin.Result) {
-        handleSubagentStatusCalledWith = result
-    }
-
-    func handleSubagentCompleted(_ result: SubagentCompletedPlugin.Result) {
-        handleSubagentCompletedCalledWith = result
-    }
-
-    func handleSubagentFailed(_ result: SubagentFailedPlugin.Result) {
-        handleSubagentFailedCalledWith = result
-    }
-
-    func handleSubagentEvent(_ result: SubagentEventPlugin.Result) {
-        handleSubagentEventCalledWith = result
-    }
-
-    func handleSubagentResultAvailable(_ result: SubagentResultAvailablePlugin.Result) {
-        // No-op for test mock
     }
 
     // MARK: - Memory
@@ -631,43 +487,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
         handleServerRestartingCalledWith = result
     }
 
-    // MARK: - Worktree
-    var handleWorktreeAcquiredCalledWith: WorktreeAcquiredPlugin.Result?
-    var handleWorktreeCommitCalledWith: WorktreeCommitPlugin.Result?
-    var handleWorktreeMergedCalledWith: WorktreeMergedPlugin.Result?
-    var handleWorktreeReleasedCalledWith: WorktreeReleasedPlugin.Result?
-
-    func handleWorktreeAcquired(_ result: WorktreeAcquiredPlugin.Result) {
-        handleWorktreeAcquiredCalledWith = result
-    }
-    func handleWorktreeCommit(_ result: WorktreeCommitPlugin.Result) {
-        handleWorktreeCommitCalledWith = result
-    }
-    func handleWorktreeMerged(_ result: WorktreeMergedPlugin.Result) {
-        handleWorktreeMergedCalledWith = result
-    }
-    func handleWorktreeReleased(_ result: WorktreeReleasedPlugin.Result) {
-        handleWorktreeReleasedCalledWith = result
-    }
-
-    // Git Workflow extensions
-    func handleWorktreeMainSynced(_ result: WorktreeMainSyncedPlugin.Result) {}
-    func handleWorktreeSessionFinalized(_ result: WorktreeSessionFinalizedPlugin.Result) {}
-    func handleWorktreeMergeStarted(_ result: WorktreeMergeStartedPlugin.Result) {}
-    func handleWorktreeConflictDetected(_ result: WorktreeConflictDetectedPlugin.Result) {}
-    func handleWorktreeConflictResolved(_ result: WorktreeConflictResolvedPlugin.Result) {}
-    func handleWorktreeMergeContinued(_ result: WorktreeMergeContinuedPlugin.Result) {}
-    func handleWorktreeMergeAborted(_ result: WorktreeMergeAbortedPlugin.Result) {}
-    func handleWorktreePushed(_ result: WorktreePushedPlugin.Result) {}
-    func handleWorktreePendingMergeDetected(_ result: WorktreePendingMergeDetectedPlugin.Result) {}
-    func handleWorktreeRebasedOnMain(_ result: WorktreeRebasedOnMainPlugin.Result) {}
-    func handleWorktreePostRebaseStashConflict(_ result: WorktreePostRebaseStashConflictPlugin.Result) {}
-
-    // Repo events
-    func handleRepoLockAcquired(_ result: RepoLockAcquiredPlugin.Result) {}
-    func handleRepoLockReleased(_ result: RepoLockReleasedPlugin.Result) {}
-    func handleRepoMainAdvanced(_ result: RepoMainAdvancedPlugin.Result) {}
-
     // Display streaming
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {}
 
@@ -684,14 +503,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
     func handleMessageQueued(_ result: MessageQueuedPlugin.Result) {}
     func handleMessageDequeued(_ result: MessageDequeuedPlugin.Result) {}
     func handleQueuedMessageSent(_ result: QueuedMessageSentPlugin.Result) {}
-
-    func handleApprovalPending(_ result: ApprovalPendingPlugin.Result) {
-        handleApprovalPendingCalledWith = result
-    }
-
-    func handleApprovalResolved(_ result: ApprovalResolvedPlugin.Result) {
-        handleApprovalResolvedCalledWith = result
-    }
 
     func logWarning(_ message: String) {
         logWarningCalled = true

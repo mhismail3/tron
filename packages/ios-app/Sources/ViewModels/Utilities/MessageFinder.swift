@@ -48,11 +48,7 @@ enum MessageFinder {
                 return invocation.id == invocationId
             case .capabilityResult(let result):
                 return result.id == invocationId
-            case .subagent(let data):
-                return data.invocationId == invocationId
             case .userInteraction(let data):
-                return data.invocationId == invocationId
-            case .engineApproval(let data):
                 return data.invocationId == invocationId
             default:
                 return false
@@ -72,39 +68,4 @@ enum MessageFinder {
         })
     }
 
-    // MARK: - By EngineApproval
-
-    /// Find LAST message index with matching invocationId in engineApproval content.
-    static func lastIndexOfEngineApproval(invocationId: String, in messages: [ChatMessage]) -> Int? {
-        messages.lastIndex(where: { message in
-            if case .engineApproval(let data) = message.content {
-                return data.invocationId == invocationId
-            }
-            return false
-        })
-    }
-
-    // MARK: - By Subagent
-
-    /// Find message index by subagentSessionId in subagent content.
-    static func indexBySubagentSessionId(_ sessionId: String, in messages: [ChatMessage]) -> Int? {
-        messages.firstIndex(where: { message in
-            if case .subagent(let data) = message.content {
-                return data.subagentSessionId == sessionId
-            }
-            return false
-        })
-    }
-
-    /// Find message index for a subagent capability invocation by invocationId.
-    static func indexOfSubagentCapabilityInvocation(invocationId: String, in messages: [ChatMessage]) -> Int? {
-        messages.firstIndex(where: { message in
-            if case .capabilityInvocation(let invocation) = message.content {
-                return invocation.id == invocationId
-                    && (invocation.identity.contractId == "agent::spawn_subagent"
-                        || invocation.identity.functionId == "agent::spawn_subagent")
-            }
-            return false
-        })
-    }
 }

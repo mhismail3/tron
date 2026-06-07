@@ -430,12 +430,6 @@ struct TintedColors {
         }
     }
 
-    /// Skill UI uses the cyan accent everywhere (chip, mention popup,
-    /// detail sheet). Centralizing the factory keeps the three sites in
-    /// sync if the accent ever shifts.
-    static func skill(_ scheme: ColorScheme) -> TintedColors {
-        TintedColors(accent: .tronCyan, colorScheme: scheme)
-    }
 }
 
 // MARK: - Reasoning Level Colors

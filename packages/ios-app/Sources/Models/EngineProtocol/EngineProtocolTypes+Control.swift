@@ -15,7 +15,6 @@ struct ControlSnapshotDTO: Codable, Equatable, Sendable {
     var grants: [AnyCodable]?
     var queues: [AnyCodable]?
     var leases: [AnyCodable]?
-    var approvals: [AnyCodable]?
     var storage: AnyCodable?
     var integrityWarnings: [AnyCodable]?
     var availableActions: [AnyCodable]?

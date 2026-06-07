@@ -151,9 +151,9 @@ final class UserMessagePayloadTests: XCTestCase {
     }
 
     func testMissingTurnStillDecodes() {
-        // Production prompt/subagent paths historically persist user messages
-        // with only `content`. Reconstruction must keep rendering those
-        // messages instead of dropping every user bubble on resume.
+        // Some persisted user messages only carry `content`. Reconstruction
+        // must keep rendering those messages instead of dropping every user
+        // bubble on resume.
         let payload: [String: AnyCodable] = [
             "content": AnyCodable("Hello")
         ]

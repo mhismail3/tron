@@ -4,7 +4,7 @@ import Foundation
 ///
 /// This structure contains all information needed to display a session,
 /// including messages, token usage, model info, and extended state
-/// like file activity, git worktree operations, and compaction history.
+/// like file activity, compaction history, and metadata.
 ///
 /// ## Usage
 /// ```swift
@@ -41,9 +41,6 @@ struct ReconstructedState {
     /// File read/write/edit activity during the session
     var fileActivity: FileActivityState
 
-    /// Git worktree activity during the session
-    var worktree: WorktreeState
-
     /// Context compaction state
     var compaction: CompactionState
 
@@ -55,15 +52,6 @@ struct ReconstructedState {
 
     /// Session tags
     var tags: [String]
-
-    /// Subagent spawn events (for capability→subagent chip conversion during reconstruction)
-    var subagentSpawns: [SubagentSpawnInfo]
-
-    /// Subagent completion events keyed by subagent session ID
-    var subagentCompletions: [String: SubagentCompletionInfo]
-
-    /// Subagent failure events keyed by subagent session ID
-    var subagentFailures: [String: SubagentFailureInfo]
 
     /// Suggested follow-up prompts from the latest suggest-prompts hook result
     var suggestions: [String]
@@ -79,14 +67,10 @@ struct ReconstructedState {
         self.workingDirectory = nil
         self.reasoningLevel = nil
         self.fileActivity = FileActivityState()
-        self.worktree = WorktreeState()
         self.compaction = CompactionState()
         self.metadata = MetadataState()
         self.sessionInfo = SessionInfo()
         self.tags = []
-        self.subagentSpawns = []
-        self.subagentCompletions = [:]
-        self.subagentFailures = [:]
         self.suggestions = []
     }
 }
@@ -143,34 +127,6 @@ extension ReconstructedState {
         }
     }
 
-    /// Git worktree activity during the session
-    struct WorktreeState {
-        var isAcquired: Bool
-        var currentWorktree: String?
-        var currentBranch: String?
-        var commits: [Commit]
-        var merges: [Merge]
-
-        struct Commit {
-            let hash: String
-            let message: String
-            let timestamp: Date
-        }
-
-        struct Merge {
-            let branch: String
-            let timestamp: Date
-        }
-
-        init() {
-            self.isAcquired = false
-            self.currentWorktree = nil
-            self.currentBranch = nil
-            self.commits = []
-            self.merges = []
-        }
-    }
-
     /// Context compaction state
     struct CompactionState {
         var boundaries: [Boundary]
@@ -224,38 +180,6 @@ extension ReconstructedState {
             guard let start = startTime else { return nil }
             return Date().timeIntervalSince(start)
         }
-    }
-
-    /// Information extracted from subagent.spawned events
-    struct SubagentSpawnInfo {
-        let subagentSessionId: String
-        let task: String
-        let model: String
-        let invocationId: String?
-        let blocking: Bool
-        let spawnType: String?
-        let taskProfile: SubagentTaskProfilePresentation?
-        let modelRouting: SubagentModelRoutingPresentation?
-    }
-
-    /// Information extracted from subagent.completed events
-    struct SubagentCompletionInfo {
-        let subagentSessionId: String
-        let resultSummary: String
-        let totalTurns: Int
-        let duration: Int
-        let tokenUsage: TokenUsage?
-        let fullOutput: String?
-        let model: String?
-        let taskProfile: SubagentTaskProfilePresentation?
-        let modelRouting: SubagentModelRoutingPresentation?
-    }
-
-    /// Information extracted from subagent.failed events
-    struct SubagentFailureInfo {
-        let subagentSessionId: String
-        let error: String
-        let duration: Int?
     }
 
 }

@@ -11,7 +11,7 @@ import Foundation
 /// 3. Image/document content blocks (displayable as thumbnails above text)
 struct UserMessagePayload {
     let content: String
-    /// Optional because live Tron prompt/subagent emitters historically stored
+    /// Optional because live prompt emitters historically stored
     /// user messages with only `content`; imported sessions may include it.
     let turn: Int?
     let imageCount: Int?
@@ -20,8 +20,6 @@ struct UserMessagePayload {
     let isCapabilityResultContext: Bool
     /// Attachments to this message (images, PDFs, documents)
     let attachments: [Attachment]?
-    /// Skills referenced in this message (rendered as cyan chips above the message)
-    let skills: [Skill]?
     /// Server-provided structured message kind for interactive-capability responses.
     /// Values: `"answered_questions"`. When present, iOS renders a chip instead
     /// of the plain text content.
@@ -102,31 +100,6 @@ struct UserMessagePayload {
         self.turn = payload.int("turn")
         self.imageCount = payload.int("imageCount")
         self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
-
-        // Parse skills from payload. `service` is populated for events written
-        // after the service-tagging refactor; older stored events omit it, in
-        // which case we fall through to the Skill.init default ("tron"), so no
-        // service badge renders for historic activations — matching pre-refactor
-        // display behavior.
-        if let skillsArray = payload["skills"]?.value as? [[String: Any]] {
-            self.skills = skillsArray.compactMap { skillDict -> Skill? in
-                guard let name = skillDict["name"] as? String else { return nil }
-                let sourceString = skillDict["source"] as? String ?? "project"
-                let source: SkillSource = sourceString == "global" ? .global : .project
-                let displayName = skillDict["displayName"] as? String ?? name
-                let service = skillDict["service"] as? String ?? SkillService.tron.rawValue
-                return Skill(
-                    name: name,
-                    displayName: displayName,
-                    description: "",
-                    source: source,
-                    tags: nil,
-                    service: service
-                )
-            }
-        } else {
-            self.skills = nil
-        }
 
         // Structured interactive-capability response metadata (server-provided).
         self.messageKind = payload.string("messageKind")

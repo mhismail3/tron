@@ -14,8 +14,6 @@ struct ChatMessage: Identifiable, Equatable {
     var tokenRecord: TokenRecord?
     /// Files attached to this message (unified model - images, PDFs, documents)
     var attachments: [Attachment]?
-    /// Skills referenced in this message (rendered as chips above the message)
-    var skills: [Skill]?
 
     // MARK: - Enriched Metadata (Phase 1)
     // These fields come from server-side event store enhancements
@@ -47,7 +45,6 @@ struct ChatMessage: Identifiable, Equatable {
         streamingVersion: Int = 0,
         tokenRecord: TokenRecord? = nil,
         attachments: [Attachment]? = nil,
-        skills: [Skill]? = nil,
         model: String? = nil,
         latencyMs: Int? = nil,
         turnNumber: Int? = nil,
@@ -63,7 +60,6 @@ struct ChatMessage: Identifiable, Equatable {
         self.streamingVersion = streamingVersion
         self.tokenRecord = tokenRecord
         self.attachments = attachments
-        self.skills = skills
         self.model = model
         self.latencyMs = latencyMs
         self.turnNumber = turnNumber

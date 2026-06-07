@@ -189,10 +189,6 @@ final class MessageIndex {
             return data.id
         case .userInteraction(let data):
             return data.invocationId
-        case .engineApproval(let data):
-            return data.invocationId
-        case .subagent(let data):
-            return data.invocationId
         default:
             return nil
         }

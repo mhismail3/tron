@@ -2,19 +2,6 @@ import SwiftUI
 
 // MARK: - Session Sidebar
 
-/// Navigation mode for the main view
-enum NavigationMode: String, CaseIterable {
-    case agents = "Sessions"
-    case work = "Work"
-
-    var icon: String {
-        switch self {
-        case .agents: "cpu"
-        case .work: "briefcase"
-        }
-    }
-}
-
 @available(iOS 26.0, *)
 struct SessionSidebar: View {
     @Environment(\.dependencies) var dependencies
@@ -28,9 +15,7 @@ struct SessionSidebar: View {
     // Convenience accessor
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     let onNewSession: () -> Void
-    var onNewSessionLongPress: (() -> Void)? = nil
     let onDeleteSession: (String) -> Void
-    let onVoiceNote: () -> Void
     let actions: DashboardToolbarActions
 
     private var recentWorkspaces: [(path: String, name: String)] {
@@ -44,13 +29,6 @@ struct SessionSidebar: View {
 
     private var filteredSessionIds: [String] {
         filteredSessions.map(\.id)
-    }
-
-    private var worktreePreloadKey: SessionSidebarWorktreePreloadKey {
-        SessionSidebarWorktreePreloadKey(
-            sessionIds: filteredSessionIds,
-            isConnected: eventStoreManager.engineClient.connectionState.isConnected
-        )
     }
 
     private var workspaceFilterPills: some View {
@@ -100,8 +78,7 @@ struct SessionSidebar: View {
                             CachedSessionSidebarRow(
                                 session: session,
                                 isSelected: session.id == selectedSessionId,
-                                streamManager: eventStoreManager.dashboardStreamManager,
-                                worktreeCache: eventStoreManager.worktreeStatusCache
+                                streamManager: eventStoreManager.dashboardStreamManager
                             )
                             .tag(session.id)
                             .listRowBackground(Color.clear)
@@ -149,17 +126,10 @@ struct SessionSidebar: View {
                         .allowsHitTesting(false)
                     }
                 }
-                .task(id: worktreePreloadKey) {
-                    let key = worktreePreloadKey
-                    guard key.isConnected else { return }
-                    await eventStoreManager.worktreeStatusCache.ensureLoaded(sessionIds: key.sessionIds)
-                }
             }
 
             // Bottom floating bar
             HStack(alignment: .center) {
-                FloatingVoiceNotesButton(action: onVoiceNote, size: 56)
-
                 if recentWorkspaces.count > 1 && appearanceSettings.showWorkspacePills {
                     workspaceFilterPills
                 } else {
@@ -167,7 +137,7 @@ struct SessionSidebar: View {
                 }
 
                 let canCreate = interactionPolicy?.canCreateSession ?? false
-                FloatingNewSessionButton(action: onNewSession, onLongPress: onNewSessionLongPress, size: 56)
+                FloatingNewSessionButton(action: onNewSession, size: 56)
                     .disabled(!canCreate)
                     .opacity(canCreate ? 1.0 : 0.4)
             }
@@ -203,11 +173,6 @@ struct SessionSidebar: View {
         }
     }
 
-}
-
-private struct SessionSidebarWorktreePreloadKey: Equatable {
-    let sessionIds: [String]
-    let isConnected: Bool
 }
 
 // MARK: - Floating New Session Button (iOS 26 Liquid Glass)
@@ -251,26 +216,22 @@ struct CachedSessionSidebarRow: View {
     let session: CachedSession
     let isSelected: Bool
     let streamManager: DashboardStreamManager
-    let worktreeCache: WorktreeStatusCache
 
-    private func accessibilityLabel(worktree: WorktreeInfo?) -> String {
+    private var accessibilityLabel: String {
         let metadata = SessionTitleIcons.accessibilityDescriptors(
-            isFork: session.isFork == true,
-            worktree: worktree
+            isFork: session.isFork == true
         )
         let metadataText = metadata.isEmpty ? "" : ", \(metadata.joined(separator: ", "))"
         return "\(session.displayTitle)\(metadataText), \(session.messageCount) messages, \(session.formattedDate)"
     }
 
     var body: some View {
-        let worktree = worktreeCache.status(for: session.id)?.worktree
         VStack(alignment: .leading, spacing: 4) {
             // Header: title
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 6) {
                     SessionTitleIcons(
-                        isFork: session.isFork == true,
-                        worktree: worktree
+                        isFork: session.isFork == true
                     )
                     Text(session.displayTitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
@@ -279,8 +240,6 @@ struct CachedSessionSidebarRow: View {
 
                     Spacer()
                 }
-                .animation(.smooth(duration: 0.25),
-                           value: worktree)
             }
 
             // Mini-chat content — single data source for both live and persisted
@@ -328,7 +287,7 @@ struct CachedSessionSidebarRow: View {
         .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 12, style: .continuous))
         .hoverEffect(.highlight)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel(worktree: worktree))
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityAddTraits(.isButton)
     }
 }
@@ -364,33 +323,6 @@ struct MiniChatActivityView: View {
                 summary: line.summary,
                 duration: line.duration,
                 status: line.status ?? .success
-            )
-
-        case .subagentSpawn:
-            MiniCapabilityChip(
-                name: "Subagent",
-                icon: "person.2",
-                color: .tronAmber,
-                summary: line.text.hasPrefix("Agent: ") ? String(line.text.dropFirst(7)) : line.text,
-                status: .running
-            )
-
-        case .subagentDone:
-            MiniCapabilityChip(
-                name: "Subagent",
-                icon: "checkmark.circle.fill",
-                color: .tronSuccess,
-                summary: line.text,
-                status: .success
-            )
-
-        case .subagentFailed:
-            MiniCapabilityChip(
-                name: "Subagent",
-                icon: "xmark.circle.fill",
-                color: .tronError,
-                summary: line.text,
-                status: .error
             )
 
         case .thinking:
@@ -580,22 +512,3 @@ struct EmptySessionsView: View {
         .padding(32)
     }
 }
-
-// MARK: - Preview
-
-// Note: Preview requires DependencyContainer
-// Previews can be enabled by creating mock instances
-/*
-#Preview {
-    NavigationStack {
-        SessionSidebar(
-            selectedSessionId: .constant(nil),
-            onNewSession: {},
-            onDeleteSession: { _ in },
-            onSettings: {},
-            onVoiceNote: {}
-        )
-        .environment(\.dependencies, DependencyContainer())
-    }
-}
-*/

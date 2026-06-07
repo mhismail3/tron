@@ -102,14 +102,6 @@ final class EventTypeRegistryTests: XCTestCase {
         XCTAssertTrue(t.isMetadataOnly)
     }
 
-    func testSubagentSpawnedAffectsState() {
-        let t = PersistedEventType.subagentSpawned
-        XCTAssertFalse(t.rendersAsChatMessage)
-        XCTAssertTrue(t.affectsSessionState)
-        XCTAssertFalse(t.isStreamingEvent)
-        XCTAssertFalse(t.isMetadataOnly)
-    }
-
     // MARK: - Full Snapshot (regression guard)
 
     /// Captures the exact classification of every enum case as a dictionary.

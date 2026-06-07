@@ -24,16 +24,6 @@ enum SystemEvent: Equatable, Hashable {
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
     /// A message was deleted from context
     case messageDeleted(targetType: String)
-    /// A skill was deactivated from context
-    case skillDeactivated(skillName: String)
-    /// Active skills were cleared by compaction (M6).
-    ///
-    /// `mode` controls rendering:
-    /// - `.clearAll`: informational banner listing the cleared skill names.
-    ///   The user can re-add via `@skill-name` or the sidebar picker.
-    /// - `.userInteraction`: interactive picker — each skill becomes a tappable chip
-    ///   that re-activates it via the `skills::activate` engine protocol.
-    case skillsCleared(clearedSkills: [String], mode: SkillsClearedMode)
     /// Rules were loaded on session start
     case rulesLoaded(count: Int)
     /// Dynamic scoped rules were activated by file access
@@ -42,10 +32,6 @@ enum SystemEvent: Equatable, Hashable {
     case catchingUp
     /// Turn failed with error
     case turnFailed(error: String, code: String?, recoverable: Bool)
-    /// Subagent completed while parent was idle - results available for review (individual, from persisted events)
-    case subagentResultAvailable(subagentSessionId: String, taskPreview: String, success: Bool)
-    /// Consolidated subagent results notification - groups multiple completed subagents into one notification
-    case subagentResultsReady(results: [SubagentResultEntry])
     /// Provider API error (auth, rate limit, network, etc.)
     case providerError(ProviderErrorDetailData)
     /// Memory retain in progress (shows spinner pill)
@@ -73,16 +59,10 @@ enum SystemEvent: Equatable, Hashable {
         case .compaction:                 return .tronSky
         case .contextCleared:             return .tronSky
         case .messageDeleted:             return .tronSky
-        case .skillDeactivated:            return .tronCyan
-        case .skillsCleared:              return .tronCyan
         case .rulesLoaded:                return .tronIndigo
         case .rulesActivated:             return .tronIndigo
         case .catchingUp:                 return .tronSlate
         case .turnFailed:                 return .tronError
-        case .subagentResultAvailable(_, _, let success):
-            return success ? .tronSuccess : .tronError
-        case .subagentResultsReady(let results):
-            return results.allSatisfy(\.success) ? .tronSuccess : .tronError
         case .providerError:              return .tronError
         case .memoryRetainInProgress:     return .tronPink
         case .memoryAutoRetainInProgress: return .tronPink
@@ -118,16 +98,6 @@ enum SystemEvent: Equatable, Hashable {
                            targetType == "message.assistant" ? "assistant message" :
                            targetType == "capability.invocation.completed" ? "capability result" : "message"
             return "Deleted \(typeLabel) from context"
-        case .skillDeactivated(let skillName):
-            return "\(skillName) deactivated from context"
-        case .skillsCleared(let clearedSkills, let mode):
-            let noun = clearedSkills.count == 1 ? "skill" : "skills"
-            switch mode {
-            case .clearAll:
-                return "Cleared \(clearedSkills.count) \(noun) on compaction"
-            case .userInteraction:
-                return "Re-activate \(clearedSkills.count) \(noun)?"
-            }
         case .rulesLoaded(let count):
             return "Loaded \(count) \(count == 1 ? "rule" : "rules")"
         case .rulesActivated(let rules, _):
@@ -136,13 +106,6 @@ enum SystemEvent: Equatable, Hashable {
             return "Loading latest messages..."
         case .turnFailed(let error, _, _):
             return "Request failed: \(error)"
-        case .subagentResultAvailable(_, let taskPreview, let success):
-            return success ? "Agent completed: \(taskPreview)" : "Agent failed: \(taskPreview)"
-        case .subagentResultsReady(let results):
-            if results.count == 1 {
-                return results[0].success ? "Agent completed: \(results[0].taskPreview)" : "Agent failed: \(results[0].taskPreview)"
-            }
-            return "\(results.count) agent results ready"
         case .providerError(let data):
             let label = ErrorCategoryDisplay.label(for: data.category, provider: data.provider)
             return "\(label): \(data.message)"
@@ -270,14 +233,4 @@ enum SystemEvent: Equatable, Hashable {
         default: return level.capitalized
         }
     }
-}
-
-// MARK: - Subagent Result Entry
-
-/// Lightweight entry for consolidated subagent result notifications.
-/// Used by `SystemEvent.subagentResultsReady` to group multiple completed subagents.
-struct SubagentResultEntry: Equatable, Hashable {
-    let subagentSessionId: String
-    let taskPreview: String
-    let success: Bool
 }

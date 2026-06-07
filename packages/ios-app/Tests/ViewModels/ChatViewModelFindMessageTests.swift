@@ -57,30 +57,6 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForCapabilityInvocationInSubagent() {
-        // Given: A message with subagent content
-        let messageId = UUID()
-        let message = ChatMessage(
-            id: messageId,
-            role: .assistant,
-            content: .subagent(SubagentInvocationData(
-                invocationId: "toolu_xyz",
-                subagentSessionId: "sess_sub",
-                task: "Do something",
-                model: nil,
-                status: .completed,
-                currentTurn: 1
-            ))
-        )
-        viewModel.messages = [message]
-
-        // When: Finding message for capability invocation
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_xyz"))
-
-        // Then: Should return the message ID
-        XCTAssertEqual(found, messageId)
-    }
-
     func testFindMessageIdForCapabilityInvocationInUserInteraction() {
         // Given: A message with userInteraction content
         let messageId = UUID()

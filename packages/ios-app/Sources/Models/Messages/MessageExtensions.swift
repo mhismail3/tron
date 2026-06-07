@@ -12,16 +12,14 @@ extension ChatMessage {
             return data.id
         case .userInteraction(let data):
             return data.invocationId
-        case .engineApproval(let data):
-            return data.invocationId
         default:
             return nil
         }
     }
 
-    /// Create a user message with optional attachments and skills
-    static func user(_ text: String, attachments: [Attachment]? = nil, skills: [Skill]? = nil) -> ChatMessage {
-        ChatMessage(role: .user, content: .text(text), attachments: attachments, skills: skills)
+    /// Create a user message with optional attachments.
+    static func user(_ text: String, attachments: [Attachment]? = nil) -> ChatMessage {
+        ChatMessage(role: .user, content: .text(text), attachments: attachments)
     }
 
     static func assistant(_ text: String) -> ChatMessage {
@@ -91,11 +89,6 @@ extension ChatMessage {
     /// In-chat notification for message deletion from context
     static func messageDeleted(targetType: String) -> ChatMessage {
         ChatMessage(role: .system, content: .messageDeleted(targetType: targetType))
-    }
-
-    /// In-chat notification for skill deactivation from context
-    static func skillDeactivated(skillName: String) -> ChatMessage {
-        ChatMessage(role: .system, content: .skillDeactivated(skillName: skillName))
     }
 
     /// In-chat notification for memory retain in progress (spinning indicator)

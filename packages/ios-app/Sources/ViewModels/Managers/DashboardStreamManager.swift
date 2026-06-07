@@ -121,52 +121,6 @@ struct SessionStreamBuffer {
         return String(format: "%.1fs", seconds)
     }
 
-    // MARK: - Subagent Events
-
-    mutating func addSubagentSpawn(task: String) {
-        guard isActive else { return }
-        currentTextLineIndex = nil
-
-        let maxLen = DashboardConstants.maxSubagentTextLength
-        let truncated = task.count > maxLen ? String(task.prefix(maxLen - 3)) + "…" : task
-        appendLine(ActivityLine(kind: .subagentSpawn, text: "Agent: \(truncated)"))
-    }
-
-    mutating func addSubagentComplete(turns: Int, durationMs: Int?) {
-        guard isActive else { return }
-        currentTextLineIndex = nil
-
-        // Replace the most recent pending spawn line (like capabilityInvocationCompleted replaces capabilityInvocationStarted)
-        if let idx = lines.lastIndex(where: { $0.kind == .subagentSpawn }) {
-            lines[idx] = ActivityLine(
-                kind: .subagentDone,
-                text: "Agent complete (\(turns) turns)",
-                duration: durationMs.map { Self.formatDuration($0) }
-            )
-            return
-        }
-        appendLine(ActivityLine(
-            kind: .subagentDone,
-            text: "Agent complete (\(turns) turns)",
-            duration: durationMs.map { Self.formatDuration($0) }
-        ))
-    }
-
-    mutating func addSubagentFailed(error: String) {
-        guard isActive else { return }
-        currentTextLineIndex = nil
-
-        let maxLen = DashboardConstants.maxSubagentTextLength
-        let truncated = error.count > maxLen ? String(error.prefix(maxLen - 3)) + "…" : error
-
-        // Replace the most recent pending spawn line
-        if let idx = lines.lastIndex(where: { $0.kind == .subagentSpawn }) {
-            lines[idx] = ActivityLine(kind: .subagentFailed, text: "Agent failed: \(truncated)")
-            return
-        }
-        appendLine(ActivityLine(kind: .subagentFailed, text: "Agent failed: \(truncated)"))
-    }
-
     // MARK: - Thinking
 
     mutating func setThinking() {
@@ -226,8 +180,8 @@ struct SessionStreamBuffer {
 
 /// Manages live streaming buffers for all session dashboard cards.
 /// Each in-progress session accumulates activity lines that the sidebar
-/// cards render as a mini-terminal. Suppresses hook subagent events and
-/// blocks post-completion events from leaking into cards.
+/// cards render as a mini-terminal. Blocks post-completion events from
+/// leaking into cards.
 ///
 /// Text deltas are batched at ~60fps to avoid choppy re-renders. Structural
 /// events (capability start/end, completion) flush immediately for responsiveness.
@@ -244,10 +198,6 @@ final class DashboardStreamManager {
 
     /// Sessions that have completed — prevents post-completion events from creating new buffers
     private var completedSessionIds: Set<String> = []
-
-    /// Subagent session IDs from non-capability-agent spawn types — suppressed from display.
-    /// Used to filter completion/failure events whose spawn type is not carried on the event itself.
-    private var nonCapabilitySubagentIds: Set<String> = []
 
     /// Sessions with pending text deltas that need flushing
     private var dirtySessionIds: Set<String> = []
@@ -296,12 +246,6 @@ final class DashboardStreamManager {
             handleCapabilityStart(sessionId: sessionId, identity: identity, invocationId: id, arguments: args)
         case .capabilityInvocationCompleted(let identity, let id, let success, let ms):
             handleCapabilityEnd(sessionId: sessionId, identity: identity, invocationId: id, success: success, durationMs: ms)
-        case .subagentSpawned(let task, let invocationId, let subId, let spawnType):
-            handleSubagentSpawned(sessionId: sessionId, task: task, invocationId: invocationId, subagentSessionId: subId, spawnType: spawnType)
-        case .subagentCompleted(let turns, let durationMs, let subId, let spawnType):
-            handleSubagentCompleted(sessionId: sessionId, turns: turns, durationMs: durationMs, subagentSessionId: subId, spawnType: spawnType)
-        case .subagentFailed(let error, let subId, let spawnType):
-            handleSubagentFailed(sessionId: sessionId, error: error, subagentSessionId: subId, spawnType: spawnType)
         case .turnFailed(let error):
             handleTurnFailed(sessionId: sessionId, error: error)
         case .complete:
@@ -335,43 +279,6 @@ final class DashboardStreamManager {
     func handleCapabilityEnd(sessionId: String, identity: CapabilityIdentity, invocationId: String? = nil, success: Bool, durationMs: Int? = nil) {
         guard ensurePendingBuffer(for: sessionId) else { return }
         pendingBuffers[sessionId]?.addCapabilityEnd(identity: identity, invocationId: invocationId, success: success, durationMs: durationMs)
-        flushSession(sessionId)
-    }
-
-    func handleSubagentSpawned(sessionId: String, task: String, invocationId: String?, subagentSessionId: String, spawnType: String?) {
-        // Wire contract: server emits a known spawnType for every subagent
-        // event. An unknown/missing value indicates a schema drift — log and
-        // treat conservatively as `.capabilityAgent` so the activity still renders.
-        let resolvedType: SubagentSpawnType
-        if let decoded = SubagentSpawnType(from: spawnType) {
-            resolvedType = decoded
-        } else {
-            logger.error(
-                "Dashboard stream received unknown spawnType=\(spawnType ?? "<nil>") for session \(subagentSessionId); defaulting to capabilityAgent",
-                category: .session
-            )
-            resolvedType = .capabilityAgent
-        }
-        if resolvedType != .capabilityAgent {
-            nonCapabilitySubagentIds.insert(subagentSessionId)
-            return
-        }
-        guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addSubagentSpawn(task: task)
-        flushSession(sessionId)
-    }
-
-    func handleSubagentCompleted(sessionId: String, turns: Int, durationMs: Int?, subagentSessionId: String, spawnType: String?) {
-        if nonCapabilitySubagentIds.remove(subagentSessionId) != nil { return }
-        guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addSubagentComplete(turns: turns, durationMs: durationMs)
-        flushSession(sessionId)
-    }
-
-    func handleSubagentFailed(sessionId: String, error: String, subagentSessionId: String, spawnType: String?) {
-        if nonCapabilitySubagentIds.remove(subagentSessionId) != nil { return }
-        guard ensurePendingBuffer(for: sessionId) else { return }
-        pendingBuffers[sessionId]?.addSubagentFailed(error: error)
         flushSession(sessionId)
     }
 
@@ -427,7 +334,6 @@ final class DashboardStreamManager {
         pendingBuffers.removeAll()
         dirtySessionIds.removeAll()
         completedSessionIds.removeAll()
-        nonCapabilitySubagentIds.removeAll()
         renderTimer?.cancel()
         renderTimer = nil
     }

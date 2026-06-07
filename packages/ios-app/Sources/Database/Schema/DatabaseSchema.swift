@@ -130,7 +130,7 @@ enum DatabaseSchema {
         // Migration: Add is_processing for dashboard rows seeded from server session list state
         try addColumnIfNotExists(db: db, table: "sessions", column: "is_processing", definition: "INTEGER DEFAULT 0")
 
-        // Migration: Add server turn count for local-first Agent Control history summaries
+        // Migration: Add server turn count for local session history summaries
         try addColumnIfNotExists(db: db, table: "sessions", column: "turn_count", definition: "INTEGER DEFAULT 0")
 
         // Migration: Add last_turn_input_tokens for context size tracking

@@ -42,13 +42,13 @@ struct DiagnosticsRedactorTests {
     @Test("redacts Swift description auth fields")
     func redactsSwiftDescriptionAuthFields() {
         let redactor = DiagnosticsRedactor()
-        let input = #"AddNamedApiKeyParams(provider: "openai", apiKey: "sk-test-abcdefghijklmnopqrstuvwxyz", apiKeyLabel: "Work") OAuth(code: "oauth-code-1234567890")"#
+        let input = #"AddNamedApiKeyParams(provider: "openai", apiKey: "sk-test-abcdefghijklmnopqrstuvwxyz", apiKeyLabel: "Project") OAuth(code: "oauth-code-1234567890")"#
         let redacted = redactor.redactMessage(input)
         #expect(!redacted.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
         #expect(!redacted.contains("oauth-code-1234567890"))
         #expect(redacted.contains(#"apiKey: "[redacted:len=34]""#))
         #expect(redacted.contains(#"code: "[redacted:len=21]""#))
-        #expect(redacted.contains("Work"))
+        #expect(redacted.contains("Project"))
     }
 
     @Test("leaves plain text without tokens untouched")

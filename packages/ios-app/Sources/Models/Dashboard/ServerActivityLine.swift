@@ -54,12 +54,6 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
                 status: (isError == true) ? .error : .success,
                 capabilityIdentity: identity
             )
-        case "subagentDone":
-            let t = turns ?? 0
-            let durationStr = durationMs.map { SessionStreamBuffer.formatDuration($0) }
-            return ActivityLine(kind: .subagentDone, text: "Agent complete (\(t) turns)", duration: durationStr)
-        case "subagentFailed":
-            return ActivityLine(kind: .subagentFailed, text: text ?? "Agent failed")
         default:
             return ActivityLine(kind: .text, text: text ?? "")
         }

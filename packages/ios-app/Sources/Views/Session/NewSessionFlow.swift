@@ -10,99 +10,27 @@ struct NewSessionFlow: View {
     let engineClient: EngineClient
     let defaultModel: String
     let eventStoreManager: EventStoreManager
-    let selectedSessionId: String?
     let onSessionCreated: (NewSessionCreated) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dependencies) private var dependencies
 
     @State private var workingDirectory = ""
     @State private var selectedModel: String = ""
-    @State private var selectedProfile: NewSessionProfileMode = .normal
-    @State private var lastNonLocalProfile: NewSessionProfileMode = .normal
-    @State private var creatingMode: NewSessionMode?
+    @State private var isCreatingSession = false
     @State private var errorMessage: String?
     @State private var showWorkspaceSelector = false
     @State private var availableModels: [ModelInfo] = []
     @State private var isLoadingModels = false
     @State private var showModelPicker = false
 
-    // Clone repository sheet
     @State private var selectedReasoningLevel = "medium"
-    @State private var showCloneSheet = false
-
-    // Import from Claude Code
-    @State private var showImportFlow = false
-
-    // Per-session worktree override
-    /// Global isolation mode fetched from server settings ("always" | "lazy" | "never").
-    /// Drives the inferred default state of the worktree toggle.
-    @State private var globalIsolationMode: String = "always"
-    /// Whether the chosen workspace is inside a git repo (decides toggle visibility).
-    @State private var workspaceIsGitRepo: Bool = false
-    /// User's explicit override. `nil` until they touch the toggle -
-    /// kept `nil` so we can distinguish "untouched, inherit global" from
-    /// "user explicitly chose default value".
-    @State private var useWorktreeOverride: Bool? = nil
-    /// In-flight git-repo lookup. Cancelled when workspace changes.
-    @State private var gitRepoCheckTask: Task<Void, Never>?
 
     private var isCreating: Bool {
-        creatingMode != nil
-    }
-
-    private var effectiveProfile: NewSessionProfileMode {
-        NewSessionProfileMode.effective(requested: selectedProfile, selectedModel: selectedModelInfo)
+        isCreatingSession
     }
 
     private var canCreateSession: Bool {
-        !isCreating && selectedModelMatchesProfile && selectedModelIsCreatable && currentCreateIntent() != nil
-    }
-
-    private var cloneDestinationWorkspace: String? {
-        NewSessionCloneTarget.destinationWorkspace(from: workingDirectory)
-    }
-
-    private var canCloneIntoWorkspace: Bool {
-        !isCreating
-            && effectiveProfile != .chat
-            && cloneDestinationWorkspace != nil
-            && selectedModelMatchesProfile
-            && selectedModelIsCreatable
-    }
-
-    /// Inferred default state of the worktree toggle, derived from the global
-    /// isolation mode. "always" and "lazy" both default to ON; "never" -> OFF.
-    private var inferredWorktreeDefault: Bool {
-        globalIsolationMode != "never"
-    }
-
-    /// Effective on/off state shown in the toggle UI (override wins, else inferred).
-    private var effectiveUseWorktreeForUI: Bool {
-        useWorktreeOverride ?? inferredWorktreeDefault
-    }
-
-    private var useWorktreeCaption: String {
-        if effectiveUseWorktreeForUI {
-            return "Runs on a session worktree branch."
-        } else {
-            return "Runs directly on the current branch."
-        }
-    }
-
-    private var quickWorkspace: String {
-        resolveQuickSessionWorkspace(
-            setting: dependencies.quickSessionWorkspace,
-            defaultWorkspace: AppConstants.defaultWorkspace,
-            selectedSessionId: selectedSessionId,
-            sessions: eventStoreManager.sessions,
-            sortedSessions: eventStoreManager.sortedSessions
-        )
-    }
-
-    private var quickWorkspaceDisplay: String {
-        guard !quickWorkspace.isEmpty else { return "Needs workspace" }
-        return URL(fileURLWithPath: quickWorkspace).lastPathComponent
+        !isCreating && selectedModelIsCreatable && currentCreateIntent() != nil
     }
 
     private var selectedModelInfo: ModelInfo? {
@@ -116,48 +44,15 @@ struct NewSessionFlow: View {
         return !selectedModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var selectedModelMatchesProfile: Bool {
-        effectiveProfile != .local || selectedModelInfo?.isLocalProvider == true
-    }
-
     /// Unique workspace paths from recent sessions, ordered by most recent activity.
     private var recentWorkspaces: [(path: String, name: String)] {
         CachedSession.recentWorkspaces(from: eventStoreManager.sortedSessions)
-    }
-
-    private var cloneCaption: String {
-        guard let cloneDestinationWorkspace else {
-            return "Choose a workspace before cloning."
-        }
-        return "Optional. Clone into \(cloneDestinationWorkspace.abbreviatingHomeDirectory), then start in the repo."
     }
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 22) {
-                    HStack(spacing: 12) {
-                        NewSessionShortcutButton(
-                            icon: "bubble.left.and.bubble.right.fill",
-                            title: "Quick Chat",
-                            caption: quickWorkspaceDisplay,
-                            color: .tronCyan,
-                            isDisabled: isCreating,
-                            action: applyQuickChatPreset
-                        )
-
-                        NewSessionShortcutButton(
-                            icon: "square.and.arrow.down",
-                            title: "Import",
-                            caption: "Claude Code",
-                            color: .tronCoral,
-                            isDisabled: isCreating,
-                            action: { showImportFlow = true }
-                        )
-                    }
-
-                    NewSessionDivider()
-
                     workspaceSetup
 
                     if let errorMessage {
@@ -182,7 +77,7 @@ struct NewSessionFlow: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        startConfiguredSession(mode: effectiveProfile == .chat ? .chat : .project)
+                        startConfiguredSession()
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark")
@@ -214,67 +109,13 @@ struct NewSessionFlow: View {
                 guard let level = notification.object as? String else { return }
                 selectedReasoningLevel = level
             }
-            .sheet(isPresented: $showImportFlow) {
-                ImportSessionFlow(
-                    engineClient: engineClient,
-                    onImported: { sessionId, workingDirectory, model in
-                        onSessionCreated(NewSessionCreated(
-                            sessionId: sessionId,
-                            workspaceId: workingDirectory,
-                            model: model,
-                            workingDirectory: workingDirectory,
-                            source: nil,
-                            profile: NewSessionProfileMode.normal.profileName
-                        ))
-                    }
-                )
-            }
-            .sheet(isPresented: $showCloneSheet) {
-                CloneRepoSheet(
-                    engineClient: engineClient,
-                    initialDestinationPath: cloneDestinationWorkspace,
-                    onCloned: { clonedPath in
-                        workingDirectory = clonedPath
-                        startConfiguredSession(mode: .clone)
-                    }
-                )
-            }
             .task {
                 await loadModels()
-                await loadGlobalIsolationMode()
             }
             .onChange(of: engineClient.connectionState) { oldState, newState in
                 if newState.isConnected && !oldState.isConnected {
                     _ = Task {
                         await loadModels()
-                        await loadGlobalIsolationMode()
-                    }
-                }
-            }
-            .onChange(of: workingDirectory) { _, newPath in
-                // Workspace changed: cancel any in-flight git-repo check and
-                // reset the user's override so it mirrors the inferred default
-                // for the new workspace. Keep the current worktree-card
-                // visibility while probing a non-empty path so git-to-git
-                // workspace switches do not flicker off and back on.
-                gitRepoCheckTask?.cancel()
-                useWorktreeOverride = nil
-                let trimmedPath = newPath.trimmingCharacters(in: .whitespacesAndNewlines)
-                withAnimation(.smooth(duration: 0.22)) {
-                    workspaceIsGitRepo = NewSessionWorktreeVisibility.whileChecking(
-                        currentIsGitRepo: workspaceIsGitRepo,
-                        nextWorkspace: trimmedPath
-                    )
-                }
-                guard !trimmedPath.isEmpty else { return }
-                gitRepoCheckTask = Task {
-                    let result = (try? await engineClient.worktree.isGitRepo(trimmedPath)) ?? false
-                    if !Task.isCancelled {
-                        await MainActor.run {
-                            withAnimation(.smooth(duration: 0.22)) {
-                                workspaceIsGitRepo = result
-                            }
-                        }
                     }
                 }
             }
@@ -291,12 +132,6 @@ struct NewSessionFlow: View {
             if !recentWorkspaces.isEmpty {
                 recentWorkspaceChips
             }
-
-            NewSessionProfileCard(
-                selectedProfile: effectiveProfile,
-                isDisabled: isCreating,
-                onSelect: applyProfileSelection
-            )
 
             NewSessionSetupCard(
                 icon: "folder.fill",
@@ -317,29 +152,6 @@ struct NewSessionFlow: View {
                 isBusy: isLoadingModels && selectedModel.isEmpty,
                 isDisabled: isCreating,
                 action: { showModelPicker = true }
-            )
-
-            if workspaceIsGitRepo && effectiveProfile != .chat {
-                NewSessionWorktreeCard(
-                    isOn: Binding(
-                        get: { effectiveUseWorktreeForUI },
-                        set: { useWorktreeOverride = $0 }
-                    ),
-                    caption: useWorktreeCaption,
-                    isDisabled: isCreating
-                )
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            NewSessionSetupCard(
-                icon: "arrow.down.doc.fill",
-                title: "Clone GitHub",
-                value: "Optional",
-                caption: cloneCaption,
-                color: .tronTeal,
-                isBusy: creatingMode == .clone,
-                isDisabled: !canCloneIntoWorkspace,
-                action: { showCloneSheet = true }
             )
         }
         .padding(.top, 2)
@@ -416,75 +228,18 @@ struct NewSessionFlow: View {
 
     // MARK: - Actions
 
-    private func applyQuickChatPreset() {
-        errorMessage = nil
-        switch NewSessionQuickChatPresetAction.resolve(quickWorkspace: quickWorkspace) {
-        case .configure(let workspace):
-            workingDirectory = workspace
-            selectedModel = NewSessionPreferredModel.resolve(
-                defaultModel: defaultModel,
-                availableModels: availableModels,
-                profile: .chat
-            )
-            lastNonLocalProfile = .chat
-            selectedProfile = selectedModelInfo?.isLocalProvider == true ? .local : .chat
-        case .selectWorkspace:
-            showWorkspaceSelector = true
-        }
-    }
-
-    private func applyProfileSelection(_ profile: NewSessionProfileMode) {
-        errorMessage = nil
-        if profile != .local {
-            lastNonLocalProfile = profile
-        }
-        selectedProfile = profile
-        selectedModel = NewSessionPreferredModel.resolve(
-            defaultModel: defaultModel,
-            availableModels: availableModels,
-            profile: profile
-        )
-        if profile == .local {
-            if selectedModelInfo?.isLocalProvider != true {
-                errorMessage = "No local model is available yet."
-            }
-        } else if selectedModel.isEmpty {
-            errorMessage = "No cloud model is available yet."
-        }
-        syncProfileWithSelectedModel()
-    }
-
     private func setSelectedModel(_ model: String) {
         selectedModel = model
-        syncProfileWithSelectedModel()
-    }
-
-    private func syncProfileWithSelectedModel() {
-        if selectedModelInfo?.isLocalProvider == true {
-            if selectedProfile != .local {
-                lastNonLocalProfile = selectedProfile
-            }
-            selectedProfile = .local
-        } else if selectedProfile == .local {
-            selectedProfile = lastNonLocalProfile
-        }
     }
 
     private func currentCreateIntent() -> NewSessionCreateIntent? {
-        switch effectiveProfile {
-        case .chat:
-            return NewSessionCreateIntent.chat(workspace: workingDirectory, model: selectedModel)
-        case .normal, .local:
-            return NewSessionCreateIntent.project(
-                workingDirectory: workingDirectory,
-                model: selectedModel,
-                profile: effectiveProfile,
-                useWorktreeOverride: useWorktreeOverride
-            )
-        }
+        NewSessionCreateIntent.make(
+            workingDirectory: workingDirectory,
+            model: selectedModel
+        )
     }
 
-    private func startConfiguredSession(mode: NewSessionMode) {
+    private func startConfiguredSession() {
         errorMessage = nil
         guard let intent = currentCreateIntent() else {
             if selectedModel.isEmpty {
@@ -498,11 +253,7 @@ struct NewSessionFlow: View {
             errorMessage = "Selected model is unavailable."
             return
         }
-        if !selectedModelMatchesProfile {
-            errorMessage = "Choose an available local model."
-            return
-        }
-        createSession(intent, mode: effectiveProfile == .chat ? .chat : mode)
+        createSession(intent)
     }
 
     private func loadModels() async {
@@ -521,31 +272,21 @@ struct NewSessionFlow: View {
 
                 selectedModel = NewSessionPreferredModel.resolve(
                     defaultModel: defaultModel,
-                    availableModels: models,
-                    profile: selectedProfile
+                    availableModels: models
                 )
-                syncProfileWithSelectedModel()
 
                 isLoadingModels = false
             }
         } catch {
             await MainActor.run {
                 selectedModel = defaultModel.isEmpty ? (availableModels.first?.id ?? "") : defaultModel
-                syncProfileWithSelectedModel()
                 isLoadingModels = false
             }
         }
     }
 
-    private func loadGlobalIsolationMode() async {
-        guard let settings = try? await engineClient.settings.get() else { return }
-        await MainActor.run {
-            globalIsolationMode = settings.isolationMode
-        }
-    }
-
-    private func createSession(_ intent: NewSessionCreateIntent, mode: NewSessionMode) {
-        creatingMode = mode
+    private func createSession(_ intent: NewSessionCreateIntent) {
+        isCreatingSession = true
         errorMessage = nil
 
         Task {
@@ -553,10 +294,6 @@ struct NewSessionFlow: View {
                 let result = try await engineClient.session.create(
                     workingDirectory: intent.workingDirectory,
                     model: intent.model,
-                    title: intent.title,
-                    source: intent.source,
-                    profile: intent.profile,
-                    useWorktree: intent.useWorktree,
                     idempotencyKey: .userAction("session.create")
                 )
 
@@ -575,15 +312,15 @@ struct NewSessionFlow: View {
                         workspaceId: intent.workingDirectory,
                         model: result.model,
                         workingDirectory: intent.workingDirectory,
-                        source: intent.source,
-                        profile: intent.profile
+                        source: nil,
+                        profile: nil
                     ))
-                    creatingMode = nil
+                    isCreatingSession = false
                 }
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
-                    creatingMode = nil
+                    isCreatingSession = false
                 }
             }
         }

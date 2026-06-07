@@ -13,12 +13,6 @@ final class InputBarState {
     var selectedImages: [PhotosPickerItem] = []
     var attachments: [Attachment] = []
 
-    // MARK: - Skills
-    var selectedSkills: [Skill] = []
-
-    // MARK: - Mention Popups
-    var isMentionPopupVisible: Bool = false
-
     // MARK: - Recording
     var reasoningLevel: String = "medium"
 
@@ -29,15 +23,13 @@ final class InputBarState {
         text = ""
         selectedImages = []
         attachments = []
-        // Note: skills are NOT cleared - they persist across messages
     }
 
-    /// Clear everything including skills
+    /// Clear all pending composer state.
     func clearAll() {
         text = ""
         selectedImages = []
         attachments = []
-        selectedSkills = []
     }
 
     /// Remove attachments incompatible with the given capability.
@@ -57,7 +49,6 @@ final class InputBarState {
         var hasher = Hasher()
         hasher.combine(text)
         hasher.combine(attachments.map(\.id))
-        hasher.combine(selectedSkills.map(\.name))
         return hasher.finalize()
     }
 
@@ -65,7 +56,6 @@ final class InputBarState {
     var hasDraftContent: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !attachments.isEmpty
-            || !selectedSkills.isEmpty
     }
 
     // MARK: - Computed Properties
@@ -155,9 +145,6 @@ struct InputBarConfig {
     // MARK: - Model / Attachments
     let currentModelInfo: ModelInfo?
 
-    // MARK: - Skills
-    let skillStore: SkillStore?
-
     // MARK: - History
     let inputHistory: InputHistoryStore?
 
@@ -195,7 +182,6 @@ struct InputBarConfig {
         contextWindow: Int = 0,
         lastTurnInputTokens: Int = 0,
         currentModelInfo: ModelInfo? = nil,
-        skillStore: SkillStore? = nil,
         inputHistory: InputHistoryStore? = nil,
         animationCoordinator: AnimationCoordinator? = nil,
         readOnly: Bool = false,
@@ -213,7 +199,6 @@ struct InputBarConfig {
         self.contextWindow = contextWindow
         self.lastTurnInputTokens = lastTurnInputTokens
         self.currentModelInfo = currentModelInfo
-        self.skillStore = skillStore
         self.inputHistory = inputHistory
         self.animationCoordinator = animationCoordinator
         self.readOnly = readOnly
@@ -239,11 +224,6 @@ struct InputBarActions {
     // MARK: - Context
     let onContextTap: (() -> Void)?
 
-    // MARK: - Skills
-    let onSkillSelect: ((Skill) -> Void)?
-    let onSkillRemove: ((Skill) -> Void)?
-    let onSkillDetailTap: ((Skill) -> Void)?
-
     // MARK: - Message Queue (Server-Driven)
     let onQueueRemove: ((String) -> Void)?
 
@@ -255,9 +235,6 @@ struct InputBarActions {
         onRemoveAttachment: @escaping (Attachment) -> Void = { _ in },
         onHistoryNavigate: ((String) -> Void)? = nil,
         onContextTap: (() -> Void)? = nil,
-        onSkillSelect: ((Skill) -> Void)? = nil,
-        onSkillRemove: ((Skill) -> Void)? = nil,
-        onSkillDetailTap: ((Skill) -> Void)? = nil,
         onQueueRemove: ((String) -> Void)? = nil
     ) {
         self.onSend = onSend
@@ -267,9 +244,6 @@ struct InputBarActions {
         self.onRemoveAttachment = onRemoveAttachment
         self.onHistoryNavigate = onHistoryNavigate
         self.onContextTap = onContextTap
-        self.onSkillSelect = onSkillSelect
-        self.onSkillRemove = onSkillRemove
-        self.onSkillDetailTap = onSkillDetailTap
         self.onQueueRemove = onQueueRemove
     }
 }

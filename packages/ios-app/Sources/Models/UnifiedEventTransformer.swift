@@ -164,10 +164,6 @@ struct UnifiedEventTransformer {
             return SystemEventHandlers.transformContextCleared(payload, timestamp: ts)
         case .compactBoundary:
             return SystemEventHandlers.transformCompactBoundary(payload, timestamp: ts)
-        case .skillDeactivated:
-            return SystemEventHandlers.transformSkillDeactivated(payload, timestamp: ts)
-        case .skillsCleared:
-            return SystemEventHandlers.transformSkillsCleared(payload, timestamp: ts)
         case .rulesLoaded:
             return SystemEventHandlers.transformRulesLoaded(payload, timestamp: ts)
         case .rulesActivated:
@@ -234,7 +230,7 @@ extension UnifiedEventTransformer {
     /// - Accumulated token usage
     /// - Current model (after any switches)
     /// - Working directory
-    /// - Extended state (file activity, worktree, compaction, etc.)
+    /// - Extended state (file activity, compaction, metadata, etc.)
     ///
     /// **Two-Pass Reconstruction**:
     /// - Pass 1: Collect deleted event IDs, capability invocation maps, and config state
@@ -326,7 +322,7 @@ extension UnifiedEventTransformer {
             case .messageUser, .messageSystem,
                  .notificationInterrupted,
                  .configModelSwitch, .configReasoningLevel,
-                 .contextCleared, .skillDeactivated, .skillsCleared,
+                 .contextCleared,
                  .rulesLoaded, .rulesActivated,
                  .errorAgent, .errorCapability, .errorProvider, .turnFailed,
                  .memoryRetained, .memoryAutoRetainFailed:
@@ -340,9 +336,6 @@ extension UnifiedEventTransformer {
                    let parsed = ModelSwitchPayload(from: event.payload) {
                     state.currentModel = parsed.newModel
                 }
-
-            case .subagentSpawned, .subagentCompleted, .subagentFailed:
-                handleSubagentEvent(eventType, payload: event.payload, state: &state)
 
             case .streamTurnEnd:
                 if let payload = StreamTurnEndPayload(from: event.payload),
@@ -358,10 +351,6 @@ extension UnifiedEventTransformer {
             case .fileRead, .fileWrite, .fileEdit:
                 handleFileActivityEvent(eventType, payload: event.payload,
                                         timestamp: event.timestamp, state: &state)
-
-            case .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged, .worktreeRenamed:
-                handleWorktreeEvent(eventType, payload: event.payload,
-                                    timestamp: event.timestamp, state: &state)
 
             case .compactBoundary:
                 if let message = transformPersistedEvent(event) {
@@ -396,71 +385,6 @@ extension UnifiedEventTransformer {
     // MARK: - Reconstruction Event Handlers
     // =========================================================================
 
-    private static func handleSubagentEvent(
-        _ eventType: PersistedEventType,
-        payload: [String: AnyCodable],
-        state: inout ReconstructedState
-    ) {
-        guard let sessionId = payload["subagentSessionId"]?.value as? String else { return }
-
-        switch eventType {
-        case .subagentSpawned:
-            state.subagentSpawns.append(ReconstructedState.SubagentSpawnInfo(
-                subagentSessionId: sessionId,
-                task: payload["task"]?.value as? String ?? "",
-                model: payload["model"]?.value as? String ?? "unknown",
-                invocationId: payload["invocationId"]?.value as? String,
-                blocking: payload["blocking"]?.value as? Bool ?? false,
-                spawnType: payload["spawnType"]?.value as? String,
-                taskProfile: decodePayloadValue(SubagentTaskProfilePresentation.self, payload: payload, key: "taskProfile"),
-                modelRouting: decodePayloadValue(SubagentModelRoutingPresentation.self, payload: payload, key: "modelRouting")
-            ))
-
-        case .subagentCompleted:
-            let tokenDict = payload["totalTokenUsage"]?.value as? [String: Any]
-            let tokenUsage: TokenUsage? = tokenDict.flatMap {
-                guard let input = $0["inputTokens"] as? Int,
-                      let output = $0["outputTokens"] as? Int else { return nil }
-                return TokenUsage(inputTokens: input, outputTokens: output,
-                                  cacheReadTokens: nil, cacheCreationTokens: nil)
-            }
-            state.subagentCompletions[sessionId] = ReconstructedState.SubagentCompletionInfo(
-                subagentSessionId: sessionId,
-                resultSummary: payload["resultSummary"]?.value as? String ?? "",
-                totalTurns: payload["totalTurns"]?.value as? Int ?? 0,
-                duration: payload["duration"]?.value as? Int ?? 0,
-                tokenUsage: tokenUsage,
-                fullOutput: payload["fullOutput"]?.value as? String,
-                model: payload["model"]?.value as? String,
-                taskProfile: decodePayloadValue(SubagentTaskProfilePresentation.self, payload: payload, key: "taskProfile"),
-                modelRouting: decodePayloadValue(SubagentModelRoutingPresentation.self, payload: payload, key: "modelRouting")
-            )
-
-        case .subagentFailed:
-            state.subagentFailures[sessionId] = ReconstructedState.SubagentFailureInfo(
-                subagentSessionId: sessionId,
-                error: payload["error"]?.value as? String ?? "Unknown error",
-                duration: payload["duration"]?.value as? Int
-            )
-
-        default:
-            break
-        }
-    }
-
-    private static func decodePayloadValue<T: Decodable>(
-        _ type: T.Type,
-        payload: [String: AnyCodable],
-        key: String
-    ) -> T? {
-        guard let value = payload[key]?.value,
-              JSONSerialization.isValidJSONObject(value),
-              let data = try? JSONSerialization.data(withJSONObject: value) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(type, from: data)
-    }
-
     private static func handleFileActivityEvent(
         _ eventType: PersistedEventType,
         payload: [String: AnyCodable],
@@ -491,70 +415,6 @@ extension UnifiedEventTransformer {
                     oldString: parsed.oldString, newString: parsed.newString, diff: parsed.diff
                 ))
             }
-        default:
-            break
-        }
-    }
-
-    private static func handleWorktreeEvent(
-        _ eventType: PersistedEventType,
-        payload: [String: AnyCodable],
-        timestamp: String,
-        state: inout ReconstructedState
-    ) {
-        // Every field we read below is non-optional on the corresponding
-        // Rust payload (see `events/types/payloads/worktree.rs`). Missing
-        // any of them is a schema violation, not a historical event shape — we drop
-        // the event from reconstruction with a warning rather than silently
-        // rendering an empty-string commit or a nil worktree path.
-        switch eventType {
-        case .worktreeAcquired:
-            guard let path = payload.string("path") else {
-                TronLogger.shared.warning(
-                    "worktree.acquired missing required field 'path'; dropping",
-                    category: .events
-                )
-                return
-            }
-            state.worktree.isAcquired = true
-            state.worktree.currentWorktree = path
-        case .worktreeReleased:
-            state.worktree.isAcquired = false
-        case .worktreeCommit:
-            guard let hash = payload.string("commitHash"),
-                  let message = payload.string("message") else {
-                TronLogger.shared.warning(
-                    "worktree.commit missing required field(s) commitHash/message; dropping",
-                    category: .events
-                )
-                return
-            }
-            state.worktree.commits.append(ReconstructedState.WorktreeState.Commit(
-                hash: hash,
-                message: message,
-                timestamp: parseTimestamp(timestamp)
-            ))
-        case .worktreeMerged:
-            guard let sourceBranch = payload.string("sourceBranch") else {
-                TronLogger.shared.warning(
-                    "worktree.merged missing required field 'sourceBranch'; dropping",
-                    category: .events
-                )
-                return
-            }
-            state.worktree.merges.append(ReconstructedState.WorktreeState.Merge(
-                branch: sourceBranch,
-                timestamp: parseTimestamp(timestamp)
-            ))
-        case .worktreeRenamed:
-            guard let newBranch = payload.string("newBranch") else {
-                TronLogger.shared.warning(
-                    "worktree.renamed missing required field 'newBranch'; dropping",
-                    category: .events
-                )
-                return
-            }
-            state.worktree.currentBranch = newBranch
         default:
             break
         }

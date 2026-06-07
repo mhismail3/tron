@@ -3,7 +3,7 @@ import Foundation
 /// Handlers for transforming system notification events into ChatMessages.
 ///
 /// Handles: notification.interrupted, context.cleared, compact.boundary,
-///          skills::deactivated, rules.loaded, stream.thinking_complete
+///          rules.loaded, stream.thinking_complete
 enum SystemEventHandlers {
 
     /// Transform notification.interrupted event into a ChatMessage.
@@ -58,68 +58,6 @@ enum SystemEventHandlers {
                 preservedTurns: parsed.preservedTurns,
                 summarizedTurns: parsed.summarizedTurns
             ),
-            timestamp: timestamp
-        )
-    }
-
-    /// Transform skills::deactivated event into a ChatMessage.
-    ///
-    /// Skill deactivated events indicate when a skill was deactivated.
-    static func transformSkillDeactivated(
-        _ payload: [String: AnyCodable],
-        timestamp: Date,
-        logger: TronLogger = TronLogger.shared
-    ) -> ChatMessage? {
-        guard let skillName = payload["skillName"]?.value as? String else {
-            logger.warning("skills::deactivated event missing skillName in payload", category: .events)
-            return nil
-        }
-
-        return ChatMessage(
-            role: .system,
-            content: .skillDeactivated(skillName: skillName),
-            timestamp: timestamp
-        )
-    }
-
-    /// Transform `skills.cleared` event into a ChatMessage.
-    ///
-    /// Emitted on the first prompt after a compaction boundary when the
-    /// active skill set was non-empty. The `mode` discriminator controls
-    /// rendering:
-    ///
-    /// - `.clearAll`: informational banner. The user can re-add skills
-    ///   manually via `@skill-name`.
-    /// - `.userInteraction`: interactive picker — each cleared skill becomes a
-    ///   tappable chip that re-activates it via the `skills::activate` engine protocol.
-    ///
-    /// Returns `nil` (drops the message) when:
-    /// - the payload is malformed (missing `clearedSkills`), OR
-    /// - `clearedSkills` is empty — the server never emits this shape, but
-    ///   rendering an empty picker / banner would be dead UI.
-    ///
-    /// Paired with M6 in the audit plan. The Rust emitter lives in the
-    /// agent domain runtime and publishes through engine streams.
-    static func transformSkillsCleared(
-        _ payload: [String: AnyCodable],
-        timestamp: Date,
-        logger: TronLogger = TronLogger.shared
-    ) -> ChatMessage? {
-        guard let parsed = SkillsClearedPayload(from: payload) else {
-            logger.warning("skills.cleared event missing clearedSkills in payload", category: .events)
-            return nil
-        }
-        guard !parsed.clearedSkills.isEmpty else {
-            // Defensive: the server suppresses emission when the set would be
-            // empty, but a future regression would otherwise render an empty
-            // picker. Drop the message instead.
-            logger.debug("skills.cleared event had empty clearedSkills; dropping", category: .events)
-            return nil
-        }
-
-        return ChatMessage(
-            role: .system,
-            content: .skillsCleared(clearedSkills: parsed.clearedSkills, mode: parsed.mode),
             timestamp: timestamp
         )
     }

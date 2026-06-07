@@ -321,11 +321,11 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
                 contractId: "process::run",
-                implementationId: "first_party.process.v1.run",
+                implementationId: "runtime.process.v1.run",
                 functionId: "process::run",
-                pluginId: "first_party.process",
+                pluginId: "runtime.process",
                 workerId: "process-worker",
-                trustTier: "first_party_signed"
+                trustTier: "runtime"
             )
         )
 
@@ -333,10 +333,10 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(mockContext.messages.count, 1)
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
-            XCTAssertEqual(invocation.display.primitiveTitle, "Work")
-            XCTAssertEqual(invocation.display.chipTitle, "Run Command")
-            XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Worker", value: "Process Worker")))
-            XCTAssertTrue(invocation.display.workRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
+            XCTAssertEqual(invocation.display.primitiveTitle, "Action")
+            XCTAssertEqual(invocation.display.chipTitle, "Run")
+            XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Executor", value: "Process Worker")))
+            XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
             let visibleProjection = [
                 invocation.display.primitiveTitle,
                 invocation.display.chipTitle,

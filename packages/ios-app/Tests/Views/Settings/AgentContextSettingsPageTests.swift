@@ -22,7 +22,7 @@ struct AgentContextSettingsPageTests {
         #expect(ServerSettingsCategory.agent.subtitle.count <= 44)
         #expect(ServerSettingsCategory.context.title == "Context")
         #expect(ServerSettingsCategory.context.icon == "gauge.with.dots.needle.67percent")
-        #expect(ServerSettingsCategory.context.subtitle == "Compaction, memory retention, skills, and rules")
+        #expect(ServerSettingsCategory.context.subtitle == "Compaction, memory retention, and rules")
         #expect(ServerSettingsCategory.mcpServers.title == "Plugin Sources")
         #expect(MainSettingsGridDestination.surfaceRow == [
             .app,
@@ -51,7 +51,7 @@ struct AgentContextSettingsPageTests {
         ])
         #expect(MainSettingsGridDestination.behaviorRow.map(\.description) == [
             "Hooks, prompts, queueing",
-            "Compaction, memory, skills",
+            "Compaction, memory, rules",
             "External capability sources",
         ])
         #expect(MainSettingsGridDestination.unavailableRow == [
@@ -98,7 +98,7 @@ struct AgentContextSettingsPageTests {
         #expect(MainSettingsLocalCategoryStyle.accent == .tronEmerald)
         #expect(MainSettingsLocalCategoryStyle.appIcon == "paintbrush")
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Hooks"))
-        #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Prompt Library"))
+        #expect(ServerSettingsCategory.serverBackedOrder.map(\.title).allSatisfy { !$0.contains("Prompt") })
         #expect(!ServerSettingsCategory.serverBackedOrder.map(\.title).contains("Git Workflow"))
     }
 
@@ -106,12 +106,10 @@ struct AgentContextSettingsPageTests {
     func builtinHookCatalogIsSharedByAgentSheet() {
         #expect(BuiltinHookCatalog.all.map(\.id) == [
             "builtin:title-gen",
-            "builtin:branch-name-gen",
             "builtin:suggest-prompts",
         ])
         #expect(BuiltinHookCatalog.all.map(\.label) == [
             "Generate Session Title",
-            "Generate Branch Name",
             "Suggest Follow-up Prompts",
         ])
     }
@@ -134,27 +132,13 @@ struct AgentContextSettingsPageTests {
         #expect(UserHookDirectoryDisplay.emptyState == "No user added hooks found")
     }
 
-    @Test("agent sheet keeps prompt library settings separated under one header")
-    func agentSheetGroupsPromptLibrarySettingsUnderOneHeader() {
-        #expect(AgentSettingsSection.promptLibrary.rawValue == "Prompt Library")
-        #expect(PromptLibrarySetting.allCases.map(\.title) == [
-            "Record prompt history",
-            "Prune on record / startup",
-            "Prompt retention",
-        ])
-        #expect(PromptLibrarySetting.recordHistory.description.contains("new prompts"))
-        #expect(PromptLibrarySetting.autoPrune.description.contains("retention limits"))
-        #expect(PromptLibrarySetting.retention.description.contains("unlimited"))
-    }
-
-    @Test("agent sheet keeps message queue after prompt library and protected branches last")
+    @Test("agent sheet keeps message queue before protected branches")
     func agentSheetOrderKeepsQueueAndProtectedBranchesAtBottom() {
         #expect(AgentSettingsSection.allCases == [
             .quickSession,
             .autonomy,
             .guardrails,
             .hooks,
-            .promptLibrary,
             .messageQueue,
             .protectedBranches,
         ])
@@ -165,30 +149,20 @@ struct AgentContextSettingsPageTests {
         #expect(ContextCompactionSetting.allCases.map(\.title) == [
             "Threshold",
             "Keep Recent Turns",
-            "Active Skills",
-            "Skill Index",
         ])
         #expect(ContextCompactionSetting.allCases.map(\.description).allSatisfy { !$0.isEmpty })
     }
 
-    @Test("main settings danger row puts clear prompt history first")
-    func mainSettingsDangerRowPutsClearPromptHistoryFirst() {
+    @Test("main settings danger row exposes durable account actions")
+    func mainSettingsDangerRowExposesDurableAccountActions() {
         #expect(SettingsDangerZoneAction.order == [
-            .clearPromptHistory,
             .archiveAllSessions,
             .resetAllSettings,
         ])
         #expect(SettingsDangerZoneAction.order.map(\.title) == [
-            "Clear Prompt History",
             "Archive All Sessions",
             "Reset All Settings",
         ])
-        #expect(SettingsDangerZoneAction.clearPromptHistory.isEnabled(
-            hasSessions: true,
-            serverSettingsReady: false,
-            serverSettingsUnavailable: true,
-            isInProgress: false
-        ) == false)
         #expect(SettingsDangerZoneAction.archiveAllSessions.isEnabled(
             hasSessions: true,
             serverSettingsReady: false,
@@ -215,65 +189,53 @@ struct AgentContextSettingsPageTests {
         ))
     }
 
-    @Test("agent summary describes execution lifecycle and prompt library state")
-    func agentSummaryDescribesExecutionLifecycleAndPromptLibraryState() {
+    @Test("agent summary describes execution lifecycle")
+    func agentSummaryDescribesExecutionLifecycle() {
         let unloaded = AgentSettingsSummary.Context(
             isLoaded: false,
             queueDrainMode: "sequential",
             enabledBuiltinHookCount: 0,
-            totalBuiltinHookCount: 3,
+            totalBuiltinHookCount: 2,
             hooksErrorPolicy: "continue",
-            promptHistoryEnabled: true,
-            promptHistoryMaxEntries: 10_000,
-            promptHistoryMaxAgeDays: 0,
-            promptHistoryAutoPrune: true,
             protectedBranchCount: 0
         )
         #expect(AgentSettingsSummary.title(for: unloaded) == "Load agent settings")
-        #expect(AgentSettingsSummary.description(for: unloaded) == "Loading agent execution, hook, and prompt-history settings from the active server.")
+        #expect(AgentSettingsSummary.description(for: unloaded) == "Loading agent execution and hook settings from the active server.")
 
         let loaded = AgentSettingsSummary.Context(
             isLoaded: true,
             queueDrainMode: "batched",
             enabledBuiltinHookCount: 2,
-            totalBuiltinHookCount: 3,
+            totalBuiltinHookCount: 2,
             hooksErrorPolicy: "block",
-            promptHistoryEnabled: false,
-            promptHistoryMaxEntries: 0,
-            promptHistoryMaxAgeDays: 30,
-            promptHistoryAutoPrune: false,
             protectedBranchCount: 2
         )
         #expect(AgentSettingsSummary.title(for: loaded) == "Agent behavior")
-        #expect(AgentSettingsSummary.description(for: loaded) == "Queued messages are batched into one prompt. 2 of 3 built-in hooks are enabled; hook failures block execution. Prompt history is off. 2 protected branches require push override.")
+        #expect(AgentSettingsSummary.description(for: loaded) == "Queued messages are batched into one prompt. 2 of 2 built-in hooks are enabled; hook failures block execution. 2 protected branches require push override.")
     }
 
-    @Test("context summary describes compaction memory skills and rules")
-    func contextSummaryDescribesCompactionMemorySkillsAndRules() {
+    @Test("context summary describes compaction memory and rules")
+    func contextSummaryDescribesCompactionMemoryAndRules() {
         let unloaded = ContextSettingsSummary.Context(
             isLoaded: false,
             triggerTokenThreshold: 0.70,
             preserveRecentCount: 5,
-            skillsCompactionPolicy: "clearAll",
-            skillsShowIndex: "always",
             autoRetainInterval: 10,
             retainModelDisplayName: "Sonnet",
             rulesDiscoverStandaloneFiles: true
         )
         #expect(ContextSettingsSummary.title(for: unloaded) == "Load context settings")
-        #expect(ContextSettingsSummary.description(for: unloaded) == "Loading compaction, memory, skills, and rule discovery settings from the active server.")
+        #expect(ContextSettingsSummary.description(for: unloaded) == "Loading compaction, memory, and rule discovery settings from the active server.")
 
         let loaded = ContextSettingsSummary.Context(
             isLoaded: true,
             triggerTokenThreshold: 0.65,
             preserveRecentCount: 4,
-            skillsCompactionPolicy: "autoRestore",
-            skillsShowIndex: "whenNoActiveSkills",
             autoRetainInterval: 0,
             retainModelDisplayName: "Sonnet",
             rulesDiscoverStandaloneFiles: false
         )
         #expect(ContextSettingsSummary.title(for: loaded) == "Context management")
-        #expect(ContextSettingsSummary.description(for: loaded) == "Compaction starts at 65%, keeps 4 recent turns, and auto-restores active skills; the skill index appears when no skills are active. Memory auto-retain is off. Standalone rule discovery is off.")
+        #expect(ContextSettingsSummary.description(for: loaded) == "Compaction starts at 65% and keeps 4 recent turns. Memory auto-retain is off. Standalone rule discovery is off.")
     }
 }

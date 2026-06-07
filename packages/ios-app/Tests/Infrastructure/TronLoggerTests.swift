@@ -182,7 +182,7 @@ struct TronLoggerSensitiveDataTests {
 
         logger.logEngineRequest(
             functionId: "auth::update",
-            payload: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Work"}"#,
+            payload: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Project"}"#,
             id: "42"
         )
 
@@ -191,7 +191,7 @@ struct TronLoggerSensitiveDataTests {
         #expect(message.contains("[42]"))
         #expect(!message.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
         #expect(!message.contains("apiKeyLabel"))
-        #expect(!message.contains("Work"))
+        #expect(!message.contains("Project"))
     }
 
     @Test("WebSocket message logging never buffers JSON previews")
@@ -210,7 +210,7 @@ struct TronLoggerSensitiveDataTests {
             direction: "→ SEND",
             type: "auth.addApiKey",
             size: 123,
-            preview: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Work"}"#
+            preview: #"{"apiKey":"sk-test-abcdefghijklmnopqrstuvwxyz","apiKeyLabel":"Project"}"#
         )
 
         let message = logger.getRecentLogs(category: .websocket).last?.3 ?? ""
@@ -219,6 +219,6 @@ struct TronLoggerSensitiveDataTests {
         #expect(message.contains("123 bytes"))
         #expect(!message.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
         #expect(!message.contains("apiKeyLabel"))
-        #expect(!message.contains("Work"))
+        #expect(!message.contains("Project"))
     }
 }

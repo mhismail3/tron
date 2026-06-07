@@ -510,7 +510,6 @@ enum DiagnosticsEventSanitizer {
         "modelPrimitiveName",
         "totalCost",
         "turn",
-        "useWorktree",
     ]
 
     private static let redactedErrorKeys: Set<String> = [

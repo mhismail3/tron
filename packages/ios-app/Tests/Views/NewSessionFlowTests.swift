@@ -30,182 +30,53 @@ final class NewSessionFlowTests: XCTestCase {
         XCTAssertEqual(NewSessionFlowPresentation.detents, [.large])
     }
 
-    func testChatIntentUsesChatSourceAndNoWorktreeOverride() {
-        let intent = NewSessionCreateIntent.chat(
-            workspace: "/tmp/tron-chat-workspace",
-            model: "claude-sonnet-4-6"
+    func testCreateIntentRequiresWorkspaceAndModel() {
+        XCTAssertNil(NewSessionCreateIntent.make(workingDirectory: "", model: "claude-sonnet-4-6"))
+        XCTAssertNil(NewSessionCreateIntent.make(workingDirectory: "/tmp/tron", model: ""))
+    }
+
+    func testCreateIntentTrimsPrimitiveInputs() {
+        let intent = NewSessionCreateIntent.make(
+            workingDirectory: "  /tmp/tron-project  ",
+            model: "  claude-sonnet-4-6  "
         )
 
-        XCTAssertEqual(intent?.kind, .chat)
-        XCTAssertEqual(intent?.workingDirectory, "/tmp/tron-chat-workspace")
+        XCTAssertEqual(intent?.workingDirectory, "/tmp/tron-project")
         XCTAssertEqual(intent?.model, "claude-sonnet-4-6")
-        XCTAssertEqual(intent?.title, "Chat")
-        XCTAssertEqual(intent?.source, "chat")
-        XCTAssertEqual(intent?.profile, "chat")
-        XCTAssertNil(intent?.useWorktree)
     }
 
-    func testChatIntentRequiresWorkspaceAndModel() {
-        XCTAssertNil(NewSessionCreateIntent.chat(workspace: "", model: "claude-sonnet-4-6"))
-        XCTAssertNil(NewSessionCreateIntent.chat(workspace: "/tmp/tron-chat-workspace", model: ""))
-    }
-
-    func testProjectIntentRequiresWorkspaceAndCarriesWorktreeOverride() {
-        let isolated = NewSessionCreateIntent.project(
-            workingDirectory: "/tmp/tron-project",
-            model: "claude-sonnet-4-6",
-            useWorktreeOverride: true
-        )
-        let passthrough = NewSessionCreateIntent.project(
-            workingDirectory: "/tmp/tron-project",
-            model: "claude-sonnet-4-6",
-            useWorktreeOverride: false
-        )
-
-        XCTAssertEqual(isolated?.kind, .project)
-        XCTAssertEqual(isolated?.workingDirectory, "/tmp/tron-project")
-        XCTAssertEqual(isolated?.model, "claude-sonnet-4-6")
-        XCTAssertNil(isolated?.title)
-        XCTAssertNil(isolated?.source)
-        XCTAssertEqual(isolated?.profile, "normal")
-        XCTAssertEqual(isolated?.useWorktree, true)
-        XCTAssertEqual(passthrough?.useWorktree, false)
-        XCTAssertNil(NewSessionCreateIntent.project(
-            workingDirectory: "",
-            model: "claude-sonnet-4-6",
-            useWorktreeOverride: nil
-        ))
-    }
-
-    func testQuickChatWithoutWorkspaceSelectsWorkspace() {
-        let action = NewSessionQuickChatPresetAction.resolve(
-            quickWorkspace: ""
-        )
-
-        XCTAssertEqual(action, .selectWorkspace)
-    }
-
-    func testQuickChatWithWorkspaceConfiguresTheSheet() {
-        let action = NewSessionQuickChatPresetAction.resolve(
-            quickWorkspace: "/tmp/tron-recent"
-        )
-
-        XCTAssertEqual(action, .configure(workspace: "/tmp/tron-recent"))
-    }
-
-    func testQuickChatWithWorkspaceConfiguresEvenBeforeModelSelection() {
-        let action = NewSessionQuickChatPresetAction.resolve(
-            quickWorkspace: "/tmp/tron-recent"
-        )
-
-        XCTAssertEqual(action, .configure(workspace: "/tmp/tron-recent"))
-    }
-
-    func testLocalModelForcesLocalProfileMode() {
-        let local = makeModel(
-            id: "llama3.2",
-            name: "Llama 3.2",
-            provider: "ollama",
-            tier: "local"
-        )
-
-        XCTAssertEqual(NewSessionProfileMode.effective(requested: .normal, selectedModel: local), .local)
-        XCTAssertEqual(NewSessionProfileMode.effective(requested: .chat, selectedModel: local), .local)
-    }
-
-    func testCloudModelPreservesRequestedProfileMode() {
-        let cloud = makeModel(
+    func testPreferredModelKeepsAvailableDefaultModel() {
+        let defaultModel = makeModel(
             id: "claude-sonnet-4-6",
             name: "Sonnet 4.6",
             provider: "anthropic",
             tier: "sonnet"
         )
-
-        XCTAssertEqual(NewSessionProfileMode.effective(requested: .normal, selectedModel: cloud), .normal)
-        XCTAssertEqual(NewSessionProfileMode.effective(requested: .chat, selectedModel: cloud), .chat)
-    }
-
-    func testProjectIntentCarriesLocalProfile() {
-        let intent = NewSessionCreateIntent.project(
-            workingDirectory: "/tmp/tron-project",
-            model: "llama3.2",
-            profile: .local,
-            useWorktreeOverride: nil
+        let recommended = makeModel(
+            id: "gpt-5.1",
+            name: "GPT 5.1",
+            provider: "openai",
+            tier: "frontier",
+            recommended: true
         )
 
-        XCTAssertEqual(intent?.profile, "local")
-        XCTAssertNil(intent?.source)
+        XCTAssertEqual(
+            NewSessionPreferredModel.resolve(
+                defaultModel: defaultModel.id,
+                availableModels: [recommended, defaultModel]
+            ),
+            defaultModel.id
+        )
     }
 
-    func testPreferredModelUsesLocalModelForLocalProfile() {
-        let cloud = makeModel(
-            id: "claude-sonnet-4-6",
-            name: "Sonnet 4.6",
+    func testPreferredModelUsesRecommendedModelWhenDefaultIsEmpty() {
+        let first = makeModel(
+            id: "claude-haiku-4-6",
+            name: "Haiku 4.6",
             provider: "anthropic",
-            tier: "sonnet",
-            recommended: true
+            tier: "haiku"
         )
-        let local = makeModel(
-            id: "llama3.2",
-            name: "Llama 3.2",
-            provider: "ollama",
-            tier: "local",
-            recommended: true
-        )
-
-        XCTAssertEqual(
-            NewSessionPreferredModel.resolve(
-                defaultModel: cloud.id,
-                availableModels: [cloud, local],
-                profile: .local
-            ),
-            local.id
-        )
-    }
-
-    func testPreferredModelKeepsDefaultCloudModelForMainAndChatProfiles() {
-        let cloud = makeModel(
-            id: "claude-sonnet-4-6",
-            name: "Sonnet 4.6",
-            provider: "anthropic",
-            tier: "sonnet",
-            recommended: true
-        )
-        let local = makeModel(
-            id: "llama3.2",
-            name: "Llama 3.2",
-            provider: "ollama",
-            tier: "local",
-            recommended: true
-        )
-
-        XCTAssertEqual(
-            NewSessionPreferredModel.resolve(
-                defaultModel: cloud.id,
-                availableModels: [local, cloud],
-                profile: .normal
-            ),
-            cloud.id
-        )
-        XCTAssertEqual(
-            NewSessionPreferredModel.resolve(
-                defaultModel: cloud.id,
-                availableModels: [local, cloud],
-                profile: .chat
-            ),
-            cloud.id
-        )
-    }
-
-    func testPreferredModelSwitchesAwayFromLocalModelForNonLocalProfiles() {
-        let local = makeModel(
-            id: "llama3.2",
-            name: "Llama 3.2",
-            provider: "ollama",
-            tier: "local",
-            recommended: true
-        )
-        let cloud = makeModel(
+        let recommended = makeModel(
             id: "claude-sonnet-4-6",
             name: "Sonnet 4.6",
             provider: "anthropic",
@@ -215,86 +86,46 @@ final class NewSessionFlowTests: XCTestCase {
 
         XCTAssertEqual(
             NewSessionPreferredModel.resolve(
-                defaultModel: local.id,
-                availableModels: [local, cloud],
-                profile: .normal
+                defaultModel: "",
+                availableModels: [first, recommended]
             ),
-            cloud.id
-        )
-        XCTAssertEqual(
-            NewSessionPreferredModel.resolve(
-                defaultModel: local.id,
-                availableModels: [local, cloud],
-                profile: .chat
-            ),
-            cloud.id
+            recommended.id
         )
     }
 
-    func testPreferredModelDoesNotUseOnlyLocalModelForNonLocalProfiles() {
-        let local = makeModel(
-            id: "llama3.2",
-            name: "Llama 3.2",
-            provider: "ollama",
-            tier: "local",
-            recommended: true
-        )
-
+    func testPreferredModelKeepsUnknownDefaultUntilServerModelsArrive() {
         XCTAssertEqual(
             NewSessionPreferredModel.resolve(
-                defaultModel: local.id,
-                availableModels: [local],
-                profile: .normal
+                defaultModel: "custom-provider-model",
+                availableModels: []
             ),
-            ""
+            "custom-provider-model"
         )
     }
 
-    func testPreferredModelDoesNotPickKnownUnavailableLocalModel() {
-        let cloud = makeModel(
+    func testPreferredModelSkipsUnavailableModels() {
+        let unavailable = makeModel(
             id: "claude-sonnet-4-6",
             name: "Sonnet 4.6",
             provider: "anthropic",
             tier: "sonnet",
-            recommended: true
-        )
-        let unavailableLocal = makeModel(
-            id: "llama3.2",
-            name: "Llama 3.2",
-            provider: "ollama",
-            tier: "local",
             recommended: true,
             available: false
         )
+        let available = makeModel(
+            id: "gpt-5.1",
+            name: "GPT 5.1",
+            provider: "openai",
+            tier: "frontier"
+        )
 
         XCTAssertEqual(
             NewSessionPreferredModel.resolve(
-                defaultModel: unavailableLocal.id,
-                availableModels: [unavailableLocal, cloud],
-                profile: .normal
+                defaultModel: unavailable.id,
+                availableModels: [unavailable, available]
             ),
-            cloud.id
+            available.id
         )
-        XCTAssertEqual(
-            NewSessionPreferredModel.resolve(
-                defaultModel: unavailableLocal.id,
-                availableModels: [unavailableLocal, cloud],
-                profile: .local
-            ),
-            ""
-        )
-    }
-
-    func testCloneTargetUsesSelectedWorkspace() {
-        XCTAssertEqual(
-            NewSessionCloneTarget.destinationWorkspace(from: "  /tmp/tron-parent  "),
-            "/tmp/tron-parent"
-        )
-    }
-
-    func testCloneTargetRequiresSelectedWorkspace() {
-        XCTAssertNil(NewSessionCloneTarget.destinationWorkspace(from: ""))
-        XCTAssertNil(NewSessionCloneTarget.destinationWorkspace(from: "   "))
     }
 
     func testModelCardValueUsesServerShortName() {
@@ -329,26 +160,5 @@ final class NewSessionFlowTests: XCTestCase {
             ),
             "Opus 4.6"
         )
-    }
-
-    func testWorktreeVisibilityStaysVisibleWhileCheckingWorkspaceSwitch() {
-        XCTAssertTrue(NewSessionWorktreeVisibility.whileChecking(
-            currentIsGitRepo: true,
-            nextWorkspace: "/tmp/next-workspace"
-        ))
-    }
-
-    func testWorktreeVisibilityDoesNotAppearWhileCheckingFromHiddenState() {
-        XCTAssertFalse(NewSessionWorktreeVisibility.whileChecking(
-            currentIsGitRepo: false,
-            nextWorkspace: "/tmp/next-workspace"
-        ))
-    }
-
-    func testWorktreeVisibilityHidesImmediatelyForEmptyWorkspace() {
-        XCTAssertFalse(NewSessionWorktreeVisibility.whileChecking(
-            currentIsGitRepo: true,
-            nextWorkspace: "   "
-        ))
     }
 }

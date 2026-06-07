@@ -114,14 +114,8 @@ final class EventRegistry: @unchecked Sendable {
         register(MemoryAutoRetainTriggeredPlugin.self)
         register(MemoryAutoRetainFailedPlugin.self)
         register(MessageDeletedPlugin.self)
-        register(SkillActivatedPlugin.self)
-        register(SkillDeactivatedPlugin.self)
         register(TurnFailedPlugin.self)
         register(RulesActivatedPlugin.self)
-
-        // Engine approval primitive events
-        register(ApprovalPendingPlugin.self)
-        register(ApprovalResolvedPlugin.self)
 
         // Session events
         register(ConnectedPlugin.self)
@@ -132,40 +126,10 @@ final class EventRegistry: @unchecked Sendable {
         register(SessionDeletedPlugin.self)
         register(SessionProcessingChangedPlugin.self)
 
-        // Subagent events
-        register(SubagentSpawnedPlugin.self)
-        register(SubagentStatusPlugin.self)
-        register(SubagentCompletedPlugin.self)
-        register(SubagentFailedPlugin.self)
-        register(SubagentEventPlugin.self)
-        register(SubagentResultAvailablePlugin.self)
-
         // Server events
         register(ServerRestartingPlugin.self)
         register(AuthUpdatedPlugin.self)
         register(PluginSourceStatusChangedPlugin.self)
-
-        // Worktree events
-        register(WorktreeAcquiredPlugin.self)
-        register(WorktreeCommitPlugin.self)
-        register(WorktreeMergedPlugin.self)
-        register(WorktreeReleasedPlugin.self)
-        register(WorktreeMainSyncedPlugin.self)
-        register(WorktreeSessionFinalizedPlugin.self)
-        register(WorktreeMergeStartedPlugin.self)
-        register(WorktreeConflictDetectedPlugin.self)
-        register(WorktreeConflictResolvedPlugin.self)
-        register(WorktreeMergeContinuedPlugin.self)
-        register(WorktreeMergeAbortedPlugin.self)
-        register(WorktreePushedPlugin.self)
-        register(WorktreePendingMergeDetectedPlugin.self)
-        register(WorktreeRebasedOnMainPlugin.self)
-        register(WorktreePostRebaseStashConflictPlugin.self)
-
-        // Repo events
-        register(RepoLockAcquiredPlugin.self)
-        register(RepoLockReleasedPlugin.self)
-        register(RepoMainAdvancedPlugin.self)
 
         // Display streaming events
         register(DisplayFramePlugin.self)

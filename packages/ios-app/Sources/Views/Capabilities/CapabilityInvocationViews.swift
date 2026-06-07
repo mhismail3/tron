@@ -117,8 +117,6 @@ struct CapabilityInvocationChip: View {
             return "failed"
         case .unavailable:
             return "unavailable"
-        case .approvalRequired:
-            return "approval"
         case .paused:
             return "paused"
         case .generating, .running, .success:
@@ -175,14 +173,14 @@ struct CapabilityInvocationDetailSheet: View {
                     CapabilityDetailHeader(data: data)
                         .sheetSection()
 
-                    workSection
+                    actionSection
                     journeySection
                     progressSection
                     resultSection
                     artifactsSection
                     logsSection
                     errorSection
-                    auditDetailsSection
+                    runtimeDetailsSection
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 28)
@@ -191,16 +189,16 @@ struct CapabilityInvocationDetailSheet: View {
     }
 
     @ViewBuilder
-    private var workSection: some View {
-        CapabilityDetailSection(title: "Work", accent: accent, tint: tint) {
+    private var actionSection: some View {
+        CapabilityDetailSection(title: "Action", accent: accent, tint: tint) {
             VStack(alignment: .leading, spacing: 14) {
-                CapabilityReadableRows(rows: display.workRows, tint: tint)
+                CapabilityReadableRows(rows: display.actionRows, tint: tint)
 
-                if !workInputRows.isEmpty {
+                if !actionInputRows.isEmpty {
                     Divider()
                         .overlay(accent.opacity(0.16))
                     detailSubheading("Inputs")
-                    CapabilityReadableRows(rows: workInputRows, tint: tint)
+                    CapabilityReadableRows(rows: actionInputRows, tint: tint)
                 }
             }
         }
@@ -255,7 +253,7 @@ struct CapabilityInvocationDetailSheet: View {
                             CapabilityInvocationCodeBlock(text: preview)
                         } else if data.result?.nilIfEmpty != nil {
                             CapabilityResultNote(
-                                text: "Structured output is available in Audit Details.",
+                                text: "Structured output is available in runtime details.",
                                 tint: tint
                             )
                         }
@@ -311,9 +309,9 @@ struct CapabilityInvocationDetailSheet: View {
     }
 
     @ViewBuilder
-    private var auditDetailsSection: some View {
+    private var runtimeDetailsSection: some View {
         if hasAuditContent {
-            CapabilityDetailSection(title: "Audit Details", accent: .tronSlate, tint: tint) {
+            CapabilityDetailSection(title: "Runtime Details", accent: .tronSlate, tint: tint) {
                 DisclosureGroup(isExpanded: $isAuditExpanded) {
                     VStack(alignment: .leading, spacing: 16) {
                         if !display.executionGroups.isEmpty {
@@ -332,13 +330,10 @@ struct CapabilityInvocationDetailSheet: View {
                         if let prettyResult = display.prettyResult {
                             CapabilityRawDisclosure(title: "Raw result", text: prettyResult, tint: tint)
                         }
-                        if let prettyApprovalState = display.prettyApprovalState {
-                            CapabilityRawDisclosure(title: "Approval state", text: prettyApprovalState, tint: tint)
-                        }
                     }
                     .padding(.top, 10)
                 } label: {
-                    Label("Execution path, guardrails, and raw payloads", systemImage: "slider.horizontal.3")
+                    Label("Execution path and raw payloads", systemImage: "slider.horizontal.3")
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
                         .foregroundStyle(tint.heading)
                 }
@@ -359,10 +354,9 @@ struct CapabilityInvocationDetailSheet: View {
             || !display.technicalRows.isEmpty
             || display.prettyArguments != nil
             || display.prettyResult != nil
-            || display.prettyApprovalState != nil
     }
 
-    private var workInputRows: [CapabilityDisplayRow] {
+    private var actionInputRows: [CapabilityDisplayRow] {
         guard primitive == "execute" else { return [] }
         return display.requestRows.filter { row in
             !["Intent", "Reason", "Contract", "Implementation", "Function", "Plugin", "Risk ceiling", "Trust floor", "Namespace"]

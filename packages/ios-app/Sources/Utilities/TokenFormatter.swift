@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Token Formatter
 
 /// Unified token count formatting.
-/// Consolidates duplicate formatting logic from AgentControlView, EventTypes, and EngineProtocolTypes.
+/// Consolidates duplicate token formatting logic shared by event and protocol models.
 enum TokenFormatter {
 
     /// Output format for token counts
@@ -68,6 +68,14 @@ enum TokenFormatter {
         }
         return "\(count)"
     }
+}
+
+func formatCost(_ cost: Double) -> String {
+    if cost < 0.00001 { return "$0.00" }
+    if cost < 0.0001 { return String(format: "$%.5f", cost) }
+    if cost < 0.001 { return String(format: "$%.4f", cost) }
+    if cost < 0.01 { return String(format: "$%.3f", cost) }
+    return String(format: "$%.2f", cost)
 }
 
 // MARK: - Int Extension

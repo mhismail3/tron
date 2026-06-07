@@ -1,9 +1,8 @@
 import SwiftUI
 import PhotosUI
 
-// ARCHITECTURE: ~606 lines — keyboard handling, attachment picker, skill picker,
-// voice capture, and send flow. These share input state (@State variables) that
-// Swift's file-scoped `private` prevents extracting to separate files.
+// ARCHITECTURE: coordinates keyboard handling, attachment picking, voice
+// capture, and send flow for the primitive prompt composer.
 
 // MARK: - Input Bar (iOS 26 Liquid Glass)
 
@@ -11,7 +10,7 @@ import PhotosUI
 struct InputBar: View {
     // MARK: - Consolidated Input (State/Config/Actions pattern)
 
-    /// Mutable input state (text, attachments, skills, etc.)
+    /// Mutable input state (text, attachments, etc.)
     @Bindable var state: InputBarState
 
     /// Read-only configuration (processing state, model info, etc.)
@@ -28,9 +27,6 @@ struct InputBar: View {
     @State private var showingImagePicker = false
     @State private var showCamera = false
     @State private var showFilePicker = false
-    @State private var showSkillMentionPopup = false
-    @State private var skillMentionQuery = ""
-    @State private var showPromptLibrary = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
     @State private var showMicButton = false
@@ -69,10 +65,6 @@ struct InputBar: View {
 
     private var shouldShowStatusPills: Bool { true }
 
-    private var hasSkillsAvailable: Bool {
-        config.skillStore != nil && (config.skillStore?.totalCount ?? 0) > 0
-    }
-
     private var textFieldTrailingPadding: CGFloat {
         let basePadding: CGFloat = 14
         var totalPadding = basePadding
@@ -89,7 +81,7 @@ struct InputBar: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            // Content area: attachments, skills (wrapping), and status pills
+            // Content area: attachments and status pills
             contentArea
                 .padding(.horizontal, 16)
                 .transition(.opacity)
@@ -103,39 +95,17 @@ struct InputBar: View {
                 .padding(.horizontal, 16)
             }
 
-            // Skill mention popup
-            if showSkillMentionPopup, let store = config.skillStore {
-                MentionPopup(
-                    skills: store.skills,
-                    query: skillMentionQuery,
-                    skillStore: store,
-                    onSelect: { skill in
-                        selectFromMention(skill)
-                    },
-                    onDismiss: {
-                        dismissMentionPopup()
-                    }
-                )
-                .padding(.horizontal, 16)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
             // Input row - floating liquid glass elements
             HStack(alignment: .bottom, spacing: 12) {
                 // Attachment button
                 if showAttachmentButton {
                     GlassAttachmentButton(
                         isProcessing: config.agentPhase.isActive || config.readOnly,
-                        hasSkillsAvailable: hasSkillsAvailable,
                         buttonSize: actionButtonSize,
-                        skillStore: config.skillStore,
                         attachmentCapability: config.attachmentCapability,
                         showCamera: $showCamera,
                         showingImagePicker: $showingImagePicker,
-                        showFilePicker: $showFilePicker,
-                        showSkillMentionPopup: $showSkillMentionPopup,
-                        skillMentionQuery: $skillMentionQuery,
-                        showPromptLibrary: $showPromptLibrary
+                        showFilePicker: $showFilePicker
                     )
                     .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -233,20 +203,6 @@ struct InputBar: View {
                 )
             }
         }
-        // Skill mention detection
-        .onChange(of: state.text) { _, newText in
-            detectSkillMention(in: newText)
-        }
-        // Sync mention popup visibility to shared state
-        .onChange(of: showSkillMentionPopup) { _, _ in
-            state.isMentionPopupVisible = showSkillMentionPopup
-        }
-        // External dismiss (tap outside)
-        .onChange(of: state.isMentionPopupVisible) { _, visible in
-            if !visible && showSkillMentionPopup {
-                dismissMentionPopup()
-            }
-        }
         // Sheets
         .sheet(isPresented: $showCamera) {
             CameraCaptureSheet { capturedImage in
@@ -305,11 +261,6 @@ struct InputBar: View {
             maxSelectionCount: 5,
             matching: .images
         )
-        .sheet(isPresented: $showPromptLibrary) {
-            PromptLibrarySheet(engineClient: dependencies.engineClient) { selected in
-                state.text = selected
-            }
-        }
         // Entrance animation — three staggered morph-ins over ~430ms.
         // All timings/springs live in TronAnimationTiming so the
         // cumulative timeline can be tweaked in one place.
@@ -345,26 +296,20 @@ struct InputBar: View {
     @ViewBuilder
     private var contentArea: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            if !state.selectedSkills.isEmpty || !state.attachments.isEmpty {
+            if !state.attachments.isEmpty {
                 ContentAreaView(
-                    selectedSkills: state.selectedSkills,
                     attachments: state.attachments,
                     attachmentCapability: config.attachmentCapability,
-                    onSkillRemove: { skill in
-                        removeSelectedMention(skill)
-                    },
-                    onSkillDetailTap: actions.onSkillDetailTap,
                     onRemoveAttachment: actions.onRemoveAttachment
                 )
             }
 
             Spacer(minLength: 0)
 
-            AgentControlPill(
+            ContextStatusPill(
                 contextPercentage: config.contextPercentage,
                 modelName: config.currentModelInfo?.name,
                 hasAppeared: hasAppeared,
-                onTap: actions.onContextTap,
                 readOnly: config.readOnly
             )
             .opacity(shouldShowStatusPills ? 1 : 0)
@@ -424,66 +369,6 @@ struct InputBar: View {
         return .handled
     }
 
-    // MARK: - Mention Detection
-
-    private func detectSkillMention(in newText: String) {
-        guard let store = config.skillStore else { return }
-
-        if let completed = SkillMentions.detectCompletedMention(
-            in: newText,
-            skills: store.skills,
-            alreadySelected: state.selectedSkills
-        ) {
-            if !state.selectedSkills.contains(where: { $0.name == completed.name }) {
-                state.selectedSkills.append(completed)
-            }
-            actions.onSkillSelect?(completed)
-            withAnimation(.tronStandard) {
-                showSkillMentionPopup = false
-                skillMentionQuery = ""
-            }
-            return
-        }
-
-        if let q = SkillMentions.detectMention(in: newText) {
-            skillMentionQuery = q
-            if !showSkillMentionPopup {
-                withAnimation(.tronStandard) {
-                    showSkillMentionPopup = true
-                }
-            }
-        } else if showSkillMentionPopup {
-            withAnimation(.tronStandard) {
-                showSkillMentionPopup = false
-                skillMentionQuery = ""
-            }
-        }
-    }
-
-    private func selectFromMention(_ skill: Skill) {
-        let trigger = SkillMentions.trigger
-        if let triggerIndex = state.text.lastIndex(of: trigger) {
-            state.text = String(state.text[..<triggerIndex]) + String(trigger) + skill.name + " "
-        }
-        if !state.selectedSkills.contains(where: { $0.name == skill.name }) {
-            state.selectedSkills.append(skill)
-        }
-        actions.onSkillSelect?(skill)
-        dismissMentionPopup()
-    }
-
-    private func dismissMentionPopup() {
-        withAnimation(.tronStandard) {
-            showSkillMentionPopup = false
-            skillMentionQuery = ""
-        }
-    }
-
-    private func removeSelectedMention(_ skill: Skill) {
-        state.selectedSkills.removeAll { $0.name == skill.name }
-        actions.onSkillRemove?(skill)
-    }
-
 }
 
 // MARK: - iOS 26 Menu Action Notifications
@@ -493,8 +378,6 @@ extension Notification.Name {
     static let modelPickerAction = Notification.Name("modelPickerAction")
     static let attachmentMenuAction = Notification.Name("attachmentMenuAction")
     static let reasoningLevelAction = Notification.Name("reasoningLevelAction")
-    /// Plan mode: Request to add plan skill and enter planning mode
-    static let draftPlanRequested = Notification.Name("draftPlanRequested")
 }
 
 // MARK: - Preview
@@ -516,7 +399,6 @@ extension Notification.Name {
                 contextWindow: 200_000,
                 lastTurnInputTokens: 60000,
                 currentModelInfo: nil,
-                skillStore: nil,
                 inputHistory: nil,
                 animationCoordinator: nil,
                 readOnly: false

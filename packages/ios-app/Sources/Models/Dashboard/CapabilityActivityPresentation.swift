@@ -53,7 +53,7 @@ enum CapabilityActivityPresentation {
         let target = targetId(from: rawObject) ?? identity.contractId ?? identity.functionId
         let object = targetArguments(from: rawObject) ?? rawObject
         guard let object else { return nil }
-        if let summary = targetSummary(for: target, from: object) ?? simpleSummary(from: object) {
+        if let summary = simpleSummary(from: object) {
             return summary.truncated(to: 120)
         }
         return nil
@@ -119,46 +119,7 @@ enum CapabilityActivityPresentation {
         if let path = firstString(["workspacePath", "path", "filePath", "cwd"], in: object) {
             return compactPathLabel(path)
         }
-        if let visibility = firstString(["visibility"], in: object)?.lowercased() {
-            switch visibility {
-            case "workspace":
-                return "Safe in this workspace"
-            case "session":
-                return "Safe in this chat"
-            case "system":
-                return "Requires promotion approval"
-            default:
-                break
-            }
-        }
         return nil
-    }
-
-    private static func targetSummary(for target: String?, from object: [String: Any]) -> String? {
-        switch target {
-        case "self_extension::grant_workspace_autonomy":
-            return "Current workspace"
-        case "worker::spawn":
-            return safetySummary(from: object)
-        default:
-            return nil
-        }
-    }
-
-    private static func safetySummary(from object: [String: Any]) -> String? {
-        guard let visibility = firstString(["visibility"], in: object)?.lowercased() else {
-            return nil
-        }
-        switch visibility {
-        case "workspace":
-            return "Safe in this workspace"
-        case "session":
-            return "Safe in this chat"
-        case "system":
-            return "Requires promotion approval"
-        default:
-            return nil
-        }
     }
 
     private static func firstString(_ keys: [String], in object: [String: Any]) -> String? {
@@ -171,9 +132,6 @@ enum CapabilityActivityPresentation {
     }
 
     private static func compactPathLabel(_ path: String) -> String {
-        if path.contains("/.worktrees/session/") {
-            return "session worktree"
-        }
         if path == "." {
             return "current folder"
         }

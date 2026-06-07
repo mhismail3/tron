@@ -60,14 +60,13 @@ struct SharedContentTests {
 @Suite("SharedContent.buildSharePrompt")
 struct SharedContentBuildPromptTests {
 
-    @Test("URL-only share produces knowledge prompt with skill")
+    @Test("URL-only share produces prompt")
     func urlOnlyShare() {
         let content = SharedContent(text: nil, url: "https://example.com/article", timestamp: Date())
         let payload = content.buildSharePrompt()
 
         #expect(payload != nil)
         #expect(payload?.prompt == "Save this to your knowledge base\n\nhttps://example.com/article")
-        #expect(payload?.skillName == "knowledge")
     }
 
     @Test("URL + text share includes both in prompt")
@@ -77,7 +76,6 @@ struct SharedContentBuildPromptTests {
 
         #expect(payload != nil)
         #expect(payload?.prompt == "Save this to your knowledge base\n\nhttps://example.com\n\nGreat article about Swift")
-        #expect(payload?.skillName == "knowledge")
     }
 
     @Test("text-only share sends raw text without skill")
@@ -87,7 +85,6 @@ struct SharedContentBuildPromptTests {
 
         #expect(payload != nil)
         #expect(payload?.prompt == "Remember this for later")
-        #expect(payload?.skillName == nil)
     }
 
     @Test("empty text-only share returns nil")
@@ -109,7 +106,6 @@ struct SharedContentBuildPromptTests {
 
         #expect(payload != nil)
         #expect(payload?.prompt == "Just text")
-        #expect(payload?.skillName == nil)
     }
 
     @Test("URL + empty text omits text portion")
@@ -118,12 +114,6 @@ struct SharedContentBuildPromptTests {
         let payload = content.buildSharePrompt()
 
         #expect(payload?.prompt == "Save this to your knowledge base\n\nhttps://example.com")
-        #expect(payload?.skillName == "knowledge")
-    }
-
-    @Test("skill name constant is knowledge")
-    func skillNameConstant() {
-        #expect(SharedContent.urlShareSkillName == "knowledge")
     }
 }
 

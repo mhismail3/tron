@@ -26,7 +26,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
     let statusWithDuration: String
     let targetId: String?
     let payloadSummary: String?
-    let workRows: [CapabilityDisplayRow]
+    let actionRows: [CapabilityDisplayRow]
     let progressSteps: [CapabilityProgressStep]
     let requestRows: [CapabilityDisplayRow]
     let executionGroups: [CapabilityDisplayGroup]
@@ -35,7 +35,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
     let technicalRows: [CapabilityDisplayRow]
     let prettyArguments: String?
     let prettyResult: String?
-    let prettyApprovalState: String?
 
     init(data: CapabilityInvocationData) {
         let argumentObject = Self.argumentObject(from: data)
@@ -116,7 +115,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
             result: data.result,
             output: outputObject
         )
-        self.workRows = Self.workRows(
+        self.actionRows = Self.actionRows(
             data: data,
             arguments: argumentObject,
             target: target,
@@ -129,14 +128,13 @@ struct CapabilityInvocationDisplayModel: Equatable {
         self.technicalRows = Self.technicalRows(data: data)
         self.prettyArguments = Self.prettyJSONString(data.arguments) ?? data.arguments.nilIfEmpty
         self.prettyResult = data.result.flatMap(Self.prettyJSONString) ?? data.result?.nilIfEmpty
-        self.prettyApprovalState = data.approvalState.flatMap(Self.prettyJSON)
     }
 
     private static func primitiveTitle(_ primitive: String) -> String {
         switch primitive {
         case "search": return "Search"
         case "inspect": return "Inspect"
-        default: return "Work"
+        default: return "Action"
         }
     }
 
@@ -165,7 +163,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         guard primitive == "execute", target != nil else {
             return primitiveTitle(primitive)
         }
-        return chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? "Work"
+        return chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? "Action"
     }
 
     private static func statusText(
@@ -179,7 +177,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
         case .generating: return "Preparing"
         case .running: return "Running"
         case .paused: return "Paused"
-        case .approvalRequired: return "Approval required"
         case .success: return "Completed"
         case .error: return "Failed"
         case .unavailable: return "Unavailable"
@@ -194,8 +191,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
             return ["runningLabel", "progressLabel", "statusLabel"]
         case .paused:
             return ["pausedLabel", "statusLabel"]
-        case .approvalRequired:
-            return ["approvalLabel", "statusLabel"]
         case .success:
             return ["successLabel", "statusLabel"]
         case .error:
@@ -230,7 +225,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
                 .truncated(to: 120)
         default:
             if primitive == "execute", target == nil {
-                return "Choosing worker"
+                return "Preparing action"
             }
             if let payloadSummary {
                 return payloadSummary.truncated(to: 140)
@@ -333,37 +328,10 @@ struct CapabilityInvocationDisplayModel: Equatable {
     }
 
     private static func payloadSummary(target: String?, from object: [String: Any]) -> String? {
-        if target == "self_extension::grant_workspace_autonomy" {
-            return "Current workspace"
-        }
-        if target == "worker::protocol_guide" {
-            return "Helper capability template"
-        }
-        if target == "worker::spawn",
-           let visibility = firstString(["visibility"], in: object)?.lowercased() {
-            switch visibility {
-            case "workspace":
-                return "Safe in this workspace"
-            case "session":
-                return "Safe in this chat"
-            case "system":
-                return "Requires promotion approval"
-            default:
-                break
-            }
-        }
-        if target == "sandbox::stop_spawned_worker" || target == "worker::disconnect" {
-            return "Local helper capability"
-        }
-        if target == "worker::health" {
-            return "Helper capability status"
-        }
         if target == "capability::inspect" {
             return "Capability details"
         }
-        if target == "capability::search"
-            || target == "catalog::watch_snapshot"
-            || target == "catalog::list" {
+        if target == "capability::search" {
             return "Capability catalog"
         }
         if let command = firstString(["command", "cmd", "shellCommand"], in: object)?.nilIfEmpty {
@@ -403,9 +371,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
 
     private static let technicalSummaryKeys: Set<String> = [
         "afterRevision",
-        "approvalId",
         "bindingDecisionId",
-        "catalogRevision",
         "classes",
         "contractId",
         "functionId",
@@ -417,8 +383,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
         "kind",
         "kinds",
         "limit",
-        "namespacePrefix",
-        "ownerWorker",
         "pluginId",
         "resourceRefs",
         "schemaDigest",
@@ -426,7 +390,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
         "subjectPrefix",
         "traceId",
         "versionId",
-        "workerId",
         "workspaceId"
     ]
 
@@ -538,7 +501,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         appendRow("Target", string(selectedTarget?["contractId"]) ?? string(selectedTarget?["functionId"]) ?? targetHint(from: arguments), to: &resolution, technical: true)
         appendRow("Implementation", string(selectedTarget?["implementationId"]) ?? string(binding?["selectedImplementation"]), to: &resolution, technical: true)
         appendRow("Selection", humanizeToken(string(binding?["selectionPolicy"])), to: &resolution)
-        appendRow("Catalog", string(selectedTarget?["catalogRevision"]) ?? string(details["catalogRevision"]), to: &resolution, technical: true)
+        appendRow("Revision", string(selectedTarget?["catalogRevision"]) ?? string(details["catalogRevision"]), to: &resolution, technical: true)
         if let rejected = array(phaseDetails?["rejectedCandidates"]), !rejected.isEmpty {
             appendRow("Rejected candidates", String(rejected.count), to: &resolution)
         }
@@ -552,7 +515,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
         appendRow("Schema", string(selectedTarget?["schemaDigest"]) ?? data.identity.schemaDigest, to: &preparation, technical: true)
         appendRow("Payload", bool(preparedRequest?["hasPayload"]).map { $0 ? "Validated" : "Not provided" }, to: &preparation)
         appendRow("Fresh handle", bool(preparedRequest?["hasInspectionHandle"]).map { $0 ? "Prepared" : "Not required" }, to: &preparation)
-        appendRow("Approval", approvalSummary(details: details, approvalState: data.approvalState), to: &preparation)
         appendRow("Corrections", correctionSummary(corrections), to: &preparation)
         if !preparation.isEmpty {
             groups.append(CapabilityDisplayGroup(title: "Preparation", rows: preparation))
@@ -564,7 +526,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
             appendRow("Child count", String(childInvocations.count), to: &run)
         }
         appendRow("Function", string(selectedTarget?["functionId"]) ?? data.identity.functionId, to: &run, technical: true)
-        appendRow("Worker", data.identity.workerId, to: &run, technical: true)
+        appendRow("Executor", data.identity.workerId, to: &run, technical: true)
         appendRow("Status", statusText(data.status, identity: data.identity), to: &run)
         appendRow("Duration", data.formattedDuration, to: &run)
         if !run.isEmpty {
@@ -592,19 +554,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
         }
 
         return groups
-    }
-
-    private static func approvalSummary(
-        details: [String: Any],
-        approvalState: [String: AnyCodable]?
-    ) -> String {
-        if bool(details["approvalReplayed"]) == true {
-            return "Replayed previous approval"
-        }
-        if bool(details["approvalRequired"]) == true || approvalState?.isEmpty == false {
-            return "Required"
-        }
-        return "Not required"
     }
 
     private static func resultRows(
@@ -683,8 +632,8 @@ struct CapabilityInvocationDisplayModel: Equatable {
         append("Implementation", identity.implementationId)
         append("Function", identity.functionId)
         append("Plugin", identity.pluginId)
-        append("Worker", identity.workerId)
-        append("Catalog", identity.catalogRevision.map(String.init))
+        append("Executor", identity.workerId)
+        append("Revision", identity.catalogRevision.map(String.init))
         append("Schema", identity.schemaDigest)
         append("Trust", identity.trustTier)
         append("Risk", identity.riskLevel)
@@ -923,13 +872,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
     }
 
     private static func compactPathLabel(_ path: String) -> String {
-        if path.contains("/.worktrees/session/") || path.contains("\\.worktrees\\session\\") {
-            let last = (path as NSString).lastPathComponent
-            if last.hasPrefix("sess_") || last.isEmpty {
-                return "session worktree"
-            }
-            return last
-        }
         let abbreviated = path.abbreviatingHomeDirectory
         let last = (abbreviated as NSString).lastPathComponent
         if !last.isEmpty, last != "/" {

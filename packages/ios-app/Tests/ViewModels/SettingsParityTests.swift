@@ -38,19 +38,11 @@ final class SettingsParityTests: XCTestCase {
         "hooksLlmModel",
         "builtinHooks",
         "hooksErrorPolicy",
-        // Skills
-        "skillsCompactionPolicy",
-        "skillsShowIndex",
         // Memory
         "autoRetainInterval",
         "retainModel",
         // Git safety
         "gitProtectedBranches",
-        // Prompt library
-        "promptHistoryEnabled",
-        "promptHistoryMaxEntries",
-        "promptHistoryMaxAgeDays",
-        "promptHistoryAutoPrune",
         // plugin source
         "mcpSchemaRefreshTtlMs",
         // Engine diagnostics
@@ -78,14 +70,13 @@ final class SettingsParityTests: XCTestCase {
         "loadError": "transient error state — surfaced inline in the UI, not a setting",
         "lastLoadedSettings": "rollback snapshot for failed sparse updates — not a setting",
         "isolationMode": "session default still comes from server settings; new-session flow exposes the per-session isolation choice",
-        "gitTargetBranch": "source-control action sheets choose targets per action or let the server auto-detect the repository default",
+        "gitTargetBranch": "runtime repo actions choose targets per action or let the server auto-detect the repository default",
         "gitSessionBranchPolicy": "merge/finalize action sheets expose branch cleanup per action instead of a global settings sheet toggle",
         "gitMergeStrategy": "merge/finalize action sheets expose strategy per action instead of a global settings sheet toggle",
         "gitAutoSetUpstream": "push action sheet exposes upstream behavior per push; the server default remains decoded for action-sheet initialization",
         "gitCrashRecoveryAbortTimeoutMs": "operational timeout kept server-side; not exposed as an end-user settings control",
         "gitOpTimeoutNetworkMs": "operational timeout kept server-side; not exposed as an end-user settings control",
         "gitOpTimeoutLocalMs": "operational timeout kept server-side; not exposed as an end-user settings control",
-        "gitSubagentConflictResolutionEnabled": "conflict resolution is offered in the source-control flow; the global offer gate is intentionally not exposed in settings",
     ]
 
     /// Normalize a Mirror child label into the user-level field name.

@@ -9,16 +9,13 @@ enum ActivityLineKind: String, Codable, Equatable, CaseIterable, Sendable {
     case userPrompt
     case capabilityInvocationStarted
     case capabilityInvocationCompleted
-    case subagentSpawn
-    case subagentDone
-    case subagentFailed
     case thinking
     case error
 }
 
 // MARK: - Activity Line Status
 
-/// Status of a capability or subagent activity line.
+/// Status of a capability activity line.
 enum ActivityLineStatus: String, Codable, Equatable, CaseIterable, Sendable {
     case running
     case success
@@ -87,7 +84,6 @@ enum CapabilityColor: String, Codable, Equatable, CaseIterable, Sendable {
 enum DashboardConstants {
     static let maxUserPromptLength = 100
     static let maxAssistantTextLength = 200
-    static let maxSubagentTextLength = 50
     static let maxErrorTextLength = 80
     static let maxActivityLines = 5
     static let maxStreamBufferLines = 8

@@ -1,7 +1,6 @@
 import Foundation
 
 /// Tracks background process lifecycle for the process list UI.
-/// Pattern follows SubagentState: @Observable class on ChatViewModel.
 @Observable
 @MainActor
 final class ProcessState {

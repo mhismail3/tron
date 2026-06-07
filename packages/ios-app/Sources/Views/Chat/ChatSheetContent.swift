@@ -9,7 +9,6 @@ struct ChatSheetContent: View {
     let viewModel: ChatViewModel
     let engineClient: EngineClient
     let sessionId: String
-    let skillStore: SkillStore?
     let workspaceDeleted: Bool
     let sheetCoordinator: SheetCoordinator?
     @Environment(\.dependencies) var dependencies
@@ -36,30 +35,6 @@ struct ChatSheetContent: View {
             }
                 .environment(\.dependencies, dependencies)
 
-        case .agentControl:
-            AgentControlView(
-                engineClient: engineClient,
-                sessionId: sessionId,
-                skillStore: skillStore,
-                readOnly: sheetReadOnly,
-                contextState: viewModel.contextState,
-                currentModelInfo: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel),
-                reasoningLevel: viewModel.modelPickerState.currentModelInfo(current: viewModel.currentModel)?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
-                availableModels: viewModel.modelPickerState.cachedModels,
-                currentModelId: viewModel.modelPickerState.displayModelName(current: viewModel.currentModel),
-                onAskAgent: { message in
-                    viewModel.pendingSourceChangesPrompt = message
-                    sheetCoordinator?.dismiss()
-                },
-                gitWorkflowState: viewModel.gitWorkflowState,
-                onWorktreeStatusShouldRefresh: { [weak viewModel] in
-                    await viewModel?.requestWorktreeStatus()
-                }
-            )
-
-        case .skillDetail(let skill):
-            skillDetailSheet(skill: skill)
-
         case .compactionDetail(let data):
             CompactionDetailSheet(
                 tokensBefore: data.tokensBefore,
@@ -75,15 +50,6 @@ struct ChatSheetContent: View {
 
         case .userInteraction:
             userInteractionSheet
-
-        case .engineApproval:
-            engineApprovalSheet
-
-        case .subagentDetail:
-            subagentDetailSheet
-
-        case .subagentResultsList:
-            subagentResultsListSheet
 
         case .notificationDelivery(let data):
             NotificationDeliveryDetailSheet(data: data)
@@ -120,15 +86,6 @@ struct ChatSheetContent: View {
     }
 
     @ViewBuilder
-    private func skillDetailSheet(skill: Skill) -> some View {
-        if let store = skillStore {
-            SkillDetailSheet(skill: skill, skillStore: store)
-        } else {
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
     private var userInteractionSheet: some View {
         if let data = viewModel.userInteractionState.currentData {
             UserInteractionSheet(
@@ -146,58 +103,4 @@ struct ChatSheetContent: View {
         }
     }
 
-    @ViewBuilder
-    private var engineApprovalSheet: some View {
-        if let data = viewModel.engineApprovalState.currentData {
-            EngineApprovalSheet(
-                capabilityData: data,
-                onSubmit: { decision, note in
-                    viewModel.prepareEngineApprovalSubmission(decision, note: note)
-                },
-                onDismiss: {
-                    viewModel.dismissEngineApprovalSheet()
-                },
-                readOnly: data.status.isReadOnly
-            )
-        } else {
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private var subagentDetailSheet: some View {
-        if let data = viewModel.subagentState.selectedSubagent {
-            SubagentDetailSheet(
-                data: data,
-                subagentState: viewModel.subagentState,
-                eventStoreManager: eventStoreManager,
-                engineClient: engineClient,
-                onSendResults: { _ in
-                    viewModel.markSubagentResultsReviewed()
-                    sheetCoordinator?.dismiss()
-                }
-            )
-        } else {
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private var subagentResultsListSheet: some View {
-        let pending = viewModel.subagentState.pendingSubagents
-        SubagentResultsListSheet(
-            pendingSubagents: pending,
-            subagentState: viewModel.subagentState,
-            eventStoreManager: eventStoreManager,
-            engineClient: engineClient,
-            onSendAll: {
-                viewModel.markSubagentResultsReviewed()
-                sheetCoordinator?.dismiss()
-            },
-            onSendIndividual: { _ in
-                viewModel.markSubagentResultsReviewed()
-                sheetCoordinator?.dismiss()
-            }
-        )
-    }
 }

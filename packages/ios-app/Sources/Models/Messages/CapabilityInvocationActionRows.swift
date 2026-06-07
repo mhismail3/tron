@@ -1,7 +1,7 @@
 import Foundation
 
 extension CapabilityInvocationDisplayModel {
-    static func workRows(
+    static func actionRows(
         data: CapabilityInvocationData,
         arguments: [String: Any],
         target: String?,
@@ -15,18 +15,18 @@ extension CapabilityInvocationDisplayModel {
             rows.append(CapabilityDisplayRow(label: label, value: value))
         }
 
-        let workTitle = target == nil && CapabilityPresentation.primitiveName(for: data.identity) == "execute"
-            ? "Choosing worker"
+        let actionTitle = target == nil && CapabilityPresentation.primitiveName(for: data.identity) == "execute"
+            ? "Preparing action"
             : capabilityName
-        append("What happened", workTitle)
-        append("Why", workWhyText(from: arguments, identity: data.identity))
-        append("Worker", CapabilityPresentation.workerLabel(for: data.identity, targetId: target) ?? "Tron")
+        append("What happened", actionTitle)
+        append("Why", actionWhyText(from: arguments, identity: data.identity))
+        append("Executor", CapabilityPresentation.workerLabel(for: data.identity, targetId: target) ?? "Runtime")
         append("Status", statusText)
-        append("Result", workResultText(data: data, resultPreview: resultPreview))
+        append("Result", actionResultText(data: data, resultPreview: resultPreview))
         return rows
     }
 
-    private static func workWhyText(from arguments: [String: Any], identity: CapabilityIdentity) -> String {
+    private static func actionWhyText(from arguments: [String: Any], identity: CapabilityIdentity) -> String {
         if let why = presentationString(["why", "reason", "intent"], for: identity) {
             return why.truncated(to: 180)
         }
@@ -37,10 +37,10 @@ extension CapabilityInvocationDisplayModel {
            let reason = firstString(["reason", "intent", "why"], in: nested)?.nilIfEmpty {
             return reason.truncated(to: 180)
         }
-        return "Agent selected the next work step."
+        return "Agent selected the next action."
     }
 
-    private static func workResultText(data: CapabilityInvocationData, resultPreview: String?) -> String {
+    private static func actionResultText(data: CapabilityInvocationData, resultPreview: String?) -> String {
         switch data.status {
         case .generating:
             return "Preparing"
@@ -48,8 +48,6 @@ extension CapabilityInvocationDisplayModel {
             return data.progressMessage?.nilIfEmpty?.truncated(to: 160) ?? "In progress"
         case .paused:
             return "Paused"
-        case .approvalRequired:
-            return "Waiting for guardrail approval"
         case .unavailable:
             return "Unavailable"
         case .error:

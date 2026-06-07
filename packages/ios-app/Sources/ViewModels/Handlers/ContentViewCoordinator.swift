@@ -108,16 +108,9 @@ final class ContentViewCoordinator {
 
         Task {
             do {
-                // Quick chat sessions (source="chat") are conversational, not
-                // edit-driven. The server enforces the "no worktree" invariant
-                // for chat sessions regardless of what we pass here; omitting
-                // `useWorktree` keeps the per-session override column NULL.
                 let result = try await engineClient.session.create(
                     workingDirectory: workspace,
                     model: dependencies.defaultModel,
-                    title: "Chat",
-                    source: "chat",
-                    profile: "chat",
                     idempotencyKey: .userAction("session.create")
                 )
 
@@ -126,8 +119,8 @@ final class ContentViewCoordinator {
                     workspaceId: workspace,
                     model: result.model,
                     workingDirectory: workspace,
-                    source: "chat",
-                    profile: "chat"
+                    source: nil,
+                    profile: nil
                 )
 
                 await MainActor.run {

@@ -49,39 +49,6 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertEqual(event.summary, "Hook completed")
     }
 
-    // MARK: - Subagent Events
-
-    func testSubagentSpawned_summary() {
-        let event = makeEvent(type: "subagent.spawned")
-        XCTAssertEqual(event.summary, "Subagent spawned")
-    }
-
-    func testSubagentCompleted_summary() {
-        let event = makeEvent(type: "subagent.completed")
-        XCTAssertEqual(event.summary, "Subagent completed")
-    }
-
-    func testSubagentFailed_withError_showsError() {
-        let event = makeEvent(type: "subagent.failed", payload: [
-            "error": AnyCodable("timeout exceeded"),
-        ])
-        XCTAssertEqual(event.summary, "Subagent failed: timeout exceeded")
-    }
-
-    func testSubagentFailed_withLongError_truncates() {
-        let longError = String(repeating: "x", count: 100)
-        let event = makeEvent(type: "subagent.failed", payload: [
-            "error": AnyCodable(longError),
-        ])
-        XCTAssertTrue(event.summary.hasPrefix("Subagent failed: "))
-        XCTAssertTrue(event.summary.count <= "Subagent failed: ".count + 30)
-    }
-
-    func testSubagentFailed_withoutError_showsFallback() {
-        let event = makeEvent(type: "subagent.failed")
-        XCTAssertEqual(event.summary, "Subagent failed")
-    }
-
     // MARK: - Turn Failed
 
     func testTurnFailed_withError_showsError() {
@@ -181,18 +148,6 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertTrue(event.summary.count <= 50)
     }
 
-    func testWorktreeAcquired_withBranch() {
-        let event = makeEvent(type: "worktree.acquired", payload: [
-            "branch": AnyCodable("session/test-branch"),
-        ])
-        XCTAssertEqual(event.summary, "Branch: session/test-branch")
-    }
-
-    func testWorktreeAcquired_withoutBranch() {
-        let event = makeEvent(type: "worktree.acquired")
-        XCTAssertEqual(event.summary, "Branch created")
-    }
-
     func testSessionBranch_summary() {
         let event = makeEvent(type: "session.branch")
         XCTAssertEqual(event.summary, "Branch created")
@@ -211,66 +166,4 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertEqual(event.summary, "TIMEOUT: Request timed out")
     }
 
-    // MARK: - Skills Cleared (M6)
-
-    /// UserInteraction summary promises re-activation. Must track the transformer's
-    /// render mode in `Core/Events/Payloads/ExtendedPayloads.swift` and the
-    /// view wiring in `Views/MessageBubble/NotificationViews.swift`.
-    func testSkillsCleared_userInteraction_summary() {
-        let event = makeEvent(type: "skills.cleared", payload: [
-            "clearedSkills": AnyCodable(["a", "b"]),
-            "reason": AnyCodable("compaction"),
-            "mode": AnyCodable("userInteraction"),
-        ])
-        XCTAssertEqual(event.summary, "Skills cleared — re-activate? (2)")
-    }
-
-    /// ClearAll summary is informational — no re-activate suffix because
-    /// the banner view does not expose chips.
-    func testSkillsCleared_clearAll_summary() {
-        let event = makeEvent(type: "skills.cleared", payload: [
-            "clearedSkills": AnyCodable(["x", "y", "z"]),
-            "reason": AnyCodable("compaction"),
-            "mode": AnyCodable("clearAll"),
-        ])
-        XCTAssertEqual(event.summary, "Skills cleared (3)")
-    }
-
-    /// Missing `mode` surfaces a generic summary. The chat transformer drops
-    /// the event entirely (strict wire contract — `mode` is required), but the
-    /// summary path has no way to "drop" a list row, so it renders without the
-    /// interactive "re-activate?" affordance (which would be a UX lie).
-    func testSkillsCleared_missingMode_genericSummary() {
-        let event = makeEvent(type: "skills.cleared", payload: [
-            "clearedSkills": AnyCodable(["solo"]),
-            "reason": AnyCodable("compaction"),
-        ])
-        XCTAssertEqual(event.summary, "Skills cleared (1)")
-    }
-
-    /// Unknown mode string produces a generic informational summary.
-    /// The chat transformer drops the event entirely under this shape
-    /// (see `testTransformSkillsClearedUnknownModeReturnsNil`); the
-    /// summary path has no way to "drop" a list row, so it renders
-    /// a neutral description without the interactive "re-activate?"
-    /// affordance (which would be a UX lie).
-    func testSkillsCleared_unknownMode_genericSummary() {
-        let event = makeEvent(type: "skills.cleared", payload: [
-            "clearedSkills": AnyCodable(["p", "q"]),
-            "reason": AnyCodable("compaction"),
-            "mode": AnyCodable("someFutureMode"),
-        ])
-        XCTAssertEqual(event.summary, "Skills cleared (2)")
-    }
-
-    /// Missing clearedSkills renders count of 0 — matches the defensive
-    /// default in the summary extension. Transformer drops this event in
-    /// chat; summary only surfaces in list views, so the zero-count render
-    /// is acceptable.
-    func testSkillsCleared_missingSkills_zeroCount() {
-        let event = makeEvent(type: "skills.cleared", payload: [
-            "mode": AnyCodable("userInteraction"),
-        ])
-        XCTAssertEqual(event.summary, "Skills cleared — re-activate? (0)")
-    }
 }

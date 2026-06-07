@@ -265,7 +265,7 @@ extension EventStoreManager {
             }
         }
 
-        // Sync the forked session's own events (e.g., session.fork, worktree.acquired)
+        // Sync the forked session's own events.
         logger.info("[FORK] Syncing forked session events...", category: .session)
         try await fullSyncSession(result.newSessionId)
 
@@ -279,9 +279,7 @@ extension EventStoreManager {
             sourceSession = nil
         }
         let now = DateParser.now
-        // New fork worktree truth comes from the server result; the source-session
-        // path is display context only when the fork shares its parent checkout.
-        let workingDir = result.worktree?.path ?? sourceSession?.workingDirectory ?? ""
+        let workingDir = sourceSession?.workingDirectory ?? ""
         let workspaceName = URL(fileURLWithPath: workingDir).lastPathComponent
         // CRITICAL: Tag with current server origin for filtering
         let serverOrigin = engineClient.serverOrigin

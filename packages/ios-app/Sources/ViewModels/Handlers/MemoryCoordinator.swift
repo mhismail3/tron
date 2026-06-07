@@ -55,9 +55,8 @@ final class MemoryCoordinator {
     /// Handle automatic memory retain failure.
     ///
     /// Fires on `agent.memory_auto_retain_failed` when an auto-retain
-    /// pipeline started but the summarizer subagent failed. The server
-    /// STILL falls back to a keyword-based summary and emits
-    /// `memory_updated` next, but the pill should signal that the quality
+    /// pipeline started but the summarizer failed. The server still writes
+    /// a reduced-quality summary and emits `memory_updated` next, but the pill should signal that the quality
     /// is low. We mutate the in-progress pill in-place to a failed state
     /// with the reason, and keep `memoryRetainInProgressMessageId` set so
     /// the subsequent `memory_updated` can land its final content (or

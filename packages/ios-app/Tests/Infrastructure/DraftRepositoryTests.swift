@@ -21,10 +21,6 @@ final class DraftRepositoryTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeSkill(name: String, source: SkillSource = .global) -> Skill {
-        Skill(name: name, displayName: name.capitalized, description: "A \(name)", source: source, tags: nil)
-    }
-
     private func makeAttachmentMetadata(
         id: UUID = UUID(),
         type: AttachmentType = .image,
@@ -48,34 +44,13 @@ final class DraftRepositoryTests: XCTestCase {
         try await database.drafts.save(
             sessionId: "s1",
             text: "Hello, world!",
-            skills: [],
             attachmentMetadata: []
         )
 
         let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "Hello, world!")
-        XCTAssertTrue(result?.skills.isEmpty ?? false)
         XCTAssertTrue(result?.attachmentMetadata.isEmpty ?? false)
-    }
-
-    func testSaveAndLoadDraft_withSkills() async throws {
-        let skills = [makeSkill(name: "code-review"), makeSkill(name: "testing", source: .project)]
-
-        try await database.drafts.save(
-            sessionId: "s1",
-            text: "",
-            skills: skills,
-            attachmentMetadata: []
-        )
-
-        let result = try await database.drafts.load(sessionId: "s1")
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.skills.count, 2)
-        XCTAssertEqual(result?.skills[0].name, "code-review")
-        XCTAssertEqual(result?.skills[0].source, .global)
-        XCTAssertEqual(result?.skills[1].name, "testing")
-        XCTAssertEqual(result?.skills[1].source, .project)
     }
 
     func testSaveAndLoadDraft_withAttachmentMetadata() async throws {
@@ -95,7 +70,6 @@ final class DraftRepositoryTests: XCTestCase {
         try await database.drafts.save(
             sessionId: "s1",
             text: "",
-            skills: [],
             attachmentMetadata: metadata
         )
 
@@ -114,20 +88,17 @@ final class DraftRepositoryTests: XCTestCase {
     }
 
     func testSaveAndLoadDraft_fullDraft() async throws {
-        let skills = [makeSkill(name: "review")]
         let attachments = [makeAttachmentMetadata(), makeAttachmentMetadata(type: .pdf, mimeType: "application/pdf", fileName: "doc.pdf")]
 
         try await database.drafts.save(
             sessionId: "s1",
             text: "Please review this",
-            skills: skills,
             attachmentMetadata: attachments
         )
 
         let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "Please review this")
-        XCTAssertEqual(result?.skills.count, 1)
         XCTAssertEqual(result?.attachmentMetadata.count, 2)
     }
 
@@ -135,14 +106,12 @@ final class DraftRepositoryTests: XCTestCase {
         try await database.drafts.save(
             sessionId: "s1",
             text: "",
-            skills: [],
             attachmentMetadata: []
         )
 
         let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.text, "")
-        XCTAssertTrue(result?.skills.isEmpty ?? false)
         XCTAssertTrue(result?.attachmentMetadata.isEmpty ?? false)
     }
 
@@ -159,21 +128,17 @@ final class DraftRepositoryTests: XCTestCase {
         try await database.drafts.save(
             sessionId: "s1",
             text: "first version",
-            skills: [],
             attachmentMetadata: []
         )
 
         try await database.drafts.save(
             sessionId: "s1",
             text: "second version",
-            skills: [makeSkill(name: "added-later")],
             attachmentMetadata: []
         )
 
         let result = try await database.drafts.load(sessionId: "s1")
         XCTAssertEqual(result?.text, "second version")
-        XCTAssertEqual(result?.skills.count, 1)
-        XCTAssertEqual(result?.skills[0].name, "added-later")
     }
 
     // MARK: - Delete
@@ -182,7 +147,6 @@ final class DraftRepositoryTests: XCTestCase {
         try await database.drafts.save(
             sessionId: "s1",
             text: "will be deleted",
-            skills: [],
             attachmentMetadata: []
         )
 
@@ -198,9 +162,9 @@ final class DraftRepositoryTests: XCTestCase {
     }
 
     func testDeleteAll() async throws {
-        try await database.drafts.save(sessionId: "s1", text: "a", skills: [], attachmentMetadata: [])
-        try await database.drafts.save(sessionId: "s2", text: "b", skills: [], attachmentMetadata: [])
-        try await database.drafts.save(sessionId: "s3", text: "c", skills: [], attachmentMetadata: [])
+        try await database.drafts.save(sessionId: "s1", text: "a", attachmentMetadata: [])
+        try await database.drafts.save(sessionId: "s2", text: "b", attachmentMetadata: [])
+        try await database.drafts.save(sessionId: "s3", text: "c", attachmentMetadata: [])
 
         try await database.drafts.deleteAll()
 
@@ -220,7 +184,6 @@ final class DraftRepositoryTests: XCTestCase {
         try await database.drafts.save(
             sessionId: "s1",
             text: text,
-            skills: [],
             attachmentMetadata: []
         )
 
@@ -234,7 +197,6 @@ final class DraftRepositoryTests: XCTestCase {
         try await database.drafts.save(
             sessionId: "s1",
             text: text,
-            skills: [],
             attachmentMetadata: []
         )
 
@@ -244,11 +206,11 @@ final class DraftRepositoryTests: XCTestCase {
 
     // MARK: - Corrupt JSON Handling
 
-    func testLoadDraft_corruptSkillsJson_returnsNil() async throws {
+    func testLoadDraft_corruptAttachmentMetadataJson_returnsNil() async throws {
         // Manually insert a row with corrupt JSON
         let sql = """
             INSERT INTO session_drafts (session_id, text, skills_json, attachment_metadata_json, updated_at)
-            VALUES ('corrupt', 'text', '{NOT VALID JSON}', '[]', '2026-04-03T00:00:00Z')
+            VALUES ('corrupt', 'text', '[]', '{NOT VALID JSON}', '2026-04-03T00:00:00Z')
         """
         try await database.withDB { db in
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {

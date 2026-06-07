@@ -854,13 +854,13 @@ packages/ios-app/Sources/
 +-- Core/                 DI, EventDispatchCoordinator, plugins, payloads
 +-- Database/             SQLite event database, queries
 +-- Models/               Data models, engine protocol codables, event types
-+-- Protocols/            Coordinator and view model protocols
-+-- Services/             Network (engine client, WebSocket, deep links), paired servers, audio,
-+                         push notifications, local diagnostics,
-+                         feedback composer, Audit Details cache, Keychain tokens
-+-- ViewModels/           Chat view models, handlers, managers, @Observable state,
-+                         OnboardingState, WorkDashboardState, AuditDetailsState
-+-- Views/                SwiftUI views (chat, Work, Audit Details, capability views, settings, Onboarding/, ...)
++-- Services/             Engine transport/domain clients, paired servers, audio,
++                         push notifications, local diagnostics, feedback,
++                         Keychain tokens
++-- ViewModels/           Chat view models, handlers, managers,
++                         settings/onboarding state
++-- Views/                SwiftUI shell: chat, input bar, message bubbles,
++                         session tree, settings, onboarding, dynamic surfaces
 +-- Theme/                Colors, typography, design tokens
 +-- Utilities/            Shared helpers
 +-- Extensions/           Type extensions
@@ -877,14 +877,15 @@ packages/ios-app/Sources/
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
-- **Primitive chat shell**: PET-8 is reducing the app to connection/onboarding/settings, prompt input, message rendering, and generic runtime surfaces. Fixed Work/Audit Details product modes are teardown targets.
+- **Primitive chat shell**: the app keeps connection/onboarding/settings, session navigation, prompt input, message rendering, local reconstruction, diagnostics, and generic runtime surfaces. Fixed Work, Audit Details, Source Control, Prompt Library, Voice Notes, Skills, Subagents, and Agent Control product modes are removed from the primary source tree.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Generic runtime rendering**: fixed capability-specific sheets must be removed or replaced with server/agent-authored generic runtime data in PET-8.
+- **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
+- **Push notification permission**: the clean shell never requests OS push permission until an active paired server exists; token registration remains a server-owned `device::register` flow after pairing.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the tracked `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. Settings also exposes the Logs sheet in every iOS build configuration so production installs can inspect or copy redacted in-memory client logs without enabling verbose production logging. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with send-boundary redaction, deterministic batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
 
 ### Data Flow
@@ -892,8 +893,8 @@ packages/ios-app/Sources/
 ```
 Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
-Work:    /engine read(agent::work_snapshot) -> AgentClient -> WorkDashboardState -> WorkDashboardView
-Audit:   /engine invoke(capability::*) -> CapabilityClient -> AuditDetailsState -> AuditDetailsView
+Prompt:  InputBar -> ChatViewModel -> AgentClient -> agent::prompt
+Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
 ```
 
 ### Build Configurations
@@ -911,7 +912,6 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `architecture.md` — App architecture, patterns, file placement
 - `development.md` — Xcode setup, builds, testing
 - `events.md` — Event plugin system
-- `capability-ui.md` — Audit Details, capability DTOs, schema forms, offline cache, and admin client boundaries
 - `apns.md` — Push notification setup
 - `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
 

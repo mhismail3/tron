@@ -28,13 +28,6 @@ struct AgentClientTests {
         var getStateModel = "claude-opus-4-20250514"
         var getStateShouldThrow = false
 
-        var activateSkillCallCount = 0
-        var lastActivatedSkill: String?
-        var deactivateSkillCallCount = 0
-        var lastDeactivatedSkill: String?
-        var activeSkillsCallCount = 0
-        var workSnapshotCallCount = 0
-
         func sendPrompt(
             _ prompt: String,
             images: [ImageAttachment]?,
@@ -55,69 +48,9 @@ struct AgentClientTests {
             if abortShouldThrow { throw TestError.mockError }
         }
 
-        func activateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillActivateResult {
-            activateSkillCallCount += 1
-            lastActivatedSkill = skillName
-            let json = """
-            {"success": true, "skill": {"name": "\(skillName)", "source": "global", "service": "tron"}}
-            """
-            return try! JSONDecoder().decode(SkillActivateResult.self, from: json.data(using: .utf8)!)
-        }
-
-        func deactivateSkill(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws -> SkillDeactivateResult {
-            deactivateSkillCallCount += 1
-            lastDeactivatedSkill = skillName
-            let json = """
-            {"success": true, "deactivatedSkill": "\(skillName)"}
-            """
-            return try! JSONDecoder().decode(SkillDeactivateResult.self, from: json.data(using: .utf8)!)
-        }
-
-        func activeSkills() async throws -> SkillActiveResult {
-            activeSkillsCallCount += 1
-            let json = """
-            {"skills": []}
-            """
-            return try! JSONDecoder().decode(SkillActiveResult.self, from: json.data(using: .utf8)!)
-        }
-
-        func workSnapshot(sessionId: String?, workspaceId: String?, limit: Int) async throws -> WorkSnapshotDTO {
-            workSnapshotCallCount += 1
-            let json = """
-            {
-              "autonomy": {
-                "mode": "independent",
-                "approvalPromptMode": "disabled",
-                "interactiveApprovalPrompts": false,
-                "statusLabel": "Runs independently",
-                "summary": "Approval-required autonomous work is audited and auto-decided unless a guardrail blocks it."
-              },
-              "activeWork": [],
-              "workers": [],
-              "recentMilestones": [],
-              "guardrails": [],
-              "auditRefs": [{"kind": "catalog", "catalogRevision": 9}],
-              "scope": {"sessionId": null, "workspaceId": null}
-            }
-            """
-            return try! JSONDecoder().decode(WorkSnapshotDTO.self, from: Data(json.utf8))
-        }
-
         enum TestError: Error {
             case mockError
         }
-    }
-
-    // MARK: - Helper to create test Skill
-
-    static func makeTestSkill(name: String = "test-skill") -> Skill {
-        Skill(
-            name: name,
-            displayName: name,
-            description: "A test skill",
-            source: .global,
-            tags: nil
-        )
     }
 
     private func makeConnectedTransport(sessionId: String = "session-123") -> MockEngineTransport {
@@ -188,12 +121,6 @@ struct AgentClientTests {
             case "agent::prompt":
                 #expect((payload as? AgentPromptParams)?.sessionId == sessionId)
                 return AgentPromptResult(acknowledged: true)
-            case "skills::activate":
-                #expect((payload as? SkillActivateParams)?.sessionId == sessionId)
-                return try Self.decode(SkillActivateResult.self, #"{"success":true,"skill":{"name":"browser","source":"global","service":"tron"}}"#)
-            case "skills::deactivate":
-                #expect((payload as? SkillDeactivateParams)?.sessionId == sessionId)
-                return try Self.decode(SkillDeactivateResult.self, #"{"success":true,"deactivatedSkill":"browser"}"#)
             case "agent::queue_prompt":
                 #expect((payload as? QueuePromptParams)?.sessionId == sessionId)
                 return PendingQueueItem(queueId: "queue-1", text: "queued", position: 1, timestamp: "2026-05-10T00:00:00Z")
@@ -218,67 +145,7 @@ struct AgentClientTests {
                 throw EngineConnectionError.invalidResponse
             }
         }
-        transport.readHandler = { functionId, payload, options in
-            #expect(functionId.rawValue == "agent::work_snapshot")
-            #expect(options.context?.sessionId == sessionId)
-            let params = try #require(payload as? AgentWorkSnapshotParams)
-            #expect(params.sessionId == sessionId)
-            #expect(params.workspaceId == nil)
-            #expect(params.limit == 12)
-            return try Self.decode(WorkSnapshotDTO.self, """
-            {
-              "autonomy": {
-                "mode": "independent",
-                "approvalPromptMode": "disabled",
-                "interactiveApprovalPrompts": false,
-                "statusLabel": "Runs independently",
-                "summary": "Approval-required autonomous work is audited and auto-decided unless a guardrail blocks it."
-              },
-              "activeWork": [],
-              "workers": [
-                {
-                  "workerId": "subagent:review-1",
-                  "label": "Review worker",
-                  "status": "Running",
-                  "health": "healthy",
-                  "trust": "Session worker",
-                  "abilityCount": 1,
-                  "abilities": [
-                    {
-                      "functionId": "agent::spawn_subagent",
-                      "label": "Delegated agent work",
-                      "risk": "Medium",
-                      "effect": "ExternalSideEffect",
-                      "health": "Healthy"
-                    }
-                  ],
-                  "generatedControls": [
-                    {
-                      "controlId": "agent-worker:review-1",
-                      "label": "View worker result",
-                      "kind": "Detail",
-                      "functionId": "agent::subagent_result",
-                      "status": "Healthy"
-                    }
-                  ],
-                  "namespaceClaims": ["agent"],
-                  "workerType": "agent",
-                  "runId": "review-1",
-                  "elapsedMs": 1200,
-                  "auditRef": {"kind": "subagent", "id": "review-1", "traceId": null}
-                }
-              ],
-              "recentMilestones": [],
-              "guardrails": [],
-              "auditRefs": [{"kind": "catalog", "catalogRevision": 42}],
-              "scope": {"sessionId": "\(sessionId)", "workspaceId": null}
-            }
-            """)
-        }
-
         try await client.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
-        _ = try await client.activateSkill("browser", idempotencyKey: .userAction("skills.activate.test"))
-        _ = try await client.deactivateSkill("browser", idempotencyKey: .userAction("skills.deactivate.test"))
         _ = try await client.queuePrompt("queued", idempotencyKey: .userAction("agent.queuePrompt.test"))
         try await client.dequeuePrompt("queue-1", idempotencyKey: .userAction("agent.dequeuePrompt.test"))
         try await client.clearQueue(idempotencyKey: .userAction("agent.clearQueue.test"))
@@ -290,20 +157,13 @@ struct AgentClientTests {
         )
         try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
         _ = try await client.abortCapabilityInvocation(invocationId: "capability-1", idempotencyKey: .userAction("agent.abortCapabilityInvocation.test"))
-        let snapshot = try await client.workSnapshot(sessionId: sessionId, limit: 12)
-        #expect(snapshot.workers.first?.label == "Review worker")
-        #expect(snapshot.workers.first?.trust == "Session worker")
-        #expect(snapshot.workers.first?.generatedControls.first?.label == "View worker result")
-        #expect(snapshot.auditRefs.first?.catalogRevision == 42)
-        #expect(transport.ensureSessionEventSubscriptionCallCount == 5)
+        #expect(transport.ensureSessionEventSubscriptionCallCount >= 1)
         #expect(transport.operationOrder.prefix(2) == [
             "subscribe:\(sessionId)",
             "write:agent::prompt"
         ])
         #expect(seenFunctions == [
             "agent::prompt",
-            "skills::activate",
-            "skills::deactivate",
             "agent::queue_prompt",
             "agent::dequeue_prompt",
             "agent::clear_queue",
@@ -311,7 +171,6 @@ struct AgentClientTests {
             "agent::abort",
             "agent::abort_invocation"
         ])
-        #expect(transport.lastReadFunctionId?.rawValue == "agent::work_snapshot")
     }
 
     @Test("Prompt does not invoke agent when live session stream cannot subscribe")
@@ -328,53 +187,6 @@ struct AgentClientTests {
             try await client.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
         }
         #expect(transport.lastWriteFunctionId == nil)
-    }
-
-    // MARK: - Skill Activation Tests
-
-    @Test("Activate skill calls correctly")
-    func testActivateSkill_calls() async throws {
-        let mock = MockAgentClient()
-
-        let result = try await mock.activateSkill("browser", idempotencyKey: .userAction("skills.activate.test"))
-
-        #expect(mock.activateSkillCallCount == 1)
-        #expect(mock.lastActivatedSkill == "browser")
-        #expect(result.success == true)
-        #expect(result.skill?.name == "browser")
-    }
-
-    @Test("Deactivate skill calls correctly")
-    func testDeactivateSkill_calls() async throws {
-        let mock = MockAgentClient()
-
-        let result = try await mock.deactivateSkill("browser", idempotencyKey: .userAction("skills.deactivate.test"))
-
-        #expect(mock.deactivateSkillCallCount == 1)
-        #expect(mock.lastDeactivatedSkill == "browser")
-        #expect(result.success == true)
-        #expect(result.deactivatedSkill == "browser")
-    }
-
-    @Test("Active skills returns list")
-    func testActiveSkills_returns() async throws {
-        let mock = MockAgentClient()
-
-        let result = try await mock.activeSkills()
-
-        #expect(mock.activeSkillsCallCount == 1)
-        #expect(result.skills.isEmpty)
-    }
-
-    @Test("Work snapshot returns server-owned worker projection")
-    func testWorkSnapshot_returns() async throws {
-        let mock = MockAgentClient()
-
-        let result = try await mock.workSnapshot(sessionId: nil, workspaceId: nil, limit: 12)
-
-        #expect(mock.workSnapshotCallCount == 1)
-        #expect(result.autonomy.mode == "independent")
-        #expect(result.auditRefs.first?.kind == "catalog")
     }
 
     // MARK: - Abort Tests

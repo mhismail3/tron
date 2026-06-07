@@ -24,9 +24,7 @@ import Foundation
 /// ## Interactive Capability Handling
 /// `agent::ask_user` is transformed via a dedicated interaction view only when
 /// the server-enriched capability identity says the invocation is that
-/// contract. Engine approvals are not model capabilities; they render from
-/// `approval.pending` / `approval.resolved` stream events and session
-/// reconstruction records.
+/// contract.
 enum InterleavedContentProcessor {
 
     /// Transform an assistant message's content blocks into ChatMessages.

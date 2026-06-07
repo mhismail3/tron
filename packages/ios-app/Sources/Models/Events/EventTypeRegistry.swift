@@ -46,11 +46,6 @@ enum PersistedEventType: String, CaseIterable {
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
 
-    // Skills
-    case skillActivated = "skills::activated"
-    case skillDeactivated = "skills::deactivated"
-    case skillsCleared = "skills.cleared"
-
     // Rules
     case rulesLoaded = "rules.loaded"
     case rulesActivated = "rules.activated"
@@ -70,22 +65,10 @@ enum PersistedEventType: String, CaseIterable {
     case fileWrite = "file.write"
     case fileEdit = "file.edit"
 
-    // Worktree/git operations
-    case worktreeAcquired = "worktree.acquired"
-    case worktreeCommit = "worktree.commit"
-    case worktreeReleased = "worktree.released"
-    case worktreeMerged = "worktree.merged"
-    case worktreeRenamed = "worktree.renamed"
-
     // Error events
     case errorAgent = "error.agent"
     case errorCapability = "error.capability"
     case errorProvider = "error.provider"
-
-    // Subagent lifecycle
-    case subagentSpawned = "subagent.spawned"
-    case subagentCompleted = "subagent.completed"
-    case subagentFailed = "subagent.failed"
 
     // Turn events
     case turnFailed = "turn.failed"
@@ -141,10 +124,6 @@ enum PersistedEventType: String, CaseIterable {
         case .messageDeleted:          return .init(false,   true,    false,   true,   "Message deleted")
         // Notifications
         case .notificationInterrupted: return .init(true,    false,   false,   false,  "Session interrupted")
-        // Skills
-        case .skillActivated:          return .init(false,   false,   false,   false,  "Skill activated")
-        case .skillDeactivated:        return .init(true,    false,   false,   false,  "Skill deactivated")
-        case .skillsCleared:           return .init(true,    false,   false,   false,  "Skills cleared")
         // Rules
         case .rulesLoaded:             return .init(true,    false,   false,   false,  "Rules loaded")
         case .rulesActivated:          return .init(true,    false,   false,   false,  "Rules activated")
@@ -159,20 +138,10 @@ enum PersistedEventType: String, CaseIterable {
         case .fileRead:                return .init(false,   false,   false,   true,   "File read")
         case .fileWrite:               return .init(false,   false,   false,   true,   "File write")
         case .fileEdit:                return .init(false,   false,   false,   true,   "File edit")
-        // Worktree
-        case .worktreeAcquired:        return .init(false,   true,    false,   true,   "Worktree acquired")
-        case .worktreeCommit:          return .init(false,   true,    false,   true,   "Git commit")
-        case .worktreeReleased:        return .init(false,   true,    false,   true,   "Worktree released")
-        case .worktreeMerged:          return .init(false,   true,    false,   true,   "Worktree merged")
-        case .worktreeRenamed:         return .init(false,   true,    false,   true,   "Branch renamed")
         // Errors
         case .errorAgent:              return .init(true,    true,    false,   false,  "Agent error")
         case .errorCapability:               return .init(true,    false,   false,   false,  "Capability error")
         case .errorProvider:           return .init(true,    false,   false,   false,  "Provider error")
-        // Subagents
-        case .subagentSpawned:         return .init(false,   true,    false,   false,  "Subagent spawned")
-        case .subagentCompleted:       return .init(false,   true,    false,   false,  "Subagent completed")
-        case .subagentFailed:          return .init(false,   true,    false,   false,  "Subagent failed")
         // Turn events
         case .turnFailed:              return .init(true,    false,   false,   false,  "Turn failed")
         // Memory
@@ -282,16 +251,4 @@ enum SystemMessageSource: String {
     case hook = "hook"
     case error = "error"
     case inject = "inject"
-}
-
-// =============================================================================
-// MARK: - Worktree Merge Strategies (from server WorktreeMergedEvent)
-// =============================================================================
-
-/// Git merge strategies.
-/// This EXACTLY mirrors the server's strategy union.
-enum MergeStrategy: String {
-    case merge = "merge"
-    case rebase = "rebase"
-    case squash = "squash"
 }

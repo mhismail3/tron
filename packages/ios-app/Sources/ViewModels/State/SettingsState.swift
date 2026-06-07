@@ -18,7 +18,6 @@ final class SettingsState {
     var rulesDiscoverStandaloneFiles: Bool = true
     var isolationMode: String = "always"
     var queueDrainMode: String = "sequential"
-    var autonomyApprovalPromptMode: String = "disabled"
 
     // MARK: - Hooks
 
@@ -28,11 +27,6 @@ final class SettingsState {
     /// - `"continue"` (default) — fail-open
     /// - `"block"` — synthesize a Block with a reason
     var hooksErrorPolicy: String = "continue"
-
-    // MARK: - Skills
-
-    var skillsCompactionPolicy: String = "clearAll"
-    var skillsShowIndex: String = "always"
 
     // MARK: - Memory
 
@@ -55,18 +49,6 @@ final class SettingsState {
     var gitCrashRecoveryAbortTimeoutMs: UInt64 = 30 * 60 * 1000
     var gitOpTimeoutNetworkMs: UInt64 = 60_000
     var gitOpTimeoutLocalMs: UInt64 = 30_000
-    var gitSubagentConflictResolutionEnabled: Bool = true
-
-    // MARK: - Prompt Library
-
-    /// Whether the server auto-captures interactive prompts into history.
-    var promptHistoryEnabled: Bool = true
-    /// Maximum retained history rows. `0` = unlimited.
-    var promptHistoryMaxEntries: Int = 10_000
-    /// Maximum history age in days. `0` = no age limit.
-    var promptHistoryMaxAgeDays: Int = 0
-    /// Opportunistically prune on server startup.
-    var promptHistoryAutoPrune: Bool = true
 
     // MARK: - plugin source
 
@@ -215,13 +197,10 @@ final class SettingsState {
         rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
         isolationMode = settings.isolationMode
         queueDrainMode = settings.queueDrainMode
-        autonomyApprovalPromptMode = settings.agentApprovalPromptMode
         hooksLlmModel = settings.hooksLlmModel
         builtinHooks = settings.builtinHooks
         hooksErrorPolicy = settings.hooksErrorPolicy
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        skillsCompactionPolicy = settings.skillsCompactionPolicy
-        skillsShowIndex = settings.skillsShowIndex
         autoRetainInterval = settings.autoRetainInterval
         retainModel = settings.retainModel
 
@@ -233,13 +212,6 @@ final class SettingsState {
         gitCrashRecoveryAbortTimeoutMs = settings.gitCrashRecoveryAbortTimeoutMs
         gitOpTimeoutNetworkMs = settings.gitOpTimeoutNetworkMs
         gitOpTimeoutLocalMs = settings.gitOpTimeoutLocalMs
-        gitSubagentConflictResolutionEnabled = settings.gitSubagentConflictResolutionEnabled
-
-        promptHistoryEnabled = settings.promptHistoryEnabled
-        promptHistoryMaxEntries = settings.promptHistoryMaxEntries
-        promptHistoryMaxAgeDays = settings.promptHistoryMaxAgeDays
-        promptHistoryAutoPrune = settings.promptHistoryAutoPrune
-
         mcpSchemaRefreshTtlMs = settings.mcpSchemaRefreshTtlMs
         observabilityLogLevel = settings.observabilityLogLevel
         observabilityPayloadCapture = settings.observabilityPayloadCapture

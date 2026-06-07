@@ -2,20 +2,6 @@ import Foundation
 
 // MARK: - Session Reconstruction
 
-enum EngineApprovalTimeline {
-    static func timestamp(for approval: EngineApprovalRecordDTO) -> Date {
-        DateParser.parse(approval.createdAt ?? approval.updatedAt ?? approval.decidedAt ?? DateParser.now) ?? Date()
-    }
-
-    static func insertionIndex(for timestamp: Date, in messages: [ChatMessage]) -> Int {
-        messages.firstIndex { $0.timestamp > timestamp } ?? messages.count
-    }
-
-    static func insert(_ message: ChatMessage, into messages: inout [ChatMessage]) {
-        messages.insert(message, at: insertionIndex(for: message.timestamp, in: messages))
-    }
-}
-
 extension ChatViewModel {
 
     /// Process the reconstruction result from `session::reconstruct`.
@@ -25,21 +11,13 @@ extension ChatViewModel {
     func processReconstructionResult(_ result: SessionReconstructResult) async {
         logger.info("[RECONSTRUCT] Processing: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), hasMore=\(result.hasMoreEvents), inFlight=\(result.inFlight != nil)", category: .session)
 
-        // 1. Reconstruct full session state (messages + config + subagent state)
+        // 1. Reconstruct full session state (messages + config)
         //    Uses reconstructSessionState() as single source of truth.
         let state = UnifiedEventTransformer.reconstructSessionState(from: result.events, presorted: true)
         applyReconstructedConfig(state)
 
         // 2. Rebuild the full timeline before selecting the visible slice.
-        //    Server-owned approval records are returned separately from event
-        //    rows, so they must be merged by timestamp here; appending them
-        //    after display slicing would put historical approvals after later
-        //    assistant results when resuming a session.
-        //    Order matters: restoreSubagentState modifies allReconstructedMessages in-place,
-        //    so it must run AFTER the array is set.
         allReconstructedMessages = state.messages
-        restoreSubagentState(from: state)
-        mergeEngineApprovalItemsIntoReconstructedMessages(result.approvalItems ?? [])
         let batchSize = min(Self.initialMessageBatchSize, allReconstructedMessages.count)
         displayedMessageCount = batchSize
         hasMoreMessages = result.hasMoreEvents || allReconstructedMessages.count > batchSize
@@ -136,27 +114,7 @@ extension ChatViewModel {
             streamingRecoverySnapshot = nil
         }
 
-        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil), pendingQueue=\(result.pendingQueue?.count ?? 0), approvals=\(result.approvalItems?.count ?? 0)", category: .session)
-    }
-
-    private func mergeEngineApprovalItemsIntoReconstructedMessages(_ items: [EngineApprovalItem]) {
-        guard !items.isEmpty else { return }
-        var restored = 0
-        for item in items {
-            let data = engineApprovalCapabilityData(from: item.approval)
-            if let index = MessageFinder.lastIndexOfEngineApproval(invocationId: data.invocationId, in: allReconstructedMessages) {
-                allReconstructedMessages[index].content = .engineApproval(data)
-            } else {
-                let message = ChatMessage(
-                    role: .assistant,
-                    content: .engineApproval(data),
-                    timestamp: EngineApprovalTimeline.timestamp(for: item.approval)
-                )
-                EngineApprovalTimeline.insert(message, into: &allReconstructedMessages)
-            }
-            restored += 1
-        }
-        logger.info("[RECONSTRUCT] Restored \(restored) engine approval chip(s)", category: .session)
+        logger.info("[RECONSTRUCT] Done: \(state.messages.count) total messages, displaying \(batchSize), hasMore=\(hasMoreMessages), inFlight=\(result.inFlight != nil), pendingQueue=\(result.pendingQueue?.count ?? 0)", category: .session)
     }
 
     /// Reconcile transient live-turn state after a server-authoritative
@@ -428,17 +386,11 @@ extension ChatViewModel {
         if let existingIdx = messages.firstIndex(where: { msg in
             switch msg.content {
             case .capabilityInvocation(let data): return data.id == capabilityInvocation.invocationId
-            case .engineApproval(let data): return data.invocationId == capabilityInvocation.invocationId
-            case .subagent(let data): return data.invocationId == capabilityInvocation.invocationId
             default: return false
             }
         }) {
             // Only update capability invocation with richer in-flight data (streaming output, startedAt).
-            // .engineApproval and .subagent have authoritative content from persisted lifecycle
-            // events.
-            if case .capabilityInvocation = messages[existingIdx].content {
-                messages[existingIdx].content = .capabilityInvocation(invocationData)
-            }
+            messages[existingIdx].content = .capabilityInvocation(invocationData)
             currentCapabilityInvocationMessages[messages[existingIdx].id] = messages[existingIdx]
             animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
             logger.info("[RECONSTRUCT] Deduplicated capability message for \(modelPrimitiveName) id=\(capabilityInvocation.invocationId)", category: .session)

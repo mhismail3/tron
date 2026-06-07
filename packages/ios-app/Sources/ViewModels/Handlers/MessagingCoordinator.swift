@@ -21,10 +21,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// The current attachments pending to send
     var attachments: [Attachment] { get set }
 
-    /// Skills currently staged as chips on the input bar. Purely local draft
-    /// state — server activation is deferred until `sendMessage`.
-    var selectedSkills: [Skill] { get set }
-
     /// Selected images from photo picker
     var selectedImages: [PhotosPickerItem] { get set }
 
@@ -43,12 +39,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// event stream before a prompt starts producing output.
     func ensureLiveEventSubscription() async throws
 
-    /// Activate a skill in the current session (server-owned state)
-    func activateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws
-
-    /// Deactivate a skill from the current session
-    func deactivateSkillOnServer(_ skillName: String, idempotencyKey: EngineIdempotencyKey) async throws
-
     /// Abort the agent on the server
     func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws
 
@@ -60,9 +50,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 
     /// Mark pending UserInteraction chips as superseded
     func markPendingQuestionsAsSuperseded()
-
-    /// Dismiss pending subagent results (user chose to send a different message)
-    func dismissPendingSubagentResults()
 
     /// Handle agent error
     func handleAgentError(_ message: String)
@@ -85,7 +72,7 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 /// Coordinates message sending, agent abort, and attachment management for ChatViewModel.
 ///
 /// Responsibilities:
-/// - Sending messages with text, attachments, skills, and reasoning levels
+/// - Sending messages with text, attachments, and reasoning levels
 /// - Creating appropriate user message UI (regular text or answered questions chip)
 /// - Managing agent abort with proper state cleanup
 /// - Attachment add/remove operations
@@ -104,16 +91,11 @@ final class MessagingCoordinator {
 
     /// Send a message to the agent.
     ///
-    /// Skills are managed via separate engine protocols (skills::activate), not sent with the prompt.
-    /// The server reads active skills from session state.
-    ///
     /// - Parameters:
     ///   - reasoningLevel: Optional reasoning level for extended thinking
-    ///   - skills: Skills to display as chips on the user message (already activated server-side)
     ///   - context: The context providing access to state and dependencies
     func sendMessage(
         reasoningLevel: String? = nil,
-        skills: [Skill]? = nil,
         context: MessagingContext
     ) async {
         let text = context.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -131,28 +113,24 @@ final class MessagingCoordinator {
             return
         }
 
-        // Answer submissions and subagent results are delivered via dedicated
-        // engine protocols, not through sendMessage. Any regular user message
-        // sent here supersedes pending question capabilities and dismisses subagent
-        // notifications. Engine approval chips are server-owned and are never
-        // locally superseded by a typed prompt.
+        // Answer submissions are delivered via dedicated engine protocols, not
+        // through sendMessage. Any regular user message sent here supersedes
+        // pending question capabilities.
         context.markPendingQuestionsAsSuperseded()
-        context.dismissPendingSubagentResults()
 
         // Reset browser dismissal for new prompt - browser can auto-open again
 
-        // Create user message with attachments and skills displayed above text
+        // Create user message with attachments displayed above text
         let attachmentsToShow = context.attachments.isEmpty ? nil : context.attachments
-        let skillsToShow = skills?.isEmpty == false ? skills : nil
 
         if !text.isEmpty {
-            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow, skills: skillsToShow)
+            let userMessage = ChatMessage.user(text, attachments: attachmentsToShow)
             context.appendMessage(userMessage)
             context.logDebug("Added user text message with \(context.attachments.count) attachments")
             context.currentTurn += 1
         } else if !context.attachments.isEmpty {
             // If only attachments (no text), still show them in chat
-            let attachmentMessage = ChatMessage(role: .user, content: .attachments(context.attachments), attachments: context.attachments, skills: skillsToShow)
+            let attachmentMessage = ChatMessage(role: .user, content: .attachments(context.attachments), attachments: context.attachments)
             context.appendMessage(attachmentMessage)
             context.logDebug("Added attachment-only message with \(context.attachments.count) attachments")
         }
@@ -189,53 +167,6 @@ final class MessagingCoordinator {
             context.logError("Failed to send prompt: \(error.localizedDescription)")
             context.handleAgentError("Failed to send message: \(error.localizedDescription)")
         }
-    }
-
-    // MARK: - Activate-and-Send
-
-    /// Activate staged skills on the server, then send the prompt.
-    ///
-    /// Staged skills are purely local draft state until the user hits send —
-    /// at that moment we promote them to server-side activation via
-    /// `skills::activate` before the prompt flows. If ANY activation fails, we
-    /// surface the error to the user and abort the send: the user selected
-    /// those skills deliberately, and silently dropping them would change the
-    /// agent's behavior in a way they did not consent to. The input draft is
-    /// preserved so the user can retry or edit and re-send.
-    ///
-    /// INVARIANT: on activation failure, `sendPromptToServer` must NOT be
-    /// called. This is the whole reason the method exists — it replaces three
-    /// `try? await activateSkillOnServer(...)` sites in `ChatView.swift` that
-    /// used to swallow failures and send anyway.
-    ///
-    /// - Parameters:
-    ///   - reasoningLevel: Optional reasoning level for extended thinking
-    ///   - skills: Skills the user staged on the input bar. Empty/nil skips
-    ///     activation and sends immediately.
-    ///   - context: The context providing access to state and dependencies
-    func activateAndSend(
-        reasoningLevel: String? = nil,
-        skills: [Skill],
-        context: MessagingContext
-    ) async {
-        for skill in skills {
-            do {
-                try await context.activateSkillOnServer(
-                    skill.name,
-                    idempotencyKey: .userAction("skills.activate")
-                )
-            } catch {
-                context.logError("Failed to activate skill '\(skill.name)': \(error.localizedDescription)")
-                context.showError("Could not activate skill “\(skill.displayName)”: \(error.localizedDescription)")
-                return
-            }
-        }
-
-        await sendMessage(
-            reasoningLevel: reasoningLevel,
-            skills: skills.isEmpty ? nil : skills,
-            context: context
-        )
     }
 
     // MARK: - Abort Agent
@@ -284,39 +215,4 @@ final class MessagingCoordinator {
         context.attachments.removeAll { $0.id == attachment.id }
     }
 
-    // MARK: - Draft Skill Management
-
-    /// Stage a skill as a chip on the input bar.
-    ///
-    /// This is purely a local draft operation — it does NOT activate the skill
-    /// on the server. Server activation is deferred to `sendMessage`, which is
-    /// the only point at which a skill genuinely enters the agent's running
-    /// context. Eagerly activating here would produce misleading
-    /// `skills::deactivated` notifications if the user removes the chip without
-    /// ever sending.
-    ///
-    /// Idempotent: adding a skill that is already staged is a no-op.
-    ///
-    /// - Parameters:
-    ///   - skill: The skill to stage
-    ///   - context: The context providing access to state
-    func addSkillToDraft(_ skill: Skill, context: MessagingContext) {
-        guard !context.selectedSkills.contains(where: { $0.id == skill.id }) else { return }
-        context.selectedSkills.append(skill)
-    }
-
-    /// Unstage a skill chip from the input bar.
-    ///
-    /// This is purely a local draft operation — it does NOT deactivate the
-    /// skill on the server. Removing a chip means "unstage for the next
-    /// prompt", not "remove from the agent's running context". Server
-    /// deactivation belongs to an explicit "remove from context" gesture
-    /// (future UI), not to chip X-tap.
-    ///
-    /// - Parameters:
-    ///   - skill: The skill to unstage
-    ///   - context: The context providing access to state
-    func removeSkillFromDraft(_ skill: Skill, context: MessagingContext) {
-        context.selectedSkills.removeAll { $0.id == skill.id }
-    }
 }

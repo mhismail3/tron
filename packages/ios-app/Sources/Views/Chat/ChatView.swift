@@ -54,14 +54,12 @@ struct ChatView: View {
     // MARK: - Stored Properties (internal for extension access)
     let sessionId: String
     let engineClient: EngineClient
-    let skillStore: SkillStore?
     let workspaceDeleted: Bool
     var onToggleSidebar: (() -> Void)?
 
-    init(engineClient: EngineClient, sessionId: String, audioRecorder: AudioRecorder, skillStore: SkillStore? = nil, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
+    init(engineClient: EngineClient, sessionId: String, audioRecorder: AudioRecorder, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
         self.sessionId = sessionId
         self.engineClient = engineClient
-        self.skillStore = skillStore
         self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
@@ -77,7 +75,6 @@ struct ChatView: View {
             viewModel: viewModel,
             engineClient: engineClient,
             sessionId: sessionId,
-            skillStore: skillStore,
             workspaceDeleted: workspaceDeleted
         )
         .sheet(isPresented: $viewModel.displayStreamState.showStreamSheet) {
@@ -149,26 +146,10 @@ struct ChatView: View {
                 }
             }
         }
-        // Handle "Draft a Plan" request: stage the plan skill as a draft chip.
-        // Server activation is deferred to send time (see onSend below); eagerly
-        // activating here would produce misleading `skills::deactivated`
-        // notifications if the user removes the chip without sending.
-        .onReceive(NotificationCenter.default.publisher(for: .draftPlanRequested)) { _ in
-            guard let skillStore = skillStore else { return }
-            if let planSkill = skillStore.skills.first(where: { $0.name.lowercased() == "plan" }) {
-                viewModel.addSkillToDraft(planSkill)
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage)) { notification in
             guard let payload = notification.object as? ShareMessagePayload else { return }
             viewModel.inputText = payload.prompt
-
-            if let skillName = payload.skillName,
-               let skill = skillStore?.skills.first(where: { $0.name.lowercased() == skillName }) {
-                viewModel.activateSkillsAndSend(skills: [skill])
-            } else {
-                viewModel.sendMessage()
-            }
+            viewModel.sendMessage()
         }
         .onAppear {
             // Reasoning level is restored from server via reconstruction (config.reasoning_level events)
@@ -211,18 +192,6 @@ struct ChatView: View {
             // This is a fire-and-forget operation that doesn't block session entry
             Task {
                 await prefetchModels()
-            }
-
-            // Refresh and load skills in parallel (fire-and-forget)
-            // Using refreshAndLoadSkills to detect any skill changes on disk
-            // (e.g., skills added/removed while app was closed)
-            Task {
-                await skillStore?.refreshAndLoadSkills(sessionId: sessionId)
-            }
-
-            // Check worktree status in parallel (fire-and-forget)
-            Task {
-                await viewModel.requestWorktreeStatus()
             }
 
             // Connect, resume, and reconstruct session state in one flow
@@ -311,15 +280,7 @@ struct ChatView: View {
     private var chatCoreContent: some View {
         messagesScrollView
             .overlay {
-                if viewModel.inputBarState.isMentionPopupVisible {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation(.tronStandard) {
-                                viewModel.inputBarState.isMentionPopupVisible = false
-                            }
-                        }
-                }
+                EmptyView()
             }
             .environment(\.textSelectionDisabled, isDisappearing)
             .background(
@@ -355,11 +316,10 @@ struct ChatView: View {
                         contextWindow: viewModel.contextState.currentContextWindow,
                         lastTurnInputTokens: viewModel.contextState.lastTurnInputTokens,
                         currentModelInfo: currentModelInfo,
-                        skillStore: skillStore,
                         inputHistory: inputHistory,
                         animationCoordinator: viewModel.animationCoordinator,
                         readOnly: workspaceDeleted || !(interactionPolicy?.isConnected ?? false),
-                        showDragHint: viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded && !viewModel.inputBarState.isMentionPopupVisible,
+                        showDragHint: viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded,
                         queuedMessages: viewModel.messageQueueState.queue
                     ),
                     actions: InputBarActions(
@@ -371,16 +331,8 @@ struct ChatView: View {
                                 to: nil, from: nil, for: nil
                             )
                             if viewModel.agentPhase.isIdle {
-                                let skillsToSend = viewModel.inputBarState.selectedSkills
-                                viewModel.inputBarState.selectedSkills = []
-
-                                // Activate staged skills on server, then send.
-                                // Coordinator surfaces activation failures via
-                                // `showError` and aborts the send — silently
-                                // dropping a staged skill would defeat user intent.
-                                viewModel.activateSkillsAndSend(
-                                    reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
-                                    skills: skillsToSend
+                                viewModel.sendMessage(
+                                    reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil
                                 )
                             } else {
                                 viewModel.enqueueCurrentInput()
@@ -391,15 +343,6 @@ struct ChatView: View {
                         onAddAttachment: viewModel.addAttachment,
                         onRemoveAttachment: viewModel.removeAttachment,
                         onHistoryNavigate: { newText in viewModel.inputText = newText },
-                        onContextTap: { [sheetCoordinator] in sheetCoordinator.showAgentControl() },
-                        onSkillSelect: nil,
-                        onSkillRemove: { [viewModel] skill in
-                            // Draft-only: unstage the chip. Server-side deactivation is NOT
-                            // called — chip removal is a draft edit, not a "remove from
-                            // context" gesture. See MessagingCoordinator.removeSkillFromDraft.
-                            viewModel.removeSkillFromDraft(skill)
-                        },
-                        onSkillDetailTap: { [sheetCoordinator] skill in sheetCoordinator.showSkillDetail(skill) },
                         onQueueRemove: { [viewModel] queueId in
                             Task { try? await viewModel.engineClient.agent.dequeuePrompt(queueId, idempotencyKey: .userAction("agent.dequeuePrompt")) }
                         }
@@ -430,7 +373,6 @@ struct ChatView: View {
                     #selector(UIResponder.resignFirstResponder),
                     to: nil, from: nil, for: nil
                 )
-                viewModel.inputBarState.isMentionPopupVisible = false
             }
         ))
         .animation(.tronSnap, value: viewModel.pullUpPanelState.isExpanded)
@@ -460,12 +402,8 @@ struct ChatView: View {
 
     private func handleBubbleTap(_ action: MessageBubbleTapAction) {
         switch action {
-        case .skill(let skill):
-            sheetCoordinator.showSkillDetail(skill)
         case .userInteraction(let data):
             viewModel.openUserInteractionSheet(for: data)
-        case .engineApproval(let data):
-            viewModel.openEngineApprovalSheet(for: data)
         case .thinking(let content):
             sheetCoordinator.showThinkingDetail(content)
         case .compaction(let tokensBefore, let tokensAfter, let reason, let summary, let preservedTurns, let summarizedTurns):
@@ -477,29 +415,16 @@ struct ChatView: View {
                 preservedTurns: preservedTurns,
                 summarizedTurns: summarizedTurns
             )
-        case .subagent(let data):
-            viewModel.subagentState.showDetails(with: data)
         case .notificationDelivery(let data):
             sheetCoordinator.showNotificationDelivery(data)
         case .capabilityInvocation(let data):
             sheetCoordinator.showCapabilityInvocationDetail(data)
         case .cancelCapabilityInvocation(let id):
             viewModel.abortCapabilityInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortCapabilityInvocation"))
-        case .subagentResult(let sid):
-            viewModel.subagentState.showDetails(for: sid)
-        case .subagentResultsReady:
-            sheetCoordinator.showSubagentResultsList()
         case .providerError(let data):
             sheetCoordinator.showProviderErrorDetail(data)
         case .memoryRetainDetail(let title, let summary):
             sheetCoordinator.showMemoryRetainDetail(title: title, summary: summary)
-        case .reactivateSkill(let skillName):
-            // M6: user tapped a chip in the skills-cleared UserInteraction picker.
-            // Reuses the existing `skills::activate` engine protocol path used by sidebar
-            // activation and @skill-name resolution — server emits
-            // `skills::activated` which the chip tracks via `SkillsClearedNotificationView`.
-            // On failure, surface the error so the user knows the tap did nothing.
-            viewModel.reactivateSkillWithUserErrorHandling(skillName)
         case .retryTurn:
             // C7: user tapped the "Retry" button on a recoverable
             // `turn.failed` notification. Re-issues the last user prompt

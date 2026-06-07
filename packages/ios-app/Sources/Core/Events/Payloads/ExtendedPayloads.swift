@@ -190,63 +190,6 @@ struct ContextClearedPayload {
     }
 }
 
-// MARK: - Skill Compaction Payloads
-
-/// Render mode carried on `skills.cleared` events.
-///
-/// Mirrors the Rust `SkillsClearedMode` enum in
-/// `packages/agent/src/events/types/payloads/skill.rs`. The discriminator tells
-/// iOS how to render the pill:
-///
-/// - `.clearAll`: informational banner listing the cleared skill names. The
-///   user can re-activate manually via `@skill-name` mention or the sidebar.
-/// - `.userInteraction`: interactive picker — each cleared skill becomes a tappable
-///   chip that re-adds it via the `skills::activate` engine protocol.
-///
-/// Wire format is lowerCamelCase (`"clearAll"` / `"userInteraction"`).
-enum SkillsClearedMode: String, Codable, Equatable, Hashable {
-    case clearAll
-    case userInteraction
-}
-
-/// Payload for `skills.cleared` event.
-///
-/// Server: `SkillsClearedPayload` in `events/types/payloads/skill.rs`. Emitted
-/// on the first prompt after a `compact.boundary` under either ClearAll or
-/// UserInteraction compaction policy; AutoRestore never emits this event because it
-/// preserves active skills through the boundary.
-///
-/// All three fields (`clearedSkills`, `reason`, `mode`) are required on the
-/// wire. The server emits them unconditionally and enforces
-/// `deny_unknown_fields`. Missing fields here fail decoding (`return nil`)
-/// rather than falling back to defaults that would mis-render the event.
-struct SkillsClearedPayload {
-    /// Names of the skills that were active at the boundary and are now
-    /// cleared. May be empty only in pathological cases (concurrent
-    /// re-activation); the server suppresses emission when the set is empty.
-    let clearedSkills: [String]
-    /// Always `"compaction"` today. Reserved for future reasons.
-    let reason: String
-    /// Render mode — see `SkillsClearedMode`.
-    let mode: SkillsClearedMode
-
-    init?(from payload: [String: AnyCodable]) {
-        guard let clearedSkills = payload.stringArray("clearedSkills") else {
-            return nil
-        }
-        guard let reason = payload.string("reason") else {
-            return nil
-        }
-        guard let rawMode = payload.string("mode"),
-              let mode = SkillsClearedMode(rawValue: rawMode) else {
-            return nil
-        }
-        self.clearedSkills = clearedSkills
-        self.reason = reason
-        self.mode = mode
-    }
-}
-
 // MARK: - Context Snapshot Payloads
 
 /// Parameters for context.getSnapshot engine protocol method
@@ -269,9 +212,6 @@ struct ContextSnapshotResult: Codable {
         let capabilities: Int
         let rules: Int
         let memory: Int
-        let skillIndex: Int
-        let skillContext: Int
-        let skillRemoval: Int
         let jobResults: Int
         let environment: Int
         let messages: Int
@@ -354,8 +294,6 @@ struct DetailedContextSnapshotResult: Codable {
     /// Raw capability clarification content if applicable (for debugging)
     let capabilityClarificationContent: String?
     let capabilitiesContent: [CapabilitySummaryInfo]
-    /// Skills explicitly added to this session's context
-    let addedSkills: [AddedSkillInfo]
     /// Rules files loaded for this session (immutable, cannot be removed)
     let rules: LoadedRules?
     /// User-memory file (MEMORY.md + rules/ listing) auto-injected into the
@@ -389,8 +327,7 @@ struct LoadedMemory: Codable {
 /// User-memory wire format. Server populates this every turn from
 /// `~/.tron/memory/MEMORY.md` + the listing of `rules/*.md`.
 ///
-/// See `runtime::memory::MemoryRegistry` for the load path and
-/// `Views/AgentControl/MemorySection.swift` for the UI that renders it.
+/// See `runtime::memory::MemoryRegistry` for the load path.
 struct UserMemorySnapshot: Codable, Equatable {
     /// Full content string injected into the LLM system prompt. When
     /// `bootstrapped == false`, this is the server-generated bootstrap stub.
@@ -417,21 +354,3 @@ struct LoadedTaskContext: Codable {
     let summary: String
     let tokens: Int
 }
-
-// MARK: - Worktree Payloads
-//
-// Worktree events (`worktree.acquired` / `.commit` / `.released` / `.merged` /
-// `.renamed`) are consumed in two places:
-//
-// - Live streaming: the per-event plugins in
-//   `Core/Events/Plugins/Worktree/` decode directly into each plugin's own
-//   `EventData.DataPayload`.
-// - History reconstruction: `UnifiedEventTransformer.handleWorktreeEvent`
-//   reads the payload dict inline with strict guards and drops malformed
-//   events.
-//
-// There is no shared wrapper struct here on purpose — an unused
-// `WorktreeAcquiredPayload` / `...Commit` / `...Released` / `...Merged` type
-// lived in this file previously and drifted out of sync with the server
-// schema. If a third consumer appears, add a strict `init?(from:)` type at
-// that point rather than resurrecting the speculative shared version.

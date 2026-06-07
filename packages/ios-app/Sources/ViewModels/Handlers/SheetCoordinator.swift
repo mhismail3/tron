@@ -60,16 +60,6 @@ final class SheetCoordinator {
         present(.settings)
     }
 
-    /// Show agent control sheet
-    func showAgentControl() {
-        present(.agentControl)
-    }
-
-    /// Show skill detail sheet
-    func showSkillDetail(_ skill: Skill) {
-        present(.skillDetail(skill))
-    }
-
     /// Show compaction detail sheet
     func showCompactionDetail(
         tokensBefore: Int,
@@ -102,21 +92,6 @@ final class SheetCoordinator {
     /// Show ask user question sheet
     func showUserInteraction() {
         present(.userInteraction)
-    }
-
-    /// Show the engine approval sheet.
-    func showEngineApproval() {
-        present(.engineApproval)
-    }
-
-    /// Show subagent detail sheet
-    func showSubagentDetail() {
-        present(.subagentDetail)
-    }
-
-    /// Show consolidated subagent results list sheet
-    func showSubagentResultsList() {
-        present(.subagentResultsList)
     }
 
     /// Show notification delivery detail sheet.

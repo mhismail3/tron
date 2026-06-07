@@ -165,21 +165,19 @@ final class StreamingRecoveryTests: XCTestCase {
     // MARK: - Integration: cleanup doesn't break pre-existing H8 contract
 
     /// Invariant: cleanUpStreamingState must NOT touch user
-    /// composition (text, skills, attachments). Adding the streaming
+    /// composition (text and attachments). Adding the streaming
     /// recovery snapshot must preserve that contract.
     func testCleanUpStillPreservesInputComposition() {
         let vm = makeViewModel()
         vm.inputBarState.text = "user's draft"
-        vm.inputBarState.selectedSkills = [
-            Skill(name: "planner", displayName: "planner", description: "", source: .global, tags: nil)
-        ]
+        vm.inputBarState.attachments = [Attachment(type: .image, data: Data([0x00]), mimeType: "image/png", fileName: "draft.png")]
         vm.streamingManager.onCreateStreamingMessage = { UUID() }
         _ = vm.streamingManager.handleTextDelta("agent mid-stream")
 
         vm.cleanUpStreamingState()
 
         XCTAssertEqual(vm.inputBarState.text, "user's draft")
-        XCTAssertEqual(vm.inputBarState.selectedSkills.count, 1)
+        XCTAssertEqual(vm.inputBarState.attachments.count, 1)
         // Snapshot captured alongside — compositional state survives.
         XCTAssertEqual(vm.streamingRecoverySnapshot?.text, "agent mid-stream")
     }

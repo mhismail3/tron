@@ -16,16 +16,12 @@ final class EventIconProviderTests: XCTestCase {
             "config.model_switch", "config.prompt_update", "config.reasoning_level",
             "message.deleted",
             "notification.interrupted",
-            "skills::activated", "skills::deactivated",
             "rules.loaded", "rules.activated",
             "compact.boundary",
             "context.cleared",
             "metadata.update", "metadata.tag",
             "file.read", "file.write", "file.edit",
             "error.agent", "error.capability", "error.provider",
-            "worktree.acquired", "worktree.commit", "worktree.released",
-            "worktree.merged", "worktree.renamed",
-            "subagent.spawned", "subagent.completed", "subagent.failed",
             "notification.process_result", "process.results_consumed",
             "turn.failed",
             "memory.retained",
@@ -72,32 +68,6 @@ final class EventIconProviderTests: XCTestCase {
 
     func testLlmHookResult_hasPurpleColor() {
         XCTAssertEqual(EventIconProvider.color(for: .llmHookResult), .tronPurple)
-    }
-
-    // MARK: - Subagent Events
-
-    func testSubagentSpawned_hasBranchIcon() {
-        XCTAssertEqual(EventIconProvider.iconName(for: .subagentSpawned), "arrow.triangle.branch")
-    }
-
-    func testSubagentSpawned_hasCyanColor() {
-        XCTAssertEqual(EventIconProvider.color(for: .subagentSpawned), .tronCyan)
-    }
-
-    func testSubagentCompleted_hasCheckmarkIcon() {
-        XCTAssertEqual(EventIconProvider.iconName(for: .subagentCompleted), "checkmark.circle.fill")
-    }
-
-    func testSubagentCompleted_hasSuccessColor() {
-        XCTAssertEqual(EventIconProvider.color(for: .subagentCompleted), .tronSuccess)
-    }
-
-    func testSubagentFailed_hasXmarkIcon() {
-        XCTAssertEqual(EventIconProvider.iconName(for: .subagentFailed), "xmark.circle.fill")
-    }
-
-    func testSubagentFailed_hasErrorColor() {
-        XCTAssertEqual(EventIconProvider.color(for: .subagentFailed), .tronError)
     }
 
     // MARK: - Turn Events
@@ -176,10 +146,6 @@ final class EventIconProviderTests: XCTestCase {
 
     func testErrorAgent_hasWarningIcon() {
         XCTAssertEqual(EventIconProvider.iconName(for: .errorAgent), "exclamationmark.triangle.fill")
-    }
-
-    func testWorktreeCommit_hasDiamondIcon() {
-        XCTAssertEqual(EventIconProvider.iconName(for: .worktreeCommit), "checkmark.diamond.fill")
     }
 
     // MARK: - Streaming Events (should have explicit icons)

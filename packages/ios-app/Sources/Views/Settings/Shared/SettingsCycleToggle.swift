@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Pill-style cycle picker used by settings rows that toggle between a
-/// short fixed list of raw values (queue drain mode, skills compaction
-/// policy, merge strategy, isolation mode, branch policy, …).
+/// short fixed list of raw values (queue drain mode, merge strategy,
+/// isolation mode, branch policy, ...).
 ///
 /// Tapping the pill advances to the next option and invokes `onCycle`
 /// with the new raw value. Use parallel `[(value, label)]` tuples so the

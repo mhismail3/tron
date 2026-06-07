@@ -11,8 +11,8 @@ import XCTest
 ///
 /// 2. `cleanUpStreamingState` — called during reconstruction, NOT
 ///    session switch — is narrowly scoped to in-flight-turn state.
-///    User-facing composition state (inputBarState text, selected
-///    skills, attachments) MUST survive a reconnect so the user
+///    User-facing composition state (inputBarState text and attachments)
+///    MUST survive a reconnect so the user
 ///    doesn't lose their work.
 @MainActor
 final class SessionStateInvariantsTests: XCTestCase {
@@ -33,36 +33,26 @@ final class SessionStateInvariantsTests: XCTestCase {
 
     // MARK: - Per-session recreation
 
-    private func sampleSkill(_ name: String) -> Skill {
-        Skill(
-            name: name,
-            displayName: name,
-            description: "",
-            source: .global,
-            tags: nil
-        )
-    }
-
     func testTwoViewModelsForDifferentSessionsHaveIndependentState() {
         let a = makeViewModel("sess-a-\(UUID().uuidString)")
         let b = makeViewModel("sess-b-\(UUID().uuidString)")
 
         // Seed A with some composition state.
         a.inputBarState.text = "draft for A"
-        a.inputBarState.selectedSkills = [sampleSkill("planner")]
+        a.inputBarState.attachments = [Attachment(type: .image, data: Data([0x00]), mimeType: "image/png", fileName: "draft.png")]
 
         // B is fresh — nothing bled through.
         XCTAssertEqual(b.inputBarState.text, "",
                        "different sessionId must yield a fresh inputBarState")
-        XCTAssertTrue(b.inputBarState.selectedSkills.isEmpty,
-                      "selected skills must not bleed across ChatViewModel instances")
+        XCTAssertTrue(b.inputBarState.attachments.isEmpty,
+                      "attachments must not bleed across ChatViewModel instances")
     }
 
     func testViewModelStartsInCleanState() {
         let vm = makeViewModel("sess-clean-\(UUID().uuidString)")
         XCTAssertTrue(vm.messages.isEmpty)
         XCTAssertTrue(vm.inputBarState.text.isEmpty)
-        XCTAssertTrue(vm.inputBarState.selectedSkills.isEmpty)
+        XCTAssertTrue(vm.inputBarState.attachments.isEmpty)
         XCTAssertFalse(vm.isCompacting)
         XCTAssertFalse(vm.isRetaining)
         XCTAssertEqual(vm.agentPhase, .idle)
@@ -78,14 +68,14 @@ final class SessionStateInvariantsTests: XCTestCase {
         let vm = makeViewModel("sess-preserve-\(UUID().uuidString)")
 
         vm.inputBarState.text = "typed but not sent"
-        vm.inputBarState.selectedSkills = [sampleSkill("reviewer")]
+        vm.inputBarState.attachments = [Attachment(type: .image, data: Data([0x00]), mimeType: "image/png", fileName: "draft.png")]
 
         vm.cleanUpStreamingState()
 
         XCTAssertEqual(vm.inputBarState.text, "typed but not sent",
                        "user's in-flight composition must survive reconnect")
-        XCTAssertEqual(vm.inputBarState.selectedSkills.count, 1,
-                       "selected skills must survive reconnect")
+        XCTAssertEqual(vm.inputBarState.attachments.count, 1,
+                       "attachments must survive reconnect")
     }
 
     /// In-flight turn state IS cleared — that's the whole purpose of

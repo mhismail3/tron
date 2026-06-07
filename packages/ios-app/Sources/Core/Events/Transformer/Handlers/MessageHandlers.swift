@@ -40,15 +40,14 @@ enum MessageHandlers {
             break
         }
 
-        // Skip empty user messages (unless they have attachments or skills)
-        guard !parsed.content.isEmpty || parsed.attachments != nil || parsed.skills != nil else { return nil }
+        // Skip empty user messages unless they have attachments.
+        guard !parsed.content.isEmpty || parsed.attachments != nil else { return nil }
 
         return ChatMessage(
             role: .user,
             content: .text(parsed.content),
             timestamp: timestamp,
-            attachments: parsed.attachments,
-            skills: parsed.skills
+            attachments: parsed.attachments
         )
     }
 

@@ -28,14 +28,13 @@ extension ChatView {
         }
     }
 
-    /// Principal toolbar item (title with optional fork + worktree icons)
+    /// Principal toolbar item (title with optional fork icon)
     @ToolbarContentBuilder
     var principalToolbarItem: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             HStack(alignment: .center, spacing: 6) {
                 SessionTitleIcons(
-                    isFork: eventStoreManager.activeSession?.isFork == true,
-                    worktree: viewModel.worktreeState.worktree
+                    isFork: eventStoreManager.activeSession?.isFork == true
                 )
                 TypewriterText(
                     text: eventStoreManager.activeSession?.displayTitle ?? "Chat",
@@ -55,10 +54,6 @@ extension ChatView {
                 }
             }
             .animation(.smooth(duration: 0.25), value: eventStoreManager.activeSession?.isFork)
-            .animation(
-                .smooth(duration: 0.25),
-                value: viewModel.worktreeState.worktree.map { !$0.isOnBaseBranch } ?? false
-            )
         }
     }
 

@@ -37,7 +37,7 @@ struct CapabilityDTOTests {
         {
           "contract": {"contractId": "filesystem::read_file"},
           "implementation": {
-            "implementationId": "first_party.filesystem.v1.read_file",
+            "implementationId": "runtime.filesystem.v1.read_file",
             "functionId": "filesystem::read_file",
             "schemaDigest": "sha"
           },
@@ -53,7 +53,7 @@ struct CapabilityDTOTests {
         let decoded = try JSONDecoder().decode(CapabilityInspectionDTO.self, from: data)
 
         #expect(decoded.contract?.contractId == "filesystem::read_file")
-        #expect(decoded.implementation?.implementationId == "first_party.filesystem.v1.read_file")
+        #expect(decoded.implementation?.implementationId == "runtime.filesystem.v1.read_file")
         #expect(decoded.inspectionHandle?.handle == "capability-inspection:v1:abc")
     }
 }

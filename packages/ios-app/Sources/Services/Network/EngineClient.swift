@@ -94,7 +94,7 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var context: ContextClient = ContextClient(transport: self)
 
-    /// Media operations client (transcription, voice notes, browser)
+    /// Media operations client (transcription, browser)
     @ObservationIgnored
     lazy var media: MediaClient = MediaClient(transport: self)
 
@@ -106,29 +106,13 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var misc: MiscClient = MiscClient(transport: self)
 
-    /// Worktree operations client (status, commits, merges, diffs, branches)
-    @ObservationIgnored
-    lazy var worktree: WorktreeClient = WorktreeClient(transport: self)
-
-    /// Skill operations client (list, get, refresh, remove)
-    @ObservationIgnored
-    lazy var skill: SkillClient = SkillClient(transport: self)
-
     /// Cron scheduling operations client (automations)
     @ObservationIgnored
     lazy var cron: CronClient = CronClient(transport: self)
 
-    /// Prompt Library operations client (history + snippets)
-    @ObservationIgnored
-    lazy var promptLibrary: PromptLibraryClient = PromptLibraryClient(transport: self)
-
     /// Notification inbox operations client
     @ObservationIgnored
     lazy var notifications: NotificationClient = NotificationClient(transport: self)
-
-    /// Engine approval primitive client.
-    @ObservationIgnored
-    lazy var approval: ApprovalClient = ApprovalClient(transport: self)
 
     /// Auth/provider operations client (API keys, OAuth tokens)
     @ObservationIgnored
@@ -146,25 +130,9 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var display: DisplayClient = DisplayClient(transport: self)
 
-    /// Capability registry, plugin, binding, policy, audit, and primitive client.
-    @ObservationIgnored
-    lazy var capability: CapabilityClient = CapabilityClient(transport: self)
-
-    /// Claude Code session import client (discover, preview, execute).
-    @ObservationIgnored
-    lazy var importClient: ImportClient = ImportClient(transport: self)
-
     /// Unified job management client (background, cancel, subscribe, unsubscribe).
     @ObservationIgnored
     lazy var job: JobClient = JobClient(transport: self)
-
-    /// Git workflow client — `git.syncMain`, `git.push`.
-    @ObservationIgnored
-    lazy var git: GitClient = GitClient(transport: self)
-
-    /// Repo-scoped queries spanning sibling sessions.
-    @ObservationIgnored
-    lazy var repo: RepoClient = RepoClient(transport: self)
 
     // MARK: - Unified Event Stream
     //
@@ -489,9 +457,7 @@ final class EngineClient: EngineTransport {
     @discardableResult
     func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
         currentSessionId = sessionId
-        let sessionSubscription = try await subscribeToSessionEvents(sessionId: sessionId, workspaceId: workspaceId)
-        _ = try await subscribeToSessionApprovals(sessionId: sessionId, workspaceId: workspaceId)
-        return sessionSubscription
+        return try await subscribeToSessionEvents(sessionId: sessionId, workspaceId: workspaceId)
     }
 
     private func subscribeToSessionEvents(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
@@ -532,62 +498,6 @@ final class EngineClient: EngineTransport {
             return subscription
         } catch {
             logger.warning("Failed to subscribe to session events: \(error.localizedDescription)", category: .events)
-            throw error
-        }
-    }
-
-    private func subscribeToSessionApprovals(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
-        try await subscribeToSessionScopedTopic(
-            topic: "approvals",
-            sessionId: sessionId,
-            workspaceId: workspaceId,
-            description: "engine approvals"
-        )
-    }
-
-    private func subscribeToSessionScopedTopic(
-        topic: String,
-        sessionId: String,
-        workspaceId: String?,
-        description: String
-    ) async throws -> EngineSubscription {
-        guard let ws = engineConnection else { throw EngineClientError.connectionNotEstablished }
-        guard connectionState.isConnected else { throw EngineConnectionError.notConnected }
-        let filters = Self.sessionEventFilters(sessionId: sessionId, workspaceId: workspaceId)
-        let key = streamKey(
-            topic: topic,
-            sessionId: sessionId,
-            workspaceId: workspaceId,
-            filterHash: Self.sessionEventFilterHash(sessionId: sessionId, workspaceId: workspaceId)
-        )
-        if let existing = streamSubscriptions[key] {
-            logger.debug(
-                "\(description.capitalized) stream already subscribed for session \(sessionId): \(existing.subscriptionId)",
-                category: .events
-            )
-            return existing
-        }
-        do {
-            let cursor = EngineClientStreamSubscriptionPolicy.sessionEventSubscriptionCursor(
-                stored: streamCursorStore.cursor(for: key)
-            )
-            let subscription = try await ws.subscribe(
-                topic: key.topic,
-                cursor: cursor,
-                filters: filters,
-                context: EngineInvocationContext(sessionId: sessionId, workspaceId: workspaceId)
-            )
-            let subscribedCursor = EngineStreamCursor(rawValue: subscription.cursor)
-            streamCursorStore.save(subscribedCursor, for: key)
-            streamSubscriptions[key] = subscription
-            streamSubscriptionKeysById[subscription.subscriptionId] = key
-            logger.info(
-                "Subscribed to \(key.topic) \(description) for session \(sessionId) from live tail \(subscribedCursor.rawValue)",
-                category: .events
-            )
-            return subscription
-        } catch {
-            logger.warning("Failed to subscribe to \(description): \(error.localizedDescription)", category: .events)
             throw error
         }
     }

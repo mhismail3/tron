@@ -116,38 +116,6 @@ final class DraftMetadataTests: XCTestCase {
         XCTAssertTrue(decoded.isEmpty)
     }
 
-    // MARK: - Skill Array Encoding in Draft Context
-
-    @MainActor
-    func testSkillArray_encodingDecodingRoundTrip() throws {
-        let skills = [
-            Skill(name: "test-skill", displayName: "Test Skill", description: "A test", source: .global, tags: ["tag1"]),
-            Skill(name: "project-skill", displayName: "Project", description: "Project skill", source: .project, tags: nil, scopeDir: "packages/ios-app"),
-        ]
-
-        let data = try JSONEncoder().encode(skills)
-        let decoded = try JSONDecoder().decode([Skill].self, from: data)
-
-        XCTAssertEqual(decoded.count, 2)
-        XCTAssertEqual(decoded[0].name, "test-skill")
-        XCTAssertEqual(decoded[0].source, .global)
-        XCTAssertEqual(decoded[0].tags, ["tag1"])
-        XCTAssertEqual(decoded[1].name, "project-skill")
-        XCTAssertEqual(decoded[1].source, .project)
-        XCTAssertEqual(decoded[1].scopeDir, "packages/ios-app")
-        XCTAssertNil(decoded[1].tags)
-    }
-
-    @MainActor
-    func testSkillArray_emptyArray() throws {
-        let skills: [Skill] = []
-
-        let data = try JSONEncoder().encode(skills)
-        let decoded = try JSONDecoder().decode([Skill].self, from: data)
-
-        XCTAssertTrue(decoded.isEmpty)
-    }
-
     // MARK: - Equatable
 
     @MainActor

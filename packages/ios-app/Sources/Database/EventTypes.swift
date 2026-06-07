@@ -100,11 +100,6 @@ enum SessionEventType: String, Codable, Sendable {
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
 
-    // Skills
-    case skillActivated = "skills::activated"
-    case skillDeactivated = "skills::deactivated"
-    case skillsCleared = "skills.cleared"
-
     case compactBoundary = "compact.boundary"
 
     // Rules tracking
@@ -124,18 +119,6 @@ enum SessionEventType: String, Codable, Sendable {
     case errorAgent = "error.agent"
     case errorCapability = "error.capability"
     case errorProvider = "error.provider"
-
-    // Worktree
-    case worktreeAcquired = "worktree.acquired"
-    case worktreeCommit = "worktree.commit"
-    case worktreeReleased = "worktree.released"
-    case worktreeMerged = "worktree.merged"
-    case worktreeRenamed = "worktree.renamed"
-
-    // Subagent lifecycle
-    case subagentSpawned = "subagent.spawned"
-    case subagentCompleted = "subagent.completed"
-    case subagentFailed = "subagent.failed"
 
     // Process management
     case notificationProcessResult = "notification.process_result"

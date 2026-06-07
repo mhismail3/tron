@@ -2,7 +2,7 @@ import Foundation
 
 /// Coordinates persisting and restoring chat input draft state per session.
 ///
-/// Uses SQLite for lightweight metadata (text, skills, attachment metadata)
+/// Uses SQLite for lightweight metadata (text and attachment metadata)
 /// and the file system for attachment binary data. Supports debounced saving
 /// during active editing and immediate saving on view disappear.
 @Observable
@@ -63,7 +63,6 @@ final class DraftStore {
             }
 
             inputBarState.text = draft.text
-            inputBarState.selectedSkills = draft.skills
             inputBarState.attachments = readAttachmentData(sessionId: sessionId, metadata: draft.attachmentMetadata)
             lastSavedFingerprints[sessionId] = inputBarState.draftFingerprint
 
@@ -139,7 +138,6 @@ final class DraftStore {
             try await eventDatabase.drafts.save(
                 sessionId: sessionId,
                 text: inputBarState.text,
-                skills: inputBarState.selectedSkills,
                 attachmentMetadata: attachmentMetadata
             )
 

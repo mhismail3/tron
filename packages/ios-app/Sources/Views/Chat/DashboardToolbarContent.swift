@@ -18,25 +18,14 @@ struct DashboardToolbarContent: ToolbarContent {
                 .accessibilityLabel("Show sidebar")
                 .hoverEffect(.highlight)
             } else {
-                Menu {
-                    ForEach(NavigationMode.allCases, id: \.self) { mode in
-                        Button {
-                            actions.onNavigationModeChange(mode)
-                        } label: {
-                            Label(mode.rawValue, systemImage: mode.icon)
-                        }
-                    }
-                } label: {
-                    Image("TronLogoVector")
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
-                        .offset(y: 1)
-                        .foregroundStyle(accent)
-                }
-                .accessibilityLabel("Navigation")
-                .hoverEffect(.highlight)
+                Image("TronLogoVector")
+                    .renderingMode(.template)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(height: 28)
+                    .offset(y: 1)
+                    .foregroundStyle(accent)
+                    .accessibilityLabel("Tron")
             }
         }
         ToolbarItem(placement: .principal) {

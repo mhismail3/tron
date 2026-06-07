@@ -80,8 +80,9 @@ struct TextContentView: View {
             }
 
             if isUser {
-                StyledSkillMentionText(text: text)
+                Text(text)
                     .font(TronTypography.messageBody)
+                    .foregroundStyle(.userMessageText)
                     .selectableText(!textSelectionDisabled)
                     .lineSpacing(4)
             } else {
@@ -96,77 +97,6 @@ struct TextContentView: View {
         .padding(.horizontal, isUser ? 0 : 4)
         .frame(maxWidth: isUser ? nil : .infinity, alignment: .leading)
         .onChange(of: text) { _, newText in blocks = MarkdownBlockParser.parse(newText) }
-    }
-}
-
-// MARK: - Styled Skill Mention Text (highlights @skillname in user messages)
-
-struct StyledSkillMentionText: View {
-    let text: String
-
-    /// Regex pattern for @skillname (alphanumeric and hyphens, followed by space/newline/end)
-    /// Uses static closure to safely handle (impossible) regex compilation failure
-    private static let skillMentionPattern: NSRegularExpression? = {
-        try? NSRegularExpression(pattern: "@([a-zA-Z0-9][a-zA-Z0-9-]*)", options: [])
-    }()
-
-    var body: some View {
-        Text(Self.attributedString(from: text))
-    }
-
-    /// Builds styled user-message text with @mentions highlighted.
-    @MainActor
-    static func attributedString(from text: String) -> AttributedString {
-        let baseFont = Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular))
-        let mentionFont = Font(TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .medium))
-
-        guard let pattern = Self.skillMentionPattern else {
-            var plain = AttributedString(text)
-            plain.font = baseFont
-            plain.foregroundColor = .userMessageText
-            return plain
-        }
-
-        let nsText = text as NSString
-        let range = NSRange(location: 0, length: nsText.length)
-        let matches = pattern.matches(in: text, options: [], range: range)
-
-        if matches.isEmpty {
-            var plain = AttributedString(text)
-            plain.font = baseFont
-            plain.foregroundColor = .userMessageText
-            return plain
-        }
-
-        var result = AttributedString()
-        var lastEnd = 0
-
-        for match in matches {
-            if match.range.location > lastEnd {
-                let beforeRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
-                var beforeText = AttributedString(nsText.substring(with: beforeRange))
-                beforeText.font = baseFont
-                beforeText.foregroundColor = .userMessageText
-                result.append(beforeText)
-            }
-
-            var mentionText = AttributedString(nsText.substring(with: match.range))
-            mentionText.font = mentionFont
-            mentionText.foregroundColor = .tronCyan
-            result.append(mentionText)
-
-            lastEnd = match.range.location + match.range.length
-        }
-
-        if lastEnd < nsText.length {
-            let afterRange = NSRange(location: lastEnd, length: nsText.length - lastEnd)
-            var afterText = AttributedString(nsText.substring(with: afterRange))
-            afterText.font = baseFont
-            afterText.foregroundColor = .userMessageText
-            result.append(afterText)
-        }
-
-        return result
     }
 }
 

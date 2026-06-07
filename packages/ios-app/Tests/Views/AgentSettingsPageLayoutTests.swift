@@ -41,35 +41,31 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             content.range(of: "private var landscapeContent: some View")?.lowerBound
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
-        let protectedIndex = try XCTUnwrap(landscapeContent.range(of: "protectedBranchesSection")?.lowerBound)
-        let promptIndex = try XCTUnwrap(
-            landscapeContent.range(of: "promptLibrarySection", range: protectedIndex..<landscapeContent.endIndex)?.lowerBound
+        let messageQueueIndex = try XCTUnwrap(landscapeContent.range(of: "messageQueueCard")?.lowerBound)
+        let protectedIndex = try XCTUnwrap(
+            landscapeContent.range(of: "protectedBranchesSection", range: messageQueueIndex..<landscapeContent.endIndex)?.lowerBound
         )
         XCTAssertLessThan(
+            messageQueueIndex,
             protectedIndex,
-            promptIndex,
-            "Protected branch controls should stay high in the landscape right column"
+            "Message queue controls should stay above protected branches in the landscape right column"
         )
     }
 
-    func testAgentSettingsAutonomyUsesWorkerFirstCopy() throws {
+    func testAgentSettingsAutonomyUsesAuthorityEnvelopeCopy() throws {
         let content = try settingsPageSource(named: "AgentSettingsPage.swift")
 
         XCTAssertTrue(
             content.contains("label: \"Autonomy Mode\""),
-            "The default settings surface should present the worker-first autonomy model, not approval internals"
+            "The settings surface should present the primitive autonomy model, not approval internals"
         )
         XCTAssertTrue(
-            content.contains("Tron runs independently on this Mac"),
-            "Independent mode copy must plainly state the default autonomous behavior"
-        )
-        XCTAssertTrue(
-            content.contains("Testing mode shows approval prompts for QA"),
-            "Interactive prompts should be framed as explicit QA/testing behavior"
+            content.contains("configured authority envelope"),
+            "Autonomy copy must describe the upfront authority envelope"
         )
         XCTAssertFalse(
-            content.contains("label: \"Approval Prompts\""),
-            "Approval prompts are an implementation detail, not the primary settings label"
+            content.contains("Approval " + "Prompts") || content.contains("approval" + "PromptMode"),
+            "Interactive approval prompts should not exist in iOS settings"
         )
     }
 
@@ -84,10 +80,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             content.contains("label: \"Run Unless Blocked\""),
             "Guardrails copy should reinforce the default autonomous run-unless-blocked behavior"
         )
-        XCTAssertTrue(
-            content.contains("Approval-required work is audited automatically unless Testing mode is enabled."),
-            "Guardrails should explain audit behavior without making prompts the default"
-        )
+        XCTAssertTrue(content.contains("outside the configured authority envelope"))
         XCTAssertLessThan(
             try XCTUnwrap(content.range(of: "autonomySection")?.lowerBound),
             try XCTUnwrap(content.range(of: "guardrailsSection")?.lowerBound),
@@ -104,17 +97,10 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             .path
         settingsState.defaultModel = "gpt-5.5"
         settingsState.queueDrainMode = "batched"
-        settingsState.autonomyApprovalPromptMode = "disabled"
         settingsState.builtinHooks = [
             BuiltinHookSetting(id: "builtin:title-gen", enabled: true),
-            BuiltinHookSetting(id: "builtin:branch-name-gen", enabled: true),
             BuiltinHookSetting(id: "builtin:suggest-prompts", enabled: true),
         ]
-        settingsState.promptHistoryEnabled = true
-        settingsState.promptHistoryMaxEntries = 10_000
-        settingsState.promptHistoryMaxAgeDays = 0
-        settingsState.promptHistoryAutoPrune = true
-
         let content = AgentSettingsPage(
             settingsState: settingsState,
             selectedModelDisplayName: "GPT-5.5",

@@ -9,9 +9,6 @@ enum DashboardEvent {
     case thinkingDelta
     case capabilityInvocationStarted(identity: CapabilityIdentity, invocationId: String?, arguments: [String: AnyCodable]?)
     case capabilityInvocationCompleted(identity: CapabilityIdentity, invocationId: String?, success: Bool, durationMs: Int?)
-    case subagentSpawned(task: String, invocationId: String?, subagentSessionId: String, spawnType: String?)
-    case subagentCompleted(turns: Int, durationMs: Int?, subagentSessionId: String, spawnType: String?)
-    case subagentFailed(error: String, subagentSessionId: String, spawnType: String?)
     case turnFailed(error: String)
     case complete
     case error(message: String)

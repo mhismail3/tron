@@ -87,7 +87,6 @@ struct UiActionDTO: Codable, Equatable, Sendable {
     var idempotencyKeyTemplate: String
     var requiredGrant: String
     var requiredRisk: String
-    var approvalPolicy: AnyCodable
     var targetRevision: UInt64
     var expiresAt: String
     var targetResourceId: String?

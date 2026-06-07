@@ -1,87 +1,52 @@
 # Event Handling
 
-The iOS app handles events through two systems: **plugins** for live WebSocket events and **transformer** for reconstructing history.
+> Last verified: 2026-06-07 (PET-8 primitive shell teardown).
 
-## Architecture Overview
+The iOS app handles engine events through two paths:
 
 ```
-Live:   WebSocket → EventRegistry → Plugin.parse() → Plugin.dispatch() → ChatViewModel
-Stored: EventDatabase → Transformer → ChatMessage array
+Live:   WebSocket -> EngineClient -> EventRegistry -> Plugin -> ChatViewModel
+Stored: EventDatabase -> UnifiedEventTransformer -> ChatMessage array
 ```
 
-## Event Plugin System
+The live path updates the mounted session UI. The stored path reconstructs
+history from durable event rows. Neither path owns source-control state,
+worker/subagent state, prompt-library state, skill state, or Audit Details
+state on the primitive teardown branch.
 
-Plugins are self-contained handlers that parse WebSocket JSON, transform to UI-ready results, and dispatch to the appropriate handler.
+## Plugin Boundary
 
-### Plugin Structure
+Each live plugin parses one server event family into a UI-ready result and
+dispatches itself through `EventDispatchCoordinator`. Plugins may render
+transport facts, progress, errors, and generic runtime data. They must not
+restore deleted product modes or synthesize retired event names.
 
-```swift
-enum MyEventPlugin: DispatchableEventPlugin {
-    static let eventType = "agent.my_event"
+Current retained plugin groups:
 
-    struct EventData: StandardEventData {
-        let type: String
-        let sessionId: String?
-        let timestamp: String?
-        // Event-specific fields
-    }
+| Group | Directory | Purpose |
+|-------|-----------|---------|
+| Streaming | `Plugins/Streaming/` | Text, thinking, and turn lifecycle deltas. |
+| Capability invocation | `Plugins/CapabilityInvocation/` | Generic `capability.invocation.*` lifecycle evidence for chat. |
+| Lifecycle | `Plugins/Lifecycle/` | Agent readiness, completion, compaction, context, memory, message deletion, and turn failure labels that still reach the shell. |
+| Session | `Plugins/Session/` | Connection and session list/update/archive/delete state. |
+| Queue | `Plugins/Queue/` | Prompt queue/dequeue/send status. |
+| Process | `Plugins/Process/` | Generic process lifecycle evidence emitted through the primitive runtime. |
+| Display | `Plugins/Display/` | Generic display frames for runtime surfaces. |
+| Server | `Plugins/Server/` | Server/auth/plugin-source/restart status messages. |
+| Hook | `Plugins/Hook/` | Generic LLM hook result display while PET-10 audits remaining hook labels. |
 
-    struct Result: EventResult {
-        // UI-ready fields only
-    }
+Deleted plugin roots such as `Plugins/Subagent/`, `Plugins/Worktree/`, and
+`Plugins/Repo/` must stay absent.
 
-    static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(/* map fields */)
-    }
+## Registration
 
-    @MainActor
-    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
-        guard let r = result as? Result else { return }
-        context.handleMyEvent(r)
-    }
-}
-```
+`EventRegistry.shared.registerAll()` runs at app startup. Registration is the
+only place a live event plugin enters the shell, so deleted roots should be
+removed from both disk and registration instead of left dormant.
 
-### Plugin Categories
+## Dispatch
 
-| Category | Location | Events |
-|----------|----------|--------|
-| Streaming | `Plugins/Streaming/` | text_delta, thinking_delta, turn_start, turn_end, agent_turn |
-| Capability invocation | `Plugins/CapabilityInvocation/` | `capability.invocation.*`, `capability.resolution`, `capability.pause.*`, and `capability.run.status` transport labels carrying capability identity and lifecycle state |
-| Lifecycle | `Plugins/Lifecycle/` | complete, error, compaction, memory_updated, memory_auto_retain_triggered, memory_auto_retain_failed, context_cleared, message_deleted, skill_deactivated, turn_failed |
-| Session | `Plugins/Session/` | connected, session.updated, session.created, session.archived, session.unarchived, session.deleted, session.processing_changed |
-| Subagent | `Plugins/Subagent/` | spawned, status, completed, failed, event, result_available |
-| Browser | `Plugins/Browser/` | browser_frame, browser_closed |
-| Task | `Plugins/Task/` | task.created, task.updated, task.deleted |
-
-### Registration
-
-All plugins registered at app startup:
-
-```swift
-// EventRegistry.swift
-func registerAll() {
-    register(TextDeltaPlugin.self)
-    register(CapabilityInvocationStartedPlugin.self)
-    register(CapabilityInvocationCompletedPlugin.self)
-    // ... all plugins
-}
-```
-
-### Memory Retain Lifecycle
-
-Manual retain and auto-retain use the same final `agent.memory_updated` event.
-The auto path emits `agent.memory_auto_retain_triggered` before the generic
-`agent.memory_updating` event so the UI can show the automatic-retain pill
-without stacking a second spinner. `MemoryCoordinator` tracks the in-progress
-message id, repairs a stale message index by scanning the current message list,
-and always clears the in-progress marker when `agent.memory_updated` arrives.
-If an in-progress pill was pruned, the completion event appends a final retained
-or nothing-new pill rather than leaving a permanent loading state.
-
-## Event Dispatch
-
-`EventDispatchCoordinator` delegates to self-dispatching plugin boxes via `EventRegistry`:
+The dispatch model stays switch-free at the central coordinator:
 
 ```swift
 func dispatch(type: String, transform: () -> (any EventResult)?, context: EventDispatchTarget) {
@@ -91,223 +56,34 @@ func dispatch(type: String, transform: () -> (any EventResult)?, context: EventD
 }
 ```
 
-No switch statement — each plugin carries its own dispatch logic.
+`ChatViewModel` conforms to the composed dispatch target through small handler
+extensions. The target exposes chat/session primitives, not fixed product
+dashboard APIs.
 
-### Handler Protocols
+## Stored Reconstruction
 
-Handlers are split into domain-specific protocols:
+`UnifiedEventTransformer` reconstructs messages from `SessionEvent` rows. The
+retained reconstruction state tracks message content, capability invocation
+lifecycles, streaming state, turn grouping, generated runtime data, and compact
+session metadata needed for chat.
 
-```swift
-@MainActor protocol StreamingEventHandler: AnyObject {
-    func handleTextDelta(_ delta: String)
-    func handleThinkingDelta(_ delta: String)
-}
+Unsupported event payloads should remain visible as diagnostics or no-op
+transport facts. They should not be converted into Work, Source Control,
+Subagent, Skill, Prompt Library, or Voice Notes models.
 
-@MainActor protocol CapabilityInvocationEventHandler: AnyObject {
-    func handleCapabilityInvocationStarted(_ result: CapabilityInvocationStartedPlugin.Result)
-    func handleCapabilityInvocationCompleted(_ result: CapabilityInvocationCompletedPlugin.Result)
-}
+## Session Updates
 
-// ... CapabilityLifecycleEventHandler, TurnLifecycleEventHandler,
-//     ContextEventHandler, BrowserEventHandler, SubagentEventHandler,
-//     TaskEventHandler, EventDispatchLogger
+`session.updated` updates only fields the server sends. iOS persists the
+resulting `CachedSession` and uses it for the session list and active-session
+metadata. The client does not synthesize missing counts from unrelated local
+state and does not reconstruct product dashboards from session metadata.
 
-// Composed target — ChatViewModel conforms to this
-@MainActor protocol EventDispatchTarget:
-    StreamingEventHandler, CapabilityInvocationEventHandler, CapabilityLifecycleEventHandler,
-    TurnLifecycleEventHandler, ContextEventHandler, BrowserEventHandler,
-    SubagentEventHandler, TaskEventHandler, EventDispatchLogger {}
-```
+## Guardrails
 
-### Implementation
+PET-8 source guards enforce:
 
-ChatViewModel extensions implement handlers:
-
-```swift
-// ChatViewModel+EventDispatchContext.swift
-extension ChatViewModel: EventDispatchTarget {
-    func handleBrowserFrame(_ result: BrowserFramePlugin.Result) {
-        handleBrowserFrameResult(result)
-    }
-    // ... wrapper methods for existing implementations
-}
-```
-
-### Session Metadata Updates
-
-`session.updated` is the live dashboard and Agent Control metadata refresh
-event. The server includes authoritative title/model previews, event count,
-turn count, message count, token totals, cache buckets, cost, activity lines,
-and last-activity timestamps when those fields changed. iOS applies only the
-fields present in the event, persists the resulting `CachedSession`, and lets
-Agent Control merge the live in-memory row with the persisted server summary so
-same-run sheets and relaunches show the same server-owned counts. The client
-does not synthesize missing turn counts from message counts.
-
-## Event Transformer
-
-Reconstructs chat history from stored events.
-
-### Key Components
-
-| File | Purpose |
-|------|---------|
-| `UnifiedEventTransformer.swift` | Main transformation logic |
-| `Handlers/MessageHandlers.swift` | Message event handling |
-| `Handlers/CapabilityInvocationHandlers.swift` | Transport event handling for capability invocation/result records |
-| `Reconstruction/` | State tracking during transform |
-
-### Transformation Flow
-
-```swift
-// Input: [SessionEvent] or [RawEvent]
-// Output: [ChatMessage]
-
-let messages = UnifiedEventTransformer.transform(events: events)
-```
-
-### EventTransformable Protocol
-
-Unifies different event types:
-
-```swift
-protocol EventTransformable {
-    var id: String { get }
-    var parentId: String? { get }
-    var sessionId: String { get }
-    var workspaceId: String { get }
-    var type: String { get }
-    var timestamp: String { get }
-    var sequence: Int { get }
-    var payload: [String: AnyCodable] { get }
-}
-```
-
-Note: `sessionId`, `timestamp`, and `sequence` are non-optional. Both `RawEvent`
-and `SessionEvent` conform trivially since they already have all required fields.
-
-### Shared First-Pass Helper: buildCapabilityInvocationMaps
-
-Both `transformPersistedEvents` and `reconstructSessionState` run a shared first
-pass over the event array via `buildCapabilityInvocationMaps(from:)`. This
-builds lookup dictionaries for transport-level
-`capability.invocation.generating`, `capability.invocation.started`, and
-`capability.invocation.completed` rows plus consumed subagent event IDs so
-downstream handlers can resolve provider-boundary invocation blocks into
-capability-native invocation messages and filter already-consumed notifications
-in a single pass.
-
-`capability.invocation.generating`, `capability.invocation.started`,
-`capability.invocation.progress`, and `capability.invocation.completed` are
-capability lifecycle labels, not renderer dispatch keys. `generating` creates
-the first visible chip and `started`/`progress`/`completed` update that same
-invocation id, preserving stable order for parallel calls. Completed payloads
-use the canonical server shape: `invocationId`, optional `modelPrimitiveName`,
-`content`, `isError`, required `duration`, optional `details`, and identity
-fields. The client derives success from `!isError`; it does not accept a second
-parallel `success`/`output` schema for clean-slate capability events. Payloads
-carry `CapabilityIdentity` fields when available:
-`modelToolName`, `contractId`, `implementationId`, `functionId`, `pluginId`,
-`workerId`, `schemaDigest`, `catalogRevision`, `trustTier`, `riskLevel`,
-`effectClass`, `traceId`, `rootInvocationId`, and `bindingDecisionId`. Active
-chat, dashboard, and detail views render from those fields and generic
-schema/result metadata. Unsupported or malformed clean-slate events become
-client diagnostics; the app does not synthesize capability identity from retired
-built-in names.
-
-### Payload Contracts
-
-History reconstruction must accept the payload shape emitted by the server, not
-only the shape used by local tests. In particular, persisted `message.user`
-events from prompt and subagent paths may contain only `content`; their `turn`
-field is optional during reconstruction. Renderable persisted event types are
-guarded by transformer fixtures so messages, capability invocation chips,
-notifications, memory cards, errors, and configuration chips keep reconstructing
-when payload contracts change inside the clean capability schema. The test
-suite also requires every persisted event type to have an explicit
-reconstruction disposition: rendered, state-handled, consumed through assistant
-content, streaming replay-only, or intentionally no-state. Pre-cutover event
-shapes are not read, normalized, or rendered.
-
-### Reconstruction Pagination
-
-The `session::reconstruct` engine protocol supports cursor-based pagination:
-
-| Field | Type | Purpose |
-|-------|------|---------|
-| `limit` | `Int?` | Max events to return per page |
-| `beforeEventId` | `String?` | Fetch events older than this event in the reconstructed chain |
-| `hasMoreEvents` | `Bool` | Whether older pages exist |
-| `oldestEventId` | `String?` | Event ID of the earliest event in the response (use as next `beforeEventId`) |
-
-`ChatViewModel+Reconstruction.swift` drives the pagination loop: on initial
-load it requests the most recent page, then on scroll-up it passes
-`oldestEventId` as `beforeEventId` to fetch the next older page. Forked
-sessions use the same cursor shape over the server-ordered ancestor chain, so
-the visible page can include parent-session history followed by child-session
-events without client-side stitching.
-
-## Adding a New Event
-
-### 1. Create Self-Dispatching Plugin
-
-```swift
-// Core/Events/Plugins/<Category>/MyEventPlugin.swift
-enum MyEventPlugin: DispatchableEventPlugin {
-    static let eventType = "agent.my_event"
-
-    struct EventData: StandardEventData {
-        let type: String
-        let sessionId: String?
-        let timestamp: String?
-        let customField: String
-    }
-
-    struct Result: EventResult {
-        let customField: String
-    }
-
-    static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(customField: event.customField)
-    }
-
-    @MainActor
-    static func dispatch(result: any EventResult, context: any EventDispatchTarget) {
-        guard let r = result as? Result else { return }
-        context.handleMyEvent(r)
-    }
-}
-```
-
-### 2. Register Plugin
-
-```swift
-// EventRegistry.swift — registerAll()
-register(MyEventPlugin.self)
-```
-
-### 3. Add Handler to Domain Protocol
-
-```swift
-// EventDispatchContext.swift — add to appropriate domain protocol
-func handleMyEvent(_ result: MyEventPlugin.Result)
-```
-
-### 4. Implement Handler
-
-```swift
-// ChatViewModel+EventDispatchContext.swift
-func handleMyEvent(_ result: MyEventPlugin.Result) {
-    // Update state based on event
-}
-```
-
-## Rules
-
-- Plugins handle live WebSocket events only
-- Transformer handles history reconstruction only
-- All live events flow through `eventPublisherV2`
-- Payloads are shared between systems - changes affect both
-- Use `StandardEventData` for automatic sessionId extraction
-- Keep Result structs flat and UI-ready
-- Use `DispatchableEventPlugin` for all new plugins
+- deleted fixed view roots remain absent;
+- deleted clients/state objects remain absent;
+- primitive shell files remain present;
+- push authorization is gated by active pairing;
+- removed product names do not reappear in ordinary source or tests.

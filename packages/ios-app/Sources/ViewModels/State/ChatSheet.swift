@@ -43,21 +43,14 @@ struct ProviderErrorDetailData: Equatable, Hashable {
 enum ChatSheet: Identifiable, Equatable {
     // Settings & Info
     case settings
-    case agentControl
 
-    // Skill details
-    case skillDetail(Skill)
     case compactionDetail(CompactionDetailData)
     case memoryRetainDetail(MemoryRetainDetailData)
 
     // Capability sheets
     case userInteraction
-    case engineApproval
-    case subagentDetail
-
     // Notification sheets
     case notificationDelivery(NotificationDeliveryData)
-    case subagentResultsList
     case thinkingDetail(String)
     case providerErrorDetail(ProviderErrorDetailData)
 
@@ -69,22 +62,12 @@ enum ChatSheet: Identifiable, Equatable {
         switch self {
         case .settings:
             return "settings"
-        case .agentControl:
-            return "agentControl"
-        case .skillDetail(let skill):
-            return "skillDetail-\(skill.id)"
         case .compactionDetail:
             return "compaction"
         case .memoryRetainDetail:
             return "memoryRetain"
         case .userInteraction:
             return "userInteraction"
-        case .engineApproval:
-            return "engineApproval"
-        case .subagentDetail:
-            return "subagent"
-        case .subagentResultsList:
-            return "subagentResultsList"
         case .notificationDelivery(let data):
             return "notificationDelivery-\(data.invocationId)"
         case .thinkingDetail:
@@ -102,21 +85,11 @@ enum ChatSheet: Identifiable, Equatable {
         switch (lhs, rhs) {
         case (.settings, .settings):
             return true
-        case (.agentControl, .agentControl):
-            return true
-        case (.skillDetail(let skill1), .skillDetail(let skill2)):
-            return skill1.id == skill2.id
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
             return data1 == data2
         case (.memoryRetainDetail(let data1), .memoryRetainDetail(let data2)):
             return data1 == data2
         case (.userInteraction, .userInteraction):
-            return true
-        case (.engineApproval, .engineApproval):
-            return true
-        case (.subagentDetail, .subagentDetail):
-            return true
-        case (.subagentResultsList, .subagentResultsList):
             return true
         case (.notificationDelivery(let data1), .notificationDelivery(let data2)):
             return data1.invocationId == data2.invocationId

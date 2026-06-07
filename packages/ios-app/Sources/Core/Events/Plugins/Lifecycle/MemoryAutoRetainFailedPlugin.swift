@@ -3,8 +3,8 @@ import Foundation
 /// Plugin for handling auto-retain failure events.
 /// Emitted by the server when an auto-retain pipeline started
 /// (`memory_auto_retain_triggered` was persisted) but the summarizer
-/// subagent failed to produce a clean output. The pipeline still writes
-/// a keyword-based summary, but iOS needs to signal that the
+/// failed to produce a clean output. The pipeline still writes
+/// a reduced-quality summary, but iOS needs to signal that the
 /// retain quality is low by replacing the "Auto-retaining…" pill with
 /// a clear failure label instead of silently transitioning to
 /// "retained".

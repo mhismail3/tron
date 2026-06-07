@@ -19,16 +19,8 @@ struct MessageBubble: View {
 
     var body: some View {
         VStack(alignment: isUserMessage ? .trailing : .leading, spacing: 4) {
-            // Show attachments above skills for user messages (thumbnails at top)
             if let attachments = message.attachments, !attachments.isEmpty {
                 AttachedFileThumbnails(attachments: attachments)
-            }
-
-            // Show skills above text for user messages
-            if let skills = message.skills, !skills.isEmpty {
-                MessageSkillChips(skills: skills) { skill in
-                    onTap?(.skill(skill))
-                }
             }
 
             contentView
@@ -97,18 +89,8 @@ struct MessageBubble: View {
                 onTap?(.userInteraction(data))
             }
 
-        case .engineApproval(let data):
-            EngineApprovalChipView(data: data) {
-                onTap?(.engineApproval(data))
-            }
-
         case .answeredQuestions(let count):
             AnsweredQuestionsChipView(questionCount: count)
-
-        case .subagent(let data):
-            SubagentChip(data: data) {
-                onTap?(.subagent(data))
-            }
 
         }
     }

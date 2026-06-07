@@ -37,7 +37,7 @@ extension ChatViewModel: ConnectionContext {
     /// This resets ONLY transient-turn state — the deliberate contract
     /// is that everything else survives reconnect:
     ///
-    /// - `inputBarState` (text, selectedSkills, attachments): the user
+    /// - `inputBarState` (text and attachments): the user
     ///   may be mid-composition; losing it on a transient reconnect
     ///   would destroy their work.
     /// - `draftStore` (persisted drafts): same reason, and these are

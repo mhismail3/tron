@@ -232,9 +232,8 @@ controls including the `Server Controls` header until the Mac reconnects and
 `settings.get` succeeds. The selected unreachable row overrides stale
 `Connected` metadata with `Unavailable`; its ellipsis menu is reduced to Retry
 and Forget. The main Settings sheet also disables destructive server-coupled
-actions while in this unavailable state: Clear Prompt History and Archive All
-Sessions are unavailable, while Reset All Settings remains available for local
-app preferences.
+actions while in this unavailable state: Archive All Sessions is unavailable,
+while Reset All Settings remains available for local app preferences.
 The dashboard also surfaces a deduplicated banner for the active paired server
 when connection state moves to disconnected, reconnecting, failed, or
 unauthorized. Disconnected and reconnecting banners are warning-yellow,
@@ -250,20 +249,14 @@ at a bounded cadence until the server returns, the app backgrounds, or
 authentication fails, so dashboard and chat controls recover after a dev-server
 rebuild without requiring every screen to own retry logic.
 The Agent and Context settings sheets follow the same top summary-card pattern
-and divide server settings by ownership. Agent owns execution and lifecycle
-behavior: quick-session defaults, hook model/error/context budgets,
-built-in/user hooks, prompt-history capture/retention controls, queued-message
-delivery, and protected branches. Hooks and Prompt Library each use one grouped
-header, but each setting keeps its own glass container and description unless
-the controls are intentionally coupled. The user hook directory card keeps the
-folder label and `~/.tron/hooks/` value in one status row, then shows a small
-empty-state placeholder until a hook-listing API exists. Context owns
-context-management behavior: individual compaction controls, memory
-auto-retain, retain model, and standalone rule discovery. Hooks and Prompt
-Library no longer appear as separate Settings destinations; their
-non-destructive controls live inside Agent. Clearing prompt history is a
-destructive server action and therefore lives in the main Settings destructive
-grid row before Archive All Sessions and Reset All Settings.
+and divide server settings by ownership. Agent owns the retained execution and
+lifecycle controls that still exist in the current settings schema:
+quick-session defaults, hook model/error behavior, queued-message delivery, and
+protected branch metadata. Each setting keeps its own glass container and
+description unless controls are intentionally coupled. Context owns retained
+context-management behavior such as compaction and memory auto-retain. Deleted
+prompt-history and prompt-library controls must not reappear as separate
+Settings destinations or destructive actions.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system::ping`. The server emits a

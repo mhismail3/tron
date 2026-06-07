@@ -29,10 +29,6 @@ final class DraftStoreTests: XCTestCase {
         Attachment(id: id, type: .image, data: data, mimeType: "image/jpeg", fileName: "photo.jpg")
     }
 
-    private func makeSkill(name: String, source: SkillSource = .global) -> Skill {
-        Skill(name: name, displayName: name.capitalized, description: "A \(name)", source: source, tags: nil)
-    }
-
     // MARK: - Core Save/Load/Clear
 
     func testSaveAndLoad_textOnly() async throws {
@@ -47,7 +43,6 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertTrue(loaded)
         XCTAssertEqual(freshState.text, "Hello, world!")
         XCTAssertTrue(freshState.attachments.isEmpty)
-        XCTAssertTrue(freshState.selectedSkills.isEmpty)
     }
 
     func testSaveAndLoad_withAttachments() async throws {
@@ -69,26 +64,9 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertEqual(freshState.attachments[0].fileName, "photo.jpg")
     }
 
-    func testSaveAndLoad_withSkills() async throws {
-        let state = InputBarState()
-        state.selectedSkills = [makeSkill(name: "code-review"), makeSkill(name: "testing", source: .project)]
-
-        await draftStore.saveImmediately(sessionId: "s1", inputBarState: state)
-
-        let freshState = InputBarState()
-        let loaded = await draftStore.loadDraft(sessionId: "s1", into: freshState)
-
-        XCTAssertTrue(loaded)
-        XCTAssertEqual(freshState.selectedSkills.count, 2)
-        XCTAssertEqual(freshState.selectedSkills[0].name, "code-review")
-        XCTAssertEqual(freshState.selectedSkills[1].name, "testing")
-        XCTAssertEqual(freshState.selectedSkills[1].source, .project)
-    }
-
     func testSaveAndLoad_fullState() async throws {
         let state = InputBarState()
         state.text = "Please review"
-        state.selectedSkills = [makeSkill(name: "review")]
         state.attachments = [makeAttachment(), makeAttachment()]
 
         await draftStore.saveImmediately(sessionId: "s1", inputBarState: state)
@@ -98,7 +76,6 @@ final class DraftStoreTests: XCTestCase {
 
         XCTAssertTrue(loaded)
         XCTAssertEqual(freshState.text, "Please review")
-        XCTAssertEqual(freshState.selectedSkills.count, 1)
         XCTAssertEqual(freshState.attachments.count, 2)
     }
 
@@ -225,7 +202,6 @@ final class DraftStoreTests: XCTestCase {
     func testConcurrentSessions_independentDrafts() async throws {
         let stateA = InputBarState()
         stateA.text = "session A"
-        stateA.selectedSkills = [makeSkill(name: "skill-a")]
 
         let stateB = InputBarState()
         stateB.text = "session B"
@@ -241,10 +217,8 @@ final class DraftStoreTests: XCTestCase {
         XCTAssertTrue(resultB)
 
         XCTAssertEqual(loadedA.text, "session A")
-        XCTAssertEqual(loadedA.selectedSkills.count, 1)
 
         XCTAssertEqual(loadedB.text, "session B")
-        XCTAssertTrue(loadedB.selectedSkills.isEmpty)
     }
 
     func testSelectedImages_notPersisted() async throws {
@@ -342,7 +316,6 @@ final class DraftStoreTests: XCTestCase {
     func testSaveImmediately_identicalState_skipsRedundantWrite() async throws {
         let state = InputBarState()
         state.text = "same text"
-        state.selectedSkills = [makeSkill(name: "review")]
 
         // First save
         await draftStore.saveImmediately(sessionId: "s1", inputBarState: state)

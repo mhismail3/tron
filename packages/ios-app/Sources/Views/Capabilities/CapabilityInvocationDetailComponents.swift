@@ -46,7 +46,7 @@ struct CapabilityDetailHeader: View {
             }
 
             if let worker = CapabilityPresentation.workerLabel(for: data.identity, targetId: display.targetId) {
-                CapabilityHeaderMetric(label: "Worker", value: worker, tint: tint)
+                CapabilityHeaderMetric(label: "Executor", value: worker, tint: tint)
             }
         }
         .padding(16)
@@ -234,7 +234,7 @@ struct CapabilityExecutionGroupView: View {
         case "Resolution":
             return [value("Mode"), value("Target").map(humanizeCapability)].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
         case "Preparation":
-            return [value("Payload"), value("Approval"), value("Corrections")].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+            return [value("Payload"), value("Corrections")].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
         case "Run":
             return [value("Status"), value("Duration")].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
         case "Discovery":
@@ -256,7 +256,7 @@ struct CapabilityExecutionGroupView: View {
         case "Resolution":
             return ["Mode", "Target"]
         case "Preparation":
-            return ["Payload", "Approval", "Corrections"]
+            return ["Payload", "Corrections"]
         case "Run":
             return ["Status", "Duration"]
         case "Discovery":

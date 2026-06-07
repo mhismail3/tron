@@ -12,7 +12,6 @@ final class SessionClient: EngineDomainClient {
         title: String? = nil,
         source: String? = nil,
         profile: String? = nil,
-        useWorktree: Bool? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> SessionCreateResult {
         _ = try requireTransport().requireConnection()
@@ -23,8 +22,7 @@ final class SessionClient: EngineDomainClient {
             contextFiles: nil,
             title: title,
             source: source,
-            profile: profile,
-            useWorktree: useWorktree
+            profile: profile
         )
 
         let result: SessionCreateResult = try await invokeWrite(

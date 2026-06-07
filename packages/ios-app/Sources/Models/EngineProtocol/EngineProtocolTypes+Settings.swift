@@ -46,10 +46,7 @@ struct ServerSettings: Decodable {
     /// - `"continue"` (default) — fail-open, agent proceeds
     /// - `"block"` — synthesize a Block with a reason; security hooks opt in
     let hooksErrorPolicy: String
-    let skillsCompactionPolicy: String
-    let skillsShowIndex: String
     let queueDrainMode: String
-    let agentApprovalPromptMode: String
     let autoRetainInterval: Int
     let retainModel: String
 
@@ -63,15 +60,6 @@ struct ServerSettings: Decodable {
     let gitCrashRecoveryAbortTimeoutMs: UInt64
     let gitOpTimeoutNetworkMs: UInt64
     let gitOpTimeoutLocalMs: UInt64
-    let gitSubagentConflictResolutionEnabled: Bool
-
-    // MARK: - Prompt Library
-
-    let promptHistoryEnabled: Bool
-    let promptHistoryMaxEntries: Int
-    let promptHistoryMaxAgeDays: Int
-    let promptHistoryAutoPrune: Bool
-
     // MARK: - plugin source
 
     /// Proactive schema-refresh TTL in milliseconds. `0` disables.
@@ -90,18 +78,14 @@ struct ServerSettings: Decodable {
     let storageMaxDatabaseMb: UInt64
 
     private enum CodingKeys: String, CodingKey {
-        case server, context, session, agent, hooks, skills, memory, git, promptLibrary, pluginSources
+        case server, context, session, hooks, memory, git, pluginSources
         case observability, storage
     }
 
     private enum GitKeys: String, CodingKey {
         case targetBranch, protectedBranches, sessionBranchPolicy, mergeStrategy
         case autoSetUpstream, crashRecoveryAbortTimeoutMs, opTimeoutNetworkMs
-        case opTimeoutLocalMs, subagentConflictResolutionEnabled
-    }
-
-    private enum PromptLibraryKeys: String, CodingKey {
-        case historyEnabled, historyMaxEntries, historyMaxAgeDays, historyAutoPrune
+        case opTimeoutLocalMs
     }
 
     private enum McpKeys: String, CodingKey {
@@ -116,10 +100,6 @@ struct ServerSettings: Decodable {
         case retentionEnabled, maxDatabaseMb
     }
 
-    private enum SkillsKeys: String, CodingKey {
-        case compactionPolicy, showIndex
-    }
-
     private enum MemoryKeys: String, CodingKey {
         case autoRetainInterval, retainModel
     }
@@ -130,14 +110,6 @@ struct ServerSettings: Decodable {
 
     private enum SessionKeys: String, CodingKey {
         case isolation, queueDrainMode
-    }
-
-    private enum AgentKeys: String, CodingKey {
-        case autonomy
-    }
-
-    private enum AgentAutonomyKeys: String, CodingKey {
-        case approvalPromptMode
     }
 
     private enum IsolationKeys: String, CodingKey {
@@ -222,14 +194,6 @@ struct ServerSettings: Decodable {
             queueDrainMode = "sequential"
         }
 
-        // agent.autonomy.approvalPromptMode
-        if let agentContainer = try? container.nestedContainer(keyedBy: AgentKeys.self, forKey: .agent),
-           let autonomyContainer = try? agentContainer.nestedContainer(keyedBy: AgentAutonomyKeys.self, forKey: .autonomy) {
-            agentApprovalPromptMode = (try? autonomyContainer.decodeIfPresent(String.self, forKey: .approvalPromptMode)) ?? "disabled"
-        } else {
-            agentApprovalPromptMode = "disabled"
-        }
-
         // hooks.*
         if let hooksContainer = try? container.nestedContainer(keyedBy: HooksKeys.self, forKey: .hooks) {
             hooksLlmModel = (try? hooksContainer.decodeIfPresent(String.self, forKey: .llmModel)) ?? "claude-haiku-4-5-20251001"
@@ -241,15 +205,6 @@ struct ServerSettings: Decodable {
             hooksErrorPolicy = "continue"
         }
 
-        // skills.*
-        if let skillsContainer = try? container.nestedContainer(keyedBy: SkillsKeys.self, forKey: .skills) {
-            skillsCompactionPolicy = (try? skillsContainer.decodeIfPresent(String.self, forKey: .compactionPolicy)) ?? "clearAll"
-            skillsShowIndex = (try? skillsContainer.decodeIfPresent(String.self, forKey: .showIndex)) ?? "always"
-        } else {
-            skillsCompactionPolicy = "clearAll"
-            skillsShowIndex = "always"
-        }
-
         // memory.*
         if let memoryContainer = try? container.nestedContainer(keyedBy: MemoryKeys.self, forKey: .memory) {
             autoRetainInterval = (try? memoryContainer.decodeIfPresent(Int.self, forKey: .autoRetainInterval)) ?? 10
@@ -259,7 +214,7 @@ struct ServerSettings: Decodable {
             retainModel = "claude-sonnet-4-6"
         }
 
-        // git.*: source-control actions depend on these values, so missing
+        // git.*: runtime repo actions depend on these values, so missing
         // fields are treated as server contract failures rather than local
         // defaults.
         let gitContainer = try container.nestedContainer(keyedBy: GitKeys.self, forKey: .git)
@@ -271,20 +226,6 @@ struct ServerSettings: Decodable {
         gitCrashRecoveryAbortTimeoutMs = try gitContainer.decode(UInt64.self, forKey: .crashRecoveryAbortTimeoutMs)
         gitOpTimeoutNetworkMs = try gitContainer.decode(UInt64.self, forKey: .opTimeoutNetworkMs)
         gitOpTimeoutLocalMs = try gitContainer.decode(UInt64.self, forKey: .opTimeoutLocalMs)
-        gitSubagentConflictResolutionEnabled = try gitContainer.decode(Bool.self, forKey: .subagentConflictResolutionEnabled)
-
-        // promptLibrary.*
-        if let plContainer = try? container.nestedContainer(keyedBy: PromptLibraryKeys.self, forKey: .promptLibrary) {
-            promptHistoryEnabled = (try? plContainer.decodeIfPresent(Bool.self, forKey: .historyEnabled)) ?? true
-            promptHistoryMaxEntries = (try? plContainer.decodeIfPresent(Int.self, forKey: .historyMaxEntries)) ?? 10_000
-            promptHistoryMaxAgeDays = (try? plContainer.decodeIfPresent(Int.self, forKey: .historyMaxAgeDays)) ?? 0
-            promptHistoryAutoPrune = (try? plContainer.decodeIfPresent(Bool.self, forKey: .historyAutoPrune)) ?? true
-        } else {
-            promptHistoryEnabled = true
-            promptHistoryMaxEntries = 10_000
-            promptHistoryMaxAgeDays = 0
-            promptHistoryAutoPrune = true
-        }
 
         // pluginSources.*
         if let mcpContainer = try? container.nestedContainer(keyedBy: McpKeys.self, forKey: .pluginSources) {
@@ -386,30 +327,6 @@ enum QueueDrainMode: String, Encodable {
     }
 }
 
-enum AutonomyApprovalPromptMode: String, Encodable, CaseIterable {
-    case disabled, testing
-
-    static func from(_ raw: String?) -> Self? {
-        raw.flatMap { Self(rawValue: $0) }
-    }
-}
-
-enum SkillsCompactionPolicy: String, Encodable {
-    case clearAll, autoRestore, userInteraction
-
-    static func from(_ raw: String?) -> Self? {
-        raw.flatMap { Self(rawValue: $0) }
-    }
-}
-
-enum SkillsShowIndex: String, Encodable {
-    case always, never, whenNoActiveSkills
-
-    static func from(_ raw: String?) -> Self? {
-        raw.flatMap { Self(rawValue: $0) }
-    }
-}
-
 enum GitSessionBranchPolicy: String, Encodable {
     case keep, deleteOnFinalize
 
@@ -483,7 +400,6 @@ struct ServerSettingsUpdate: Encodable {
     var server: ServerUpdate?
     var context: ContextUpdate?
     var session: SessionUpdate?
-    var agent: AgentUpdate?
     var hooks: HooksUpdate?
 
     struct ServerUpdate: Encodable {
@@ -534,23 +450,10 @@ struct ServerSettingsUpdate: Encodable {
         }
     }
 
-    struct AgentUpdate: Encodable {
-        var autonomy: AutonomyUpdate?
-
-        struct AutonomyUpdate: Encodable {
-            var approvalPromptMode: AutonomyApprovalPromptMode?
-        }
-    }
-
     struct HooksUpdate: Encodable {
         var llmModel: String?
         var builtinHooks: [BuiltinHookSetting]?
         var errorPolicy: String?
-    }
-
-    struct SkillsUpdate: Encodable {
-        var compactionPolicy: SkillsCompactionPolicy?
-        var showIndex: SkillsShowIndex?
     }
 
     struct MemoryUpdate: Encodable {
@@ -558,7 +461,6 @@ struct ServerSettingsUpdate: Encodable {
         var retainModel: String?
     }
 
-    var skills: SkillsUpdate?
     var memory: MemoryUpdate?
 
     struct GitUpdate: Encodable {
@@ -570,19 +472,9 @@ struct ServerSettingsUpdate: Encodable {
         var crashRecoveryAbortTimeoutMs: UInt64?
         var opTimeoutNetworkMs: UInt64?
         var opTimeoutLocalMs: UInt64?
-        var subagentConflictResolutionEnabled: Bool?
     }
 
     var git: GitUpdate?
-
-    struct PromptLibraryUpdate: Encodable {
-        var historyEnabled: Bool?
-        var historyMaxEntries: Int?
-        var historyMaxAgeDays: Int?
-        var historyAutoPrune: Bool?
-    }
-
-    var promptLibrary: PromptLibraryUpdate?
 
     struct McpUpdate: Encodable {
         var schemaRefreshTtlMs: UInt64?

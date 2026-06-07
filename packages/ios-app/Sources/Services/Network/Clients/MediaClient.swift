@@ -1,7 +1,7 @@
 import Foundation
 
 /// Client for media-related engine capabilities.
-/// Handles transcription, voice notes, and browser status.
+/// Handles prompt transcription and browser status.
 final class MediaClient: EngineDomainClient {
 
     // MARK: - Transcription Methods
@@ -30,50 +30,6 @@ final class MediaClient: EngineDomainClient {
             context: optionalSessionInvocationContext(params.sessionId),
             timeout: 360.0
         )
-    }
-
-    // MARK: - Voice Notes Methods
-
-    /// Save a voice note with transcription
-    func saveVoiceNote(
-        audioData: Data,
-        mimeType: String = "audio/wav",
-        idempotencyKey: EngineIdempotencyKey
-    ) async throws -> VoiceNotesSaveResult {
-        _ = try requireTransport().requireConnection()
-
-        // Encode audio to base64 off main thread
-        let audioBase64 = await Task.detached(priority: .utility) {
-            audioData.base64EncodedString()
-        }.value
-
-        let params = VoiceNotesSaveParams(
-            audioBase64: audioBase64,
-            mimeType: mimeType
-        )
-
-        return try await invokeWrite(
-            "voice_notes::save",
-            params,
-            idempotencyKey: idempotencyKey,
-            timeout: 360.0
-        )
-    }
-
-    /// List saved voice notes
-    func listVoiceNotes(limit: Int = 50, offset: Int = 0) async throws -> VoiceNotesListResult {
-        _ = try requireTransport().requireConnection()
-
-        let params = VoiceNotesListParams(limit: limit, offset: offset)
-        return try await invokeRead("voice_notes::list", params)
-    }
-
-    /// Delete a voice note
-    func deleteVoiceNote(filename: String, idempotencyKey: EngineIdempotencyKey) async throws -> VoiceNotesDeleteResult {
-        _ = try requireTransport().requireConnection()
-
-        let params = VoiceNotesDeleteParams(filename: filename)
-        return try await invokeWrite("voice_notes::delete", params, idempotencyKey: idempotencyKey)
     }
 
     // MARK: - Browser Methods

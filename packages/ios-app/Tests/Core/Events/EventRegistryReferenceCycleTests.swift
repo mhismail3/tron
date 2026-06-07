@@ -68,7 +68,7 @@ struct EventRegistryReferenceCycleTests {
         "TurnEndPlugin",
         "CapabilityInvocationStartedPlugin",
         "CapabilityInvocationCompletedPlugin",
-        "SubagentSpawnedPlugin",
+        "CompactionPlugin",
     ]
 
     @Test("Registered plugins are enum types (no instance state)")

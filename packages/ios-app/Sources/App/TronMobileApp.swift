@@ -295,6 +295,13 @@ struct TronMobileApp: App {
     }
 
     private func registerPushIfAuthorized() async {
+        guard container.pairedServerStore.activeServer != nil else {
+            TronLogger.shared.debug(
+                "No active paired server; push authorization request skipped",
+                category: .notification
+            )
+            return
+        }
         guard !isRegisteringPush else {
             TronLogger.shared.debug(
                 "Push registration already in progress; skipping duplicate request",

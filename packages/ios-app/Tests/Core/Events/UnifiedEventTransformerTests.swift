@@ -201,14 +201,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "newLevel": AnyCodable("high")
             ],
             .notificationInterrupted: [:],
-            .skillDeactivated: [
-                "skillName": AnyCodable("browser")
-            ],
-            .skillsCleared: [
-                "clearedSkills": AnyCodable(["browser", "code-review"]),
-                "reason": AnyCodable("compaction"),
-                "mode": AnyCodable("userInteraction")
-            ],
             .rulesLoaded: [
                 "totalFiles": AnyCodable(1),
                 "dynamicRulesCount": AnyCodable(0)
@@ -282,7 +274,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
     }
 
     func testTransformUserMessageWithoutTurnMatchesProductionWirePayload() {
-        // `session::reconstruct` returns live prompt/subagent user messages
+        // `session::reconstruct` returns live prompt user messages
         // with content-only payloads. This is the regression guard for the
         // resume bug where every user bubble disappeared.
         let event = RawEvent(
@@ -615,7 +607,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
             "session.start",
             "session.end",
             "compact.boundary",
-            "worktree.acquired",
             "stream.turn_end"
         ]
 
@@ -701,9 +692,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             .messageDeleted,
             .streamTurnEnd,
             .configModelSwitch, .configReasoningLevel,
-            .subagentSpawned, .subagentCompleted, .subagentFailed,
             .fileRead, .fileWrite, .fileEdit,
-            .worktreeAcquired, .worktreeReleased, .worktreeCommit, .worktreeMerged, .worktreeRenamed,
             .compactBoundary,
             .metadataUpdate, .metadataTag,
             .llmHookResult
@@ -722,13 +711,12 @@ final class UnifiedEventTransformerTests: XCTestCase {
             // Session tree / completion metadata lives outside ReconstructedState.
             .sessionEnd,
             .sessionFork,
-            // Prompt/skill/process/memory trigger events do not currently restore
+            // Prompt/process/memory trigger events do not currently restore
             // user-visible chat or persisted ReconstructedState fields.
             .capabilityPauseRequested,
             .capabilityPauseResolved,
             .capabilityRunStatus,
             .configPromptUpdate,
-            .skillActivated,
             .memoryAutoRetainTriggered,
             .notificationProcessResult,
             .processResultsConsumed
@@ -1557,273 +1545,10 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    // MARK: - Subagent Reconstruction Tests
+    // MARK: - Session Chat Rendering Tests
 
-    func testSubagentSpawnedExtraction() {
-        let events = [
-            sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "invocationId": AnyCodable("tc_1"),
-                "modelPrimitiveName": AnyCodable("execute"), "contractId": AnyCodable("agent::spawn_subagent"),
-                "arguments": AnyCodable("{\"task\":\"Research Swift concurrency\"}"),
-                "turn": AnyCodable(1)
-            ], sequence: 2),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_sess_1"),
-                "task": AnyCodable("Research Swift concurrency"),
-                "model": AnyCodable("claude-opus-4-6"),
-                "invocationId": AnyCodable("tc_1"),
-                "spawnType": AnyCodable("subsession")
-            ], sequence: 3),
-            sessionEvent(type: "subagent.completed", payload: [
-                "subagentSessionId": AnyCodable("sub_sess_1"),
-                "resultSummary": AnyCodable("Found 5 key patterns"),
-                "totalTurns": AnyCodable(7),
-                "duration": AnyCodable(45000),
-                "totalTokenUsage": AnyCodable(["inputTokens": 50000, "outputTokens": 2000]),
-                "model": AnyCodable("claude-opus-4-6"),
-                "fullOutput": AnyCodable("Detailed findings...")
-            ], sequence: 4),
-            sessionEvent(type: "capability.invocation.completed", payload: [
-                "invocationId": AnyCodable("tc_1"),
-                "content": AnyCodable("Research complete"),
-                "isError": AnyCodable(false),
-                "duration": AnyCodable(45000)
-            ], sequence: 5)
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.subagentSpawns.count, 1)
-        XCTAssertEqual(state.subagentSpawns[0].subagentSessionId, "sub_sess_1")
-        XCTAssertEqual(state.subagentSpawns[0].invocationId, "tc_1")
-        XCTAssertEqual(state.subagentSpawns[0].task, "Research Swift concurrency")
-        XCTAssertEqual(state.subagentSpawns[0].model, "claude-opus-4-6")
-
-        XCTAssertEqual(state.subagentCompletions.count, 1)
-        let completion = state.subagentCompletions["sub_sess_1"]
-        XCTAssertNotNil(completion)
-        XCTAssertEqual(completion?.totalTurns, 7)
-        XCTAssertEqual(completion?.duration, 45000)
-        XCTAssertEqual(completion?.resultSummary, "Found 5 key patterns")
-        XCTAssertEqual(completion?.fullOutput, "Detailed findings...")
-    }
-
-    func testSubagentFailedExtraction() {
-        let events = [
-            sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "invocationId": AnyCodable("tc_2"),
-                "modelPrimitiveName": AnyCodable("execute"), "contractId": AnyCodable("agent::spawn_subagent"),
-                "arguments": AnyCodable("{\"task\":\"Failing task\"}"),
-                "turn": AnyCodable(1)
-            ], sequence: 2),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_sess_2"),
-                "task": AnyCodable("Failing task"),
-                "model": AnyCodable("claude-sonnet-4-5"),
-                "invocationId": AnyCodable("tc_2")
-            ], sequence: 3),
-            sessionEvent(type: "subagent.failed", payload: [
-                "subagentSessionId": AnyCodable("sub_sess_2"),
-                "error": AnyCodable("Max turns exceeded"),
-                "duration": AnyCodable(30000)
-            ], sequence: 4),
-            sessionEvent(type: "capability.invocation.completed", payload: [
-                "invocationId": AnyCodable("tc_2"),
-                "content": AnyCodable("Agent failed: Max turns exceeded"),
-                "isError": AnyCodable(true),
-                "duration": AnyCodable(30000)
-            ], sequence: 5)
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.subagentFailures.count, 1)
-        let failure = state.subagentFailures["sub_sess_2"]
-        XCTAssertNotNil(failure)
-        XCTAssertEqual(failure?.error, "Max turns exceeded")
-        XCTAssertEqual(failure?.duration, 30000)
-    }
-
-    func testMultipleParallelSubagentsExtraction() {
-        let events = [
-            sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "invocationId": AnyCodable("tc_a"),
-                "modelPrimitiveName": AnyCodable("execute"), "contractId": AnyCodable("agent::spawn_subagent"),
-                "arguments": AnyCodable("{\"task\":\"Explore auth\"}"),
-                "turn": AnyCodable(1)
-            ], sequence: 2),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "invocationId": AnyCodable("tc_b"),
-                "modelPrimitiveName": AnyCodable("execute"), "contractId": AnyCodable("agent::spawn_subagent"),
-                "arguments": AnyCodable("{\"task\":\"Research OAuth\"}"),
-                "turn": AnyCodable(1)
-            ], sequence: 3),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_a"),
-                "task": AnyCodable("Explore auth"),
-                "model": AnyCodable("claude-sonnet-4-5"),
-                "invocationId": AnyCodable("tc_a")
-            ], sequence: 4),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_b"),
-                "task": AnyCodable("Research OAuth"),
-                "model": AnyCodable("claude-opus-4-6"),
-                "invocationId": AnyCodable("tc_b")
-            ], sequence: 5),
-            sessionEvent(type: "subagent.completed", payload: [
-                "subagentSessionId": AnyCodable("sub_a"),
-                "resultSummary": AnyCodable("Auth patterns found"),
-                "totalTurns": AnyCodable(4),
-                "duration": AnyCodable(20000),
-                "totalTokenUsage": AnyCodable(["inputTokens": 10000, "outputTokens": 500])
-            ], sequence: 6),
-            sessionEvent(type: "subagent.failed", payload: [
-                "subagentSessionId": AnyCodable("sub_b"),
-                "error": AnyCodable("Provider error"),
-                "duration": AnyCodable(5000)
-            ], sequence: 7),
-            sessionEvent(type: "capability.invocation.completed", payload: [
-                "invocationId": AnyCodable("tc_a"),
-                "content": AnyCodable("Done"),
-                "isError": AnyCodable(false),
-                "duration": AnyCodable(20000)
-            ], sequence: 8),
-            sessionEvent(type: "capability.invocation.completed", payload: [
-                "invocationId": AnyCodable("tc_b"),
-                "content": AnyCodable("Failed"),
-                "isError": AnyCodable(true),
-                "duration": AnyCodable(5000)
-            ], sequence: 9)
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.subagentSpawns.count, 2)
-        XCTAssertEqual(state.subagentCompletions.count, 1)
-        XCTAssertNotNil(state.subagentCompletions["sub_a"])
-        XCTAssertEqual(state.subagentCompletions["sub_a"]?.totalTurns, 4)
-        XCTAssertEqual(state.subagentFailures.count, 1)
-        XCTAssertNotNil(state.subagentFailures["sub_b"])
-        XCTAssertEqual(state.subagentFailures["sub_b"]?.error, "Provider error")
-    }
-
-    func testSubagentSpawnedWithoutInvocationIdFallback() {
-        let events = [
-            sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "invocationId": AnyCodable("tc_old"),
-                "modelPrimitiveName": AnyCodable("execute"), "contractId": AnyCodable("agent::spawn_subagent"),
-                "arguments": AnyCodable("{\"task\":\"Old style task\"}"),
-                "turn": AnyCodable(1)
-            ], sequence: 2),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_old"),
-                "task": AnyCodable("Old style task"),
-                "model": AnyCodable("claude-sonnet-4-5")
-            ], sequence: 3),
-            sessionEvent(type: "subagent.completed", payload: [
-                "subagentSessionId": AnyCodable("sub_old"),
-                "resultSummary": AnyCodable("Done"),
-                "totalTurns": AnyCodable(3),
-                "duration": AnyCodable(15000),
-                "totalTokenUsage": AnyCodable(["inputTokens": 5000, "outputTokens": 300])
-            ], sequence: 4)
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.subagentSpawns.count, 1)
-        XCTAssertNil(state.subagentSpawns[0].invocationId)
-        XCTAssertEqual(state.subagentSpawns[0].subagentSessionId, "sub_old")
-    }
-
-    func testRunningSubagentNoCompletionEvent() {
-        let events = [
-            sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "capability.invocation.started", payload: [
-                "invocationId": AnyCodable("tc_run"),
-                "modelPrimitiveName": AnyCodable("execute"), "contractId": AnyCodable("agent::spawn_subagent"),
-                "arguments": AnyCodable("{\"task\":\"Long running task\"}"),
-                "turn": AnyCodable(1)
-            ], sequence: 2),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_run"),
-                "task": AnyCodable("Long running task"),
-                "model": AnyCodable("claude-opus-4-6"),
-                "invocationId": AnyCodable("tc_run")
-            ], sequence: 3)
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.subagentSpawns.count, 1)
-        XCTAssertTrue(state.subagentCompletions.isEmpty)
-        XCTAssertTrue(state.subagentFailures.isEmpty)
-    }
-
-    func testBackgroundSubagentNoCapabilityInvocation() {
-        let events = [
-            sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "message.user", payload: ["content": AnyCodable("Hello")], sequence: 2),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_bg"),
-                "task": AnyCodable("LedgerWriter"),
-                "model": AnyCodable("claude-haiku-4-5"),
-                "spawnType": AnyCodable("subsession")
-            ], sequence: 3),
-            sessionEvent(type: "subagent.completed", payload: [
-                "subagentSessionId": AnyCodable("sub_bg"),
-                "resultSummary": AnyCodable("Ledger updated"),
-                "totalTurns": AnyCodable(1),
-                "duration": AnyCodable(2000),
-                "totalTokenUsage": AnyCodable(["inputTokens": 1000, "outputTokens": 50])
-            ], sequence: 4)
-        ]
-
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-
-        XCTAssertEqual(state.subagentSpawns.count, 1)
-        XCTAssertEqual(state.subagentCompletions.count, 1)
-    }
-
-    func testSubagentSpawnedBlockingFieldExtracted() {
-        let events = [
-            sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_1"),
-                "task": AnyCodable("Blocking task"),
-                "model": AnyCodable("claude-opus-4-6"),
-                "invocationId": AnyCodable("tc_1"),
-                "blocking": AnyCodable(true)
-            ], sequence: 2)
-        ]
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-        XCTAssertEqual(state.subagentSpawns.count, 1)
-        XCTAssertTrue(state.subagentSpawns[0].blocking)
-    }
-
-    func testSubagentSpawnedBlockingDefaultsFalse() {
-        // Old events without blocking field should default to false
-        let events = [
-            sessionEvent(type: "session.start", payload: [:], sequence: 1),
-            sessionEvent(type: "subagent.spawned", payload: [
-                "subagentSessionId": AnyCodable("sub_old"),
-                "task": AnyCodable("Old task"),
-                "model": AnyCodable("claude-opus-4-6")
-            ], sequence: 2)
-        ]
-        let state = UnifiedEventTransformer.reconstructSessionState(from: events)
-        XCTAssertEqual(state.subagentSpawns.count, 1)
-        XCTAssertFalse(state.subagentSpawns[0].blocking)
-    }
-
-    // MARK: - Subagent Session Chat Rendering Tests
-
-    func testSubagentSessionEventsTransformToChat() {
-        // A typical subagent session: user message (task), assistant reply with capability invocation, final output
+    func testSessionEventsTransformToChat() {
+        // A typical session: user message, assistant reply with capability invocation, final output.
         let events = [
             rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.user", payload: [
@@ -1882,13 +1607,13 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    func testSubagentSessionEmptyEventsProducesNoMessages() {
+    func testSessionEmptyEventsProducesNoMessages() {
         let events: [RawEvent] = []
         let messages = UnifiedEventTransformer.transformPersistedEvents(events)
         XCTAssertTrue(messages.isEmpty)
     }
 
-    func testSubagentSessionWithOnlySessionStartProducesNoMessages() {
+    func testSessionWithOnlySessionStartProducesNoMessages() {
         let events = [
             rawEvent(type: "session.start", payload: [:], sequence: 1)
         ]
@@ -1896,8 +1621,8 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertTrue(messages.isEmpty)
     }
 
-    func testSubagentSessionMultiTurnConversation() {
-        // Subagent with multiple turns (reads two files)
+    func testSessionMultiTurnConversation() {
+        // Multiple turns with capability calls.
         let events = [
             rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
             rawEvent(type: "message.user", payload: [
@@ -1970,7 +1695,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(textMessages.count, 2)
     }
 
-    func testSubagentSessionWithMarkdownTable() {
+    func testSessionWithMarkdownTable() {
         // Ensure markdown tables survive transformation
         let events = [
             rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
@@ -1997,7 +1722,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         XCTAssertEqual(assistantTexts.count, 1, "Markdown table text should be preserved")
     }
 
-    func testSubagentSessionWithFailedCapability() {
+    func testSessionWithFailedCapability() {
         // Capability that returns error status
         let events = [
             rawEvent(type: "session.start", payload: [:], timestamp: timestamp(0), sequence: 1),
@@ -2631,169 +2356,4 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    // MARK: - skills.cleared Reconstruction Tests (M6)
-
-    /// Reconstructs the `skills.cleared` event emitted on the first prompt
-    /// after a compaction with `userInteraction` policy: the picker renders with a
-    /// chip per cleared skill.
-    func testTransformSkillsClearedUserInteraction() {
-        let event = rawEvent(
-            type: "skills.cleared",
-            payload: [
-                "clearedSkills": AnyCodable(["browser", "code-review", "memory"]),
-                "reason": AnyCodable("compaction"),
-                "mode": AnyCodable("userInteraction")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNotNil(message)
-        XCTAssertEqual(message?.role, .system)
-
-        guard case .systemEvent(let systemEvent) = message?.content else {
-            XCTFail("Expected systemEvent content, got \(String(describing: message?.content))")
-            return
-        }
-        guard case .skillsCleared(let names, let mode) = systemEvent else {
-            XCTFail("Expected .skillsCleared system event, got \(systemEvent)")
-            return
-        }
-        XCTAssertEqual(names, ["browser", "code-review", "memory"])
-        XCTAssertEqual(mode, .userInteraction)
-    }
-
-    /// Reconstructs the `skills.cleared` event emitted under `clearAll` policy:
-    /// informational banner (no picker affordance), names preserved in order.
-    func testTransformSkillsClearedClearAll() {
-        let event = rawEvent(
-            type: "skills.cleared",
-            payload: [
-                "clearedSkills": AnyCodable(["alpha", "beta"]),
-                "reason": AnyCodable("compaction"),
-                "mode": AnyCodable("clearAll")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNotNil(message)
-        guard case .systemEvent(let systemEvent) = message?.content,
-              case .skillsCleared(let names, let mode) = systemEvent else {
-            XCTFail("Expected .skillsCleared system event")
-            return
-        }
-        XCTAssertEqual(names, ["alpha", "beta"])
-        XCTAssertEqual(mode, .clearAll)
-    }
-
-    /// Strict wire contract: the `mode` field is required. An event without
-    /// it must fail to decode and the transformer must drop it — mirrors the
-    /// Rust `SkillsClearedPayload` which no longer carries `#[serde(default)]`.
-    func testTransformSkillsClearedMissingModeReturnsNil() {
-        let event = rawEvent(
-            type: "skills.cleared",
-            payload: [
-                "clearedSkills": AnyCodable(["old-skill"]),
-                "reason": AnyCodable("compaction")
-                // No mode field — wire contract violation
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNil(message, "Missing mode must drop the event, matching Rust decoder")
-    }
-
-    /// Strict wire contract: the `reason` field is required.
-    func testTransformSkillsClearedMissingReasonReturnsNil() {
-        let event = rawEvent(
-            type: "skills.cleared",
-            payload: [
-                "clearedSkills": AnyCodable(["x"]),
-                "mode": AnyCodable("userInteraction")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNil(message, "Missing reason must drop the event")
-    }
-
-    /// Defense-in-depth: server suppresses emission on empty cleared_skills,
-    /// but if a malformed/manually-written event ever reaches the client the
-    /// transformer drops it rather than rendering an empty picker.
-    func testTransformSkillsClearedEmptyReturnsNil() {
-        let event = rawEvent(
-            type: "skills.cleared",
-            payload: [
-                "clearedSkills": AnyCodable([] as [String]),
-                "reason": AnyCodable("compaction"),
-                "mode": AnyCodable("userInteraction")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNil(message, "Empty clearedSkills must not produce a ChatMessage")
-    }
-
-    /// If `clearedSkills` is missing entirely (payload corruption), the
-    /// transformer returns nil and logs a warning rather than crashing or
-    /// rendering an empty pill. Regression guard against optional-field
-    /// drift between server payload and iOS parser.
-    func testTransformSkillsClearedMissingSkillsReturnsNil() {
-        let event = rawEvent(
-            type: "skills.cleared",
-            payload: [
-                "reason": AnyCodable("compaction"),
-                "mode": AnyCodable("userInteraction")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNil(message, "Missing clearedSkills must not produce a ChatMessage")
-    }
-
-    /// Forward-compat: unknown `mode` strings (introduced server-side ahead
-    /// of iOS) must cause the transformer to drop the event. Mirrors Rust's
-    /// `skills_cleared_mode_rejects_unknown_variant` test — if a future mode
-    /// value is emitted but not yet understood, dropping the event is
-    /// preferable to silently mis-rendering it as an interactive picker.
-    /// The user will instead see no pill until the iOS build catches up,
-    /// which matches the informational-event safety property.
-    func testTransformSkillsClearedUnknownModeReturnsNil() {
-        let event = rawEvent(
-            type: "skills.cleared",
-            payload: [
-                "clearedSkills": AnyCodable(["x"]),
-                "reason": AnyCodable("compaction"),
-                "mode": AnyCodable("someFutureMode")
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNil(message, "Unknown mode must drop the event, matching Rust decoder")
-    }
-
-    /// SessionEvent overload: reconstruction uses the same handler path as
-    /// RawEvent, so both overloads must produce the same message shape for
-    /// the same wire payload.
-    func testTransformSkillsClearedSessionEventParity() {
-        let payload: [String: AnyCodable] = [
-            "clearedSkills": AnyCodable(["a", "b"]),
-            "reason": AnyCodable("compaction"),
-            "mode": AnyCodable("clearAll")
-        ]
-
-        let raw = rawEvent(type: "skills.cleared", payload: payload)
-        let sess = sessionEvent(type: "skills.cleared", payload: payload)
-
-        let rawMessage = UnifiedEventTransformer.transformPersistedEvent(raw)
-        let sessMessage = UnifiedEventTransformer.transformPersistedEvent(sess)
-
-        XCTAssertEqual(rawMessage?.content, sessMessage?.content)
-    }
 }

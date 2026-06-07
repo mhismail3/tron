@@ -35,8 +35,6 @@ enum EventIconProvider {
             return "doc.text.badge.plus"
         case .contextCleared:
             return "clear.fill"
-        case .skillActivated, .skillDeactivated:
-            return "sparkles"
         case .compactBoundary:
             return "arrow.down.right.and.arrow.up.left"
         case .configModelSwitch:
@@ -57,28 +55,12 @@ enum EventIconProvider {
             return "arrow.right.circle"
         case .streamTurnEnd:
             return "arrow.down.circle"
-        case .worktreeAcquired:
-            return "arrow.triangle.branch"
-        case .worktreeCommit:
-            return "checkmark.diamond.fill"
-        case .worktreeReleased:
-            return "arrow.uturn.backward.circle"
-        case .worktreeMerged:
-            return "arrow.triangle.merge"
-        case .worktreeRenamed:
-            return "pencil.line"
         case .notificationProcessResult:
             return "bell.badge.fill"
         case .processResultsConsumed:
             return "tray.and.arrow.down.fill"
         case .llmHookResult:
             return "wand.and.rays"
-        case .subagentSpawned:
-            return "arrow.triangle.branch"
-        case .subagentCompleted:
-            return "checkmark.circle.fill"
-        case .subagentFailed:
-            return "xmark.circle.fill"
         case .turnFailed:
             return "exclamationmark.triangle.fill"
         case .memoryRetained:
@@ -122,10 +104,6 @@ enum EventIconProvider {
             return .tronPurple
         case .contextCleared:
             return .tronCyan
-        case .skillActivated:
-            return .tronSuccess
-        case .skillDeactivated:
-            return .tronWarning
         case .compactBoundary:
             return .tronCyan
         case .configModelSwitch:
@@ -144,20 +122,12 @@ enum EventIconProvider {
             return .tronTextMuted
         case .streamTurnStart, .streamTurnEnd:
             return .tronBlue
-        case .worktreeAcquired, .worktreeCommit, .worktreeReleased, .worktreeMerged, .worktreeRenamed:
-            return .tronCyan
         case .notificationProcessResult:
             return .tronWarning
         case .processResultsConsumed:
             return .tronSuccess
         case .llmHookResult:
             return .tronPurple
-        case .subagentSpawned:
-            return .tronCyan
-        case .subagentCompleted:
-            return .tronSuccess
-        case .subagentFailed:
-            return .tronError
         case .turnFailed:
             return .tronError
         case .memoryRetained:

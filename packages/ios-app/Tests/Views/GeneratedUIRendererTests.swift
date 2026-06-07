@@ -91,7 +91,6 @@ struct GeneratedUIRendererTests {
                 idempotencyKeyTemplate: "${submission.idempotencyKey}",
                 requiredGrant: "prompt_library.write",
                 requiredRisk: "medium",
-                approvalPolicy: AnyCodable(["required": false]),
                 targetRevision: 1,
                 expiresAt: "2026-05-20T00:01:14.053095+00:00"
             )
@@ -123,7 +122,6 @@ struct GeneratedUIRendererTests {
             idempotencyKeyTemplate: "${submission.idempotencyKey}",
             requiredGrant: "prompt_library.write",
             requiredRisk: "medium",
-            approvalPolicy: AnyCodable(["required": false]),
             targetRevision: 1,
             expiresAt: "2100-01-01T00:00:00Z"
         )
@@ -164,7 +162,6 @@ struct GeneratedUIRendererTests {
             idempotencyKeyTemplate: "${submission.idempotencyKey}",
             requiredGrant: "grant",
             requiredRisk: "medium",
-            approvalPolicy: AnyCodable(["required": false]),
             targetRevision: 7,
             expiresAt: "2100-01-01T00:00:00Z",
             presentation: UiActionPresentationDTO(

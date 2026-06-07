@@ -12,9 +12,6 @@ protocol DependencyProviding: AnyObject {
     /// Local SQLite event database
     var eventDatabase: EventDatabase { get }
 
-    /// Skill store for managing skills
-    var skillStore: SkillStore { get }
-
     /// Event store manager for session state
     var eventStoreManager: EventStoreManager { get }
 

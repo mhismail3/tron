@@ -52,7 +52,7 @@ final class AudioLevelMeter: @unchecked Sendable {
 private let log = TronLogger.shared
 
 /// Single source of truth for AVAudioEngine-based recording.
-/// Shared by AudioRecorder (chat transcription) and VoiceNotesRecorder (voice notes).
+/// Shared by prompt transcription recording surfaces.
 ///
 /// Supports pre-warming via `prepare()` to eliminate startup latency. When prepared,
 /// the engine is already running with a tap that captures audio into the buffer.

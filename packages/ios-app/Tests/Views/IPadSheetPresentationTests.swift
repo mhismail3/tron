@@ -75,16 +75,8 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
-                ["Sources", "Views", "Session", "CloneRepoSheet.swift"],
-                ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
-            ),
-            (
                 ["Sources", "Views", "Capabilities", "Display", "StreamSheetView.swift"],
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
-            ),
-            (
-                ["Sources", "Views", "Subagents", "SubagentDetailSheet.swift"],
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             ),
             (
                 ["Sources", "Views", "System", "CompactionDetailSheet.swift"],
@@ -99,20 +91,12 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
             ),
             (
-                ["Sources", "Views", "EngineApproval", "EngineApprovalSheet.swift"],
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)"
-            ),
-            (
                 ["Sources", "Views", "UserInteraction", "UserInteractionSheet.swift"],
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)"
             ),
             (
                 ["Sources", "Views", "Process", "ProcessListSheet.swift"],
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
-            ),
-            (
-                ["Sources", "Views", "Subagents", "SubagentResultsListSheet.swift"],
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             )
         ]
 
@@ -133,24 +117,9 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
-                ["Sources", "Views", "Subagents", "SubagentResultsListSheet.swift"],
-                "struct SubagentResultsListSheet: View",
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
-            ),
-            (
-                ["Sources", "Views", "AuditDetails", "AuditDetailsComponents.swift"],
-                "struct CapabilityInspectionSheet: View",
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
-            ),
-            (
                 ["Sources", "Views", "Settings", "Pages", "PluginSourcesPage.swift"],
                 "private struct AddPluginSourceSheet: View",
                 ".adaptivePresentationDetents([.medium], ipadSizing: .largeForm)"
-            ),
-            (
-                ["Sources", "Views", "SourceChanges", "FileDetailSheet.swift"],
-                "struct FileDetailSheet: View",
-                "CapabilityDetailSheetContainer("
             ),
             (
                 ["Sources", "Views", "System", "LogViewer.swift"],
@@ -171,24 +140,6 @@ final class IPadSheetPresentationTests: XCTestCase {
                 "\(entry.anchor) should own canonical adaptive iPad sheet sizing"
             )
         }
-    }
-
-    func testSourceControlDoesNotWrapFileDetailWithDuplicateSizing() throws {
-        let content = try source(pathComponents: ["Sources", "Views", "AgentControl", "SourceControlSheet.swift"])
-        let sheetRange = try XCTUnwrap(
-            content.range(of: ".sheet(item: $selectedFileDetail)"),
-            "SourceControlSheet should still present file detail through its selected-file sheet"
-        )
-        let nextSheetRange = try XCTUnwrap(
-            content.range(of: ".sheet(item: $activeGitAction", range: sheetRange.upperBound..<content.endIndex),
-            "SourceControlSheet should still present git action sheets after file detail"
-        )
-        let fileDetailSheetBlock = String(content[sheetRange.lowerBound..<nextSheetRange.lowerBound])
-
-        XCTAssertFalse(
-            fileDetailSheetBlock.contains(".adaptivePresentationDetents("),
-            "FileDetailSheet should inherit canonical sizing from CapabilityDetailSheetContainer instead of a presenter-side duplicate"
-        )
     }
 
     func testSettingsDoesNotWrapLogViewerWithDuplicateSizing() throws {

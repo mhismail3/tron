@@ -23,7 +23,7 @@ struct SourceGuardTests {
 
         #expect(toolbar.contains(#"Image("TronLogoVector")"#))
         #expect(toolbar.contains(#"Image(systemName: "gearshape")"#))
-        #expect(toolbar.contains(#".accessibilityLabel("Navigation")"#))
+        #expect(toolbar.contains(#".accessibilityLabel("Show sidebar")"#))
         #expect(toolbar.contains(#".accessibilityLabel("Settings")"#))
         #expect(!toolbar.contains(#"Label("Settings", systemImage:"#))
         #expect(!toolbar.contains(#"Text("Navigation")"#))
@@ -122,7 +122,7 @@ struct SourceGuardTests {
             "Voice" + "Notes" + "List" + "View",
             "Safari" + "View",
             "NavigationMode" + "." + "automations",
-            "NavigationMode" + "." + "voiceNotes",
+            "NavigationMode" + "." + "voice" + "Notes",
             "can" + "Manage" + "Automations",
         ]
 
@@ -286,8 +286,8 @@ struct SourceGuardTests {
             ("tool " + "call", "retired invocation wording"),
             ("tool" + "Start", "retired dashboard activity kind"),
             ("tool" + "End", "retired dashboard activity kind"),
-            ("tool" + "Agent", "retired subagent spawn-type wire value"),
-            ("Tool" + "Agent", "retired subagent spawn-type symbol"),
+            ("tool" + "Agent", "retired worker spawn-type wire value"),
+            ("Tool" + "Agent", "retired worker spawn-type symbol"),
             ("tool" + "Count", "retired analytics capability-count field"),
             ("tool" + "Status", "retired interaction status payload field"),
             ("tool" + "Order", "retired capability metadata ordering key"),
@@ -320,7 +320,7 @@ struct SourceGuardTests {
             ("ask" + "User" + "Question", "retired interaction topology naming"),
             ("Notify" + "App", "retired notification topology naming"),
             ("Get" + "Confirmation", "retired confirmation topology naming"),
-            ("Spawn" + "Subagent", "retired subagent topology naming"),
+            ("Spawn" + "Sub" + "agent", "retired worker topology naming"),
             ("capability" + "Name == " + #""AskUserQuestion""#, "old-name interaction detection"),
             (#""name": "# + #""AskUserQuestion""#, "old-name interaction fixture identity"),
             (#""name":"# + #""AskUserQuestion""#, "old-name interaction fixture identity"),
@@ -395,6 +395,8 @@ struct SourceGuardTests {
         )
 
         #expect(appEntry.contains("guard onboardingComplete else { return }"))
+        #expect(appEntry.contains("guard container.pairedServerStore.activeServer != nil else"))
+        #expect(appEntry.contains("No active paired server; push authorization request skipped"))
         #expect(appEntry.contains("await registerPushIfAuthorized()"))
         #expect(appEntry.contains("case .notDetermined:"))
         #expect(appEntry.contains("requestAuthorization()"))
@@ -445,242 +447,104 @@ struct SourceGuardTests {
         #expect(!appEntry.contains("if #available(iOS 26.0, *)"))
     }
 
-    @Test("Prompt Library picker is selection-only and management is generated UI")
-    func testPromptLibraryPickerBoundaryAndGeneratedManagement() throws {
+    @Test("Primitive shell has no fixed prompt picker plane")
+    func testPrimitiveShellHasNoFixedPromptPickerPlane() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let promptRoot = iosRoot.appendingPathComponent("Sources/Views/PromptLibrary")
-        let sheet = try String(
-            contentsOf: promptRoot.appendingPathComponent("PromptLibrarySheet.swift"),
-            encoding: .utf8
-        )
-        let historyList = try String(
-            contentsOf: promptRoot.appendingPathComponent("PromptHistoryListView.swift"),
-            encoding: .utf8
-        )
-        let snippetList = try String(
-            contentsOf: promptRoot.appendingPathComponent("PromptSnippetListView.swift"),
-            encoding: .utf8
-        )
-        let pickerState = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/PromptLibraryState.swift"),
-            encoding: .utf8
-        )
-        let managementSheet = try String(
-            contentsOf: promptRoot.appendingPathComponent("PromptLibraryManagementSurfaceSheet.swift"),
-            encoding: .utf8
-        )
-        let generatedRenderer = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/AuditDetails/GeneratedUISurfaceView.swift"),
-            encoding: .utf8
-        )
+        let promptRoot = iosRoot.appendingPathComponent("Sources/Views/Prompt" + "Library")
 
-        #expect(sheet.contains("PromptLibraryManagementSurfaceSheet"))
-        #expect(sheet.contains("onSelect(text)"))
-        #expect(sheet.contains("onSelect(item.text)"))
-        #expect(historyList.contains(".onTapGesture { onSelect(item.text) }"))
-        #expect(snippetList.contains(".onTapGesture { onSelect(snippet.text) }"))
-        #expect(!sheet.contains("SnippetEditorSheet"))
-        #expect(!sheet.contains("showClearHistoryAlert"))
-        #expect(!sheet.contains("isCreatingSnippet"))
-        #expect(!sheet.contains("editingSnippet"))
-        for pickerFile in [sheet, historyList, snippetList, pickerState] {
-            #expect(!pickerFile.contains(".swipeActions"))
-            #expect(!pickerFile.contains("createSnippet"))
-            #expect(!pickerFile.contains("updateSnippet"))
-            #expect(!pickerFile.contains("deleteSnippet"))
-            #expect(!pickerFile.contains("deleteHistory"))
-            #expect(!pickerFile.contains("clearHistory"))
-            #expect(!pickerFile.contains("targetFunctionId"))
-            #expect(!pickerFile.contains("payloadTemplate"))
-            #expect(!pickerFile.contains("requiredGrant"))
-            #expect(!pickerFile.contains("UiActionSubmissionDTO"))
+        #expect(!FileManager.default.fileExists(atPath: promptRoot.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: iosRoot.appendingPathComponent("Sources/ViewModels/State/Prompt" + "LibraryState.swift").path
+        ))
+        #expect(!FileManager.default.fileExists(
+            atPath: iosRoot.appendingPathComponent("Sources/Models/EngineProtocol/EngineProtocolTypes+Prompt" + "Library.swift").path
+        ))
+        #expect(!FileManager.default.fileExists(
+            atPath: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/Prompt" + "LibraryClient.swift").path
+        ))
+    }
+
+    @Test("Primitive shell has no interactive approval plane")
+    func testPrimitiveShellHasNoInteractiveApprovalPlane() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let deletedPaths = [
+            "Sources/Core/Events/Plugins/Approval",
+            "Sources/Services/Network/Clients/ApprovalClient.swift",
+            "Sources/ViewModels/Handlers/EngineApprovalCoordinator.swift",
+            "Sources/ViewModels/State/EngineApprovalState.swift",
+            "Sources/Views/EngineApproval",
+            "Sources/Models/Messages/EngineApprovalTypes.swift",
+            "Sources/Models/EngineProtocol/EngineProtocolTypes+Approval.swift",
+        ]
+        for relativePath in deletedPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) belongs to the deleted interactive approval plane"
+            )
         }
-        #expect(!snippetList.contains("onEdit"))
 
-        #expect(managementSheet.contains(#"targetType: "resource_collection""#))
-        #expect(managementSheet.contains(#"prompt_library.snippets.v1"#))
-        #expect(managementSheet.contains(#"prompt_library.history.v1"#))
-        #expect(managementSheet.contains("GeneratedUISurfaceView"))
-        #expect(managementSheet.contains("submitUiAction"))
-        #expect(managementSheet.contains("ToastCenter.shared.push"))
-        #expect(managementSheet.contains("successMessage"))
-        #expect(managementSheet.contains("toastDedupKey"))
-        #expect(managementSheet.contains(".withToastBanner()"))
-        #expect(!managementSheet.contains("lastActionResult"))
-        #expect(!managementSheet.contains("actionResultView"))
-        #expect(!managementSheet.contains("childInvocationId"))
-        #expect(!managementSheet.contains("targetFunctionId"))
-        #expect(!managementSheet.contains("payloadTemplate"))
-        #expect(!managementSheet.contains("requiredGrant"))
-
-        #expect(generatedRenderer.contains("seedFormDefaultsIfNeeded"))
-        #expect(generatedRenderer.contains(#"component.props?["value"]"#))
-        #expect(generatedRenderer.contains(#""TextField", "TextArea", "Select", "Toggle", "Stepper", "DateTime""#))
-        #expect(generatedRenderer.contains("confirmationDialog"))
-        #expect(generatedRenderer.contains("GeneratedUIRenderer.inputIsSatisfied"))
-        #expect(generatedRenderer.contains("GeneratedUIRenderer.userInput"))
-        #expect(generatedRenderer.contains("UiActionSubmissionDTO"))
-        #expect(generatedRenderer.contains("guard !isOfflineCached else { return }"))
-        #expect(generatedRenderer.contains("UiActionPresentationDTO"))
-        #expect(generatedRenderer.contains("GeneratedUIActionButtonRole(presentation:"))
-        #expect(generatedRenderer.contains("presentationIcon(for:"))
-        #expect(generatedRenderer.contains("SettingsCard"))
-        #expect(generatedRenderer.contains("TronTypography"))
-        #expect(generatedRenderer.contains(".sectionFill"))
-        #expect(generatedRenderer.contains("GeneratedUIActionButtonStyle"))
-        #expect(generatedRenderer.contains(".generatedUIAction"))
-        #expect(generatedRenderer.contains(".buttonStyle(.noFeedback)"))
-        #expect(generatedRenderer.contains("generatedUIRowExpansionAnimation"))
-        #expect(generatedRenderer.contains("Animation.smooth"))
-        #expect(generatedRenderer.contains("withAnimation(generatedUIRowExpansionAnimation)"))
-        #expect(generatedRenderer.contains(".transition(.opacity)"))
-        #expect(!generatedRenderer.contains("targetFunctionId"))
-        #expect(!generatedRenderer.contains("isDestructive(action:"))
-        #expect(!generatedRenderer.contains("actionSymbol(action:"))
-        #expect(!generatedRenderer.contains("humanizedActionLabel"))
-        #expect(!generatedRenderer.contains(#"text.contains("delete")"#))
-        #expect(!generatedRenderer.contains(#"text.contains("refresh")"#))
-        #expect(!generatedRenderer.contains(".textFieldStyle(.roundedBorder)"))
-        #expect(!generatedRenderer.contains(".background(.thinMaterial"))
-        #expect(!generatedRenderer.contains(".spring("))
-        #expect(!generatedRenderer.contains(".scaleEffect("))
-        #expect(!generatedRenderer.contains("DisclosureGroup"))
-        #expect(managementSheet.contains("SettingsCard"))
-        #expect(managementSheet.contains("animatesSelection: false"))
+        let forbiddenFragments = [
+            "approval::resolve",
+            "approval.pending",
+            "approval.resolved",
+            "approvalPromptMode",
+            "AutonomyApprovalPromptMode",
+            "EngineApproval",
+            "engineApproval",
+            "ApprovalClient",
+            "approvalPolicy",
+            "approvalContract",
+            "approvalState",
+            "APPROVAL_REQUIRED"
+        ]
+        let sourcesRoot = iosRoot.appendingPathComponent("Sources")
+        guard let enumerator = FileManager.default.enumerator(
+            at: sourcesRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            Issue.record("Unable to enumerate iOS sources")
+            return
+        }
+        for case let url as URL in enumerator where url.pathExtension == "swift" {
+            let values = try url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values.isRegularFile == true else { continue }
+            let content = try String(contentsOf: url, encoding: .utf8)
+            for fragment in forbiddenFragments {
+                #expect(
+                    !content.contains(fragment),
+                    "\(url.lastPathComponent) retains deleted approval fragment \(fragment)"
+                )
+            }
+        }
     }
 
-    @Test("Engine approval flow stays server-owned")
-    func testEngineApprovalFlowStaysServerOwned() throws {
-        let iosRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let client = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/ApprovalClient.swift"),
-            encoding: .utf8
-        )
-        let coordinator = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/Handlers/EngineApprovalCoordinator.swift"),
-            encoding: .utf8
-        )
-        let sheet = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/EngineApproval/EngineApprovalSheet.swift"),
-            encoding: .utf8
-        )
-        let types = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Models/Messages/EngineApprovalTypes.swift"),
-            encoding: .utf8
-        )
-
-        #expect(client.contains("\"approval::resolve\""))
-        #expect(client.contains("authorityScopes: [\"approval.resolve\"]"))
-        #expect(coordinator.contains("status: .resolving"))
-        #expect(coordinator.contains("decision: nil"))
-        #expect(coordinator.contains("updateMessageFromServerApproval"))
-        #expect(coordinator.contains("context.connectionState.isConnected"))
-        #expect(coordinator.contains("Approval decisions are read-only while disconnected"))
-        #expect(sheet.contains("capabilityData.consequenceSections"))
-        #expect(types.contains("targetMetadata"))
-        #expect(types.contains("authorityGrantId"))
-        #expect(types.contains("idempotencyKey"))
-    }
-
-    @Test("Audit Details overview and inspection sheet stay native and scoped")
+    @Test("Audit Details product console stays removed")
     func testAuditDetailsOverviewAndInspectionBoundary() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let auditDetails = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/AuditDetails/AuditDetailsView.swift"),
-            encoding: .utf8
-        )
-        let auditDetailsComponents = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/AuditDetails/AuditDetailsComponents.swift"),
-            encoding: .utf8
-        )
-        let auditDetailsState = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/AuditDetailsState.swift"),
-            encoding: .utf8
-        )
-        let capabilityClient = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/CapabilityClient.swift"),
-            encoding: .utf8
-        )
-        let moduleProjection = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/ViewModels/State/AuditDetailsWorkerPackProjection.swift"),
-            encoding: .utf8
-        )
-        let moduleProjectionView = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/AuditDetails/AuditDetailsWorkerPackProjectionView.swift"),
-            encoding: .utf8
-        )
-        let auditDetailsSurface = auditDetails + "\n" + auditDetailsComponents
+        let deletedPaths = [
+            "Sources/Views/AuditDetails",
+            "Sources/ViewModels/State/AuditDetailsState.swift",
+            "Sources/ViewModels/State/AuditDetailsWorkerPackProjection.swift",
+            "Sources/ViewModels/State/AuditDetailsWorkerArtifactProjection.swift",
+            "Sources/Services/Network/Clients/CapabilityClient.swift",
+        ]
+        for relativePath in deletedPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) belongs to the deleted fixed Audit Details console"
+            )
+        }
 
-        #expect(!auditDetails.contains(#".navigationTitle("Engine")"#))
-        #expect(auditDetails.contains("DashboardToolbarContent("))
-        #expect(auditDetails.contains(#"title: "Audit Details","#))
-        #expect(auditDetails.contains("AuditDetailsSuggestionChips(suggestions: state.substrateSearchSuggestions)"))
-        #expect(auditDetailsState.contains("var substrateSearchSuggestions: [AuditDetailsSearchSuggestion]"))
-        #expect(auditDetailsState.contains("registry?.implementations"))
-        #expect(auditDetailsState.contains("registry?.documents"))
-        #expect(auditDetailsState.contains("catalogWatchSnapshot("))
-        #expect(auditDetailsState.contains("catalogSnapshot?.snapshot?.functions"))
-        #expect(capabilityClient.contains(#""catalog::watch_snapshot""#))
-        #expect(capabilityClient.contains(#""catalog.read""#))
-        #expect(auditDetailsState.contains("controlSnapshot?.availableActions"))
-        #expect(auditDetailsState.contains("controlSnapshot?.modulePackages"))
-        #expect(auditDetailsState.contains("controlSnapshot?.uiSurfaceRefs"))
-        #expect(auditDetailsState.contains("readOnlyMutationReason"))
-        #expect(auditDetailsState.contains("Offline Audit Details cache is read-only"))
-        #expect(auditDetailsState.contains("failMutationIfReadOnly(surface: true)"))
-        #expect(auditDetailsState.contains("failMutationIfReadOnly(program: true)"))
-        #expect(auditDetailsState.contains("failMutationIfReadOnly()"))
-        #expect(auditDetails.contains("isOfflineCached: state.isMutatingDisabled"))
-        #expect(auditDetailsState.contains("audit?.events"))
-        #expect(auditDetailsState.contains("programRuns?.programRuns"))
-        #expect(auditDetailsState.contains(#""capabilities.primer""#))
-        #expect(auditDetailsState.contains(#""conformance \(implementation.implementationId)""#))
-        #expect(!auditDetailsComponents.contains("private let suggestions"))
-        for fixedCatalogSuggestion in [
-            "Read files",
-            "Run command",
-            "Search web",
-            "Ask user",
-            "Spawn worker",
-            "read a file",
-            "run a shell command",
-            "search the web",
-            "ask the user a question"
-        ] {
-            #expect(!auditDetailsComponents.contains(fixedCatalogSuggestion))
-        }
-        #expect(auditDetails.contains("AuditDetailsWorkerPackProjectionCard("))
-        #expect(auditDetails.contains("projection: state.moduleOperatorProjection"))
-        #expect(auditDetails.contains(#"state.controlAdvertisesAction(functionId: "ui::surface_for_target", targetType: target.targetType)"#))
-        #expect(auditDetails.contains("state.authorSurface(targetType: target.targetType, targetId: target.targetId)"))
-        #expect(auditDetailsState.contains("AuditDetailsWorkerPackOperatorProjection.make(from: controlSnapshot)"))
-        #expect(moduleProjection.contains("snapshot.moduleHealth"))
-        #expect(moduleProjection.contains("snapshot.moduleSourceTrust"))
-        #expect(moduleProjection.contains(#".filter { $0.functionId.hasPrefix("module::") }"#))
-        #expect(moduleProjection.contains("var surfaceTargets: [AuditDetailsWorkerPackSurfaceTarget]"))
-        #expect(moduleProjectionView.contains("projection.evidenceRefCount"))
-        #expect(moduleProjectionView.contains("projection.surfaceTargets"))
-        #expect(moduleProjectionView.contains("openSurface(target)"))
-        #expect(moduleProjectionView.contains("projection.actions"))
-        for forbiddenModulePolicy in [
-            "module::configure",
-            "module::activate",
-            "module::approve_source",
-            "module::run_conformance",
-            "payloadTemplate",
-            "packagePolicy"
-        ] {
-            #expect(!moduleProjection.contains(forbiddenModulePolicy))
-        }
         let forbiddenProductionModulePolicy = [
             "module::act",
             "module::package_action",
@@ -714,20 +578,6 @@ struct SourceGuardTests {
                 )
             }
         }
-        #expect(auditDetailsSurface.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
-        #expect(auditDetailsSurface.contains(#"SheetTitle(title: "Inspection", color: tint)"#))
-        #expect(auditDetailsSurface.contains("SheetDismissButton(color: tint)"))
-        #expect(auditDetailsSurface.contains("AuditDetailsCard(tint: tint)"))
-        #expect(auditDetailsSurface.contains("private var secondaryTitle: String?"))
-        #expect(auditDetailsSurface.contains("candidate != primaryTitle"))
-
-        let readinessStart = try #require(auditDetails.range(of: "private var readinessIssues"))
-        let readinessEnd = try #require(auditDetails.range(of: "private var mutationIssue"))
-        let readinessBlock = String(auditDetails[readinessStart.lowerBound..<readinessEnd.lowerBound])
-        #expect(!readinessBlock.contains("Program runtime unavailable"))
-        #expect(!readinessBlock.contains("programRuntimeReady"))
-        #expect(auditDetails.contains("private var programRuntimeReady: Bool"))
-        #expect(auditDetails.contains("Program execution stays disabled until the first-party worker reports healthy conformance."))
     }
 
     @Test("feedback recipient has tracked non-placeholder default")
@@ -1022,6 +872,91 @@ struct SourceGuardTests {
                 chipStyleStrokeMatches.isEmpty,
                 "\(url.lastPathComponent) routes removed chipStyle strokeOpacity compatibility through the glass-only API"
             )
+        }
+    }
+
+    @Test("Primitive shell has no fixed product modes")
+    func testPrimitiveShellHasNoFixedProductModes() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourcesRoot = iosRoot.appendingPathComponent("Sources")
+        let viewsRoot = sourcesRoot.appendingPathComponent("Views")
+
+        let removedViewRoots = [
+            "Agent" + "Control",
+            "Audit" + "Details",
+            "Prompt" + "Library",
+            "Skills",
+            "Source" + "Changes",
+            "Sub" + "agents",
+            "Voice" + "Notes",
+            "Work",
+        ]
+        for rootName in removedViewRoots {
+            #expect(
+                !FileManager.default.fileExists(atPath: viewsRoot.appendingPathComponent(rootName).path),
+                "\(rootName) is a fixed product UI root; primitive iOS must render only the chat shell and generic runtime surfaces"
+            )
+        }
+
+        let requiredShellFiles = [
+            "Views/Chat/ContentView.swift",
+            "Views/Chat/ChatView.swift",
+            "Views/InputBar/InputBar.swift",
+            "Views/Settings/SettingsView.swift",
+            "Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift",
+        ]
+        for relativePath in requiredShellFiles {
+            #expect(
+                FileManager.default.fileExists(atPath: sourcesRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) is part of the retained primitive shell"
+            )
+        }
+
+        let forbiddenNeedles: [(String, String)] = [
+            ("Navigation" + "Mode" + "." + "work", "fixed Work navigation"),
+            ("case " + "work\n", "fixed Work navigation enum case"),
+            ("case " + "work,", "fixed Work navigation enum case"),
+            ("case " + "work:", "fixed Work navigation enum case"),
+            ("show" + "Agent" + "Control", "Agent Control sheet presenter"),
+            ("Agent" + "Control" + "View", "Agent Control product sheet"),
+            ("Work" + "Dashboard" + "View", "fixed Work dashboard"),
+            ("Audit" + "Details" + "View", "fixed Audit Details console"),
+            ("Source" + "Control" + "Sheet", "fixed Source Control sheet"),
+            ("Prompt" + "Library" + "Sheet", "fixed prompt picker"),
+            ("Skill" + "Detail" + "Sheet", "fixed Skills sheet"),
+            ("Mention" + "Popup", "fixed Skills picker"),
+            ("Floating" + "Voice" + "Notes" + "Button", "fixed Voice Notes UI"),
+            ("Voice" + "Notes" + "Recording" + "Sheet", "fixed Voice Notes UI"),
+            ("Sub" + "agent" + "Detail" + "Sheet", "fixed worker UI"),
+            ("Sub" + "agent" + "Results" + "List" + "Sheet", "fixed worker UI"),
+            ("Capability" + "Client", "capability catalog/operator client"),
+            ("agent::" + "work_snapshot", "server-owned Work projection"),
+        ]
+
+        guard let enumerator = FileManager.default.enumerator(
+            at: sourcesRoot,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            Issue.record("Could not enumerate \(sourcesRoot.path)")
+            return
+        }
+
+        while let any = enumerator.nextObject() {
+            guard let url = any as? URL else { continue }
+            guard url.pathExtension == "swift" else { continue }
+
+            let content = try String(contentsOf: url, encoding: .utf8)
+            for (needle, reason) in forbiddenNeedles {
+                #expect(
+                    !content.contains(needle),
+                    "\(url.path) contains \(reason): `\(needle)`"
+                )
+            }
         }
     }
 }

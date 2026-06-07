@@ -11,7 +11,6 @@ final class MockAgentClientForRepository {
     var lastSendPromptImages: [ImageAttachment]?
     var lastSendPromptAttachments: [FileAttachment]?
     var lastSendPromptReasoningLevel: String?
-    var lastSendPromptSkills: [Skill]?
     var sendPromptError: Error?
 
     // Abort
@@ -22,15 +21,13 @@ final class MockAgentClientForRepository {
         _ prompt: String,
         images: [ImageAttachment]?,
         attachments: [FileAttachment]?,
-        reasoningLevel: String?,
-        skills: [Skill]?
+        reasoningLevel: String?
     ) async throws {
         sendPromptCallCount += 1
         lastSendPromptText = prompt
         lastSendPromptImages = images
         lastSendPromptAttachments = attachments
         lastSendPromptReasoningLevel = reasoningLevel
-        lastSendPromptSkills = skills
         if let error = sendPromptError {
             throw error
         }
@@ -63,16 +60,12 @@ final class DefaultAgentRepositoryTests: XCTestCase {
     // MARK: - Send Prompt Tests
 
     func test_sendPrompt_passesAllParameters() async throws {
-        // Given
-        let skills = [createMockSkill(name: "skill1")]
-
         // When
         try await mockClient.sendPrompt(
             "Hello, Claude!",
             images: nil,
             attachments: nil,
-            reasoningLevel: "high",
-            skills: skills
+            reasoningLevel: "high"
         )
 
         // Then
@@ -81,7 +74,6 @@ final class DefaultAgentRepositoryTests: XCTestCase {
         XCTAssertNil(mockClient.lastSendPromptImages)
         XCTAssertNil(mockClient.lastSendPromptAttachments)
         XCTAssertEqual(mockClient.lastSendPromptReasoningLevel, "high")
-        XCTAssertEqual(mockClient.lastSendPromptSkills?.count, 1)
     }
 
     func test_sendPrompt_handlesNilOptionalParameters() async throws {
@@ -90,14 +82,12 @@ final class DefaultAgentRepositoryTests: XCTestCase {
             "Simple message",
             images: nil,
             attachments: nil,
-            reasoningLevel: nil,
-            skills: nil
+            reasoningLevel: nil
         )
 
         // Then
         XCTAssertEqual(mockClient.sendPromptCallCount, 1)
         XCTAssertNil(mockClient.lastSendPromptReasoningLevel)
-        XCTAssertNil(mockClient.lastSendPromptSkills)
     }
 
     func test_sendPrompt_throwsError() async throws {
@@ -106,7 +96,7 @@ final class DefaultAgentRepositoryTests: XCTestCase {
 
         // When/Then
         do {
-            try await mockClient.sendPrompt("Hello", images: nil, attachments: nil, reasoningLevel: nil, skills: nil)
+            try await mockClient.sendPrompt("Hello", images: nil, attachments: nil, reasoningLevel: nil)
             XCTFail("Expected error to be thrown")
         } catch {
             XCTAssertEqual(mockClient.sendPromptCallCount, 1)
@@ -136,15 +126,4 @@ final class DefaultAgentRepositoryTests: XCTestCase {
         }
     }
 
-    // MARK: - Helpers
-
-    private func createMockSkill(name: String) -> Skill {
-        Skill(
-            name: name,
-            displayName: name,
-            description: "Test skill",
-            source: .global,
-            tags: nil
-        )
-    }
 }

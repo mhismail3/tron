@@ -77,21 +77,6 @@ struct SystemEventView: View {
         case .messageDeleted(let targetType):
             MessageDeletedNotificationView(targetType: targetType)
 
-        case .skillDeactivated(let skillName):
-            SkillDeactivatedNotificationView(skillName: skillName)
-
-        case .skillsCleared(let clearedSkills, let mode):
-            // M6: `.clearAll` renders an informational banner; `.userInteraction`
-            // renders tappable chips that call `skills::activate` via the
-            // `.reactivateSkill` tap action.
-            SkillsClearedNotificationView(
-                clearedSkills: clearedSkills,
-                mode: mode,
-                onReactivate: mode == .userInteraction ? { skillName in
-                    onTap?(.reactivateSkill(skillName: skillName))
-                } : nil
-            )
-
         case .rulesLoaded(let count):
             RulesLoadedNotificationView(count: count)
 
@@ -111,24 +96,6 @@ struct SystemEventView: View {
                 recoverable: recoverable,
                 onRetry: recoverable ? { onTap?(.retryTurn) } : nil
             )
-
-        case .subagentResultAvailable(let subagentSessionId, let taskPreview, let success):
-            // Historical individual notification from persisted events before consolidation.
-            SubagentResultNotificationView(
-                results: [SubagentResultEntry(subagentSessionId: subagentSessionId, taskPreview: taskPreview, success: success)],
-                onTap: {
-                    onTap?(.subagentResult(sessionId: subagentSessionId))
-                }
-            )
-
-        case .subagentResultsReady(let results):
-            SubagentResultNotificationView(results: results) {
-                if results.count == 1 {
-                    onTap?(.subagentResult(sessionId: results[0].subagentSessionId))
-                } else {
-                    onTap?(.subagentResultsReady(results: results))
-                }
-            }
 
         case .providerError(let data):
             ProviderErrorNotificationView(

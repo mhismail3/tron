@@ -63,44 +63,26 @@ final class ChatViewModel {
         set { inputBarState.attachments = newValue }
     }
 
-    /// Skills staged as chips on the input bar - delegated to inputBarState
-    var selectedSkills: [Skill] {
-        get { inputBarState.selectedSkills }
-        set { inputBarState.selectedSkills = newValue }
-    }
-
     // MARK: - Extracted State Objects
 
     /// UserInteraction state (sheet, current data, answers)
     let userInteractionState = UserInteractionState()
-    /// EngineApproval state (sheet, current data)
-    let engineApprovalState = EngineApprovalState()
     /// Context tracking state (tokens, cost, context window)
     let contextState = ContextTrackingState()
-    /// Subagent state (tracking spawned subagents for chip UI)
-    let subagentState = SubagentState()
     /// Process state (tracking background processes for process list UI)
     let processState = ProcessState()
     /// Whether the process list sheet is presented
     var showProcessSheet = false
     /// Thinking state (for extended thinking display)
     let thinkingState = ThinkingState()
-    /// Input bar state (text, attachments, skills, reasoning level)
+    /// Input bar state (text, attachments, reasoning level)
     let inputBarState = InputBarState()
     /// Message queue state (queued messages waiting for agent.ready)
     let messageQueueState = MessageQueueState()
     /// Whether the abort confirmation dialog should be shown (queue has items)
     var showAbortConfirmation = false
-    /// Pending source changes prompt to send after sheet dismissal completes.
-    var pendingSourceChangesPrompt: String?
     /// Model picker state (cached models, optimistic updates, switching)
     let modelPickerState: ModelPickerState
-    /// Worktree isolation state (status, loading) — read-through to the
-    /// shared `WorktreeStatusCache`.
-    let worktreeState: WorktreeIsolationState
-    /// Git workflow state — lock holder, pending merge, conflict banner,
-    /// divergence chips. Populated by worktree/repo event handlers.
-    let gitWorkflowState = GitWorkflowState()
     /// Pull-up panel state (suggestions, position, drag)
     let pullUpPanelState = PullUpPanelState()
     // MARK: - Protocol Conformance (Context Protocols)
@@ -197,8 +179,6 @@ final class ChatViewModel {
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
     /// Coordinates UserInteraction event handling and user interaction
     let userInteractionCoordinator = UserInteractionCoordinator()
-    /// Coordinates EngineApproval event handling and user interaction
-    let engineApprovalCoordinator = EngineApprovalCoordinator()
     /// Coordinates voice recording and transcription
     let transcriptionCoordinator = TranscriptionCoordinator()
     /// Coordinates message sending, abort, and attachments
@@ -281,15 +261,6 @@ final class ChatViewModel {
         self.eventStoreManager = eventStoreManager
         self.connectionState = engineClient.connectionState
         self.modelPickerState = ModelPickerState(modelClient: engineClient.model)
-        // Worktree state reads through the shared cache when a store manager
-        // is available, else a test-local cache that exists only for this view
-        // model so tests passing a nil manager still get a working object.
-        let cache = eventStoreManager?.worktreeStatusCache
-            ?? WorktreeStatusCache(fetch: { [weak engineClient] id in
-                guard let engineClient else { throw CancellationError() }
-                return try await engineClient.worktree.getStatus(sessionId: id)
-            })
-        self.worktreeState = WorktreeIsolationState(sessionId: sessionId, cache: cache)
         setupBindings()
         setupEventProcessingCallbacks()
         setupAudioRecorder()
@@ -333,8 +304,6 @@ final class ChatViewModel {
                 self.clearDisplayStreamState()
                 self.clearProcessState()
                 self.userInteractionState.clearAll()
-                self.engineApprovalState.clearAll()
-                self.subagentState.clearAll()
                 self.prunedLiveMessages.removeAll()
                 self.pullUpPanelState.awaitingSuggestions = false
             }
@@ -690,8 +659,8 @@ final class ChatViewModel {
     }
 
     /// Show "Processing..." only when the model is thinking and no other
-    /// visual feedback is active (streaming text, thinking block, capability
-    /// spinner, or subagent chip).
+    /// visual feedback is active (streaming text, thinking block, or capability
+    /// spinner).
     ///
     /// Every property read here must be on an @Observable object so SwiftUI
     /// re-evaluates when state changes. StreamingManager is NOT @Observable,
@@ -701,7 +670,6 @@ final class ChatViewModel {
         if messages.last?.isStreaming == true { return false }
         if isThinkingActivelyStreaming { return false }
         if hasRunningCapabilityInvocations { return false }
-        if subagentState.hasRunningSubagents { return false }
         return true
     }
 

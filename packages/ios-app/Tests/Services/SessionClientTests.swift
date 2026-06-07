@@ -257,8 +257,7 @@ struct SessionClientTests {
                     newSessionId: "forked-session",
                     forkedFromEventId: nil,
                     forkedFromSessionId: "session-123",
-                    rootEventId: nil,
-                    worktree: nil
+                    rootEventId: nil
                 )
             default:
                 Issue.record("unexpected function id \(functionId.rawValue)")

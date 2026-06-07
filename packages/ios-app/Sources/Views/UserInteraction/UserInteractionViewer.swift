@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - UserInteraction Viewer
 
 /// In-chat viewer for UserInteraction capability invocations
-/// Compact chip style matching SkillChip - glassy capsule with status colors
+/// Compact glassy capsule with status colors.
 /// Uses async model: pending → answered or superseded
 @available(iOS 26.0, *)
 struct UserInteractionCapabilityViewer: View {

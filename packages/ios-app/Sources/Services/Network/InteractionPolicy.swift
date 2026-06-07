@@ -2,8 +2,8 @@ import Foundation
 
 /// Central read-only / interaction policy for the app.
 ///
-/// Every mutation surface (send button, mic, new session, archive swipe, worktree actions,
-/// plugin source, skills, etc.) reads predicates from this type via the SwiftUI environment
+/// Every mutation surface (send button, mic, new session, archive swipe,
+/// plugin source, etc.) reads predicates from this type via the SwiftUI environment
 /// and applies `.disabled(!policy.canX)`. No surface checks connection state directly anymore.
 ///
 /// Transitions into `.connected` are debounced (default 500ms) to avoid UI flicker from rapid
@@ -86,9 +86,7 @@ final class InteractionPolicy {
     var canRecordAudio: Bool        { isConnected }
     var canCreateSession: Bool      { isConnected }
     var canMutateSession: Bool      { isConnected }
-    var canCommitWorktree: Bool     { isConnected }
     var canManagePluginSources: Bool          { isConnected }
-    var canManageSkills: Bool       { isConnected }
     var canLoadServerData: Bool     { isConnected }
 
     // MARK: - Private

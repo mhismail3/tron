@@ -38,7 +38,7 @@ final class AudioRecorder {
     // MARK: - Pre-warming
 
     /// Pre-warm the audio engine so recording starts instantly.
-    /// Only call when recording is imminent (e.g. voice notes sheet onAppear).
+    /// Only call when prompt transcription recording is imminent.
     func prepare() async {
         guard await requestPermission() else { return }
         do {

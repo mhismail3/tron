@@ -18,9 +18,7 @@ enum MessageContent: Equatable {
 
     // Special capability invocations (rendered as interactive chips)
     case userInteraction(UserInteractionInvocationData)
-    case engineApproval(EngineApprovalData)
     case answeredQuestions(questionCount: Int)
-    case subagent(SubagentInvocationData)
 
     // MARK: - Convenience Factories (forward to systemEvent)
     // These provide cleaner API for common system event patterns
@@ -61,18 +59,6 @@ enum MessageContent: Equatable {
     static func messageDeleted(targetType: String) -> MessageContent {
         .systemEvent(.messageDeleted(targetType: targetType))
     }
-    /// In-chat notification for skill deactivation from context
-    static func skillDeactivated(skillName: String) -> MessageContent {
-        .systemEvent(.skillDeactivated(skillName: skillName))
-    }
-    /// In-chat notification that active skills were cleared by compaction (M6).
-    ///
-    /// - `.clearAll` mode renders an informational banner.
-    /// - `.userInteraction` mode renders a tappable picker that re-activates each
-    ///   skill via `skills::activate` engine protocol.
-    static func skillsCleared(clearedSkills: [String], mode: SkillsClearedMode) -> MessageContent {
-        .systemEvent(.skillsCleared(clearedSkills: clearedSkills, mode: mode))
-    }
     /// In-chat notification for memory retain in progress
     static var memoryRetainInProgress: MessageContent {
         .systemEvent(.memoryRetainInProgress)
@@ -82,8 +68,8 @@ enum MessageContent: Equatable {
         .systemEvent(.memoryAutoRetainInProgress(intervalFired: intervalFired))
     }
     /// In-chat notification that an auto-retain pipeline started but its
-    /// summarizer subagent failed. The server still falls back to a
-    /// keyword summary; this pill surfaces the quality signal.
+    /// summarizer failed. The server still writes a reduced-quality summary;
+    /// this pill surfaces the quality signal.
     static func memoryAutoRetainFailed(intervalFired: Int, reason: String) -> MessageContent {
         .systemEvent(.memoryAutoRetainFailed(intervalFired: intervalFired, reason: reason))
     }
@@ -137,19 +123,8 @@ enum MessageContent: Equatable {
             return event.textContent
         case .userInteraction(let data):
             return "[\(data.params.questions.count) questions]"
-        case .engineApproval(let data):
-            return data.params.action
         case .answeredQuestions(let count):
             return "Answered \(count) \(count == 1 ? "question" : "questions")"
-        case .subagent(let data):
-            switch data.status {
-            case .running:
-                return "Subagent running (turn \(data.currentTurn))"
-            case .completed:
-                return data.resultSummary ?? "Subagent completed"
-            case .failed:
-                return data.error ?? "Subagent failed"
-            }
         }
     }
 
@@ -171,13 +146,6 @@ enum MessageContent: Equatable {
 
     var isUserInteraction: Bool {
         if case .userInteraction = self {
-            return true
-        }
-        return false
-    }
-
-    var isEngineApproval: Bool {
-        if case .engineApproval = self {
             return true
         }
         return false

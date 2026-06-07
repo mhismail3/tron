@@ -9,9 +9,6 @@ struct SessionCreateParams: Encodable {
     let title: String?
     let source: String?
     let profile: String?
-    /// Per-session worktree override. `nil` defers to the global isolation mode;
-    /// `true` forces an isolated worktree; `false` forces passthrough.
-    let useWorktree: Bool?
 
     init(
         workingDirectory: String,
@@ -19,8 +16,7 @@ struct SessionCreateParams: Encodable {
         contextFiles: [String]? = nil,
         title: String? = nil,
         source: String? = nil,
-        profile: String? = nil,
-        useWorktree: Bool? = nil
+        profile: String? = nil
     ) {
         self.workingDirectory = workingDirectory
         self.model = model
@@ -28,7 +24,6 @@ struct SessionCreateParams: Encodable {
         self.title = title
         self.source = source
         self.profile = profile
-        self.useWorktree = useWorktree
     }
 }
 
@@ -75,9 +70,6 @@ struct SessionInfo: Decodable, Identifiable, Hashable {
     let source: String?
     /// Execution profile selected for the session.
     let profile: String?
-    /// Per-session worktree override. `nil` = inherit global isolation mode;
-    /// `true` = force isolation; `false` = force passthrough.
-    let useWorktree: Bool?
     /// Whether the agent is currently running in this session (server-authoritative)
     let isRunning: Bool?
     /// Server-computed activity summary lines for dashboard cards
@@ -186,13 +178,4 @@ struct SessionForkResult: Decodable {
     let forkedFromEventId: String?  // The event that was forked from
     let forkedFromSessionId: String?  // The source session
     let rootEventId: String?  // The fork event in the new session
-    let worktree: ForkWorktreeInfo?  // Worktree info including path
-}
-
-/// Simplified worktree info for fork results
-struct ForkWorktreeInfo: Decodable {
-    let isolated: Bool
-    let branch: String?  // Can be null for non-isolated sessions
-    let baseCommit: String?  // Can be null for non-isolated sessions
-    let path: String
 }

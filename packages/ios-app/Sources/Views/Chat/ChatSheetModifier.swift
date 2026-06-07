@@ -8,7 +8,6 @@ struct ChatSheetModifier: ViewModifier {
     let viewModel: ChatViewModel
     let engineClient: EngineClient
     let sessionId: String
-    let skillStore: SkillStore?
     let workspaceDeleted: Bool
 
     func body(content: Content) -> some View {
@@ -19,7 +18,6 @@ struct ChatSheetModifier: ViewModifier {
                     viewModel: viewModel,
                     engineClient: engineClient,
                     sessionId: sessionId,
-                    skillStore: skillStore,
                     workspaceDeleted: workspaceDeleted,
                     sheetCoordinator: sheetCoordinator
                 )
@@ -34,20 +32,6 @@ struct ChatSheetModifier: ViewModifier {
                     sheetCoordinator.showUserInteraction()
                 } else if !show {
                     sheetCoordinator.dismissIfActive(.userInteraction)
-                }
-            }
-            .onChange(of: viewModel.engineApprovalState.showSheet) { _, show in
-                if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showEngineApproval()
-                } else if !show {
-                    sheetCoordinator.dismissIfActive(.engineApproval)
-                }
-            }
-            .onChange(of: viewModel.subagentState.showDetailSheet) { _, show in
-                if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showSubagentDetail()
-                } else if !show {
-                    sheetCoordinator.dismissIfActive(.subagentDetail)
                 }
             }
     }
@@ -66,12 +50,8 @@ struct ChatSheetModifier: ViewModifier {
         // prompt send (which triggers isProcessing, keyboard resign, etc.) happens
         // here to avoid concurrent state mutations that glitch the InputBar layout.
         viewModel.executePendingUserInteractionSubmission()
-        viewModel.executePendingEngineApprovalSubmission()
-        viewModel.executePendingSourceChangesSubmission()
 
         viewModel.userInteractionState.showSheet = false
-        viewModel.engineApprovalState.showSheet = false
-        viewModel.subagentState.showDetailSheet = false
         viewModel.showSettings = false
         sheetCoordinator.onDismiss?()
     }
@@ -84,7 +64,6 @@ extension View {
         viewModel: ChatViewModel,
         engineClient: EngineClient,
         sessionId: String,
-        skillStore: SkillStore?,
         workspaceDeleted: Bool
     ) -> some View {
         modifier(ChatSheetModifier(
@@ -92,7 +71,6 @@ extension View {
             viewModel: viewModel,
             engineClient: engineClient,
             sessionId: sessionId,
-            skillStore: skillStore,
             workspaceDeleted: workspaceDeleted
         ))
     }

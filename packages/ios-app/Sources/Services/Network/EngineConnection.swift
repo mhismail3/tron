@@ -156,7 +156,7 @@ final class EngineConnection {
         let task = session.webSocketTask(with: request)
         engineConnectionTask = task
         openedWebSocketTask = nil
-        task.maximumMessageSize = 150 * 1024 * 1024  // 150MB — matches server limit; covers 15-min voice notes at 48kHz (~115MB base64)
+        task.maximumMessageSize = 150 * 1024 * 1024  // 150MB — matches server limit for large inline payloads.
         task.resume()
         logger.verbose("WebSocket task resumed", category: .websocket)
 

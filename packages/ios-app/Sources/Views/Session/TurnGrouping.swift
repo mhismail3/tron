@@ -5,7 +5,6 @@ import Foundation
 struct TurnGroup: Identifiable, Equatable {
     let turnNumber: Int
     let events: [SessionEvent]
-    let analyticsData: ConsolidatedAnalytics.TurnData?
     let userMessagePreview: String?
     let assistantMessagePreview: String?
     let startsWithUserMessage: Bool
@@ -59,7 +58,6 @@ enum TurnGrouping {
     /// - Sessions without turn resets produce identical output to raw turn numbers
     static func group(
         events: [SessionEvent],
-        analytics: ConsolidatedAnalytics,
         currentSessionId: String
     ) -> [TurnGroup] {
         guard !events.isEmpty else { return [] }
@@ -87,11 +85,6 @@ enum TurnGrouping {
             turnMap.append((ct, currentEvents))
         }
 
-        // Build analytics lookup by turn number
-        let analyticsMap: [Int: ConsolidatedAnalytics.TurnData] = Dictionary(
-            uniqueKeysWithValues: analytics.turns.map { ($0.turn, $0) }
-        )
-
         return turnMap.map { (turn, turnEvents) in
             let userPreview = extractUserMessagePreview(from: turnEvents)
             let assistantPreview = extractAssistantMessagePreview(from: turnEvents)
@@ -101,7 +94,6 @@ enum TurnGrouping {
             return TurnGroup(
                 turnNumber: turn,
                 events: turnEvents,
-                analyticsData: analyticsMap[turn],
                 userMessagePreview: userPreview,
                 assistantMessagePreview: assistantPreview,
                 startsWithUserMessage: startsWithUser,

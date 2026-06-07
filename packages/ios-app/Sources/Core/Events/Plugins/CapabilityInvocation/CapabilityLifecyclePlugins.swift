@@ -1,7 +1,7 @@
 import Foundation
 
-/// Plugin for a generic capability pause: approvals, user input, and future
-/// plugin-defined pauses all flow through this event.
+/// Plugin for a generic capability pause: user input and future plugin-defined
+/// pauses flow through this event.
 enum CapabilityPauseRequestedPlugin: DispatchableEventPlugin {
     static let eventType = "capability.pause.requested"
 
@@ -173,7 +173,7 @@ enum CapabilityPauseResolvedPlugin: DispatchableEventPlugin {
     }
 }
 
-/// Plugin for long-running capability handles such as subagents and jobs.
+/// Plugin for long-running capability handles such as background jobs.
 enum CapabilityRunStatusPlugin: DispatchableEventPlugin {
     static let eventType = "capability.run.status"
 

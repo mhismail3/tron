@@ -11,10 +11,6 @@ final class InputBarStateTests: XCTestCase {
         Attachment(id: id, type: .image, data: Data([0x00]), mimeType: "image/jpeg", fileName: "test.jpg")
     }
 
-    private func makeSkill(name: String) -> Skill {
-        Skill(name: name, displayName: name, description: "test", source: .global, tags: nil)
-    }
-
     // MARK: - draftFingerprint
 
     func testDraftFingerprint_changesWithText() {
@@ -37,20 +33,9 @@ final class InputBarStateTests: XCTestCase {
         XCTAssertNotEqual(fp1, fp2)
     }
 
-    func testDraftFingerprint_changesWithSkills() {
-        let state = InputBarState()
-        let fp1 = state.draftFingerprint
-
-        state.selectedSkills = [makeSkill(name: "review")]
-        let fp2 = state.draftFingerprint
-
-        XCTAssertNotEqual(fp1, fp2)
-    }
-
     func testDraftFingerprint_stableForSameState() {
         let state = InputBarState()
         state.text = "hello"
-        state.selectedSkills = [makeSkill(name: "review")]
 
         let fp1 = state.draftFingerprint
         let fp2 = state.draftFingerprint
@@ -74,12 +59,6 @@ final class InputBarStateTests: XCTestCase {
     func testHasDraftContent_attachmentsOnly_returnsTrue() {
         let state = InputBarState()
         state.attachments = [makeAttachment()]
-        XCTAssertTrue(state.hasDraftContent)
-    }
-
-    func testHasDraftContent_skillsOnly_returnsTrue() {
-        let state = InputBarState()
-        state.selectedSkills = [makeSkill(name: "review")]
         XCTAssertTrue(state.hasDraftContent)
     }
 

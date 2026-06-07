@@ -71,7 +71,6 @@ struct AgentSettingsPage: View {
         autonomySection
         guardrailsSection
         hooksSection
-        promptLibrarySection
         messageQueueCard
         protectedBranchesSection
     }
@@ -92,7 +91,6 @@ struct AgentSettingsPage: View {
                 VStack(spacing: 16) {
                     protectedBranchesSection
                     messageQueueCard
-                    promptLibrarySection
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
             }
@@ -114,10 +112,6 @@ struct AgentSettingsPage: View {
             enabledBuiltinHookCount: enabledBuiltinHookCount,
             totalBuiltinHookCount: BuiltinHookCatalog.all.count,
             hooksErrorPolicy: settingsState.hooksErrorPolicy,
-            promptHistoryEnabled: settingsState.promptHistoryEnabled,
-            promptHistoryMaxEntries: settingsState.promptHistoryMaxEntries,
-            promptHistoryMaxAgeDays: settingsState.promptHistoryMaxAgeDays,
-            promptHistoryAutoPrune: settingsState.promptHistoryAutoPrune,
             protectedBranchCount: settingsState.gitProtectedBranches.count
         )
     }
@@ -130,40 +124,19 @@ struct AgentSettingsPage: View {
 
     // MARK: - Autonomy
 
-    private var autonomyCaption: String {
-        switch settingsState.autonomyApprovalPromptMode {
-        case "testing":
-            return "Testing mode shows approval prompts for QA while preserving server-side guardrails."
-        default:
-            return "Tron runs independently on this Mac, audits approval-required work, and only stops when guardrails block it."
-        }
-    }
-
     private var autonomySection: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: AgentSettingsSection.autonomy.rawValue)
 
             SettingsCard {
                 SettingsRow(icon: "shield", label: "Autonomy Mode") {
-                    SettingsCycleToggle(
-                        options: [("disabled", "Independent"), ("testing", "Testing")],
-                        current: settingsState.autonomyApprovalPromptMode
-                    ) { newValue in
-                        settingsState.autonomyApprovalPromptMode = newValue
-                        updateServerSetting {
-                            ServerSettingsUpdate(
-                                agent: .init(
-                                    autonomy: .init(
-                                        approvalPromptMode: AutonomyApprovalPromptMode.from(newValue)
-                                    )
-                                )
-                            )
-                        }
-                    }
+                    Text("Independent")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
                 }
             }
 
-            SettingsCaption(text: autonomyCaption)
+            SettingsCaption(text: "The engine runs inside its configured authority envelope and records blocked work as runtime evidence.")
         }
     }
 
@@ -187,7 +160,7 @@ struct AgentSettingsPage: View {
                 }
             }
 
-            SettingsCaption(text: "Server guardrails stop unsafe work before it runs. Approval-required work is audited automatically unless Testing mode is enabled.")
+            SettingsCaption(text: "Server constraints stop work outside the configured authority envelope before it runs.")
         }
     }
 
@@ -400,111 +373,6 @@ struct AgentSettingsPage: View {
         }
     }
 
-    // MARK: - Prompt Library
-
-    private var promptLibrarySection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: AgentSettingsSection.promptLibrary.rawValue)
-
-            VStack(spacing: 12) {
-                promptLibrarySettingBlock(.recordHistory) {
-                    SettingsCard {
-                        SettingsRow(icon: "clock.arrow.circlepath", label: "Record prompt history") {
-                            Toggle("", isOn: Bindable(settingsState).promptHistoryEnabled)
-                                .labelsHidden()
-                                .tint(.tronEmerald)
-                        }
-                        .onChange(of: settingsState.promptHistoryEnabled) { _, newValue in
-                            updateServerSetting {
-                                ServerSettingsUpdate(promptLibrary: .init(historyEnabled: newValue))
-                            }
-                        }
-                    }
-                }
-
-                promptLibrarySettingBlock(.autoPrune) {
-                    SettingsCard {
-                        SettingsRow(icon: "scissors", label: "Prune on record / startup") {
-                            Toggle("", isOn: Bindable(settingsState).promptHistoryAutoPrune)
-                                .labelsHidden()
-                                .tint(.tronEmerald)
-                        }
-                        .onChange(of: settingsState.promptHistoryAutoPrune) { _, newValue in
-                            updateServerSetting {
-                                ServerSettingsUpdate(promptLibrary: .init(historyAutoPrune: newValue))
-                            }
-                        }
-                    }
-                }
-
-                promptLibrarySettingBlock(.retention) {
-                    promptHistoryRetentionCard
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func promptLibrarySettingBlock<Content: View>(
-        _ setting: PromptLibrarySetting,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-            SettingsCaption(text: setting.description)
-        }
-    }
-
-    private var promptHistoryMaxEntriesDisplay: String {
-        settingsState.promptHistoryMaxEntries == 0 ? "Unlimited" : "\(settingsState.promptHistoryMaxEntries)"
-    }
-
-    private var promptHistoryMaxAgeDisplay: String {
-        settingsState.promptHistoryMaxAgeDays == 0 ? "Unlimited" : "\(settingsState.promptHistoryMaxAgeDays)d"
-    }
-
-    private var promptHistoryRetentionCard: some View {
-        SettingsCard {
-            SettingsRow(icon: "tray.full", label: "Max Entries") {
-                Text(promptHistoryMaxEntriesDisplay)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .monospacedDigit()
-                    .frame(minWidth: 64, alignment: .trailing)
-                TronStepper(
-                    value: Bindable(settingsState).promptHistoryMaxEntries,
-                    range: 0...100_000,
-                    step: 1_000
-                )
-            }
-            .onChange(of: settingsState.promptHistoryMaxEntries) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(promptLibrary: .init(historyMaxEntries: newValue))
-                }
-            }
-
-            SettingsRowDivider()
-
-            SettingsRow(icon: "calendar", label: "Max Age (days)") {
-                Text(promptHistoryMaxAgeDisplay)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                    .foregroundStyle(.tronEmerald)
-                    .monospacedDigit()
-                    .frame(minWidth: 64, alignment: .trailing)
-                TronStepper(
-                    value: Bindable(settingsState).promptHistoryMaxAgeDays,
-                    range: 0...365,
-                    step: 7
-                )
-            }
-            .onChange(of: settingsState.promptHistoryMaxAgeDays) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(promptLibrary: .init(historyMaxAgeDays: newValue))
-                }
-            }
-        }
-    }
-
     // MARK: - Protected Branches
 
     private var protectedBranchesSection: some View {
@@ -584,7 +452,7 @@ struct AgentSettingsPage: View {
                 }
             }
 
-            SettingsCaption(text: "Pushes to protected branches require an explicit override. Source-control action sheets still let you choose merge, push, and branch behavior per action.")
+            SettingsCaption(text: "Pushes to protected branches require an explicit override. Runtime actions can still choose merge, push, and branch behavior per action.")
         }
     }
 
