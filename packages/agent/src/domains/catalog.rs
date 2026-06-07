@@ -125,7 +125,6 @@ fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     specs.extend(super::auth::contract::capabilities()?);
     specs.extend(super::blob::contract::capabilities()?);
     specs.extend(super::capability::contract::capabilities()?);
-    specs.extend(super::context::contract::capabilities()?);
     specs.extend(super::logs::contract::capabilities()?);
     specs.extend(super::message::contract::capabilities()?);
     specs.extend(super::model::contract::capabilities()?);

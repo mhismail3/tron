@@ -169,27 +169,6 @@ extension EventStoreManager {
         logger.debug("Updated session \(sessionId) tokens: in=\(inputTokens) out=\(outputTokens) lastTurnIn=\(lastTurnInputTokens) cacheRead=\(cacheReadTokens) cacheCreation=\(cacheCreationTokens) cost=\(cost)", category: .session)
     }
 
-    // MARK: - Workspace Validation
-
-    /// Check if a workspace path exists on the filesystem.
-    /// Returns `true` if path exists, `false` if confirmed deleted (server returned error),
-    /// or `nil` if the result is indeterminate (connection/transport error).
-    func validateWorkspacePath(_ path: String) async -> Bool? {
-        guard !path.isEmpty else { return false }
-        do {
-            _ = try await engineClient.filesystem.listDirectory(path: path, showHidden: false)
-            return true
-        } catch is EngineProtocolError {
-            // Server processed the request and returned an error (e.g. ENOENT)
-            logger.debug("Workspace path confirmed deleted: '\(path)'", category: .session)
-            return false
-        } catch {
-            // Connection/transport error — can't determine workspace state
-            logger.debug("Workspace path validation indeterminate for '\(path)': \(error.localizedDescription)", category: .session)
-            return nil
-        }
-    }
-
     // MARK: - Tree Operations (Fork)
 
     /// Fork a session at a specific event (or HEAD if nil)

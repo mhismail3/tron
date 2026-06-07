@@ -10,8 +10,6 @@ struct AgentSettingsPage: View {
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showDefaultModelPicker = false
 
-    private var engineClient: EngineClient { dependencies.engineClient }
-
     var body: some View {
         SettingsPageContainer(title: "Agent") {
             if SettingsAdaptiveLayout.usesIPadLandscapeLayout {
@@ -22,7 +20,6 @@ struct AgentSettingsPage: View {
         }
         .sheet(isPresented: $showQuickSessionWorkspaceSelector) {
             WorkspaceSelector(
-                engineClient: engineClient,
                 selectedPath: Binding(
                     get: { settingsState.quickSessionWorkspace },
                     set: { newValue in

@@ -180,8 +180,8 @@ inherits = ["default"]
 [settings.ui.input]
 maxHistory = 7
 
-[settings.capabilities.search]
-skipDirectories = ["custom"]
+[settings.ui.thinkingAnimation]
+chars = ["*"]
 "#,
     );
 
@@ -189,8 +189,8 @@ skipDirectories = ["custom"]
 
     assert_eq!(resolved.spec.settings.ui.input.max_history, 7);
     assert_eq!(
-        resolved.spec.settings.capabilities.search.skip_directories,
-        vec!["custom".to_string()]
+        resolved.spec.settings.ui.thinking_animation.chars,
+        vec!["*".to_string()]
     );
     assert_eq!(
         resolved.spec.settings.server.default_provider, "anthropic",

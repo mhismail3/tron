@@ -64,7 +64,6 @@ source "$SCRIPT_DIR/tron-lib.sh"
 RUST_WORKSPACE="$PROJECT_DIR/packages/agent"
 RELEASE_BINARY="$RUST_WORKSPACE/target/release/tron"
 DEV_SERVER_BINARY="$RUST_WORKSPACE/target/dev-server/tron"
-MAC_APP_LOCAL_ENV_FILE="$PROJECT_DIR/packages/mac-app/.env.local"
 BENCH_SCRIPT="$SCRIPT_DIR/benchmarks/bench.py"
 BENCH_BASELINE_DIR="$SCRIPT_DIR/benchmarks/baselines"
 BENCH_GATE_ITERATIONS=50

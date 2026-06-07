@@ -89,11 +89,6 @@ final class SheetCoordinator {
         present(.userInteraction)
     }
 
-    /// Show notification delivery detail sheet.
-    func showNotificationDelivery(_ data: NotificationDeliveryData) {
-        present(.notificationDelivery(data))
-    }
-
     /// Show thinking detail sheet
     func showThinkingDetail(_ content: String) {
         present(.thinkingDetail(content))

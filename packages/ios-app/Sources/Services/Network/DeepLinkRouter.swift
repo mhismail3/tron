@@ -20,8 +20,6 @@ enum NavigationIntent: Equatable {
     case session(id: String, scrollTo: ScrollTarget?)
     /// Navigate to settings
     case settings
-    /// Open the notification inbox, optionally auto-opening a specific notification
-    case notification(invocationId: String)
     /// Process pending shared content from Share Extension
     case share
 }
@@ -50,20 +48,15 @@ final class DeepLinkRouter {
     /// Handle notification payload from AppDelegate
     /// - Parameter notificationPayload: The userInfo dictionary from the notification
     func handle(notificationPayload: [AnyHashable: Any]) {
-        // If invocationId is present, open the notification inbox with that notification.
-        if let invocationId = notificationPayload["invocationId"] as? String {
-            pendingIntent = .notification(invocationId: invocationId)
-            TronLogger.shared.info("Deep link intent set: notification invocationId=\(invocationId)", category: .notification)
-            return
-        }
-
         guard let sessionId = notificationPayload["sessionId"] as? String else {
             TronLogger.shared.warning("Deep link notification missing sessionId", category: .notification)
             return
         }
 
-        pendingIntent = .session(id: sessionId, scrollTo: nil)
-        TronLogger.shared.info("Deep link intent set: session=\(sessionId)", category: .notification)
+        let scrollTarget = (notificationPayload["invocationId"] as? String)
+            .map { ScrollTarget.capabilityInvocation(id: $0) }
+        pendingIntent = .session(id: sessionId, scrollTo: scrollTarget)
+        TronLogger.shared.info("Deep link intent set: session=\(sessionId), scrollTo=\(String(describing: scrollTarget))", category: .notification)
     }
 
     // MARK: - URL Scheme Handling
@@ -94,9 +87,6 @@ final class DeepLinkRouter {
         switch routeType {
         case "session":
             return handleSessionURL(url: url)
-
-        case "notification":
-            return handleNotificationURL(url: url)
 
         case "settings":
             pendingIntent = .settings
@@ -129,20 +119,6 @@ final class DeepLinkRouter {
         let scrollTarget = Self.scrollTarget(from: url)
         pendingIntent = .session(id: sessionId, scrollTo: scrollTarget)
         TronLogger.shared.info("Deep link intent set: session=\(sessionId), scrollTo=\(String(describing: scrollTarget))", category: .notification)
-        return true
-    }
-
-    /// Handle notification URL (tron://notification/{invocationId})
-    private func handleNotificationURL(url: URL) -> Bool {
-        let pathComponents = url.pathComponents.filter { $0 != "/" }
-
-        guard let invocationId = pathComponents.first, !invocationId.isEmpty else {
-            TronLogger.shared.warning("Notification deep link missing invocationId", category: .notification)
-            return false
-        }
-
-        pendingIntent = .notification(invocationId: invocationId)
-        TronLogger.shared.info("Deep link intent set: notification invocationId=\(invocationId)", category: .notification)
         return true
     }
 

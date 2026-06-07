@@ -78,12 +78,9 @@ enum HeaderIcon: Equatable, Sendable {
 
 /// Permission categories the wizard probes during the Permissions step.
 ///
-/// `screenRecording` replaced `notifications` once we verified the Mac
-/// wrapper never posts a local notification (all APNS-driven alerts
-/// flow to the iOS companion app). The Rust agent's Computer-Use tool
-/// calls `screencapture(1)` for every screenshot, which requires
-/// Screen Recording — see
-/// `packages/agent/src/tools/ui/computer_use/permissions.rs`.
+/// The Rust agent's screenshot path calls `screencapture(1)`, which
+/// requires Screen Recording. The primitive wrapper does not request a
+/// notification permission because the push/inbox product plane is gone.
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess
     case screenRecording

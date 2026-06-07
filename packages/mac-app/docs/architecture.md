@@ -304,7 +304,7 @@ files are still preserved.
 
 ## Key Invariants
 
-- **`Tron.app` never builds the Rust agent.** The `tron` helper executable is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helpers/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine capability/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`. Local relay dogfood is configured through the ignored `packages/mac-app/.env.local` file that the bundle script reads before Cargo compiles the helper; production releases use GitHub Actions secrets instead.
+- **`Tron.app` never builds the Rust agent.** The `tron` helper executable is staged at release time by `scripts/bundle-agent.sh` and committed-to-gitignore. Missing or corrupt helpers/plist/signature → wizard surfaces a reinstall/move instruction. Any agent-side engine capability/TCC/install/settings-default change must be followed by rerunning the bundle script before Mac dogfood, because Xcode only copies `Sources/Resources/Library`.
 - **The Install step is not an `onAppear` side effect.** Landing on the page is read-only; the user must press Install before the wrapper registers the service.
 - **Install requests are consumed once.** `InstallStep` can remount during navigation, but it only mutates disk/launchd when `installRequestID > handledInstallRequestID`; success/failure pages are display-only until the user presses Retry.
 - **Welcome install detection must not relayout the hero.** `WelcomeStep` does not render install detection state; the Install step owns that status.

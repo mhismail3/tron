@@ -1,11 +1,10 @@
 import SwiftUI
 
-/// Sheet showing all tracked background processes with cancel controls.
+/// Sheet showing tracked background processes as passive runtime evidence.
 /// Presented from the toolbar menu when active processes exist.
 @available(iOS 26.0, *)
 struct ProcessListSheet: View {
     let processState: ProcessState
-    let onCancel: (String) -> Void
     let onClose: () -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -45,7 +44,7 @@ struct ProcessListSheet: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(processState.allProcessesSorted) { process in
-                    ProcessRow(process: process, onCancel: onCancel)
+                    ProcessRow(process: process)
                 }
             }
             .padding()
@@ -70,7 +69,6 @@ struct ProcessListSheet: View {
 @available(iOS 26.0, *)
 private struct ProcessRow: View {
     let process: ProcessState.TrackedProcess
-    let onCancel: (String) -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -92,10 +90,6 @@ private struct ProcessRow: View {
                         Text("running...")
                             .font(TronTypography.sans(size: TronTypography.sizeCaption))
                             .foregroundStyle(.tronEmerald.opacity(0.7))
-                    } else if process.status == .cancelling {
-                        Text("cancelling...")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextMuted)
                     }
                     if let exitCode = process.exitCode, exitCode != 0 {
                         Text("exit \(exitCode)")
@@ -105,19 +99,6 @@ private struct ProcessRow: View {
                 }
             }
             Spacer()
-            if process.status == .running || process.status == .backgrounded {
-                Button {
-                    onCancel(process.id)
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.tronError.opacity(0.8))
-                }
-            } else if process.status == .cancelling {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(.tronTextMuted)
-            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -140,10 +121,6 @@ private struct ProcessRow: View {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 20))
                 .foregroundStyle(.tronError)
-        case .cancelling:
-            ProgressView()
-                .controlSize(.small)
-                .tint(.tronTextMuted)
         case .cancelled:
             Image(systemName: "minus.circle.fill")
                 .font(.system(size: 20))

@@ -62,30 +62,6 @@ pub(crate) async fn resolve_provider_capabilities(
     })
 }
 
-pub(crate) async fn list_model_capabilities(
-    host: &EngineHostHandle,
-    session_id: &str,
-    workspace_id: Option<&str>,
-) -> Result<Vec<ModelCapability>, String> {
-    Ok(resolve_capability_targets(host, session_id, workspace_id)
-        .await?
-        .into_iter()
-        .map(|target| model_capability_schema(&target))
-        .collect())
-}
-
-async fn resolve_capability_targets(
-    host: &EngineHostHandle,
-    session_id: &str,
-    workspace_id: Option<&str>,
-) -> Result<Vec<EngineCapabilityTarget>, String> {
-    Ok(
-        resolve_capability_targets_with_lifecycle(host, session_id, workspace_id)
-            .await?
-            .targets,
-    )
-}
-
 struct ResolvedCapabilityTargets {
     targets: Vec<EngineCapabilityTarget>,
     turn_stopping_capabilities: HashSet<String>,

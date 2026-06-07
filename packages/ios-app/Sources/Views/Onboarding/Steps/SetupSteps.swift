@@ -53,7 +53,6 @@ struct WorkspaceSetupOnboardingPage: View {
         }
         .sheet(isPresented: $showWorkspaceSelector, onDismiss: saveWorkspace) {
             WorkspaceSelector(
-                engineClient: dependencies.engineClient,
                 selectedPath: $selectedPath
             )
         }

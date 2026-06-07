@@ -42,12 +42,10 @@ struct ContentView: View {
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     private var defaultModel: String { dependencies.defaultModel }
     private var quickSessionWorkspace: String { dependencies.quickSessionWorkspace }
-    private var notificationStore: NotificationStore { dependencies.notificationStore }
 
     // Deep link navigation from TronMobileApp
     @Binding var deepLinkSessionId: String?
     @Binding var deepLinkScrollTarget: ScrollTarget?
-    @Binding var deepLinkNotificationInvocationId: String?
 
     @State private var coordinator: ContentViewCoordinator?
     @State private var selectedSessionId: String?
@@ -58,10 +56,6 @@ struct ContentView: View {
 
     // Scroll target for deep link navigation (passed to ChatView)
     @State private var currentScrollTarget: ScrollTarget?
-
-    // Notification inbox
-    @State private var showNotificationSheet = false
-    @State private var notificationAutoOpenInvocationId: String?
 
     var body: some View {
         mainContent
@@ -106,7 +100,6 @@ struct ContentView: View {
                 // across call sites and handles the disconnected/connected/reconnecting cases
                 // without blocking the view.
                 eventStoreManager.requestSessionRefresh(reason: .foreground)
-                Task { await notificationStore.refresh() }
 
                 // Cold launch share: the .pendingShareContent notification may have
                 // fired before this view existed (app was still initializing). Check
@@ -124,11 +117,7 @@ struct ContentView: View {
                 // connection-restored side effects still live here until migrated.
                 if newState.isConnected && !oldState.isConnected {
                     coordinator?.handleConnectionEstablished(selectedSessionId: selectedSessionId)
-                    Task { await notificationStore.refresh() }
                 }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .notificationReceived)) { _ in
-                Task { await notificationStore.refresh() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .serverSettingsDidChange)) { _ in
                 coordinator?.handleServerSettingsChanged()
@@ -143,17 +132,6 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .pendingShareContent)) { _ in
                 handlePendingShare()
-            }
-            .onChange(of: deepLinkNotificationInvocationId) { _, newInvocationId in
-                guard let invocationId = newInvocationId else { return }
-                notificationAutoOpenInvocationId = invocationId
-                showNotificationSheet = true
-                deepLinkNotificationInvocationId = nil
-            }
-            .sheet(isPresented: $showNotificationSheet, onDismiss: {
-                notificationAutoOpenInvocationId = nil
-            }) {
-                notificationSheet
             }
             .onChange(of: selectedSessionId) { _, newValue in
                 coordinator?.handleSessionSelection(newValue)
@@ -172,23 +150,8 @@ struct ContentView: View {
 
     private var dashboardActions: DashboardToolbarActions {
         DashboardToolbarActions(
-            onSettings: { showSettings = true },
-            notificationUnreadCount: notificationStore.unreadCount,
-            onNotificationBell: { showNotificationSheet = true }
+            onSettings: { showSettings = true }
         )
-    }
-
-    private var notificationSheet: some View {
-        NotificationListSheet(
-            notificationStore: notificationStore,
-            onGoToSession: openNotificationSession,
-            autoOpenInvocationId: $notificationAutoOpenInvocationId
-        )
-    }
-
-    private func openNotificationSession(_ sessionId: String) {
-        showNotificationSheet = false
-        selectedSessionId = sessionId
     }
 
     /// Whether the sidebar is currently visible (for hiding duplicate controls in detail view)

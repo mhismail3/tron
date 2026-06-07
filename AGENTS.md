@@ -40,13 +40,11 @@ No setting should exist only on the server or only in the iOS UI.
 
 ## Managed Skills
 
-First-party skills live in `packages/agent/skills/` and are synced to `~/.tron/skills/` by `tron install`/`tron dev`. When creating or modifying a managed skill:
-
-1. Add an empty `.managed` sentinel file in the skill directory
-2. After changes, sync to the local skills dir: `rsync -a --delete --exclude=node_modules --exclude=.DS_Store packages/agent/skills/<name>/ ~/.tron/skills/<name>/`
-3. Never edit `~/.tron/skills/<name>/` directly for managed skills — changes belong in the repo copy
-
-The `.managed` file tells the sync script this skill is repo-owned and safe to overwrite. Without it, the skill is treated as user-customized and skipped during sync.
+The primitive branch does not ship repo-managed first-party skills under
+`packages/agent/skills/`. Do not reintroduce that directory, managed skill sync,
+or built-in skill prompt context during the primitive teardown. Future skills
+belong to a successor self-adapting-agent scorecard and must be agent-authored
+state or generated runtime behavior, not bootstrap harness behavior.
 
 ## Deployment
 
@@ -72,7 +70,6 @@ The codebase uses progressive disclosure — documentation lives in the code:
 - `packages/ios-app/docs/architecture.md` — SwiftUI, MVVM, coordinator, event plugins
 - `packages/ios-app/docs/development.md` — Xcode setup, builds, testing
 - `packages/ios-app/docs/events.md` — event plugin system
-- `packages/ios-app/docs/apns.md` — push notification setup
 
 ### Progressive Disclosure Upkeep
 

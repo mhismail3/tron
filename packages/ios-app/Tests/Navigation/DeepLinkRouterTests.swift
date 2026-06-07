@@ -13,15 +13,14 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleNotificationWithInvocationId_OpensNotification() {
-        // invocation id takes priority — routes to notification inbox
+    func testHandleNotificationWithInvocationIdScrollsWithinSession() {
         let router = DeepLinkRouter()
         router.handle(notificationPayload: [
             "sessionId": "sess_123",
             "invocationId": "cap_abc"
         ])
 
-        XCTAssertEqual(router.pendingIntent, .notification(invocationId: "cap_abc"))
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .capabilityInvocation(id: "cap_abc")))
     }
 
     func testHandleNotificationWithEventId_IgnoresEventId() {
@@ -35,12 +34,11 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: nil))
     }
 
-    func testHandleNotificationWithMissingSessionId_ButHasInvocationId() {
-        // invocation id alone is enough to open the notification inbox
+    func testHandleNotificationWithMissingSessionIdButHasInvocationId() {
         let router = DeepLinkRouter()
         router.handle(notificationPayload: ["invocationId": "cap_abc"])
 
-        XCTAssertEqual(router.pendingIntent, .notification(invocationId: "cap_abc"))
+        XCTAssertNil(router.pendingIntent)
     }
 
     func testHandleNotificationWithNoIds() {
@@ -50,8 +48,7 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertNil(router.pendingIntent)
     }
 
-    func testHandleNotificationWithBothIds_InvocationIdTakesPriority() {
-        // invocation id takes priority over sessionId and eventId
+    func testHandleNotificationWithBothIdsUsesSessionAndInvocationScrollTarget() {
         let router = DeepLinkRouter()
         router.handle(notificationPayload: [
             "sessionId": "sess_123",
@@ -59,7 +56,7 @@ final class DeepLinkRouterTests: XCTestCase {
             "eventId": "evt_xyz"
         ])
 
-        XCTAssertEqual(router.pendingIntent, .notification(invocationId: "cap_abc"))
+        XCTAssertEqual(router.pendingIntent, .session(id: "sess_123", scrollTo: .capabilityInvocation(id: "cap_abc")))
     }
 
     // MARK: - URL Scheme Handling
@@ -128,12 +125,12 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingIntent, .settings)
     }
 
-    func testHandleURLNotification() {
+    func testHandleURLNotificationIsNotAPrimitiveRoute() {
         let router = DeepLinkRouter()
         let url = URL(string: "tron://notification/cap_abc")!
 
-        XCTAssertTrue(router.handle(url: url))
-        XCTAssertEqual(router.pendingIntent, .notification(invocationId: "cap_abc"))
+        XCTAssertFalse(router.handle(url: url))
+        XCTAssertNil(router.pendingIntent)
     }
 
     func testHandleURLNotificationWithMissingInvocationId() {

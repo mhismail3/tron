@@ -109,37 +109,6 @@ struct SystemDiagnosticsResult: Decodable {
 }
 #endif
 
-// MARK: - Device Token Methods (Push Notifications)
-
-/// Parameters for device.register
-struct DeviceTokenRegisterParams: Encodable {
-    let deviceToken: String
-    let sessionId: String?
-    let workspaceId: String?
-    let environment: String
-    /// APNs bundle ID the token was issued against (e.g.,
-    /// `com.tron.mobile` vs `com.tron.mobile.beta`). The server stores it
-    /// and the relay uses it as `apns-topic` — without it, Beta-scheme
-    /// tokens get rejected with `DeviceTokenNotForTopic`.
-    let bundleId: String
-}
-
-/// Result of device.register
-struct DeviceTokenRegisterResult: Decodable {
-    let id: String
-    let created: Bool
-}
-
-/// Parameters for device.unregister
-struct DeviceTokenUnregisterParams: Encodable {
-    let deviceToken: String
-}
-
-/// Result of device.unregister
-struct DeviceTokenUnregisterResult: Decodable {
-    let success: Bool
-}
-
 // MARK: - Logs Methods
 
 struct LogsRecentParams: Encodable {

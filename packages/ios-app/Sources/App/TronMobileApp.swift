@@ -1,15 +1,11 @@
 import SwiftUI
-import UserNotifications
 
 @main
 struct TronMobileApp: App {
-    // App delegate for push notification handling
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     // Central dependency container - manages all services
     @State private var container = DependencyContainer()
-    @State private var isRegisteringPush = false
-    @State private var inFlightDeviceTokenRegistrationKeys: Set<String> = []
 
     // Appearance mode (Light / Dark / Auto)
     @State private var appearanceSettings = AppearanceSettings.shared
@@ -38,7 +34,6 @@ struct TronMobileApp: App {
     // Deep link navigation state
     @State private var deepLinkSessionId: String?
     @State private var deepLinkScrollTarget: ScrollTarget?
-    @State private var deepLinkNotificationInvocationId: String?
 
     init() {
         TronFontLoader.registerFonts()
@@ -54,27 +49,9 @@ struct TronMobileApp: App {
             .task {
                 await initializeApp()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .deviceTokenDidUpdate)) { notification in
-                // When device token updates, register with server immediately
-                guard let token = notification.userInfo?["token"] as? String else { return }
-                Task {
-                    await registerDeviceToken(token)
-                }
-            }
             .onChange(of: container.engineClient.connectionState) { oldState, newState in
                 handleConnectionBannerTransition(to: newState)
                 container.clientLogIngestionService.handleConnectionChange(from: oldState, to: newState)
-
-                // When connection is established, make sure the paired client
-                // has an APNs token registered with the engine.
-                guard newState.isConnected && !oldState.isConnected else { return }
-                guard onboardingComplete else { return }
-                Task { await registerPushIfAuthorized() }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .navigateToSession)) { notification in
-                // Handle deep link from push notification via DeepLinkRouter
-                guard let userInfo = notification.userInfo else { return }
-                container.deepLinkRouter.handle(notificationPayload: userInfo)
             }
             .onOpenURL { url in
                 // Handle URL scheme deep links
@@ -92,9 +69,6 @@ struct TronMobileApp: App {
                 case .settings:
                     NotificationCenter.default.post(name: .showSettingsAction, object: nil)
                     TronLogger.shared.info("Deep link to settings", category: .notification)
-                case .notification(let invocationId):
-                    deepLinkNotificationInvocationId = invocationId
-                    TronLogger.shared.info("Deep link to notification inbox: invocationId=\(invocationId)", category: .notification)
                 case .share:
                     NotificationCenter.default.post(name: .pendingShareContent, object: nil)
                     TronLogger.shared.info("Deep link to share", category: .notification)
@@ -123,18 +97,6 @@ struct TronMobileApp: App {
                 if newPhase == .active && oldPhase != .active {
                     Task {
                         await recoverForegroundConnection()
-
-                        // Sync badge with server unread count
-                        await container.notificationStore.refresh()
-                        if container.notificationStore.unreadCount == 0 {
-                            await container.notificationStore.clearBadge()
-                        } else {
-                            do {
-                                try await UNUserNotificationCenter.current().setBadgeCount(container.notificationStore.unreadCount)
-                            } catch {
-                                TronLogger.shared.debug("Failed to update badge: \(error)", category: .notification)
-                            }
-                        }
 
                         // Handle reconnection based on current connection state.
                         // Session-list refresh is requested unconditionally — the central
@@ -190,8 +152,6 @@ struct TronMobileApp: App {
             .onAppear(perform: syncOnboardingSheetPresentation)
             .onChange(of: onboardingComplete) { _, isComplete in
                 syncOnboardingSheetPresentation()
-                guard isComplete else { return }
-                Task { await registerPushIfAuthorized() }
             }
             .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { notification in
                 launchServerOnboarding(notification: notification)
@@ -201,17 +161,12 @@ struct TronMobileApp: App {
     private var dashboardContent: some View {
         ContentView(
             deepLinkSessionId: $deepLinkSessionId,
-            deepLinkScrollTarget: $deepLinkScrollTarget,
-            deepLinkNotificationInvocationId: $deepLinkNotificationInvocationId
+            deepLinkScrollTarget: $deepLinkScrollTarget
         )
         .environment(\.dependencies, container)
         .environment(\.interactionPolicy, container.interactionPolicy)
         .withErrorHandler()
         .withToastBanner()
-        .task {
-            guard onboardingComplete else { return }
-            await registerPushIfAuthorized()
-        }
     }
 
     private func syncOnboardingSheetPresentation() {
@@ -262,92 +217,6 @@ struct TronMobileApp: App {
     private func initializeApp() async {
         await initializer.initialize {
             try await container.initialize()
-        }
-        // Push notification setup waits for pairing so token registration can
-        // flow through the active engine via device::register.
-    }
-
-    // MARK: - Push Notifications
-
-    /// Register device token with the server. Registration is global: the
-    /// server fans out every `notifications::send` delivery to all active
-    /// tokens regardless of which session originated it.
-    private func registerDeviceToken(_ token: String) async {
-        guard container.engineClient.isConnected else {
-            TronLogger.shared.debug("Not connected, will register token when connected", category: .notification)
-            return
-        }
-
-        let registrationKey = "\(container.engineClient.currentSessionId ?? "global"):\(token)"
-        guard !inFlightDeviceTokenRegistrationKeys.contains(registrationKey) else {
-            TronLogger.shared.debug("Device token registration already in flight; skipping duplicate", category: .notification)
-            return
-        }
-        inFlightDeviceTokenRegistrationKeys.insert(registrationKey)
-        defer { inFlightDeviceTokenRegistrationKeys.remove(registrationKey) }
-
-        do {
-            try await container.engineClient.misc.registerDeviceToken(token, idempotencyKey: .userAction("device.register"))
-            TronLogger.shared.info("Device token registered with server", category: .notification)
-        } catch {
-            TronLogger.shared.error("Failed to register device token: \(error.localizedDescription)", category: .notification)
-        }
-    }
-
-    private func registerPushIfAuthorized() async {
-        guard container.pairedServerStore.activeServer != nil else {
-            TronLogger.shared.debug(
-                "No active paired server; push authorization request skipped",
-                category: .notification
-            )
-            return
-        }
-        guard !isRegisteringPush else {
-            TronLogger.shared.debug(
-                "Push registration already in progress; skipping duplicate request",
-                category: .notification
-            )
-            return
-        }
-        isRegisteringPush = true
-        defer { isRegisteringPush = false }
-
-        // Re-check authorization and request the OS permission once the app is
-        // paired. The engine owns notification storage and delivery; the iOS
-        // client only owns the local APNs permission/token exchange.
-        await container.pushNotificationService.checkAuthorizationStatus()
-        switch container.pushNotificationService.authorizationStatus {
-        case .authorized, .provisional, .ephemeral:
-            break
-        case .notDetermined:
-            TronLogger.shared.info(
-                "Requesting push notification authorization after engine pairing",
-                category: .notification
-            )
-            let granted = await container.pushNotificationService.requestAuthorization()
-            guard granted else { return }
-        case .denied:
-            TronLogger.shared.info(
-                "Push notification permission is denied; device token registration skipped",
-                category: .notification
-            )
-            return
-        @unknown default:
-            TronLogger.shared.warning(
-                "Unknown push notification authorization status=\(container.pushNotificationService.authorizationStatus); device token registration skipped",
-                category: .notification
-            )
-            return
-        }
-
-        container.pushNotificationService.registerIfAuthorized()
-        if let token = container.pushNotificationService.deviceToken {
-            await registerDeviceToken(token)
-        } else {
-            TronLogger.shared.debug(
-                "No APNs device token available yet after authorization check; server registration will retry when APNs returns one",
-                category: .notification
-            )
         }
     }
 

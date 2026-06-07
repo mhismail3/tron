@@ -66,11 +66,6 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssert(Self.sharedContainer.draftStore is DraftStore)
     }
 
-    func test_container_providesPushNotificationService() async throws {
-        XCTAssertNotNil(Self.sharedContainer.pushNotificationService)
-        XCTAssert(Self.sharedContainer.pushNotificationService is PushNotificationService)
-    }
-
     func test_container_providesDeepLinkRouter() async throws {
         XCTAssertNotNil(Self.sharedContainer.deepLinkRouter)
         XCTAssert(Self.sharedContainer.deepLinkRouter is DeepLinkRouter)
@@ -149,17 +144,6 @@ final class DependencyContainerTests: XCTestCase {
         container.selectPairedServer(second, connectAfterSwitch: false)
 
         XCTAssert(originalDB === container.eventDatabase, "EventDatabase should NOT be recreated after settings change")
-    }
-
-    func test_selectPairedServer_preservesPushNotificationService() async throws {
-        let (container, first) = pairedContainer(host: "first.example.com", port: 19004)
-        let originalService = container.pushNotificationService
-        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19005)
-        container.replacePairedServers([first, second], activeServer: first)
-
-        container.selectPairedServer(second, connectAfterSwitch: false)
-
-        XCTAssert(originalService === container.pushNotificationService, "PushNotificationService should NOT be recreated")
     }
 
     func test_selectPairedServer_preservesDeepLinkRouter() async throws {

@@ -135,18 +135,6 @@ final class ContentViewCoordinator {
     // MARK: - Private
 
     private func validateWorkspace(for sessionId: String) {
-        guard let session = eventStoreManager.sessions.first(where: { $0.id == sessionId }) else {
-            return
-        }
-
-        let manager = eventStoreManager
-        let workingDir = session.workingDirectory
-        Task {
-            isValidatingWorkspace = true
-            if let pathExists = await manager.validateWorkspacePath(workingDir) {
-                workspaceDeletedForSession[sessionId] = !pathExists
-            }
-            isValidatingWorkspace = false
-        }
+        workspaceDeletedForSession.removeValue(forKey: sessionId)
     }
 }

@@ -1,24 +1,7 @@
 import Foundation
 
-/// Handlers for transforming system notification events into ChatMessages.
-///
-/// Handles: notification.interrupted, context.cleared, compact.boundary,
-///          stream.thinking_complete
+/// Handlers for transforming system events into ChatMessages.
 enum SystemEventHandlers {
-
-    /// Transform notification.interrupted event into a ChatMessage.
-    ///
-    /// Interrupted events indicate when user stops agent mid-execution.
-    static func transformInterrupted(
-        _ payload: [String: AnyCodable],
-        timestamp: Date
-    ) -> ChatMessage? {
-        return ChatMessage(
-            role: .system,
-            content: .interrupted,
-            timestamp: timestamp
-        )
-    }
 
     /// Transform context.cleared event into a ChatMessage.
     ///

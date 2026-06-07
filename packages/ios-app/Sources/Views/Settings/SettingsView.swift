@@ -6,7 +6,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dependencies) var dependencies
     @AppStorage("confirmArchive") private var confirmArchive = true
-    @AppStorage("autoMarkNotificationsRead") private var autoMarkRead = true
 
     private var engineClient: EngineClient { dependencies.engineClient }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -198,8 +197,7 @@ struct SettingsView: View {
             ProvidersSettingsPage()
         case .app:
             AppearanceSettingsPage(
-                confirmArchive: $confirmArchive,
-                autoMarkRead: $autoMarkRead
+                confirmArchive: $confirmArchive
             )
         }
     }
@@ -589,7 +587,6 @@ struct SettingsView: View {
 
     private func resetToDefaults() {
         confirmArchive = true
-        autoMarkRead = true
         guard serverSettingsReady else { return }
         let activeServerId = dependencies.pairedServerStore.activeServer?.id
         let client = engineClient

@@ -91,7 +91,6 @@ struct NewSessionFlow: View {
             }
             .sheet(isPresented: $showWorkspaceSelector) {
                 WorkspaceSelector(
-                    engineClient: engineClient,
                     selectedPath: $workingDirectory
                 )
             }

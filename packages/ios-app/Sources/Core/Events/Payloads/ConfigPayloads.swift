@@ -79,16 +79,3 @@ struct MessageDeletedPayload {
         self.reason = payload.string("reason")
     }
 }
-
-// MARK: - Notification Payloads
-
-/// Payload for notification.interrupted event
-struct InterruptedPayload {
-    let timestamp: String?
-    let turn: Int?
-
-    init(from payload: [String: AnyCodable]) {
-        self.timestamp = payload.string("timestamp")
-        self.turn = payload.int("turn")
-    }
-}

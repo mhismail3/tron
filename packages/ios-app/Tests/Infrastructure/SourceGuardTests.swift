@@ -403,27 +403,138 @@ struct SourceGuardTests {
         }
     }
 
-    @Test("Push registration requests permission after engine pairing")
-    func testPushRegistrationRequestsPermissionAfterPairing() throws {
+    @Test("Primitive shell has no APNs or device-token client plane")
+    func testPrimitiveShellHasNoAPNsOrDeviceTokenClientPlane() throws {
         let fileURL = URL(fileURLWithPath: #filePath)
         let iosRoot = fileURL
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let appEntry = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/App/TronMobileApp.swift"),
-            encoding: .utf8
-        )
+        let deletedPaths = [
+            "Sources/Services/Notifications/PushNotificationService.swift",
+            "Sources/Services/Infrastructure/APNsEnvironment.swift",
+            "Tests/Services/PushNotificationServiceTests.swift",
+            "Tests/Services/APNsEnvironmentTests.swift",
+        ]
+        for relativePath in deletedPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) belongs to the deleted push transport plane"
+            )
+        }
+        for relativePath in [
+            "TronMobileBeta.entitlements",
+            "TronMobileProd.entitlements",
+        ] {
+            let entitlement = try String(
+                contentsOf: iosRoot.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+            #expect(!entitlement.contains("aps-environment"))
+        }
+        let forbidden = [
+            "PushNotificationService",
+            "APNsEnvironment",
+            "device::register",
+            "device::unregister",
+            "DeviceTokenRegister",
+            "registerForRemoteNotifications",
+            "UNUserNotificationCenter",
+            "registerPushIfAuthorized",
+            "registerDeviceToken",
+        ]
+        let checkedRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        for root in checkedRoots {
+            for path in try swiftFiles(in: root) {
+                if path.lastPathComponent == "SourceGuardTests.swift" {
+                    continue
+                }
+                let source = try String(contentsOf: path, encoding: .utf8)
+                for token in forbidden {
+                    #expect(!source.contains(token), "\(token) must stay deleted from \(path.path)")
+                }
+            }
+        }
+    }
 
-        #expect(appEntry.contains("guard onboardingComplete else { return }"))
-        #expect(appEntry.contains("guard container.pairedServerStore.activeServer != nil else"))
-        #expect(appEntry.contains("No active paired server; push authorization request skipped"))
-        #expect(appEntry.contains("await registerPushIfAuthorized()"))
-        #expect(appEntry.contains("case .notDetermined:"))
-        #expect(appEntry.contains("requestAuthorization()"))
-        #expect(appEntry.contains("device::register"))
-        #expect(appEntry.contains("inFlightDeviceTokenRegistrationKeys"))
-        #expect(appEntry.contains("Device token registration already in flight; skipping duplicate"))
+    @Test("Primitive shell has no stale typed domain clients")
+    func testPrimitiveShellHasNoStaleTypedDomainClients() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let deletedPaths = [
+            "Sources/Services/Network/Clients/ContextClient.swift",
+            "Sources/Services/Network/Clients/CronClient.swift",
+            "Sources/Services/Network/Clients/DisplayClient.swift",
+            "Sources/Services/Network/Clients/FilesystemClient.swift",
+            "Sources/Services/Network/Clients/JobClient.swift",
+            "Sources/Services/Network/Clients/NotificationClient.swift",
+            "Sources/Services/Network/Clients/RepoClient.swift",
+            "Sources/Models/EngineProtocol/EngineProtocolTypes+Cron.swift",
+            "Sources/Models/EngineProtocol/EngineProtocolTypes+Filesystem.swift",
+            "Sources/Models/Messages/NotificationDeliveryTypes.swift",
+            "Sources/Services/NotificationStore.swift",
+            "Sources/ViewModels/State/ContextRefreshGate.swift",
+            "Sources/Views/Capabilities/NotificationDelivery",
+            "Sources/Views/Notifications",
+            "Tests/Models/EngineProtocol/EngineProtocolTypesCronTests.swift",
+            "Tests/Services/ContextClientTests.swift",
+            "Tests/Services/CronClientTests.swift",
+            "Tests/Services/DisplayClientTests.swift",
+            "Tests/Services/FilesystemClientTests.swift",
+            "Tests/Services/JobClientTests.swift",
+            "Tests/Services/NotificationClientTests.swift",
+            "Tests/Services/NotificationStoreTests.swift",
+            "Tests/Services/WorkspaceValidationTests.swift",
+            "Tests/ViewModels/ContextRefreshGateTests.swift",
+            "Tests/Views/NotificationInboxFilterTests.swift",
+            "Tests/Views/NotificationSheetPresentationTests.swift",
+        ]
+        for relativePath in deletedPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) is fixed capability client/UI/test surface"
+            )
+        }
+
+        let forbidden = [
+            "ContextClient",
+            "CronClient",
+            "DisplayClient",
+            "FilesystemClient",
+            "JobClient",
+            "NotificationClient",
+            "RepoClient",
+            "NotificationStore",
+            "NotificationDelivery",
+            "ContextRefreshGate",
+            "syncFromServerSnapshot",
+            "ContextSnapshotResult",
+            "context.getSnapshot",
+            "context.getDetailedSnapshot",
+            "display.stopStream",
+            "job.cancel",
+            "notifications::send",
+        ]
+        let checkedRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        for root in checkedRoots {
+            for path in try swiftFiles(in: root) {
+                if path.lastPathComponent == "SourceGuardTests.swift" {
+                    continue
+                }
+                let source = try String(contentsOf: path, encoding: .utf8)
+                for token in forbidden {
+                    #expect(!source.contains(token), "\(token) must stay deleted from \(path.path)")
+                }
+            }
+        }
     }
 
     @Test("iOS runtime contract is iOS 26 only")
@@ -979,5 +1090,24 @@ struct SourceGuardTests {
                 )
             }
         }
+    }
+
+    private func swiftFiles(in root: URL) throws -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            Issue.record("Could not enumerate \(root.path)")
+            return []
+        }
+
+        var files: [URL] = []
+        while let any = enumerator.nextObject() {
+            guard let url = any as? URL else { continue }
+            guard url.pathExtension == "swift" else { continue }
+            files.append(url)
+        }
+        return files
     }
 }

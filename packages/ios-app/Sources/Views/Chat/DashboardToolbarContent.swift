@@ -34,13 +34,6 @@ struct DashboardToolbarContent: ToolbarContent {
                 .foregroundStyle(accent)
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
-            if actions.notificationUnreadCount > 0 {
-                NotificationBellButton(
-                    unreadCount: actions.notificationUnreadCount,
-                    accent: accent,
-                    action: { actions.onNotificationBell() }
-                )
-            }
             Button(action: actions.onSettings) {
                 Image(systemName: "gearshape")
                     .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .medium))

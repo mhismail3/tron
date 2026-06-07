@@ -42,9 +42,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         eventDatabase.storageMode
     }
 
-    /// Push notification service - persists across server changes
-    private(set) var pushNotificationService: PushNotificationService
-
     /// Deep link router - persists across server changes
     private(set) var deepLinkRouter: DeepLinkRouter
 
@@ -89,9 +86,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     /// Event store manager - updated when engine client changes
     private(set) var eventStoreManager: EventStoreManager
-
-    /// Notification inbox store - refreshed from server
-    private(set) var notificationStore: NotificationStore
 
     // MARK: - Repositories
 
@@ -162,7 +156,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         }
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)
-        pushNotificationService = PushNotificationService()
         deepLinkRouter = DeepLinkRouter()
 
         // Build initial server URL from the iOS-local active pairing. With no
@@ -192,9 +185,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         // Initialize event store manager
         eventStoreManager = EventStoreManager(eventDB: db, engineClient: client)
-
-        // Initialize notification store
-        notificationStore = NotificationStore(engineClient: client)
 
         // Initialize repositories
         modelRepository = DefaultModelRepository(modelClient: client.model)
@@ -385,7 +375,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         eventStoreManager.updateEngineClient(newClient)
         eventStoreManager.attachConnectionManager(newManager)
-        notificationStore = NotificationStore(engineClient: newClient)
         modelRepository = DefaultModelRepository(modelClient: newClient.model)
         sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
         agentRepository = DefaultAgentRepository(agentClient: newClient.agent)

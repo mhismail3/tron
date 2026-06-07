@@ -398,10 +398,6 @@ authProfile = "default"
         assert!((settings.retry.jitter_factor - defaults.retry.jitter_factor).abs() < f64::EPSILON);
         assert_eq!(settings.agent.max_turns, defaults.agent.max_turns);
         assert_eq!(
-            settings.capabilities.process.default_timeout_ms,
-            defaults.capabilities.process.default_timeout_ms
-        );
-        assert_eq!(
             settings.context.compactor.max_tokens,
             defaults.context.compactor.max_tokens
         );
@@ -609,22 +605,15 @@ maxEntries = 500
     }
 
     #[test]
-    fn load_array_replace_not_merge() {
+    fn capability_policy_settings_are_rejected() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
-        write_sparse_settings(
-            &path,
-            r#"[settings.capabilities.process]
-dangerousPatterns = ["^rm -rf /"]
-"#,
-        );
+        let section = ["settings", "capabilities", "process"].join(".");
+        let key = ["dangerous", "Patterns"].concat();
+        write_sparse_settings(&path, &format!("[{section}]\n{key} = [\"^rm -rf /\"]\n"));
 
-        let settings = load_settings_from_path(&path).unwrap();
-        assert_eq!(settings.capabilities.process.dangerous_patterns.len(), 1);
-        assert_eq!(
-            settings.capabilities.process.dangerous_patterns[0],
-            "^rm -rf /"
-        );
+        let err = load_settings_from_path(&path).unwrap_err();
+        assert!(err.to_string().contains("capabilities"));
     }
 
     #[test]

@@ -20,22 +20,12 @@ extension ChatViewModel: DisplayStreamEventHandler {
         displayStreamState.endStream()
     }
 
-    /// Stop the active display stream via engine protocol and clean up active state.
-    /// Keeps the last frame for post-stream viewing.
+    /// Stop rendering the active display stream locally and keep the last frame.
     func stopDisplayStream() {
         guard let streamId = displayStreamState.activeStreamId else { return }
 
         displayStreamState.markStopped()
-
-        launchBackground { [weak self] in
-            guard let self else { return }
-            do {
-                let _ = try await self.engineClient.display.stopStream(streamId: streamId, idempotencyKey: .userAction("display.stopStream"))
-                self.logInfo("Stopped display stream: \(streamId)")
-            } catch {
-                self.logWarning("Failed to stop display stream: \(error)")
-            }
-        }
+        logInfo("Stopped local display stream rendering: \(streamId)")
     }
 
     /// Clear all stream state (e.g., on session change or disconnect).

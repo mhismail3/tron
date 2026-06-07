@@ -31,52 +31,6 @@ baseDelayMs = 1000
 maxDelayMs = 60000
 jitterFactor = 0.2
 
-[settings.capabilities.process]
-defaultTimeoutMs = 120000
-maxTimeoutMs = 600000
-maxOutputLength = 40000
-dangerousPatterns = ["^rm\\s+(-rf?|--force)\\s+/\\s*$", "rm\\s+-rf?\\s+/", "^sudo\\s+", "^chmod\\s+777\\s+/\\s*$", "^mkfs\\.", "^dd\\s+if=.*of=/dev/", ">\\s*/dev/sd[a-z]"]
-
-[settings.capabilities.process.sandbox]
-defaultImage = "ubuntu:latest"
-networkEnabled = true
-
-[settings.capabilities.filesystemRead]
-defaultLimitLines = 2000
-maxLineLength = 2000
-maxOutputTokens = 20000
-
-[settings.capabilities.find]
-defaultMaxResults = 100
-defaultMaxDepth = 10
-
-[settings.capabilities.search]
-defaultMaxResults = 100
-maxFileSizeBytes = 10485760
-binaryExtensions = ["png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "svg", "mp3", "mp4", "wav", "avi", "mov", "mkv", "flac", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "zip", "tar", "gz", "bz2", "7z", "rar", "exe", "dll", "so", "dylib", "o", "a", "woff", "woff2", "ttf", "eot", "otf", "db", "sqlite", "bin"]
-skipDirectories = ["node_modules", "__pycache__", "dist", "build", ".git", ".svn", ".hg", "vendor", "target"]
-maxOutputTokens = 15000
-astDefaultLimit = 50
-astMaxLimit = 200
-defaultContext = 0
-astBinaryPath = "sg"
-requireConfirmationForReplace = false
-defaultTimeoutMs = 60000
-
-[settings.capabilities.web.fetch]
-timeoutMs = 30000
-
-[settings.capabilities.web.cache]
-ttlMs = 900000
-maxEntries = 100
-
-[settings.capabilities.browser]
-headed = false
-
-[settings.capabilities.computerUse]
-confirmBeforeAction = true
-screenshotThrottleMs = 500
-
 [settings.context.compactor]
 maxTokens = 25000
 compactionThreshold = 0.85

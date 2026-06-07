@@ -362,7 +362,6 @@ struct TurnGroupingTests {
             makeEvent(type: "message.assistant", sequence: 3, payload: makePayload(turn: 2)),
             // Inter-prompt events (no turn in payload)
             makeEvent(type: "hook.llm_result", sequence: 4),
-            makeEvent(type: "process.results_consumed", sequence: 5),
             // Cycle 2: reset
             makeEvent(type: "message.user", sequence: 6),
             makeEvent(type: "message.assistant", sequence: 7, payload: makePayload(turn: 1)),
@@ -568,12 +567,10 @@ struct TurnGroupingTests {
             makeEvent(type: "message.assistant", sequence: 10, payload: makePayload(turn: 3)),
             // Inter-prompt events
             makeEvent(type: "hook.llm_result", sequence: 11),
-            makeEvent(type: "process.results_consumed", sequence: 12),
             // Prompt 2: 2 turns, turn numbers reset
             makeEvent(type: "message.user", sequence: 13, payload: ["content": AnyCodable("Now tag all bookmarks")]),
             makeEvent(type: "message.assistant", sequence: 14, payload: makePayload(turn: 1)),
             makeEvent(type: "capability.invocation.started", sequence: 15, payload: makePayload(turn: 1)),
-            makeEvent(type: "notification.process_result", sequence: 16),
             makeEvent(type: "capability.invocation.completed", sequence: 17),
             makeEvent(type: "message.assistant", sequence: 18, payload: makePayload(turn: 2)),
             // Inter-prompt events

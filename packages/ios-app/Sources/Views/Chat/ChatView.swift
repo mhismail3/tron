@@ -13,7 +13,6 @@ struct ChatView: View {
     // MARK: - Environment & State (internal for extension access)
     @Environment(\.dismiss) var dismiss
     @Environment(\.dependencies) var dependencies
-    @Environment(\.scenePhase) private var scenePhase
     @State var viewModel: ChatViewModel
 
     // Convenience accessor
@@ -87,7 +86,6 @@ struct ChatView: View {
         .sheet(isPresented: $viewModel.showProcessSheet) {
             ProcessListSheet(
                 processState: viewModel.processState,
-                onCancel: { processId in viewModel.cancelProcess(processId) },
                 onClose: { viewModel.showProcessSheet = false }
             )
         }
@@ -199,14 +197,6 @@ struct ChatView: View {
             await viewModel.connectAndReconstruct()
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
 
-            // Entering a session from the sidebar implicitly clears
-            // its unread notifications — the user has seen them by the
-            // time they've opened the session. Fire-and-forget so any
-            // server hiccup doesn't delay the UI.
-            Task {
-                await dependencies.notificationStore.markAllRead(sessionId: viewModel.sessionId, idempotencyKey: .userAction("notifications.markAllRead"))
-            }
-
             // Handle message visibility and set initialLoadComplete
             // NOTE: initialLoadComplete is set INSIDE handleInitialMessageVisibility()
             // AFTER the cascade starts, to prevent a flash where all messages are visible
@@ -234,15 +224,6 @@ struct ChatView: View {
             if shouldDismiss {
                 logger.info("Session not found on server, navigating back to dashboard", category: .session)
                 dismiss()
-            }
-        }
-        .onChange(of: scenePhase) { oldPhase, newPhase in
-            // When the user brings the app back to the foreground
-            // WHILE this session is on screen, their unread notifications
-            // for this session are implicitly seen. Fire-and-forget.
-            guard newPhase == .active, oldPhase != .active else { return }
-            Task {
-                await dependencies.notificationStore.markAllRead(sessionId: viewModel.sessionId, idempotencyKey: .userAction("notifications.markAllRead"))
             }
         }
         .onChange(of: scrollTarget) { _, target in
@@ -411,8 +392,6 @@ struct ChatView: View {
                 preservedTurns: preservedTurns,
                 summarizedTurns: summarizedTurns
             )
-        case .notificationDelivery(let data):
-            sheetCoordinator.showNotificationDelivery(data)
         case .capabilityInvocation(let data):
             sheetCoordinator.showCapabilityInvocationDetail(data)
         case .cancelCapabilityInvocation(let id):

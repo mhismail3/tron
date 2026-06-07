@@ -15,9 +15,6 @@ protocol DependencyProviding: AnyObject {
     /// Event store manager for session state
     var eventStoreManager: EventStoreManager { get }
 
-    /// Push notification service
-    var pushNotificationService: PushNotificationService { get }
-
     /// Deep link router for navigation
     var deepLinkRouter: DeepLinkRouter { get }
 

@@ -36,29 +36,6 @@ struct ChatSheetTests {
         #expect(sheet.id == "userInteraction")
     }
 
-    @Test("Notification delivery sheets with different data have different ids")
-    func testNotificationDeliveryDifferentDataHaveDifferentIds() {
-        let data1 = NotificationDeliveryData(
-            invocationId: "invocation1",
-            title: "Title 1",
-            body: "Body",
-            sheetContent: nil,
-            status: .sending
-        )
-        let data2 = NotificationDeliveryData(
-            invocationId: "invocation2",
-            title: "Title 2",
-            body: "Body",
-            sheetContent: nil,
-            status: .sending
-        )
-
-        let sheet1 = ChatSheet.notificationDelivery(data1)
-        let sheet2 = ChatSheet.notificationDelivery(data2)
-
-        #expect(sheet1.id != sheet2.id)
-    }
-
     @Test("Thinking detail has consistent id regardless of content")
     func testThinkingDetailId() {
         let sheet1 = ChatSheet.thinkingDetail("content 1")
@@ -71,13 +48,6 @@ struct ChatSheetTests {
     @Test("All sheet cases have unique base ids")
     func testAllCasesHaveUniqueBaseIds() {
         let compactionData = CompactionDetailData(tokensBefore: 100, tokensAfter: 50, reason: "test", summary: nil)
-        let notifyData = NotificationDeliveryData(
-            invocationId: "capability",
-            title: "Title",
-            body: "Body",
-            sheetContent: nil,
-            status: .sending
-        )
         let capabilityData = testCapabilityInvocation(id: "capability_call", status: .success)
         let providerErrorData = ProviderErrorDetailData(
             provider: "test",
@@ -94,7 +64,6 @@ struct ChatSheetTests {
             .settings,
             .compactionDetail(compactionData),
             .userInteraction,
-            .notificationDelivery(notifyData),
             .thinkingDetail("content"),
             .capabilityInvocationDetail(capabilityData),
             .providerErrorDetail(providerErrorData)
@@ -321,27 +290,6 @@ struct SheetCoordinatorTests {
         coordinator.showUserInteraction()
 
         #expect(coordinator.activeSheet == .userInteraction)
-    }
-
-    @Test("showNotificationDelivery creates notification delivery sheet with data")
-    func testShowNotificationDeliveryCreatesCorrectSheet() {
-        let coordinator = SheetCoordinator()
-        let data = NotificationDeliveryData(
-            invocationId: "invocation123",
-            title: "Notification",
-            body: "Body text",
-            sheetContent: nil,
-            status: .sending
-        )
-
-        coordinator.showNotificationDelivery(data)
-
-        if case .notificationDelivery(let sheetData) = coordinator.activeSheet {
-            #expect(sheetData.invocationId == "invocation123")
-            #expect(sheetData.title == "Notification")
-        } else {
-            Issue.record("Expected notificationDelivery sheet")
-        }
     }
 
     @Test("showThinkingDetail creates thinking sheet with content")

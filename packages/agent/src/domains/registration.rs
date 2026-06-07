@@ -22,7 +22,7 @@ use crate::domains::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, auth, blob, capability, context, logs, message, model, session, settings, system,
+    agent, auth, blob, capability, logs, message, model, session, settings, system,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -58,7 +58,6 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         agent::worker_module(&deps)?,
         logs::worker_module(&deps)?,
         session::worker_module(&deps)?,
-        context::worker_module(&deps)?,
     ];
     modules.extend(model::worker_modules(&deps)?);
     Ok(modules)

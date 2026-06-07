@@ -124,9 +124,6 @@ extension SessionEvent {
                      payload.string("model")?.shortModelName ?? "?"
             return "Model: \(from) → \(to)"
 
-        case .notificationInterrupted:
-            return "Session interrupted"
-
         case .compactBoundary:
             return "Context compacted"
 
@@ -182,17 +179,6 @@ extension SessionEvent {
 
         case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
             return "Streaming..."
-
-        case .notificationProcessResult:
-            let label = payload.string("label") ?? ""
-            if !label.isEmpty {
-                return "Process done: \(String(label.prefix(30)))"
-            }
-            return "Process result"
-
-        case .processResultsConsumed:
-            let count = payload.int("count") ?? 0
-            return count > 0 ? "Results consumed (\(count))" : "Results consumed"
 
         case .llmHookResult:
             let hookName = payload.string("hookName") ?? ""

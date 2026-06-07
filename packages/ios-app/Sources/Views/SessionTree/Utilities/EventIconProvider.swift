@@ -43,18 +43,12 @@ enum EventIconProvider {
             return "exclamationmark.triangle.fill"
         case .errorProvider:
             return "arrow.clockwise.circle"
-        case .notificationInterrupted:
-            return "pause.circle.fill"
         case .metadataUpdate, .metadataTag:
             return "tag.fill"
         case .streamTurnStart:
             return "arrow.right.circle"
         case .streamTurnEnd:
             return "arrow.down.circle"
-        case .notificationProcessResult:
-            return "bell.badge.fill"
-        case .processResultsConsumed:
-            return "tray.and.arrow.down.fill"
         case .llmHookResult:
             return "wand.and.rays"
         case .turnFailed:
@@ -108,16 +102,10 @@ enum EventIconProvider {
             return .tronError
         case .errorProvider:
             return .tronError
-        case .notificationInterrupted:
-            return .tronWarning
         case .metadataUpdate, .metadataTag:
             return .tronTextMuted
         case .streamTurnStart, .streamTurnEnd:
             return .tronBlue
-        case .notificationProcessResult:
-            return .tronWarning
-        case .processResultsConsumed:
-            return .tronSuccess
         case .llmHookResult:
             return .tronPurple
         case .turnFailed:

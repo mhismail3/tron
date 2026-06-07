@@ -438,7 +438,7 @@ See `docs/events.md` for the complete event handling guide.
 
 ### Memory Management
 
-- Event arrays capped (100 events per subagent)
+- Event arrays capped per retained session/detail view
 - Messages windowed for large sessions
 - Images loaded lazily
 

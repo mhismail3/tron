@@ -43,9 +43,6 @@ enum PersistedEventType: String, CaseIterable {
     // Message operations
     case messageDeleted = "message.deleted"
 
-    // Notifications (in-chat pill notifications)
-    case notificationInterrupted = "notification.interrupted"
-
     // Compaction/summarization
     case compactBoundary = "compact.boundary"
 
@@ -68,10 +65,6 @@ enum PersistedEventType: String, CaseIterable {
 
     // Turn events
     case turnFailed = "turn.failed"
-
-    // Process management
-    case notificationProcessResult = "notification.process_result"
-    case processResultsConsumed = "process.results_consumed"
 
     // Hooks
     case llmHookResult = "hook.llm_result"
@@ -113,8 +106,6 @@ enum PersistedEventType: String, CaseIterable {
         case .configReasoningLevel:    return .init(true,    true,    false,   false,  "Reasoning level changed")
         // Message operations
         case .messageDeleted:          return .init(false,   true,    false,   true,   "Message deleted")
-        // Notifications
-        case .notificationInterrupted: return .init(true,    false,   false,   false,  "Session interrupted")
         // Compaction
         case .compactBoundary:         return .init(true,    true,    false,   true,   "Compact boundary")
         // Context
@@ -132,9 +123,6 @@ enum PersistedEventType: String, CaseIterable {
         case .errorProvider:           return .init(true,    false,   false,   false,  "Provider error")
         // Turn events
         case .turnFailed:              return .init(true,    false,   false,   false,  "Turn failed")
-        // Process
-        case .notificationProcessResult: return .init(false, false,   false,   false,  "Process result")
-        case .processResultsConsumed:  return .init(false,   false,   false,   false,  "Results consumed")
         // Hooks
         case .llmHookResult:           return .init(false,   true,    false,   true,   "LLM hook result")
         }

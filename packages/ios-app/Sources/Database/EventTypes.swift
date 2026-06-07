@@ -97,9 +97,6 @@ enum SessionEventType: String, Codable, Sendable {
     // Message operations
     case messageDeleted = "message.deleted"
 
-    // Notifications (in-chat pill notifications)
-    case notificationInterrupted = "notification.interrupted"
-
     case compactBoundary = "compact.boundary"
 
     // Context
@@ -115,10 +112,6 @@ enum SessionEventType: String, Codable, Sendable {
     case errorAgent = "error.agent"
     case errorCapability = "error.capability"
     case errorProvider = "error.provider"
-
-    // Process management
-    case notificationProcessResult = "notification.process_result"
-    case processResultsConsumed = "process.results_consumed"
 
     // Turn events
     case turnFailed = "turn.failed"

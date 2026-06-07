@@ -69,20 +69,6 @@ final class EngineStreamScopeTests: XCTestCase {
     }
 }
 
-// MARK: - Notification Refresh Tests
-
-@MainActor
-final class NotificationStoreConnectionTests: XCTestCase {
-
-    func testRefreshOnlyRunsWhenEngineIsConnected() {
-        XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .disconnected))
-        XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .connecting))
-        XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .reconnecting(attempt: 1, nextRetrySeconds: 2)))
-        XCTAssertFalse(NotificationStore.shouldRefreshFromServer(connectionState: .failed(reason: "offline")))
-        XCTAssertTrue(NotificationStore.shouldRefreshFromServer(connectionState: .connected))
-    }
-}
-
 // MARK: - Model Info Tests
 
 @MainActor

@@ -86,7 +86,6 @@ cmd_dev() {
                 echo "Stops the installed service, runs local binary on port $PROD_PORT."
                 echo "Uses the dev-server profile (thin LTO, fast builds, debug backtraces)."
                 echo "The installed service restarts automatically when dev exits (Ctrl+C)."
-                echo "Loads relay env from packages/mac-app/.env.local when present."
                 echo ""
                 echo "Usage: tron dev [options]"
                 echo ""
@@ -181,7 +180,6 @@ dev_start_foreground() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
     # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
-    prepare_dev_relay_env
     cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
     local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
@@ -226,7 +224,6 @@ dev_start_background() {
     fi
 
     # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
-    prepare_dev_relay_env
     cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
     local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
     create_app_bundle "$DEV_BUNDLE" "$dev_src"

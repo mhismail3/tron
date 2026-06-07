@@ -353,8 +353,7 @@ cmd_install() {
     # Suppresses decorative banners and interactive prompts.
     #
     # Event shape: {"phase":"<name>","status":"start|ok|fail","detail":"..."}
-    # Phases (ordered): dirs, configs, build, bundle, sidecar, skills,
-    #                   plist, cli, symlink, launchd
+    # Phases (ordered): dirs, configs, build, bundle, plist, cli, symlink, launchd
     # The distributed Mac app does not call this path. Production
     # installs are `/Applications/Tron.app` + SMAppService only.
     local gui_helper=0

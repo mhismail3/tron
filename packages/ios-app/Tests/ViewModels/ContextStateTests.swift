@@ -284,62 +284,7 @@ final class ContextStateTests: XCTestCase {
         XCTAssertEqual(state.lastTurnInputTokens, 99000)
     }
 
-    // MARK: - Server Snapshot Sync Tests
-
-    func testSyncFromServerSnapshotUpdatesTokens() {
-        let state = ContextTrackingState()
-        state.currentContextWindow = 200_000
-        state.contextWindowTokens = 5000  // stale value from last turn
-
-        state.syncFromServerSnapshot(currentTokens: 7600, contextLimit: 1_000_000)
-
-        XCTAssertEqual(state.contextWindowTokens, 7600)
-        XCTAssertEqual(state.currentContextWindow, 1_000_000)
-    }
-
-    func testSyncFromServerSnapshotPreservesTokensWhenServerReturnsZero() {
-        let state = ContextTrackingState()
-        state.currentContextWindow = 200_000
-        state.contextWindowTokens = 85000  // valid reconstructed value
-
-        state.syncFromServerSnapshot(currentTokens: 0, contextLimit: 200_000)
-
-        XCTAssertEqual(state.contextWindowTokens, 85000)  // preserved
-        XCTAssertEqual(state.currentContextWindow, 200_000)
-    }
-
-    func testSyncFromServerSnapshotNewSessionGetsSystemPromptOverhead() {
-        let state = ContextTrackingState()
-        XCTAssertEqual(state.contextWindowTokens, 0)
-
-        state.syncFromServerSnapshot(currentTokens: 7600, contextLimit: 1_000_000)
-
-        XCTAssertEqual(state.contextWindowTokens, 7600)
-        XCTAssertEqual(state.contextPercentage, 1)  // 7600/1000000 = 0.76%, rounds to 1%
-        XCTAssertEqual(state.tokensRemaining, 992_400)
-    }
-
-    func testSyncFromServerSnapshotPostCompaction() {
-        let state = ContextTrackingState()
-        state.currentContextWindow = 1_000_000
-        state.contextWindowTokens = 29000  // stale compaction estimate
-
-        state.syncFromServerSnapshot(currentTokens: 77300, contextLimit: 1_000_000)
-
-        XCTAssertEqual(state.contextWindowTokens, 77300)
-        XCTAssertEqual(state.tokensRemaining, 922_700)
-    }
-
-    func testSyncFromServerSnapshotAlwaysUpdatesContextLimit() {
-        let state = ContextTrackingState()
-        state.currentContextWindow = 200_000
-
-        state.syncFromServerSnapshot(currentTokens: 0, contextLimit: 1_000_000)
-
-        XCTAssertEqual(state.currentContextWindow, 1_000_000)
-    }
-
-    func testSyncFromServerSnapshotAfterTurnEndThenRefresh() {
+    func testTokenRecordAfterTurnEndUpdatesContextWindow() {
         let state = ContextTrackingState()
         state.currentContextWindow = 1_000_000
 
@@ -351,12 +296,6 @@ final class ContextStateTests: XCTestCase {
         )
         state.updateFromTokenRecord(record)
         XCTAssertEqual(state.contextWindowTokens, 85000)
-
-        // Server snapshot may differ slightly (includes volatile tokens)
-        state.syncFromServerSnapshot(currentTokens: 86200, contextLimit: 1_000_000)
-
-        // Server is authoritative — overwrite
-        XCTAssertEqual(state.contextWindowTokens, 86200)
     }
 
     // MARK: - Reconstruction Restoration Integration Tests

@@ -48,9 +48,6 @@ struct ChatSheetContent: View {
         case .userInteraction:
             userInteractionSheet
 
-        case .notificationDelivery(let data):
-            NotificationDeliveryDetailSheet(data: data)
-
         case .thinkingDetail(let content):
             ThinkingDetailSheet(
                 state: ThinkingDetailState(

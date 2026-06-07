@@ -128,8 +128,6 @@ final class ChatViewModel {
     private var eventTask: Task<Void, Never>?
     @ObservationIgnored
     private var eventTaskGeneration: UInt64 = 0
-    @ObservationIgnored
-    private let contextRefreshGate = ContextRefreshGate()
     /// ID of the thinking message for the current turn (thinking appears before text response)
     var thinkingMessageId: UUID?
     /// True while reconstruction is in progress — buffers real-time events for replay after
@@ -417,7 +415,6 @@ final class ChatViewModel {
         eventTaskGeneration += 1
         eventTask?.cancel()
         eventTask = nil
-        contextRefreshGate.cancel()
     }
 
     var liveEventStreamIsActiveForTesting: Bool {
@@ -441,7 +438,6 @@ final class ChatViewModel {
         // assumeIsolated lets the compiler see we can safely access isolated state.
         MainActor.assumeIsolated {
             eventTask?.cancel()
-            contextRefreshGate.cancel()
             for task in observationTasks { task.cancel() }
             for task in backgroundTasks { task.cancel() }
         }
@@ -684,35 +680,7 @@ final class ChatViewModel {
         }
     }
 
-    /// Refresh context state from server (authoritative source).
-    /// Call after: session resume, model switch, skill add/remove, context clear/compaction.
-    /// Syncs both context limit and current token count to keep the pill in sync with the sheet.
-    /// When the server returns currentTokens=0 (session not yet built), preserves existing tokens.
     func refreshContextFromServer() async {
-        await contextRefreshGate.run { [weak self] in
-            await self?.performContextRefreshFromServer()
-        }
-    }
-
-    private func performContextRefreshFromServer() async {
-        guard let sessionId = engineClient.currentSessionId else {
-            logger.debug("No session ID available for context refresh", category: .session)
-            return
-        }
-
-        let contextClient = engineClient.context
-        let sid = sessionId
-        do {
-            let snapshot = try await withRetry {
-                try await contextClient.getSnapshot(sessionId: sid)
-            }
-            self.contextState.syncFromServerSnapshot(
-                currentTokens: snapshot.currentTokens,
-                contextLimit: snapshot.contextLimit
-            )
-        } catch {
-            logger.warning("refreshContextFromServer failed: \(error.localizedDescription)", category: .session)
-        }
     }
 
     // Note: Deep link methods moved to ChatViewModel+DeepLinks.swift

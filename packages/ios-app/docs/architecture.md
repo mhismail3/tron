@@ -30,8 +30,6 @@ source-control state, worker state, or product dashboards locally.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, and bounded local
   event cache integrity.
-- Push notification permission/token registration only after an active paired
-  server exists.
 
 ## Deleted Fixed Product Modes
 
@@ -88,8 +86,7 @@ Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 
 The shell mounts `ContentView` even before onboarding is complete. First-run
 onboarding is presented as a sheet over the shell. When `onboardingComplete` is
-true but no active paired server exists, the shell stays visible and does not
-request push notification permission.
+true but no active paired server exists, the shell stays visible.
 
 ## Engine Client Boundary
 
@@ -119,13 +116,6 @@ generic renderer for server/agent-authored runtime data. It uses native SwiftUI
 layout primitives and submits only generic action coordinates or encoded action
 payloads supplied by the runtime surface. It must not map fixed feature names
 into custom sheets.
-
-## Notifications
-
-Push notifications are background delivery infrastructure, not a product mode.
-`TronMobileApp.registerPushIfAuthorized()` first checks that an active paired
-server exists. Clean shell launches without a paired server must not display the
-system notification permission prompt.
 
 ## Diagnostics And Build Identity
 

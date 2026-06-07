@@ -47,7 +47,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
-        "Current score: **81/100**",
+        "Current score: **92/100**",
         "Status: **active execution artifact**",
         "Branch: `codex/primitive-engine-teardown`",
         "There are no users and no compatibility obligations.",
@@ -68,8 +68,8 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | passed_after_fix |",
         "| PET-7 | Self-authored worker/capability substrate | 8 | passed_after_fix |",
         "| PET-8 | iOS primitive shell | 10 | passed_after_fix |",
-        "| PET-9 | Documentation and managed asset rewrite | 5 | pending |",
-        "| PET-10 | Absence gates, traceability gates, and dead-code cleanup | 6 | running |",
+        "| PET-9 | Documentation and managed asset rewrite | 5 | passed_after_fix |",
+        "| PET-10 | Absence gates, traceability gates, and dead-code cleanup | 6 | passed_after_fix |",
         "| PET-11 | End-to-end closeout and \"cannot remove more\" audit | 8 | pending |",
         "Total weight: **100**",
         "`provider_surface_exports_only_execute`",
@@ -89,7 +89,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Evidence Manifest",
-        "Current score: **81/100**",
+        "Current score: **92/100**",
         "Status: **active execution artifact**",
         "New teardown branch: `codex/primitive-engine-teardown`",
         "Compatibility assumption: none.",
@@ -102,6 +102,8 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-6 | passed_after_fix |",
         "| PET-7 | passed_after_fix |",
         "| PET-8 | passed_after_fix |",
+        "| PET-9 | passed_after_fix |",
+        "| PET-10 | passed_after_fix |",
         "| PET-11 | pending |",
         "provider model-facing tool export proof",
         "trace record proof linking provider/model turn, invocation, VCS/resource",
@@ -515,10 +517,6 @@ fn startup_context_has_no_product_policy_or_worker_managers() {
             "packages/agent/src/domains/worker.rs",
         ),
         (
-            "context domain deps",
-            "packages/agent/src/domains/context/deps.rs",
-        ),
-        (
             "agent domain deps",
             "packages/agent/src/domains/agent/deps.rs",
         ),
@@ -573,10 +571,6 @@ fn retained_registered_contracts_do_not_encode_approval_or_policy_planes() {
         (
             "auth contract",
             "packages/agent/src/domains/auth/contract.rs",
-        ),
-        (
-            "context contract",
-            "packages/agent/src/domains/context/contract.rs",
         ),
         (
             "message contract",
@@ -1254,6 +1248,93 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
                 "approvalItems",
                 "requiresApproval",
                 "observability::",
+            ],
+            label,
+        );
+    }
+}
+
+#[test]
+fn capability_policy_settings_plane_is_deleted() {
+    assert_repo_path_absent(
+        "packages/agent/src/domains/settings/implementation/types/capabilities.rs",
+        "capability-specific settings type module",
+    );
+
+    for (path, label) in [
+        (
+            "packages/agent/defaults/profiles/default/profile.toml",
+            "default profile",
+        ),
+        (
+            "packages/agent/src/domains/settings/implementation/types/mod.rs",
+            "settings root type",
+        ),
+        (
+            "packages/agent/src/domains/settings/implementation/storage/loader.rs",
+            "settings loader tests",
+        ),
+        (
+            "packages/agent/src/shared/foundation/profile/tests.rs",
+            "profile overlay tests",
+        ),
+        ("README.md", "README settings docs"),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "settings.capabilities",
+                "[settings.capabilities",
+                "CapabilitySettings",
+                "capabilities.process",
+                "capabilities.search",
+                "ProcessCapabilitySettings",
+                "FilesystemReadCapabilitySettings",
+                "BrowserSettings",
+                "ComputerUseSettings",
+            ],
+            label,
+        );
+    }
+}
+
+#[test]
+fn public_context_capability_plane_is_deleted() {
+    assert_repo_path_absent(
+        "packages/agent/src/domains/context",
+        "public context domain worker",
+    );
+
+    for (path, label) in [
+        (
+            "packages/agent/src/domains/mod.rs",
+            "domain module registry",
+        ),
+        (
+            "packages/agent/src/domains/registration.rs",
+            "domain startup registration",
+        ),
+        (
+            "packages/agent/src/domains/catalog.rs",
+            "canonical capability catalog",
+        ),
+        ("README.md", "README context docs"),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "context::worker_module",
+                "super::context::contract",
+                "context::get_snapshot",
+                "context::get_detailed_snapshot",
+                "context::preview_compaction",
+                "context::should_compact",
+                "context::confirm_compaction",
+                "context::compact",
+                "context::can_accept_turn",
+                "context::get_audit_trace",
             ],
             label,
         );

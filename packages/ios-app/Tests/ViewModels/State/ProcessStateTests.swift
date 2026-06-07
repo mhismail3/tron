@@ -90,64 +90,12 @@ struct ProcessStateTests {
         #expect(state.processes.isEmpty)
     }
 
-    // MARK: - Cancelling Flow
-
-    @Test("markCancelling sets cancelling status and stores previous")
-    func testMarkCancelling() {
+    @Test("server status update records cancellation")
+    func testServerStatusRecordsCancellation() {
         let state = ProcessState()
         state.trackSpawn(result: makeSpawnResult())
-        state.markCancelling("proc-1")
-        #expect(state.processes["proc-1"]?.status == .cancelling)
-        #expect(state.processes["proc-1"]?.statusBeforeCancelling == .running)
-    }
-
-    @Test("confirmCancelled transitions from cancelling to cancelled")
-    func testConfirmCancelled() {
-        let state = ProcessState()
-        state.trackSpawn(result: makeSpawnResult())
-        state.markCancelling("proc-1")
-        state.confirmCancelled("proc-1")
-        #expect(state.processes["proc-1"]?.status == .cancelled)
-        #expect(state.processes["proc-1"]?.statusBeforeCancelling == nil)
-    }
-
-    @Test("revertCancelling restores previous status")
-    func testRevertCancelling() {
-        let state = ProcessState()
-        state.trackSpawn(result: makeSpawnResult())
-        state.markCancelling("proc-1")
-        state.revertCancelling("proc-1")
-        #expect(state.processes["proc-1"]?.status == .running)
-        #expect(state.processes["proc-1"]?.statusBeforeCancelling == nil)
-    }
-
-    @Test("markCancelling is no-op when already cancelling")
-    func testMarkCancellingIdempotent() {
-        let state = ProcessState()
-        state.trackSpawn(result: makeSpawnResult())
-        state.markCancelling("proc-1")
-        state.markCancelling("proc-1")
-        #expect(state.processes["proc-1"]?.status == .cancelling)
-        #expect(state.processes["proc-1"]?.statusBeforeCancelling == .running)
-    }
-
-    @Test("server status update clears cancelling state")
-    func testServerStatusClearsCancelling() {
-        let state = ProcessState()
-        state.trackSpawn(result: makeSpawnResult())
-        state.markCancelling("proc-1")
         state.trackStatusUpdate(result: ProcessStatusUpdatePlugin.Result(processId: "proc-1", status: "cancelled"))
         #expect(state.processes["proc-1"]?.status == .cancelled)
-        #expect(state.processes["proc-1"]?.statusBeforeCancelling == nil)
-    }
-
-    @Test("cancelling process counts as active")
-    func testCancellingIsActive() {
-        let state = ProcessState()
-        state.trackSpawn(result: makeSpawnResult())
-        state.markCancelling("proc-1")
-        #expect(state.hasActiveProcesses == true)
-        #expect(state.activeCount == 1)
     }
 
     // MARK: - Computed Properties

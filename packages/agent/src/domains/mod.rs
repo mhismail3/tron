@@ -2,7 +2,7 @@
 //!
 //! Each declared child module is part of the retained bare loop: startup and
 //! system metadata, provider/auth/settings setup, session/message/log truth,
-//! model providers, context inspection, blobs, and the single model-facing
+//! model providers, blobs, and the single model-facing
 //! `capability::execute` primitive. Product/tool domains are intentionally not
 //! declared on this branch.
 //!
@@ -15,7 +15,7 @@
 //! | `contract` | Method-agnostic builders for domain-owned `contract.rs` records |
 //! | `registration` | Startup loop that registers worker modules returned by domains |
 //! | `worker` | Shared setup-only domain worker module and function registration types |
-//! | domain modules | Retained loop infrastructure for agent, auth, blob, context, logs, message, model, session, settings, and system |
+//! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, and system |
 //!
 //! Each retained domain `contract.rs` is the local source of truth for that
 //! worker's function ids, schemas, idempotency, leases, compensation, stream
@@ -43,7 +43,6 @@ pub mod blob;
 pub mod capability;
 pub mod capability_support;
 pub mod catalog;
-pub mod context;
 pub mod contract;
 pub mod logs;
 pub mod message;

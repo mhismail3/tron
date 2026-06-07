@@ -23,9 +23,7 @@ protocol EngineClientProtocol: AnyObject {
     var session: SessionClient { get }
     var agent: AgentClient { get }
     var model: ModelClient { get }
-    var filesystem: FilesystemClient { get }
     var eventSync: EventSyncClient { get }
-    var context: ContextClient { get }
     var misc: MiscClient { get }
 
     // MARK: - Connection

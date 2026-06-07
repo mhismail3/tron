@@ -146,7 +146,7 @@ tron/
 |   +-- pull_request_template.md
 +-- .claude/
     +-- CLAUDE.md           AI agent project instructions
-    +-- rules/              Path-scoped AI navigation rules
+    +-- skills/             Repo-local Claude helper skills for contributors
 ```
 
 ---
@@ -296,7 +296,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 
 | Command | Description |
 |---------|-------------|
-| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`, loads push relay env from `packages/mac-app/.env.local` when present, defaults dev logging to `RUST_LOG=info,ort=error` unless the caller already set `RUST_LOG`, waits up to 30 seconds for `/health` in background mode by default, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
+| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`, defaults dev logging to `RUST_LOG=info,ort=error` unless the caller already set `RUST_LOG`, waits up to 30 seconds for `/health` in background mode by default, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
 | `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc` |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
@@ -615,10 +615,6 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
     }
   },
 
-  "capabilities": {
-    "process": { "defaultTimeoutMs": 120000 }
-  },
-
   "observability": {
     "logLevel": "info",                         // "trace" | "debug" | "info" | "warn" | "error"
     "payloadCapture": "normal",                 // "normal" | "debug" | "trace"; full payloads use blob refs
@@ -709,13 +705,12 @@ projection, environment metadata, conversation history, and any pending
 `execute` results. Built-in rules, skills, worker guides, hooks, and profile
 policy primers are not model-context planes on this branch.
 
-`context::get_snapshot` and `context::get_detailed_snapshot` report the
-server-owned context total. Before a provider call this is the chars/4 local
-component estimate; after a provider call it uses the exact provider-reported
-context count. When provider tokenizer/cache accounting is higher than the sum
-of local sections, the response includes `breakdown.providerAdjustment` so the
-UI can show the attributed sections plus the provider tokenizer delta without
-guessing.
+The prompt loop records context totals in session events and trace metadata.
+Before a provider call this is the chars/4 local component estimate; after a
+provider call it uses the exact provider-reported context count. When provider
+tokenizer/cache accounting is higher than the sum of local sections, trace
+metadata carries a provider adjustment so clients can show the attributed
+sections plus the provider tokenizer delta without guessing.
 
 ### Compaction Pipeline
 
@@ -735,7 +730,9 @@ terminal live `agent.compaction` event with `success=false` so connected
 clients can retire any in-progress compaction indicator without reconstructing
 a false boundary.
 
-Compaction is observable via the canonical `context::should_compact`, `context::preview_compaction`, and `context::confirm_compaction` capabilities. Programmatic compaction is exposed via `context::compact`.
+Compaction is internal prompt-loop infrastructure. It is observable through
+session events and primitive trace records, not through public `context::*`
+capabilities.
 
 ### Context Assembly Order
 
@@ -805,7 +802,7 @@ packages/ios-app/Sources/
 +-- Database/             SQLite event database, queries
 +-- Models/               Data models, engine protocol codables, event types
 +-- Services/             Engine transport/domain clients, paired servers,
-+                         push notifications, local diagnostics, feedback,
++                         local diagnostics, feedback,
 +                         Keychain tokens
 +-- ViewModels/           Chat view models, handlers, managers,
 +                         settings/onboarding state
@@ -835,7 +832,6 @@ packages/ios-app/Sources/
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server and token locally. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
-- **Push notification permission**: the clean shell never requests OS push permission until an active paired server exists; token registration remains a server-owned `device::register` flow after pairing.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the tracked `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. Settings also exposes the Logs sheet in every iOS build configuration so production installs can inspect or copy redacted in-memory client logs without enabling verbose production logging. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with send-boundary redaction, deterministic batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
 
 ### Data Flow
@@ -999,22 +995,18 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- auth.json                  LLM provider OAuth tokens + API keys + bearerToken (mode 600)
 |   +-- default/                   Managed, restorable base AgentExecutionSpec/manual
 |   |   +-- profile.toml           Complete typed AgentExecutionSpec v3
-|   |   +-- prompts/               Main, chat, local, workflow, and process prompts
-|   |   +-- context/               Context block assembly policy
-|   |   +-- providers/             Provider-specific presentation defaults
-|   |   +-- capabilities/          Capability presentation policy
 |   +-- normal/                    Managed standard workspace/session profile
 |   |   +-- profile.toml           Inherits default; profileClass = "normal"
 |   +-- chat/                      Managed quick-chat profile
-|   |   +-- profile.toml           Inherits default; maps main entrypoint to chat prompt
+|   |   +-- profile.toml           Inherits default; quick-chat provider defaults
 |   +-- local/                     Managed local-provider profile
-|   |   +-- profile.toml           Inherits default; maps main entrypoint to local prompt/context/runtime policies
+|   |   +-- profile.toml           Inherits default; local-provider defaults
 |   +-- user/                      Sparse user profile/settings/prompt overrides
 |       +-- profile.toml           Sparse `[settings]` overrides
 +-- memory/                       Durable user/agent continuity
 |   +-- MEMORY.md                  Canonical single-file root (name, preferences, active projects)
-|   +-- rules/                     Detail files listed in context, read on demand
-|   +-- sessions/                  Auto-generated retain summaries
+|   +-- rules/                     Optional user-authored continuity detail files
+|   +-- sessions/                  Optional agent-owned session summaries
 +-- workspace/                    Active work and generated artifacts
 |   +-- projects/                  Project-local active work
 |   +-- plans/                     Plan files and TODOs
@@ -1025,7 +1017,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- labs/                      Manifested experimental spaces
 |   +-- archive/                   Retired workspace material
 |   +-- knowledge/                 Curated wiki/research experiment
-|   +-- vault/                     Skill-owned local fast secret storage
+|   +-- vault/                     Local fast secret storage for agent-owned workspace state
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
     |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, leases, compensation, workers
@@ -1060,15 +1052,13 @@ The production Mac app registers `com.tron.server` with `SMAppService.agent(plis
 
 Local Release builds use the same path rule: copy the built `Tron.app` to `/Applications/Tron.app` before testing install/registration. If a DMG build is already installed, the local Release build replaces that same slot; reopen `/Applications/Tron.app` or run `tron start`/`tron restart` so the wrapper repairs SMAppService before launchd executes the bundled server. Start-like menu actions, command-mode starts, contributor CLI start/restart, and update finalization wait for `/health` after ServiceManagement reports loaded; the app-version marker is recorded only after that health gate succeeds. Loaded-but-unhealthy helpers remain visible failures until `/Applications/Tron.app` is updated or reinstalled. Default Debug Xcode builds use bundle ID `com.tron.mac.dev`, may run from DerivedData, and are companion-only: they can show the menu bar and observe the production server, but server pause/restart/uninstall/install actions are disabled. Use the `TronMac Isolated Install` scheme when testing the first-run/reinstall wizard from Xcode; it registers `com.tron.server.dev`, points `BundleProgram` at `Tron Server Dev.app`, runs on port `9848`, and stores data under `~/.tron-dev`. For agent-only iteration, `tron dev` stops the production LaunchAgent, binds port `9847`, and later restores the installed helper through the wrapper's internal `--tron-start-server-and-quit` command so ServiceManagement remains the only production registration path.
 
-For local Mac wrapper builds and `tron dev` takeovers that need real push delivery, copy `packages/mac-app/.env.local.example` to `packages/mac-app/.env.local` and set `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and optionally `TRON_RELAY_ENVIRONMENT`. `packages/mac-app/scripts/bundle-agent.sh` and `scripts/tron dev` read only those relay keys from the ignored file immediately before Cargo compiles the helper, so Xcode Debug, local Release, and agent-only dev tests do not require repeated shell exports. Production DMG builds still get relay values only from GitHub Actions secrets.
-
 ### DMG Release Pipeline
 
 End-users install `Tron.app` via a notarized DMG published to GitHub Releases. Release identity is centralized in `VERSION.env`: the first beta is canonical `0.1.0-beta.1`, Apple bundles receive numeric `MARKETING_VERSION = 0.1.0` / `CURRENT_PROJECT_VERSION = 1`, and human-facing UI renders `v0.1 (Beta 1)`. The pipeline lives at `.github/workflows/release-mac.yml` and triggers on a matching `server-v*` tag push:
 
 1. Checkout + Rust toolchain/cache (`actions-rust-lang/setup-rust-toolchain`).
 2. `scripts/tron version check` verifies `VERSION.env`, Cargo, Cargo.lock, Mac/iOS `project.yml`, custom bundle canonical version keys, and release docs agree before any artifact is built. A tag push must equal `server-v$(TRON_VERSION)`.
-3. `cargo build --release --bin tron --locked` in `packages/agent/`, with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` supplied from GitHub secrets so push delivery is enabled for release users without local config.
+3. `cargo build --release --bin tron --locked` in `packages/agent/`.
 4. Install XcodeGen + `create-dmg`.
 5. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into both bundled helpers (`Tron Server.app` and `Tron Server Dev.app`) and writes both LaunchAgent plists.
 6. `xcodegen generate` inside `packages/mac-app/`.

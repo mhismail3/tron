@@ -146,8 +146,6 @@ struct UnifiedEventTransformer {
             return CapabilityInvocationHandlers.transformInvocationStarted(payload, timestamp: ts)
         case .capabilityInvocationCompleted:
             return CapabilityInvocationHandlers.transformInvocationCompleted(payload, timestamp: ts)
-        case .notificationInterrupted:
-            return SystemEventHandlers.transformInterrupted(payload, timestamp: ts)
         case .configModelSwitch:
             return ConfigHandlers.transformModelSwitch(payload, timestamp: ts)
         case .configReasoningLevel:
@@ -312,7 +310,6 @@ extension UnifiedEventTransformer {
                 }
 
             case .messageUser, .messageSystem,
-                 .notificationInterrupted,
                  .configModelSwitch, .configReasoningLevel,
                  .contextCleared,
                  .errorAgent, .errorCapability, .errorProvider, .turnFailed:

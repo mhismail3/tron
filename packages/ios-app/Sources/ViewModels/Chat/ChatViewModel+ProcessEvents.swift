@@ -38,25 +38,6 @@ extension ChatViewModel: ProcessEventHandler {
         logDebug("Job backgrounded: \(result.jobId) [\(result.label)] reason=\(result.reason)")
     }
 
-    // MARK: - Actions
-
-    /// Cancel a running job via engine protocol with server confirmation.
-    func cancelProcess(_ processId: String) {
-        processState.markCancelling(processId)
-        launchBackground { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.engineClient.job.cancel(jobId: processId, sessionId: self.sessionId, idempotencyKey: .userAction("job.cancel"))
-                self.processState.confirmCancelled(processId)
-                self.logInfo("Cancelled job: \(processId)")
-            } catch {
-                self.processState.revertCancelling(processId)
-                self.logWarning("Failed to cancel job \(processId): \(error)")
-                self.showError("Failed to cancel process")
-            }
-        }
-    }
-
     // MARK: - Cleanup
 
     /// Clear process state. Called from session switch/disconnect cleanup.

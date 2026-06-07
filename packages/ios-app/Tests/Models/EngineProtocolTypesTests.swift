@@ -248,43 +248,6 @@ final class EventTypesTests: XCTestCase {
     }
 }
 
-// MARK: - Filesystem Types Tests
-
-@MainActor
-final class FilesystemTypesTests: XCTestCase {
-
-    func testDirectoryEntryDecoding() throws {
-        let json = """
-        {
-            "name": "test.txt",
-            "path": "/path/to/test.txt",
-            "isDirectory": false,
-            "isSymlink": false,
-            "size": 1024,
-            "modifiedAt": "2026-01-26T00:00:00.000Z"
-        }
-        """.data(using: .utf8)!
-
-        let entry = try JSONDecoder().decode(DirectoryEntry.self, from: json)
-
-        XCTAssertEqual(entry.name, "test.txt")
-        XCTAssertEqual(entry.id, "/path/to/test.txt")
-        XCTAssertFalse(entry.isDirectory)
-    }
-
-    func testSuggestedPathDecoding() throws {
-        let json = """
-        {"name": "Projects", "path": "/Users/test/Projects", "exists": true}
-        """.data(using: .utf8)!
-
-        let path = try JSONDecoder().decode(SuggestedPath.self, from: json)
-
-        XCTAssertEqual(path.name, "Projects")
-        XCTAssertEqual(path.id, "/Users/test/Projects")
-        XCTAssertEqual(path.exists, true)
-    }
-}
-
 // MARK: - Task Types Tests
 
 @MainActor
@@ -394,22 +357,6 @@ final class SystemTypesTests: XCTestCase {
         XCTAssertEqual(info.activeSessions, 5)
     }
 
-    func testDeviceTokenRegisterParamsEncoding() throws {
-        let params = DeviceTokenRegisterParams(
-            deviceToken: "abc123",
-            sessionId: "sess_123",
-            workspaceId: "ws_456",
-            environment: "production",
-            bundleId: "com.tron.mobile"
-        )
-
-        let data = try JSONEncoder().encode(params)
-        let decoded = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-
-        XCTAssertEqual(decoded["deviceToken"] as? String, "abc123")
-        XCTAssertEqual(decoded["environment"] as? String, "production")
-        XCTAssertEqual(decoded["bundleId"] as? String, "com.tron.mobile")
-    }
 }
 
 // MARK: - Model Types Extended Tests

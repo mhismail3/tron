@@ -47,7 +47,7 @@ The workspace CLI dispatcher is intentionally small. Command families live in
 `scripts/tron.d/`; runtime helpers shared by the installed `tron-cli` live in
 `scripts/tron-lib.d/` and are copied beside `tron-lib.sh` during
 `tron install`, `tron setup`, and contributor deploy refreshes.
-| Production DMG release | Push/run the `server-v*` release workflow in `.github/workflows/release-mac.yml` | Builds `tron` with relay secrets, stages it into `Tron.app`, verifies the bundled helper and LaunchAgent, signs helper then wrapper, notarizes/staples, creates the DMG, and publishes it |
+| Production DMG release | Push/run the `server-v*` release workflow in `.github/workflows/release-mac.yml` | Builds `tron`, stages it into `Tron.app`, verifies the bundled helper and LaunchAgent, signs helper then wrapper, notarizes/staples, creates the DMG, and publishes it |
 
 ## Local dev loop
 
@@ -72,16 +72,6 @@ packages/mac-app/scripts/bundle-agent.sh --source /absolute/path/to/tron
 packages/mac-app/scripts/bundle-agent.sh --clean
 ```
 
-For local push relay dogfood, copy `packages/mac-app/.env.local.example` to `packages/mac-app/.env.local` and fill in the Cloudflare Worker values once:
-
-```bash
-TRON_RELAY_URL=https://tron-push-relay.<subdomain>.workers.dev
-TRON_RELAY_SECRET=<same HMAC secret set in Wrangler>
-TRON_RELAY_ENVIRONMENT=production
-```
-
-`bundle-agent.sh` and `scripts/tron dev` read only `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT` from that ignored file immediately before they run Cargo, so every Debug, local Release, or agent-only dev helper has the same relay config without repeating shell exports. Already-exported environment variables still take precedence, which keeps CI and one-off builds explicit.
-
 The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization. The primitive branch does not bundle managed skills, transcription sidecars, or product capability assets.
 
 After staging, regenerate the Xcode project so it picks up the file reference:
@@ -96,8 +86,6 @@ If you ship the wrapper without either staged helper executable or the bundled L
 Xcode's `Copy Bundled Login Item` script copies the whole `Sources/Resources/Library` tree after compile, signs every nested helper app, then re-signs the outer wrapper so ServiceManagement sees the copied LaunchAgent plists as sealed resources. If that final outer-app re-sign is skipped, `SMAppService.register()` fails with code `-67054` (`a sealed resource is missing or invalid`).
 
 If you change Rust agent code that the Mac wrapper depends on — engine capabilities, onboarding/install behavior, settings defaults, or anything used before pairing — rerun `packages/mac-app/scripts/bundle-agent.sh` before launching the Mac app from Xcode. Xcode copies the already-staged `Sources/Resources/Library` tree; it does not rebuild that binary for you. Forgetting this step makes the Swift UI talk to an older embedded server, which is especially confusing when testing new engine invocations such as `logs::recent`.
-
-Push relay config is not read from `~/.tron/profiles/auth.json`. Production releases compile it from GitHub secrets. Local Mac wrapper dogfood and agent-only `tron dev` sessions use `packages/mac-app/.env.local`; exported `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT` still override that file when set in the shell before starting the dev server.
 
 There is no installer cleanup path that edits production artifacts in place: the app bundle is immutable, launch registration is owned by `SMAppService`, and user data is preserved under `~/.tron`. Menu-bar uninstall unregisters `com.tron.server`, removes runtime state in `internal/run/`, and can optionally clear `[settings]` overrides from `profiles/user/profile.toml` and/or remove `profiles/auth.json`; database and workspace data stay intact. For pre-onboarding production cleanup where no menu bar exists, run `/Applications/Tron.app/Contents/MacOS/Tron --tron-uninstall-and-quit` so the same SMAppService unregister path executes without opening the wizard. The default Debug companion refuses that operation for production.
 
@@ -179,7 +167,7 @@ To simulate the menu-bar-only mode without onboarding, just `touch ~/.tron/inter
 Defined in `.github/workflows/release-mac.yml`. Broadly:
 
 1. `scripts/tron version check` validates that `VERSION.env` matches Cargo, Cargo.lock, Mac/iOS XcodeGen settings, custom bundle canonical version keys, and release docs. Tag runs must match `server-v$(TRON_VERSION)`, so manual workflow input cannot create a mismatched artifact.
-2. `cargo build --release --bin tron --locked` on the same `macos-15` runner with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` from GitHub secrets (cross-compile is avoided for code-signing reasons).
+2. `cargo build --release --bin tron --locked` on the same `macos-15` runner (cross-compile is avoided for code-signing reasons).
 3. `bash packages/mac-app/scripts/bundle-agent.sh --skip-build` inside `packages/mac-app`, which stages `packages/agent/target/release/tron`.
 4. `xcodegen generate` inside `packages/mac-app/`.
 5. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`; the target post-build script copies the helper Library tree and Constitution defaults.

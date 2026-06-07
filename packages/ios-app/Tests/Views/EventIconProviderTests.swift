@@ -15,13 +15,11 @@ final class EventIconProviderTests: XCTestCase {
             "stream.turn_start", "stream.turn_end",
             "config.model_switch", "config.prompt_update", "config.reasoning_level",
             "message.deleted",
-            "notification.interrupted",
             "compact.boundary",
             "context.cleared",
             "metadata.update", "metadata.tag",
             "file.read", "file.write", "file.edit",
             "error.agent", "error.capability", "error.provider",
-            "notification.process_result", "process.results_consumed",
             "turn.failed",
             "hook.llm_result",
         ]

@@ -42,8 +42,6 @@ enum ChatSheet: Identifiable, Equatable {
 
     // Capability sheets
     case userInteraction
-    // Notification sheets
-    case notificationDelivery(NotificationDeliveryData)
     case thinkingDetail(String)
     case providerErrorDetail(ProviderErrorDetailData)
 
@@ -59,8 +57,6 @@ enum ChatSheet: Identifiable, Equatable {
             return "compaction"
         case .userInteraction:
             return "userInteraction"
-        case .notificationDelivery(let data):
-            return "notificationDelivery-\(data.invocationId)"
         case .thinkingDetail:
             return "thinking"
         case .capabilityInvocationDetail(let data):
@@ -80,8 +76,6 @@ enum ChatSheet: Identifiable, Equatable {
             return data1 == data2
         case (.userInteraction, .userInteraction):
             return true
-        case (.notificationDelivery(let data1), .notificationDelivery(let data2)):
-            return data1.invocationId == data2.invocationId
         case (.thinkingDetail(let content1), .thinkingDetail(let content2)):
             return content1 == content2
         case (.capabilityInvocationDetail(let data1), .capabilityInvocationDetail(let data2)):

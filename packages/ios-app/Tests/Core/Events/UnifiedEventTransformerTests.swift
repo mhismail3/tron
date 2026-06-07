@@ -200,7 +200,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "previousLevel": AnyCodable("medium"),
                 "newLevel": AnyCodable("high")
             ],
-            .notificationInterrupted: [:],
             .compactBoundary: [
                 "originalTokens": AnyCodable(10_000),
                 "compactedTokens": AnyCodable(2_000),
@@ -465,28 +464,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
         }
     }
 
-    // MARK: - Interruption Tests
-
-    func testTransformInterrupted() {
-        let event = rawEvent(
-            type: "notification.interrupted",
-            payload: [
-                "turn": AnyCodable(3)
-            ]
-        )
-
-        let message = UnifiedEventTransformer.transformPersistedEvent(event)
-
-        XCTAssertNotNil(message)
-        XCTAssertEqual(message?.role, .system)
-
-        if case .interrupted = message?.content {
-            // Success
-        } else {
-            XCTFail("Expected interrupted content")
-        }
-    }
-
     // MARK: - Error Event Tests
 
     func testTransformAgentError() {
@@ -698,9 +675,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             .capabilityPauseRequested,
             .capabilityPauseResolved,
             .capabilityRunStatus,
-            .configPromptUpdate,
-            .notificationProcessResult,
-            .processResultsConsumed
+            .configPromptUpdate
         ]
 
         let accounted = rendered

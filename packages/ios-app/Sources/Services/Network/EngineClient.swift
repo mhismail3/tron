@@ -82,17 +82,9 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var model: ModelClient = ModelClient(transport: self)
 
-    /// Filesystem operations client
-    @ObservationIgnored
-    lazy var filesystem: FilesystemClient = FilesystemClient(transport: self)
-
     /// Event sync operations client
     @ObservationIgnored
     lazy var eventSync: EventSyncClient = EventSyncClient(transport: self)
-
-    /// Context management client
-    @ObservationIgnored
-    lazy var context: ContextClient = ContextClient(transport: self)
 
     /// Settings operations client (server-authoritative settings)
     @ObservationIgnored
@@ -102,14 +94,6 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var misc: MiscClient = MiscClient(transport: self)
 
-    /// Cron scheduling operations client (automations)
-    @ObservationIgnored
-    lazy var cron: CronClient = CronClient(transport: self)
-
-    /// Notification inbox operations client
-    @ObservationIgnored
-    lazy var notifications: NotificationClient = NotificationClient(transport: self)
-
     /// Auth/provider operations client (API keys, OAuth tokens)
     @ObservationIgnored
     lazy var auth: AuthClient = AuthClient(transport: self)
@@ -117,14 +101,6 @@ final class EngineClient: EngineTransport {
     /// Blob storage client (for Display capability image loading).
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)
-
-    /// Display stream control client (stop streams on demand).
-    @ObservationIgnored
-    lazy var display: DisplayClient = DisplayClient(transport: self)
-
-    /// Unified job management client (background, cancel, subscribe, unsubscribe).
-    @ObservationIgnored
-    lazy var job: JobClient = JobClient(transport: self)
 
     // MARK: - Unified Event Stream
     //
@@ -359,22 +335,6 @@ final class EngineClient: EngineTransport {
         // Handle auth updated — notify observers so Providers page refreshes
         if eventType == AuthUpdatedPlugin.eventType {
             NotificationCenter.default.post(name: .authDidUpdate, object: nil)
-        }
-
-        // Notifications are normal engine capabilities. When the notification
-        // completion event arrives over `/engine`, refresh the inbox through
-        // the same thin-client notification path APNs uses. APNs is still the
-        // background transport; this foreground path keeps the notification
-        // bell current without adding a second server API.
-        if eventType == CapabilityInvocationCompletedPlugin.eventType,
-           let result = eventV2.getResult() as? CapabilityInvocationCompletedPlugin.Result,
-           result.identity.contractId == "notifications::send"
-                || result.identity.functionId == "notifications::send" {
-            logger.info(
-                "Notification capability completion received from engine stream; refreshing notification inbox",
-                category: .notification
-            )
-            NotificationCenter.default.post(name: .notificationReceived, object: nil)
         }
 
         // Publish event to async stream

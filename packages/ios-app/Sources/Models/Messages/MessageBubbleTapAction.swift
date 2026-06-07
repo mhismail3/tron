@@ -6,7 +6,6 @@ enum MessageBubbleTapAction {
     case userInteraction(UserInteractionInvocationData)
     case thinking(String)
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
-    case notificationDelivery(NotificationDeliveryData)
     case capabilityInvocation(CapabilityInvocationData)
     /// User tapped the cancel button on a running capability chip.
     /// Handler should call `agent.abortCapabilityInvocation(invocationId:)` to cooperatively abort

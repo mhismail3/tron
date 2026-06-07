@@ -28,7 +28,7 @@ All commands were run from `/Users/moose/Downloads/projects/tron` on
 | Domain registration list | `sed -n '1,180p' packages/agent/src/domains/registration.rs` | 0 |
 | Engine primitive workers | `rg -n "pub\\(crate\\) const .*_WORKER_ID\|pub\\(crate\\) mod" packages/agent/src/engine/primitives/mod.rs` | 0 |
 | Runner context planes | `sed -n '1,140p' packages/agent/src/domains/agent/runner/context/mod.rs` | 0 |
-| Managed skills | `find packages/agent/skills -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
+| Managed skills absence | `test ! -d packages/agent/skills` | 0 |
 | Agent docs | `find packages/agent/docs -maxdepth 1 -type f \| sort` | 0 |
 | iOS top-level views | `find packages/ios-app/Sources/Views -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
 | iOS service/model roots | `find packages/ios-app/Sources/{Services,Models} -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
@@ -43,10 +43,11 @@ inventory file.
 
 ## Rust Domain Inventory
 
-`packages/agent/src/domains/registration.rs` currently registers every listed
-domain at startup. PET-2 must change that default. Files may remain only while
-their code is still transitively needed by retained infrastructure; PET-10/PET-11
-must delete leftover non-primitive source.
+PET-1 recorded the product-era domain map before deletion. After PET-10, the
+current retained domain roots are `agent`, `auth`, `blob`, `capability`,
+`capability_support`, `logs`, `message`, `model`, `session`, `settings`, and
+`system`. Rows for deleted product domains remain here only as deletion evidence
+and PET-11 re-audit targets.
 
 | Domain | Class | Teardown decision |
 |--------|-------|-------------------|
@@ -55,10 +56,10 @@ must delete leftover non-primitive source.
 | `blob` | retain | Keep payload/blob resolution for event, resource, and invocation evidence. |
 | `browser` | delete | First-party browser/computer-use product capability. Any future browser helper must be agent-authored runtime state. |
 | `capability` | retain | Keep only the model-facing `execute` primitive. Delete search, inspect, status, registry snapshot, bindings, plugins, conformance, recipes, vector search, and policy-profile orchestration. |
-| `capability_support` | delete | Product implementation support for the old catalog. Execution host code must move behind the primitive `execute` substrate only when required. |
-| `context` | retain | Keep minimal context budgeting, compaction, and state/session summary access. Delete client-facing detailed context console and rule/policy/product context APIs. |
+| `capability_support` | retain | Keep only the primitive execute provider surface and scheduling support required by `capability::execute`; old catalog recipes, bindings, conformance, target routing, and registry support are deleted. |
+| `context` | delete | The public `context::*` capability plane is deleted. Minimal prompt context assembly, budgeting, compaction, and state/session summaries survive only under the agent runner infrastructure. |
 | `cron` | delete | Hard-coded scheduling/automation product plane. Future scheduling must be agent-owned state. |
-| `device` | delete | Push/device product workflow. Pairing and transport safety remain outside this domain if needed. |
+| `device` | delete | Push/device product workflow. APNs, device-token registration, and relay delivery are deleted; pairing and transport safety remain outside this domain if needed. |
 | `display` | delete | Fixed display/computer-use side channel. |
 | `events` | delete | Product event capability wrapper. Session/stream storage remains infrastructure, not a model-facing events namespace. |
 | `filesystem` | delete | First-party file capability catalog. The retained execution primitive may use bounded host file operations internally. |
@@ -70,7 +71,7 @@ must delete leftover non-primitive source.
 | `memory` | delete | Replace hard-coded memory retain/auto-retain with agent-owned state workspace. |
 | `message` | retain | Keep message/session truth needed for the chat loop. |
 | `model` | retain | Keep provider clients, provider protocol normalization, token/cost accounting, model settings, and streaming/tool-call assembly. |
-| `notifications` | delete | Product notification capability. |
+| `notifications` | delete | Product notification capability, notification inbox/delivery UI, APNs registration, and push relay path are deleted. |
 | `plan` | delete | Built-in planning product capability. |
 | `process` | delete | First-party process capability catalog. The retained `execute` host may run bounded commands internally without exposing `process::*`. |
 | `program` | successor | Delete the registered product capability. Reuse only if PET-7 proves a generic helper runtime that is not a first-party worker-pack lifecycle. |
@@ -169,9 +170,9 @@ state after bootstrap.
 
 ## Documentation Inventory
 
-PET-9 must rewrite or delete product docs so the branch documents only runnable
-bare-loop behavior. Retired scorecards and guides are deleted rather than kept
-as historical source files on this branch.
+PET-9 rewrote or deleted product docs so the branch documents only runnable
+bare-loop behavior and active deletion evidence. Retired scorecards and guides
+are deleted rather than kept as historical source files on this branch.
 
 | Document | Class | Teardown decision |
 |----------|-------|-------------------|
@@ -217,7 +218,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `Models` | retain | Keep EngineProtocol, Messages, Tokens. Delete Dashboard, Features, product DTOs. |
 | `Protocols` | retain | Keep only shell/service protocols. |
 | `Resources` | retain | Keep required fonts/resources only. |
-| `Services` | retain | Keep Network, Storage, Settings, Events, Observability, Onboarding, and paired-server bootstrap. Audio/transcription and plugin-source clients are deleted. Notifications remain only as pairing/server delivery infrastructure until PET-11 re-audits them. |
+| `Services` | retain | Keep Network, Storage, Settings, Events, Observability, Onboarding, local diagnostics, and paired-server bootstrap. Audio/transcription, plugin-source, APNs, notification-store, and push-relay clients are deleted. |
 | `Theme` | retain | Keep minimal accessible styling. |
 | `Utilities` | retain | Keep only generic shell utilities. |
 | `ViewModels` | retain | Keep chat/session/settings state. Delete fixed product handlers and projections. |
@@ -228,26 +229,27 @@ runtime output. These package roots are the top-level source cleanup map.
 | View root | Class | Teardown decision |
 |-----------|-------|-------------------|
 | `AgentControl` | delete | Fixed product control surface. |
-| `Attachments` | delete | Product attachment workflow unless PET-8 proves it is bare prompt infrastructure. |
+| `Attachments` | successor | Retain only if PET-11 proves the files are bare prompt-input infrastructure. Any product attachment workflow must be deleted or recreated later as agent-authored runtime state. |
 | `AuditDetails` | successor | Delete fixed audit/worker-pack views. Reuse only generic dynamic-surface rendering if it is decoupled from product targets. |
-| `Capabilities` | delete | Fixed capability catalog/client surface. |
+| `Capabilities` | successor | Retained files must be generic invocation/runtime evidence for the one `execute` primitive. PET-11 must delete fixed capability catalog, display, process, or product-specific sheets that are not required by the shell. |
 | `Chat` | retain | Primary prompt and assistant output shell. |
 | `Components` | retain | Shared generic UI components only. |
+| `DynamicSurfaces` | retain | Generic runtime surface rendering for agent-authored UI state. PET-11 must verify no fixed product target leaks through this retained renderer. |
 | `EngineApproval` | delete | Product approval prompts; infrastructure blocked state can render as plain message. |
-| `InputBar` | retain | Keep prompt composer and attachments. Skills, prompt-library, voice/audio, and fixed action product buttons are deleted. |
+| `InputBar` | retain | Keep prompt composer and attachment entry points. Skills, prompt-library, voice/audio, and fixed action product buttons are deleted. |
 | `MessageBubble` | retain | Keep message rendering and generic runtime output. Delete capability/product-specific cards. |
 | `Notifications` | delete | Product notification surface. |
 | `Onboarding` | retain | Keep server pairing/provider setup needed to reach the loop. |
-| `Process` | delete | Fixed process capability UI. |
+| `Process` | successor | Retained process UI is passive runtime evidence only after job-cancel teardown. PET-11 must collapse or delete it if generic message/capability evidence can cover the primitive loop. |
 | `PromptLibrary` | delete | Product prompt library UI. |
 | `Session` | retain | Keep session list/create/resume/delete. Delete clone/worktree/session analytics/product cards. |
-| `SessionTree` | delete | Product tree visualization. |
+| `SessionTree` | successor | Keep only plain session navigation/history reconstruction if needed. Product tree projections, fork visualizations, and analytics belong to deletion unless PET-11 proves they are shell infrastructure. |
 | `Settings` | retain | Keep connection/provider/server settings plus quick-session, prompt queue, and compaction controls. Agent autonomy, guardrails, hooks, skills, plugin sources, memory/rules, prompt-library, protected branch, and capability settings are deleted. |
 | `Skills` | delete | Skill management UI. |
 | `SourceChanges` | delete | Source-control product UI. |
 | `Subagents` | delete | Product subagent UI. |
 | `System` | retain | Keep minimal diagnostics/connection error sheets. Delete process/worktree/provider-product detail surfaces. |
-| `UserInteraction` | delete | Product interaction/approval controls unless reduced to plain blocked-state rendering. |
+| `UserInteraction` | successor | Approval controls are deleted. PET-11 must decide whether retained blocked-state viewing is shell infrastructure or removable product residue. |
 | `VoiceNotes` | delete | Product voice note UI. |
 | `Work` | delete | Worker-first dashboard. |
 
@@ -268,7 +270,7 @@ server settings shape and iOS controls together.
 | `server.rs` | retain | Provider/default model/default workspace/update/Tailscale bootstrap only; transcription bootstrap is deleted. |
 | `skills.rs` | delete | Skill discovery/injection settings. |
 | `ui.rs` | retain | Keep appearance/accessibility basics only. Delete product dashboard settings. |
-| `update.rs` | retain | Retain only if Mac/server bootstrap still needs update checks; otherwise delete during PET-9. |
+| `update.rs` | successor | Retain only if Mac/server bootstrap still needs update checks; otherwise delete during PET-11. |
 | `SettingsState.swift` | retain | Keep only fields matching retained server settings. |
 | `EngineProtocolTypes+Settings.swift` | retain | Decode/update only retained server settings. |
 | `ConnectionSettingsPage.swift` | retain | Keep server pairing/provider/bootstrap controls. |
@@ -281,15 +283,19 @@ server settings shape and iOS controls together.
 2. PET-4/PET-6: replace rules, skills, hooks, guardrails, prompt overlays, and memory retain with a static soul plus agent-owned state workspace.
 3. PET-5/PET-7: collapse fresh storage and helper substrate so old product tables/resources/events are absent, and any helper runtime is generic substrate only.
 4. PET-8: delete fixed iOS product modes and prove the primitive shell on iPhone and iPad.
-5. PET-9/PET-10/PET-11: rewrite docs/assets, add absence gates, run closeout proof, and re-audit all inventory rows for leftover removable code.
+5. PET-9/PET-10: rewrite docs/assets, add absence gates, and remove dead source until focused Rust/iOS proof is warning-free.
+6. PET-11: run closeout proof and re-audit all retained/successor rows for leftover removable code.
 
-## Open Loops After PET-1
+## Open Loops After PET-10
 
-- PET-2 must decide the exact retained startup domain set and remove default
-  registration for deleted domains.
-- PET-3 must choose the final bootstrap host-access shape for `execute`.
-- PET-4 must choose the canonical soul storage location.
-- PET-7 must decide whether any existing program/sandbox/worker code survives
-  as generic helper substrate.
-- PET-8 must choose whether generic dynamic rendering reuses a trimmed `ui`
-  resource schema or a smaller branch-local schema.
+- PET-11 must audit retained iOS `Attachments`, `Capabilities`, `Process`,
+  `SessionTree`, and `UserInteraction` source from first principles.
+- PET-11 must decide whether `session_drafts.skills_json`,
+  `EngineProtocolTypes+Repo.swift`, and `EngineProtocolTypes+Task.swift` are
+  true shell/session infrastructure or stale product DTO residue.
+- PET-11 must re-audit retained `capability_support`, `update.rs`, Mac update
+  docs, local diagnostics/logging surfaces, and dynamic-surface rendering for
+  hidden product policy.
+- PET-11 may close only after a fresh end-to-end loop proof and after no
+  retained/successor row can be deleted without breaking
+  boot/provider/session/execute/state/trace/client-shell primitives.

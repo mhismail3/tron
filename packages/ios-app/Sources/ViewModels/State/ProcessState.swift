@@ -18,24 +18,21 @@ final class ProcessState {
         var resultSummary: String?
 
         enum Status: String {
-            case running, backgrounded, completed, failed, cancelling, cancelled
+            case running, backgrounded, completed, failed, cancelled
         }
-
-        /// Stored status before cancelling, used to revert on engine protocol failure.
-        var statusBeforeCancelling: Status?
     }
 
     /// All tracked processes keyed by processId.
     private(set) var processes: [String: TrackedProcess] = [:]
 
-    /// Whether any processes are currently active (running, backgrounded, or cancelling).
+    /// Whether any processes are currently active.
     var hasActiveProcesses: Bool {
-        processes.values.contains { $0.status == .running || $0.status == .backgrounded || $0.status == .cancelling }
+        processes.values.contains { $0.status == .running || $0.status == .backgrounded }
     }
 
     /// Count of currently active processes.
     var activeCount: Int {
-        processes.values.count(where: { $0.status == .running || $0.status == .backgrounded || $0.status == .cancelling })
+        processes.values.count(where: { $0.status == .running || $0.status == .backgrounded })
     }
 
     /// All processes sorted by start time (most recent first).
@@ -68,10 +65,9 @@ final class ProcessState {
     }
 
     /// Update a process status from server event.
-    /// Server events are authoritative — they clear any pending cancelling state.
+    /// Server events are authoritative lifecycle evidence.
     func trackStatusUpdate(result: ProcessStatusUpdatePlugin.Result) {
         guard processes[result.processId] != nil else { return }
-        processes[result.processId]?.statusBeforeCancelling = nil
         switch result.status {
         case "cancelled":
             processes[result.processId]?.status = .cancelled
@@ -88,28 +84,6 @@ final class ProcessState {
     func trackBackgrounded(jobId: String, reason: String) {
         guard processes[jobId] != nil else { return }
         processes[jobId]?.status = .backgrounded
-    }
-
-    /// Mark a process as cancelling (pending server confirmation).
-    /// Stores the previous status so it can be reverted on engine protocol failure.
-    func markCancelling(_ processId: String) {
-        guard let current = processes[processId], current.status != .cancelling else { return }
-        processes[processId]?.statusBeforeCancelling = current.status
-        processes[processId]?.status = .cancelling
-    }
-
-    /// Confirm cancellation after successful server engine protocol.
-    func confirmCancelled(_ processId: String) {
-        guard processes[processId]?.status == .cancelling else { return }
-        processes[processId]?.status = .cancelled
-        processes[processId]?.statusBeforeCancelling = nil
-    }
-
-    /// Revert from cancelling to previous status on engine protocol failure.
-    func revertCancelling(_ processId: String) {
-        guard let process = processes[processId], process.status == .cancelling else { return }
-        processes[processId]?.status = process.statusBeforeCancelling ?? .running
-        processes[processId]?.statusBeforeCancelling = nil
     }
 
     // MARK: - Cleanup

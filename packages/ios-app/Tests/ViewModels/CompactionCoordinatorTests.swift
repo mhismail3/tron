@@ -158,18 +158,12 @@ final class CompactionCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.refreshContextInBackgroundCalled)
     }
 
-    func testCompactionThenRefreshOverwritesEstimate() {
+    func testCompactionStoresEstimatedContextTokens() {
         // Compaction sets estimatedContextTokens
         let result = makeCompactionResult(tokensBefore: 66000, tokensAfter: 18000, estimatedContextTokens: 29000)
         coordinator.handleCompaction(result, context: mockContext)
 
         XCTAssertEqual(mockContext.contextState.lastTurnInputTokens, 29000)
-
-        // refreshContextInBackground would call syncFromServerSnapshot
-        // Simulate server returning the true post-compaction context size
-        mockContext.contextState.syncFromServerSnapshot(currentTokens: 77300, contextLimit: 1_000_000)
-
-        XCTAssertEqual(mockContext.contextState.contextWindowTokens, 77300)
     }
 
     // MARK: - Helpers
