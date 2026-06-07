@@ -1,9 +1,9 @@
-//! Validation for fixed generated UI surface resources.
+//! Validation for runtime UI surface resources.
 
 use chrono::DateTime;
 use serde_json::{Value, json};
 
-use super::types::{UI_CATALOG_ID, UI_CATALOG_REVISION};
+use super::types::UI_SURFACE_SCHEMA_VERSION;
 use crate::engine::errors::{EngineError, Result};
 use crate::engine::ids::FunctionId;
 use crate::engine::schema;
@@ -22,64 +22,25 @@ pub(crate) fn ui_surface_schema() -> Value {
             "surfaceId",
             "title",
             "purpose",
-            "catalog",
+            "schemaVersion",
             "layout",
-            "bindings",
             "actions",
-            "redactionPolicy",
-            "expiresAt",
-            "refreshPolicy"
+            "expiresAt"
         ],
         "additionalProperties": false,
         "properties": {
             "surfaceId": {"type": "string"},
             "title": {"type": "string"},
             "purpose": {"type": "string"},
-            "catalog": {"type": "object"},
+            "schemaVersion": {"type": "integer"},
             "layout": {"type": "object"},
-            "bindings": {"type": "array", "items": {"type": "object"}},
             "actions": {"type": "array", "items": {"type": "object"}, "maxItems": UI_MAX_ACTIONS},
-            "redactionPolicy": {"type": "object"},
-            "expiresAt": {"type": "string"},
-            "refreshPolicy": {"type": "object"},
-            "authoring": {"type": "object"}
+            "expiresAt": {"type": "string"}
         }
     })
 }
 
-/// Return the fixed first-party generated UI catalog.
-#[must_use]
-pub fn ui_component_catalog() -> Value {
-    let components = ui_component_types()
-        .iter()
-        .map(|component| {
-            json!({
-                "id": component,
-                "props": allowed_component_props(component),
-            })
-        })
-        .collect::<Vec<_>>();
-    json!({
-        "catalogId": UI_CATALOG_ID,
-        "revision": UI_CATALOG_REVISION,
-        "components": components,
-        "bounds": {
-            "maxDepth": UI_MAX_DEPTH,
-            "maxComponents": UI_MAX_COMPONENTS,
-            "maxTableRows": UI_MAX_TABLE_ROWS,
-            "maxTextBytes": UI_MAX_TEXT_BYTES,
-            "maxActions": UI_MAX_ACTIONS,
-            "maxPayloadBytes": UI_MAX_PAYLOAD_BYTES
-        },
-        "rendererExpectations": {
-            "unsupportedComponents": "closed_error",
-            "unsupportedProps": "reject",
-            "actions": "canonical_capability_invocation_only"
-        }
-    })
-}
-
-/// Validate the fixed `ui_surface` payload contract.
+/// Validate the bounded runtime `ui_surface` payload contract.
 pub(crate) fn validate_ui_surface_payload(payload: &Value) -> Result<()> {
     let bytes = serde_json::to_vec(payload).map_err(|error| EngineError::LedgerFailure {
         operation: "ui_surface.payload_size",
@@ -94,7 +55,7 @@ pub(crate) fn validate_ui_surface_payload(payload: &Value) -> Result<()> {
     ensure_non_empty_string(payload, "title")?;
     ensure_non_empty_string(payload, "purpose")?;
     ensure_datetime_string(payload, "expiresAt")?;
-    ensure_ui_catalog(payload.get("catalog"))?;
+    ensure_schema_version(payload)?;
 
     let mut stats = UiSurfaceStats::default();
     validate_ui_component(
@@ -114,7 +75,6 @@ pub(crate) fn validate_ui_surface_payload(payload: &Value) -> Result<()> {
             "ui_surface text exceeds {UI_MAX_TEXT_BYTES} bytes"
         )));
     }
-    validate_ui_bindings(payload.get("bindings"))?;
     validate_ui_actions(payload.get("actions"))?;
     scan_ui_value_for_forbidden_content(payload, "$")
 }
@@ -125,30 +85,17 @@ struct UiSurfaceStats {
     text_bytes: usize,
 }
 
-fn ensure_ui_catalog(value: Option<&Value>) -> Result<()> {
-    let Some(object) = value.and_then(Value::as_object) else {
+fn ensure_schema_version(payload: &Value) -> Result<()> {
+    let Some(version) = payload.get("schemaVersion").and_then(Value::as_u64) else {
         return Err(EngineError::PolicyViolation(
-            "ui_surface catalog must be an object".to_owned(),
+            "ui_surface requires schemaVersion".to_owned(),
         ));
     };
-    let id = object
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|id| *id == UI_CATALOG_ID)
-        .ok_or_else(|| {
-            EngineError::PolicyViolation(format!("ui_surface catalog must be {UI_CATALOG_ID}"))
-        })?;
-    let revision = object
-        .get("revision")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            EngineError::PolicyViolation("ui_surface catalog revision is required".to_owned())
-        })?;
-    if id == UI_CATALOG_ID && revision == UI_CATALOG_REVISION {
+    if version == UI_SURFACE_SCHEMA_VERSION {
         Ok(())
     } else {
         Err(EngineError::PolicyViolation(format!(
-            "ui_surface catalog {id} revision {revision} is not supported"
+            "ui_surface schemaVersion {version} is not supported"
         )))
     }
 }
@@ -225,44 +172,6 @@ fn validate_ui_component_props(
     Ok(())
 }
 
-fn validate_ui_bindings(value: Option<&Value>) -> Result<()> {
-    let Some(bindings) = value.and_then(Value::as_array) else {
-        return Err(EngineError::PolicyViolation(
-            "ui_surface bindings must be an array".to_owned(),
-        ));
-    };
-    for binding in bindings {
-        let Some(object) = binding.as_object() else {
-            return Err(EngineError::PolicyViolation(
-                "ui_surface binding must be an object".to_owned(),
-            ));
-        };
-        if let Some(target_type) = object.get("targetType").and_then(Value::as_str)
-            && !matches!(
-                target_type,
-                "worker"
-                    | "capability"
-                    | "grant"
-                    | "goal"
-                    | "resource_collection"
-                    | "decision"
-                    | "resource"
-                    | "invocation"
-                    | "trace"
-                    | "queue"
-                    | "lease"
-                    | "storage"
-                    | "integrity"
-            )
-        {
-            return Err(EngineError::PolicyViolation(format!(
-                "unsupported ui binding targetType {target_type}"
-            )));
-        }
-    }
-    Ok(())
-}
-
 fn validate_ui_actions(value: Option<&Value>) -> Result<()> {
     let Some(actions) = value.and_then(Value::as_array) else {
         return Err(EngineError::PolicyViolation(
@@ -279,15 +188,7 @@ fn validate_ui_actions(value: Option<&Value>) -> Result<()> {
         let object = action.as_object().ok_or_else(|| {
             EngineError::PolicyViolation("ui_surface action must be an object".to_owned())
         })?;
-        for field in [
-            "actionId",
-            "label",
-            "targetFunctionId",
-            "idempotencyKeyTemplate",
-            "requiredGrant",
-            "requiredRisk",
-            "expiresAt",
-        ] {
+        for field in ["actionId", "label", "expiresAt"] {
             ensure_non_empty_object_string(object, field)?;
         }
         let action_id = object.get("actionId").and_then(Value::as_str).unwrap();
@@ -296,13 +197,7 @@ fn validate_ui_actions(value: Option<&Value>) -> Result<()> {
                 "duplicate ui action {action_id}"
             )));
         }
-        let target = object
-            .get("targetFunctionId")
-            .and_then(Value::as_str)
-            .unwrap();
-        FunctionId::new(target.to_owned())?;
         ensure_datetime_value(object.get("expiresAt"), "expiresAt")?;
-        ensure_risk_label(object.get("requiredRisk").and_then(Value::as_str).unwrap())?;
         let input_schema = object.get("inputSchema").ok_or_else(|| {
             EngineError::PolicyViolation("ui action requires inputSchema".to_owned())
         })?;
@@ -311,84 +206,8 @@ fn validate_ui_actions(value: Option<&Value>) -> Result<()> {
             "ui_action_input",
             input_schema,
         )?;
-        let payload_template = object.get("payloadTemplate").ok_or_else(|| {
-            EngineError::PolicyViolation("ui action requires payloadTemplate".to_owned())
-        })?;
-        if !payload_template.is_object() {
-            return Err(EngineError::PolicyViolation(
-                "ui action requires object payloadTemplate".to_owned(),
-            ));
-        }
-        validate_ui_payload_template_placeholders(payload_template, input_schema)?;
-        if !object.get("authorityPolicy").is_some_and(Value::is_object) {
-            return Err(EngineError::PolicyViolation(
-                "ui action requires authorityPolicy".to_owned(),
-            ));
-        }
-        if object
-            .get("targetRevision")
-            .and_then(Value::as_u64)
-            .is_none()
-        {
-            return Err(EngineError::PolicyViolation(
-                "ui action requires integer targetRevision".to_owned(),
-            ));
-        }
     }
     Ok(())
-}
-
-fn validate_ui_payload_template_placeholders(template: &Value, input_schema: &Value) -> Result<()> {
-    match template {
-        Value::String(text) => validate_ui_template_string(text, input_schema),
-        Value::Array(items) => {
-            for item in items {
-                validate_ui_payload_template_placeholders(item, input_schema)?;
-            }
-            Ok(())
-        }
-        Value::Object(object) => {
-            for value in object.values() {
-                validate_ui_payload_template_placeholders(value, input_schema)?;
-            }
-            Ok(())
-        }
-        _ => Ok(()),
-    }
-}
-
-fn validate_ui_template_string(text: &str, input_schema: &Value) -> Result<()> {
-    if !text.starts_with("${") || !text.ends_with('}') {
-        return Ok(());
-    }
-    if matches!(
-        text,
-        "${surface.resourceId}"
-            | "${surface.versionId}"
-            | "${action.id}"
-            | "${submission.idempotencyKey}"
-    ) {
-        return Ok(());
-    }
-    if let Some(field) = text
-        .strip_prefix("${input.")
-        .and_then(|value| value.strip_suffix('}'))
-    {
-        let Some(properties) = input_schema.get("properties").and_then(Value::as_object) else {
-            return Err(EngineError::PolicyViolation(
-                "ui action input placeholders require inputSchema properties".to_owned(),
-            ));
-        };
-        if properties.contains_key(field) {
-            return Ok(());
-        }
-        return Err(EngineError::PolicyViolation(format!(
-            "ui action payloadTemplate references unknown input field {field}"
-        )));
-    }
-    Err(EngineError::PolicyViolation(format!(
-        "unsupported ui action payloadTemplate placeholder {text}"
-    )))
 }
 
 fn ensure_non_empty_string(payload: &Value, field: &str) -> Result<()> {
@@ -433,19 +252,6 @@ fn ensure_datetime_value(value: Option<&Value>, field: &str) -> Result<()> {
         })
 }
 
-fn ensure_risk_label(value: &str) -> Result<()> {
-    if matches!(
-        value.to_ascii_lowercase().as_str(),
-        "low" | "medium" | "high" | "critical"
-    ) {
-        Ok(())
-    } else {
-        Err(EngineError::PolicyViolation(format!(
-            "unsupported ui action risk {value}"
-        )))
-    }
-}
-
 fn ui_component_types() -> &'static [&'static str] {
     &[
         "Text",
@@ -460,7 +266,6 @@ fn ui_component_types() -> &'static [&'static str] {
         "ResourceRef",
         "InvocationRef",
         "GrantRef",
-        "WorkerRef",
         "Metric",
         "TextField",
         "TextArea",
@@ -491,7 +296,6 @@ fn allowed_component_props(component_type: &str) -> Vec<&'static str> {
         "ResourceRef" => vec!["resourceId", "versionId", "kind", "label"],
         "InvocationRef" => vec!["invocationId", "label"],
         "GrantRef" => vec!["grantId", "label"],
-        "WorkerRef" => vec!["workerId", "label"],
         "Metric" => vec!["label", "value", "unit", "tone"],
         "TextField" | "TextArea" | "DateTime" => {
             vec!["name", "label", "placeholder", "value", "required"]
@@ -570,35 +374,15 @@ fn ui_structural_identifier_key(key: &str) -> bool {
             | "configVersionId"
             | "activationVersionId"
             | "expectedCurrentVersionId"
-            | "packageDigest"
-            | "sourceDigest"
             | "contentHash"
             | "sessionId"
-            | "contextSessionId"
             | "workspaceId"
-            | "targetId"
             | "targetResourceId"
-            | "targetFunctionId"
             | "targetVersionId"
-            | "decisionResourceId"
-            | "decisionVersionId"
-            | "scheduleDecisionResourceId"
-            | "scheduleDecisionVersionId"
-            | "expectedDecisionVersionId"
-            | "trustDecisionResourceId"
-            | "trustRootDecisionResourceId"
-            | "trustRootDecisionVersionId"
-            | "oldTrustRootDecisionResourceId"
-            | "newTrustRootDecisionResourceId"
-            | "oldTrustRootDecisionVersionId"
-            | "newTrustRootDecisionVersionId"
             | "functionId"
-            | "workerId"
             | "grantId"
             | "invocationId"
             | "createdByInvocationId"
-            | "refreshedFromVersionId"
-            | "projectionHash"
             | "actionId"
             | "confirmActionId"
     )

@@ -11,10 +11,8 @@ use crate::engine::ids::{ActorId, InvocationId, TraceId, WorkerId};
 pub const UI_SURFACE_KIND: &str = "ui_surface";
 /// Built-in generated UI resource schema id.
 pub const UI_SURFACE_SCHEMA_ID: &str = "tron.resource.ui_surface.v1";
-/// Fixed first-party generated UI component catalog id.
-pub const UI_CATALOG_ID: &str = "tron.ui.catalog.core.v1";
-/// Fixed first-party generated UI component catalog revision.
-pub const UI_CATALOG_REVISION: u64 = 1;
+/// Runtime UI surface schema version rendered by the client shell.
+pub const UI_SURFACE_SCHEMA_VERSION: u64 = 1;
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

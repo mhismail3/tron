@@ -799,9 +799,13 @@ fn self_authored_worker_pack_primitives_are_not_registered_or_left_on_disk() {
     for path in [
         "packages/agent/src/engine/primitives/module.rs",
         "packages/agent/src/engine/primitives/module",
+        "packages/agent/src/engine/primitives/action_summary.rs",
+        "packages/agent/src/engine/primitives/control/actions.rs",
         "packages/agent/src/engine/primitives/runtime/worker_protocol.rs",
         "packages/agent/src/engine/primitives/runtime/worker_protocol_template.py",
+        "packages/agent/src/engine/primitives/ui/authoring",
         "packages/agent/src/engine/primitives/ui/authoring/source_control.rs",
+        "packages/agent/src/engine/primitives/ui/authoring/actions.rs",
         "packages/agent/src/engine/host/module_jobs.rs",
         "packages/agent/src/engine/tests/module_activation.rs",
         "packages/agent/src/engine/tests/module_activation",
@@ -809,35 +813,19 @@ fn self_authored_worker_pack_primitives_are_not_registered_or_left_on_disk() {
         assert_repo_path_absent(path, "self-authored worker-pack substrate");
     }
 
-    for (label, path) in [
-        (
-            "control action projection",
-            "packages/agent/src/engine/primitives/control/actions.rs",
-        ),
-        (
-            "action summary projection",
-            "packages/agent/src/engine/primitives/action_summary.rs",
-        ),
-        (
-            "generated UI authoring actions",
-            "packages/agent/src/engine/primitives/ui/authoring/actions.rs",
-        ),
-        ("README", "README.md"),
-    ] {
-        let source = read_repo_file(path);
-        assert_absent(
-            &source,
-            &[
-                "module::",
-                "worker::spawn",
-                "worker::protocol_guide",
-                "worker pack",
-                "worker packs",
-                "sandbox-created",
-            ],
-            label,
-        );
-    }
+    let readme = read_repo_file("README.md");
+    assert_absent(
+        &readme,
+        &[
+            "module::",
+            "worker::spawn",
+            "worker::protocol_guide",
+            "worker pack",
+            "worker packs",
+            "sandbox-created",
+        ],
+        "README",
+    );
 }
 
 #[test]
@@ -1899,6 +1887,97 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
     assert!(
         ios_surface.contains("runtimeEvidenceSection"),
         "iOS settings should render the one retained evidence section directly"
+    );
+}
+
+#[test]
+fn dynamic_runtime_surfaces_are_schema_rendering_not_target_authoring() {
+    assert_repo_path_absent(
+        "packages/agent/src/engine/primitives/ui/authoring",
+        "server-owned generated UI target authoring",
+    );
+    assert_repo_path_absent(
+        "packages/agent/src/engine/primitives/action_summary.rs",
+        "server-owned UI action summary projection",
+    );
+    assert_repo_path_absent(
+        "packages/agent/src/engine/primitives/control/actions.rs",
+        "server-owned UI control action projection",
+    );
+
+    let rust_surface = [
+        read_repo_file("packages/agent/src/engine/primitives/ui.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/ui/schemas.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/ui/validation.rs"),
+        read_repo_file("packages/agent/src/engine/resources/types.rs"),
+        read_repo_file("packages/agent/src/engine/resources/ui_surface.rs"),
+    ]
+    .join("\n");
+    assert_absent(
+        &rust_surface,
+        &[
+            "ui::catalog",
+            "ui::surface_for_target",
+            "ui::refresh_surface",
+            "ui_component_catalog",
+            "UI_CATALOG_ID",
+            "UI_CATALOG_REVISION",
+            "SurfaceAuthoringRequest",
+            "author_surface_for_target",
+            "targetFunctionId",
+            "requiredGrant",
+            "requiredRisk",
+            "targetRevision",
+            "payloadTemplate",
+            "idempotencyKeyTemplate",
+            "WorkerRef",
+            "\"bindings\"",
+            "\"authoring\"",
+            "\"redactionPolicy\"",
+            "\"refreshPolicy\"",
+        ],
+        "retained Rust dynamic surface primitive",
+    );
+
+    let ios_surface = [
+        read_repo_file(
+            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+GeneratedUI.swift",
+        ),
+        read_repo_file(
+            "packages/ios-app/Sources/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift",
+        ),
+        read_repo_file("packages/ios-app/Tests/Models/EngineProtocol/GeneratedUIDTOTests.swift"),
+        read_repo_file("packages/ios-app/Tests/Views/GeneratedUIRendererTests.swift"),
+    ]
+    .join("\n");
+    assert_absent(
+        &ios_surface,
+        &[
+            "UiCatalog",
+            "catalogId",
+            "catalogRevision",
+            "targetFunctionId",
+            "requiredGrant",
+            "requiredRisk",
+            "targetRevision",
+            "payloadTemplate",
+            "idempotencyKeyTemplate",
+            "UiBindingDTO",
+            "UiSurfaceAuthoringDTO",
+            "UiSurfaceForTargetRequestDTO",
+            "UiSurfaceRefreshRequestDTO",
+            "WorkerRef",
+            "workerId",
+            "bindings",
+            "authoring",
+            "redactionPolicy",
+            "refreshPolicy",
+        ],
+        "retained iOS dynamic runtime surface",
+    );
+    assert!(
+        ios_surface.contains("schemaVersion"),
+        "dynamic runtime surfaces should keep one explicit schema version primitive"
     );
 }
 

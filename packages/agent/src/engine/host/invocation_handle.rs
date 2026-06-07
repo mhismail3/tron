@@ -12,9 +12,6 @@ impl EngineHostHandle {
         if invocation.function_id.as_str() == INVOKE_FUNCTION {
             return self.invoke_delegated_unlocked(invocation).await;
         }
-        if invocation.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION {
-            return self.invoke_ui_submit_action_unlocked(invocation).await;
-        }
         if invocation.function_id.namespace() == ENGINE_WORKER_ID {
             return self.inner.lock().await.invoke(invocation).await;
         }
@@ -44,7 +41,6 @@ impl EngineHostHandle {
         invocation: Invocation,
     ) -> QueueTargetInvocation {
         if invocation.function_id.as_str() == INVOKE_FUNCTION
-            || invocation.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION
             || invocation.function_id.namespace() == ENGINE_WORKER_ID
             || is_host_dispatched_primitive_function(&invocation.function_id)
         {
@@ -295,9 +291,6 @@ impl EngineHostHandle {
         };
 
         let child_result = match prepared.child {
-            PreparedDelegatedChild::UiSubmit(child) => {
-                self.invoke_ui_submit_action_unlocked(*child).await
-            }
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Execute(child)) => {
                 self.execute_prepared_regular(*child).await
             }
@@ -313,110 +306,6 @@ impl EngineHostHandle {
             prepared.meta_function,
             Ok(value),
             None,
-        )
-    }
-
-    async fn invoke_ui_submit_action_unlocked(
-        &self,
-        mut invocation: Invocation,
-    ) -> InvocationResult {
-        let prepared = {
-            let mut host = self.inner.lock().await;
-            let function = match host.prepare_meta_invocation(&mut invocation) {
-                Ok(function) => function,
-                Err(err) => return host.meta_error(&invocation, err),
-            };
-            let idempotency = match host
-                .catalog
-                .begin_invocation_idempotency(&function, &invocation)
-            {
-                InvocationIdempotencyDecision::None => None,
-                InvocationIdempotencyDecision::Reserved(reservation) => Some(reservation),
-                InvocationIdempotencyDecision::Finished { result, scope } => {
-                    return host
-                        .catalog
-                        .record_invocation_result(&invocation, result, scope);
-                }
-            };
-            let compensation_contract = function.compensation.clone();
-            let lease_result = host.acquire_resource_lease_for_invocation(&function, &invocation);
-            let mut lease_ids = Vec::new();
-            if let Ok(Some(lease)) = &lease_result {
-                lease_ids.push(lease.lease_id.clone());
-            }
-            let lease_id = lease_ids.first().cloned();
-            match lease_result
-                .and_then(|_| primitives::ui::action_child_invocation(&*host, &invocation))
-            {
-                Ok(child) => Ok((
-                    invocation.clone(),
-                    function,
-                    idempotency,
-                    lease_id,
-                    compensation_contract,
-                    child,
-                )),
-                Err(err) => {
-                    let value = if let Some(lease_id) = lease_id.as_deref() {
-                        release_after_primary(host.release_resource_lease_sync(lease_id), Err(err))
-                    } else {
-                        Err(err)
-                    };
-                    Err(host.finish_meta_invocation_with_contracts(
-                        invocation.clone(),
-                        function,
-                        value,
-                        idempotency,
-                        lease_ids,
-                        compensation_contract,
-                    ))
-                }
-            }
-        };
-        let (meta_invocation, meta_function, idempotency, lease_id, compensation_contract, child) =
-            match prepared {
-                Ok(prepared) => prepared,
-                Err(result) => return result,
-            };
-        let child = if is_host_dispatched_primitive_function(&child.function_id) {
-            PreparedSyncInvocationDecision::Finished(Box::new(
-                self.inner
-                    .lock()
-                    .await
-                    .invoke_sync_host_dispatched_primitive(child),
-            ))
-        } else {
-            let mut host = self.inner.lock().await;
-            host.catalog.prepare_sync_invocation(child)
-        };
-        let child_result = match child {
-            PreparedSyncInvocationDecision::Execute(child) => {
-                self.execute_prepared_regular(*child).await
-            }
-            PreparedSyncInvocationDecision::Finished(result) => *result,
-        };
-        let submit_value = if let Some(error) = child_result.error.clone() {
-            Err(error)
-        } else {
-            Ok(primitives::ui::submit_action_result_value(
-                &meta_invocation,
-                &child_result,
-            ))
-        };
-        let mut host = self.inner.lock().await;
-        let resource_lease_ids = lease_id.iter().cloned().collect::<Vec<_>>();
-        let submit_value = if let Some(lease_id) = lease_id.as_deref() {
-            release_after_primary(host.release_resource_lease_sync(lease_id), submit_value)
-        } else {
-            submit_value
-        };
-        host.finish_meta_invocation_with_contracts(
-            meta_invocation,
-            meta_function,
-            submit_value,
-            idempotency,
-            resource_lease_ids,
-            compensation_contract,
         )
     }
 }

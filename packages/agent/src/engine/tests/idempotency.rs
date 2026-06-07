@@ -43,7 +43,7 @@ async fn hmh_f1_host_mutation_families_reject_missing_idempotency_before_payload
 
     for (function_id, scope) in [
         ("worker::disconnect", "worker.write"),
-        ("ui::surface_for_target", "ui.write"),
+        ("ui::submit_action", "ui.write"),
         ("engine::promote", "engine.promote.workspace"),
         ("queue::enqueue", "queue.write"),
         ("resource::create", "resource.write"),

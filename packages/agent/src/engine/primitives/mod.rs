@@ -12,14 +12,9 @@
 //! operational reads or rewrites after discard while leaving inspection
 //! available. `trigger::*` dispatches registered triggers back through the
 //! same trigger runtime used by transports and schedules, so queued trigger
-//! delivery is not a harness-only path. `ui::*` stores fixed-catalog generated
-//! UI as `ui_surface` resources, authors deterministic target surfaces from
-//! substrate projections, validates/refreshes/expires generated versions, and
-//! routes submitted actions back through canonical capability invocations.
-//! Stored-surface/action validation is owned by the UI primitive's validation
-//! submodule so authoring and execution checks do not blur together. Operator
-//! action summaries and consequence projections are shaped by the local
-//! `action_summary` helper so control and generated UI surfaces do not drift.
+//! delivery is not a harness-only path. `ui::*` stores runtime UI surface
+//! resources, validates the bounded schema, and records generic action
+//! submissions without server-authored target routing.
 //! `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
@@ -64,7 +59,6 @@ use super::types::{
     RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
 };
 
-pub(crate) mod action_summary;
 pub(crate) mod catalog;
 pub(crate) mod control;
 pub(crate) mod grant;

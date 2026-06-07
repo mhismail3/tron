@@ -1,10 +1,7 @@
 //! Control-plane primitive contracts and projections.
 //!
 //! The control worker is a projection surface over existing substrate truth.
-//! It owns no durable state and exposes no mutation multiplexer. Action summary
-//! catalogs live in a focused submodule so the snapshot coordinator stays small.
-
-mod actions;
+//! It owns no durable state and exposes no mutation multiplexer.
 
 use serde_json::{Value, json};
 
@@ -22,7 +19,6 @@ use crate::engine::resources::{
     EngineResource, EngineResourceInspection, ListResources, UI_SURFACE_KIND,
 };
 use crate::engine::{EffectClass, EngineError, Invocation, Result, VisibilityScope, WorkerId};
-use actions::{actions_for_target, substrate_actions};
 
 pub(crate) const SNAPSHOT_FUNCTION: &str = "control::snapshot";
 pub(crate) const INSPECT_FUNCTION: &str = "control::inspect";
@@ -35,7 +31,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             snapshot_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "invocations", "grants", "queues", "leases", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
+                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "invocations", "grants", "queues", "leases", "storage", "integrityWarnings", "uiSurfaceRefs"],
                 "additionalProperties": false,
                 "properties": {
                     "catalogRevision": {"type": "integer"},
@@ -49,7 +45,6 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                     "leases": {"type": "array"},
                     "storage": {"type": ["object", "null"]},
                     "integrityWarnings": {"type": "array"},
-                    "availableActions": {"type": "array"},
                     "uiSurfaceRefs": {"type": "array"}
                 }
             }),
@@ -60,14 +55,12 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             inspect_schema(),
             json!({
                 "type": "object",
-                "required": ["targetType", "targetId", "graph", "availableActions", "uiSurfaceRefs"],
+                "required": ["targetType", "targetId", "graph"],
                 "additionalProperties": false,
                 "properties": {
                     "targetType": {"type": "string"},
                     "targetId": {"type": "string"},
-                    "graph": {"type": "object"},
-                    "availableActions": {"type": "array"},
-                    "uiSurfaceRefs": {"type": "array"}
+                    "graph": {"type": "object"}
                 }
             }),
         ),
@@ -177,7 +170,6 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "leases": [],
         "storage": storage,
         "integrityWarnings": substrate_integrity_warnings(host)?,
-        "availableActions": substrate_actions(),
         "uiSurfaceRefs": ui_surface_refs(host, limit)?,
     }))
 }
@@ -267,8 +259,6 @@ fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> 
         "targetType": target_type,
         "targetId": target_id,
         "graph": graph,
-        "availableActions": actions_for_target(target_type, target_id),
-        "uiSurfaceRefs": ui_surface_refs_for_target(host, target_type, target_id)?,
     }))
 }
 
@@ -283,52 +273,6 @@ fn ui_surface_refs(host: &dyn PrimitiveRuntimeHost, limit: usize) -> Result<Vec<
     .into_iter()
     .filter_map(|resource| ui_surface_ref_for_resource(host, resource).transpose())
     .collect()
-}
-
-fn ui_surface_refs_for_target(
-    host: &dyn PrimitiveRuntimeHost,
-    target_type: &str,
-    target_id: &str,
-) -> Result<Vec<Value>> {
-    let functions = host.discover_functions(&FunctionQuery {
-        include_internal: true,
-        ..FunctionQuery::default()
-    });
-    let surfaces = host
-        .list_resources(ListResources {
-            kind: Some(UI_SURFACE_KIND.to_owned()),
-            scope: None,
-            lifecycle: None,
-            limit: 500,
-        })?
-        .into_iter()
-        .filter_map(|resource| ui_surface_ref_for_resource(host, resource).transpose())
-        .collect::<Result<Vec<_>>>()?;
-    Ok(surfaces
-        .into_iter()
-        .filter(|surface| {
-            let bound_to_target = surface_targets(surface).iter().any(|target| {
-                target.get("targetType").and_then(Value::as_str) == Some(target_type)
-                    && target.get("targetId").and_then(Value::as_str) == Some(target_id)
-            });
-            let action_targets_capability = target_type == "capability"
-                && surface_actions(surface).iter().any(|action| {
-                    action.get("targetFunctionId").and_then(Value::as_str) == Some(target_id)
-                });
-            let action_targets_worker = target_type == "worker"
-                && surface_actions(surface).iter().any(|action| {
-                    let Some(function_id) = action.get("targetFunctionId").and_then(Value::as_str)
-                    else {
-                        return false;
-                    };
-                    functions.iter().any(|function| {
-                        function.id.as_str() == function_id
-                            && function.owner_worker.as_str() == target_id
-                    })
-                });
-            bound_to_target || action_targets_capability || action_targets_worker
-        })
-        .collect())
 }
 
 fn ui_surface_ref_for_resource(
@@ -353,9 +297,8 @@ fn ui_surface_ref_for_resource(
         "surfaceId": payload.get("surfaceId").cloned().unwrap_or(Value::Null),
         "title": payload.get("title").cloned().unwrap_or(Value::Null),
         "purpose": payload.get("purpose").cloned().unwrap_or(Value::Null),
-        "catalog": payload.get("catalog").cloned().unwrap_or(Value::Null),
+        "schemaVersion": payload.get("schemaVersion").cloned().unwrap_or(Value::Null),
         "expiresAt": payload.get("expiresAt").cloned().unwrap_or(Value::Null),
-        "targets": payload.get("bindings").cloned().unwrap_or_else(|| json!([])),
         "actions": ui_surface_action_summaries(&payload),
     })))
 }
@@ -369,22 +312,6 @@ fn current_resource_payload(inspection: &EngineResourceInspection) -> Option<Val
         .map(|version| version.payload.clone())
 }
 
-fn surface_targets(surface: &Value) -> Vec<Value> {
-    surface
-        .get("targets")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-}
-
-fn surface_actions(surface: &Value) -> Vec<Value> {
-    surface
-        .get("actions")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-}
-
 fn ui_surface_action_summaries(payload: &Value) -> Value {
     let Some(actions) = payload.get("actions").and_then(Value::as_array) else {
         return json!([]);
@@ -396,12 +323,7 @@ fn ui_surface_action_summaries(payload: &Value) -> Value {
                 json!({
                     "actionId": action.get("actionId").cloned().unwrap_or(Value::Null),
                     "label": action.get("label").cloned().unwrap_or(Value::Null),
-                    "targetFunctionId": action.get("targetFunctionId").cloned().unwrap_or(Value::Null),
-                    "requiredGrant": action.get("requiredGrant").cloned().unwrap_or(Value::Null),
-                    "requiredRisk": action.get("requiredRisk").cloned().unwrap_or(Value::Null),
-                    "targetRevision": action.get("targetRevision").cloned().unwrap_or(Value::Null),
                     "expiresAt": action.get("expiresAt").cloned().unwrap_or(Value::Null),
-                    "consequence": action.get("consequence").cloned().unwrap_or(Value::Null),
                     "presentation": action.get("presentation").cloned().unwrap_or(Value::Null),
                 })
             })

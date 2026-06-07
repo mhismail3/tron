@@ -4,13 +4,13 @@ import Testing
 
 @Suite("Generated UI Renderer")
 struct GeneratedUIRendererTests {
-    @Test("fixed catalog supports every first-party component")
-    func supportsFixedCatalog() {
+    @Test("runtime schema supports every retained component")
+    func supportsRuntimeSchemaComponents() {
         let surface = UiSurfaceDTO(
             surfaceId: "surface-components",
             title: "Components",
             purpose: "Renderer coverage",
-            catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: GeneratedUIRenderer.catalogRevision),
+            schemaVersion: GeneratedUIRenderer.schemaVersion,
             layout: UiComponentDTO(
                 id: "root",
                 type: "Section",
@@ -20,11 +20,8 @@ struct GeneratedUIRendererTests {
                     .filter { $0 != "Section" }
                     .map { UiComponentDTO(id: $0, type: $0, props: minimalProps(for: $0), children: nil) }
             ),
-            bindings: [],
             actions: [],
-            redactionPolicy: ["mode": AnyCodable("redacted")],
-            expiresAt: "2100-01-01T00:00:00Z",
-            refreshPolicy: ["mode": AnyCodable("manual")]
+            expiresAt: "2100-01-01T00:00:00Z"
         )
 
         let state = GeneratedUIRenderer.validate(surface: surface)
@@ -33,12 +30,12 @@ struct GeneratedUIRendererTests {
         #expect(state.actionsEnabled)
     }
 
-    @Test("unsupported catalog and components close instead of approximating")
-    func unsupportedCatalogAndComponentsClose() {
+    @Test("unsupported schema and components close instead of approximating")
+    func unsupportedSchemaAndComponentsClose() {
         var surface = baseSurface(componentType: "Text")
-        surface.catalog = UiCatalogRefDTO(id: "tron.ui.catalog.other.v1", revision: 1)
+        surface.schemaVersion = 999
 
-        #expect(GeneratedUIRenderer.validate(surface: surface).status == .closedError("Unsupported UI catalog"))
+        #expect(GeneratedUIRenderer.validate(surface: surface).status == .closedError("Unsupported surface schema"))
 
         let unsupported = baseSurface(componentType: "WebView")
         #expect(GeneratedUIRenderer.validate(surface: unsupported).status == .closedError("Unsupported UI component: WebView"))
@@ -59,9 +56,8 @@ struct GeneratedUIRendererTests {
             surfaceId: "surface",
             title: "Surface",
             purpose: "Test",
-            catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: 1),
+            schemaVersion: GeneratedUIRenderer.schemaVersion,
             expiresAt: "2100-01-01T00:00:00Z",
-            targets: [],
             actions: []
         )
         let stale = GeneratedUIRenderer.validate(surface: surface, resourceRef: ref, observedVersionId: "ver-old")
@@ -83,15 +79,9 @@ struct GeneratedUIRendererTests {
         surface.expiresAt = "2026-05-20T00:01:14.053095+00:00"
         surface.actions = [
             UiActionDTO(
-                actionId: "create-snippet",
+                actionId: "create-note",
                 label: "Create",
-                targetFunctionId: "prompt_library::snippet_create",
                 inputSchema: AnyCodable(["type": "object"]),
-                payloadTemplate: AnyCodable(["name": "${input.name}", "text": "${input.text}"]),
-                idempotencyKeyTemplate: "${submission.idempotencyKey}",
-                requiredGrant: "prompt_library.write",
-                requiredRisk: "medium",
-                targetRevision: 1,
                 expiresAt: "2026-05-20T00:01:14.053095+00:00"
             )
         ]
@@ -106,9 +96,8 @@ struct GeneratedUIRendererTests {
     @Test("stored action input schemas scope submitted form values")
     func actionInputIsScopedToStoredSchema() {
         let action = UiActionDTO(
-            actionId: "create-snippet",
+            actionId: "create-note",
             label: "Create",
-            targetFunctionId: "prompt_library::snippet_create",
             inputSchema: AnyCodable([
                 "type": "object",
                 "required": ["name", "text"],
@@ -118,11 +107,6 @@ struct GeneratedUIRendererTests {
                     "text": ["type": "string"]
                 ]
             ]),
-            payloadTemplate: AnyCodable(["name": "${input.name}", "text": "${input.text}"]),
-            idempotencyKeyTemplate: "${submission.idempotencyKey}",
-            requiredGrant: "prompt_library.write",
-            requiredRisk: "medium",
-            targetRevision: 1,
             expiresAt: "2100-01-01T00:00:00Z"
         )
         let values: [String: AnyCodable] = [
@@ -144,12 +128,11 @@ struct GeneratedUIRendererTests {
         ], for: action))
     }
 
-    @Test("session-generated capability surface renders and submits stored coordinates")
-    func sessionGeneratedCapabilitySurfaceRendersAndSubmitsCoordinates() throws {
+    @Test("agent-created runtime surface renders and submits stored coordinates")
+    func agentCreatedRuntimeSurfaceRendersAndSubmitsCoordinates() throws {
         let action = UiActionDTO(
-            actionId: "invoke-capability",
+            actionId: "invoke-action",
             label: "Invoke",
-            targetFunctionId: "session_ui::summarize",
             inputSchema: AnyCodable([
                 "type": "object",
                 "required": ["message"],
@@ -158,11 +141,6 @@ struct GeneratedUIRendererTests {
                     "message": ["type": "string", "title": "Message"]
                 ]
             ]),
-            payloadTemplate: AnyCodable(["message": "${input.message}"]),
-            idempotencyKeyTemplate: "${submission.idempotencyKey}",
-            requiredGrant: "grant",
-            requiredRisk: "medium",
-            targetRevision: 7,
             expiresAt: "2100-01-01T00:00:00Z",
             presentation: UiActionPresentationDTO(
                 tone: "primary",
@@ -171,14 +149,14 @@ struct GeneratedUIRendererTests {
             )
         )
         let surface = UiSurfaceDTO(
-            surfaceId: "generated.capability.session-ui-summarize",
-            title: "Capability session_ui::summarize",
-            purpose: "Operate a session-created capability",
-            catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: GeneratedUIRenderer.catalogRevision),
+            surfaceId: "runtime.surface.agent-action",
+            title: "Agent Action",
+            purpose: "Operate an agent-created action",
+            schemaVersion: GeneratedUIRenderer.schemaVersion,
             layout: UiComponentDTO(
                 id: "root",
                 type: "Section",
-                props: ["title": AnyCodable("Capability session_ui::summarize")],
+                props: ["title": AnyCodable("Agent Action")],
                 children: [
                     UiComponentDTO(id: "message", type: "TextArea", props: [
                         "name": AnyCodable("message"),
@@ -186,46 +164,29 @@ struct GeneratedUIRendererTests {
                         "required": AnyCodable(true)
                     ], children: nil),
                     UiComponentDTO(id: "invoke", type: "Button", props: [
-                        "actionId": AnyCodable("invoke-capability"),
+                        "actionId": AnyCodable("invoke-action"),
                         "label": AnyCodable("Invoke")
                     ], children: nil)
                 ]
             ),
-            bindings: [UiBindingDTO(targetType: "capability", targetId: "session_ui::summarize", role: "target", label: "Session capability")],
             actions: [action],
-            redactionPolicy: ["mode": AnyCodable("redacted")],
-            expiresAt: "2100-01-01T00:00:00Z",
-            refreshPolicy: ["mode": AnyCodable("manual")],
-            authoring: UiSurfaceAuthoringDTO(
-                mode: "generated",
-                targetType: "capability",
-                targetId: "session_ui::summarize",
-                purpose: "Operate a session-created capability",
-                layoutProfile: "compact",
-                targetRevision: 7,
-                catalogRevision: GeneratedUIRenderer.catalogRevision,
-                projectionHash: "hash-session-ui",
-                maxPreviewBytes: 512,
-                createdByInvocationId: "inv-session-ui",
-                refreshedFromVersionId: nil
-            )
+            expiresAt: "2100-01-01T00:00:00Z"
         )
         let ref = UiSurfaceRefDTO(
-            resourceId: "ui-surface-session-ui",
-            versionId: "ver-session-ui",
+            resourceId: "ui-surface-agent-action",
+            versionId: "ver-agent-action",
             kind: "ui_surface",
             lifecycle: "active",
             surfaceId: surface.surfaceId,
             title: surface.title,
             purpose: surface.purpose,
-            catalog: surface.catalog,
+            schemaVersion: surface.schemaVersion,
             expiresAt: surface.expiresAt,
-            targets: surface.bindings,
             actions: []
         )
-        let values = ["message": AnyCodable("summarize this session-created capability")]
+        let values = ["message": AnyCodable("summarize this session")]
 
-        let state = GeneratedUIRenderer.validate(surface: surface, resourceRef: ref, observedVersionId: "ver-session-ui")
+        let state = GeneratedUIRenderer.validate(surface: surface, resourceRef: ref, observedVersionId: "ver-agent-action")
         #expect(state.status == .renderable)
         #expect(state.actionsEnabled)
         #expect(GeneratedUIRenderer.inputIsSatisfied(values, for: action))
@@ -236,13 +197,10 @@ struct GeneratedUIRendererTests {
             surfaceVersionId: try #require(ref.versionId),
             actionId: action.actionId,
             userInput: GeneratedUIRenderer.userInput(from: values, for: action),
-            idempotencyKey: "session-generated-ui-submit"
+            idempotencyKey: "runtime-ui-submit"
         )
         let object = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(submission)) as? [String: Any])
         #expect(Set(object.keys) == ["surfaceResourceId", "surfaceVersionId", "actionId", "userInput", "idempotencyKey"])
-        #expect(object["targetFunctionId"] == nil)
-        #expect(object["payloadTemplate"] == nil)
-        #expect(object["requiredGrant"] == nil)
     }
 
     private func baseSurface(componentType: String) -> UiSurfaceDTO {
@@ -250,13 +208,10 @@ struct GeneratedUIRendererTests {
             surfaceId: "surface",
             title: "Surface",
             purpose: "Test",
-            catalog: UiCatalogRefDTO(id: GeneratedUIRenderer.catalogId, revision: GeneratedUIRenderer.catalogRevision),
+            schemaVersion: GeneratedUIRenderer.schemaVersion,
             layout: UiComponentDTO(id: "root", type: componentType, props: minimalProps(for: componentType), children: nil),
-            bindings: [],
             actions: [],
-            redactionPolicy: ["mode": AnyCodable("redacted")],
-            expiresAt: "2100-01-01T00:00:00Z",
-            refreshPolicy: ["mode": AnyCodable("manual")]
+            expiresAt: "2100-01-01T00:00:00Z"
         )
     }
 
@@ -278,8 +233,6 @@ struct GeneratedUIRendererTests {
             ["invocationId": AnyCodable("inv")]
         case "GrantRef":
             ["grantId": AnyCodable("grant")]
-        case "WorkerRef":
-            ["workerId": AnyCodable("worker")]
         case "Metric":
             ["label": AnyCodable("Metric"), "value": AnyCodable(1)]
         case "TextField", "TextArea", "Select", "Toggle", "Stepper", "DateTime":

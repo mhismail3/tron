@@ -70,7 +70,6 @@ struct PreparedDelegatedInvocation {
 
 enum PreparedDelegatedChild {
     Sync(PreparedSyncInvocationDecision),
-    UiSubmit(Box<Invocation>),
 }
 
 enum PreparedDelegatedInvocationDecision {
@@ -481,9 +480,7 @@ impl EngineHost {
                 ));
             }
         };
-        let child = if child.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION {
-            PreparedDelegatedChild::UiSubmit(Box::new(child))
-        } else if is_host_dispatched_primitive_function(&child.function_id) {
+        let child = if is_host_dispatched_primitive_function(&child.function_id) {
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Finished(Box::new(
                 self.invoke_sync_host_dispatched_primitive(child),
             )))

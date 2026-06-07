@@ -311,8 +311,8 @@ server settings shape and iOS controls together.
   `primitive_surface`, deleted the product update-check surface from server,
   iOS, Mac, scripts, docs, and bundled default settings, and flattened
   diagnostics/logging to retained-log storage plus `execute.log_recent`.
-  PET-11 must still re-audit dynamic-surface rendering for hidden product
-  policy.
+  PET-11 also flattened dynamic-surface rendering to schema-versioned runtime
+  resources and deleted server-owned target authoring/catalog/refresh policy.
 - PET-11 may close only after a fresh end-to-end loop proof and after no
   retained/successor row can be deleted without breaking
   boot/provider/session/execute/state/trace/client-shell primitives.

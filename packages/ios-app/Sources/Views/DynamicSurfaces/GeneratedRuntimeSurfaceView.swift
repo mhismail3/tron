@@ -14,14 +14,13 @@ struct GeneratedUIRendererState: Equatable {
 }
 
 enum GeneratedUIRenderer {
-    static let catalogId = "tron.ui.catalog.core.v1"
-    static let catalogRevision: UInt64 = 1
+    static let schemaVersion: UInt64 = 1
     static let supportedComponents: Set<String> = [
         "Text", "Heading", "Monospace", "Badge", "Section", "List", "Table",
         "Tabs", "Disclosure", "ResourceRef", "InvocationRef", "GrantRef",
-        "WorkerRef", "Metric", "TextField", "TextArea", "Select", "Toggle",
-        "Stepper", "DateTime", "Button", "ButtonGroup", "Confirmation",
-        "Progress", "Health", "Warning", "Error", "EmptyState"
+        "Metric", "TextField", "TextArea", "Select", "Toggle", "Stepper",
+        "DateTime", "Button", "ButtonGroup", "Confirmation", "Progress",
+        "Health", "Warning", "Error", "EmptyState"
     ]
 
     static func validate(
@@ -31,8 +30,8 @@ enum GeneratedUIRenderer {
         now: Date = Date(),
         isOfflineCached: Bool = false
     ) -> GeneratedUIRendererState {
-        guard surface.catalog.id == catalogId, surface.catalog.revision == catalogRevision else {
-            return .init(status: .closedError("Unsupported UI catalog"), actionsEnabled: false)
+        guard surface.schemaVersion == schemaVersion else {
+            return .init(status: .closedError("Unsupported surface schema"), actionsEnabled: false)
         }
         if let lifecycle = resourceRef?.lifecycle,
            ["damaged", "discarded"].contains(lifecycle) {
@@ -266,9 +265,6 @@ struct GeneratedRuntimeSurfaceView: View {
         case .renderable:
             let content = renderComponent(surface.layout, actionsEnabled: state.actionsEnabled, isRoot: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if isResourceCollectionSurface {
-                return AnyView(content)
-            }
             return AnyView(content
                 .padding(12)
                 .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true, compact: false, interactive: false))
@@ -310,8 +306,7 @@ struct GeneratedRuntimeSurfaceView: View {
                 .sectionFill(.tronEmerald, cornerRadius: 999, subtle: true, compact: true, interactive: false))
         case "Section":
             return AnyView(VStack(alignment: .leading, spacing: 8) {
-                if let title = component.props?.string("title"),
-                   !(isRoot && isResourceCollectionSurface) {
+                if let title = component.props?.string("title") {
                     Text(title)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(.tronTextPrimary)
@@ -345,8 +340,6 @@ struct GeneratedRuntimeSurfaceView: View {
             return AnyView(referenceRow("Invocation", value: component.props?.string("invocationId")))
         case "GrantRef":
             return AnyView(referenceRow("Grant", value: component.props?.string("grantId")))
-        case "WorkerRef":
-            return AnyView(referenceRow("Executor", value: component.props?.string("workerId")))
         case "Metric":
             return AnyView(HStack {
                 Text(component.props?.string("label") ?? "Metric")
@@ -689,10 +682,6 @@ struct GeneratedRuntimeSurfaceView: View {
         return "\(value?.value ?? "")"
     }
 
-    private var isResourceCollectionSurface: Bool {
-        surface.authoring?.targetType == "resource_collection"
-    }
-
     private var confirmationDialogPresented: Binding<Bool> {
         Binding(
             get: { pendingConfirmation != nil },
@@ -742,7 +731,7 @@ struct GeneratedRuntimeSurfaceView: View {
         [
             resourceRef?.resourceId ?? surface.surfaceId,
             resourceRef?.versionId ?? "",
-            surface.authoring?.projectionHash ?? ""
+            "\(surface.schemaVersion)"
         ].joined(separator: ":")
     }
 

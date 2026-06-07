@@ -99,13 +99,10 @@ pub(in crate::engine) fn dispatch(
         control::SNAPSHOT_FUNCTION | control::INSPECT_FUNCTION => {
             control::dispatch(host, invocation)
         }
-        ui::CATALOG_FUNCTION
-        | ui::CREATE_SURFACE_FUNCTION
-        | ui::SURFACE_FOR_TARGET_FUNCTION
+        ui::CREATE_SURFACE_FUNCTION
         | ui::UPDATE_SURFACE_FUNCTION
         | ui::INSPECT_SURFACE_FUNCTION
         | ui::VALIDATE_SURFACE_FUNCTION
-        | ui::REFRESH_SURFACE_FUNCTION
         | ui::EXPIRE_SURFACE_FUNCTION
         | ui::DISCARD_SURFACE_FUNCTION
         | ui::SUBMIT_ACTION_FUNCTION => ui::dispatch(host, invocation),

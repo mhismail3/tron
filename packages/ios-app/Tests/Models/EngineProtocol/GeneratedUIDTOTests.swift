@@ -4,52 +4,31 @@ import Testing
 
 @Suite("Generated UI DTOs")
 struct GeneratedUIDTOTests {
-    @Test("decodes ui_surface payload and control refs")
+    @Test("decodes ui_surface payload and resource refs")
     func decodesSurfaceAndRefs() throws {
         let surfaceJSON = """
         {
           "surfaceId": "surface-1",
           "title": "Substrate",
           "purpose": "Inspect state",
-          "catalog": {"id": "tron.ui.catalog.core.v1", "revision": 1},
+          "schemaVersion": 1,
           "layout": {"type": "Section", "props": {"title": "Root"}, "children": [{"type": "Text", "props": {"text": "hello"}}]},
-          "bindings": [{"targetType": "worker", "targetId": "control"}],
           "actions": [{
             "actionId": "refresh",
             "label": "Refresh",
-            "targetFunctionId": "control::snapshot",
             "inputSchema": {"type": "object", "additionalProperties": false},
-            "payloadTemplate": {},
-            "idempotencyKeyTemplate": "${submission.idempotencyKey}",
-            "requiredGrant": "grant",
-            "requiredRisk": "low",
-            "targetRevision": 1,
             "expiresAt": "2100-01-01T00:00:00Z",
             "presentation": {"tone": "neutral", "buttonRole": "neutral", "icon": "arrow.clockwise"}
           }],
-          "redactionPolicy": {"mode": "redacted"},
-          "expiresAt": "2100-01-01T00:00:00Z",
-          "refreshPolicy": {"mode": "manual"},
-          "authoring": {
-            "mode": "generated",
-            "targetType": "worker",
-            "targetId": "control",
-            "targetRevision": 7,
-            "catalogRevision": 9,
-            "projectionHash": "hash:abc",
-            "maxPreviewBytes": 1024,
-            "createdByInvocationId": "redacted:invocation"
-          }
+          "expiresAt": "2100-01-01T00:00:00Z"
         }
         """
         let surface = try JSONDecoder().decode(UiSurfaceDTO.self, from: Data(surfaceJSON.utf8))
 
-        #expect(surface.catalog.id == "tron.ui.catalog.core.v1")
+        #expect(surface.schemaVersion == 1)
         #expect(surface.layout.children?.first?.type == "Text")
-        #expect(surface.actions.first?.targetFunctionId == "control::snapshot")
+        #expect(surface.actions.first?.actionId == "refresh")
         #expect(surface.actions.first?.presentation?.icon == "arrow.clockwise")
-        #expect(surface.authoring?.mode == "generated")
-        #expect(surface.authoring?.targetType == "worker")
 
         let refJSON = """
         {
@@ -60,16 +39,16 @@ struct GeneratedUIDTOTests {
           "surfaceId": "surface-1",
           "title": "Substrate",
           "purpose": "Inspect state",
-          "catalog": {"id": "tron.ui.catalog.core.v1", "revision": 1},
+          "schemaVersion": 1,
           "expiresAt": "2100-01-01T00:00:00Z",
-          "targets": [{"targetType": "worker", "targetId": "control"}],
-          "actions": [{"actionId": "refresh", "label": "Refresh", "targetFunctionId": "control::snapshot", "requiredRisk": "low", "presentation": {"tone": "neutral", "buttonRole": "neutral", "icon": "arrow.clockwise"}}]
+          "actions": [{"actionId": "refresh", "label": "Refresh", "presentation": {"tone": "neutral", "buttonRole": "neutral", "icon": "arrow.clockwise"}}]
         }
         """
         let ref = try JSONDecoder().decode(UiSurfaceRefDTO.self, from: Data(refJSON.utf8))
 
         #expect(ref.resourceId == "res-ui")
-        #expect(ref.actions?.first?.targetFunctionId == "control::snapshot")
+        #expect(ref.schemaVersion == 1)
+        #expect(ref.actions?.first?.actionId == "refresh")
         #expect(ref.actions?.first?.presentation?.buttonRole == "neutral")
     }
 
@@ -82,17 +61,13 @@ struct GeneratedUIDTOTests {
             "surfaceId": "surface-1",
             "title": "Substrate",
             "purpose": "Inspect state",
-            "catalog": {"id": "tron.ui.catalog.core.v1", "revision": 1},
+            "schemaVersion": 1,
             "layout": {"type": "Text", "props": {"text": "hello"}},
-            "bindings": [],
             "actions": [],
-            "redactionPolicy": {"mode": "redacted"},
-            "expiresAt": "2100-01-01T00:00:00Z",
-            "refreshPolicy": {"mode": "manual"}
+            "expiresAt": "2100-01-01T00:00:00Z"
           },
-          "resourceRef": {"resourceId": "res-ui", "versionId": "ver-ui", "kind": "ui_surface"},
+          "resourceRef": {"resourceId": "res-ui", "versionId": "ver-ui", "kind": "ui_surface", "schemaVersion": 1},
           "validationState": "valid",
-          "bindings": [],
           "actions": [],
           "lineage": {"versionCount": 1}
         }
@@ -101,11 +76,11 @@ struct GeneratedUIDTOTests {
         #expect(inspected.surface?.surfaceId == "surface-1")
         #expect(inspected.resourceRef?.versionId == "ver-ui")
 
-        let validationJSON = #"{"surfaceResourceId":"res-ui","validationState":"stale","diagnostics":[{"code":"stale_target_revision"}]}"#
+        let validationJSON = #"{"surfaceResourceId":"res-ui","validationState":"stale","diagnostics":[{"code":"stale_surface_version"}]}"#
         let validation = try JSONDecoder().decode(UiSurfaceValidationDTO.self, from: Data(validationJSON.utf8))
         #expect(validation.validationState == "stale")
 
-        let mutationJSON = #"{"surface":{"surfaceId":"surface-1","title":"Substrate","purpose":"Inspect","catalog":{"id":"tron.ui.catalog.core.v1","revision":1},"layout":{"type":"Text","props":{"text":"hello"}},"bindings":[],"actions":[],"redactionPolicy":{"mode":"redacted"},"expiresAt":"2100-01-01T00:00:00Z","refreshPolicy":{"mode":"manual"}},"resourceRefs":[{"resourceId":"res-ui","versionId":"ver-ui","kind":"ui_surface"}]}"#
+        let mutationJSON = #"{"surface":{"surfaceId":"surface-1","title":"Substrate","purpose":"Inspect","schemaVersion":1,"layout":{"type":"Text","props":{"text":"hello"}},"actions":[],"expiresAt":"2100-01-01T00:00:00Z"},"resourceRefs":[{"resourceId":"res-ui","versionId":"ver-ui","kind":"ui_surface","schemaVersion":1}]}"#
         let mutation = try JSONDecoder().decode(UiSurfaceMutationResultDTO.self, from: Data(mutationJSON.utf8))
         #expect(mutation.resourceRefs.first?.resourceId == "res-ui")
     }
@@ -123,7 +98,5 @@ struct GeneratedUIDTOTests {
         let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
         #expect(Set(object.keys) == ["surfaceResourceId", "surfaceVersionId", "actionId", "userInput", "idempotencyKey"])
-        #expect(object["targetFunctionId"] == nil)
-        #expect(object["payloadTemplate"] == nil)
     }
 }
