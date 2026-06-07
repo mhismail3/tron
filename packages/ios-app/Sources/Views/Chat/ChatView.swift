@@ -83,12 +83,6 @@ struct ChatView: View {
                 onStop: { viewModel.stopDisplayStream() }
             )
         }
-        .sheet(isPresented: $viewModel.showProcessSheet) {
-            ProcessListSheet(
-                processState: viewModel.processState,
-                onClose: { viewModel.showProcessSheet = false }
-            )
-        }
         .alert("Error", isPresented: Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.clearError() } }
@@ -119,7 +113,6 @@ struct ChatView: View {
                   let action = ChatMenuAction(rawValue: raw) else { return }
             switch action {
             case .settings: sheetCoordinator.showSettings()
-            case .processes: viewModel.showProcessSheet = true
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .modelPickerAction)) { notification in
@@ -721,7 +714,7 @@ struct ChatView: View {
 // Posting a notification lets the parent view mutate state from onReceive.
 
 enum ChatMenuAction: String {
-    case settings, processes
+    case settings
 }
 
 extension Notification.Name {

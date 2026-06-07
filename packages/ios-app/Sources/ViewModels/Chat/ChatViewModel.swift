@@ -62,10 +62,6 @@ final class ChatViewModel {
 
     /// Context tracking state (tokens, cost, context window)
     let contextState = ContextTrackingState()
-    /// Process state (tracking background processes for process list UI)
-    let processState = ProcessState()
-    /// Whether the process list sheet is presented
-    var showProcessSheet = false
     /// Thinking state (for extended thinking display)
     let thinkingState = ThinkingState()
     /// Input bar state (text, attachments, reasoning level)
@@ -273,7 +269,6 @@ final class ChatViewModel {
                 self.compactionInProgressMessageId = nil
                 self.runningCapabilityInvocationCount = 0
                 self.clearDisplayStreamState()
-                self.clearProcessState()
                 self.prunedLiveMessages.removeAll()
                 self.pullUpPanelState.awaitingSuggestions = false
             }

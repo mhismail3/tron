@@ -246,7 +246,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `MessageBubble` | retain | Keep message rendering and generic runtime output. Delete capability/product-specific cards. |
 | `Notifications` | delete | Product notification surface. |
 | `Onboarding` | retain | Keep server pairing/provider setup needed to reach the loop. |
-| `Process` | successor | Retained process UI is passive runtime evidence only after job-cancel teardown. PET-11 must collapse or delete it if generic message/capability evidence can cover the primitive loop. |
+| `Process` | delete | PET-11 deleted the fixed iOS process dashboard, live `process.*` plugins, `ProcessState`, process sheet, and process-specific result viewer. The retained `process_run` primitive renders through generic capability evidence and trace records. |
 | `PromptLibrary` | delete | Product prompt library UI. |
 | `Session` | retain | Keep session list/create/resume/delete. Delete clone/worktree/session analytics/product cards. |
 | `SessionTree` | successor | Keep only plain session navigation/history reconstruction if needed. Product tree projections, fork visualizations, and analytics belong to deletion unless PET-11 proves they are shell infrastructure. |
@@ -294,9 +294,10 @@ server settings shape and iOS controls together.
 
 ## Open Loops After PET-10
 
-- PET-11 must audit retained iOS `Attachments`, `Capabilities`, `Process`,
-  and `SessionTree` source from first principles. The hard-coded
-  `UserInteraction` prompt/answer plane was deleted during PET-11.
+- PET-11 must audit retained iOS `Attachments`, `Capabilities`, and
+  `SessionTree` source from first principles. The hard-coded
+  `UserInteraction` prompt/answer plane and fixed process dashboard were
+  deleted during PET-11.
 - PET-11 decided that `session_drafts.skills_json` was stale product DTO
   residue and deleted it from fresh iOS draft storage. PET-11 also deleted
   `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after

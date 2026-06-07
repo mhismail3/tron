@@ -40,13 +40,6 @@ import Foundation
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result)
 }
 
-@MainActor protocol ProcessEventHandler: AnyObject {
-    func handleProcessSpawned(_ result: ProcessSpawnedPlugin.Result)
-    func handleProcessCompleted(_ result: ProcessCompletedPlugin.Result)
-    func handleProcessStatusUpdate(_ result: ProcessStatusUpdatePlugin.Result)
-    func handleJobBackgrounded(_ result: JobBackgroundedPlugin.Result)
-}
-
 @MainActor protocol HookEventHandler: AnyObject {
     func handleLlmHookResult(_ result: LlmHookResultPlugin.Result)
 }
@@ -70,5 +63,5 @@ import Foundation
     StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler,
     ServerEventHandler,
-    DisplayStreamEventHandler, ProcessEventHandler, HookEventHandler,
+    DisplayStreamEventHandler, HookEventHandler,
     QueueEventHandler, EventDispatchLogger {}

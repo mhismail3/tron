@@ -126,12 +126,6 @@ final class EventRegistry: @unchecked Sendable {
         // Display streaming events
         register(DisplayFramePlugin.self)
 
-        // Process management events
-        register(ProcessSpawnedPlugin.self)
-        register(ProcessCompletedPlugin.self)
-        register(ProcessStatusUpdatePlugin.self)
-        register(JobBackgroundedPlugin.self)
-
         // Hook events
         register(LlmHookResultPlugin.self)
 

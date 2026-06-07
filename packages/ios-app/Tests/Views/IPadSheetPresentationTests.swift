@@ -85,10 +85,6 @@ final class IPadSheetPresentationTests: XCTestCase {
             (
                 ["Sources", "Views", "System", "ProviderErrorDetailSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
-            ),
-            (
-                ["Sources", "Views", "Process", "ProcessListSheet.swift"],
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             )
         ]
 
@@ -103,11 +99,6 @@ final class IPadSheetPresentationTests: XCTestCase {
 
     func testReusableSheetViewsOwnCanonicalIPadSizing() throws {
         let expected: [(path: [String], anchor: String, fragment: String)] = [
-            (
-                ["Sources", "Views", "Process", "ProcessListSheet.swift"],
-                "struct ProcessListSheet: View",
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
-            ),
             (
                 ["Sources", "Views", "System", "LogViewer.swift"],
                 "struct LogViewer: View",

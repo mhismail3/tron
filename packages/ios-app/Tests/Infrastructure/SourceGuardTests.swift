@@ -704,6 +704,72 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Primitive shell has no fixed process dashboard plane")
+    func testPrimitiveShellHasNoFixedProcessDashboardPlane() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let deletedPaths = [
+            "Sources/Core/Events/Plugins/Process",
+            "Sources/ViewModels/Chat/ChatViewModel+ProcessEvents.swift",
+            "Sources/ViewModels/State/ProcessState.swift",
+            "Sources/Views/Capabilities/Process",
+            "Sources/Views/Process",
+            "Tests/ViewModels/State/ProcessStateTests.swift",
+        ]
+        for relativePath in deletedPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) belongs to the deleted fixed process dashboard plane"
+            )
+        }
+
+        let checkedPaths = [
+            "Sources",
+            "Tests",
+            "project.yml",
+        ]
+        let forbidden = [
+            "Process" + "List" + "Sheet",
+            "Process" + "State",
+            "Process" + "Event" + "Handler",
+            "Process" + "Spawned" + "Plugin",
+            "Process" + "Completed" + "Plugin",
+            "Process" + "Status" + "Update" + "Plugin",
+            "Job" + "Backgrounded" + "Plugin",
+            "Manage" + "Process" + "Result" + "Viewer",
+            "show" + "Process" + "Sheet",
+            "clear" + "Process" + "State",
+            "handle" + "Process" + "Spawned",
+            "handle" + "Process" + "Completed",
+            "handle" + "Process" + "Status" + "Update",
+            "handle" + "Job" + "Backgrounded",
+            "process" + "." + "spawned",
+            "process" + "." + "completed",
+            "process" + "." + "status_update",
+            "job" + "." + "backgrounded",
+            "case " + "processes",
+        ]
+
+        for relativePath in checkedPaths {
+            let url = iosRoot.appendingPathComponent(relativePath)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            let files: [URL]
+            if (try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                files = try swiftFiles(in: url)
+            } else {
+                files = [url]
+            }
+            for file in files where file.lastPathComponent != "SourceGuardTests.swift" {
+                let source = try String(contentsOf: file, encoding: .utf8)
+                for token in forbidden {
+                    #expect(!source.contains(token), "\(token) must stay deleted from primitive shell: \(file.path)")
+                }
+            }
+        }
+    }
+
     @Test("iOS runtime contract is iOS 26 only")
     func testIOSRuntimeContractIsIOS26Only() throws {
         let fileURL = URL(fileURLWithPath: #filePath)
